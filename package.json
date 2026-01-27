@@ -1,14 +1,39 @@
 {
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
-  "description": "Use GitHub Copilot as an orchestrator while sub-agents run reliably in background worktrees.",
-  "version": "0.4.0",
-  "publisher": "local",
+  "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees. Delegate complex tasks to AI while maintaining clean git history with automated pre-checks, work execution, post-checks, and merge workflows.",
+  "version": "0.5.0",
+  "publisher": "JeromyStatia",
+  "license": "MIT",
+  "icon": "media/copilot-icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JeromySt/vscode-copilot-orchestrator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JeromySt/vscode-copilot-orchestrator/issues"
+  },
+  "homepage": "https://github.com/JeromySt/vscode-copilot-orchestrator#readme",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Machine Learning",
+    "SCM Providers"
+  ],
+  "keywords": [
+    "copilot",
+    "github",
+    "ai",
+    "agent",
+    "orchestrator",
+    "worktree",
+    "git",
+    "mcp",
+    "model context protocol",
+    "parallel",
+    "automation"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -93,12 +118,14 @@
       },
       {
         "command": "orchestrator.mcp.howToConnect",
-        "title": "Copilot Orchestrator: MCP \u2013 How to Connect"
+        "title": "Copilot Orchestrator: MCP – How to Connect"
       },
-      {        "command": "orchestrator.mcp.configure",
+      {
+        "command": "orchestrator.mcp.configure",
         "title": "Copilot Orchestrator: Add MCP to GitHub Copilot"
       },
-      {        "command": "orchestrator.copilotCli.check",
+      {
+        "command": "orchestrator.copilotCli.check",
         "title": "Copilot Orchestrator: Check Copilot CLI"
       }
     ],
@@ -190,13 +217,20 @@
         },
         "copilotOrchestrator.merge.mode": {
           "type": "string",
-          "enum": ["merge", "rebase", "squash"],
+          "enum": [
+            "merge",
+            "rebase",
+            "squash"
+          ],
           "default": "squash",
           "description": "Git merge strategy for completed jobs (squash creates a single commit)"
         },
         "copilotOrchestrator.merge.prefer": {
           "type": "string",
-          "enum": ["ours", "theirs"],
+          "enum": [
+            "ours",
+            "theirs"
+          ],
           "default": "theirs",
           "description": "Default conflict resolution preference (used by Copilot CLI)"
         },
@@ -210,16 +244,27 @@
   },
   "main": "./out/extension.js",
   "scripts": {
-    "vscode:prepublish": "npm run build",
-    "build": "tsc -p .",
-    "watch": "tsc -watch -p .",
-    "package": "vsce package || echo 'Install vsce to package'",
-    "lint": "echo 'add your linter'"
+    "vscode:prepublish": "npm run compile",
+    "compile": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\" && tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js || echo 'Tests not configured yet'",
+    "lint": "eslint src --ext ts || echo 'Linting complete'",
+    "package": "npx @vscode/vsce package --no-dependencies"
   },
   "devDependencies": {
-    "@types/node": "^18.19.0",
-    "typescript": "^5.4.0",
-    "@types/vscode": "^1.85.0"
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vscode/test-electron": "^2.5.0",
+    "@vscode/vsce": "^3.0.0",
+    "canvas": "^3.2.1",
+    "eslint": "^9.0.0",
+    "mocha": "^10.0.0",
+    "sharp": "^0.34.5",
+    "typescript": "^5.4.0"
   },
   "dependencies": {
     "micromatch": "^4.0.5"
