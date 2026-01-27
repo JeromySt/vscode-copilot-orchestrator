@@ -144,13 +144,28 @@ const server = http.createServer(async (req, res) => {
               },
               {
                 name: 'get_copilot_job_status',
-                description: 'Get simplified status of a job. Returns: id, status (queued/running/succeeded/failed/canceled), currentStep, stepStatuses, attemptNumber, currentAttempt status, duration. Use get_copilot_job_details for full job information.',
+                description: 'Get simplified status of a job. Returns: id, isComplete (boolean for easy polling termination), progress (0-100%), status, currentStep, stepStatuses, metrics (tests/coverage/errors), workSummary, recommendedPollIntervalMs. Use get_copilot_job_details for full job information.',
                 inputSchema: {
                   type: 'object',
                   properties: {
                     id: { type: 'string', description: 'Job ID' }
                   },
                   required: ['id']
+                }
+              },
+              {
+                name: 'get_copilot_jobs_batch_status',
+                description: 'Get status of multiple jobs in a single call. Efficient for monitoring parallel jobs. Returns statuses array and allComplete boolean.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    ids: { 
+                      type: 'array', 
+                      items: { type: 'string' },
+                      description: 'Array of Job IDs to check status for' 
+                    }
+                  },
+                  required: ['ids']
                 }
               },
               {
@@ -295,6 +310,10 @@ const server = http.createServer(async (req, res) => {
 
             case 'get_copilot_job_status':
               result = await callOrchestrator('GET', `/copilot_job/${args.id}/status`);
+              break;
+
+            case 'get_copilot_jobs_batch_status':
+              result = await callOrchestrator('POST', '/copilot_jobs/status', { ids: args.ids });
               break;
 
             case 'get_copilot_job_details':
