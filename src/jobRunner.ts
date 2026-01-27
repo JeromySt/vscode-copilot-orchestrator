@@ -10,8 +10,9 @@ import { isCopilotCliAvailable } from './cliCheckCore';
 
 export type WorkSummary = { commits: number; filesAdded: number; filesModified: number; filesDeleted: number; description: string };
 export type JobMetrics = { testsRun?: number; testsPassed?: number; testsFailed?: number; coveragePercent?: number; buildErrors?: number; buildWarnings?: number };
+export type WebhookConfig = { url: string; events?: ('stage_complete' | 'job_complete' | 'job_failed')[]; headers?: Record<string, string> };
 export type ExecutionAttempt = { attemptId: string; startedAt: number; endedAt?: number; logFile: string; copilotSessionId?: string; workInstruction: string; stepStatuses: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; workSummary?: WorkSummary; metrics?: JobMetrics };
-export type JobSpec = { id: string; name: string; task: string; inputs: { repoPath: string; baseBranch: string; targetBranch: string; worktreeRoot: string; instructions?: string }; policy: { useJust: boolean; steps: { prechecks: string; work: string; postchecks: string } } };
+export type JobSpec = { id: string; name: string; task: string; inputs: { repoPath: string; baseBranch: string; targetBranch: string; worktreeRoot: string; instructions?: string }; policy: { useJust: boolean; steps: { prechecks: string; work: string; postchecks: string } }; webhook?: WebhookConfig };
 export type Job = JobSpec & { status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; logFile?: string; startedAt?: number; endedAt?: number; copilotSessionId?: string; processIds?: number[]; currentStep?: string; stepStatuses?: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; workHistory?: string[]; attempts?: ExecutionAttempt[]; currentAttemptId?: string; workSummary?: WorkSummary; metrics?: JobMetrics };
 
 export class JobRunner {
@@ -210,7 +211,7 @@ export class JobRunner {
   }
   
   list(): Job[] { return Array.from(this.jobs.values()); }
-  enqueue(spec: JobSpec) { 
+  enqueue(spec: JobSpec, webhookConfig?: WebhookConfig) { 
     // Generate GUID for job ID if not provided
     if (!spec.id || spec.id === '') {
       spec.id = randomUUID();
@@ -225,7 +226,8 @@ export class JobRunner {
       logFile, 
       stepStatuses: {},
       workHistory: [spec.policy.steps.work],
-      attempts: []
+      attempts: [],
+      webhook: webhookConfig
     }; 
     this.jobs.set(job.id, job); 
     this.queue.push(job.id); 
@@ -335,6 +337,90 @@ Focus on addressing the failure root cause while maintaining all original requir
         currentAttempt.stepStatuses = { ...job.stepStatuses };
       }
     }
+  }
+
+  private async notifyWebhook(job: Job, event: 'stage_complete' | 'job_complete' | 'job_failed', stage?: string) {
+    if (!job.webhook?.url) return;
+    
+    // Check if this event type is subscribed (default: all events)
+    const subscribedEvents = job.webhook.events || ['stage_complete', 'job_complete', 'job_failed'];
+    if (!subscribedEvents.includes(event)) return;
+    
+    const payload = {
+      event,
+      timestamp: Date.now(),
+      job: {
+        id: job.id,
+        name: job.name,
+        status: job.status,
+        currentStep: job.currentStep,
+        stepStatuses: job.stepStatuses,
+        stage: stage || null,
+        progress: this.calculateProgress(job),
+        workSummary: job.workSummary || null,
+        metrics: job.metrics || null,
+        duration: job.startedAt ? Math.round((Date.now() - job.startedAt) / 1000) : null
+      }
+    };
+    
+    try {
+      const http = require('http');
+      const https = require('https');
+      const url = new URL(job.webhook.url);
+      const client = url.protocol === 'https:' ? https : http;
+      
+      const options = {
+        method: 'POST',
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: url.pathname + url.search,
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'copilot-orchestrator/0.4.0',
+          'X-Webhook-Event': event,
+          'X-Job-Id': job.id,
+          ...(job.webhook.headers || {})
+        }
+      };
+      
+      const req = client.request(options, (res: any) => {
+        this.writeLog(job, `[webhook] ${event} notification sent to ${job.webhook!.url} - HTTP ${res.statusCode}`);
+      });
+      
+      req.on('error', (e: Error) => {
+        this.writeLog(job, `[webhook] Failed to send ${event} notification: ${e.message}`);
+      });
+      
+      req.write(JSON.stringify(payload));
+      req.end();
+    } catch (e) {
+      this.writeLog(job, `[webhook] Error sending notification: ${e}`);
+    }
+  }
+
+  private calculateProgress(job: Job): number {
+    const phaseWeights: Record<string, number> = {
+      'prechecks': 10, 'work': 70, 'postchecks': 85, 'mergeback': 95, 'cleanup': 100
+    };
+    if (job.status === 'succeeded') return 100;
+    if (job.status === 'failed' || job.status === 'canceled') return -1;
+    if (job.status === 'queued') return 0;
+    const currentStep = job.currentStep;
+    if (!currentStep) return 5;
+    const stepStatuses = job.stepStatuses || {};
+    const phases = ['prechecks', 'work', 'postchecks', 'mergeback', 'cleanup'];
+    let progress = 0;
+    for (const phase of phases) {
+      if (stepStatuses[phase as keyof typeof stepStatuses] === 'success' || stepStatuses[phase as keyof typeof stepStatuses] === 'skipped') {
+        progress = phaseWeights[phase];
+      } else if (phase === currentStep) {
+        const prevPhase = phases[phases.indexOf(phase) - 1];
+        const prevProgress = prevPhase ? phaseWeights[prevPhase] : 0;
+        progress = prevProgress + (phaseWeights[phase] - prevProgress) / 2;
+        break;
+      }
+    }
+    return Math.round(progress);
   }
 
   private async calculateWorkSummary(job: Job): Promise<WorkSummary> {
@@ -673,6 +759,7 @@ Focus on addressing the failure root cause while maintaining all original requir
         job.stepStatuses[stepKey] = 'success';
         this.syncStepStatusesToAttempt(job);
         this.persist();
+        this.notifyWebhook(job, 'stage_complete', label);
         return result;
       }
       
@@ -717,6 +804,7 @@ Focus on addressing the failure root cause while maintaining all original requir
             job.stepStatuses[stepKey] = 'success';
             this.syncStepStatusesToAttempt(job);
             this.persist();
+            this.notifyWebhook(job, 'stage_complete', label);
             resolve();
           } else {
             job.stepStatuses[stepKey] = 'failed';
@@ -848,6 +936,7 @@ Focus on addressing the failure root cause while maintaining all original requir
         if (!job.stepStatuses) job.stepStatuses = {};
         job.stepStatuses.cleanup = 'success';
         this.syncStepStatusesToAttempt(job);
+        this.notifyWebhook(job, 'stage_complete', 'cleanup');
         this.writeLog(job, '========== CLEANUP SECTION END ==========\n');
       } catch (cleanupError) {
         this.writeLog(job, '[cleanup] Warning: ' + String(cleanupError));
@@ -856,6 +945,9 @@ Focus on addressing the failure root cause while maintaining all original requir
         this.syncStepStatusesToAttempt(job);
         this.writeLog(job, '========== CLEANUP SECTION END ==========\n');
       }
+      
+      // Job completed successfully - send webhook
+      this.notifyWebhook(job, 'job_complete');
     }
     catch(e){ 
       job.status = (job as Job).status === 'canceled' ? 'canceled' : 'failed'; 
@@ -869,6 +961,9 @@ Focus on addressing the failure root cause while maintaining all original requir
           currentAttempt.endedAt = Date.now();
         }
       }
+      
+      // Job failed - send webhook
+      this.notifyWebhook(job, 'job_failed');
     }
     finally{ 
       job.endedAt=Date.now(); 
@@ -1229,6 +1324,7 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
       if (!job.stepStatuses) job.stepStatuses = {};
       job.stepStatuses.mergeback = 'success';
       this.syncStepStatusesToAttempt(job);
+      this.notifyWebhook(job, 'stage_complete', 'mergeback');
       this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');
       this.persist();
     } catch(e) {

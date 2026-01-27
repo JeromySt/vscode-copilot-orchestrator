@@ -126,11 +126,12 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
       }
       
       // POST /copilot_job - Create new job
+      // Optional webhook config: { webhook: { url: string, events?: ('stage_complete'|'job_complete'|'job_failed')[], headers?: Record<string,string> } }
       if (req.method==='POST' && url.pathname==='/copilot_job'){ 
         let body=''; 
         req.on('data',c=> body+=c); 
         await new Promise(r=> req.on('end',r)); 
-        const spec = JSON.parse(body) as JobSpec;
+        const spec = JSON.parse(body) as JobSpec & { webhook?: { url: string; events?: string[]; headers?: Record<string,string> } };
         
         // Auto-derive targetBranch from baseBranch if not specified
         // Only differs if baseBranch is the repository's default branch
@@ -164,7 +165,13 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
             : spec.inputs.baseBranch;
         }
         
-        runner.enqueue(spec); 
+        // Extract webhook config before enqueuing
+        const webhookConfig = spec.webhook;
+        if (webhookConfig) {
+          delete (spec as any).webhook; // Remove from spec, will be attached to job
+        }
+        
+        runner.enqueue(spec, webhookConfig as any); 
         
         // Return full job status for immediate monitoring
         const job = runner.list().find(j => j.id === spec.id);
@@ -175,6 +182,7 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
           status: job?.status || 'queued',
           currentStep: job?.currentStep || null,
           stepStatuses: job?.stepStatuses || {},
+          webhookConfigured: !!webhookConfig,
           recommendedPollIntervalMs: 2000
         })); 
         return; 
@@ -382,13 +390,27 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
           version: '0.4.0',
           endpoints: {
             'GET /copilot_jobs': 'List all jobs',
-            'POST /copilot_job': 'Create a new job',
-            'GET /copilot_job/:id/status': 'Get simplified job status (id, status, currentStep, stepStatuses, duration)',
+            'POST /copilot_job': 'Create a new job (supports optional webhook config)',
+            'POST /copilot_jobs/status': 'Get batch status for multiple job IDs',
+            'GET /copilot_job/:id/status': 'Get simplified job status (isComplete, progress, metrics, workSummary)',
             'GET /copilot_job/:id': 'Get full job details',
             'GET /copilot_job/:id/log/:section': 'Get job log section (prechecks/work/postchecks/mergeback/cleanup/full)',
             'POST /copilot_job/:id/cancel': 'Cancel a job',
             'POST /copilot_job/:id/continue': 'Continue work on existing job with new instructions',
             'POST /copilot_job/:id/retry': 'Retry failed job with AI analysis (optional: {workContext: string})'
+          },
+          webhook: {
+            description: 'Configure webhook when creating a job to receive callbacks on completion',
+            config: {
+              url: 'URL to POST webhook notifications to (required)',
+              events: "Array of events: ['stage_complete', 'job_complete', 'job_failed'] (default: all)",
+              headers: 'Object with custom HTTP headers (e.g., Authorization)'
+            },
+            payload: {
+              event: 'Event type that triggered the webhook',
+              timestamp: 'Unix timestamp in milliseconds',
+              job: 'Job status object with id, name, status, currentStep, stepStatuses, progress, metrics, workSummary, duration'
+            }
           }
         }));
         return;

@@ -125,7 +125,7 @@ const server = http.createServer(async (req, res) => {
             tools: [
               {
                 name: 'create_copilot_job',
-                description: 'Create a new orchestrator job in an isolated git worktree',
+                description: 'Create a new orchestrator job in an isolated git worktree. Optionally configure webhook callbacks for stage/job completion events.',
                 inputSchema: {
                   type: 'object',
                   properties: {
@@ -137,7 +137,24 @@ const server = http.createServer(async (req, res) => {
                     prechecks: { type: 'string', description: 'Pre-check command (optional, e.g., "npm test")' },
                     work: { type: 'string', description: 'Work to perform - use natural language (will auto-prefix with @agent) or shell command' },
                     postchecks: { type: 'string', description: 'Post-check command (optional, e.g., "npm run lint")' },
-                    instructions: { type: 'string', description: 'Additional instructions for the AI agent (optional)' }
+                    instructions: { type: 'string', description: 'Additional instructions for the AI agent (optional)' },
+                    webhook: { 
+                      type: 'object', 
+                      description: 'Webhook configuration for callbacks on job events (optional)',
+                      properties: {
+                        url: { type: 'string', description: 'URL to POST webhook notifications to' },
+                        events: { 
+                          type: 'array', 
+                          items: { type: 'string', enum: ['stage_complete', 'job_complete', 'job_failed'] },
+                          description: 'Events to subscribe to (default: all events)'
+                        },
+                        headers: { 
+                          type: 'object', 
+                          description: 'Additional HTTP headers to send with webhook (e.g., Authorization)' 
+                        }
+                      },
+                      required: ['url']
+                    }
                   },
                   required: ['task', 'repoPath', 'baseBranch']
                 }
@@ -304,7 +321,13 @@ const server = http.createServer(async (req, res) => {
                   }
                 }
               };
-              result = await callOrchestrator('POST', '/copilot_job', jobSpec);
+              
+              // Add webhook config if provided
+              const requestBody = args.webhook 
+                ? { ...jobSpec, webhook: args.webhook }
+                : jobSpec;
+              
+              result = await callOrchestrator('POST', '/copilot_job', requestBody);
               break;
             }
 
