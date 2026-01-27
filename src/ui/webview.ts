@@ -1,6 +1,6 @@
 
 import * as vscode from 'vscode';
-import { Job } from './jobRunner';
+import { Job } from '../core/jobRunner';
 
 export function createDashboard(context: vscode.ExtensionContext) {
   const panel = vscode.window.createWebviewPanel(
@@ -91,6 +91,18 @@ export function createDashboard(context: vscode.ExtensionContext) {
     const runningEl = document.getElementById('running');
     const totalEl = document.getElementById('total');
     
+    function formatDuration(seconds) {
+      if (seconds < 0) return '0s';
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = Math.floor(seconds % 60);
+      const parts = [];
+      if (hours > 0) parts.push(hours + 'h');
+      if (minutes > 0) parts.push(minutes + 'm');
+      if (secs > 0 || parts.length === 0) parts.push(secs + 's');
+      return parts.join(' ');
+    }
+    
     window.addEventListener('message', ev => {
       const data = ev.data;
       const jobs = data.jobs || [];
@@ -118,7 +130,7 @@ export function createDashboard(context: vscode.ExtensionContext) {
         const rows = document.getElementById('rows');
         rows.innerHTML = jobs.map(j => {
           const duration = j.endedAt && j.startedAt 
-            ? Math.round((j.endedAt - j.startedAt) / 1000) + 's'
+            ? formatDuration(Math.round((j.endedAt - j.startedAt) / 1000))
             : j.startedAt ? 'running...' : '';
           const started = j.startedAt 
             ? new Date(j.startedAt).toLocaleTimeString()

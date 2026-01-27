@@ -14,6 +14,13 @@
     "onStartupFinished"
   ],
   "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "copilot-orchestrator.mcp-server",
+        "label": "Copilot Orchestrator",
+        "enabledByDefault": true
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -34,7 +41,8 @@
       },
       {
         "command": "orchestrator.cancelJob",
-        "title": "Copilot Orchestrator: Cancel Job"
+        "title": "Copilot Orchestrator: Cancel Job",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "orchestrator.startJob",
@@ -47,11 +55,6 @@
       {
         "command": "orchestrator.showJobDetails",
         "title": "Copilot Orchestrator: Show Job Details/Logs"
-      },
-      {
-        "command": "orchestrator.cancelJob",
-        "title": "Cancel Job",
-        "icon": "$(debug-stop)"
       },
       {
         "command": "orchestrator.showJobSection",
@@ -125,20 +128,45 @@
     "configuration": {
       "title": "Copilot Orchestrator",
       "properties": {
+        "copilotOrchestrator.http.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the HTTP REST API server"
+        },
+        "copilotOrchestrator.http.host": {
+          "type": "string",
+          "default": "localhost",
+          "description": "Host for HTTP API server (localhost, 127.0.0.1, or ::1)"
+        },
+        "copilotOrchestrator.http.port": {
+          "type": "number",
+          "default": 39218,
+          "description": "Port for HTTP REST API server"
+        },
         "copilotOrchestrator.mcp.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Start local MCP shim on activation"
+          "description": "Enable the MCP server for GitHub Copilot integration"
         },
         "copilotOrchestrator.mcp.host": {
           "type": "string",
-          "default": "127.0.0.1",
-          "description": "Host for local MCP shim"
+          "default": "localhost",
+          "description": "Host for MCP server (localhost, 127.0.0.1, or ::1)"
         },
         "copilotOrchestrator.mcp.port": {
           "type": "number",
-          "default": 39217,
-          "description": "Port for local MCP shim"
+          "default": 39219,
+          "description": "Port for MCP server (Model Context Protocol)"
+        },
+        "copilotOrchestrator.worktreeRoot": {
+          "type": "string",
+          "default": ".worktrees",
+          "description": "Directory name for git worktrees (relative to repository root)"
+        },
+        "copilotOrchestrator.maxWorkers": {
+          "type": "number",
+          "default": 0,
+          "description": "Maximum concurrent job workers (0 = auto, based on CPU count minus 1)"
         },
         "copilotOrchestrator.copilotCli.required": {
           "type": "boolean",
@@ -159,6 +187,23 @@
           "type": "boolean",
           "default": true,
           "description": "Fail jobs early if Copilot CLI is missing (with install guidance)"
+        },
+        "copilotOrchestrator.merge.mode": {
+          "type": "string",
+          "enum": ["merge", "rebase", "squash"],
+          "default": "squash",
+          "description": "Git merge strategy for completed jobs (squash creates a single commit)"
+        },
+        "copilotOrchestrator.merge.prefer": {
+          "type": "string",
+          "enum": ["ours", "theirs"],
+          "default": "theirs",
+          "description": "Default conflict resolution preference (used by Copilot CLI)"
+        },
+        "copilotOrchestrator.merge.pushOnSuccess": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically push to remote after successful merge"
         }
       }
     }

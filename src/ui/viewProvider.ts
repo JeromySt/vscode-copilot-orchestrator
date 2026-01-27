@@ -1,6 +1,6 @@
 
 import * as vscode from 'vscode';
-import { Job } from './jobRunner';
+import { Job } from '../core/jobRunner';
 
 // Simple data provider interface
 export interface JobDataProvider {

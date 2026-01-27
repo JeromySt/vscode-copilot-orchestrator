@@ -1,7 +1,7 @@
 
 import { spawnSync } from 'child_process';
 import * as path from 'path';
-import { ensureDir } from './utils';
+import { ensureDir } from '../core/utils';
 export type WorktreePlan = { jobId: string; repoPath: string; worktreeRoot: string; baseBranch: string; targetBranch: string };
 function sh(cmd: string, cwd: string, log: (s:string)=>void) { const p = spawnSync(cmd, { cwd, shell:true, stdio:'pipe', encoding:'utf-8' }); if (p.stdout) log(p.stdout); if (p.stderr) log(p.stderr); if (p.status!==0) throw new Error(`Command failed (${p.status}): ${cmd}`); }
 export function createWorktrees(plan: WorktreePlan, log:(s:string)=>void) {

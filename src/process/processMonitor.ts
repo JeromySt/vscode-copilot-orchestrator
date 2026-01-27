@@ -1,0 +1,294 @@
+/**
+ * @fileoverview Process monitoring for job execution tracking.
+ * 
+ * This module provides OS-level process monitoring to track processes
+ * spawned by jobs and display resource usage in the UI.
+ * 
+ * @module process/processMonitor
+ */
+
+import { execSync, spawnSync } from 'child_process';
+import * as os from 'os';
+import { ProcessInfo, ProcessNode } from '../types';
+import { IProcessMonitor } from '../interfaces/IProcessMonitor';
+
+/**
+ * Process monitor implementation supporting Windows and Unix systems.
+ * 
+ * Uses platform-specific commands:
+ * - Windows: PowerShell with Get-CimInstance
+ * - Unix: ps command
+ * 
+ * @example
+ * ```typescript
+ * const monitor = new ProcessMonitor();
+ * const snapshot = await monitor.getSnapshot();
+ * const tree = monitor.buildTree([1234, 5678], snapshot);
+ * ```
+ */
+export class ProcessMonitor implements IProcessMonitor {
+  /** Cache for process snapshots */
+  private snapshotCache: ProcessInfo[] = [];
+  /** Timestamp of last snapshot */
+  private lastSnapshotTime = 0;
+  /** Cache TTL in milliseconds */
+  private readonly cacheTtlMs: number;
+  
+  /**
+   * Create a new ProcessMonitor.
+   * @param cacheTtlMs - How long to cache snapshots (default: 2000ms)
+   */
+  constructor(cacheTtlMs = 2000) {
+    this.cacheTtlMs = cacheTtlMs;
+  }
+  
+  /**
+   * Get a snapshot of all running processes.
+   * Results are cached to reduce overhead.
+   */
+  async getSnapshot(): Promise<ProcessInfo[]> {
+    const now = Date.now();
+    
+    // Return cached snapshot if still valid
+    if (now - this.lastSnapshotTime < this.cacheTtlMs && this.snapshotCache.length > 0) {
+      return this.snapshotCache;
+    }
+    
+    // Collect fresh snapshot
+    const snapshot = process.platform === 'win32' 
+      ? await this.getWindowsProcesses()
+      : await this.getUnixProcesses();
+    
+    this.snapshotCache = snapshot;
+    this.lastSnapshotTime = now;
+    
+    return snapshot;
+  }
+  
+  /**
+   * Build a hierarchical process tree from root PIDs.
+   * 
+   * @param rootPids - PIDs to use as tree roots
+   * @param snapshot - Process snapshot to build from
+   * @returns Array of process trees
+   */
+  buildTree(rootPids: number[], snapshot: ProcessInfo[]): ProcessNode[] {
+    if (!rootPids || rootPids.length === 0 || !snapshot || snapshot.length === 0) {
+      return [];
+    }
+    
+    // Build process map for O(1) lookup
+    const processMap = new Map<number, ProcessInfo>();
+    for (const proc of snapshot) {
+      processMap.set(proc.pid, proc);
+    }
+    
+    // Find all legitimate descendants using BFS
+    // This prevents PID reuse issues where old processes coincidentally
+    // have a parent PID matching our current processes
+    const descendants = new Set<number>(rootPids);
+    let foundNew = true;
+    let iterations = 0;
+    const maxIterations = 20;
+    
+    while (foundNew && iterations < maxIterations) {
+      foundNew = false;
+      iterations++;
+      
+      for (const [childPid, childProc] of processMap.entries()) {
+        if (!descendants.has(childPid) && 
+            descendants.has(childProc.parentPid) && 
+            childPid !== childProc.parentPid) {
+          descendants.add(childPid);
+          foundNew = true;
+        }
+      }
+    }
+    
+    // Build tree recursively
+    const buildNode = (pid: number, depth = 0): ProcessNode | null => {
+      const proc = processMap.get(pid);
+      if (!proc || depth > 10) return null;
+      
+      const children: ProcessNode[] = [];
+      for (const [childPid, childProc] of processMap.entries()) {
+        if (descendants.has(childPid) && 
+            childProc.parentPid === pid && 
+            childPid !== pid) {
+          const childNode = buildNode(childPid, depth + 1);
+          if (childNode) {
+            children.push(childNode);
+          }
+        }
+      }
+      
+      return {
+        ...proc,
+        children: children.length > 0 ? children : undefined
+      };
+    };
+    
+    // Build tree for each root
+    const results: ProcessNode[] = [];
+    for (const rootPid of rootPids) {
+      const tree = buildNode(rootPid);
+      if (tree) {
+        results.push(tree);
+      }
+    }
+    
+    return results;
+  }
+  
+  /**
+   * Check if a process is currently running.
+   * Uses signal 0 which checks existence without killing.
+   */
+  isRunning(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  
+  /**
+   * Terminate a process and its descendants.
+   */
+  async terminate(pid: number, force = false): Promise<void> {
+    if (process.platform === 'win32') {
+      await this.terminateWindows(pid, force);
+    } else {
+      await this.terminateUnix(pid, force);
+    }
+  }
+  
+  /**
+   * Get processes on Windows using PowerShell.
+   */
+  private async getWindowsProcesses(): Promise<ProcessInfo[]> {
+    try {
+      // Combined CIM query for efficiency
+      const output = execSync(
+        `powershell -NoProfile -Command "$procs = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,WorkingSetSize,CreationDate,ThreadCount,HandleCount,Priority,ExecutablePath; $perf = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Select-Object IDProcess,PercentProcessorTime; $cpuMap = @{}; foreach ($p in $perf) { if ($p.IDProcess) { $cpuMap[$p.IDProcess] = $p.PercentProcessorTime } }; $result = @(); foreach ($proc in $procs) { $result += @{ ProcessId = $proc.ProcessId; ParentProcessId = $proc.ParentProcessId; Name = $proc.Name; CommandLine = $proc.CommandLine; WorkingSetSize = $proc.WorkingSetSize; CPU = if ($cpuMap.ContainsKey($proc.ProcessId)) { $cpuMap[$proc.ProcessId] } else { 0 }; CreationDate = if ($proc.CreationDate) { $proc.CreationDate.ToString('o') } else { $null }; ThreadCount = $proc.ThreadCount; HandleCount = $proc.HandleCount; Priority = $proc.Priority; ExecutablePath = $proc.ExecutablePath } }; $result | ConvertTo-Json"`,
+        { encoding: 'utf-8', timeout: 5000 }
+      );
+      
+      const data = JSON.parse(output);
+      const procs = Array.isArray(data) ? data : [data];
+      const coreCount = os.cpus().length || 1;
+      
+      return procs.map(p => ({
+        pid: p.ProcessId || 0,
+        parentPid: p.ParentProcessId || 0,
+        name: p.Name || 'unknown',
+        commandLine: p.CommandLine || undefined,
+        cpu: Math.round((p.CPU || 0) / coreCount * 10) / 10,
+        memory: p.WorkingSetSize || 0,
+        threadCount: p.ThreadCount || undefined,
+        handleCount: p.HandleCount || undefined,
+        priority: p.Priority || undefined,
+        creationDate: p.CreationDate || undefined,
+        executablePath: p.ExecutablePath || undefined
+      }));
+    } catch (e) {
+      console.error('Failed to get Windows processes:', e);
+      return [];
+    }
+  }
+  
+  /**
+   * Get processes on Unix using ps command.
+   */
+  private async getUnixProcesses(): Promise<ProcessInfo[]> {
+    try {
+      const output = execSync(
+        'ps -eo pid,ppid,%cpu,rss,comm,args 2>/dev/null || true',
+        { encoding: 'utf-8', timeout: 3000 }
+      ).trim();
+      
+      const lines = output.split('\n').slice(1); // Skip header
+      const processes: ProcessInfo[] = [];
+      
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 5) continue;
+        
+        const pid = parseInt(parts[0], 10);
+        const parentPid = parseInt(parts[1], 10);
+        const cpu = parseFloat(parts[2]) || 0;
+        const memoryKb = parseInt(parts[3], 10) || 0;
+        const name = parts[4];
+        const commandLine = parts.slice(5).join(' ');
+        
+        processes.push({
+          pid,
+          parentPid,
+          name,
+          commandLine: commandLine || undefined,
+          cpu,
+          memory: memoryKb * 1024 // Convert KB to bytes
+        });
+      }
+      
+      return processes;
+    } catch (e) {
+      console.error('Failed to get Unix processes:', e);
+      return [];
+    }
+  }
+  
+  /**
+   * Terminate a process tree on Windows.
+   */
+  private async terminateWindows(pid: number, force: boolean): Promise<void> {
+    try {
+      const flag = force ? '/F' : '';
+      execSync(`taskkill ${flag} /T /PID ${pid}`, { 
+        stdio: 'ignore',
+        timeout: 5000 
+      });
+    } catch (e) {
+      console.error(`Failed to terminate Windows process ${pid}:`, e);
+    }
+  }
+  
+  /**
+   * Terminate a process tree on Unix.
+   */
+  private async terminateUnix(pid: number, force: boolean): Promise<void> {
+    try {
+      // Get all descendant PIDs
+      const result = spawnSync('pgrep', ['-P', String(pid)], { 
+        encoding: 'utf-8' 
+      });
+      
+      const childPids = result.stdout
+        ?.trim()
+        .split('\n')
+        .filter(p => p)
+        .map(p => parseInt(p, 10)) || [];
+      
+      // Terminate children first
+      for (const childPid of childPids) {
+        await this.terminateUnix(childPid, force);
+      }
+      
+      // Terminate the process itself
+      const signal = force ? 'SIGKILL' : 'SIGTERM';
+      process.kill(pid, signal);
+    } catch (e) {
+      // Process may already be dead
+      if ((e as NodeJS.ErrnoException).code !== 'ESRCH') {
+        console.error(`Failed to terminate Unix process ${pid}:`, e);
+      }
+    }
+  }
+}
+
+/**
+ * Singleton instance for convenience.
+ * Use dependency injection for testability.
+ */
+export const processMonitor = new ProcessMonitor();

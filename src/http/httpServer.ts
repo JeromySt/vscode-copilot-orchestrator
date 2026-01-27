@@ -1,7 +1,7 @@
 
 import * as http from 'http';
-import { JobRunner, JobSpec } from './jobRunner';
-import { PlanRunner, PlanSpec } from './planRunner';
+import { JobRunner, JobSpec } from '../core/jobRunner';
+import { PlanRunner, PlanSpec } from '../core/planRunner';
 
 // Helper to calculate progress percentage based on phase
 function calculateProgress(job: any): number {
@@ -246,7 +246,7 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
       // POST /copilot_job/:id/cancel - Cancel job
       if (req.method==='POST' && url.pathname.endsWith('/cancel')){ 
         const id = url.pathname.split('/')[2]; 
-        (runner as any).cancel(id); 
+        runner.cancel(id); 
         res.end(JSON.stringify({ok:true, id, message: 'Job cancelled'})); 
         return; 
       }
@@ -453,9 +453,31 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
     } 
   }); 
   
-  server.listen(port, host, () => {
-    console.log(`Copilot Orchestrator HTTP API listening on http://${host}:${port}`);
-  }); 
+  // Try to bind - attempt specified host, with fallback for localhost configurations
+  const tryHosts = host === '127.0.0.1' || host === 'localhost' 
+    ? ['::1', '127.0.0.1']  // Try IPv6 first for dual-stack support, fallback to IPv4
+    : [host];               // Use specified host directly
   
+  let hostIndex = 0;
+  
+  function tryBind(): void {
+    const bindHost = tryHosts[hostIndex];
+    server.listen(port, bindHost, () => {
+      const displayHost = bindHost === '::1' ? '[::1]' : bindHost;
+      console.log(`Copilot Orchestrator HTTP API listening on http://${displayHost}:${port}`);
+    });
+  }
+  
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if ((err.code === 'EADDRNOTAVAIL' || err.code === 'EAFNOSUPPORT') && hostIndex + 1 < tryHosts.length) {
+      hostIndex++;
+      console.log(`Failed to bind to ${tryHosts[hostIndex - 1]}, trying ${tryHosts[hostIndex]}...`);
+      tryBind();
+    } else {
+      console.error('HTTP Server error:', err.message);
+    }
+  });
+  
+  tryBind();
   return server; 
 }

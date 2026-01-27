@@ -5,10 +5,11 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { randomUUID } from 'crypto';
 import { ensureDir, readJSON, writeJSON, cpuCountMinusOne } from './utils';
-import { createWorktrees } from './gitWorktrees';
-import { isCopilotCliAvailable } from './cliCheckCore';
+import { createWorktrees } from '../git/gitWorktrees';
+import { isCopilotCliAvailable } from '../agent/cliCheckCore';
 
-export type WorkSummary = { commits: number; filesAdded: number; filesModified: number; filesDeleted: number; description: string };
+export type CommitDetail = { hash: string; shortHash: string; message: string; author: string; date: string; filesAdded: string[]; filesModified: string[]; filesDeleted: string[] };
+export type WorkSummary = { commits: number; filesAdded: number; filesModified: number; filesDeleted: number; description: string; commitDetails?: CommitDetail[] };
 export type JobMetrics = { testsRun?: number; testsPassed?: number; testsFailed?: number; coveragePercent?: number; buildErrors?: number; buildWarnings?: number };
 export type WebhookConfig = { url: string; events?: ('stage_complete' | 'job_complete' | 'job_failed')[]; headers?: Record<string, string> };
 export type ExecutionAttempt = { attemptId: string; startedAt: number; endedAt?: number; logFile: string; copilotSessionId?: string; workInstruction: string; stepStatuses: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; workSummary?: WorkSummary; metrics?: JobMetrics };
@@ -453,24 +454,73 @@ Focus on addressing the failure root cause while maintaining all original requir
 
   private async calculateWorkSummary(job: Job): Promise<WorkSummary> {
     const { execSync } = require('child_process');
-    const worktreePath = job.inputs.worktreeRoot;
+    // Build full worktree path: repoPath/worktreeRoot/jobId
+    const worktreePath = path.join(job.inputs.repoPath, job.inputs.worktreeRoot, job.id);
     const baseBranch = job.inputs.baseBranch;
     
     let commits = 0;
     let filesAdded = 0;
     let filesModified = 0;
     let filesDeleted = 0;
+    const commitDetails: CommitDetail[] = [];
     
     try {
       // Find the merge-base (where the worktree branch forked from baseBranch)
       // Use local branch only - worktrees don't have remotes
       const mergeBase = execSync(`git merge-base HEAD ${baseBranch}`, { cwd: worktreePath, encoding: 'utf-8' }).trim();
       
-      // Count commits since the fork point
-      const commitOutput = execSync(`git rev-list --count ${mergeBase}..HEAD`, { cwd: worktreePath, encoding: 'utf-8' }).trim();
-      commits = parseInt(commitOutput, 10) || 0;
+      // Get detailed commit information
+      // Format: hash|shortHash|author|date|message
+      const commitLogOutput = execSync(
+        `git log ${mergeBase}..HEAD --pretty=format:"%H|%h|%an|%ai|%s" --reverse`,
+        { cwd: worktreePath, encoding: 'utf-8' }
+      ).trim();
       
-      // Get file changes since the fork point
+      if (commitLogOutput) {
+        const commitLines = commitLogOutput.split('\n').filter((l: string) => l.trim());
+        commits = commitLines.length;
+        
+        for (const commitLine of commitLines) {
+          const [hash, shortHash, author, date, ...messageParts] = commitLine.split('|');
+          const message = messageParts.join('|'); // In case message contains |
+          
+          // Get files changed in this specific commit
+          const filesOutput = execSync(
+            `git diff-tree --no-commit-id --name-status -r ${hash}`,
+            { cwd: worktreePath, encoding: 'utf-8' }
+          ).trim();
+          
+          const commitFilesAdded: string[] = [];
+          const commitFilesModified: string[] = [];
+          const commitFilesDeleted: string[] = [];
+          
+          if (filesOutput) {
+            const fileLines = filesOutput.split('\n').filter((l: string) => l.trim());
+            for (const fileLine of fileLines) {
+              const [status, ...filePathParts] = fileLine.split('\t');
+              const filePath = filePathParts.join('\t');
+              if (status === 'A') commitFilesAdded.push(filePath);
+              else if (status === 'M') commitFilesModified.push(filePath);
+              else if (status === 'D') commitFilesDeleted.push(filePath);
+              else if (status.startsWith('R')) commitFilesModified.push(filePath);
+              else if (status.startsWith('C')) commitFilesAdded.push(filePath);
+            }
+          }
+          
+          commitDetails.push({
+            hash,
+            shortHash,
+            author,
+            date,
+            message,
+            filesAdded: commitFilesAdded,
+            filesModified: commitFilesModified,
+            filesDeleted: commitFilesDeleted
+          });
+        }
+      }
+      
+      // Get total file changes since the fork point (for summary)
       const diffOutput = execSync(`git diff --name-status ${mergeBase} HEAD`, { cwd: worktreePath, encoding: 'utf-8' }).trim();
       
       if (diffOutput) {
@@ -499,7 +549,7 @@ Focus on addressing the failure root cause while maintaining all original requir
     
     const description = parts.length > 0 ? parts.join(', ') : 'No changes detected';
     
-    return { commits, filesAdded, filesModified, filesDeleted, description };
+    return { commits, filesAdded, filesModified, filesDeleted, description, commitDetails };
   }
 
   private extractMetricsFromLog(job: Job): JobMetrics {
@@ -1263,6 +1313,14 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     this.writeLog(job, '\n========== MERGEBACK SECTION START ==========');
     const cp = require('child_process'); const pathM = require('path'); const fsM = require('fs');
     
+    // Load merge configuration from VS Code settings
+    const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
+    const mergeMode = mergeCfg.get<'merge' | 'rebase' | 'squash'>('mode', 'squash');
+    const prefer = mergeCfg.get<'ours' | 'theirs'>('prefer', 'theirs');
+    const pushOnSuccess = mergeCfg.get<boolean>('pushOnSuccess', false);
+    
+    this.writeLog(job, `[mergeback] Using merge mode: ${mergeMode}, prefer: ${prefer}, pushOnSuccess: ${pushOnSuccess}`);
+    
     // Track output for error detection
     let copilotOutput = '';
     
@@ -1280,13 +1338,11 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
       }); 
       p.on('exit',(code:number)=> code===0? resolve(): reject(new Error(cmd+` -> exit ${code}`))); 
     });
-    const cfgPath = pathM.join(repoPath,'.orchestrator','merge.json'); let cfg = { mode:'merge', prefer:'theirs', autoResolve:[], pushOnSuccess:false } as any; try { cfg = JSON.parse(fsM.readFileSync(cfgPath,'utf8')); } catch {}
+    
     // Merge the job's working branch (copilot_jobs/{id}) INTO the target branch
     const targetBranch = job.inputs.targetBranch;
     const feat = `copilot_jobs/${job.id}`.replace(/[^a-zA-Z0-9\-_.\/]/g,'-');
     await run('git add -A', jobRoot).catch(()=>{}); await run(`git commit -m "orchestrator(${job.id}): finalize" || echo no-commit`, jobRoot);
-    // Note: Push to remote is disabled by default. Changes stay local for manual review.
-    // await run(`git push -u origin ${feat}`, jobRoot);
     await run('git fetch --all --tags', repoPath); 
     
     // Check if targetBranch exists locally, if not check remote, if not fall back to baseBranch
@@ -1306,38 +1362,56 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     // Try to pull, but don't fail if branch has no upstream
     await run(`git pull --ff-only || echo "No upstream tracking branch, continuing with current state"`, repoPath).catch(()=>{});
     
-    // Use copilot.exe to merge directly on the target branch (no intermediate mergeback branch)
-    this.writeLog(job, `[mergeback] Using Copilot to merge ${feat} into ${mergeTarget}...`);
+    // Build merge instruction based on configured mode
+    let mergeInstruction: string;
+    switch (mergeMode) {
+      case 'squash':
+        mergeInstruction = `@agent squash merge branch ${feat} into current branch ${mergeTarget}. ` +
+          `Combine all commits into a single commit. ` +
+          `Handle any conflicts (prefer ${prefer}) and commit with message 'orchestrator(${job.id}): squash merge from ${feat}'`;
+        break;
+      case 'rebase':
+        mergeInstruction = `@agent rebase branch ${feat} onto current branch ${mergeTarget}. ` +
+          `Handle any conflicts (prefer ${prefer}) and complete the rebase. ` +
+          `Final commit message should include 'orchestrator(${job.id}): rebased from ${feat}'`;
+        break;
+      case 'merge':
+      default:
+        mergeInstruction = `@agent merge branch ${feat} into current branch ${mergeTarget}. ` +
+          `Handle any conflicts (prefer ${prefer}) and commit with message 'orchestrator(${job.id}): merge from ${feat}'`;
+        break;
+    }
+    
+    this.writeLog(job, `[mergeback] Using Copilot to ${mergeMode} ${feat} into ${mergeTarget}...`);
     
     // Reset copilot output tracking for this command
     copilotOutput = '';
     
     try {
       // Let Copilot handle the entire merge operation including any conflicts
-      // Use --allow-all-paths and --allow-all-tools to enable file system and git modifications
       await run(
-        `copilot.exe -p "@agent merge branch ${feat} into current branch ${mergeTarget}. Handle any conflicts and commit the result with message 'orchestrator(${job.id}): mergeback from ${feat}'" --allow-all-paths --allow-all-tools`,
+        `copilot.exe -p "${mergeInstruction}" --allow-all-paths --allow-all-tools`,
         repoPath
       );
       
       // Check for error patterns in copilot output even if exit code was 0
-      // Be careful not to match success messages like "no conflicts"
       const errorPatterns = [
         /permission denied/i,
         /could not request permission/i,
         /failed to merge/i,
-        /merge conflict(?!s)/i,  // "merge conflict" but not "merge conflicts" in negative context
+        /merge conflict(?!s)/i,
         /fatal:/i,
-        /(?<!no )CONFLICT(?!s)/i,  // CONFLICT but not "no conflicts" or "CONFLICTS" 
+        /(?<!no )CONFLICT(?!s)/i,
         /cannot complete/i,
         /unable to merge/i,
         /\bI cannot\b/i
       ];
       
-      // Also check for explicit success indicators that override error patterns
       const successPatterns = [
         /merge completed successfully/i,
         /merged.*successfully/i,
+        /squash.*completed/i,
+        /rebase.*completed/i,
         /fast-forward/i,
         /no conflicts/i
       ];
@@ -1348,13 +1422,28 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
         throw new Error('Copilot merge reported errors in output (see logs above)');
       }
       
-      this.writeLog(job, '[mergeback] ✓ Merge completed successfully via Copilot');
+      this.writeLog(job, `[mergeback] ✓ ${mergeMode.charAt(0).toUpperCase() + mergeMode.slice(1)} completed successfully via Copilot`);
       if (!job.stepStatuses) job.stepStatuses = {};
       job.stepStatuses.mergeback = 'success';
       this.syncStepStatusesToAttempt(job);
       this.notifyWebhook(job, 'stage_complete', 'mergeback');
-      this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');
       this.persist();
+      
+      // Push to remote if configured
+      if (pushOnSuccess) {
+        this.writeLog(job, `[mergeback] Pushing ${mergeTarget} to origin...`);
+        try {
+          await run(`git push origin ${mergeTarget}`, repoPath);
+          this.writeLog(job, '[mergeback] ✓ Pushed to remote successfully');
+        } catch (pushError) {
+          this.writeLog(job, '[mergeback] ⚠ Push failed: ' + String(pushError));
+          this.writeLog(job, '[mergeback] Changes are committed locally but not pushed');
+        }
+      } else {
+        this.writeLog(job, '[mergeback] ✓ Merge completed locally. Push manually when ready (pushOnSuccess is disabled).');
+      }
+      
+      this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');
     } catch(e) {
       this.writeLog(job, '[mergeback] Copilot merge failed: ' + String(e));
       if (!job.stepStatuses) job.stepStatuses = {};
@@ -1366,14 +1455,8 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
       try { fsM.mkdirSync(patchDir,{recursive:true}); } catch{}
       await run(`git diff ${mergeTarget}...${feat} > "${patchDir}/patch.diff"`, repoPath).catch(()=>{});
       this.writeLog(job, '[mergeback] Saved patch to .orchestrator/jobs/'+job.id+'/patch.diff');
+      this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');
       throw e;
     }
-    // Note: pushOnSuccess is now always false by default to prevent automatic remote pushes
-    if (cfg.pushOnSuccess){ 
-      this.writeLog(job, '[mergeback] Warning: pushOnSuccess is enabled in merge.json but automatic push is disabled');
-      // await run(`git push origin ${mergeTarget}`, repoPath); 
-    }
-    this.writeLog(job, '[mergeback] ✓ Merge completed locally. Review and push manually when ready.');
-    this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');
   }
 }
