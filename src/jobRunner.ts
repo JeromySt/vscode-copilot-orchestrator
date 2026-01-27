@@ -723,6 +723,8 @@ Focus on addressing the failure root cause while maintaining all original requir
       this.persist();
       
       // Attempt mergeback - if it fails, mark job as failed
+      job.currentStep = 'mergeback';
+      this.persist();
       try {
         await this.mergeBack(job, repoPath, jobRoot);
       } catch (e) {
@@ -739,6 +741,8 @@ Focus on addressing the failure root cause while maintaining all original requir
       }
       
       // Auto-cleanup worktree and branch after successful mergeback
+      job.currentStep = 'cleanup';
+      this.persist();
       this.writeLog(job, '\n========== CLEANUP SECTION START ==========');
       try {
         this.writeLog(job, '[cleanup] Cleaning up worktree and branch...');
@@ -1140,6 +1144,8 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
       if (!job.stepStatuses) job.stepStatuses = {};
       job.stepStatuses.mergeback = 'success';
       this.syncStepStatusesToAttempt(job);
+      this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');
+      this.persist();
     } catch(e) {
       this.writeLog(job, '[mergeback] Copilot merge failed: ' + String(e));
       if (!job.stepStatuses) job.stepStatuses = {};
