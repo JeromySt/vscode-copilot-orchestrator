@@ -339,8 +339,36 @@ Focus on addressing the failure root cause while maintaining all original requir
     }
   }
 
+  private isLocalUrl(urlString: string): boolean {
+    try {
+      const url = new URL(urlString);
+      const hostname = url.hostname.toLowerCase();
+      
+      // Allow localhost variants
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+        return true;
+      }
+      
+      // Allow loopback range 127.x.x.x
+      if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+        return true;
+      }
+      
+      // Block everything else (including 0.0.0.0 which could bind externally)
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
   private async notifyWebhook(job: Job, event: 'stage_complete' | 'job_complete' | 'job_failed', stage?: string) {
     if (!job.webhook?.url) return;
+    
+    // Security: Only allow local webhook destinations
+    if (!this.isLocalUrl(job.webhook.url)) {
+      this.writeLog(job, `[webhook] BLOCKED: Non-local URL not allowed (${job.webhook.url})`);
+      return;
+    }
     
     // Check if this event type is subscribed (default: all events)
     const subscribedEvents = job.webhook.events || ['stage_complete', 'job_complete', 'job_failed'];

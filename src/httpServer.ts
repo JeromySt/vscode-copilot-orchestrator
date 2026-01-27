@@ -168,6 +168,34 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
         // Extract webhook config before enqueuing
         const webhookConfig = spec.webhook;
         if (webhookConfig) {
+          // Security: Validate webhook URL is localhost only
+          try {
+            const webhookUrl = new URL(webhookConfig.url);
+            const hostname = webhookUrl.hostname.toLowerCase();
+            const isLocal = hostname === 'localhost' || 
+                           hostname === '127.0.0.1' || 
+                           hostname === '::1' ||
+                           /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
+            
+            if (!isLocal) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({
+                error: 'Webhook URL must be localhost',
+                message: 'For security, webhooks can only call back to localhost (127.0.0.1, ::1, or localhost). External URLs are not allowed.',
+                providedUrl: webhookConfig.url
+              }));
+              return;
+            }
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({
+              error: 'Invalid webhook URL',
+              message: 'The webhook URL is malformed',
+              providedUrl: webhookConfig.url
+            }));
+            return;
+          }
+          
           delete (spec as any).webhook; // Remove from spec, will be attached to job
         }
         
@@ -401,8 +429,9 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
           },
           webhook: {
             description: 'Configure webhook when creating a job to receive callbacks on completion',
+            security: 'LOCALHOST ONLY - webhooks restricted to 127.0.0.1, ::1, or localhost for security',
             config: {
-              url: 'URL to POST webhook notifications to (required)',
+              url: 'Localhost URL to POST webhook notifications to (required, e.g., http://localhost:8080/callback)',
               events: "Array of events: ['stage_complete', 'job_complete', 'job_failed'] (default: all)",
               headers: 'Object with custom HTTP headers (e.g., Authorization)'
             },

@@ -125,7 +125,7 @@ const server = http.createServer(async (req, res) => {
             tools: [
               {
                 name: 'create_copilot_job',
-                description: 'Create a new orchestrator job in an isolated git worktree. Optionally configure webhook callbacks for stage/job completion events.',
+                description: 'Create a new orchestrator job in an isolated git worktree. Optionally configure webhook callbacks for stage/job completion events (localhost URLs only for security).',
                 inputSchema: {
                   type: 'object',
                   properties: {
@@ -140,9 +140,9 @@ const server = http.createServer(async (req, res) => {
                     instructions: { type: 'string', description: 'Additional instructions for the AI agent (optional)' },
                     webhook: { 
                       type: 'object', 
-                      description: 'Webhook configuration for callbacks on job events (optional)',
+                      description: 'Webhook configuration for callbacks on job events. SECURITY: Only localhost URLs allowed (127.0.0.1, ::1, localhost)',
                       properties: {
-                        url: { type: 'string', description: 'URL to POST webhook notifications to' },
+                        url: { type: 'string', description: 'Localhost URL to POST webhook notifications to (e.g., http://localhost:8080/callback)' },
                         events: { 
                           type: 'array', 
                           items: { type: 'string', enum: ['stage_complete', 'job_complete', 'job_failed'] },
