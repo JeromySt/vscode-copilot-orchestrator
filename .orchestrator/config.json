@@ -1,0 +1,15 @@
+{
+  "http": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 39217
+  },
+  "maxWorkers": 0,
+  "worktreeRoot": ".worktrees",
+  "coverageThreshold": 80,
+  "pr": {
+    "enabled": false,
+    "draft": true,
+    "titlePrefix": "orchestrator:"
+  }
+}

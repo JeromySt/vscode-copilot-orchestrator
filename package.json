@@ -1,0 +1,182 @@
+{
+  "name": "vscode-copilot-orchestrator",
+  "displayName": "Copilot Orchestrator",
+  "description": "Use GitHub Copilot as an orchestrator while sub-agents run reliably in background worktrees.",
+  "version": "0.4.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copilot-orchestrator",
+          "title": "Copilot",
+          "icon": "media/copilot-icon.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "orchestrator.createJob",
+        "title": "Copilot Orchestrator: Create Job"
+      },
+      {
+        "command": "orchestrator.openDashboard",
+        "title": "Copilot Orchestrator: Open Dashboard"
+      },
+      {
+        "command": "orchestrator.cancelJob",
+        "title": "Copilot Orchestrator: Cancel Job"
+      },
+      {
+        "command": "orchestrator.startJob",
+        "title": "Copilot Orchestrator: Start Job"
+      },
+      {
+        "command": "orchestrator.inspectStatus",
+        "title": "Copilot Orchestrator: Inspect Status"
+      },
+      {
+        "command": "orchestrator.showJobDetails",
+        "title": "Copilot Orchestrator: Show Job Details/Logs"
+      },
+      {
+        "command": "orchestrator.cancelJob",
+        "title": "Cancel Job",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "orchestrator.showJobSection",
+        "title": "Copilot Orchestrator: Show Job Section (Prechecks/Work/Postchecks)"
+      },
+      {
+        "command": "orchestrator.retryJob",
+        "title": "Retry Job",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "orchestrator.deleteJob",
+        "title": "Delete Job",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "orchestrator.openJobWorktree",
+        "title": "Open Job Worktree",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "orchestrator.mergeCompletedJob",
+        "title": "Copilot Orchestrator: Merge Completed Job"
+      },
+      {
+        "command": "orchestrator.resolveConflicts",
+        "title": "Copilot Orchestrator: Resolve Merge Conflicts"
+      },
+      {
+        "command": "orchestrator.generateTests",
+        "title": "Copilot Orchestrator: Generate Test Suite"
+      },
+      {
+        "command": "orchestrator.produceDocs",
+        "title": "Copilot Orchestrator: Produce Documentation"
+      },
+      {
+        "command": "orchestrator.mcp.howToConnect",
+        "title": "Copilot Orchestrator: MCP \u2013 How to Connect"
+      },
+      {        "command": "orchestrator.mcp.configure",
+        "title": "Copilot Orchestrator: Add MCP to GitHub Copilot"
+      },
+      {        "command": "orchestrator.copilotCli.check",
+        "title": "Copilot Orchestrator: Check Copilot CLI"
+      }
+    ],
+    "views": {
+      "copilot-orchestrator": [
+        {
+          "id": "orchestrator.jobsView",
+          "name": "Jobs",
+          "type": "webview"
+        }
+      ]
+    },
+    "notebooks": [
+      {
+        "type": "orchestrator-notebook",
+        "displayName": "Copilot Orchestrator Job Plan",
+        "selector": [
+          {
+            "filenamePattern": "**/*.orchestrator.json"
+          },
+          {
+            "filenamePattern": "**/*.orchestrator.ipynb.json"
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Copilot Orchestrator",
+      "properties": {
+        "copilotOrchestrator.mcp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start local MCP shim on activation"
+        },
+        "copilotOrchestrator.mcp.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Host for local MCP shim"
+        },
+        "copilotOrchestrator.mcp.port": {
+          "type": "number",
+          "default": 39217,
+          "description": "Port for local MCP shim"
+        },
+        "copilotOrchestrator.copilotCli.required": {
+          "type": "boolean",
+          "default": true,
+          "description": "Warn/guide install if GitHub Copilot CLI is missing on activation"
+        },
+        "copilotOrchestrator.copilotCli.preferredInstall": {
+          "type": "string",
+          "enum": [
+            "gh",
+            "npm",
+            "auto"
+          ],
+          "default": "auto",
+          "description": "Preferred installation method for Copilot CLI"
+        },
+        "copilotOrchestrator.copilotCli.enforceInJobs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Fail jobs early if Copilot CLI is missing (with install guidance)"
+        }
+      }
+    }
+  },
+  "main": "./out/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "package": "vsce package || echo 'Install vsce to package'",
+    "lint": "echo 'add your linter'"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "typescript": "^5.4.0",
+    "@types/vscode": "^1.85.0"
+  },
+  "dependencies": {
+    "micromatch": "^4.0.5"
+  }
+}

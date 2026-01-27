@@ -1,0 +1,19 @@
+{
+  "mode": "merge",
+  "prefer": "theirs",
+  "autoResolve": [
+    {
+      "glob": "package-lock.json",
+      "prefer": "theirs"
+    },
+    {
+      "glob": "yarn.lock",
+      "prefer": "theirs"
+    },
+    {
+      "glob": "docs/**",
+      "prefer": "theirs"
+    }
+  ],
+  "pushOnSuccess": true
+}
