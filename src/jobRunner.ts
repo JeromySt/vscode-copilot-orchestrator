@@ -347,15 +347,16 @@ Focus on addressing the failure root cause while maintaining all original requir
     let filesDeleted = 0;
     
     try {
-      // Count commits ahead of base branch
-      const commitCountCmd = `git rev-list --count origin/${baseBranch}..HEAD`;
-      const commitOutput = execSync(commitCountCmd, { cwd: worktreePath, encoding: 'utf-8' }).trim();
+      // Find the merge-base (where the worktree branch forked from baseBranch)
+      // Use local branch only - worktrees don't have remotes
+      const mergeBase = execSync(`git merge-base HEAD ${baseBranch}`, { cwd: worktreePath, encoding: 'utf-8' }).trim();
+      
+      // Count commits since the fork point
+      const commitOutput = execSync(`git rev-list --count ${mergeBase}..HEAD`, { cwd: worktreePath, encoding: 'utf-8' }).trim();
       commits = parseInt(commitOutput, 10) || 0;
       
-      // Get diff stat against base branch (--numstat gives us added/deleted lines per file)
-      // But we want file counts, so use --diff-filter
-      const diffCmd = `git diff --name-status origin/${baseBranch}...HEAD`;
-      const diffOutput = execSync(diffCmd, { cwd: worktreePath, encoding: 'utf-8' }).trim();
+      // Get file changes since the fork point
+      const diffOutput = execSync(`git diff --name-status ${mergeBase} HEAD`, { cwd: worktreePath, encoding: 'utf-8' }).trim();
       
       if (diffOutput) {
         const lines = diffOutput.split('\n').filter((l: string) => l.trim());
@@ -364,9 +365,12 @@ Focus on addressing the failure root cause while maintaining all original requir
           if (status === 'A') filesAdded++;
           else if (status === 'M') filesModified++;
           else if (status === 'D') filesDeleted++;
-          else if (status === 'R') filesModified++; // Renamed counts as modified
+          else if (status === 'R') filesModified++;
+          else if (status === 'C') filesAdded++;
         }
       }
+      
+      this.writeLog(job, `[orchestrator] Work summary: ${commits} commits, forked from ${baseBranch} at ${mergeBase.substring(0, 8)}`);
     } catch (e) {
       this.writeLog(job, `[orchestrator] Warning: Could not calculate work summary: ${e}`);
     }
