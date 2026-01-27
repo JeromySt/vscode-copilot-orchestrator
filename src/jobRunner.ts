@@ -9,9 +9,10 @@ import { createWorktrees } from './gitWorktrees';
 import { isCopilotCliAvailable } from './cliCheckCore';
 
 export type WorkSummary = { commits: number; filesAdded: number; filesModified: number; filesDeleted: number; description: string };
-export type ExecutionAttempt = { attemptId: string; startedAt: number; endedAt?: number; logFile: string; copilotSessionId?: string; workInstruction: string; stepStatuses: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; workSummary?: WorkSummary };
+export type JobMetrics = { testsRun?: number; testsPassed?: number; testsFailed?: number; coveragePercent?: number; buildErrors?: number; buildWarnings?: number };
+export type ExecutionAttempt = { attemptId: string; startedAt: number; endedAt?: number; logFile: string; copilotSessionId?: string; workInstruction: string; stepStatuses: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; workSummary?: WorkSummary; metrics?: JobMetrics };
 export type JobSpec = { id: string; name: string; task: string; inputs: { repoPath: string; baseBranch: string; targetBranch: string; worktreeRoot: string; instructions?: string }; policy: { useJust: boolean; steps: { prechecks: string; work: string; postchecks: string } } };
-export type Job = JobSpec & { status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; logFile?: string; startedAt?: number; endedAt?: number; copilotSessionId?: string; processIds?: number[]; currentStep?: string; stepStatuses?: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; workHistory?: string[]; attempts?: ExecutionAttempt[]; currentAttemptId?: string; workSummary?: WorkSummary };
+export type Job = JobSpec & { status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; logFile?: string; startedAt?: number; endedAt?: number; copilotSessionId?: string; processIds?: number[]; currentStep?: string; stepStatuses?: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; workHistory?: string[]; attempts?: ExecutionAttempt[]; currentAttemptId?: string; workSummary?: WorkSummary; metrics?: JobMetrics };
 
 export class JobRunner {
   private ctx: vscode.ExtensionContext; 
@@ -387,6 +388,75 @@ Focus on addressing the failure root cause while maintaining all original requir
     return { commits, filesAdded, filesModified, filesDeleted, description };
   }
 
+  private extractMetricsFromLog(job: Job): JobMetrics {
+    const metrics: JobMetrics = {};
+    
+    if (!job.logFile) return metrics;
+    
+    try {
+      const logContent = fs.readFileSync(job.logFile, 'utf-8');
+      
+      // Extract test counts - common patterns
+      // NUnit: "Passed: 45, Failed: 2, Skipped: 1"
+      // Jest: "Tests: 45 passed, 2 failed"
+      // dotnet test: "Total tests: 47, Passed: 45, Failed: 2"
+      const testPatterns = [
+        /Total tests?:\s*(\d+).*?Passed:\s*(\d+).*?Failed:\s*(\d+)/i,
+        /Tests?:\s*(\d+)\s*passed.*?(\d+)\s*failed/i,
+        /Passed:\s*(\d+).*?Failed:\s*(\d+)/i,
+        /(\d+)\s*tests?\s*passed.*?(\d+)\s*failed/i,
+        /(\d+)\s*passing.*?(\d+)\s*failing/i
+      ];
+      
+      for (const pattern of testPatterns) {
+        const match = logContent.match(pattern);
+        if (match) {
+          if (match.length === 4) {
+            // Pattern with total, passed, failed
+            metrics.testsRun = parseInt(match[1], 10);
+            metrics.testsPassed = parseInt(match[2], 10);
+            metrics.testsFailed = parseInt(match[3], 10);
+          } else if (match.length === 3) {
+            // Pattern with passed, failed
+            metrics.testsPassed = parseInt(match[1], 10);
+            metrics.testsFailed = parseInt(match[2], 10);
+            metrics.testsRun = (metrics.testsPassed || 0) + (metrics.testsFailed || 0);
+          }
+          break;
+        }
+      }
+      
+      // Extract coverage percentage
+      // Common patterns: "Coverage: 85.5%", "Line coverage: 85.5%", "85.5% coverage"
+      const coveragePatterns = [
+        /(?:coverage|line coverage|branch coverage):\s*([\d.]+)%/i,
+        /([\d.]+)%\s*(?:coverage|covered)/i,
+        /coverage\s+is\s+([\d.]+)%/i
+      ];
+      
+      for (const pattern of coveragePatterns) {
+        const match = logContent.match(pattern);
+        if (match) {
+          metrics.coveragePercent = parseFloat(match[1]);
+          break;
+        }
+      }
+      
+      // Extract build errors/warnings
+      // Common patterns: "3 error(s)", "5 warning(s)", "Build: 3 errors, 5 warnings"
+      const errorMatch = logContent.match(/(\d+)\s*error(?:s|\(s\))?/i);
+      const warningMatch = logContent.match(/(\d+)\s*warning(?:s|\(s\))?/i);
+      
+      if (errorMatch) metrics.buildErrors = parseInt(errorMatch[1], 10);
+      if (warningMatch) metrics.buildWarnings = parseInt(warningMatch[1], 10);
+      
+    } catch (e) {
+      // Log read failed, return empty metrics
+    }
+    
+    return metrics;
+  }
+
   cancel(id: string) { 
     const j = this.jobs.get(id); 
     if (!j) return; 
@@ -704,6 +774,17 @@ Focus on addressing the failure root cause while maintaining all original requir
         await execStep('postchecks', steps.postchecks); 
         this.writeLog(job, '========== POSTCHECKS SECTION END ==========');
         this.writeLog(job, '');
+        
+        // Extract metrics from logs after postchecks
+        const metrics = this.extractMetricsFromLog(job);
+        if (Object.keys(metrics).length > 0) {
+          job.metrics = metrics;
+          if (job.attempts && job.currentAttemptId) {
+            const currentAttempt = job.attempts.find(a => a.attemptId === job.currentAttemptId);
+            if (currentAttempt) currentAttempt.metrics = metrics;
+          }
+          this.writeLog(job, `[orchestrator] Extracted metrics: tests=${metrics.testsRun || 0}, passed=${metrics.testsPassed || 0}, failed=${metrics.testsFailed || 0}, coverage=${metrics.coveragePercent || 'N/A'}%`);
+        }
       } else {
         this.writeLog(job, '[orchestrator] Skipping postchecks - work step did not complete successfully');
         if (!job.stepStatuses) job.stepStatuses = {};

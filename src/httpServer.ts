@@ -3,11 +3,87 @@ import * as http from 'http';
 import { JobRunner, JobSpec } from './jobRunner';
 import { PlanRunner, PlanSpec } from './planRunner';
 
+// Helper to calculate progress percentage based on phase
+function calculateProgress(job: any): number {
+  const phaseWeights: Record<string, number> = {
+    'prechecks': 10,
+    'work': 70,
+    'postchecks': 85,
+    'mergeback': 95,
+    'cleanup': 100
+  };
+  
+  if (job.status === 'succeeded') return 100;
+  if (job.status === 'failed' || job.status === 'canceled') return -1; // -1 indicates incomplete
+  if (job.status === 'queued') return 0;
+  
+  const currentStep = job.currentStep;
+  if (!currentStep) return 5; // Just started
+  
+  // If current step is running, we're partway through that phase
+  const stepStatuses = job.stepStatuses || {};
+  const phases = ['prechecks', 'work', 'postchecks', 'mergeback', 'cleanup'];
+  
+  let progress = 0;
+  for (const phase of phases) {
+    if (stepStatuses[phase] === 'success' || stepStatuses[phase] === 'skipped') {
+      progress = phaseWeights[phase];
+    } else if (phase === currentStep) {
+      // Currently in this phase - estimate halfway through
+      const prevPhase = phases[phases.indexOf(phase) - 1];
+      const prevProgress = prevPhase ? phaseWeights[prevPhase] : 0;
+      progress = prevProgress + (phaseWeights[phase] - prevProgress) / 2;
+      break;
+    }
+  }
+  
+  return Math.round(progress);
+}
+
+// Helper to build job status response
+function buildJobStatus(job: any) {
+  const currentAttempt = job.attempts?.find((a: any) => a.attemptId === job.currentAttemptId);
+  const isComplete = job.status === 'succeeded' || job.status === 'failed' || job.status === 'canceled';
+  const isRunning = job.status === 'running' || job.status === 'queued';
+  
+  // Calculate exponential polling interval: 500ms -> 10000ms based on duration
+  let recommendedPollIntervalMs = 0;
+  if (isRunning && job.startedAt) {
+    const durationSec = Math.floor((Date.now() - job.startedAt) / 1000);
+    const doublings = Math.floor(durationSec / 30);
+    recommendedPollIntervalMs = Math.min(500 * Math.pow(2, doublings), 10000);
+  } else if (isRunning) {
+    recommendedPollIntervalMs = 500;
+  }
+  
+  return {
+    id: job.id,
+    isComplete,
+    status: job.status,
+    progress: calculateProgress(job),
+    currentStep: job.currentStep || null,
+    stepStatuses: job.stepStatuses || {},
+    attemptNumber: job.attempts?.length || 0,
+    currentAttempt: currentAttempt ? {
+      attemptId: currentAttempt.attemptId,
+      status: currentAttempt.status,
+      stepStatuses: currentAttempt.stepStatuses || {},
+      workSummary: currentAttempt.workSummary || null
+    } : null,
+    startedAt: job.startedAt,
+    endedAt: job.endedAt,
+    duration: job.endedAt && job.startedAt ? Math.round((job.endedAt - job.startedAt) / 1000) : (job.startedAt ? Math.round((Date.now() - job.startedAt) / 1000) : null),
+    recommendedPollIntervalMs,
+    workSummary: job.workSummary || null,
+    metrics: job.metrics || null
+  };
+}
+
 export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, port: number){
   const server = http.createServer(async (req,res)=> { 
     const url = new URL(req.url||'/', `http://${host}:${port}`); 
     res.setHeader('Content-Type','application/json');
-    res.setHeader('Access-Control-Allow-Origin', '*'); // Enable CORS for browser/agent access
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     
@@ -19,6 +95,34 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
         const jobs = runner.list(); 
         res.end(JSON.stringify({jobs, count: jobs.length})); 
         return; 
+      }
+      
+      // POST /copilot_jobs/status - Batch status check for multiple job IDs
+      if (req.method==='POST' && url.pathname==='/copilot_jobs/status'){
+        let body = '';
+        req.on('data', c => body += c);
+        await new Promise(r => req.on('end', r));
+        const { ids } = JSON.parse(body) as { ids: string[] };
+        
+        if (!ids || !Array.isArray(ids)) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: 'Missing or invalid ids array' }));
+          return;
+        }
+        
+        const jobs = runner.list();
+        const statuses = ids.map(id => {
+          const job = jobs.find(j => j.id === id);
+          if (!job) return { id, error: 'Job not found' };
+          return buildJobStatus(job);
+        });
+        
+        res.end(JSON.stringify({ 
+          statuses,
+          allComplete: statuses.every(s => 'isComplete' in s && s.isComplete),
+          timestamp: Date.now()
+        }));
+        return;
       }
       
       // POST /copilot_job - Create new job
@@ -86,39 +190,7 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
           return;
         }
         
-        // Return simplified status
-        const currentAttempt = job.attempts?.find((a: any) => a.attemptId === job.currentAttemptId);
-        const isRunning = job.status === 'running' || job.status === 'queued';
-        
-        // Calculate exponential polling interval: 500ms -> 10000ms based on duration
-        // Starts at 500ms, doubles every 30 seconds, caps at 10 seconds
-        let recommendedPollIntervalMs = 0;
-        if (isRunning && job.startedAt) {
-          const durationSec = Math.floor((Date.now() - job.startedAt) / 1000);
-          const doublings = Math.floor(durationSec / 30); // Double every 30 seconds
-          recommendedPollIntervalMs = Math.min(500 * Math.pow(2, doublings), 10000);
-        } else if (isRunning) {
-          recommendedPollIntervalMs = 500; // Default start
-        }
-        
-        res.end(JSON.stringify({
-          id: job.id,
-          status: job.status,
-          currentStep: job.currentStep || null,
-          stepStatuses: job.stepStatuses || {},
-          attemptNumber: job.attempts?.length || 0,
-          currentAttempt: currentAttempt ? {
-            attemptId: currentAttempt.attemptId,
-            status: currentAttempt.status,
-            stepStatuses: currentAttempt.stepStatuses || {},
-            workSummary: currentAttempt.workSummary || null
-          } : null,
-          startedAt: job.startedAt,
-          endedAt: job.endedAt,
-          duration: job.endedAt && job.startedAt ? Math.round((job.endedAt - job.startedAt) / 1000) : (job.startedAt ? Math.round((Date.now() - job.startedAt) / 1000) : null),
-          recommendedPollIntervalMs,
-          workSummary: job.workSummary || null
-        }));
+        res.end(JSON.stringify(buildJobStatus(job)));
         return;
       }
       
