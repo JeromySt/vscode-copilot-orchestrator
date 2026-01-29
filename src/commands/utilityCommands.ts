@@ -84,8 +84,8 @@ export function registerUtilityCommands(
       const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       if (!ws) return;
 
-      const gitApi = await import('../git/gitApi');
-      const files = gitApi.listConflicts(ws);
+      const git = await import('../git');
+      const files = git.merge.listConflicts(ws);
       
       if (!files.length) {
         vscode.window.showInformationMessage('No merge conflicts detected.');
@@ -98,11 +98,11 @@ export function registerUtilityCommands(
       if (!side) return;
 
       for (const f of files) {
-        await gitApi.checkoutSide(ws, side as 'theirs' | 'ours', f);
+        git.merge.resolveBySide(f, side as 'theirs' | 'ours', ws);
       }
 
-      await gitApi.stageAll(ws);
-      const ok = await gitApi.commit(ws, `orchestrator: resolved conflicts preferring ${side}`);
+      git.repository.stageAll(ws);
+      const ok = git.repository.commit(ws, `orchestrator: resolved conflicts preferring ${side}`);
       
       vscode.window.showInformationMessage(
         ok ? 'Conflicts resolved and committed.' : 'Resolution applied; commit may be required.'

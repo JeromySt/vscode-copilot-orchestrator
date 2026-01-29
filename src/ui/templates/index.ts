@@ -9,3 +9,6 @@
 export { getJobDetailsCss } from './jobDetailsCss';
 export { getJobDetailsJs } from './jobDetailsJs';
 export { getJobDetailsHtml, getJobDetailsLoadingHtml } from './jobDetailsHtml';
+
+// Plan detail templates
+export * from './planDetail';

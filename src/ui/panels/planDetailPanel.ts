@@ -12,11 +12,19 @@
 
 import * as vscode from 'vscode';
 import { Plan, PlanJob, SubPlanSpec } from '../plansViewProvider';
+import { 
+  getPlanDetailCss, 
+  getPlanDetailLoadingCss, 
+  getWorkSummaryCss,
+  getPlanDetailJs,
+  getWorkSummaryJs 
+} from '../templates/planDetail';
 
 /**
  * Callback to get merge branches for a plan
  */
 export type GetMergeBranchesCallback = (planId: string) => Map<string, string> | undefined;
+
 
 /**
  * Manages plan detail webview panels
@@ -658,266 +666,16 @@ export class PlanDetailPanel {
     // Generate Mermaid diagram definition
     const mermaidDef = this._generateMermaidDiagram(plan, mergeBranches);
     
+    // Build data maps for click handling
+    const jobDataMap = this._buildJobDataMap(jobs);
+    const subPlanDataMap = this._buildSubPlanDataMap(plan);
+    
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <style>
-    * { box-sizing: border-box; }
-    body { 
-      font: 13px -apple-system, Segoe UI, Roboto, sans-serif; 
-      padding: 20px; 
-      margin: 0; 
-      color: var(--vscode-foreground);
-      background: var(--vscode-editor-background);
-    }
-    
-    .header {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-bottom: 24px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--vscode-panel-border);
-    }
-    .header-title-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .plan-name {
-      font-size: 18px;
-      font-weight: 600;
-    }
-    .status-badge { 
-      display: inline-flex; 
-      align-items: center; 
-      padding: 4px 10px; 
-      border-radius: 3px; 
-      font-weight: 600; 
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .status-badge.failed, .status-badge.partial { 
-      background: rgba(244, 135, 113, 0.15); 
-      border-left: 3px solid #F48771;
-      color: #F48771; 
-    }
-    .status-badge.completed, .status-badge.succeeded { 
-      background: rgba(78, 201, 176, 0.15); 
-      border-left: 3px solid #4EC9B0;
-      color: #4EC9B0; 
-    }
-    .status-badge.running { 
-      background: rgba(75, 166, 251, 0.2); 
-      border-left: 3px solid #4BA6FB;
-      color: #7DD3FC; 
-    }
-    .status-badge.queued, .status-badge.canceled { 
-      background: rgba(133, 133, 133, 0.1); 
-      border-left: 3px solid #858585;
-      color: #858585; 
-    }
-    
-    .progress-section {
-      margin-bottom: 24px;
-    }
-    .progress-header {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 8px;
-      font-size: 12px;
-    }
-    .progress-bar {
-      height: 8px;
-      border-radius: 4px;
-      background: var(--vscode-input-background);
-      overflow: hidden;
-    }
-    .progress-bar-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #4BA6FB, #4EC9B0);
-      transition: width 0.5s ease;
-    }
-    .progress-stats {
-      display: flex;
-      gap: 16px;
-      margin-top: 12px;
-      font-size: 12px;
-    }
-    .stat {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .stat-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-    .stat-dot.completed { background: #4EC9B0; }
-    .stat-dot.running { background: #7DD3FC; }
-    .stat-dot.queued { background: #858585; }
-    .stat-dot.failed { background: #F48771; }
-    
-    .diagram-container {
-      margin: 20px 0;
-      padding: 20px;
-      background: var(--vscode-input-background);
-      border-radius: 8px;
-      overflow-x: auto;
-    }
-    
-    #mermaid-diagram {
-      display: flex;
-      justify-content: flex-start;
-      min-width: fit-content;
-    }
-    
-    /* Mermaid styling overrides */
-    /* Only running/completed/failed job nodes are clickable - not pending, merge, or branch nodes */
-    .mermaid .node.running rect,
-    .mermaid .node.running .nodeLabel,
-    .mermaid .node.completed rect,
-    .mermaid .node.completed .nodeLabel,
-    .mermaid .node.failed rect,
-    .mermaid .node.failed .nodeLabel {
-      cursor: pointer !important;
-    }
-    
-    .mermaid .node.running:hover rect,
-    .mermaid .node.completed:hover rect,
-    .mermaid .node.failed:hover rect {
-      filter: brightness(1.2);
-    }
-    
-    /* Subgraph styling */
-    .mermaid .cluster rect {
-      fill: rgba(60, 60, 60, 0.3) !important;
-      stroke: #555 !important;
-      rx: 8px;
-    }
-    
-    .mermaid .cluster-label {
-      fill: #888 !important;
-      font-size: 11px !important;
-    }
-    
-    /* Force uniform job node widths */
-    .mermaid .node rect {
-      min-width: 220px !important;
-    }
-    
-    /* Smaller width for MERGE and branch nodes */
-    .mermaid .node.mergeNode rect,
-    .mermaid .node.mergeCompleted rect,
-    .mermaid .node.targetBranchNode rect,
-    .mermaid .node.baseBranchNode rect {
-      min-width: auto !important;
-    }
-    
-    .actions {
-      margin-top: 24px;
-      padding-top: 16px;
-      border-top: 1px solid var(--vscode-panel-border);
-      display: flex;
-      gap: 8px;
-    }
-    .action-btn {
-      padding: 8px 16px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 600;
-      transition: all 0.2s;
-    }
-    .action-btn:hover:not(:disabled) {
-      transform: translateY(-1px);
-      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-    .action-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .cancel-btn, .retry-btn {
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-    }
-    .delete-btn {
-      background: #5a1d1d;
-      color: #F48771;
-      margin-left: auto;
-    }
-    .delete-btn:hover:not(:disabled) {
-      background: #6d2222;
-    }
-    
-    .legend {
-      display: flex;
-      gap: 16px;
-      margin-bottom: 16px;
-      font-size: 11px;
-      flex-wrap: wrap;
-    }
-    .legend-section {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-    .legend-section-title {
-      font-weight: 600;
-      color: #888;
-      margin-right: 4px;
-    }
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .legend-box {
-      width: 14px;
-      height: 14px;
-      border-radius: 3px;
-      border: 2px solid;
-    }
-    .legend-box.pending { border-color: #858585; background: transparent; }
-    .legend-box.running { border-color: #7DD3FC; background: rgba(125, 211, 252, 0.2); }
-    .legend-box.completed { border-color: #4EC9B0; background: rgba(78, 201, 176, 0.2); }
-    .legend-box.failed { border-color: #F48771; background: rgba(244, 135, 113, 0.2); }
-    
-    .legend-line {
-      width: 20px;
-      height: 3px;
-      position: relative;
-    }
-    .legend-line.pending {
-      background: repeating-linear-gradient(90deg, #858585 0px, #858585 4px, transparent 4px, transparent 6px);
-    }
-    .legend-line.running {
-      background: repeating-linear-gradient(90deg, #7DD3FC 0px, #7DD3FC 6px, transparent 6px, transparent 8px, #7DD3FC 8px, #7DD3FC 10px, transparent 10px, transparent 12px);
-    }
-    .legend-line.completed {
-      background: #4EC9B0;
-    }
-    .legend-line.failed {
-      background: repeating-linear-gradient(90deg, #F48771 0px, #F48771 2px, transparent 2px, transparent 4px);
-    }
-    
-    /* Responsive legend - stack on smaller screens */
-    @media (max-width: 800px) {
-      .legend {
-        flex-direction: column;
-        gap: 8px;
-      }
-      .legend-section {
-        gap: 8px;
-      }
-    }
-  </style>
+  <style>${getPlanDetailCss()}</style>
 </head>
 <body>
   <div class="header">
@@ -980,130 +738,7 @@ ${mermaidDef}
     </button>`}
   </div>
   
-  <script>
-    const vscode = acquireVsCodeApi();
-    
-    // Initialize Mermaid with dark theme and elk layout for better edge routing
-    mermaid.initialize({
-      startOnLoad: true,
-      theme: 'dark',
-      flowchart: {
-        useMaxWidth: false,
-        htmlLabels: true,
-        curve: 'linear',
-        rankSpacing: 50,
-        nodeSpacing: 15,
-        padding: 10
-      },
-      themeVariables: {
-        primaryColor: '#2d2d2d',
-        primaryTextColor: '#cccccc',
-        primaryBorderColor: '#555555',
-        lineColor: '#666666',
-        secondaryColor: '#3c3c3c',
-        tertiaryColor: '#252526'
-      }
-    });
-    
-    // Handle node clicks - need to handle clicks on text, rect, etc inside nodes
-    // Note: MERGE nodes, branch nodes, and PENDING jobs are not clickable
-    document.addEventListener('click', (e) => {
-      // Walk up to find a node group element
-      let el = e.target;
-      while (el && el !== document.body) {
-        // Check for node class or if it's inside a node group
-        if (el.classList && (el.classList.contains('node') || el.classList.contains('nodeLabel'))) {
-          // Find the parent node group
-          let nodeGroup = el;
-          while (nodeGroup && !nodeGroup.id?.startsWith('flowchart-')) {
-            nodeGroup = nodeGroup.parentElement;
-          }
-          if (nodeGroup && nodeGroup.id) {
-            const nodeId = nodeGroup.id;
-            
-            // Check for WORK_SUMMARY node click
-            if (nodeId.includes('WORK_SUMMARY')) {
-              e.preventDefault();
-              e.stopPropagation();
-              vscode.postMessage({ type: 'showWorkSummary' });
-              break;
-            }
-            
-            // Check for sub-plan node click (format: flowchart-subplan_xxx-N)
-            const subPlanMatch = nodeId.match(/flowchart-(subplan_[^-]+)-/);
-            if (subPlanMatch) {
-              const sanitizedId = subPlanMatch[1];
-              const subPlanData = window.subPlanDataMap && window.subPlanDataMap[sanitizedId];
-              if (subPlanData && subPlanData.childPlanId) {
-                e.preventDefault();
-                e.stopPropagation();
-                vscode.postMessage({ type: 'openNestedPlan', planId: subPlanData.childPlanId });
-              }
-              break;
-            }
-            
-            // Only handle job nodes (not merge nodes, base nodes, or target nodes)
-            // Extract sanitized job ID from node ID (format: flowchart-job_xxxx-N)
-            const match = nodeId.match(/flowchart-(job_[^-]+)-/);
-            if (match) {
-              const sanitizedId = match[1];
-              // Skip merge nodes
-              if (sanitizedId.startsWith('merge_')) break;
-              
-              const jobData = window.jobDataMap && window.jobDataMap[sanitizedId];
-              // Only allow clicking if job has been started (has a jobId) - not pending jobs
-              if (jobData && jobData.jobId) {
-                e.preventDefault();
-                e.stopPropagation();
-                if (jobData.nestedPlanId) {
-                  vscode.postMessage({ type: 'openNestedPlan', planId: jobData.nestedPlanId });
-                } else {
-                  vscode.postMessage({ type: 'openJob', jobId: jobData.jobId });
-                }
-              }
-            }
-            break;
-          }
-        }
-        el = el.parentElement;
-      }
-    });
-    
-    // Store job data for click handling (keyed by sanitized ID)
-    window.jobDataMap = ${JSON.stringify(this._buildJobDataMap(jobs))};
-    
-    // Store sub-plan data for click handling (keyed by sanitized ID)
-    window.subPlanDataMap = ${JSON.stringify(this._buildSubPlanDataMap(plan))};
-    
-    document.getElementById('cancelBtn')?.addEventListener('click', () => {
-      vscode.postMessage({ type: 'cancelPlan' });
-    });
-    
-    document.getElementById('retryBtn')?.addEventListener('click', () => {
-      vscode.postMessage({ type: 'retryPlan' });
-    });
-    
-    document.getElementById('deleteBtn')?.addEventListener('click', (e) => {
-      const btn = e.currentTarget;
-      if (btn.disabled) return;
-      btn.disabled = true;
-      btn.textContent = '⏳ Deleting...';
-      vscode.postMessage({ type: 'deletePlan' });
-    });
-    
-    // Listen for messages from the extension
-    window.addEventListener('message', (event) => {
-      const message = event.data;
-      if (message.type === 'deleteReset') {
-        // Reset the delete button if deletion was cancelled
-        const btn = document.getElementById('deleteBtn');
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = '🗑️ Delete Plan';
-        }
-      }
-    });
-  </script>
+  <script>${getPlanDetailJs(jobDataMap, subPlanDataMap)}</script>
 </body>
 </html>`;
   }

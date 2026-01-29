@@ -39,235 +39,29 @@ import * as path from 'path';
 import { JobRunner, JobSpec, Job } from './jobRunner';
 import { randomUUID } from 'crypto';
 import { Logger, ComponentLogger } from './logger';
-import * as branchUtils from '../git/branchUtils';
+import * as git from '../git';
+
+// Import from plan modules
+import {
+  PlanJob,
+  SubPlanJob,
+  SubPlanSpec,
+  PlanSpec,
+  PlanState,
+  InternalPlanState,
+  toPublicState,
+  createInternalState,
+  isCompletedStatus,
+} from './plan/types';
+import { PlanPersistence } from './plan/persistence';
+import * as mergeManager from './plan/mergeManager';
+import * as cleanupManager from './plan/cleanupManager';
+
+// Re-export types for external consumers
+export type { PlanJob, SubPlanJob, SubPlanSpec, PlanSpec, PlanState };
 
 /** Plan runner component logger */
 const log: ComponentLogger = Logger.for('plans');
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
-/**
- * A job within a plan, with dependency and branching information.
- */
-export interface PlanJob {
-  /** Unique job ID within the plan */
-  id: string;
-  /** Pre-computed runner job ID (GUID) - assigned when plan is enqueued */
-  runnerJobId?: string;
-  /** Pre-computed nested plan ID (if this job creates a sub-plan) - assigned when plan is enqueued */
-  nestedPlanId?: string;
-  /** Human-readable name */
-  name?: string;
-  /** Task description */
-  task?: string;
-  /** IDs of work units (jobs or sub-plans) this job consumes from (producer→consumer). */
-  consumesFrom: string[];
-  /** Nested plan specification (if this job is a sub-plan) */
-  plan?: Omit<PlanSpec, 'id' | 'repoPath' | 'worktreeRoot'>;
-  /** Job inputs */
-  inputs: {
-    /** Base branch - auto-computed from parent jobs when dependencies exist */
-    baseBranch: string;
-    /** Target branch for this job (auto-generated if empty) */
-    targetBranch: string;
-    /** Additional instructions */
-    instructions?: string;
-  };
-  /** Execution policy */
-  policy?: {
-    useJust?: boolean;
-    steps?: {
-      prechecks?: string;
-      work?: string;
-      postchecks?: string;
-    };
-  };
-}
-
-/**
- * A sub-plan that runs as part of a parent plan.
- * Sub-plans trigger after certain jobs complete and merge their results
- * back into the parent plan's flow.
- */
-/**
- * Job definition within a sub-plan.
- */
-export interface SubPlanJob {
-  id: string;
-  name?: string;
-  task: string;
-  work?: string;
-  /** IDs of jobs within the sub-plan this job consumes from (producer→consumer). */
-  consumesFrom: string[];
-  prechecks?: string;
-  postchecks?: string;
-  instructions?: string;
-}
-
-/**
- * A sub-plan that runs as part of a parent plan.
- * Sub-plans trigger after their consumesFrom work units complete.
- * Downstream work units that list this sub-plan in their consumesFrom
- * will wait for it and receive its completed branch.
- * 
- * Sub-plans can themselves have sub-plans, enabling arbitrary nesting.
- */
-export interface SubPlanSpec {
-  /** Unique sub-plan ID within the parent plan */
-  id: string;
-  /** Human-readable name */
-  name?: string;
-  /** IDs of work units (jobs or sub-plans) that must complete before this sub-plan starts. */
-  consumesFrom: string[];
-  /** Maximum parallel jobs in the sub-plan */
-  maxParallel?: number;
-  /** Jobs within this sub-plan */
-  jobs: SubPlanJob[];
-  /** Nested sub-plans within this sub-plan (recursive) */
-  subPlans?: SubPlanSpec[];
-}
-
-/**
- * Plan specification defining the execution DAG.
- */
-export interface PlanSpec {
-  /** Unique plan ID */
-  id: string;
-  /** Human-readable name */
-  name?: string;
-  /** Repository path (defaults to workspace) */
-  repoPath?: string;
-  /** Worktree root for this plan (defaults to .worktrees/<planId>) */
-  worktreeRoot?: string;
-  /** Base branch the plan starts from */
-  baseBranch?: string;
-  /** Target branch to merge final results (defaults to baseBranch) */
-  targetBranch?: string;
-  /** Maximum parallel jobs (0 = auto based on CPU) */
-  maxParallel?: number;
-  /** Jobs in this plan */
-  jobs: PlanJob[];
-  /** Sub-plans that trigger after certain jobs complete */
-  subPlans?: SubPlanSpec[];
-  /** Whether this plan is a sub-plan (launched by a parent plan) */
-  isSubPlan?: boolean;
-  /** Parent plan ID if this is a sub-plan */
-  parentPlanId?: string;
-  /** 
-   * Whether to clean up worktrees/branches for successfully merged work units.
-   * When true (default), worktrees and branches are deleted after a leaf merges to targetBranch.
-   * This keeps local git state minimal during plan execution.
-   * When false, cleanup only happens when the plan is deleted.
-   */
-  cleanUpSuccessfulWork?: boolean;
-}
-
-/**
- * Runtime state of a plan.
- */
-export interface PlanState {
-  /** Plan ID */
-  id: string;
-  /** Current status */
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'partial';
-  /** Jobs waiting to be scheduled */
-  queued: string[];
-  /** Currently running jobs */
-  running: string[];
-  /** Successfully completed jobs */
-  done: string[];
-  /** Failed jobs */
-  failed: string[];
-  /** Canceled jobs */
-  canceled: string[];
-  /** Jobs that have been submitted to the runner */
-  submitted: string[];
-  /** Plan start time */
-  startedAt?: number;
-  /** Plan end time */
-  endedAt?: number;
-  /** Error message if failed */
-  error?: string;
-  /** Whether the final RI merge to targetBranch completed successfully */
-  riMergeCompleted?: boolean;
-  /** Work units that have been merged to targetBranch (incremental delivery) */
-  mergedLeaves?: string[];
-  
-  // Sub-plan status (optional, only present if plan has sub-plans)
-  /** Sub-plans that have not yet been triggered */
-  pendingSubPlans?: string[];
-  /** Sub-plans currently running (map of sub-plan ID -> child plan ID) */
-  runningSubPlans?: Record<string, string>;
-  /** Sub-plans that have completed */
-  completedSubPlans?: string[];
-  /** Sub-plans that have failed */
-  failedSubPlans?: string[];
-  
-  /** Aggregated work summary across all completed jobs in the plan */
-  aggregatedWorkSummary?: {
-    totalCommits: number;
-    totalFilesAdded: number;
-    totalFilesModified: number;
-    totalFilesDeleted: number;
-    jobSummaries: Array<{
-      jobId: string;
-      jobName: string;
-      commits: number;
-      filesAdded: number;
-      filesModified: number;
-      filesDeleted: number;
-      description: string;
-      /** Detailed commit information */
-      commitDetails?: Array<{
-        hash: string;
-        shortHash: string;
-        message: string;
-        author: string;
-        date: string;
-        filesAdded: string[];
-        filesModified: string[];
-        filesDeleted: string[];
-      }>;
-    }>;
-  };
-}
-
-// ============================================================================
-// INTERNAL STATE (not exported, but used for branch tracking)
-// ============================================================================
-
-interface InternalPlanState extends Omit<PlanState, 'pendingSubPlans' | 'runningSubPlans' | 'completedSubPlans' | 'failedSubPlans' | 'mergedLeaves'> {
-  /** Map of plan job ID -> actual JobRunner job ID (GUID) */
-  jobIdMap: Map<string, string>;
-  /** Map of plan job ID -> completed branch name */
-  completedBranches: Map<string, string>;
-  /** Map of plan job ID -> worktree path */
-  worktreePaths: Map<string, string>;
-  /** 
-   * The targetBranchRoot for this plan.
-   * - If baseBranch was a default branch, this is a new feature branch
-   * - Otherwise, this equals baseBranch
-   */
-  targetBranchRoot?: string;
-  /** Whether targetBranchRoot was created by the plan (vs using existing branch) */
-  targetBranchRootCreated?: boolean;
-  
-  // Sub-plan tracking (using Sets/Maps internally, converted to arrays for public state)
-  /** Sub-plans that haven't been triggered yet */
-  pendingSubPlans: Set<string>;
-  /** Sub-plans currently running (sub-plan ID -> child plan ID) */
-  runningSubPlans: Map<string, string>;
-  /** Sub-plans that have completed (sub-plan ID -> completed branch) */
-  completedSubPlans: Map<string, string>;
-  /** Sub-plans that have failed */
-  failedSubPlans: Set<string>;
-  /** Integration branches created for sub-plans (sub-plan ID -> branch name) */
-  subPlanIntegrationBranches?: Map<string, string>;
-  /** Work units (jobs/sub-plans) that have been merged to targetBranch */
-  mergedLeaves: Set<string>;
-}
 
 // ============================================================================
 // PLAN RUNNER
@@ -286,18 +80,16 @@ export class PlanRunner {
   private plans = new Map<string, InternalPlanState>();
   private specs = new Map<string, PlanSpec>();
   private interval?: NodeJS.Timeout;
-  private plansFile: string;
+  private persistence: PlanPersistence;
   
   /** Event emitter for plan changes */
   private _onDidChange = new vscode.EventEmitter<void>();
   public readonly onDidChange = this._onDidChange.event;
 
   constructor(private runner: JobRunner) {
-    // Determine plans file path
+    // Initialize persistence
     const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    this.plansFile = workspacePath 
-      ? path.join(workspacePath, '.orchestrator', 'jobs', 'plans.json')
-      : '';
+    this.persistence = new PlanPersistence(workspacePath);
     
     // Load persisted plans on startup
     this.loadFromDisk();
@@ -318,103 +110,25 @@ export class PlanRunner {
    * Persist plans state to disk.
    */
   private persist(): void {
-    if (!this.plansFile) return;
-    
-    try {
-      const dir = path.dirname(this.plansFile);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      
-      // Convert Maps to plain objects for serialization
-      const data = {
-        plans: Array.from(this.plans.entries()).map(([id, state]) => ({
-          ...this.toPublicState(state),
-          // Preserve internal maps as arrays for serialization
-          _jobIdMap: Array.from(state.jobIdMap.entries()),
-          _completedBranches: Array.from(state.completedBranches.entries()),
-          _worktreePaths: Array.from(state.worktreePaths.entries()),
-          _targetBranchRoot: state.targetBranchRoot,
-          _targetBranchRootCreated: state.targetBranchRootCreated,
-          // Sub-plan state
-          _pendingSubPlans: Array.from(state.pendingSubPlans || []),
-          _runningSubPlans: Array.from(state.runningSubPlans?.entries() || []),
-          _completedSubPlans: Array.from(state.completedSubPlans?.entries() || []),
-          _failedSubPlans: Array.from(state.failedSubPlans || []),
-          _subPlanIntegrationBranches: Array.from(state.subPlanIntegrationBranches?.entries() || []),
-          // Incremental delivery tracking
-          _mergedLeaves: Array.from(state.mergedLeaves || [])
-        })),
-        specs: Array.from(this.specs.entries()).map(([id, spec]) => spec)
-      };
-      
-      fs.writeFileSync(this.plansFile, JSON.stringify(data, null, 2), 'utf-8');
-      log.debug('Plans persisted to disk', { planCount: data.plans.length });
-    } catch (error: any) {
-      log.error('Failed to persist plans', { error: error.message });
-    }
+    this.persistence.save(this.plans, this.specs);
   }
 
   /**
    * Load plans from disk.
    */
   private loadFromDisk(): void {
-    if (!this.plansFile || !fs.existsSync(this.plansFile)) return;
+    const { plans, specs } = this.persistence.load();
+    this.plans = plans;
+    this.specs = specs;
     
-    try {
-      const data = JSON.parse(fs.readFileSync(this.plansFile, 'utf-8'));
-      
-      // Restore specs
-      if (data.specs) {
-        for (const spec of data.specs) {
-          this.specs.set(spec.id, spec);
-        }
-      }
-      
-      // Restore plan states
-      if (data.plans) {
-        for (const planData of data.plans) {
-          const state: InternalPlanState = {
-            id: planData.id,
-            status: planData.status,
-            queued: planData.queued || [],
-            running: planData.running || [],
-            done: planData.done || [],
-            failed: planData.failed || [],
-            canceled: planData.canceled || [],
-            submitted: planData.submitted || [],
-            startedAt: planData.startedAt,
-            endedAt: planData.endedAt,
-            error: planData.error,
-            // Restore Maps from arrays
-            jobIdMap: new Map(planData._jobIdMap || []),
-            completedBranches: new Map(planData._completedBranches || []),
-            worktreePaths: new Map(planData._worktreePaths || []),
-            targetBranchRoot: planData._targetBranchRoot,
-            targetBranchRootCreated: planData._targetBranchRootCreated,
-            // Restore sub-plan state
-            pendingSubPlans: new Set(planData._pendingSubPlans || []),
-            runningSubPlans: new Map(planData._runningSubPlans || []),
-            completedSubPlans: new Map(planData._completedSubPlans || []),
-            failedSubPlans: new Set(planData._failedSubPlans || []),
-            subPlanIntegrationBranches: new Map(planData._subPlanIntegrationBranches || []),
-            // Restore incremental delivery tracking
-            mergedLeaves: new Set(planData._mergedLeaves || [])
-          };
-          this.plans.set(state.id, state);
-        }
-      }
-      
+    if (plans.size > 0) {
       log.info('Plans loaded from disk', { 
-        planCount: this.plans.size,
-        specCount: this.specs.size
+        planCount: plans.size,
+        specCount: specs.size
       });
       
       // Resume any plans that were running
       this.resumeIncompletePlans();
-      
-    } catch (error: any) {
-      log.error('Failed to load plans from disk', { error: error.message });
     }
   }
 
@@ -449,7 +163,13 @@ export class PlanRunner {
    * Get all plans (returns public PlanState without internal maps).
    */
   list(): PlanState[] {
-    return Array.from(this.plans.values()).map(p => this.toPublicState(p));
+    return Array.from(this.plans.values()).map(p => {
+      const state = toPublicState(p);
+      if (p.mergedLeaves?.size > 0) {
+        state.aggregatedWorkSummary = this.aggregateWorkSummaries(p);
+      }
+      return state;
+    });
   }
 
   /**
@@ -480,41 +200,14 @@ export class PlanRunner {
    */
   get(id: string): PlanState | undefined {
     const plan = this.plans.get(id);
-    return plan ? this.toPublicState(plan) : undefined;
-  }
-
-  /**
-   * Convert internal state to public state (hide Maps).
-   */
-  private toPublicState(internal: InternalPlanState): PlanState {
-    const state: PlanState = {
-      id: internal.id,
-      status: internal.status,
-      queued: internal.queued,
-      running: internal.running,
-      done: internal.done,
-      failed: internal.failed,
-      canceled: internal.canceled,
-      submitted: internal.submitted,
-      startedAt: internal.startedAt,
-      endedAt: internal.endedAt,
-      error: internal.error,
-      riMergeCompleted: internal.riMergeCompleted,
-      mergedLeaves: internal.mergedLeaves?.size ? Array.from(internal.mergedLeaves) : undefined
-    };
+    if (!plan) return undefined;
     
-    // Include sub-plan status if there are any
-    if (internal.pendingSubPlans?.size || internal.runningSubPlans?.size || 
-        internal.completedSubPlans?.size || internal.failedSubPlans?.size) {
-      state.pendingSubPlans = Array.from(internal.pendingSubPlans || []);
-      state.runningSubPlans = Object.fromEntries(internal.runningSubPlans || []);
-      state.completedSubPlans = Array.from(internal.completedSubPlans?.keys() || []);
-      state.failedSubPlans = Array.from(internal.failedSubPlans || []);
-    }
+    // Use the imported toPublicState, then add aggregated work summaries
+    const state = toPublicState(plan);
     
     // Aggregate work summaries from merged leaves - show as soon as any leaf is merged
-    if (internal.mergedLeaves?.size > 0) {
-      state.aggregatedWorkSummary = this.aggregateWorkSummaries(internal);
+    if (plan.mergedLeaves?.size > 0) {
+      state.aggregatedWorkSummary = this.aggregateWorkSummaries(plan);
     }
     
     return state;
@@ -838,7 +531,7 @@ export class PlanRunner {
     // Resolve targetBranchRoot on first pump (lazy initialization)
     if (!plan.targetBranchRoot) {
       const baseBranch = spec.baseBranch || 'main';
-      const { targetBranchRoot, needsCreation } = branchUtils.resolveTargetBranchRoot(
+      const { targetBranchRoot, needsCreation } = git.orchestrator.resolveTargetBranchRoot(
         baseBranch,
         repoPath,
         `copilot_jobs/${spec.id}`
@@ -846,7 +539,7 @@ export class PlanRunner {
       
       if (needsCreation) {
         log.info(`Plan ${spec.id}: baseBranch '${baseBranch}' is a default branch, creating feature branch`);
-        branchUtils.createBranch(targetBranchRoot, baseBranch, repoPath, s => log.debug(s));
+        git.branches.create(targetBranchRoot, baseBranch, repoPath, s => log.debug(s));
         plan.targetBranchRootCreated = true;
       } else {
         log.info(`Plan ${spec.id}: using non-default baseBranch '${baseBranch}' as targetBranchRoot`);
@@ -916,13 +609,13 @@ export class PlanRunner {
     
     try {
       log.debug(`Creating worktree for job ${jobId} at ${worktreePath}`);
-      branchUtils.createWorktree(
-        worktreePath,
-        targetBranch,  // The worktree branch IS the targetBranch
-        baseBranch,    // Created from baseBranch (first parent's completed branch or plan's targetBranchRoot)
+      git.worktrees.create({
         repoPath,
-        s => log.debug(s)
-      );
+        worktreePath,
+        branchName: targetBranch,  // The worktree branch IS the targetBranch
+        fromRef: baseBranch,       // Created from baseBranch (first parent's completed branch or plan's targetBranchRoot)
+        log: s => log.debug(s)
+      });
       
       // Track worktree path for cleanup
       plan.worktreePaths.set(jobId, worktreePath);
@@ -1070,7 +763,7 @@ export class PlanRunner {
       return true;
     }
     
-    const { execSync, spawnSync } = require('child_process');
+    const { spawnSync } = require('child_process');
     const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
     const prefer = mergeCfg.get<'ours' | 'theirs'>('prefer', 'theirs');
     
@@ -1082,54 +775,71 @@ export class PlanRunner {
     for (const sourceBranch of additionalSources) {
       log.debug(`Merging ${sourceBranch} into worktree at ${worktreePath}`);
       
-      try {
-        // First try a simple git merge
-        execSync(`git merge --no-edit "origin/${sourceBranch}" -m "Merge ${sourceBranch} for job ${job.id}"`, { 
-          cwd: worktreePath, 
-          encoding: 'utf-8',
-          stdio: 'pipe'
-        });
+      // First try with origin/ prefix
+      let mergeResult = git.merge.merge({
+        source: `origin/${sourceBranch}`,
+        target: git.branches.current(worktreePath),
+        cwd: worktreePath,
+        message: `Merge ${sourceBranch} for job ${job.id}`,
+        log: (msg: string) => log.debug(msg)
+      });
+      
+      if (mergeResult.success) {
         log.debug(`Simple merge of ${sourceBranch} succeeded (no conflicts)`);
-      } catch (mergeError: any) {
-        // Try without origin/ prefix
-        try {
-          execSync(`git merge --no-edit "${sourceBranch}" -m "Merge ${sourceBranch} for job ${job.id}"`, { 
-            cwd: worktreePath, 
-            encoding: 'utf-8',
-            stdio: 'pipe'
-          });
+        continue;
+      }
+      
+      // If conflict, try without origin/ prefix
+      if (!mergeResult.hasConflicts) {
+        git.merge.abort(worktreePath);
+        mergeResult = git.merge.merge({
+          source: sourceBranch,
+          target: git.branches.current(worktreePath),
+          cwd: worktreePath,
+          message: `Merge ${sourceBranch} for job ${job.id}`,
+          log: (msg: string) => log.debug(msg)
+        });
+        
+        if (mergeResult.success) {
           log.debug(`Simple merge of ${sourceBranch} (local) succeeded (no conflicts)`);
-        } catch (localMergeError: any) {
-          // Merge conflict - use Copilot CLI to resolve
-          log.info(`Merge conflict detected for ${sourceBranch}, using Copilot CLI to resolve...`);
-          
-          const mergeInstruction = `@agent Resolve the current git merge conflict. ` +
-            `We are merging branch '${sourceBranch}' into the current working directory. ` +
-            `Prefer '${prefer}' changes when there are conflicts. ` +
-            `Complete the merge and commit with message 'orchestrator: merge ${sourceBranch} for job ${job.id}'`;
-          
-          // Use string command with JSON.stringify to handle spaces in prompt
-          const copilotCmd = `copilot -p ${JSON.stringify(mergeInstruction)} --allow-all-paths --allow-all-tools`;
-          const result = spawnSync(copilotCmd, [], {
-            cwd: worktreePath,
-            shell: true,
-            encoding: 'utf-8',
-            timeout: 300000 // 5 minute timeout
-          });
-          
-          if (result.status !== 0) {
-            log.error(`Copilot CLI failed to resolve merge conflict for ${sourceBranch}`, { 
-              exitCode: result.status
-            });
-            // Abort the merge
-            try {
-              execSync('git merge --abort', { cwd: worktreePath, stdio: 'pipe' });
-            } catch {}
-            return false;
-          }
-          
-          log.info(`Copilot CLI resolved merge conflict for ${sourceBranch}`);
+          continue;
         }
+      }
+      
+      // Handle merge conflict with Copilot CLI
+      if (mergeResult.hasConflicts) {
+        log.info(`Merge conflict detected for ${sourceBranch}, using Copilot CLI to resolve...`);
+        
+        const mergeInstruction = `@agent Resolve the current git merge conflict. ` +
+          `We are merging branch '${sourceBranch}' into the current working directory. ` +
+          `Prefer '${prefer}' changes when there are conflicts. ` +
+          `Complete the merge and commit with message 'orchestrator: merge ${sourceBranch} for job ${job.id}'`;
+        
+        // Use string command with JSON.stringify to handle spaces in prompt
+        const copilotCmd = `copilot -p ${JSON.stringify(mergeInstruction)} --allow-all-paths --allow-all-tools`;
+        const result = spawnSync(copilotCmd, [], {
+          cwd: worktreePath,
+          shell: true,
+          encoding: 'utf-8',
+          timeout: 300000 // 5 minute timeout
+        });
+        
+        if (result.status !== 0) {
+          log.error(`Copilot CLI failed to resolve merge conflict for ${sourceBranch}`, { 
+            exitCode: result.status
+          });
+          // Abort the merge
+          try {
+            git.merge.abort(worktreePath);
+          } catch {}
+          return false;
+        }
+        
+        log.info(`Copilot CLI resolved merge conflict for ${sourceBranch}`);
+      } else {
+        // Non-conflict failure
+        log.error(`Merge failed for ${sourceBranch}: ${mergeResult.error}`);
+        return false;
       }
     }
     
@@ -1228,7 +938,7 @@ export class PlanRunner {
         
         // Check if this sub-plan is a leaf (nothing consumes from it)
         // If so, immediately merge to targetBranch - user gets value right away!
-        const isLeaf = this.isLeafWorkUnit(spec, subPlanId);
+        const isLeaf = mergeManager.isLeafWorkUnit(spec, subPlanId);
         if (isLeaf && completedBranch) {
           const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
           const repoPath = spec.repoPath || ws;
@@ -1331,7 +1041,7 @@ export class PlanRunner {
     
     // Check if this is a leaf job (nothing consumes from it)
     // If so, immediately merge to targetBranch - user gets value right away!
-    const isLeaf = this.isLeafWorkUnit(spec, jobId);
+    const isLeaf = mergeManager.isLeafWorkUnit(spec, jobId);
     if (isLeaf && !spec.isSubPlan) {
       const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
       const repoPath = spec.repoPath || ws;
@@ -1343,27 +1053,8 @@ export class PlanRunner {
   }
   
   /**
-   * Check if a work unit is a leaf (nothing consumes from it).
-   */
-  private isLeafWorkUnit(spec: PlanSpec, workUnitId: string): boolean {
-    // Check if any job consumes from this work unit
-    for (const job of spec.jobs) {
-      if (job.consumesFrom.includes(workUnitId)) {
-        return false;
-      }
-    }
-    // Check if any sub-plan consumes from this work unit
-    for (const sp of spec.subPlans || []) {
-      if (sp.consumesFrom.includes(workUnitId)) {
-        return false;
-      }
-    }
-    return true;
-  }
-  
-  /**
    * Immediately merge a completed leaf job's branch to targetBranch.
-   * This gives the user incremental value as work completes.
+   * Delegates to mergeManager module.
    */
   private mergeLeafToTarget(
     spec: PlanSpec, 
@@ -1372,90 +1063,18 @@ export class PlanRunner {
     completedBranch: string,
     repoPath: string
   ): void {
-    const { execSync, spawnSync } = require('child_process');
+    const success = mergeManager.mergeLeafToTarget(spec, plan, jobId, completedBranch, repoPath);
     
-    const targetBranch = spec.targetBranch || spec.baseBranch || 'main';
-    const planJob = spec.jobs.find(j => j.id === jobId);
-    
-    log.info(`Leaf job ${jobId} completed - merging immediately to ${targetBranch}`, {
-      planId: spec.id,
-      completedBranch
-    });
-    
-    const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
-    const prefer = mergeCfg.get<'ours' | 'theirs'>('prefer', 'theirs');
-    
-    try {
-      // Checkout target branch
-      execSync(`git checkout "${targetBranch}"`, { cwd: repoPath, stdio: 'pipe' });
-      
-      // Merge the leaf job's branch
-      try {
-        execSync(`git merge --no-edit "${completedBranch}" -m "Merge ${planJob?.name || jobId} from plan ${spec.name || spec.id}"`, { 
-          cwd: repoPath, 
-          stdio: 'pipe' 
-        });
-        log.info(`Leaf job ${jobId} merged to ${targetBranch} successfully`);
-      } catch (mergeError: any) {
-        // Merge conflict - use Copilot CLI to resolve
-        log.info(`Merge conflict merging leaf ${jobId}, using Copilot CLI to resolve...`);
-        
-        const mergeInstruction = `@agent Resolve the current git merge conflict. ` +
-          `We are merging branch '${completedBranch}' into '${targetBranch}'. ` +
-          `Prefer '${prefer}' changes when there are conflicts. ` +
-          `Complete the merge and commit with message 'orchestrator: merge ${planJob?.name || jobId} from plan ${spec.name || spec.id}'`;
-        
-        // Use string command with JSON.stringify to handle spaces in prompt
-        const copilotCmd = `copilot -p ${JSON.stringify(mergeInstruction)} --allow-all-paths --allow-all-tools`;
-        const result = spawnSync(copilotCmd, [], {
-          cwd: repoPath,
-          shell: true,
-          encoding: 'utf-8',
-          timeout: 300000
-        });
-        
-        if (result.status !== 0) {
-          log.error(`Copilot CLI failed to resolve leaf merge conflict for ${jobId}`, { 
-            exitCode: result.status
-          });
-          try {
-            execSync('git merge --abort', { cwd: repoPath, stdio: 'pipe' });
-          } catch {}
-          return;
-        }
-        
-        log.info(`Leaf job ${jobId} merge conflict resolved and merged to ${targetBranch}`);
-      }
-      
-      // Push the updated target branch
-      try {
-        execSync(`git push origin "${targetBranch}"`, { cwd: repoPath, stdio: 'pipe' });
-      } catch (pushError: any) {
-        log.warn(`Failed to push after leaf merge: ${pushError.message}`);
-      }
-      
-      // Track that this leaf has been merged - triggers Work Summary update
-      plan.mergedLeaves.add(jobId);
-      plan.riMergeCompleted = true;
-      
-      log.info(`Leaf ${jobId} merged and tracked for Work Summary`, {
-        totalMerged: plan.mergedLeaves.size
-      });
-      
+    if (success && spec.cleanUpSuccessfulWork !== false) {
       // Clean up worktree/branch if enabled (default behavior)
-      if (spec.cleanUpSuccessfulWork !== false) {
-        this.cleanupWorkUnit(spec, plan, jobId, repoPath);
-      }
-      
-    } catch (error: any) {
-      log.error(`Failed to merge leaf job ${jobId} to ${targetBranch}`, { error: error.message });
+      cleanupManager.cleanupWorkUnit(spec, plan, jobId, repoPath);
+      this.persist();
     }
   }
   
   /**
    * Clean up worktree and branch for a successfully merged work unit.
-   * Also recursively cleans up any upstream producers that have all their
-   * consumers now cleaned up.
+   * Delegates to cleanupManager module.
    */
   private cleanupWorkUnit(
     spec: PlanSpec,
@@ -1464,119 +1083,8 @@ export class PlanRunner {
     repoPath: string,
     cleanedUp: Set<string> = new Set()
   ): void {
-    // Avoid infinite recursion
-    if (cleanedUp.has(workUnitId)) return;
-    cleanedUp.add(workUnitId);
-    
-    const { execSync } = require('child_process');
-    
-    // Clean up the worktree
-    const worktreePath = plan.worktreePaths.get(workUnitId);
-    if (worktreePath && fs.existsSync(worktreePath)) {
-      try {
-        // Remove git worktree (this also removes the directory)
-        execSync(`git worktree remove --force "${worktreePath}"`, { cwd: repoPath, stdio: 'pipe' });
-        plan.worktreePaths.delete(workUnitId);
-        log.debug(`Cleaned up worktree for ${workUnitId}: ${worktreePath}`);
-      } catch (e: any) {
-        log.warn(`Failed to remove worktree for ${workUnitId}: ${e.message}`);
-        // Try force delete the directory anyway
-        try {
-          fs.rmSync(worktreePath, { recursive: true, force: true });
-          plan.worktreePaths.delete(workUnitId);
-        } catch {}
-      }
-    }
-    
-    // Clean up the branch (only the job-specific branch, not merge branches)
-    const completedBranch = plan.completedBranches.get(workUnitId);
-    if (completedBranch) {
-      try {
-        // Delete local branch
-        execSync(`git branch -D "${completedBranch}"`, { cwd: repoPath, stdio: 'pipe' });
-        log.debug(`Deleted local branch for ${workUnitId}: ${completedBranch}`);
-      } catch (e: any) {
-        log.debug(`Failed to delete local branch ${completedBranch}: ${e.message}`);
-      }
-      
-      try {
-        // Delete remote branch
-        execSync(`git push origin --delete "${completedBranch}"`, { cwd: repoPath, stdio: 'pipe' });
-        log.debug(`Deleted remote branch for ${workUnitId}: ${completedBranch}`);
-      } catch (e: any) {
-        log.debug(`Failed to delete remote branch ${completedBranch}: ${e.message}`);
-      }
-      
-      plan.completedBranches.delete(workUnitId);
-    }
-    
-    log.info(`Cleaned up work unit ${workUnitId}`, {
-      worktree: !!worktreePath,
-      branch: !!completedBranch
-    });
-    
-    // Now check if any upstream producers can be cleaned up
-    // A producer can be cleaned up if ALL its consumers have been cleaned up
-    const job = spec.jobs.find(j => j.id === workUnitId);
-    if (job) {
-      for (const producerId of job.consumesFrom) {
-        if (this.canCleanupProducer(spec, plan, producerId, cleanedUp)) {
-          this.cleanupWorkUnit(spec, plan, producerId, repoPath, cleanedUp);
-        }
-      }
-    }
-    
-    // Also check sub-plan producers
-    const subPlan = spec.subPlans?.find(sp => sp.id === workUnitId);
-    if (subPlan) {
-      for (const producerId of subPlan.consumesFrom) {
-        if (this.canCleanupProducer(spec, plan, producerId, cleanedUp)) {
-          this.cleanupWorkUnit(spec, plan, producerId, repoPath, cleanedUp);
-        }
-      }
-    }
-    
+    cleanupManager.cleanupWorkUnit(spec, plan, workUnitId, repoPath, cleanedUp);
     this.persist();
-  }
-  
-  /**
-   * Check if a producer can be cleaned up.
-   * A producer can only be cleaned up if ALL consumers that depend on it
-   * have been merged and cleaned up.
-   */
-  private canCleanupProducer(
-    spec: PlanSpec,
-    plan: InternalPlanState,
-    producerId: string,
-    cleanedUp: Set<string>
-  ): boolean {
-    // Don't cleanup if already cleaned or not merged
-    if (cleanedUp.has(producerId)) return false;
-    if (!plan.mergedLeaves.has(producerId) && !plan.done.includes(producerId)) {
-      // Producer hasn't finished yet
-      return false;
-    }
-    
-    // Find all consumers of this producer
-    const consumers: string[] = [];
-    for (const job of spec.jobs) {
-      if (job.consumesFrom.includes(producerId)) {
-        consumers.push(job.id);
-      }
-    }
-    for (const sp of spec.subPlans || []) {
-      if (sp.consumesFrom.includes(producerId)) {
-        consumers.push(sp.id);
-      }
-    }
-    
-    // Producer can be cleaned up if ALL consumers have been cleaned up
-    return consumers.every(consumerId => 
-      cleanedUp.has(consumerId) || 
-      // A consumer counts as "cleaned up" if it was merged (for leaves)
-      // and we're currently cleaning it up in this call chain
-      plan.mergedLeaves.has(consumerId)
-    );
   }
 
   /**
@@ -1705,7 +1213,6 @@ export class PlanRunner {
     subPlanSpec: SubPlanSpec,
     repoPath: string
   ): void {
-    const { execSync } = require('child_process');
     const path = require('path');
     
     // Generate a unique ID for the child plan
@@ -1752,15 +1259,18 @@ export class PlanRunner {
     
     try {
       // Create the integration branch from the source branch
-      // First, ensure we're not on the source branch (might be in a worktree)
-      try {
-        execSync(`git branch -D "${integrationBranchName}"`, { cwd: repoPath, stdio: 'pipe' });
-      } catch (e) {
-        // Branch doesn't exist, that's fine
-      }
+      // First, try to delete if it already exists
+      git.branches.deleteLocal(repoPath, integrationBranchName, { force: true });
       
-      execSync(`git branch "${integrationBranchName}" "${sourceBranch}"`, { cwd: repoPath, stdio: 'pipe' });
-      execSync(`git push origin "${integrationBranchName}"`, { cwd: repoPath, stdio: 'pipe' });
+      // Create branch from source
+      git.branches.create(integrationBranchName, sourceBranch, repoPath, 
+        (msg: string) => log.debug(msg));
+      
+      // Push to remote
+      git.repository.push(repoPath, { 
+        branch: integrationBranchName, 
+        log: (msg: string) => log.debug(msg) 
+      });
       
       log.info(`Created integration branch for sub-plan: ${integrationBranchName} from ${sourceBranch}`);
       
@@ -1947,164 +1457,19 @@ export class PlanRunner {
   /**
    * Perform the final RI (Reverse Integration) merge.
    * Merges the final job outputs back to the plan's targetBranch.
-   * 
-   * Note: With incremental leaf merging, leaves auto-merge when they complete.
-   * This is now just a fallback/cleanup that runs on plan completion.
+   * Delegates to mergeManager module.
    */
   private performFinalMerge(spec: PlanSpec, plan: InternalPlanState, repoPath: string): void {
-    const { execSync, spawnSync } = require('child_process');
-    
-    const targetBranch = spec.targetBranch || spec.baseBranch || 'main';
-    
-    // Find "leaf" jobs - jobs that no other job or sub-plan consumes from
-    const allConsumedFrom = new Set<string>();
-    for (const job of spec.jobs) {
-      job.consumesFrom.forEach(source => allConsumedFrom.add(source));
-    }
-    // Also include sub-plan consumesFrom
-    for (const sp of spec.subPlans || []) {
-      sp.consumesFrom.forEach(source => allConsumedFrom.add(source));
-    }
-    
-    const allLeafIds = new Set(
-      spec.jobs.filter(j => !allConsumedFrom.has(j.id) && plan.done.includes(j.id)).map(j => j.id)
-    );
-    
-    // Check which leaves haven't been merged yet (should be none with incremental merging)
-    const unmgergedLeaves = [...allLeafIds].filter(id => !plan.mergedLeaves.has(id));
-    
-    if (unmgergedLeaves.length === 0) {
-      log.info(`Plan ${spec.id}: All ${allLeafIds.size} leaves already merged incrementally`);
-      plan.riMergeCompleted = true;
-      // Clean up integration branches (sub-plan integration branches)
-      this.cleanupIntegrationBranches(plan, repoPath);
-      return;
-    }
-    
-    // Fallback: merge any leaves that weren't merged incrementally (shouldn't happen normally)
-    log.warn(`Plan ${spec.id}: ${unmgergedLeaves.length} leaves need fallback merge`, {
-      unmerged: unmgergedLeaves,
-      alreadyMerged: [...plan.mergedLeaves]
-    });
-    
-    // Load merge configuration
-    const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
-    const prefer = mergeCfg.get<'ours' | 'theirs'>('prefer', 'theirs');
-    
-    try {
-      // Checkout target branch
-      execSync(`git checkout "${targetBranch}"`, { cwd: repoPath, stdio: 'pipe' });
-      
-      // Merge each unmerged leaf job's branch
-      for (const leafJobId of unmgergedLeaves) {
-        const leafJob = spec.jobs.find(j => j.id === leafJobId);
-        const leafBranch = plan.completedBranches.get(leafJobId);
-        if (!leafBranch || !leafJob) continue;
-        
-        log.info(`Fallback merging ${leafBranch} into ${targetBranch}`);
-        try {
-          execSync(`git merge --no-edit "${leafBranch}" -m "Merge ${leafJob.name || leafJob.id} from plan ${spec.name || spec.id}"`, { 
-            cwd: repoPath, 
-            stdio: 'pipe' 
-          });
-          // Track this as merged
-          plan.mergedLeaves.add(leafJobId);
-        } catch (mergeError: any) {
-          // Merge conflict - use Copilot CLI to resolve
-          log.info(`Merge conflict merging ${leafBranch}, using Copilot CLI to resolve...`);
-          
-          const mergeInstruction = `@agent Resolve the current git merge conflict. ` +
-            `We are merging branch '${leafBranch}' into '${targetBranch}'. ` +
-            `Prefer '${prefer}' changes when there are conflicts. ` +
-            `Complete the merge and commit with message 'orchestrator: merge ${leafJob.name || leafJob.id} from plan ${spec.name || spec.id}'`;
-          
-          // Use string command with JSON.stringify to handle spaces in prompt
-          const copilotCmd = `copilot -p ${JSON.stringify(mergeInstruction)} --allow-all-paths --allow-all-tools`;
-          const result = spawnSync(copilotCmd, [], {
-            cwd: repoPath,
-            shell: true,
-            encoding: 'utf-8',
-            timeout: 300000 // 5 minute timeout
-          });
-          
-          if (result.status !== 0) {
-            log.error(`Copilot CLI failed to resolve RI merge conflict`, { 
-              exitCode: result.status,
-              leafBranch,
-              targetBranch
-            });
-            try {
-              execSync('git merge --abort', { cwd: repoPath, stdio: 'pipe' });
-            } catch {}
-            plan.error = `RI merge failed: conflict merging ${leafBranch}`;
-            return;
-          }
-          
-          log.info(`Copilot CLI resolved RI merge conflict for ${leafBranch}`);
-          // Track this as merged
-          plan.mergedLeaves.add(leafJobId);
-        }
-      }
-      
-      // Push the updated target branch
-      try {
-        execSync(`git push origin "${targetBranch}"`, { cwd: repoPath, stdio: 'pipe' });
-        log.info(`Plan ${spec.id}: RI merge completed and pushed to ${targetBranch}`);
-      } catch (pushError: any) {
-        log.warn(`Failed to push ${targetBranch}: ${pushError.message}`);
-      }
-      
-      // Mark RI merge as successful
-      plan.riMergeCompleted = true;
-      
-      // Clean up integration branches now that RI is complete
-      this.cleanupIntegrationBranches(plan, repoPath);
-      
-    } catch (error: any) {
-      log.error(`Plan ${spec.id}: Final RI merge failed`, { error: error.message });
-      plan.error = `RI merge failed: ${error.message}`;
-      // Don't change status to partial for checkout errors - these are usually
-      // transient worktree issues and all jobs actually succeeded
-      // The error is still recorded and visible to the user
-      plan.riMergeCompleted = false;
-    }
+    mergeManager.performFinalMerge(spec, plan, repoPath);
+    this.persist();
   }
 
   /**
    * Clean up integration branches created for sub-plans.
-   * Note: With the consumesFrom model, regular jobs no longer create separate merge branches.
-   * This only cleans up sub-plan integration branches.
+   * Delegates to mergeManager module.
    */
   private cleanupIntegrationBranches(plan: InternalPlanState, repoPath: string): void {
-    const { execSync } = require('child_process');
-    
-    if (!plan.subPlanIntegrationBranches || plan.subPlanIntegrationBranches.size === 0) {
-      return;
-    }
-    
-    log.info(`Cleaning up ${plan.subPlanIntegrationBranches.size} integration branches`, {
-      planId: plan.id
-    });
-    
-    for (const [subPlanId, integrationBranch] of plan.subPlanIntegrationBranches) {
-      try {
-        // Delete local branch
-        execSync(`git branch -D "${integrationBranch}"`, { cwd: repoPath, stdio: 'pipe' });
-        log.debug(`Deleted local integration branch: ${integrationBranch}`);
-      } catch (e: any) {
-        log.debug(`Failed to delete local branch ${integrationBranch}: ${e.message}`);
-      }
-      
-      try {
-        // Delete remote branch
-        execSync(`git push origin --delete "${integrationBranch}"`, { cwd: repoPath, stdio: 'pipe' });
-        log.debug(`Deleted remote integration branch: ${integrationBranch}`);
-      } catch (e: any) {
-        log.debug(`Failed to delete remote branch ${integrationBranch}: ${e.message}`);
-      }
-    }
-    
-    plan.subPlanIntegrationBranches.clear();
+    mergeManager.cleanupIntegrationBranches(plan, repoPath);
     this.persist();
   }
 

@@ -9,7 +9,7 @@
  * @module interfaces/IJobRunner
  */
 
-import { Job, JobSpec } from '../types';
+import { Job, JobSpec } from '../core/job/types';
 
 /**
  * Core interface for job execution and lifecycle management.

@@ -6,6 +6,6 @@
  * @module commands
  */
 
-export { registerJobCommands, JobCommandsDependencies } from './jobCommands';
 export { registerMcpCommands, promptMcpServerRegistration } from './mcpCommands';
 export { registerUtilityCommands, UtilityCommandsDependencies, DashboardPanel } from './utilityCommands';
+export { registerJobCommands, JobCommandDependencies } from './jobCommands';

@@ -9,7 +9,7 @@
  * @module interfaces/IJobPersistence
  */
 
-import { Job } from '../types';
+import { Job } from '../core/job/types';
 
 /**
  * Interface for persisting and retrieving job state.

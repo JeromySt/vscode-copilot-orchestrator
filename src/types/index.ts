@@ -3,12 +3,13 @@
  * 
  * Import types from this module for convenience:
  * ```typescript
- * import { Job, JobSpec } from './types';
+ * import { ProcessInfo, OrchestratorConfig } from './types';
  * ```
+ * 
+ * Job types are in core/job/types.ts - import from core/jobRunner or core/job/types
  * 
  * @module types
  */
 
-export * from './job';
 export * from './process';
 export * from './config';

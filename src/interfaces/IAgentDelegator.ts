@@ -9,7 +9,7 @@
  * @module interfaces/IAgentDelegator
  */
 
-import { Job } from '../types';
+import { Job } from '../core/job/types';
 
 /**
  * Result of an AI agent delegation.

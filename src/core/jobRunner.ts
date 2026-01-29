@@ -6,67 +6,13 @@ import * as fs from 'fs';
 import { randomUUID } from 'crypto';
 import { ensureDir, readJSON, writeJSON, cpuCountMinusOne } from './utils';
 import { isCopilotCliAvailable } from '../agent/cliCheckCore';
-import * as branchUtils from '../git/branchUtils';
+import * as git from '../git';
+import type { CommitDetail, WorkSummary, JobMetrics, ExecutionAttempt, JobSpec, Job, StepStatuses } from './job/types';
+import { calculateWorkSummary as calculateWorkSummaryFromGit } from './job/workSummary';
+import { extractMetricsFromLog as extractMetricsFromLogFile } from './job/metricsExtractor';
 
-export type CommitDetail = { hash: string; shortHash: string; message: string; author: string; date: string; filesAdded: string[]; filesModified: string[]; filesDeleted: string[] };
-export type WorkSummary = { commits: number; filesAdded: number; filesModified: number; filesDeleted: number; description: string; commitDetails?: CommitDetail[] };
-export type JobMetrics = { testsRun?: number; testsPassed?: number; testsFailed?: number; coveragePercent?: number; buildErrors?: number; buildWarnings?: number };
-export type WebhookConfig = { url: string; events?: ('stage_complete' | 'job_complete' | 'job_failed')[]; headers?: Record<string, string> };
-export type ExecutionAttempt = { attemptId: string; startedAt: number; endedAt?: number; logFile: string; copilotSessionId?: string; workInstruction: string; stepStatuses: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; commit?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; workSummary?: WorkSummary; metrics?: JobMetrics };
-
-/**
- * Job specification - defines what work to do and where.
- * 
- * ## Worktree Management Modes:
- * 
- * ### Standalone Job (isPlanManaged = false, default):
- * - Job creates its own worktree from baseBranch
- * - Job manages branch creation if on default branch
- * - Job performs mergeback into targetBranch after work
- * - Job cleans up its worktree
- * 
- * ### Plan-Managed Job (isPlanManaged = true):
- * - Plan pre-creates worktree and provides worktreePath
- * - Job executes work in provided worktree
- * - Job does NOT create branches or perform mergeback
- * - Plan handles all branch/worktree lifecycle
- */
-export type JobSpec = { 
-  id: string; 
-  name: string; 
-  task: string; 
-  inputs: { 
-    repoPath: string; 
-    baseBranch: string; 
-    targetBranch: string; 
-    worktreeRoot: string; 
-    instructions?: string;
-    /** 
-     * If true, this job is managed by a plan.
-     * - Worktree is pre-created by the plan
-     * - Job skips branch creation and mergeback
-     * - Plan handles all branch lifecycle
-     */
-    isPlanManaged?: boolean;
-    /**
-     * For plan-managed jobs: the pre-created worktree path.
-     * Job will verify this is a valid worktree before executing.
-     */
-    worktreePath?: string;
-    /**
-     * The plan ID this job belongs to (if any).
-     * Used to group jobs under their parent plan in the UI.
-     */
-    planId?: string;
-  }; 
-  policy: { 
-    useJust: boolean; 
-    steps: { prechecks: string; work: string; postchecks: string } 
-  }; 
-  webhook?: WebhookConfig 
-};
-
-export type Job = JobSpec & { status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; logFile?: string; startedAt?: number; endedAt?: number; copilotSessionId?: string; processIds?: number[]; currentStep?: string; stepStatuses?: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; commit?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; workHistory?: string[]; attempts?: ExecutionAttempt[]; currentAttemptId?: string; workSummary?: WorkSummary; metrics?: JobMetrics };
+// Re-export types for backward compatibility
+export type { CommitDetail, WorkSummary, JobMetrics, ExecutionAttempt, JobSpec, Job, StepStatuses };
 
 export class JobRunner {
   private ctx: vscode.ExtensionContext; 
@@ -264,7 +210,7 @@ export class JobRunner {
   }
   
   list(): Job[] { return Array.from(this.jobs.values()); }
-  enqueue(spec: JobSpec, webhookConfig?: WebhookConfig) { 
+  enqueue(spec: JobSpec) { 
     // Generate GUID for job ID if not provided
     if (!spec.id || spec.id === '') {
       spec.id = randomUUID();
@@ -279,8 +225,7 @@ export class JobRunner {
       logFile, 
       stepStatuses: {},
       workHistory: [spec.policy.steps.work],
-      attempts: [],
-      webhook: webhookConfig
+      attempts: []
     }; 
     this.jobs.set(job.id, job); 
     this.queue.push(job.id); 
@@ -414,71 +359,6 @@ Focus on addressing the failure root cause while maintaining all original requir
     }
   }
 
-  private async notifyWebhook(job: Job, event: 'stage_complete' | 'job_complete' | 'job_failed', stage?: string) {
-    if (!job.webhook?.url) return;
-    
-    // Security: Only allow local webhook destinations
-    if (!this.isLocalUrl(job.webhook.url)) {
-      this.writeLog(job, `[webhook] BLOCKED: Non-local URL not allowed (${job.webhook.url})`);
-      return;
-    }
-    
-    // Check if this event type is subscribed (default: all events)
-    const subscribedEvents = job.webhook.events || ['stage_complete', 'job_complete', 'job_failed'];
-    if (!subscribedEvents.includes(event)) return;
-    
-    const payload = {
-      event,
-      timestamp: Date.now(),
-      job: {
-        id: job.id,
-        name: job.name,
-        status: job.status,
-        currentStep: job.currentStep,
-        stepStatuses: job.stepStatuses,
-        stage: stage || null,
-        progress: this.calculateProgress(job),
-        workSummary: job.workSummary || null,
-        metrics: job.metrics || null,
-        duration: job.startedAt ? Math.round((Date.now() - job.startedAt) / 1000) : null
-      }
-    };
-    
-    try {
-      const http = require('http');
-      const https = require('https');
-      const url = new URL(job.webhook.url);
-      const client = url.protocol === 'https:' ? https : http;
-      
-      const options = {
-        method: 'POST',
-        hostname: url.hostname,
-        port: url.port || (url.protocol === 'https:' ? 443 : 80),
-        path: url.pathname + url.search,
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'copilot-orchestrator/0.4.0',
-          'X-Webhook-Event': event,
-          'X-Job-Id': job.id,
-          ...(job.webhook.headers || {})
-        }
-      };
-      
-      const req = client.request(options, (res: any) => {
-        this.writeLog(job, `[webhook] ${event} notification sent to ${job.webhook!.url} - HTTP ${res.statusCode}`);
-      });
-      
-      req.on('error', (e: Error) => {
-        this.writeLog(job, `[webhook] Failed to send ${event} notification: ${e.message}`);
-      });
-      
-      req.write(JSON.stringify(payload));
-      req.end();
-    } catch (e) {
-      this.writeLog(job, `[webhook] Error sending notification: ${e}`);
-    }
-  }
-
   private calculateProgress(job: Job): number {
     const phaseWeights: Record<string, number> = {
       'prechecks': 10, 'work': 60, 'commit': 70, 'postchecks': 85, 'mergeback': 95, 'cleanup': 100
@@ -505,172 +385,13 @@ Focus on addressing the failure root cause while maintaining all original requir
   }
 
   private async calculateWorkSummary(job: Job): Promise<WorkSummary> {
-    const { execSync } = require('child_process');
-    // Use provided worktreePath for plan-managed jobs, otherwise build the path
-    const worktreePath = job.inputs.worktreePath || path.join(job.inputs.repoPath, job.inputs.worktreeRoot, job.id);
-    const baseBranch = job.inputs.baseBranch;
-    
-    let commits = 0;
-    let filesAdded = 0;
-    let filesModified = 0;
-    let filesDeleted = 0;
-    const commitDetails: CommitDetail[] = [];
-    
-    try {
-      // Find the merge-base (where the worktree branch forked from baseBranch)
-      // Use local branch only - worktrees don't have remotes
-      const mergeBase = execSync(`git merge-base HEAD ${baseBranch}`, { cwd: worktreePath, encoding: 'utf-8' }).trim();
-      
-      // Get detailed commit information
-      // Format: hash|shortHash|author|date|message
-      const commitLogOutput = execSync(
-        `git log ${mergeBase}..HEAD --pretty=format:"%H|%h|%an|%ai|%s" --reverse`,
-        { cwd: worktreePath, encoding: 'utf-8' }
-      ).trim();
-      
-      if (commitLogOutput) {
-        const commitLines = commitLogOutput.split('\n').filter((l: string) => l.trim());
-        commits = commitLines.length;
-        
-        for (const commitLine of commitLines) {
-          const [hash, shortHash, author, date, ...messageParts] = commitLine.split('|');
-          const message = messageParts.join('|'); // In case message contains |
-          
-          // Get files changed in this specific commit
-          const filesOutput = execSync(
-            `git diff-tree --no-commit-id --name-status -r ${hash}`,
-            { cwd: worktreePath, encoding: 'utf-8' }
-          ).trim();
-          
-          const commitFilesAdded: string[] = [];
-          const commitFilesModified: string[] = [];
-          const commitFilesDeleted: string[] = [];
-          
-          if (filesOutput) {
-            const fileLines = filesOutput.split('\n').filter((l: string) => l.trim());
-            for (const fileLine of fileLines) {
-              const [status, ...filePathParts] = fileLine.split('\t');
-              const filePath = filePathParts.join('\t');
-              if (status === 'A') commitFilesAdded.push(filePath);
-              else if (status === 'M') commitFilesModified.push(filePath);
-              else if (status === 'D') commitFilesDeleted.push(filePath);
-              else if (status.startsWith('R')) commitFilesModified.push(filePath);
-              else if (status.startsWith('C')) commitFilesAdded.push(filePath);
-            }
-          }
-          
-          commitDetails.push({
-            hash,
-            shortHash,
-            author,
-            date,
-            message,
-            filesAdded: commitFilesAdded,
-            filesModified: commitFilesModified,
-            filesDeleted: commitFilesDeleted
-          });
-        }
-      }
-      
-      // Get total file changes since the fork point (for summary)
-      const diffOutput = execSync(`git diff --name-status ${mergeBase} HEAD`, { cwd: worktreePath, encoding: 'utf-8' }).trim();
-      
-      if (diffOutput) {
-        const lines = diffOutput.split('\n').filter((l: string) => l.trim());
-        for (const line of lines) {
-          const status = line.charAt(0);
-          if (status === 'A') filesAdded++;
-          else if (status === 'M') filesModified++;
-          else if (status === 'D') filesDeleted++;
-          else if (status === 'R') filesModified++;
-          else if (status === 'C') filesAdded++;
-        }
-      }
-      
-      this.writeLog(job, `[orchestrator] Work summary: ${commits} commits, forked from ${baseBranch} at ${mergeBase.substring(0, 8)}`);
-    } catch (e) {
-      this.writeLog(job, `[orchestrator] Warning: Could not calculate work summary: ${e}`);
-    }
-    
-    // Build description string
-    const parts: string[] = [];
-    if (commits > 0) parts.push(`${commits} commit${commits !== 1 ? 's' : ''}`);
-    if (filesAdded > 0) parts.push(`${filesAdded} file${filesAdded !== 1 ? 's' : ''} added`);
-    if (filesModified > 0) parts.push(`${filesModified} file${filesModified !== 1 ? 's' : ''} modified`);
-    if (filesDeleted > 0) parts.push(`${filesDeleted} file${filesDeleted !== 1 ? 's' : ''} deleted`);
-    
-    const description = parts.length > 0 ? parts.join(', ') : 'No changes detected';
-    
-    return { commits, filesAdded, filesModified, filesDeleted, description, commitDetails };
+    const summary = calculateWorkSummaryFromGit(job);
+    this.writeLog(job, `[orchestrator] Work summary: ${summary.description}`);
+    return summary;
   }
 
   private extractMetricsFromLog(job: Job): JobMetrics {
-    const metrics: JobMetrics = {};
-    
-    if (!job.logFile) return metrics;
-    
-    try {
-      const logContent = fs.readFileSync(job.logFile, 'utf-8');
-      
-      // Extract test counts - common patterns
-      // NUnit: "Passed: 45, Failed: 2, Skipped: 1"
-      // Jest: "Tests: 45 passed, 2 failed"
-      // dotnet test: "Total tests: 47, Passed: 45, Failed: 2"
-      const testPatterns = [
-        /Total tests?:\s*(\d+).*?Passed:\s*(\d+).*?Failed:\s*(\d+)/i,
-        /Tests?:\s*(\d+)\s*passed.*?(\d+)\s*failed/i,
-        /Passed:\s*(\d+).*?Failed:\s*(\d+)/i,
-        /(\d+)\s*tests?\s*passed.*?(\d+)\s*failed/i,
-        /(\d+)\s*passing.*?(\d+)\s*failing/i
-      ];
-      
-      for (const pattern of testPatterns) {
-        const match = logContent.match(pattern);
-        if (match) {
-          if (match.length === 4) {
-            // Pattern with total, passed, failed
-            metrics.testsRun = parseInt(match[1], 10);
-            metrics.testsPassed = parseInt(match[2], 10);
-            metrics.testsFailed = parseInt(match[3], 10);
-          } else if (match.length === 3) {
-            // Pattern with passed, failed
-            metrics.testsPassed = parseInt(match[1], 10);
-            metrics.testsFailed = parseInt(match[2], 10);
-            metrics.testsRun = (metrics.testsPassed || 0) + (metrics.testsFailed || 0);
-          }
-          break;
-        }
-      }
-      
-      // Extract coverage percentage
-      // Common patterns: "Coverage: 85.5%", "Line coverage: 85.5%", "85.5% coverage"
-      const coveragePatterns = [
-        /(?:coverage|line coverage|branch coverage):\s*([\d.]+)%/i,
-        /([\d.]+)%\s*(?:coverage|covered)/i,
-        /coverage\s+is\s+([\d.]+)%/i
-      ];
-      
-      for (const pattern of coveragePatterns) {
-        const match = logContent.match(pattern);
-        if (match) {
-          metrics.coveragePercent = parseFloat(match[1]);
-          break;
-        }
-      }
-      
-      // Extract build errors/warnings
-      // Common patterns: "3 error(s)", "5 warning(s)", "Build: 3 errors, 5 warnings"
-      const errorMatch = logContent.match(/(\d+)\s*error(?:s|\(s\))?/i);
-      const warningMatch = logContent.match(/(\d+)\s*warning(?:s|\(s\))?/i);
-      
-      if (errorMatch) metrics.buildErrors = parseInt(errorMatch[1], 10);
-      if (warningMatch) metrics.buildWarnings = parseInt(warningMatch[1], 10);
-      
-    } catch (e) {
-      // Log read failed, return empty metrics
-    }
-    
-    return metrics;
+    return extractMetricsFromLogFile(job);
   }
 
   cancel(id: string) { 
@@ -740,51 +461,12 @@ Focus on addressing the failure root cause while maintaining all original requir
     
     // Delete the worktree and associated branch
     try {
-      const path = require('path');
-      const fs = require('fs');
       const worktreePath = path.join(j.inputs.repoPath, j.inputs.worktreeRoot, j.id);
       const branchName = `copilot_jobs/${j.id}`;
       
-      if (fs.existsSync(worktreePath)) {
-        const { spawnSync } = require('child_process');
-        
-        // Remove worktree using git
-        const removeResult = spawnSync('git', ['worktree', 'remove', worktreePath, '--force'], {
-          cwd: j.inputs.repoPath,
-          encoding: 'utf-8',
-          shell: true
-        });
-        
-        if (removeResult.status !== 0) {
-          console.error(`Failed to remove worktree via git: ${removeResult.stderr}`);
-          // Try to delete directory directly as fallback
-          try {
-            fs.rmSync(worktreePath, { recursive: true, force: true });
-          } catch (e) {
-            console.error(`Failed to delete worktree directory: ${e}`);
-          }
-        }
-      }
-      
-      // Always attempt to delete the associated branch (even if worktree doesn't exist)
-      // This handles cases where the worktree was manually deleted but branch remains
-      const { spawnSync } = require('child_process');
-      const deleteBranchResult = spawnSync('git', ['branch', '-D', branchName], {
-        cwd: j.inputs.repoPath,
-        encoding: 'utf-8',
-        shell: true
-      });
-      
-      if (deleteBranchResult.status !== 0 && !deleteBranchResult.stderr?.includes('not found')) {
-        console.error(`Failed to delete branch ${branchName}: ${deleteBranchResult.stderr}`);
-      }
-      
-      // Also prune worktree metadata to clean up any stale references
-      spawnSync('git', ['worktree', 'prune'], {
-        cwd: j.inputs.repoPath,
-        encoding: 'utf-8',
-        shell: true
-      });
+      // Use git module to safely remove worktree and branch
+      git.worktrees.removeSafe(j.inputs.repoPath, worktreePath, { force: true });
+      git.branches.deleteLocal(j.inputs.repoPath, branchName, { force: true });
       
       // Delete the log file if it exists
       if (j.logFile && fs.existsSync(j.logFile)) {
@@ -879,14 +561,14 @@ Focus on addressing the failure root cause while maintaining all original requir
       jobRoot = job.inputs.worktreePath;
       
       // Verify the worktree exists
-      if (!branchUtils.isValidWorktree(jobRoot)) {
+      if (!git.worktrees.isValid(jobRoot)) {
         const msg = `Plan-managed job worktree does not exist or is invalid: ${jobRoot}`;
         this.writeLog(job, '[preflight] ERROR: ' + msg);
         job.status = 'failed'; job.endedAt = Date.now(); this.persist(); this.working--; this.pump();
         return;
       }
       
-      worktreeBranch = branchUtils.getWorktreeBranch(jobRoot) || job.inputs.targetBranch;
+      worktreeBranch = git.worktrees.getBranch(jobRoot) || job.inputs.targetBranch;
       this.writeLog(job, `[orchestrator] Plan-managed job using pre-created worktree: ${jobRoot}`);
       this.writeLog(job, `[orchestrator] Worktree branch: ${worktreeBranch}`);
     } else {
@@ -894,7 +576,7 @@ Focus on addressing the failure root cause while maintaining all original requir
       this.writeLog(job, '[orchestrator] Standalone job - managing worktree lifecycle');
       
       // Determine the targetBranchRoot based on whether baseBranch is a default branch
-      const { targetBranchRoot, needsCreation } = branchUtils.resolveTargetBranchRoot(
+      const { targetBranchRoot, needsCreation } = git.orchestrator.resolveTargetBranchRoot(
         job.inputs.baseBranch,
         repoPath,
         'copilot_jobs'
@@ -903,7 +585,7 @@ Focus on addressing the failure root cause while maintaining all original requir
       if (needsCreation) {
         this.writeLog(job, `[orchestrator] Base branch '${job.inputs.baseBranch}' is a default branch`);
         this.writeLog(job, `[orchestrator] Creating feature branch: ${targetBranchRoot}`);
-        branchUtils.createBranch(targetBranchRoot, job.inputs.baseBranch, repoPath, s => this.writeLog(job, s));
+        git.branches.create(targetBranchRoot, job.inputs.baseBranch, repoPath, s => this.writeLog(job, s));
         // Update the job's targetBranch to the new feature branch
         job.inputs.targetBranch = targetBranchRoot;
       } else {
@@ -918,13 +600,13 @@ Focus on addressing the failure root cause while maintaining all original requir
       jobRoot = path.join(wtRootAbs, job.id);
       
       this.writeLog(job, `[orchestrator] Creating worktree at: ${jobRoot}`);
-      branchUtils.createWorktree(
-        jobRoot,
-        worktreeBranch,
-        job.inputs.targetBranch,
+      git.worktrees.create({
         repoPath,
-        s => this.writeLog(job, s)
-      );
+        worktreePath: jobRoot,
+        branchName: worktreeBranch,
+        fromRef: job.inputs.targetBranch,
+        log: s => this.writeLog(job, s)
+      });
     }
 
     const execStep = async (label: string, cmd: string) => {
@@ -965,7 +647,6 @@ Focus on addressing the failure root cause while maintaining all original requir
         job.stepStatuses[stepKey] = 'success';
         this.syncStepStatusesToAttempt(job);
         this.persist();
-        this.notifyWebhook(job, 'stage_complete', label);
         return result;
       }
       
@@ -1010,7 +691,6 @@ Focus on addressing the failure root cause while maintaining all original requir
             job.stepStatuses[stepKey] = 'success';
             this.syncStepStatusesToAttempt(job);
             this.persist();
-            this.notifyWebhook(job, 'stage_complete', label);
             resolve();
           } else {
             job.stepStatuses[stepKey] = 'failed';
@@ -1058,7 +738,6 @@ Focus on addressing the failure root cause while maintaining all original requir
           if (!job.stepStatuses) job.stepStatuses = {};
           job.stepStatuses.commit = 'success';
           this.syncStepStatusesToAttempt(job);
-          this.notifyWebhook(job, 'stage_complete', 'commit');
         } catch (e) {
           this.writeLog(job, '[commit] Warning: Commit step encountered an issue: ' + String(e));
           // Don't fail the job for commit issues - the work is done
@@ -1132,7 +811,6 @@ Focus on addressing the failure root cause while maintaining all original requir
         job.stepStatuses.mergeback = 'skipped';
         job.stepStatuses.cleanup = 'skipped';
         this.syncStepStatusesToAttempt(job);
-        this.notifyWebhook(job, 'job_complete');
       } else {
         // Standalone job: perform mergeback and cleanup
         
@@ -1160,24 +838,22 @@ Focus on addressing the failure root cause while maintaining all original requir
         this.writeLog(job, '\n========== CLEANUP SECTION START ==========');
         try {
           this.writeLog(job, '[cleanup] Cleaning up worktree and temporary branch...');
-          const { execSync } = require('child_process');
           
-          // Remove worktree
-          execSync(`git worktree remove "${jobRoot}" --force`, { cwd: repoPath });
-          this.writeLog(job, '[cleanup] ✓ Removed worktree');
+          // Use git module to safely remove worktree and branch
+          git.worktrees.removeSafe(repoPath, jobRoot, { 
+            force: true, 
+            log: (s: string) => this.writeLog(job, `[cleanup] ${s}`) 
+          });
+          git.branches.deleteLocal(repoPath, worktreeBranch, { 
+            force: true,
+            log: (s: string) => this.writeLog(job, `[cleanup] ${s}`) 
+          });
           
-          // Delete the temporary worktree branch (not the targetBranch!)
-          execSync(`git branch -D "${worktreeBranch}"`, { cwd: repoPath });
-          this.writeLog(job, `[cleanup] ✓ Deleted temporary branch '${worktreeBranch}'`);
           this.writeLog(job, `[cleanup] ✓ Target branch '${job.inputs.targetBranch}' preserved`);
-          
-          // Prune worktrees
-          execSync('git worktree prune', { cwd: repoPath });
           this.writeLog(job, '[cleanup] ✓ Cleanup completed');
           if (!job.stepStatuses) job.stepStatuses = {};
           job.stepStatuses.cleanup = 'success';
           this.syncStepStatusesToAttempt(job);
-          this.notifyWebhook(job, 'stage_complete', 'cleanup');
           this.writeLog(job, '========== CLEANUP SECTION END ==========\n');
         } catch (cleanupError) {
           this.writeLog(job, '[cleanup] Warning: ' + String(cleanupError));
@@ -1186,9 +862,6 @@ Focus on addressing the failure root cause while maintaining all original requir
           this.syncStepStatusesToAttempt(job);
           this.writeLog(job, '========== CLEANUP SECTION END ==========\n');
         }
-        
-        // Job completed successfully - send webhook
-        this.notifyWebhook(job, 'job_complete');
       }
     }
     catch(e){ 
@@ -1203,9 +876,6 @@ Focus on addressing the failure root cause while maintaining all original requir
           currentAttempt.endedAt = Date.now();
         }
       }
-      
-      // Job failed - send webhook
-      this.notifyWebhook(job, 'job_failed');
     }
     finally{ 
       job.endedAt=Date.now(); 
@@ -1485,26 +1155,14 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     
     // Stage all changes
     try {
-      execSync('git add -A', { cwd: jobRoot, stdio: 'pipe' });
+      git.repository.stageAll(jobRoot);
     } catch (e) {
       this.writeLog(job, '[commit] No changes to stage');
     }
     
     // Check if there are changes to commit
-    const statusResult = spawnSync('git', ['status', '--porcelain'], { 
-      cwd: jobRoot, 
-      encoding: 'utf-8' 
-    });
-    
-    const hasChanges = statusResult.stdout && statusResult.stdout.trim().length > 0;
-    
-    // Also check for staged changes
-    const diffResult = spawnSync('git', ['diff', '--cached', '--name-only'], {
-      cwd: jobRoot,
-      encoding: 'utf-8'
-    });
-    
-    const hasStagedChanges = diffResult.stdout && diffResult.stdout.trim().length > 0;
+    const hasChanges = git.repository.hasChanges(jobRoot);
+    const hasStagedChanges = git.repository.hasStagedChanges(jobRoot);
     
     if (!hasChanges && !hasStagedChanges) {
       this.writeLog(job, '[commit] No changes to commit - work may have already been committed');
@@ -1586,7 +1244,8 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     
     // Push the commit
     try {
-      const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: jobRoot, encoding: 'utf-8' }).trim();
+      const currentBranch = git.branches.current(jobRoot);
+      const { execSync } = require('child_process');
       execSync(`git push origin "${currentBranch}"`, { cwd: jobRoot, stdio: 'pipe' });
       this.writeLog(job, `[commit] ✓ Pushed commit to origin/${currentBranch}`);
     } catch (pushError) {
@@ -1625,21 +1284,18 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     // Note: All work should already be committed by the commit step
     // Just verify there are no uncommitted changes
     const { spawnSync, execSync } = require('child_process');
-    const statusCheck = spawnSync('git', ['status', '--porcelain'], { cwd: jobRoot, encoding: 'utf-8' });
-    if (statusCheck.stdout && statusCheck.stdout.trim().length > 0) {
+    if (git.repository.hasChanges(jobRoot)) {
       this.writeLog(job, '[mergeback] Warning: Found uncommitted changes, creating safety commit...');
       try {
-        execSync('git add -A', { cwd: jobRoot, stdio: 'pipe' });
-        execSync(`git commit -m "orchestrator(${job.id}): safety commit before mergeback"`, { cwd: jobRoot, stdio: 'pipe' });
+        git.repository.stageAll(jobRoot);
+        git.repository.commit(jobRoot, `orchestrator(${job.id}): safety commit before mergeback`);
       } catch (e) {
         // Ignore - might be nothing to commit
       }
     }
     
     // Verify target branch exists
-    const localCheck = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${targetBranch}`], { cwd: repoPath });
-    
-    if (localCheck.status !== 0) {
+    if (!git.branches.exists(targetBranch, repoPath)) {
       const errorMsg = `Target branch '${targetBranch}' does not exist.`;
       this.writeLog(job, `[mergeback] CRITICAL ERROR: ${errorMsg}`);
       if (!job.stepStatuses) job.stepStatuses = {};
@@ -1672,7 +1328,6 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     if (!job.stepStatuses) job.stepStatuses = {};
     job.stepStatuses.mergeback = 'success';
     this.syncStepStatusesToAttempt(job);
-    this.notifyWebhook(job, 'stage_complete', 'mergeback');
     this.persist();
     
     // Push to remote if configured
