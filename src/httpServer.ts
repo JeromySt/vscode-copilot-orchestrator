@@ -1,7 +1,12 @@
 
 import * as http from 'http';
-import { JobRunner, JobSpec } from '../core/jobRunner';
-import { PlanRunner, PlanSpec } from '../core/planRunner';
+import { JobRunner, JobSpec } from './core/jobRunner';
+import { PlanRunner, PlanSpec } from './core/planRunner';
+import { McpHandler } from './mcp/handler';
+import { Logger, ComponentLogger } from './core/logger';
+
+/** HTTP server component logger */
+const log: ComponentLogger = Logger.for('http');
 
 // Helper to calculate progress percentage based on phase
 function calculateProgress(job: any): number {
@@ -22,7 +27,7 @@ function calculateProgress(job: any): number {
   
   // If current step is running, we're partway through that phase
   const stepStatuses = job.stepStatuses || {};
-  const phases = ['prechecks', 'work', 'postchecks', 'mergeback', 'cleanup'];
+  const phases = ['prechecks', 'work', 'commit', 'postchecks', 'mergeback', 'cleanup'];
   
   let progress = 0;
   for (const phase of phases) {
@@ -80,8 +85,18 @@ function buildJobStatus(job: any) {
 }
 
 export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, port: number){
+  // Get workspace path for MCP handler
+  const vscode = require('vscode');
+  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+  
+  // Create MCP handler instance
+  const mcpHandler = new McpHandler(runner, plans, workspacePath);
+  
   const server = http.createServer(async (req,res)=> { 
-    const url = new URL(req.url||'/', `http://${host}:${port}`); 
+    const url = new URL(req.url||'/', `http://${host}:${port}`);
+    const startTime = Date.now();
+    log.debug('Request received', { method: req.method, path: url.pathname });
+    
     res.setHeader('Content-Type','application/json');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -90,6 +105,30 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
     if (req.method === 'OPTIONS') { res.end(); return; }
     
     try {
+      // POST /mcp - MCP JSON-RPC endpoint
+      if (req.method === 'POST' && url.pathname === '/mcp') {
+        let body = '';
+        req.on('data', (chunk: Buffer) => body += chunk.toString());
+        await new Promise(resolve => req.on('end', resolve));
+        
+        try {
+          const request = JSON.parse(body);
+          log.debug('MCP request', { method: request.method, id: request.id });
+          const response = await mcpHandler.handleRequest(request);
+          const duration = Date.now() - startTime;
+          log.debug('MCP response', { method: request.method, duration: `${duration}ms`, hasError: !!response.error });
+          res.end(JSON.stringify(response));
+        } catch (parseError: any) {
+          log.error('MCP parse error', parseError);
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            id: null,
+            error: { code: -32700, message: 'Parse error' }
+          }));
+        }
+        return;
+      }
+      
       // GET /copilot_jobs - List all jobs
       if (req.method==='GET' && url.pathname==='/copilot_jobs'){ 
         const jobs = runner.list(); 
@@ -246,7 +285,7 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
       // POST /copilot_job/:id/cancel - Cancel job
       if (req.method==='POST' && url.pathname.endsWith('/cancel')){ 
         const id = url.pathname.split('/')[2]; 
-        runner.cancel(id); 
+        (runner as any).cancel(id); 
         res.end(JSON.stringify({ok:true, id, message: 'Job cancelled'})); 
         return; 
       }
@@ -422,7 +461,7 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
             'POST /copilot_jobs/status': 'Get batch status for multiple job IDs',
             'GET /copilot_job/:id/status': 'Get simplified job status (isComplete, progress, metrics, workSummary)',
             'GET /copilot_job/:id': 'Get full job details',
-            'GET /copilot_job/:id/log/:section': 'Get job log section (prechecks/work/postchecks/mergeback/cleanup/full)',
+            'GET /copilot_job/:id/log/:section': 'Get job log section (prechecks/work/commit/postchecks/mergeback/cleanup/full)',
             'POST /copilot_job/:id/cancel': 'Cancel a job',
             'POST /copilot_job/:id/continue': 'Continue work on existing job with new instructions',
             'POST /copilot_job/:id/retry': 'Retry failed job with AI analysis (optional: {workContext: string})'
@@ -453,31 +492,85 @@ export function startHttp(runner: JobRunner, plans: PlanRunner, host: string, po
     } 
   }); 
   
-  // Try to bind - attempt specified host, with fallback for localhost configurations
-  const tryHosts = host === '127.0.0.1' || host === 'localhost' 
-    ? ['::1', '127.0.0.1']  // Try IPv6 first for dual-stack support, fallback to IPv4
-    : [host];               // Use specified host directly
+  server.listen(port, host, () => {
+    console.log(`Copilot Orchestrator HTTP API listening on http://${host}:${port}`);
+    console.log(`MCP endpoint available at http://${host}:${port}/mcp`);
+  }); 
   
-  let hostIndex = 0;
-  
-  function tryBind(): void {
-    const bindHost = tryHosts[hostIndex];
-    server.listen(port, bindHost, () => {
-      const displayHost = bindHost === '::1' ? '[::1]' : bindHost;
-      console.log(`Copilot Orchestrator HTTP API listening on http://${displayHost}:${port}`);
-    });
-  }
-  
-  server.on('error', (err: NodeJS.ErrnoException) => {
-    if ((err.code === 'EADDRNOTAVAIL' || err.code === 'EAFNOSUPPORT') && hostIndex + 1 < tryHosts.length) {
-      hostIndex++;
-      console.log(`Failed to bind to ${tryHosts[hostIndex - 1]}, trying ${tryHosts[hostIndex]}...`);
-      tryBind();
-    } else {
-      console.error('HTTP Server error:', err.message);
-    }
-  });
-  
-  tryBind();
   return server; 
+}
+
+/**
+ * Start HTTP server and return a promise that resolves when it's listening.
+ */
+export function startHttpAsync(runner: JobRunner, plans: PlanRunner, host: string, port: number): Promise<http.Server> {
+  return new Promise((resolve, reject) => {
+    log.info('Starting HTTP server', { host, port });
+    
+    // Get workspace path for MCP handler
+    const vscode = require('vscode');
+    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+    
+    // Create MCP handler instance
+    const mcpHandler = new McpHandler(runner, plans, workspacePath);
+    
+    const server = http.createServer(async (req, res) => { 
+      const url = new URL(req.url || '/', `http://${host}:${port}`);
+      const startTime = Date.now();
+      log.debug('Request received', { method: req.method, path: url.pathname });
+      
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      
+      if (req.method === 'OPTIONS') { res.end(); return; }
+      
+      try {
+        // POST /mcp - MCP JSON-RPC endpoint
+        if (req.method === 'POST' && url.pathname === '/mcp') {
+          let body = '';
+          req.on('data', (chunk: Buffer) => body += chunk.toString());
+          await new Promise(r => req.on('end', r));
+          
+          try {
+            const request = JSON.parse(body);
+            log.debug('MCP request', { method: request.method, id: request.id });
+            const response = await mcpHandler.handleRequest(request);
+            const duration = Date.now() - startTime;
+            log.debug('MCP response', { method: request.method, duration: `${duration}ms`, hasError: !!response.error });
+            res.end(JSON.stringify(response));
+          } catch (parseError: any) {
+            log.error('MCP parse error', parseError);
+            res.end(JSON.stringify({
+              jsonrpc: '2.0',
+              id: null,
+              error: { code: -32700, message: 'Parse error' }
+            }));
+          }
+          return;
+        }
+        
+        // Delegate to the sync handler for other routes
+        // (This is a simplified version - in practice you'd refactor to share the handler)
+        log.debug('Route not found', { path: url.pathname });
+        res.statusCode = 404;
+        res.end(JSON.stringify({ error: 'Not found', path: url.pathname }));
+      } catch (e: any) {
+        log.error('Request handling error', e);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ error: String(e), message: e.message })); 
+      } 
+    }); 
+    
+    server.on('error', (err) => {
+      log.error('HTTP server error', err);
+      reject(err);
+    });
+    
+    server.listen(port, host, () => {
+      log.info('HTTP server started', { url: `http://${host}:${port}`, mcpEndpoint: `http://${host}:${port}/mcp` });
+      resolve(server);
+    }); 
+  });
 }

@@ -3,7 +3,14 @@ import { spawnSync } from 'child_process';
 import * as path from 'path';
 import { ensureDir } from '../core/utils';
 export type WorktreePlan = { jobId: string; repoPath: string; worktreeRoot: string; baseBranch: string; targetBranch: string };
-function sh(cmd: string, cwd: string, log: (s:string)=>void) { const p = spawnSync(cmd, { cwd, shell:true, stdio:'pipe', encoding:'utf-8' }); if (p.stdout) log(p.stdout); if (p.stderr) log(p.stderr); if (p.status!==0) throw new Error(`Command failed (${p.status}): ${cmd}`); }
+
+function sh(cmd: string, cwd: string, log: (s:string)=>void) { 
+  const p = spawnSync(cmd, { cwd, shell:true, stdio:'pipe', encoding:'utf-8' }); 
+  if (p.stdout) log(p.stdout); 
+  if (p.stderr) log(p.stderr); 
+  if (p.status!==0) throw new Error(`Command failed (${p.status}): ${cmd}`); 
+}
+
 export function createWorktrees(plan: WorktreePlan, log:(s:string)=>void) {
   const { repoPath, worktreeRoot, baseBranch, targetBranch, jobId } = plan;
   const fs = require('fs');
@@ -80,12 +87,17 @@ export function createWorktrees(plan: WorktreePlan, log:(s:string)=>void) {
   // Create new worktree
   ensureDir(jobRoot);
   
-  // Use copilot_jobs/{guid} naming convention for safety and framework association
-  const jobBranch = `copilot_jobs/${jobId}`;
+  // The worktree branch IS the targetBranch - no separate "job branch" needed
+  // This avoids creating duplicate branches that point to the same commit
+  // - baseBranch: where we start from (user branch or parent job's targetBranch)
+  // - targetBranch: the worktree branch where work happens AND the completed branch
+  const worktreeBranch = targetBranch;
   
-  // Always create worktree from local branch (not origin) - let caller manage pushes
-  // This ensures worktrees work with local-only branches
-  sh(`git worktree add -B ${jobBranch} "${jobRoot}" "${baseBranch}"`, repoPath, log);
+  log(`[orchestrator] Creating worktree on branch '${worktreeBranch}' from '${baseBranch}'`);
+  
+  // Use -B to create or reset the branch to baseBranch's HEAD
+  // This creates the worktree AND the branch in one operation
+  sh(`git worktree add -B "${worktreeBranch}" "${jobRoot}" "${baseBranch}"`, repoPath, log);
   
   sh(`git submodule update --init --recursive`, repoPath, log);
   sh(`git -C "${jobRoot}" config submodule.recurse true`, repoPath, log);
@@ -97,7 +109,8 @@ export function createWorktrees(plan: WorktreePlan, log:(s:string)=>void) {
     const branch = (branchQ.stdout||'').trim() || 'main';
     const abs = path.join(repoPath, smPath); const dest = path.join(jobRoot, smPath); ensureDir(path.dirname(dest));
     const check = spawnSync('git', ['show-ref','--verify','--quiet',`refs/remotes/origin/${branch}`], { cwd: abs });
-    if (check.status===0) sh(`git worktree add -B ${jobBranch} "${dest}" "origin/${branch}"`, abs, log);
+    // Use worktreeBranch for submodule worktrees as well (consistent naming)
+    if (check.status===0) sh(`git worktree add -B "${worktreeBranch}" "${dest}" "origin/${branch}"`, abs, log);
     else { const head = spawnSync('git',['rev-parse','HEAD'],{cwd:abs,encoding:'utf-8'}).stdout.trim(); sh(`git worktree add "${dest}" ${head}`, abs, log); }
   }
   return jobRoot;

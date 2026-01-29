@@ -68,21 +68,11 @@ async function handleAddToCopilot(
   host: string,
   port: number
 ): Promise<void> {
-  const serverPath = vscode.Uri.joinPath(
-    context.extensionUri, 
-    'server', 
-    'mcp-server.js'
-  ).fsPath;
-  
   const config = {
     mcpServers: {
       'copilot-orchestrator': {
-        command: 'node',
-        args: [serverPath],
-        env: {
-          ORCH_HOST: host,
-          ORCH_PORT: String(port)
-        }
+        type: 'http',
+        url: `http://${host}:${port}/mcp`
       }
     }
   };
@@ -127,12 +117,6 @@ async function handleCopyInstructions(
   host: string,
   port: number
 ): Promise<void> {
-  const serverPath = vscode.Uri.joinPath(
-    context.extensionUri, 
-    'server', 
-    'mcp-server.js'
-  ).fsPath;
-  
   const instructions = `# Add Copilot Orchestrator to GitHub Copilot Chat
 
 1. Locate your Copilot configuration file:
@@ -145,12 +129,8 @@ async function handleCopyInstructions(
 {
   "mcpServers": {
     "copilot-orchestrator": {
-      "command": "node",
-      "args": ["${serverPath}"],
-      "env": {
-        "ORCH_HOST": "${host}",
-        "ORCH_PORT": "${port}"
-      }
+      "type": "http",
+      "url": "http://${host}:${port}/mcp"
     }
   }
 }
@@ -174,25 +154,19 @@ function showInlineInstructions(
   host: string,
   port: number
 ): void {
-  const serverPath = vscode.Uri.joinPath(
-    context.extensionUri, 
-    'server', 
-    'mcp-server.js'
-  ).fsPath;
-  
   const outputChannel = vscode.window.createOutputChannel('Copilot Orchestrator Setup');
   outputChannel.appendLine('=== Copilot Orchestrator MCP Setup ===\n');
   outputChannel.appendLine('Add this to your GitHub Copilot configuration:\n');
   outputChannel.appendLine(JSON.stringify({
     mcpServers: {
       'copilot-orchestrator': {
-        command: 'node',
-        args: [serverPath],
-        env: { ORCH_HOST: host, ORCH_PORT: String(port) }
+        type: 'http',
+        url: `http://${host}:${port}/mcp`
       }
     }
   }, null, 2));
   outputChannel.appendLine('\n\nHTTP API available at: http://' + host + ':' + port);
+  outputChannel.appendLine('MCP endpoint: http://' + host + ':' + port + '/mcp');
   outputChannel.show();
 }
 

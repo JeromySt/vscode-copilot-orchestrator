@@ -2,48 +2,46 @@
  * @fileoverview Interface for MCP server management.
  * 
  * The MCP (Model Context Protocol) server allows external AI agents
- * to interact with the orchestrator.
+ * to interact with the orchestrator via stdio transport.
  * 
  * @module interfaces/IMcpManager
  */
 
 /**
- * Interface for managing the MCP HTTP server lifecycle.
+ * Interface for managing the MCP server status and configuration.
  * 
- * The MCP server is a separate Node.js process that provides
- * SSE (Server-Sent Events) for real-time communication with
- * AI agents like GitHub Copilot.
+ * The MCP server is spawned by VS Code via stdio transport for
+ * communication with GitHub Copilot. This interface manages the
+ * status display and configuration.
  * 
  * @example
  * ```typescript
  * if (config.mcp.enabled) {
- *   mcpManager.start();
- *   // MCP server now listening on mcpManager.getEndpoint()
+ *   mcpManager.start(); // Mark as available
+ *   mcpManager.setRegisteredWithVSCode(true);
  * }
  * ```
  */
 export interface IMcpManager {
   /**
-   * Start the MCP server.
-   * No-op if already running.
+   * Mark the MCP server as available.
    */
   start(): void;
   
   /**
-   * Stop the MCP server.
-   * Gracefully terminates the server process.
+   * Mark the MCP server as stopped.
    */
   stop(): void;
   
   /**
-   * Check if the MCP server is currently running.
-   * @returns true if the server process is alive
+   * Check if the MCP server is available.
+   * @returns true if the server is registered/available
    */
   isRunning(): boolean;
   
   /**
-   * Get the endpoint URL for the MCP server.
-   * @returns URL string (e.g., 'http://127.0.0.1:39219')
+   * Get the MCP server identifier.
+   * @returns Server identifier string
    */
   getEndpoint(): string;
   
@@ -52,5 +50,5 @@ export interface IMcpManager {
    * @param callback - Called when status changes
    * @returns Unsubscribe function
    */
-  onStatusChange(callback: (status: 'running' | 'stopped' | 'error') => void): () => void;
+  onStatusChange(callback: (status: 'connected' | 'available' | 'stopped' | 'error') => void): () => void;
 }

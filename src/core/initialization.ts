@@ -9,16 +9,18 @@
  */
 
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { JobRunner, Job } from './jobRunner';
-import { PlanRunner } from './planRunner';
+import { PlanRunner, PlanSpec } from './planRunner';
 import { ProcessMonitor } from '../process/processMonitor';
 import { McpServerManager, McpConfig } from '../mcp/mcpServerManager';
 import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
-import { startHttp } from '../http/httpServer';
 import { JobsViewProvider } from '../ui/viewProvider';
+import { PlansViewProvider, Plan, PlanDetailPanel } from '../ui';
 import { OrchestratorNotebookSerializer, registerNotebookController } from '../ui/notebook';
 import { attachStatusBar } from '../ui/statusBar';
-import { getJobDetailsHtml } from '../ui/templates/jobDetailsHtml';
+import { getJobDetailsHtml, getJobDetailsLoadingHtml } from '../ui/templates/jobDetailsHtml';
 import { ensureCopilotCliInteractive, registerCopilotCliCheck } from '../agent/cliCheck';
 import { 
   registerMcpCommands, 
@@ -97,12 +99,14 @@ export function loadConfiguration(): ExtensionConfig {
     http: {
       enabled: httpCfg.get<boolean>('enabled', true),
       host: httpCfg.get<string>('host', 'localhost'),
-      port: httpCfg.get<number>('port', 39218)
+      port: httpCfg.get<number>('port', 39219)
     },
     mcp: {
+      // MCP is now served via HTTP endpoint, so use HTTP config
+      // The 'enabled' flag controls whether MCP is registered with VS Code
       enabled: mcpCfg.get<boolean>('enabled', true),
-      host: mcpCfg.get<string>('host', 'localhost'),
-      port: mcpCfg.get<number>('port', 39219)
+      host: httpCfg.get<string>('host', 'localhost'),
+      port: httpCfg.get<number>('port', 39219)
     },
     merge: {
       mode: mergeCfg.get<'merge' | 'rebase' | 'squash'>('mode', 'squash'),
@@ -154,27 +158,36 @@ export function initializeCoreServices(
 // ============================================================================
 
 /**
- * Initialize the HTTP REST API server.
+ * Initialize the HTTP server with MCP endpoint.
+ * Returns a promise that resolves when the server is listening.
  */
-export function initializeHttpServer(
+export async function initializeHttpServer(
   context: vscode.ExtensionContext,
   runner: JobRunner,
   plans: PlanRunner,
   config: HttpConfig
-): void {
-  console.log('[Init] Initializing HTTP server...');
+): Promise<void> {
+  console.log(`[Init] Starting HTTP server on ${config.host}:${config.port}...`);
   
-  if (!config.enabled) {
-    console.log('[Init] HTTP server disabled in settings');
-    return;
-  }
-
+  // Import and start the HTTP server (async version)
+  const { startHttpAsync } = require('../httpServer');
+  
   try {
-    const server = startHttp(runner, plans, config.host, config.port);
-    context.subscriptions.push({ dispose: () => server.close() });
-    console.log(`[Init] HTTP server started on ${config.host}:${config.port}`);
-  } catch (error) {
-    console.error('[Init] Failed to start HTTP server:', error);
+    const server = await startHttpAsync(runner, plans, config.host, config.port);
+    
+    // Register cleanup
+    context.subscriptions.push({
+      dispose: () => {
+        console.log('[Init] Stopping HTTP server...');
+        server.close();
+      }
+    });
+    
+    console.log(`[Init] HTTP server started at http://${config.host}:${config.port}`);
+    console.log(`[Init] MCP endpoint available at http://${config.host}:${config.port}/mcp`);
+  } catch (error: any) {
+    console.error(`[Init] Failed to start HTTP server: ${error.message}`);
+    vscode.window.showErrorMessage(`Failed to start Copilot Orchestrator HTTP server: ${error.message}`);
   }
 }
 
@@ -190,45 +203,46 @@ export function initializeMcpServer(
   httpConfig: HttpConfig,
   mcpConfig: McpServerConfig
 ): McpServerManager | undefined {
-  console.log('[Init] Initializing MCP server...');
+  console.log('[Init] Initializing MCP registration...');
   
   if (!mcpConfig.enabled) {
-    console.log('[Init] MCP server disabled in settings');
+    console.log('[Init] MCP registration disabled in settings');
     return undefined;
   }
 
-  const serverPath = vscode.Uri.joinPath(
-    context.extensionUri, 
-    'server', 
-    'mcp-server.js'
-  ).fsPath;
+  // MCP is served via HTTP endpoint - no separate server needed
+  // The serverPath is kept for backwards compatibility but not used
+  const serverPath = '';
 
+  // Get workspace path for the MCP server
+  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+
+  // Use HTTP config for the MCP endpoint since it's served via HTTP
   const manager = new McpServerManager(context, {
     enabled: true,
-    host: mcpConfig.host,
-    port: mcpConfig.port,
-    orchestratorHost: httpConfig.host,
-    orchestratorPort: httpConfig.port,
-    serverPath
+    host: httpConfig.host,
+    port: httpConfig.port,
+    serverPath,
+    workspacePath
   });
 
   manager.start();
   context.subscriptions.push({ dispose: () => manager.stop() });
 
   // Register with VS Code for automatic GitHub Copilot integration
+  // Use HTTP config since MCP is served via HTTP endpoint
   const providerDisposable = registerMcpDefinitionProvider(context, {
-    host: mcpConfig.host,
-    port: mcpConfig.port,
-    orchestratorPort: httpConfig.port,
-    serverPath
+    host: httpConfig.host,
+    port: httpConfig.port,
+    serverPath,
+    workspacePath
   });
   context.subscriptions.push(providerDisposable);
   
   // Update status to indicate MCP is registered with VS Code
-  // even if the HTTP server has issues
   manager.setRegisteredWithVSCode(true);
 
-  console.log(`[Init] MCP server started on ${mcpConfig.host}:${mcpConfig.port}`);
+  console.log(`[Init] MCP registered via HTTP endpoint at http://${httpConfig.host}:${httpConfig.port}/mcp`);
   return manager;
 }
 
@@ -257,6 +271,181 @@ export function initializeSidebarView(
 
   console.log('[Init] Sidebar view ready');
   return jobsView;
+}
+
+/**
+ * Initialize the sidebar plans view.
+ */
+export function initializePlansView(
+  context: vscode.ExtensionContext,
+  planRunner: PlanRunner
+): PlansViewProvider {
+  console.log('[Init] Initializing plans view...');
+  
+  const plansView = new PlansViewProvider(context);
+  
+  // Create data provider that uses the planRunner directly
+  const loadPlans = (): Plan[] => {
+    const runnerPlans = planRunner.list();
+    const specs = planRunner.listSpecs ? planRunner.listSpecs() : [];
+    
+    return runnerPlans.map(p => {
+      const spec = specs.find((s: PlanSpec) => s.id === p.id);
+      const jobIdMap = planRunner.getJobIdMap ? planRunner.getJobIdMap(p.id) : undefined;
+      
+      // Debug: log spec and subPlans availability
+      console.log(`[loadPlans] Plan ${p.id}: spec found=${!!spec}, subPlans=${spec?.subPlans?.length || 0}`);
+      
+      return {
+        id: p.id,
+        name: spec?.name || p.id,
+        status: p.status as Plan['status'],
+        maxParallel: spec?.maxParallel || 1,
+        jobs: (spec?.jobs || []).map(j => ({
+          planJobId: j.id,
+          jobId: jobIdMap?.get(j.id) || null,
+          name: j.name,
+          task: j.task,
+          status: p.done.includes(j.id) ? 'completed' as const :
+                  p.running.includes(j.id) ? 'running' as const :
+                  p.failed.includes(j.id) ? 'failed' as const :
+                  'pending' as const,
+          consumesFrom: j.consumesFrom
+        })),
+        queued: p.queued,
+        running: p.running,
+        completed: p.done,
+        failed: p.failed,
+        startedAt: p.startedAt || null,
+        endedAt: p.endedAt || null,
+        baseBranch: spec?.baseBranch,
+        targetBranch: spec?.targetBranch || spec?.baseBranch,
+        // RI merge status
+        riMergeCompleted: p.riMergeCompleted,
+        // Sub-plan information from spec and state
+        subPlans: spec?.subPlans,
+        pendingSubPlans: p.pendingSubPlans,
+        runningSubPlans: p.runningSubPlans,
+        completedSubPlans: p.completedSubPlans,
+        failedSubPlans: p.failedSubPlans,
+        // Parent plan ID (if this is a sub-plan)
+        parentPlanId: spec?.parentPlanId,
+        // Aggregated work summary
+        aggregatedWorkSummary: p.aggregatedWorkSummary
+      };
+    });
+  };
+  
+  const getPlan = (id: string): Plan | undefined => {
+    return loadPlans().find(p => p.id === id);
+  };
+  
+  plansView.setDataProvider({
+    getPlans: loadPlans,
+    getPlan
+  });
+  
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(PlansViewProvider.viewType, plansView)
+  );
+  
+  // Refresh when plan runner state changes
+  context.subscriptions.push(
+    planRunner.onDidChange(() => plansView.refresh())
+  );
+  
+  // Register plan commands
+  context.subscriptions.push(
+    vscode.commands.registerCommand('orchestrator.showPlanDetails', (planId: string) => {
+      PlanDetailPanel.createOrShow(context.extensionUri, planId, getPlan);
+    }),
+    
+    vscode.commands.registerCommand('orchestrator.cancelPlan', async (planId?: string) => {
+      if (!planId) {
+        const plans = loadPlans().filter(p => !['completed', 'succeeded', 'failed', 'canceled', 'partial'].includes(p.status));
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No active plans to cancel');
+          return;
+        }
+        const selected = await vscode.window.showQuickPick(
+          plans.map(p => ({ label: p.name, description: p.status, id: p.id })),
+          { placeHolder: 'Select a plan to cancel' }
+        );
+        if (!selected) return;
+        planId = selected.id;
+      }
+      
+      planRunner.cancel(planId);
+      vscode.window.showInformationMessage(`Plan "${planId}" has been canceled`);
+    }),
+    
+    vscode.commands.registerCommand('orchestrator.retryPlan', async (planId?: string) => {
+      if (!planId) {
+        const plans = loadPlans().filter(p => ['failed', 'partial'].includes(p.status));
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No failed plans to retry');
+          return;
+        }
+        const selected = await vscode.window.showQuickPick(
+          plans.map(p => ({ label: p.name, description: `${p.status} - ${p.failed.length} failed jobs`, id: p.id })),
+          { placeHolder: 'Select a plan to retry' }
+        );
+        if (!selected) return;
+        planId = selected.id;
+      }
+      
+      const success = planRunner.retry(planId);
+      if (success) {
+        vscode.window.showInformationMessage(`Plan "${planId}" retry started`);
+      } else {
+        vscode.window.showErrorMessage(`Failed to retry plan "${planId}"`);
+      }
+    }),
+    
+    vscode.commands.registerCommand('orchestrator.deletePlan', async (planId?: string) => {
+      if (!planId) {
+        const plans = loadPlans();
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No plans to delete');
+          return;
+        }
+        const selected = await vscode.window.showQuickPick(
+          plans.map(p => ({ label: p.name, description: p.status, id: p.id })),
+          { placeHolder: 'Select a plan to delete' }
+        );
+        if (!selected) return;
+        planId = selected.id;
+      }
+      
+      const plan = loadPlans().find(p => p.id === planId);
+      if (!plan) {
+        vscode.window.showErrorMessage(`Plan not found`);
+        return;
+      }
+      
+      const warningMsg = ['running', 'queued'].includes(plan.status)
+        ? `Plan "${plan.name}" is currently ${plan.status}. It will be stopped and deleted. Continue?`
+        : `Delete plan "${plan.name}"?`;
+      
+      const confirm = await vscode.window.showWarningMessage(warningMsg, { modal: true }, 'Delete');
+      if (confirm === 'Delete') {
+        const success = planRunner.delete(planId);
+        if (success) {
+          vscode.window.showInformationMessage(`Plan "${plan.name}" deleted`);
+          plansView.refresh();
+        } else {
+          vscode.window.showErrorMessage(`Failed to delete plan "${plan.name}"`);
+        }
+      }
+    }),
+    
+    vscode.commands.registerCommand('orchestrator.refreshPlans', () => {
+      plansView.refresh();
+    })
+  );
+
+  console.log('[Init] Plans view ready');
+  return plansView;
 }
 
 // ============================================================================
@@ -717,44 +906,71 @@ async function handleShowJobDetails(
     jobId = (pick as any).jobId;
   }
 
-  const job = runner.list().find(j => j.id === jobId);
-  if (!job || !jobId) {
-    vscode.window.showErrorMessage(`Job ${jobId} not found`);
+  // At this point jobId must be defined
+  if (!jobId) {
     return;
   }
 
-  // Check if panel already exists
+  // Check if panel already exists - reveal immediately
   const existingPanel = jobDetailPanels.get(jobId);
   if (existingPanel) {
-    existingPanel.reveal(vscode.ViewColumn.Beside);
-    existingPanel.webview.html = getJobDetailsHtml(job as any);
+    existingPanel.reveal(vscode.ViewColumn.Active);
+    // Show loading state while refreshing
+    existingPanel.webview.html = getJobDetailsLoadingHtml('Refreshing...');
+    // Defer content loading to allow loading state to render
+    const existingJobId = jobId;
+    setImmediate(() => {
+      const job = runner.list().find(j => j.id === existingJobId);
+      if (job) {
+        existingPanel.webview.html = getJobDetailsHtml(job as any);
+      }
+    });
     return;
   }
 
-  // Create new panel
+  // Create new panel IMMEDIATELY with loading state
   const panel = vscode.window.createWebviewPanel(
     'jobDetails',
-    `Job: ${job.name}`,
-    vscode.ViewColumn.One,
+    `Job: Loading...`,
+    vscode.ViewColumn.Active,
     { enableScripts: true, enableCommandUris: true }
   );
 
-  jobDetailPanels.set(jobId, panel);
-  (panel as any)._lastStatus = job.status;
+  // Show loading state right away
+  panel.webview.html = getJobDetailsLoadingHtml();
+
+  // Store the jobId in a const to ensure it's not undefined for closures
+  const currentJobId = jobId;
+  jobDetailPanels.set(currentJobId, panel);
 
   panel.onDidDispose(() => {
-    jobDetailPanels.delete(jobId!);
+    jobDetailPanels.delete(currentJobId);
   });
 
-  // Set up message handler
-  setupJobDetailMessageHandler(panel, runner, jobId, jobDetailPanels, processMonitor);
+  // Defer content loading to allow loading state to render
+  setImmediate(() => {
+    // Now load the actual job data
+    const job = runner.list().find(j => j.id === currentJobId);
+    if (!job) {
+      panel.webview.html = `<html><body style="padding:20px;font-family:sans-serif;color:#cc0000;"><h2>❌ Job not found</h2><p>Job ${currentJobId} could not be located.</p></body></html>`;
+      return;
+    }
 
-  panel.webview.html = getJobDetailsHtml(job as any);
+    // Update panel title
+    panel.title = `Job: ${job.name}`;
+    (panel as any)._lastStatus = job.status;
 
-  // Auto-refresh for running jobs
-  if (job.status === 'running' || job.status === 'queued') {
-    setupAutoRefresh(panel, runner, jobId, jobDetailPanels);
-  }
+    // Set up message handler
+    setupJobDetailMessageHandler(panel, runner, currentJobId, jobDetailPanels, processMonitor);
+
+    // Now render the full content
+    panel.webview.html = getJobDetailsHtml(job as any);
+
+    // Auto-refresh for running jobs
+    if (job.status === 'running' || job.status === 'queued') {
+      setupAutoRefresh(panel, runner, currentJobId, jobDetailPanels);
+    }
+  });
 }
 
 function setupJobDetailMessageHandler(

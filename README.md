@@ -104,11 +104,31 @@ Each job includes:
 - **Phase Navigation**: Filter logs by Prechecks, Work, Postchecks, Mergeback, or Cleanup
 - **Work History**: Timeline of task iterations for retried jobs
 
+### 📋 Plans UI
+
+The sidebar includes two views:
+
+**Jobs View** - Shows individual job status:
+- Quick status overview with progress indicators
+- Click any job to open detailed logs and information
+- Real-time updates as jobs progress
+
+**Plans View** - Shows multi-job plan status:
+- Visual progress bars showing completion percentage
+- Job counts by status (completed/running/failed)
+- Click to open the **Plan Detail Panel**
+
+**Plan Detail Panel** - Visual execution pipeline:
+- Stage-based layout showing job dependencies
+- Color-coded status indicators (✓ completed, ◐ running, ✗ failed)
+- Click individual job cards to view their detailed logs
+- Real-time updates as plan executes
+
 ### 🔌 MCP (Model Context Protocol) Integration
 
 The orchestrator exposes a full MCP server that integrates directly with GitHub Copilot Chat:
 
-**Available MCP Tools:**
+**Job Tools:**
 | Tool | Description |
 |------|-------------|
 | `create_copilot_job` | Create a new orchestrator job |
@@ -119,7 +139,18 @@ The orchestrator exposes a full MCP server that integrates directly with GitHub 
 | `continue_copilot_job_work` | Add more work to existing job |
 | `retry_copilot_job` | Retry with AI-guided analysis |
 | `cancel_copilot_job` | Cancel a running job |
+| `delete_copilot_job` | Delete a job |
+| `delete_copilot_jobs` | Delete multiple jobs by ID |
 | `list_copilot_jobs` | List all jobs |
+
+**Plan Tools (Multi-Job Workflows):**
+| Tool | Description |
+|------|-------------|
+| `create_copilot_plan` | Create a plan with multiple dependent jobs |
+| `get_copilot_plan_status` | Get plan progress and job statuses |
+| `list_copilot_plans` | List all plans |
+| `cancel_copilot_plan` | Cancel a plan and all its jobs |
+| `delete_copilot_plan` | Delete a plan and optionally its jobs |
 
 **Example Copilot Chat interaction:**
 ```
@@ -135,50 +166,170 @@ Copilot: I'll create an orchestrator job for that task...
          - Progress: 45%
 ```
 
-### 📡 HTTP REST API
-
-Full REST API for external integrations:
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/copilot_jobs` | GET | List all jobs |
-| `/copilot_job` | POST | Create new job |
-| `/copilot_job/:id` | GET | Get job details |
-| `/copilot_job/:id/status` | GET | Get job status |
-| `/copilot_job/:id/cancel` | POST | Cancel job |
-| `/copilot_job/:id/retry` | POST | Retry failed job |
-| `/copilot_job/:id/continue` | POST | Continue with new work |
-| `/copilot_job/:id/log/:section` | GET | Get log section |
-
 ### 📋 Multi-Job Plans
 
 Orchestrate dependent jobs with execution plans:
 
+Plans allow you to run multiple jobs with dependencies. Jobs execute in parallel up to `maxParallel`, but respect dependency ordering.
+
+**Example: Code Quality Pipeline**
 ```json
 {
-  "id": "PLAN-telemetry-hardening",
+  "name": "Code Quality Pipeline",
   "maxParallel": 2,
   "jobs": [
-    { "id": "format", "inputs": { "baseBranch": "main", "targetBranch": "job/format" } },
-    { "id": "lint",   "dependsOn": ["format"], "inputs": { "targetBranch": "job/lint" } },
-    { "id": "tests",  "dependsOn": ["lint"],   "inputs": { "targetBranch": "job/tests" } },
-    { "id": "docs",   "dependsOn": ["tests"],  "inputs": { "targetBranch": "job/docs" } }
+    { 
+      "id": "format", 
+      "task": "Format all TypeScript files",
+      "work": "@agent Run prettier on all .ts files and fix formatting issues"
+    },
+    { 
+      "id": "lint", 
+      "task": "Fix lint errors",
+      "dependsOn": ["format"],
+      "work": "@agent Fix all ESLint errors, don't just disable rules"
+    },
+    { 
+      "id": "tests", 
+      "task": "Add missing tests",
+      "dependsOn": ["lint"],
+      "work": "@agent Add unit tests for any untested functions",
+      "postchecks": "npm test"
+    },
+    { 
+      "id": "docs", 
+      "task": "Update documentation",
+      "dependsOn": ["tests"],
+      "work": "@agent Update JSDoc comments and README for any changed APIs"
+    }
   ]
 }
 ```
 
-### 🔔 Webhook Notifications
+**Execution order:**
+```
+        ┌─────────┐
+        │ format  │  ← Starts immediately
+        └────┬────┘
+             │
+        ┌────▼────┐
+        │  lint   │  ← Waits for format
+        └────┬────┘
+             │
+        ┌────▼────┐
+        │  tests  │  ← Waits for lint
+        └────┬────┘
+             │
+        ┌────▼────┐
+        │  docs   │  ← Waits for tests
+        └─────────┘
+```
 
-Configure webhooks to receive job events:
+### 🔗 Nested Plans (Plans within Plans)
 
+For complex workflows, a job can itself be a complete plan. This enables hierarchical orchestration where one step triggers an entire sub-pipeline:
+
+**Example: Full Release Pipeline with Nested Testing Plan**
 ```json
 {
-  "webhook": {
-    "url": "http://localhost:8080/callback",
-    "events": ["stage_complete", "job_complete", "job_failed"]
-  }
+  "name": "Release Pipeline",
+  "maxParallel": 3,
+  "jobs": [
+    {
+      "id": "prepare",
+      "name": "Prepare Release",
+      "task": "Bump version and update changelog",
+      "work": "@agent Update version in package.json and add changelog entry"
+    },
+    {
+      "id": "api-service",
+      "name": "API Service",
+      "task": "Implement API changes",
+      "dependsOn": ["prepare"],
+      "work": "@agent Implement the new REST endpoints per the API spec"
+    },
+    {
+      "id": "web-client",
+      "name": "Web Client",
+      "task": "Update web frontend",
+      "dependsOn": ["prepare"],
+      "work": "@agent Update React components to use new API endpoints"
+    },
+    {
+      "id": "mobile-client",
+      "name": "Mobile Client", 
+      "task": "Update mobile app",
+      "dependsOn": ["prepare"],
+      "work": "@agent Update React Native screens for new features"
+    },
+    {
+      "id": "docs-update",
+      "name": "Documentation",
+      "task": "Update all documentation",
+      "dependsOn": ["prepare"],
+      "work": "@agent Update API docs, README, and user guide"
+    },
+    {
+      "id": "testing-suite",
+      "name": "Comprehensive Testing",
+      "task": "Run full test suite across all components",
+      "dependsOn": ["api-service", "web-client", "mobile-client", "docs-update"],
+      "plan": {
+        "name": "Testing Sub-Plan",
+        "maxParallel": 4,
+        "jobs": [
+          { "id": "unit-tests", "task": "Run unit tests", "work": "npm run test:unit" },
+          { "id": "integration-tests", "task": "Run integration tests", "work": "npm run test:integration" },
+          { "id": "e2e-tests", "task": "Run E2E tests", "work": "npm run test:e2e" },
+          { "id": "perf-tests", "task": "Run performance tests", "work": "npm run test:perf" }
+        ]
+      }
+    },
+    {
+      "id": "deploy",
+      "name": "Deploy Release",
+      "task": "Deploy to production",
+      "dependsOn": ["testing-suite"],
+      "work": "@agent Create release tag and trigger deployment workflow",
+      "postchecks": "npm run smoke-test"
+    }
+  ]
 }
 ```
+
+**Execution visualization:**
+```
+                              ┌───────────┐
+                              │  prepare  │  ← Stage 1: Single pre-step
+                              └─────┬─────┘
+            ┌─────────────┬─────────┴─────────┬─────────────┐
+            │             │                   │             │
+      ┌─────▼─────┐ ┌─────▼────┐ ┌───────▼───┐ ┌─────▼──────┐
+      │api-service│ │web-client│ │mobile-cli │ │docs-update │  ← Stage 2: 4 parallel
+      └─────┬─────┘ └─────┬────┘ └─────┬─────┘ └──────┬─────┘
+            │             │            │              │
+            └─────────────┴──────┬─────┴──────────────┘
+                                 │
+                   ┌─────────────▼─────────────┐
+                   │      testing-suite        │  ← Stage 3: Nested plan!
+                   │  ┌─────────────────────┐  │
+                   │  │   Testing Sub-Plan  │  │
+                   │  │  ┌────┐ ┌────┐      │  │
+                   │  │  │unit│ │intg│ ...  │  │   (4 parallel test jobs)
+                   │  │  └────┘ └────┘      │  │
+                   │  └─────────────────────┘  │
+                   └─────────────┬─────────────┘
+                                 │
+                   ┌─────────────▼─────────────┐
+                  │         deploy            │  ← Stage 4: Single post-step
+                  └───────────────────────────┘
+```
+
+This pattern enables:
+- **Modular pipelines**: Reuse testing plans across different parent plans
+- **Deep orchestration**: Nest plans to any depth for complex workflows
+- **Parallel efficiency**: Each level runs at its own `maxParallel` setting
+- **Unified monitoring**: Track nested plan progress in the Plan Detail Panel
 
 ---
 
@@ -234,18 +385,6 @@ Click the **Copilot** icon in the Activity Bar (left sidebar) to open the Jobs p
 input validation to the user registration form
 ```
 
-**Option C: Via HTTP API**
-```bash
-curl -X POST http://localhost:39218/copilot_job \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task": "Add input validation",
-    "repoPath": "/path/to/repo",
-    "baseBranch": "main",
-    "work": "@agent Add comprehensive input validation to user registration"
-  }'
-```
-
 ### 3. Monitor Progress
 
 - Watch the job in the **Copilot: Jobs** sidebar
@@ -268,21 +407,18 @@ When the job completes:
 The extension automatically registers the MCP server with VS Code:
 - **Status Bar**: Shows MCP connection state
 - **Copilot Chat**: Tools appear automatically in tool selection
+- **HTTP Transport**: MCP endpoint at `http://localhost:39219/mcp`
 
 ### Manual Configuration
 
-If needed, add to your Copilot settings:
+If needed, add to your VS Code settings or `mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "copilot-orchestrator": {
-      "command": "node",
-      "args": ["<extension-path>/server/mcp-server.js"],
-      "env": {
-        "ORCH_HOST": "localhost",
-        "ORCH_PORT": "39218"
-      }
+      "type": "http",
+      "url": "http://localhost:39219/mcp"
     }
   }
 }
@@ -296,15 +432,14 @@ If needed, add to your Copilot settings:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `copilotOrchestrator.http.enabled` | `true` | Enable HTTP REST API |
-| `copilotOrchestrator.http.port` | `39218` | HTTP API port |
 | `copilotOrchestrator.mcp.enabled` | `true` | Enable MCP server |
-| `copilotOrchestrator.mcp.port` | `39219` | MCP server port |
 | `copilotOrchestrator.worktreeRoot` | `.worktrees` | Worktree directory |
 | `copilotOrchestrator.maxWorkers` | `0` (auto) | Max concurrent jobs |
 | `copilotOrchestrator.merge.mode` | `squash` | Merge strategy |
+| `copilotOrchestrator.merge.prefer` | `theirs` | Conflict resolution preference |
 | `copilotOrchestrator.merge.pushOnSuccess` | `false` | Auto-push after merge |
 | `copilotOrchestrator.copilotCli.required` | `true` | Require Copilot CLI |
+| `copilotOrchestrator.copilotCli.preferredInstall` | `auto` | Install method (gh/npm/auto) |
 | `copilotOrchestrator.copilotCli.enforceInJobs` | `true` | Fail fast without CLI |
 
 ### Merge Strategies
@@ -339,10 +474,6 @@ interface JobSpec {
       work: string;         // Work command (@agent for AI)
       postchecks?: string;  // Post-check command
     };
-  };
-  webhook?: {
-    url: string;            // Callback URL (localhost only)
-    events?: string[];      // Events to subscribe to
   };
 }
 ```
@@ -387,15 +518,6 @@ interface JobStatus {
 2. Check `.worktrees` directory permissions
 3. Clean stale worktrees: `git worktree prune`
 
-### Port Conflicts
-Configure alternative ports:
-```json
-{
-  "copilotOrchestrator.http.port": 39220,
-  "copilotOrchestrator.mcp.port": 39221
-}
-```
-
 ---
 
 ## Development
@@ -416,20 +538,51 @@ npm run package
 vscode-copilot-orchestrator/
 ├── src/
 │   ├── extension.ts          # Extension entry point
-│   ├── core/                  # Core logic
+│   ├── httpServer.ts         # HTTP server with MCP endpoint
+│   ├── core/                  # Core logic (JobRunner, PlanRunner)
 │   ├── agent/                 # AI agent delegation
 │   ├── commands/              # VS Code commands
-│   ├── git/                   # Git operations
-│   ├── http/                  # HTTP REST API
-│   ├── mcp/                   # MCP server integration
-│   ├── notifications/         # Webhook notifications
+│   ├── git/                   # Git operations & worktrees
+│   ├── mcp/                   # MCP protocol handler & registration
 │   ├── process/               # Process monitoring
 │   ├── types/                 # TypeScript types
-│   └── ui/                    # UI components
-├── server/
-│   └── mcp-server.js          # MCP server (stdio/HTTP)
+│   └── ui/                    # UI components (sidebar, webview)
 └── out/                       # Compiled JavaScript
 ```
+
+---
+
+## Architecture
+
+The extension runs an **HTTP-based MCP server**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    GitHub Copilot Chat                      │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ MCP (HTTP POST)
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                VS Code Extension (TypeScript)               │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              HTTP Server (:39219)                    │   │
+│  │  • /mcp - MCP JSON-RPC endpoint                     │   │
+│  │  • REST API for direct integration                   │   │
+│  └───────────────────────────┬─────────────────────────┘   │
+│                              │                              │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  JobRunner / PlanRunner                              │   │
+│  │  • Job lifecycle management                          │   │
+│  │  • Git worktree operations                           │   │
+│  │  • Copilot CLI execution                             │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  UI: Sidebar views, webview panels, status bar              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+No Node.js runtime dependency - everything runs inside the extension!
 
 ---
 

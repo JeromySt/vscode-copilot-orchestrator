@@ -5,16 +5,68 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { randomUUID } from 'crypto';
 import { ensureDir, readJSON, writeJSON, cpuCountMinusOne } from './utils';
-import { createWorktrees } from '../git/gitWorktrees';
 import { isCopilotCliAvailable } from '../agent/cliCheckCore';
+import * as branchUtils from '../git/branchUtils';
 
 export type CommitDetail = { hash: string; shortHash: string; message: string; author: string; date: string; filesAdded: string[]; filesModified: string[]; filesDeleted: string[] };
 export type WorkSummary = { commits: number; filesAdded: number; filesModified: number; filesDeleted: number; description: string; commitDetails?: CommitDetail[] };
 export type JobMetrics = { testsRun?: number; testsPassed?: number; testsFailed?: number; coveragePercent?: number; buildErrors?: number; buildWarnings?: number };
 export type WebhookConfig = { url: string; events?: ('stage_complete' | 'job_complete' | 'job_failed')[]; headers?: Record<string, string> };
-export type ExecutionAttempt = { attemptId: string; startedAt: number; endedAt?: number; logFile: string; copilotSessionId?: string; workInstruction: string; stepStatuses: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; workSummary?: WorkSummary; metrics?: JobMetrics };
-export type JobSpec = { id: string; name: string; task: string; inputs: { repoPath: string; baseBranch: string; targetBranch: string; worktreeRoot: string; instructions?: string }; policy: { useJust: boolean; steps: { prechecks: string; work: string; postchecks: string } }; webhook?: WebhookConfig };
-export type Job = JobSpec & { status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; logFile?: string; startedAt?: number; endedAt?: number; copilotSessionId?: string; processIds?: number[]; currentStep?: string; stepStatuses?: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; workHistory?: string[]; attempts?: ExecutionAttempt[]; currentAttemptId?: string; workSummary?: WorkSummary; metrics?: JobMetrics };
+export type ExecutionAttempt = { attemptId: string; startedAt: number; endedAt?: number; logFile: string; copilotSessionId?: string; workInstruction: string; stepStatuses: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; commit?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; workSummary?: WorkSummary; metrics?: JobMetrics };
+
+/**
+ * Job specification - defines what work to do and where.
+ * 
+ * ## Worktree Management Modes:
+ * 
+ * ### Standalone Job (isPlanManaged = false, default):
+ * - Job creates its own worktree from baseBranch
+ * - Job manages branch creation if on default branch
+ * - Job performs mergeback into targetBranch after work
+ * - Job cleans up its worktree
+ * 
+ * ### Plan-Managed Job (isPlanManaged = true):
+ * - Plan pre-creates worktree and provides worktreePath
+ * - Job executes work in provided worktree
+ * - Job does NOT create branches or perform mergeback
+ * - Plan handles all branch/worktree lifecycle
+ */
+export type JobSpec = { 
+  id: string; 
+  name: string; 
+  task: string; 
+  inputs: { 
+    repoPath: string; 
+    baseBranch: string; 
+    targetBranch: string; 
+    worktreeRoot: string; 
+    instructions?: string;
+    /** 
+     * If true, this job is managed by a plan.
+     * - Worktree is pre-created by the plan
+     * - Job skips branch creation and mergeback
+     * - Plan handles all branch lifecycle
+     */
+    isPlanManaged?: boolean;
+    /**
+     * For plan-managed jobs: the pre-created worktree path.
+     * Job will verify this is a valid worktree before executing.
+     */
+    worktreePath?: string;
+    /**
+     * The plan ID this job belongs to (if any).
+     * Used to group jobs under their parent plan in the UI.
+     */
+    planId?: string;
+  }; 
+  policy: { 
+    useJust: boolean; 
+    steps: { prechecks: string; work: string; postchecks: string } 
+  }; 
+  webhook?: WebhookConfig 
+};
+
+export type Job = JobSpec & { status: 'queued'|'running'|'succeeded'|'failed'|'canceled'; logFile?: string; startedAt?: number; endedAt?: number; copilotSessionId?: string; processIds?: number[]; currentStep?: string; stepStatuses?: { prechecks?: 'success'|'failed'|'skipped'; work?: 'success'|'failed'|'skipped'; commit?: 'success'|'failed'|'skipped'; postchecks?: 'success'|'failed'|'skipped'; mergeback?: 'success'|'failed'|'skipped'; cleanup?: 'success'|'failed'|'skipped' }; workHistory?: string[]; attempts?: ExecutionAttempt[]; currentAttemptId?: string; workSummary?: WorkSummary; metrics?: JobMetrics };
 
 export class JobRunner {
   private ctx: vscode.ExtensionContext; 
@@ -429,7 +481,7 @@ Focus on addressing the failure root cause while maintaining all original requir
 
   private calculateProgress(job: Job): number {
     const phaseWeights: Record<string, number> = {
-      'prechecks': 10, 'work': 70, 'postchecks': 85, 'mergeback': 95, 'cleanup': 100
+      'prechecks': 10, 'work': 60, 'commit': 70, 'postchecks': 85, 'mergeback': 95, 'cleanup': 100
     };
     if (job.status === 'succeeded') return 100;
     if (job.status === 'failed' || job.status === 'canceled') return -1;
@@ -437,7 +489,7 @@ Focus on addressing the failure root cause while maintaining all original requir
     const currentStep = job.currentStep;
     if (!currentStep) return 5;
     const stepStatuses = job.stepStatuses || {};
-    const phases = ['prechecks', 'work', 'postchecks', 'mergeback', 'cleanup'];
+    const phases = ['prechecks', 'work', 'commit', 'postchecks', 'mergeback', 'cleanup'];
     let progress = 0;
     for (const phase of phases) {
       if (stepStatuses[phase as keyof typeof stepStatuses] === 'success' || stepStatuses[phase as keyof typeof stepStatuses] === 'skipped') {
@@ -454,8 +506,8 @@ Focus on addressing the failure root cause while maintaining all original requir
 
   private async calculateWorkSummary(job: Job): Promise<WorkSummary> {
     const { execSync } = require('child_process');
-    // Build full worktree path: repoPath/worktreeRoot/jobId
-    const worktreePath = path.join(job.inputs.repoPath, job.inputs.worktreeRoot, job.id);
+    // Use provided worktreePath for plan-managed jobs, otherwise build the path
+    const worktreePath = job.inputs.worktreePath || path.join(job.inputs.repoPath, job.inputs.worktreeRoot, job.id);
     const baseBranch = job.inputs.baseBranch;
     
     let commits = 0;
@@ -810,20 +862,96 @@ Focus on addressing the failure root cause while maintaining all original requir
       job.status='failed'; job.endedAt=Date.now(); this.persist(); this.working--; this.pump(); return;
     }
 
-    const repoPath = job.inputs.repoPath; 
-    const jobRoot = createWorktrees({ 
-      jobId: job.id, 
-      repoPath, 
-      worktreeRoot: job.inputs.worktreeRoot, 
-      baseBranch: job.inputs.baseBranch, 
-      targetBranch: job.inputs.targetBranch 
-    }, s=> this.writeLog(job, s));
+    const repoPath = job.inputs.repoPath;
+    const isPlanManaged = job.inputs.isPlanManaged === true;
+    let jobRoot: string;
+    let worktreeBranch: string;
+    
+    if (isPlanManaged) {
+      // Plan-managed job: worktree is pre-created by the plan
+      if (!job.inputs.worktreePath) {
+        const msg = 'Plan-managed job is missing worktreePath';
+        this.writeLog(job, '[preflight] ERROR: ' + msg);
+        job.status = 'failed'; job.endedAt = Date.now(); this.persist(); this.working--; this.pump();
+        return;
+      }
+      
+      jobRoot = job.inputs.worktreePath;
+      
+      // Verify the worktree exists
+      if (!branchUtils.isValidWorktree(jobRoot)) {
+        const msg = `Plan-managed job worktree does not exist or is invalid: ${jobRoot}`;
+        this.writeLog(job, '[preflight] ERROR: ' + msg);
+        job.status = 'failed'; job.endedAt = Date.now(); this.persist(); this.working--; this.pump();
+        return;
+      }
+      
+      worktreeBranch = branchUtils.getWorktreeBranch(jobRoot) || job.inputs.targetBranch;
+      this.writeLog(job, `[orchestrator] Plan-managed job using pre-created worktree: ${jobRoot}`);
+      this.writeLog(job, `[orchestrator] Worktree branch: ${worktreeBranch}`);
+    } else {
+      // Standalone job: we manage the worktree lifecycle
+      this.writeLog(job, '[orchestrator] Standalone job - managing worktree lifecycle');
+      
+      // Determine the targetBranchRoot based on whether baseBranch is a default branch
+      const { targetBranchRoot, needsCreation } = branchUtils.resolveTargetBranchRoot(
+        job.inputs.baseBranch,
+        repoPath,
+        'copilot_jobs'
+      );
+      
+      if (needsCreation) {
+        this.writeLog(job, `[orchestrator] Base branch '${job.inputs.baseBranch}' is a default branch`);
+        this.writeLog(job, `[orchestrator] Creating feature branch: ${targetBranchRoot}`);
+        branchUtils.createBranch(targetBranchRoot, job.inputs.baseBranch, repoPath, s => this.writeLog(job, s));
+        // Update the job's targetBranch to the new feature branch
+        job.inputs.targetBranch = targetBranchRoot;
+      } else {
+        this.writeLog(job, `[orchestrator] Using non-default branch as target: ${targetBranchRoot}`);
+        job.inputs.targetBranch = targetBranchRoot;
+      }
+      
+      // Create worktree for the job
+      // The worktree branch is a temporary branch that will be merged back
+      worktreeBranch = `copilot_jobs/${job.id}`;
+      const wtRootAbs = path.join(repoPath, job.inputs.worktreeRoot);
+      jobRoot = path.join(wtRootAbs, job.id);
+      
+      this.writeLog(job, `[orchestrator] Creating worktree at: ${jobRoot}`);
+      branchUtils.createWorktree(
+        jobRoot,
+        worktreeBranch,
+        job.inputs.targetBranch,
+        repoPath,
+        s => this.writeLog(job, s)
+      );
+    }
 
     const execStep = async (label: string, cmd: string) => {
       // Check if this step already succeeded (for retry scenarios)
       const stepKey = label.toLowerCase() as 'prechecks'|'work'|'postchecks';
       if (job.stepStatuses?.[stepKey] === 'success') {
         this.writeLog(job, `[${label}] Skipping - already completed successfully`);
+        return;
+      }
+      
+      // Handle empty commands
+      if (!cmd || cmd.trim() === '') {
+        // Work step must have a command - fail if empty
+        if (stepKey === 'work') {
+          this.writeLog(job, `[${label}] ERROR: Work step cannot be empty`);
+          if (!job.stepStatuses) job.stepStatuses = {};
+          job.stepStatuses[stepKey] = 'failed';
+          this.syncStepStatusesToAttempt(job);
+          this.persist();
+          throw new Error('Work step cannot be empty - no command specified');
+        }
+        // Pre/postchecks can be skipped if empty
+        this.writeLog(job, `[${label}] Skipping - no command specified`);
+        if (!job.stepStatuses) job.stepStatuses = {};
+        job.stepStatuses[stepKey] = 'skipped';
+        this.syncStepStatusesToAttempt(job);
+        this.persist();
         return;
       }
       
@@ -920,8 +1048,28 @@ Focus on addressing the failure root cause while maintaining all original requir
       this.writeLog(job, '========== WORK SECTION END ==========');
       this.writeLog(job, '');
       
-      // Calculate work summary after work step
+      // Commit step - always run after work to capture changes in a meaningful commit
       if (job.stepStatuses?.work === 'success') {
+        this.writeLog(job, '========== COMMIT SECTION START ==========');
+        job.currentStep = 'commit';
+        this.persist();
+        try {
+          await this.commitWork(job, jobRoot);
+          if (!job.stepStatuses) job.stepStatuses = {};
+          job.stepStatuses.commit = 'success';
+          this.syncStepStatusesToAttempt(job);
+          this.notifyWebhook(job, 'stage_complete', 'commit');
+        } catch (e) {
+          this.writeLog(job, '[commit] Warning: Commit step encountered an issue: ' + String(e));
+          // Don't fail the job for commit issues - the work is done
+          if (!job.stepStatuses) job.stepStatuses = {};
+          job.stepStatuses.commit = 'success'; // Still mark as success since work completed
+          this.syncStepStatusesToAttempt(job);
+        }
+        this.writeLog(job, '========== COMMIT SECTION END ==========');
+        this.writeLog(job, '');
+        
+        // Calculate work summary after commit step (so it captures our commit)
         const summary = await this.calculateWorkSummary(job);
         job.workSummary = summary;
         // Also store in current attempt
@@ -931,6 +1079,10 @@ Focus on addressing the failure root cause while maintaining all original requir
         }
         this.writeLog(job, `[orchestrator] Work summary: ${summary.description}`);
         this.persist();
+      } else {
+        if (!job.stepStatuses) job.stepStatuses = {};
+        job.stepStatuses.commit = 'skipped';
+        this.syncStepStatusesToAttempt(job);
       }
       
       // Only run postchecks if work succeeded
@@ -973,59 +1125,71 @@ Focus on addressing the failure root cause while maintaining all original requir
       
       this.persist();
       
-      // Attempt mergeback - if it fails, mark job as failed
-      job.currentStep = 'mergeback';
-      this.persist();
-      try {
-        await this.mergeBack(job, repoPath, jobRoot);
-      } catch (e) {
-        this.writeLog(job, '[mergeback] FAILED: '+String(e));
-        job.status = 'failed';
-        if (job.attempts && job.currentAttemptId) {
-          const currentAttempt = job.attempts.find(a => a.attemptId === job.currentAttemptId);
-          if (currentAttempt) {
-            currentAttempt.status = 'failed';
-          }
-        }
+      // For plan-managed jobs, skip mergeback and cleanup - plan handles these
+      if (isPlanManaged) {
+        this.writeLog(job, '[orchestrator] Plan-managed job - skipping mergeback and cleanup (handled by plan)');
+        if (!job.stepStatuses) job.stepStatuses = {};
+        job.stepStatuses.mergeback = 'skipped';
+        job.stepStatuses.cleanup = 'skipped';
+        this.syncStepStatusesToAttempt(job);
+        this.notifyWebhook(job, 'job_complete');
+      } else {
+        // Standalone job: perform mergeback and cleanup
+        
+        // Attempt mergeback - if it fails, mark job as failed
+        job.currentStep = 'mergeback';
         this.persist();
-        throw e; // Re-throw to skip cleanup
+        try {
+          await this.mergeBack(job, repoPath, jobRoot, worktreeBranch);
+        } catch (e) {
+          this.writeLog(job, '[mergeback] FAILED: '+String(e));
+          job.status = 'failed';
+          if (job.attempts && job.currentAttemptId) {
+            const currentAttempt = job.attempts.find(a => a.attemptId === job.currentAttemptId);
+            if (currentAttempt) {
+              currentAttempt.status = 'failed';
+            }
+          }
+          this.persist();
+          throw e; // Re-throw to skip cleanup
+        }
+        
+        // Auto-cleanup worktree and temporary branch after successful mergeback
+        job.currentStep = 'cleanup';
+        this.persist();
+        this.writeLog(job, '\n========== CLEANUP SECTION START ==========');
+        try {
+          this.writeLog(job, '[cleanup] Cleaning up worktree and temporary branch...');
+          const { execSync } = require('child_process');
+          
+          // Remove worktree
+          execSync(`git worktree remove "${jobRoot}" --force`, { cwd: repoPath });
+          this.writeLog(job, '[cleanup] ✓ Removed worktree');
+          
+          // Delete the temporary worktree branch (not the targetBranch!)
+          execSync(`git branch -D "${worktreeBranch}"`, { cwd: repoPath });
+          this.writeLog(job, `[cleanup] ✓ Deleted temporary branch '${worktreeBranch}'`);
+          this.writeLog(job, `[cleanup] ✓ Target branch '${job.inputs.targetBranch}' preserved`);
+          
+          // Prune worktrees
+          execSync('git worktree prune', { cwd: repoPath });
+          this.writeLog(job, '[cleanup] ✓ Cleanup completed');
+          if (!job.stepStatuses) job.stepStatuses = {};
+          job.stepStatuses.cleanup = 'success';
+          this.syncStepStatusesToAttempt(job);
+          this.notifyWebhook(job, 'stage_complete', 'cleanup');
+          this.writeLog(job, '========== CLEANUP SECTION END ==========\n');
+        } catch (cleanupError) {
+          this.writeLog(job, '[cleanup] Warning: ' + String(cleanupError));
+          if (!job.stepStatuses) job.stepStatuses = {};
+          job.stepStatuses.cleanup = 'failed';
+          this.syncStepStatusesToAttempt(job);
+          this.writeLog(job, '========== CLEANUP SECTION END ==========\n');
+        }
+        
+        // Job completed successfully - send webhook
+        this.notifyWebhook(job, 'job_complete');
       }
-      
-      // Auto-cleanup worktree and branch after successful mergeback
-      job.currentStep = 'cleanup';
-      this.persist();
-      this.writeLog(job, '\n========== CLEANUP SECTION START ==========');
-      try {
-        this.writeLog(job, '[cleanup] Cleaning up worktree and branch...');
-        const { execSync } = require('child_process');
-        
-        // Remove worktree
-        execSync(`git worktree remove "${jobRoot}" --force`, { cwd: repoPath });
-        this.writeLog(job, '[cleanup] ✓ Removed worktree');
-        
-        // Delete the job branch
-        const jobBranch = `copilot_jobs/${job.id}`;
-        execSync(`git branch -D ${jobBranch}`, { cwd: repoPath });
-        this.writeLog(job, '[cleanup] ✓ Deleted branch: ' + jobBranch);
-        
-        // Prune worktrees
-        execSync('git worktree prune', { cwd: repoPath });
-        this.writeLog(job, '[cleanup] ✓ Cleanup completed');
-        if (!job.stepStatuses) job.stepStatuses = {};
-        job.stepStatuses.cleanup = 'success';
-        this.syncStepStatusesToAttempt(job);
-        this.notifyWebhook(job, 'stage_complete', 'cleanup');
-        this.writeLog(job, '========== CLEANUP SECTION END ==========\n');
-      } catch (cleanupError) {
-        this.writeLog(job, '[cleanup] Warning: ' + String(cleanupError));
-        if (!job.stepStatuses) job.stepStatuses = {};
-        job.stepStatuses.cleanup = 'failed';
-        this.syncStepStatusesToAttempt(job);
-        this.writeLog(job, '========== CLEANUP SECTION END ==========\n');
-      }
-      
-      // Job completed successfully - send webhook
-      this.notifyWebhook(job, 'job_complete');
     }
     catch(e){ 
       job.status = (job as Job).status === 'canceled' ? 'canceled' : 'failed'; 
@@ -1309,154 +1473,225 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     this.writeLog(job, `[${label}] ✓ Delegation step completed`);
   }
   
-  private async mergeBack(job: Job, repoPath: string, jobRoot: string){
+  /**
+   * Commit all pending work in the worktree using Copilot CLI.
+   * Creates a meaningful commit message describing the work done.
+   * This runs for both standalone and plan-managed jobs.
+   */
+  private async commitWork(job: Job, jobRoot: string): Promise<void> {
+    const { spawnSync, execSync } = require('child_process');
+    
+    this.writeLog(job, '[commit] Checking for uncommitted changes...');
+    
+    // Stage all changes
+    try {
+      execSync('git add -A', { cwd: jobRoot, stdio: 'pipe' });
+    } catch (e) {
+      this.writeLog(job, '[commit] No changes to stage');
+    }
+    
+    // Check if there are changes to commit
+    const statusResult = spawnSync('git', ['status', '--porcelain'], { 
+      cwd: jobRoot, 
+      encoding: 'utf-8' 
+    });
+    
+    const hasChanges = statusResult.stdout && statusResult.stdout.trim().length > 0;
+    
+    // Also check for staged changes
+    const diffResult = spawnSync('git', ['diff', '--cached', '--name-only'], {
+      cwd: jobRoot,
+      encoding: 'utf-8'
+    });
+    
+    const hasStagedChanges = diffResult.stdout && diffResult.stdout.trim().length > 0;
+    
+    if (!hasChanges && !hasStagedChanges) {
+      this.writeLog(job, '[commit] No changes to commit - work may have already been committed');
+      return;
+    }
+    
+    this.writeLog(job, '[commit] Found uncommitted changes, creating commit with Copilot CLI...');
+    
+    // Use Copilot CLI to create a meaningful commit message
+    const commitInstruction = `@agent Create a git commit for all staged changes in this worktree. ` +
+      `The commit message should be descriptive and follow conventional commit format. ` +
+      `The task that was completed: "${job.task}". ` +
+      `Job name: "${job.name}". ` +
+      `Create the commit now with a meaningful message that describes what was accomplished.`;
+    
+    // Build command as string with proper quoting (shell: true re-parses arrays)
+    const copilotCmd = `copilot -p ${JSON.stringify(commitInstruction)} --allow-all-paths --allow-all-tools`;
+    
+    this.writeLog(job, '[commit] Running Copilot CLI to generate commit...');
+    
+    const result = spawnSync(copilotCmd, [], {
+      cwd: jobRoot,
+      shell: true,
+      encoding: 'utf-8',
+      timeout: 120000 // 2 minute timeout for commit
+    });
+    
+    if (result.status !== 0) {
+      this.writeLog(job, `[commit] Copilot CLI returned non-zero: ${result.status}`);
+      if (result.stderr) {
+        this.writeLog(job, `[commit] stderr: ${result.stderr}`);
+      }
+      
+      // Fallback: create commit with default message
+      this.writeLog(job, '[commit] Falling back to default commit message...');
+      try {
+        execSync(`git commit -m "orchestrator(${job.id}): ${job.name || job.task}"`, { 
+          cwd: jobRoot, 
+          stdio: 'pipe' 
+        });
+        this.writeLog(job, '[commit] ✓ Created fallback commit');
+      } catch (fallbackError) {
+        this.writeLog(job, `[commit] Fallback commit also failed: ${fallbackError}`);
+        // Check if already committed
+        const checkStatus = spawnSync('git', ['status', '--porcelain'], { cwd: jobRoot, encoding: 'utf-8' });
+        if (!checkStatus.stdout || checkStatus.stdout.trim().length === 0) {
+          this.writeLog(job, '[commit] ✓ Changes appear to have been committed');
+        }
+      }
+      return;
+    }
+    
+    // Log Copilot output
+    if (result.stdout) {
+      const lines = result.stdout.split('\n').filter((l: string) => l.trim());
+      for (const line of lines.slice(-10)) { // Last 10 lines
+        this.writeLog(job, `[commit] ${line}`);
+      }
+    }
+    
+    // Verify commit was created
+    const verifyResult = spawnSync('git', ['status', '--porcelain'], { cwd: jobRoot, encoding: 'utf-8' });
+    if (verifyResult.stdout && verifyResult.stdout.trim().length > 0) {
+      // Still have uncommitted changes - Copilot might not have committed
+      this.writeLog(job, '[commit] Changes still pending, creating final commit...');
+      try {
+        execSync(`git add -A && git commit -m "orchestrator(${job.id}): finalize work for ${job.name || job.task}"`, { 
+          cwd: jobRoot, 
+          shell: true,
+          stdio: 'pipe' 
+        });
+        this.writeLog(job, '[commit] ✓ Created final commit');
+      } catch (e) {
+        // Might fail if nothing to commit, that's OK
+      }
+    } else {
+      this.writeLog(job, '[commit] ✓ All changes committed successfully');
+    }
+    
+    // Push the commit
+    try {
+      const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: jobRoot, encoding: 'utf-8' }).trim();
+      execSync(`git push origin "${currentBranch}"`, { cwd: jobRoot, stdio: 'pipe' });
+      this.writeLog(job, `[commit] ✓ Pushed commit to origin/${currentBranch}`);
+    } catch (pushError) {
+      this.writeLog(job, `[commit] ⚠ Could not push commit: ${pushError}`);
+    }
+  }
+  
+  /**
+   * Merge the worktree branch back into the target branch.
+   * 
+   * For standalone jobs:
+   * - worktreeBranch contains the work (e.g., copilot_jobs/<jobId>)
+   * - targetBranch is where we merge into (e.g., the feature branch or user branch)
+   */
+  private async mergeBack(job: Job, repoPath: string, jobRoot: string, worktreeBranch: string){
     this.writeLog(job, '\n========== MERGEBACK SECTION START ==========');
-    const cp = require('child_process'); const pathM = require('path'); const fsM = require('fs');
+    const cp = require('child_process');
     
-    // Load merge configuration from VS Code settings
-    const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
-    const mergeMode = mergeCfg.get<'merge' | 'rebase' | 'squash'>('mode', 'squash');
-    const prefer = mergeCfg.get<'ours' | 'theirs'>('prefer', 'theirs');
-    const pushOnSuccess = mergeCfg.get<boolean>('pushOnSuccess', false);
-    
-    this.writeLog(job, `[mergeback] Using merge mode: ${mergeMode}, prefer: ${prefer}, pushOnSuccess: ${pushOnSuccess}`);
-    
-    // Track output for error detection
-    let copilotOutput = '';
+    const targetBranch = job.inputs.targetBranch;
     
     const run = (cmd: string, cwd: string)=> new Promise<void>((resolve,reject)=>{ 
       const p = cp.spawn(cmd,{cwd,shell:true}); 
       p.stdout.on('data',(d:any)=> {
         const line = d.toString().trimEnd();
         this.writeLog(job, '[mergeback] '+line);
-        copilotOutput += line + '\n';
       }); 
       p.stderr.on('data',(d:any)=> {
         const line = d.toString().trimEnd();
         this.writeLog(job, '[mergeback] '+line);
-        copilotOutput += line + '\n';
       }); 
       p.on('exit',(code:number)=> code===0? resolve(): reject(new Error(cmd+` -> exit ${code}`))); 
     });
     
-    // Merge the job's working branch (copilot_jobs/{id}) INTO the target branch
-    const targetBranch = job.inputs.targetBranch;
-    const feat = `copilot_jobs/${job.id}`.replace(/[^a-zA-Z0-9\-_.\/]/g,'-');
-    await run('git add -A', jobRoot).catch(()=>{}); await run(`git commit -m "orchestrator(${job.id}): finalize" || echo no-commit`, jobRoot);
-    await run('git fetch --all --tags', repoPath); 
+    this.writeLog(job, `[mergeback] Merging '${worktreeBranch}' into '${targetBranch}'`);
     
-    // Check if targetBranch exists locally, if not check remote, if not fall back to baseBranch
-    const { spawnSync } = require('child_process');
+    // Note: All work should already be committed by the commit step
+    // Just verify there are no uncommitted changes
+    const { spawnSync, execSync } = require('child_process');
+    const statusCheck = spawnSync('git', ['status', '--porcelain'], { cwd: jobRoot, encoding: 'utf-8' });
+    if (statusCheck.stdout && statusCheck.stdout.trim().length > 0) {
+      this.writeLog(job, '[mergeback] Warning: Found uncommitted changes, creating safety commit...');
+      try {
+        execSync('git add -A', { cwd: jobRoot, stdio: 'pipe' });
+        execSync(`git commit -m "orchestrator(${job.id}): safety commit before mergeback"`, { cwd: jobRoot, stdio: 'pipe' });
+      } catch (e) {
+        // Ignore - might be nothing to commit
+      }
+    }
+    
+    // Verify target branch exists
     const localCheck = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${targetBranch}`], { cwd: repoPath });
-    const remoteCheck = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/remotes/origin/${targetBranch}`], { cwd: repoPath });
     
-    let mergeTarget = targetBranch;
-    if (localCheck.status !== 0 && remoteCheck.status !== 0) {
-      // Target branch doesn't exist locally or remotely - fall back to baseBranch
-      this.writeLog(job, `[mergeback] Target branch '${targetBranch}' does not exist, using base branch '${job.inputs.baseBranch}' instead`);
-      mergeTarget = job.inputs.baseBranch;
-    }
-    
-    await run(`git switch ${mergeTarget}`, repoPath); 
-    
-    // Try to pull, but don't fail if branch has no upstream
-    await run(`git pull --ff-only || echo "No upstream tracking branch, continuing with current state"`, repoPath).catch(()=>{});
-    
-    // Build merge instruction based on configured mode
-    let mergeInstruction: string;
-    switch (mergeMode) {
-      case 'squash':
-        mergeInstruction = `@agent squash merge branch ${feat} into current branch ${mergeTarget}. ` +
-          `Combine all commits into a single commit. ` +
-          `Handle any conflicts (prefer ${prefer}) and commit with message 'orchestrator(${job.id}): squash merge from ${feat}'`;
-        break;
-      case 'rebase':
-        mergeInstruction = `@agent rebase branch ${feat} onto current branch ${mergeTarget}. ` +
-          `Handle any conflicts (prefer ${prefer}) and complete the rebase. ` +
-          `Final commit message should include 'orchestrator(${job.id}): rebased from ${feat}'`;
-        break;
-      case 'merge':
-      default:
-        mergeInstruction = `@agent merge branch ${feat} into current branch ${mergeTarget}. ` +
-          `Handle any conflicts (prefer ${prefer}) and commit with message 'orchestrator(${job.id}): merge from ${feat}'`;
-        break;
-    }
-    
-    this.writeLog(job, `[mergeback] Using Copilot to ${mergeMode} ${feat} into ${mergeTarget}...`);
-    
-    // Reset copilot output tracking for this command
-    copilotOutput = '';
-    
-    try {
-      // Let Copilot handle the entire merge operation including any conflicts
-      await run(
-        `copilot.exe -p "${mergeInstruction}" --allow-all-paths --allow-all-tools`,
-        repoPath
-      );
-      
-      // Check for error patterns in copilot output even if exit code was 0
-      const errorPatterns = [
-        /permission denied/i,
-        /could not request permission/i,
-        /failed to merge/i,
-        /merge conflict(?!s)/i,
-        /fatal:/i,
-        /(?<!no )CONFLICT(?!s)/i,
-        /cannot complete/i,
-        /unable to merge/i,
-        /\bI cannot\b/i
-      ];
-      
-      const successPatterns = [
-        /merge completed successfully/i,
-        /merged.*successfully/i,
-        /squash.*completed/i,
-        /rebase.*completed/i,
-        /fast-forward/i,
-        /no conflicts/i
-      ];
-      
-      const hasSuccess = successPatterns.some(pattern => pattern.test(copilotOutput));
-      const foundError = !hasSuccess && errorPatterns.some(pattern => pattern.test(copilotOutput));
-      if (foundError) {
-        throw new Error('Copilot merge reported errors in output (see logs above)');
-      }
-      
-      this.writeLog(job, `[mergeback] ✓ ${mergeMode.charAt(0).toUpperCase() + mergeMode.slice(1)} completed successfully via Copilot`);
-      if (!job.stepStatuses) job.stepStatuses = {};
-      job.stepStatuses.mergeback = 'success';
-      this.syncStepStatusesToAttempt(job);
-      this.notifyWebhook(job, 'stage_complete', 'mergeback');
-      this.persist();
-      
-      // Push to remote if configured
-      if (pushOnSuccess) {
-        this.writeLog(job, `[mergeback] Pushing ${mergeTarget} to origin...`);
-        try {
-          await run(`git push origin ${mergeTarget}`, repoPath);
-          this.writeLog(job, '[mergeback] ✓ Pushed to remote successfully');
-        } catch (pushError) {
-          this.writeLog(job, '[mergeback] ⚠ Push failed: ' + String(pushError));
-          this.writeLog(job, '[mergeback] Changes are committed locally but not pushed');
-        }
-      } else {
-        this.writeLog(job, '[mergeback] ✓ Merge completed locally. Push manually when ready (pushOnSuccess is disabled).');
-      }
-      
-      this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');
-    } catch(e) {
-      this.writeLog(job, '[mergeback] Copilot merge failed: ' + String(e));
+    if (localCheck.status !== 0) {
+      const errorMsg = `Target branch '${targetBranch}' does not exist.`;
+      this.writeLog(job, `[mergeback] CRITICAL ERROR: ${errorMsg}`);
       if (!job.stepStatuses) job.stepStatuses = {};
       job.stepStatuses.mergeback = 'failed';
       this.syncStepStatusesToAttempt(job);
-      
-      // Save patch as fallback
-      const patchDir = pathM.join(repoPath,'.orchestrator','jobs',job.id);
-      try { fsM.mkdirSync(patchDir,{recursive:true}); } catch{}
-      await run(`git diff ${mergeTarget}...${feat} > "${patchDir}/patch.diff"`, repoPath).catch(()=>{});
-      this.writeLog(job, '[mergeback] Saved patch to .orchestrator/jobs/'+job.id+'/patch.diff');
       this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');
-      throw e;
+      throw new Error(errorMsg);
     }
+    
+    // Switch to target branch and squash merge the worktree branch
+    await run(`git switch "${targetBranch}"`, repoPath);
+    
+    try {
+      // Squash merge the worktree branch
+      await run(`git merge --squash "${worktreeBranch}"`, repoPath);
+      
+      // Commit the squash merge
+      await run(`git commit -m "orchestrator(${job.id}): squash merge from ${worktreeBranch}" || echo "no changes to commit"`, repoPath);
+      
+      this.writeLog(job, `[mergeback] ✓ Squash merged '${worktreeBranch}' into '${targetBranch}'`);
+    } catch (mergeError) {
+      this.writeLog(job, `[mergeback] Squash merge failed: ${mergeError}`);
+      if (!job.stepStatuses) job.stepStatuses = {};
+      job.stepStatuses.mergeback = 'failed';
+      this.syncStepStatusesToAttempt(job);
+      this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');
+      throw mergeError;
+    }
+    
+    if (!job.stepStatuses) job.stepStatuses = {};
+    job.stepStatuses.mergeback = 'success';
+    this.syncStepStatusesToAttempt(job);
+    this.notifyWebhook(job, 'stage_complete', 'mergeback');
+    this.persist();
+    
+    // Push to remote if configured
+    const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
+    const pushOnSuccess = mergeCfg.get<boolean>('pushOnSuccess', false);
+    
+    if (pushOnSuccess) {
+      this.writeLog(job, `[mergeback] Pushing ${targetBranch} to origin...`);
+      try {
+        await run(`git push origin ${targetBranch}`, repoPath);
+        this.writeLog(job, '[mergeback] ✓ Pushed to remote successfully');
+      } catch (pushError) {
+        this.writeLog(job, '[mergeback] ⚠ Push failed: ' + String(pushError));
+        this.writeLog(job, '[mergeback] Changes are committed locally but not pushed');
+      }
+    } else {
+      this.writeLog(job, '[mergeback] ✓ Changes committed locally. Push manually when ready (pushOnSuccess is disabled).');
+    }
+    
+    this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');
   }
 }

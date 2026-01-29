@@ -8,4 +8,4 @@
 
 export { getJobDetailsCss } from './jobDetailsCss';
 export { getJobDetailsJs } from './jobDetailsJs';
-export { getJobDetailsHtml } from './jobDetailsHtml';
+export { getJobDetailsHtml, getJobDetailsLoadingHtml } from './jobDetailsHtml';

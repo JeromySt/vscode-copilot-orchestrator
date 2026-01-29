@@ -12,6 +12,113 @@ import { getJobDetailsCss } from './jobDetailsCss';
 import { getJobDetailsJs } from './jobDetailsJs';
 
 // ============================================================================
+// LOADING SKELETON
+// ============================================================================
+
+/**
+ * Get a loading skeleton HTML to show immediately while actual content loads.
+ * This provides instant feedback to the user.
+ */
+export function getJobDetailsLoadingHtml(jobName: string = 'Loading...'): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      padding: 20px;
+      color: var(--vscode-foreground);
+      background: var(--vscode-editor-background);
+    }
+    .loading-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px;
+    }
+    .loading-spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--vscode-panel-border);
+      border-top-color: var(--vscode-progressBar-background);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .loading-text {
+      margin-top: 16px;
+      font-size: 14px;
+      opacity: 0.8;
+    }
+    .loading-subtext {
+      margin-top: 8px;
+      font-size: 12px;
+      opacity: 0.5;
+    }
+    .skeleton {
+      background: linear-gradient(90deg, 
+        var(--vscode-panel-border) 25%, 
+        var(--vscode-editor-selectionBackground) 50%, 
+        var(--vscode-panel-border) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 4px;
+    }
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .skeleton-header {
+      height: 32px;
+      width: 60%;
+      margin-bottom: 16px;
+    }
+    .skeleton-badge {
+      height: 24px;
+      width: 80px;
+      display: inline-block;
+      margin-right: 8px;
+    }
+    .skeleton-line {
+      height: 16px;
+      margin: 8px 0;
+    }
+    .skeleton-line.short { width: 40%; }
+    .skeleton-line.medium { width: 60%; }
+    .skeleton-line.long { width: 85%; }
+    .skeleton-block {
+      height: 120px;
+      margin: 16px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="loading-container">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Loading job details...</div>
+    <div class="loading-subtext">${escapeHtml(jobName)}</div>
+  </div>
+  
+  <div style="opacity: 0.3; pointer-events: none;">
+    <div class="skeleton skeleton-header"></div>
+    <div>
+      <span class="skeleton skeleton-badge"></span>
+      <span class="skeleton skeleton-badge"></span>
+    </div>
+    <div class="skeleton skeleton-line long"></div>
+    <div class="skeleton skeleton-line medium"></div>
+    <div class="skeleton skeleton-line short"></div>
+    <div class="skeleton skeleton-block"></div>
+  </div>
+</body>
+</html>`;
+}
+
+// ============================================================================
 // UTILITIES
 // ============================================================================
 
@@ -97,6 +204,13 @@ interface JobData {
   workHistory?: string[];
   policy: JobPolicy;
   stepStatuses?: Record<string, string>;
+  /** Plan ID if this job is part of a plan (plan-managed jobs cannot be deleted individually) */
+  planId?: string;
+  /** Job inputs (for accessing planId from the actual job object) */
+  inputs?: {
+    planId?: string;
+    [key: string]: any;
+  };
 }
 
 // ============================================================================
@@ -276,7 +390,7 @@ function buildPhaseTabsHtml(job: JobData, attempt: AttemptData): string {
     return '○';
   };
 
-  const phases = ['PRECHECKS', 'WORK', 'POSTCHECKS', 'MERGEBACK', 'CLEANUP'];
+  const phases = ['PRECHECKS', 'WORK', 'COMMIT', 'POSTCHECKS', 'MERGEBACK', 'CLEANUP'];
   const phaseTabs = phases.map(phase => {
     const phaseLower = phase.toLowerCase();
     const phaseClass = getPhaseClass(phaseLower);
@@ -284,6 +398,7 @@ function buildPhaseTabsHtml(job: JobData, attempt: AttemptData): string {
     const displayName = phase === 'PRECHECKS' ? 'Prechecks' :
                         phase === 'POSTCHECKS' ? 'Postchecks' :
                         phase === 'MERGEBACK' ? 'Mergeback' :
+                        phase === 'COMMIT' ? 'Commit' :
                         phase.charAt(0) + phase.slice(1).toLowerCase();
     return `<button class="log-tab phase-tab phase-tab-${phaseClass}" data-section="${phase}"><span class="phase-icon phase-icon-${phaseClass}">${phaseIcon}</span>${displayName}</button>`;
   }).join('');
@@ -320,6 +435,7 @@ function buildAttemptCard(attempt: AttemptData, idx: number, job: JobData): stri
   const stepIndicators = `
     ${getStepDot(getStepStatus('prechecks', attempt.stepStatuses?.prechecks))}
     ${getStepDot(getStepStatus('work', attempt.stepStatuses?.work))}
+    ${getStepDot(getStepStatus('commit', attempt.stepStatuses?.commit))}
     ${getStepDot(getStepStatus('postchecks', attempt.stepStatuses?.postchecks))}
     ${getStepDot(getStepStatus('mergeback', attempt.stepStatuses?.mergeback))}
     ${getStepDot(getStepStatus('cleanup', attempt.stepStatuses?.cleanup))}
@@ -512,7 +628,12 @@ function buildHeaderHtml(job: JobData): string {
   if (job.status === 'failed') {
     actionButtonsHtml += `<button class="action-btn retry-btn" data-action="retry" data-job-id="${job.id}">🔄 Retry with AI Analysis</button>`;
   }
-  actionButtonsHtml += `<button class="action-btn delete-btn" data-action="delete" data-job-id="${job.id}">🗑 Delete</button>`;
+  // Only show delete button for standalone jobs (not part of a plan)
+  // Plan-managed jobs can only be deleted by deleting the root plan
+  const isPlanManaged = job.planId || job.inputs?.planId;
+  if (!isPlanManaged) {
+    actionButtonsHtml += `<button class="action-btn delete-btn" data-action="delete" data-job-id="${job.id}">🗑 Delete</button>`;
+  }
 
   return `
     <div class="header">

@@ -41,22 +41,26 @@ Shows detailed job information with timestamps and logs.
 
 ### Key Components
 
-1. **Job Runner** (`src/jobRunner.ts`)
+1. **Job Runner** (`src/core/jobRunner.ts`)
    - Manages job queue and parallel execution
    - Creates isolated git worktrees for each job
    - Handles auto-merging completed work
 
-2. **MCP Server** (`server/mcp-server.js`)
-   - Model Context Protocol integration
-   - HTTP API for external agent delegation
-   - Runs on localhost:39217 by default
+2. **MCP Handler** (`src/mcp/mcpHandler.ts`)
+   - Model Context Protocol (HTTP transport)
+   - MCP endpoint at `/mcp`
+   - REST API for direct integration
 
-3. **Git Worktrees** (`src/gitWorktrees.ts`)
+3. **HTTP Server** (`src/httpServer.ts`)
+   - Runs on localhost:39219 by default
+   - Serves both MCP and REST endpoints
+
+4. **Git Worktrees** (`src/git/gitWorktrees.ts`)
    - Isolates each job in separate working directory
    - Prevents conflicts between parallel jobs
    - Auto-cleanup after merge
 
-4. **Views & UI**
+5. **Views & UI**
    - Activity Bar icon for quick access
    - WebView panel for job monitoring
    - Status bar integration

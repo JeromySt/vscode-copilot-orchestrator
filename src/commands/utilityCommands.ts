@@ -7,12 +7,14 @@
  * - Documentation generation
  * - Dashboard management
  * - Status inspection
+ * - Log viewing
  * 
  * @module commands/utilityCommands
  */
 
 import * as vscode from 'vscode';
 import { TaskRunner } from '../core/taskRunner';
+import { Logger } from '../core/logger';
 
 // ============================================================================
 // TYPES
@@ -137,6 +139,13 @@ export function registerUtilityCommands(
       );
 
       vscode.window.showInformationMessage(`Docs step exit ${rc}`);
+    })
+  );
+
+  // Show Logs Output Channel
+  context.subscriptions.push(
+    vscode.commands.registerCommand('orchestrator.showLogs', () => {
+      Logger.show();
     })
   );
 }

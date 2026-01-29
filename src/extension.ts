@@ -15,6 +15,7 @@ import {
   initializeHttpServer,
   initializeMcpServer,
   initializeSidebarView,
+  initializePlansView,
   initializeNotebookSupport,
   createUIManager,
   initializeCopilotCli,
@@ -23,6 +24,7 @@ import {
 } from './core/initialization';
 import { McpServerManager } from './mcp/mcpServerManager';
 import { ProcessMonitor } from './process/processMonitor';
+import { Logger } from './core/logger';
 
 // ============================================================================
 // MODULE STATE
@@ -53,23 +55,31 @@ let processMonitor: ProcessMonitor | undefined;
  * @param context - VS Code extension context
  */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  console.log('Copilot Orchestrator extension is activating...');
+  // ── Logger ─────────────────────────────────────────────────────────────
+  const log = Logger.initialize(context);
+  const extLog = Logger.for('extension');
+  extLog.info('Extension activating...');
 
   // ── Configuration ──────────────────────────────────────────────────────
   const config = loadConfiguration();
+  extLog.debug('Configuration loaded', config);
 
   // ── Core Services ──────────────────────────────────────────────────────
   const { runner, plans, processMonitor: pm } = initializeCoreServices(context);
   processMonitor = pm;
 
   // ── HTTP Server ────────────────────────────────────────────────────────
-  initializeHttpServer(context, runner, plans, config.http);
+  // Must be started BEFORE MCP registration so the endpoint is available
+  await initializeHttpServer(context, runner, plans, config.http);
 
   // ── MCP Server ─────────────────────────────────────────────────────────
   mcpManager = initializeMcpServer(context, config.http, config.mcp);
 
   // ── Sidebar View ───────────────────────────────────────────────────────
   const jobsView = initializeSidebarView(context, runner);
+
+  // ── Plans View ─────────────────────────────────────────────────────────
+  initializePlansView(context, plans);
 
   // ── Notebook Support ───────────────────────────────────────────────────
   initializeNotebookSupport(context, runner);
@@ -87,7 +97,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   await showMcpRegistrationPrompt(context);
 
   // ── Complete ───────────────────────────────────────────────────────────
-  console.log('Copilot Orchestrator extension activated successfully');
+  extLog.info('Extension activated successfully');
   vscode.window.showInformationMessage('Copilot Orchestrator is ready!');
 }
 

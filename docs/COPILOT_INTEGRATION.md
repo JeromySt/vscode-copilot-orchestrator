@@ -89,49 +89,53 @@ curl -X POST http://localhost:39217/job \
    - "Use the HTTP API to create jobs"
 3. **Copilot must construct the JobSpec** from the user's natural language description
 
-### Current Limitations:
+### MCP Tools Integration
 
-- GitHub Copilot Chat may not have direct HTTP request capabilities
-- May need a VS Code extension or Language Server Protocol integration
-- Alternative: Use the MCP stdio interface (server/mcp-server.js)
+GitHub Copilot supports MCP (Model Context Protocol). The extension exposes an HTTP-based MCP server:
 
-### Alternative: MCP Tools Integration
-
-If GitHub Copilot supports MCP (Model Context Protocol), it can use the tools exposed by `server/mcp-server.js`:
-
-- `orchestrator_job_create` - Create a new job
-- `orchestrator_job_status` - Get job status
-- `orchestrator_plan_create` - Create a multi-job plan
-- `orchestrator_plan_status` - Get plan status
+**Available Tools:**
+- `create_copilot_job` - Create a new job
+- `get_copilot_job_status` - Get job status
+- `get_copilot_job_details` - Get full job details
+- `list_copilot_jobs` - List all jobs
+- `cancel_copilot_job` - Cancel a running job
+- `create_copilot_plan` - Create a multi-job plan
+- `get_copilot_plan_status` - Get plan status
+- `cancel_copilot_plan` - Cancel a running plan
 
 ### Setting Up MCP for Copilot
 
-Add to your Copilot configuration (if supported):
+Add to your VS Code settings (`settings.json`) or workspace `mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "copilot-orchestrator": {
-      "command": "node",
-      "args": ["C:/src/repos/vscode-copilot-orchestrator/server/mcp-server.js"],
-      "env": {
-        "ORCH_HOST": "127.0.0.1",
-        "ORCH_PORT": "39217"
-      }
+      "type": "http",
+      "url": "http://localhost:39219/mcp"
     }
   }
 }
 ```
 
-### Testing the API Manually
+### Testing the MCP Endpoint
 
 ```powershell
-# Create a test job
-Invoke-RestMethod -Uri "http://localhost:39217/job" `
+# Test tools/list
+$body = '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+Invoke-RestMethod -Uri "http://localhost:39219/mcp" -Method POST -Body $body -ContentType "application/json"
+```
+
+### Testing the REST API
+
+```powershell
+# Create a test job via REST API
+Invoke-RestMethod -Uri "http://localhost:39219/copilot_job" `
   -Method POST `
   -ContentType "application/json" `
   -Body (@{
     id = "test-job-1"
+    name = "Test Job"
     task = "Test task"
     inputs = @{
       repoPath = "C:/src/repos/YourProject"
@@ -140,10 +144,10 @@ Invoke-RestMethod -Uri "http://localhost:39217/job" `
       worktreeRoot = ".worktrees"
     }
     policy = @{
-      useJust = $true
+      useJust = $false
       steps = @{
         prechecks = "echo precheck"
-        work = "echo work"
+        work = "@agent Implement the test task"
         postchecks = "echo postcheck"
       }
     }

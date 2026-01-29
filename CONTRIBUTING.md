@@ -65,7 +65,7 @@ src/
 │   └── httpServer.ts     # Express server
 ├── mcp/                  # Model Context Protocol
 │   └── McpServerManager.ts # MCP server management
-├── notifications/        # Webhooks
+├── process/              # Process monitoring
 │   └── WebhookNotifier.ts # Webhook notifications
 ├── process/              # Process monitoring
 │   └── ProcessMonitor.ts # Child process tracking

@@ -19,10 +19,10 @@ export interface McpDefinitionProviderConfig {
   host: string;
   /** Port the MCP server listens on */
   port: number;
-  /** Path to the mcp-server.js script */
+  /** Path to the mcp-server.js script (deprecated - now using HTTP) */
   serverPath: string;
-  /** Orchestrator HTTP API port (for env variable) */
-  orchestratorPort: number;
+  /** Workspace path for the MCP server */
+  workspacePath?: string;
 }
 
 /**
@@ -67,16 +67,16 @@ export function registerMcpDefinitionProvider(
   }
 
   console.log('[MCP Provider] Registering MCP server definition provider...');
-  console.log(`[MCP Provider] Server path: ${config.serverPath}`);
-  console.log(`[MCP Provider] Orchestrator: ${config.host}:${config.orchestratorPort}`);
+  console.log(`[MCP Provider] HTTP endpoint: http://${config.host}:${config.port}/mcp`);
+  console.log(`[MCP Provider] Workspace: ${config.workspacePath}`);
   
-  // Create the provider
-  const provider: vscode.McpServerDefinitionProvider<vscode.McpStdioServerDefinition> = {
+  // Create the provider - use HTTP transport
+  const provider: vscode.McpServerDefinitionProvider<vscode.McpHttpServerDefinition> = {
     onDidChangeMcpServerDefinitions: serverChangedEmitter.event,
     
     provideMcpServerDefinitions(
       _token: vscode.CancellationToken
-    ): vscode.ProviderResult<vscode.McpStdioServerDefinition[]> {
+    ): vscode.ProviderResult<vscode.McpHttpServerDefinition[]> {
       console.log(`[MCP Provider] provideMcpServerDefinitions called, enabled=${isEnabled}`);
       
       if (!isEnabled || !currentConfig) {
@@ -84,28 +84,22 @@ export function registerMcpDefinitionProvider(
         return [];
       }
       
-      // Use stdio transport - VS Code spawns the process
-      // This is more reliable than HTTP for local extensions
-      const server = new vscode.McpStdioServerDefinition(
+      // Use HTTP transport - extension serves the MCP endpoint directly
+      const mcpUrl = vscode.Uri.parse(`http://${currentConfig.host}:${currentConfig.port}/mcp`);
+      const server = new vscode.McpHttpServerDefinition(
         'Copilot Orchestrator',                    // label
-        'node',                                     // command
-        [currentConfig.serverPath],                 // args
-        {                                           // env
-          ORCH_HOST: currentConfig.host,
-          ORCH_PORT: String(currentConfig.orchestratorPort),
-          MCP_PORT: String(currentConfig.port)
-        },
+        mcpUrl,                                     // url
         context.extension.packageJSON.version       // version
       );
       
-      console.log(`[MCP Provider] Returning server: ${server.label}, command: ${server.command}, args: ${server.args.join(' ')}`);
+      console.log(`[MCP Provider] Returning server: ${server.label}, url: ${mcpUrl.toString()}`);
       return [server];
     },
     
     resolveMcpServerDefinition(
-      server: vscode.McpStdioServerDefinition,
+      server: vscode.McpHttpServerDefinition,
       _token: vscode.CancellationToken
-    ): vscode.ProviderResult<vscode.McpStdioServerDefinition> {
+    ): vscode.ProviderResult<vscode.McpHttpServerDefinition> {
       // No additional resolution needed - server config is complete
       console.log(`[MCP Provider] Resolving server: ${server.label}`);
       return server;
@@ -123,16 +117,14 @@ export function registerMcpDefinitionProvider(
     
     // Listen for configuration changes
     const configWatcher = vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('copilotOrchestrator.mcp') || e.affectsConfiguration('copilotOrchestrator.http')) {
+      if (e.affectsConfiguration('copilotOrchestrator.mcp')) {
         const mcpConfig = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
-        const httpConfig = vscode.workspace.getConfiguration('copilotOrchestrator.http');
         isEnabled = mcpConfig.get<boolean>('enabled', true);
         
         // Update config
         if (currentConfig) {
           currentConfig.host = mcpConfig.get<string>('host', 'localhost');
           currentConfig.port = mcpConfig.get<number>('port', 39219);
-          currentConfig.orchestratorPort = httpConfig.get<number>('port', 39218);
         }
         
         // Notify VS Code that servers changed

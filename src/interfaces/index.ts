@@ -12,7 +12,6 @@
 export * from './IJobRunner';
 export * from './IJobPersistence';
 export * from './IGitOperations';
-export * from './IWebhookNotifier';
 export * from './IProcessMonitor';
 export * from './IMcpManager';
 export * from './IAgentDelegator';

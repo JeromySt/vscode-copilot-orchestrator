@@ -176,8 +176,6 @@ export interface Job extends JobSpec {
   workSummary?: WorkSummary;
   /** Metrics extracted from execution */
   metrics?: JobMetrics;
-  /** Webhook configuration for notifications */
-  webhook?: import('./webhook').WebhookConfig;
 }
 
 /**

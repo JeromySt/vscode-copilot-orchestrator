@@ -29,8 +29,8 @@ export function registerMcpCommands(context: vscode.ExtensionContext): void {
 Tools available:
 - orchestrator.job.create / orchestrator.job.status
 - orchestrator.plan.create / orchestrator.plan.status / orchestrator.plan.cancel
-Endpoint: http://${host}:${port}
-If your Agent requires stdio, run: node server/mcp-server.js`;
+MCP Endpoint: http://${host}:${port}/mcp
+HTTP API: http://${host}:${port}`;
 
       await vscode.env.clipboard.writeText(snippet);
       vscode.window.showInformationMessage('MCP connection details copied to clipboard.');
@@ -88,58 +88,34 @@ export async function promptMcpServerRegistration(
 
 /**
  * Show detailed instructions for registering the MCP server.
+ * Offers a direct "Start Server" button that attempts to start the MCP server directly.
  * 
  * @param host - MCP server host address
  * @param port - MCP server port number
  */
 async function showRegistrationInstructions(host: string, port: number): Promise<void> {
-  const instructions = `
-# MCP Server Registration
-
-To use Copilot Orchestrator with GitHub Copilot Chat, add this to your VS Code settings:
-
-\`\`\`json
-{
-  "github.copilot.chat.mcp.servers": {
-    "orchestrator": {
-      "type": "http",
-      "url": "http://${host}:${port}/mcp"
-    }
-  }
-}
-\`\`\`
-
-Or for stdio mode (external agents):
-\`\`\`bash
-node server/mcp-server.js
-\`\`\`
-
-The server provides these tools:
-- **orchestrator.job.create** - Create a new background job
-- **orchestrator.job.status** - Get job status and results
-- **orchestrator.plan.create** - Create multi-step execution plans
-- **orchestrator.plan.status** - Monitor plan execution
-- **orchestrator.plan.cancel** - Cancel running plans
-`;
-
-  const doc = await vscode.workspace.openTextDocument({
-    content: instructions,
-    language: 'markdown'
-  });
-  await vscode.window.showTextDocument(doc, { preview: true });
-
-  // Copy settings snippet to clipboard
-  const settingsSnippet = JSON.stringify({
-    "github.copilot.chat.mcp.servers": {
-      "orchestrator": {
-        "type": "http",
-        "url": `http://${host}:${port}/mcp`
-      }
-    }
-  }, null, 2);
-
-  await vscode.env.clipboard.writeText(settingsSnippet);
-  vscode.window.showInformationMessage(
-    'MCP server settings copied to clipboard. Paste into your VS Code settings.json'
+  const choice = await vscode.window.showInformationMessage(
+    'Copilot Orchestrator MCP server is ready! Click "Start Server" to enable it for GitHub Copilot Chat.',
+    'Start Server',
+    'Open MCP List',
+    'Later'
   );
+
+  if (choice === 'Start Server') {
+    // Try to start the MCP server directly using VS Code's command
+    // The server ID must match what we registered in package.json
+    try {
+      await vscode.commands.executeCommand(
+        'workbench.action.chat.startMcpServer', 
+        'copilot-orchestrator.mcp-server'
+      );
+      vscode.window.showInformationMessage('Copilot Orchestrator MCP server started! You can now use orchestrator tools in Copilot Chat.');
+    } catch (error: any) {
+      // If direct start fails, fall back to opening the MCP list
+      console.warn('Direct MCP start failed, falling back to list:', error);
+      await vscode.commands.executeCommand('workbench.action.chat.listMcpServers');
+    }
+  } else if (choice === 'Open MCP List') {
+    await vscode.commands.executeCommand('workbench.action.chat.listMcpServers');
+  }
 }

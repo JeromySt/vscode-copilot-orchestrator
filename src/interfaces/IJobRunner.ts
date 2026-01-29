@@ -2,7 +2,6 @@
  * @fileoverview Interface for job execution and management.
  * 
  * This is the primary interface for job orchestration, used by:
- * - HTTP API handlers
  * - MCP server tools
  * - VS Code commands
  * - UI components
@@ -10,7 +9,7 @@
  * @module interfaces/IJobRunner
  */
 
-import { Job, JobSpec, WebhookConfig } from '../types';
+import { Job, JobSpec } from '../types';
 
 /**
  * Core interface for job execution and lifecycle management.
@@ -48,9 +47,8 @@ export interface IJobRunner {
    * Queue a new job for execution.
    * The job will be executed when a worker becomes available.
    * @param spec - Job specification
-   * @param webhook - Optional webhook configuration for notifications
    */
-  enqueue(spec: JobSpec, webhook?: WebhookConfig): void;
+  enqueue(spec: JobSpec): void;
   
   /**
    * Retry a failed or canceled job.

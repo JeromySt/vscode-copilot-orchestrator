@@ -58,10 +58,14 @@ export class JobsViewProvider implements vscode.WebviewViewProvider {
   refresh() { 
     if (!this._view || !this._dataProvider) return;
     
-    const jobs = this._dataProvider.getJobs();
+    const allJobs = this._dataProvider.getJobs();
+    // Filter out plan-managed jobs - they're shown under their parent plan
+    const standaloneJobs = allJobs.filter(j => !j.inputs.planId);
+    const runningStandalone = standaloneJobs.filter(j => j.status === 'running').length;
+    
     this._view.webview.postMessage({ 
       type: 'update',
-      jobs: jobs.map(j => ({
+      jobs: standaloneJobs.map(j => ({
         id: j.id,
         name: j.name,
         status: j.status,
@@ -69,7 +73,7 @@ export class JobsViewProvider implements vscode.WebviewViewProvider {
         duration: j.endedAt && j.startedAt ? Math.round((j.endedAt - j.startedAt) / 1000) : null,
         startedAt: j.startedAt
       })),
-      running: jobs.filter(j=>j.status==='running').length 
+      running: runningStandalone
     }); 
   }
   

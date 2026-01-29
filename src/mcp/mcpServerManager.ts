@@ -1,20 +1,23 @@
 /**
  * @fileoverview MCP (Model Context Protocol) server lifecycle management.
  * 
- * The MCP server provides an SSE-based API for AI agents to interact
- * with the orchestrator. This module manages the server process lifecycle.
+ * The MCP server runs as part of the extension's HTTP server on /mcp endpoint.
+ * This module manages the status bar display and configuration.
  * 
  * @module mcp/mcpServerManager
  */
 
 import * as vscode from 'vscode';
-import * as cp from 'child_process';
 import { IMcpManager } from '../interfaces/IMcpManager';
+import { Logger, ComponentLogger } from '../core/logger';
+
+/** MCP component logger */
+const log: ComponentLogger = Logger.for('mcp');
 
 /**
  * Status of the MCP server.
  */
-export type McpStatus = 'running' | 'stopped' | 'error';
+export type McpStatus = 'connected' | 'available' | 'stopped' | 'error';
 
 /**
  * Configuration for the MCP server.
@@ -22,33 +25,26 @@ export type McpStatus = 'running' | 'stopped' | 'error';
 export interface McpConfig {
   /** Whether the MCP server is enabled */
   enabled: boolean;
-  /** Host for the MCP server to listen on */
+  /** Host for the HTTP server */
   host: string;
-  /** Port for the MCP server to listen on */
+  /** Port for the HTTP server */
   port: number;
-  /** Host of the orchestrator HTTP API */
-  orchestratorHost?: string;
-  /** Port of the orchestrator HTTP API */
-  orchestratorPort?: number;
-  /** Path to the MCP server script */
+  /** Path to the MCP server script (deprecated, kept for compatibility) */
   serverPath: string;
+  /** Workspace path for the MCP server */
+  workspacePath?: string;
 }
 
 /**
  * MCP server lifecycle manager.
  * 
- * Manages the MCP HTTP server process which provides SSE (Server-Sent Events)
- * for AI agent communication.
+ * The MCP server runs as part of the extension's HTTP server on /mcp endpoint.
+ * This manager handles status display, configuration, and connectivity checks.
  * 
  * @example
  * ```typescript
  * const manager = new McpServerManager(context, config);
- * if (config.enabled) {
- *   manager.start();
- * }
- * 
- * // On extension deactivation
- * manager.stop();
+ * manager.start(); // Starts health checks
  * ```
  */
 export class McpServerManager implements IMcpManager {
@@ -56,8 +52,6 @@ export class McpServerManager implements IMcpManager {
   private readonly context: vscode.ExtensionContext;
   /** Server configuration */
   private readonly config: McpConfig;
-  /** Child process for the MCP server */
-  private process: cp.ChildProcess | undefined;
   /** Current server status */
   private status: McpStatus = 'stopped';
   /** Whether registered with VS Code's MCP definition provider */
@@ -66,6 +60,10 @@ export class McpServerManager implements IMcpManager {
   private statusListeners: Set<(status: McpStatus) => void> = new Set();
   /** Status bar item for displaying server status */
   private statusBarItem: vscode.StatusBarItem | undefined;
+  /** Health check interval */
+  private healthCheckInterval: NodeJS.Timeout | undefined;
+  /** Number of consecutive failures */
+  private consecutiveFailures = 0;
   
   /**
    * Create a new MCP server manager.
@@ -83,7 +81,7 @@ export class McpServerManager implements IMcpManager {
       99
     );
     this.statusBarItem.text = 'MCP: stopped';
-    this.statusBarItem.tooltip = 'Copilot Orchestrator MCP HTTP Server';
+    this.statusBarItem.tooltip = 'Copilot Orchestrator MCP Server (HTTP)';
     this.statusBarItem.show();
     
     context.subscriptions.push(this.statusBarItem);
@@ -91,107 +89,131 @@ export class McpServerManager implements IMcpManager {
   }
   
   /**
-   * Start the MCP server.
-   * No-op if already running.
+   * Mark the MCP server as available and start health checks.
+   * The MCP endpoint is served via the HTTP server.
    */
   start(): void {
-    if (this.process) {
-      console.log('MCP server already running');
-      return;
-    }
-    
     if (!this.config.enabled) {
-      console.log('MCP server disabled in settings');
+      log.info('MCP server disabled in settings');
       return;
     }
     
-    try {
-      const { host, port, orchestratorHost, orchestratorPort, serverPath } = this.config;
-      
-      // Use 'localhost' for connections to work with both IPv4 and IPv6
-      const mcpHost = host === '127.0.0.1' || host === '::1' ? 'localhost' : host;
-      const orchHost = orchestratorHost === '127.0.0.1' || orchestratorHost === '::1' 
-        ? 'localhost' 
-        : (orchestratorHost || 'localhost');
-      const orchPort = orchestratorPort || 39218;
-      
-      console.log(`Starting MCP HTTP server: ${serverPath}`);
-      console.log(`MCP will listen on: http://${mcpHost}:${port}`);
-      console.log(`Target Orchestrator API: http://${orchHost}:${orchPort}`);
-      
-      this.process = cp.spawn('node', [serverPath], {
-        env: {
-          ...process.env,
-          ORCH_HOST: orchHost,
-          ORCH_PORT: String(orchPort),
-          MCP_PORT: String(port)
-        },
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
-      
-      // Handle stdout
-      this.process.stdout?.on('data', (data) => {
-        console.log(`[MCP] ${data.toString().trim()}`);
-      });
-      
-      // Handle stderr
-      this.process.stderr?.on('data', (data) => {
-        console.log(`[MCP] ${data.toString().trim()}`);
-      });
-      
-      // Handle successful spawn
-      this.process.on('spawn', () => {
-        console.log('MCP HTTP server spawned successfully');
-        this.setStatus('running');
-      });
-      
-      // Handle errors
-      this.process.on('error', (err) => {
-        console.error('MCP server error:', err);
-        this.setStatus('error');
-      });
-      
-      // Handle exit
-      this.process.on('exit', (code, signal) => {
-        console.log(`MCP server exited: code=${code}, signal=${signal}`);
-        this.process = undefined;
-        this.setStatus('stopped');
-      });
-      
-    } catch (err) {
-      console.error('Failed to start MCP server:', err);
-      this.setStatus('error');
-      vscode.window.showWarningMessage(
-        'Failed to start MCP HTTP server. Check console for details.'
-      );
-    }
+    log.info('MCP server starting', { 
+      endpoint: `http://${this.config.host}:${this.config.port}/mcp`,
+      workspace: this.config.workspacePath || 'default'
+    });
+    
+    this.setStatus('available');
+    
+    // Start periodic health checks
+    this.startHealthChecks();
   }
   
   /**
-   * Stop the MCP server.
-   * Gracefully terminates the server process.
+   * Stop the MCP server and health checks.
    */
   stop(): void {
-    if (this.process) {
-      console.log('Stopping MCP server...');
-      this.process.kill('SIGTERM');
-      this.process = undefined;
-      this.setStatus('stopped');
+    log.info('MCP server stopping');
+    this.stopHealthChecks();
+    this.setStatus('stopped');
+  }
+  
+  /**
+   * Start periodic health checks to verify MCP endpoint connectivity.
+   */
+  private startHealthChecks(): void {
+    log.debug('Starting health checks');
+    // Initial check after a short delay (let server start)
+    setTimeout(() => this.checkHealth(), 1000);
+    
+    // Periodic checks every 10 seconds
+    this.healthCheckInterval = setInterval(() => this.checkHealth(), 10000);
+  }
+  
+  /**
+   * Stop health checks.
+   */
+  private stopHealthChecks(): void {
+    if (this.healthCheckInterval) {
+      log.debug('Stopping health checks');
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = undefined;
     }
   }
   
   /**
-   * Check if the MCP server is running.
+   * Check MCP endpoint health by sending a tools/list request.
+   */
+  private async checkHealth(): Promise<void> {
+    const url = `http://${this.config.host}:${this.config.port}/mcp`;
+    log.debug('Health check starting', { url });
+    
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'health-check',
+          method: 'tools/list'
+        })
+      });
+      
+      log.debug('Health check response', { status: response.status, ok: response.ok });
+      
+      if (response.ok) {
+        const data = await response.json() as any;
+        if (data.result && data.result.tools) {
+          this.consecutiveFailures = 0;
+          if (this.status !== 'connected') {
+            log.info('Health check passed - connected', { toolCount: data.result.tools.length });
+            this.setStatus('connected');
+          } else {
+            log.debug('Health check passed', { toolCount: data.result.tools.length });
+          }
+          return;
+        } else {
+          log.debug('Health check invalid response', { data });
+        }
+      }
+      
+      // Response not OK or invalid data
+      this.handleHealthCheckFailure(`HTTP ${response.status}`);
+    } catch (error: any) {
+      log.debug('Health check error', { error: error.message });
+      this.handleHealthCheckFailure(error.message || 'Connection failed');
+    }
+  }
+  
+  /**
+   * Handle a health check failure.
+   */
+  private handleHealthCheckFailure(reason: string): void {
+    this.consecutiveFailures++;
+    log.debug('Health check failure', { reason, consecutiveFailures: this.consecutiveFailures });
+    
+    if (this.consecutiveFailures >= 3 && this.status !== 'error') {
+      log.warn('Health check failed repeatedly', { reason, failures: this.consecutiveFailures });
+      this.setStatus('error');
+    } else if (this.consecutiveFailures < 3 && this.status === 'connected') {
+      // Brief failure, mark as available (trying to reconnect)
+      log.debug('Brief health check failure, retrying');
+      this.setStatus('available');
+    }
+  }
+  
+  /**
+   * Check if the MCP server is available.
    */
   isRunning(): boolean {
-    return this.process !== undefined && this.status === 'running';
+    return this.status === 'available' || this.status === 'connected';
   }
   
   /**
    * Get the MCP server endpoint URL.
    */
   getEndpoint(): string {
-    return `http://localhost:${this.config.port}`;
+    return `http://${this.config.host}:${this.config.port}/mcp`;
   }
   
   /**
@@ -213,12 +235,8 @@ export class McpServerManager implements IMcpManager {
     return {
       mcpServers: {
         'copilot-orchestrator': {
-          command: 'node',
-          args: [this.config.serverPath],
-          env: {
-            ORCH_HOST: this.config.host,
-            ORCH_PORT: String(this.config.port)
-          }
+          type: 'http',
+          url: `http://${this.config.host}:${this.config.port}/mcp`
         }
       }
     };
@@ -243,12 +261,11 @@ export class McpServerManager implements IMcpManager {
   
   /**
    * Set whether the MCP server is registered with VS Code's definition provider.
-   * This updates the status bar to show the server is available even if the
-   * HTTP server isn't running (VS Code uses stdio transport instead).
+   * This is informational - actual connectivity is determined by health checks.
    */
   setRegisteredWithVSCode(registered: boolean): void {
     this.registeredWithVSCode = registered;
-    this.updateStatusBar();
+    console.log(`[MCP] Registered with VS Code: ${registered}`);
   }
   
   /**
@@ -257,19 +274,21 @@ export class McpServerManager implements IMcpManager {
   private updateStatusBar(): void {
     if (!this.statusBarItem) return;
     
-    if (this.status === 'running') {
-      // HTTP server is running
-      this.statusBarItem.text = `$(radio-tower) MCP: ${this.config.port}`;
-      this.statusBarItem.tooltip = `MCP Server running on http://${this.config.host}:${this.config.port}`;
+    const endpoint = `http://${this.config.host}:${this.config.port}/mcp`;
+    
+    if (this.status === 'connected') {
+      // Connected and verified working
+      this.statusBarItem.text = '$(check) MCP: connected';
+      this.statusBarItem.tooltip = `Copilot Orchestrator MCP connected at ${endpoint}`;
       this.statusBarItem.backgroundColor = undefined;
-    } else if (this.registeredWithVSCode) {
-      // Not running HTTP, but registered with VS Code (stdio transport)
-      this.statusBarItem.text = '$(check) MCP: registered';
-      this.statusBarItem.tooltip = 'Copilot Orchestrator MCP registered with VS Code (stdio transport)';
+    } else if (this.status === 'available') {
+      // Server started, checking connectivity
+      this.statusBarItem.text = '$(radio-tower) MCP: connecting...';
+      this.statusBarItem.tooltip = `Copilot Orchestrator MCP server at ${endpoint}`;
       this.statusBarItem.backgroundColor = undefined;
     } else if (this.status === 'error') {
       this.statusBarItem.text = '$(error) MCP: error';
-      this.statusBarItem.tooltip = 'Copilot Orchestrator MCP server error';
+      this.statusBarItem.tooltip = `Copilot Orchestrator MCP server error - cannot reach ${endpoint}`;
       this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
     } else {
       this.statusBarItem.text = '$(circle-slash) MCP: stopped';
@@ -287,19 +306,18 @@ export class McpServerManager implements IMcpManager {
  */
 export function createMcpManager(context: vscode.ExtensionContext): McpServerManager {
   const mcpCfg = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
-  const httpCfg = vscode.workspace.getConfiguration('copilotOrchestrator.http');
+  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
   
   const config: McpConfig = {
     enabled: mcpCfg.get<boolean>('enabled', true),
     host: mcpCfg.get<string>('host', 'localhost'),
     port: mcpCfg.get<number>('port', 39219),
-    orchestratorHost: httpCfg.get<string>('host', 'localhost'),
-    orchestratorPort: httpCfg.get<number>('port', 39218),
     serverPath: vscode.Uri.joinPath(
       context.extensionUri, 
       'server', 
       'mcp-server.js'
-    ).fsPath
+    ).fsPath,
+    workspacePath
   };
   
   return new McpServerManager(context, config);

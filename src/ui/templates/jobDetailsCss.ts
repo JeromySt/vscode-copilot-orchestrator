@@ -484,6 +484,24 @@ export function getJobDetailsCss(): string {
     .phase-icon-running {
       animation: spin 1s linear infinite;
     }
+    .phase-icon-success {
+      color: var(--vscode-testing-iconPassed, #4EC9B0);
+    }
+    .phase-icon-failed {
+      color: var(--vscode-testing-iconFailed, #F48771);
+    }
+    .phase-icon-skipped {
+      color: var(--vscode-descriptionForeground, #858585);
+    }
+    .phase-icon-pending {
+      opacity: 0.4;
+    }
+    .phase-tab-failed {
+      border-bottom: 2px solid var(--vscode-testing-iconFailed, #F48771) !important;
+    }
+    .phase-tab-success {
+      border-bottom: 2px solid var(--vscode-testing-iconPassed, #4EC9B0) !important;
+    }
     @keyframes spin {
       from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }

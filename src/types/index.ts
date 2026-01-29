@@ -3,13 +3,12 @@
  * 
  * Import types from this module for convenience:
  * ```typescript
- * import { Job, JobSpec, WebhookConfig } from './types';
+ * import { Job, JobSpec } from './types';
  * ```
  * 
  * @module types
  */
 
 export * from './job';
-export * from './webhook';
 export * from './process';
 export * from './config';

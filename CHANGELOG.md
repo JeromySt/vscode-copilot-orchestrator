@@ -13,19 +13,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Expandable work summary**: Click to see per-commit details with file change counts
 - **Human-readable durations**: "12m 33s" instead of raw seconds
 - **Process monitoring**: Live view of running processes during job execution
+- **Plans UI**: New Plans view in sidebar showing multi-job plan status
+- **Plan Detail Panel**: Visual pipeline view showing job dependencies and execution flow
+- **Plan persistence**: Plans now persisted to `plans.json` for extension reload survival
+- **Nested plans**: Jobs can now contain full sub-plans for hierarchical orchestration
+  - Click nested plan cards to drill into sub-plan details
+  - Visual distinction with dashed borders and "Nested Plan" badge
 
 ### Changed
+- **Architecture simplification**: Removed HTTP server layer - MCP server now handles jobs directly
 - **Major refactoring**: Reorganized codebase into modular directories
   - `src/core/` - Core job runner and initialization logic
   - `src/agent/` - AI agent delegation
   - `src/git/` - Git operations and worktree management
-  - `src/http/` - HTTP REST API server
   - `src/mcp/` - MCP server integration
-  - `src/notifications/` - Webhook notifications
   - `src/process/` - Process monitoring
   - `src/ui/` - UI components (status bar, webview, view provider)
 - **Configuration consolidation**: All settings now in VS Code extension settings (removed `.orchestrator/config.json`)
 - **Extension entry point**: Reduced from ~2800 lines to ~100 lines
+
+### Removed
+- **Webhook notifications**: Removed as they don't apply to stdio-only architecture
+- **HTTP server**: Removed in favor of direct MCP job execution
+- **HTTP configuration settings**: `copilotOrchestrator.http.*` settings removed
 
 ### Fixed
 - UI jumpiness when switching log tabs (incremental updates)
@@ -36,7 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - 2025-01-XX
 
 ### Added
-- Webhook notification support for job events
 - Multi-job plan execution with dependency management
 - Retry functionality with AI-guided failure analysis
 - Continue work on existing jobs
