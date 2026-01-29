@@ -35,7 +35,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 /**
  * Components that can have logging enabled
  */
-export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension';
+export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler';
 
 /**
  * Debug configuration per component
@@ -48,6 +48,7 @@ interface DebugConfig {
   git: boolean;
   ui: boolean;
   extension: boolean;
+  scheduler: boolean;
 }
 
 /**
@@ -66,7 +67,8 @@ export class Logger {
     plans: false,
     git: false,
     ui: false,
-    extension: false
+    extension: false,
+    scheduler: false
   };
   private configListener: vscode.Disposable | undefined;
 
@@ -135,7 +137,8 @@ export class Logger {
       plans: config.get<boolean>('debug.plans', false),
       git: config.get<boolean>('debug.git', false),
       ui: config.get<boolean>('debug.ui', false),
-      extension: config.get<boolean>('debug.extension', false)
+      extension: config.get<boolean>('debug.extension', false),
+      scheduler: config.get<boolean>('debug.scheduler', false)
     };
   }
 
