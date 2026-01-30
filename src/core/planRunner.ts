@@ -1429,6 +1429,11 @@ export class PlanRunner {
         const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
         const repoPath = spec.repoPath || ws;
         this.performFinalMerge(spec, plan, repoPath);
+        
+        // Clean up all plan resources if cleanUpSuccessfulWork is enabled (default: true)
+        if (spec.cleanUpSuccessfulWork !== false) {
+          this.cleanupAllPlanResources(spec, plan, repoPath);
+        }
       }
     } else if (finishedJobs + finishedSubPlans < totalJobs + totalSubPlans && 
                plan.queued.length === 0 && plan.running.length === 0 && 
@@ -1470,6 +1475,25 @@ export class PlanRunner {
    */
   private cleanupIntegrationBranches(plan: InternalPlanState, repoPath: string): void {
     mergeManager.cleanupIntegrationBranches(plan, repoPath);
+    this.persist();
+  }
+
+  /**
+   * Clean up all worktrees and branches for a completed plan.
+   * Delegates to cleanupManager module.
+   */
+  private cleanupAllPlanResources(spec: PlanSpec, plan: InternalPlanState, repoPath: string): void {
+    cleanupManager.cleanupAllPlanResources(spec, plan, repoPath);
+    
+    // Also clean up any nested sub-plans
+    for (const [subPlanId, childPlanId] of plan.completedSubPlans) {
+      const childPlan = this.plans.get(childPlanId);
+      const childSpec = this.specs.get(childPlanId);
+      if (childPlan && childSpec) {
+        cleanupManager.cleanupAllPlanResources(childSpec, childPlan, repoPath);
+      }
+    }
+    
     this.persist();
   }
 
