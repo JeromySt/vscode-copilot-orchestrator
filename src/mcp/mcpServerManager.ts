@@ -29,8 +29,6 @@ export interface McpConfig {
   host: string;
   /** Port for the HTTP server */
   port: number;
-  /** Path to the MCP server script (deprecated, kept for compatibility) */
-  serverPath: string;
   /** Workspace path for the MCP server */
   workspacePath?: string;
 }
@@ -312,11 +310,6 @@ export function createMcpManager(context: vscode.ExtensionContext): McpServerMan
     enabled: mcpCfg.get<boolean>('enabled', true),
     host: mcpCfg.get<string>('host', 'localhost'),
     port: mcpCfg.get<number>('port', 39219),
-    serverPath: vscode.Uri.joinPath(
-      context.extensionUri, 
-      'server', 
-      'mcp-server.js'
-    ).fsPath,
     workspacePath
   };
   

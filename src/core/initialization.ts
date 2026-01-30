@@ -209,19 +209,14 @@ export function initializeMcpServer(
     return undefined;
   }
 
-  // MCP is served via HTTP endpoint - no separate server needed
-  // The serverPath is kept for backwards compatibility but not used
-  const serverPath = '';
-
   // Get workspace path for the MCP server
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
 
-  // Use HTTP config for the MCP endpoint since it's served via HTTP
+  // MCP is served via HTTP endpoint at /mcp
   const manager = new McpServerManager(context, {
     enabled: true,
     host: httpConfig.host,
     port: httpConfig.port,
-    serverPath,
     workspacePath
   });
 
@@ -229,11 +224,9 @@ export function initializeMcpServer(
   context.subscriptions.push({ dispose: () => manager.stop() });
 
   // Register with VS Code for automatic GitHub Copilot integration
-  // Use HTTP config since MCP is served via HTTP endpoint
   const providerDisposable = registerMcpDefinitionProvider(context, {
     host: httpConfig.host,
     port: httpConfig.port,
-    serverPath,
     workspacePath
   });
   context.subscriptions.push(providerDisposable);

@@ -19,8 +19,6 @@ export interface McpDefinitionProviderConfig {
   host: string;
   /** Port the MCP server listens on */
   port: number;
-  /** Path to the mcp-server.js script (deprecated - now using HTTP) */
-  serverPath: string;
   /** Workspace path for the MCP server */
   workspacePath?: string;
 }
