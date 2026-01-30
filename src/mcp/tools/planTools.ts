@@ -21,7 +21,16 @@ export function getPlanToolDefinitions(): McpTool[] {
   return [
     {
       name: 'create_copilot_plan',
-      description: 'Create a plan with multiple work units (jobs and optional sub-plans). Dependencies use a simple producer→consumer model: each work unit lists the IDs of other work units it consumes from (consumesFrom). Jobs run in parallel up to maxParallel, respecting consumesFrom order.',
+      description: `Create a plan with multiple work units (jobs and optional sub-plans). Dependencies use a simple producer→consumer model: each work unit lists the IDs of other work units it consumes from (consumesFrom). Jobs run in parallel up to maxParallel, respecting consumesFrom order.
+
+EXECUTION CONTEXT FOR JOBS:
+- All commands (prechecks, work, postchecks) execute in a SHELL PROCESS (cmd.exe on Windows, /bin/sh on Unix)
+- Commands run in the job's worktree directory, NOT PowerShell - use shell syntax accordingly
+- For AI-assisted work, prefix with "@agent" to delegate to GitHub Copilot CLI
+
+WORK FIELD OPTIONS:
+1. Shell command: Runs directly in shell (e.g., "npm run build", "make test")
+2. @agent <task>: Delegates to GitHub Copilot CLI with natural language instructions`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -29,7 +38,7 @@ export function getPlanToolDefinitions(): McpTool[] {
           name: { type: 'string', description: 'Human-readable plan name' },
           baseBranch: { type: 'string', description: 'Starting branch for the plan (default: main). Root jobs branch from here.' },
           targetBranch: { type: 'string', description: 'Optional branch to merge final results into' },
-          maxParallel: { type: 'number', description: 'Max concurrent jobs (default: auto based on CPU)' },
+          maxParallel: { type: 'number', description: 'Max concurrent jobs (default: auto based on CPU). Note: Global maxConcurrentJobs setting takes precedence.' },
           cleanUpSuccessfulWork: { type: 'boolean', description: 'Whether to clean up worktrees/branches after successful merges (default: true). When true, worktrees/branches are deleted immediately after a leaf merges to targetBranch, keeping local git state minimal.' },
           jobs: {
             type: 'array',
@@ -40,16 +49,25 @@ export function getPlanToolDefinitions(): McpTool[] {
                 id: { type: 'string', description: 'Unique job ID within the plan' },
                 name: { type: 'string', description: 'Job display name' },
                 task: { type: 'string', description: 'Task description' },
-                work: { type: 'string', description: 'Work command (use @agent for AI tasks)' },
+                work: { 
+                  type: 'string', 
+                  description: 'Shell command (runs in cmd/sh, NOT PowerShell) OR "@agent <task>" for Copilot delegation' 
+                },
                 consumesFrom: {
                   type: 'array',
                   items: { type: 'string' },
                   description: 'IDs of work units (jobs or sub-plans) whose output is consumed by this job. Jobs with no consumesFrom are root jobs.'
                 },
                 baseBranch: { type: 'string', description: 'Override base branch (only for root jobs with no consumesFrom)' },
-                prechecks: { type: 'string', description: 'Pre-check command' },
-                postchecks: { type: 'string', description: 'Post-check command' },
-                instructions: { type: 'string', description: 'Additional AI instructions' }
+                prechecks: { 
+                  type: 'string', 
+                  description: 'Shell command to run before work (runs in cmd/sh, NOT PowerShell)' 
+                },
+                postchecks: { 
+                  type: 'string', 
+                  description: 'Shell command to run after work (runs in cmd/sh, NOT PowerShell)' 
+                },
+                instructions: { type: 'string', description: 'Additional context for @agent tasks (ignored for shell commands)' }
               },
               required: ['id', 'task']
             }
@@ -77,10 +95,13 @@ export function getPlanToolDefinitions(): McpTool[] {
                       id: { type: 'string', description: 'Unique job ID within the sub-plan' },
                       name: { type: 'string', description: 'Job display name' },
                       task: { type: 'string', description: 'Task description' },
-                      work: { type: 'string', description: 'Work command' },
+                      work: { 
+                        type: 'string', 
+                        description: 'Shell command (runs in cmd/sh, NOT PowerShell) OR "@agent <task>" for Copilot' 
+                      },
                       consumesFrom: { type: 'array', items: { type: 'string' }, description: 'IDs of jobs within the sub-plan this job consumes from.' },
-                      prechecks: { type: 'string' },
-                      postchecks: { type: 'string' },
+                      prechecks: { type: 'string', description: 'Shell command (runs in cmd/sh, NOT PowerShell)' },
+                      postchecks: { type: 'string', description: 'Shell command (runs in cmd/sh, NOT PowerShell)' },
                       instructions: { type: 'string' }
                     },
                     required: ['id', 'task']

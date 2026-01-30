@@ -15,19 +15,42 @@ export function getJobToolDefinitions(): McpTool[] {
   return [
     {
       name: 'create_copilot_job',
-      description: 'Create a new orchestrator job in an isolated git worktree. The job will run prechecks, execute AI-assisted work, run postchecks, and merge changes back.',
+      description: `Create a new orchestrator job in an isolated git worktree. The job will run prechecks, execute work, run postchecks, and merge changes back.
+
+EXECUTION CONTEXT:
+- All commands (prechecks, work, postchecks) execute in a SHELL PROCESS (cmd.exe on Windows, /bin/sh on Unix)
+- Commands run in the worktree directory, NOT PowerShell - use shell syntax accordingly
+- For AI-assisted work, prefix with "@agent" to delegate to GitHub Copilot CLI
+
+WORK FIELD OPTIONS:
+1. Shell command: Runs directly in shell (e.g., "npm run build", "python script.py")
+2. @agent <task>: Delegates to GitHub Copilot CLI with natural language instructions
+
+EXAMPLES:
+- work: "npm run fix-lint" → Runs shell command directly
+- work: "@agent Implement the login feature following the spec in docs/login.md" → Copilot handles it
+- prechecks: "npm ci && npm run typecheck" → Shell commands for validation`,
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string', description: 'Job ID (optional, auto-generated if not provided)' },
           name: { type: 'string', description: 'Human-readable job name' },
-          task: { type: 'string', description: 'Task description for the AI agent' },
+          task: { type: 'string', description: 'Task description (used as default work if work not specified)' },
           repoPath: { type: 'string', description: 'Repository path (defaults to workspace)' },
           baseBranch: { type: 'string', description: 'Branch to start from (default: main)' },
-          prechecks: { type: 'string', description: 'Pre-check command (e.g., "npm test")' },
-          work: { type: 'string', description: 'Work command - use natural language for @agent delegation' },
-          postchecks: { type: 'string', description: 'Post-check command (e.g., "npm run lint")' },
-          instructions: { type: 'string', description: 'Additional AI instructions' }
+          prechecks: { 
+            type: 'string', 
+            description: 'Shell command to run before work (e.g., "npm ci && npm test"). Runs in cmd/sh, not PowerShell.' 
+          },
+          work: { 
+            type: 'string', 
+            description: 'Either a shell command OR "@agent <natural language task>" for Copilot delegation. Shell commands run in cmd.exe (Windows) or /bin/sh (Unix), NOT PowerShell.' 
+          },
+          postchecks: { 
+            type: 'string', 
+            description: 'Shell command to run after work (e.g., "npm run lint && npm test"). Runs in cmd/sh, not PowerShell.' 
+          },
+          instructions: { type: 'string', description: 'Additional context for @agent tasks (ignored for shell commands)' }
         },
         required: ['task']
       }
@@ -104,24 +127,30 @@ export function getJobToolDefinitions(): McpTool[] {
     },
     {
       name: 'retry_copilot_job',
-      description: 'Retry a failed job, optionally with new instructions.',
+      description: 'Retry a failed job. By default, analyzes previous logs to fix issues. Optionally provide new instructions for @agent tasks.',
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string', description: 'Job ID to retry' },
-          instructions: { type: 'string', description: 'New/updated instructions for the retry' }
+          instructions: { 
+            type: 'string', 
+            description: 'New instructions for retry. For @agent work, use natural language. For shell commands, provide the updated shell command.' 
+          }
         },
         required: ['id']
       }
     },
     {
       name: 'continue_copilot_job_work',
-      description: 'Add more work to an existing job and re-run it.',
+      description: 'Add more work to an existing job and re-run it. The new work is prepended to work history.',
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string', description: 'Job ID' },
-          work: { type: 'string', description: 'Additional work to perform' }
+          work: { 
+            type: 'string', 
+            description: 'Additional work: shell command (runs in cmd/sh) OR "@agent <task>" for Copilot. Commands auto-prefix with @agent if no prefix given.' 
+          }
         },
         required: ['id', 'work']
       }
