@@ -234,16 +234,20 @@ export async function handleDeletePlan(args: any, ctx: ToolHandlerContext): Prom
     return { error: `Plan ${args.id} not found` };
   }
   
-  // Cancel if running
-  if (!['completed', 'failed', 'canceled', 'partial'].includes(plan.status)) {
-    ctx.plans.cancel(args.id);
-  }
+  // Delete the plan (this also cancels if running and cleans up resources)
+  const deleted = ctx.plans.delete(args.id);
   
-  return { 
-    success: true, 
-    planId: args.id,
-    message: `Plan ${args.id} canceled/stopped`
-  };
+  if (deleted) {
+    return { 
+      success: true, 
+      planId: args.id,
+      message: `Plan ${args.id} deleted`
+    };
+  } else {
+    return {
+      error: `Failed to delete plan ${args.id}`
+    };
+  }
 }
 
 /**

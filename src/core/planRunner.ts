@@ -354,7 +354,8 @@ export class PlanRunner {
       completedSubPlans: new Map(),
       failedSubPlans: new Set(),
       // Incremental delivery tracking
-      mergedLeaves: new Set()
+      mergedLeaves: new Set(),
+      cleanedWorkUnits: new Set()
     };
     
     // Queue jobs with no consumesFrom (roots of the DAG)
@@ -1080,10 +1081,9 @@ export class PlanRunner {
     spec: PlanSpec,
     plan: InternalPlanState,
     workUnitId: string,
-    repoPath: string,
-    cleanedUp: Set<string> = new Set()
+    repoPath: string
   ): void {
-    cleanupManager.cleanupWorkUnit(spec, plan, workUnitId, repoPath, cleanedUp);
+    cleanupManager.cleanupWorkUnit(spec, plan, workUnitId, repoPath);
     this.persist();
   }
 

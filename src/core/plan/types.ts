@@ -252,6 +252,8 @@ export interface InternalPlanState extends Omit<PlanState, 'pendingSubPlans' | '
   subPlanIntegrationBranches?: Map<string, string>;
   /** Work units (jobs/sub-plans) that have been merged to targetBranch */
   mergedLeaves: Set<string>;
+  /** Work units whose worktrees/branches have been cleaned up */
+  cleanedWorkUnits: Set<string>;
 }
 
 // ============================================================================
@@ -279,6 +281,7 @@ export function createInternalState(id: string): InternalPlanState {
     completedSubPlans: new Map(),
     failedSubPlans: new Set(),
     mergedLeaves: new Set(),
+    cleanedWorkUnits: new Set(),
   };
 }
 

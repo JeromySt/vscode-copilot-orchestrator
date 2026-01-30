@@ -19,17 +19,22 @@ const log: ComponentLogger = Logger.for('plans');
  * Clean up worktree and branch for a successfully merged work unit.
  * Also recursively cleans up any upstream producers that have all their
  * consumers now cleaned up.
+ * 
+ * Uses plan.cleanedWorkUnits to track what has been cleaned across calls.
  */
 export function cleanupWorkUnit(
   spec: PlanSpec,
   plan: InternalPlanState,
   workUnitId: string,
-  repoPath: string,
-  cleanedUp: Set<string> = new Set()
+  repoPath: string
 ): void {
-  // Avoid infinite recursion
-  if (cleanedUp.has(workUnitId)) return;
-  cleanedUp.add(workUnitId);
+  // Initialize cleanedWorkUnits if needed (for backward compat with persisted plans)
+  if (!plan.cleanedWorkUnits) {
+    plan.cleanedWorkUnits = new Set();
+  }
+  
+  // Avoid re-cleaning already cleaned work units
+  if (plan.cleanedWorkUnits.has(workUnitId)) return;
 
   // Clean up the worktree
   const worktreePath = plan.worktreePaths.get(workUnitId);
@@ -66,6 +71,9 @@ export function cleanupWorkUnit(
     plan.completedBranches.delete(workUnitId);
   }
 
+  // Mark this work unit as cleaned
+  plan.cleanedWorkUnits.add(workUnitId);
+
   log.info(`Cleaned up work unit ${workUnitId}`, {
     worktree: !!worktreePath,
     branch: !!completedBranch,
@@ -76,8 +84,8 @@ export function cleanupWorkUnit(
   const job = spec.jobs.find(j => j.id === workUnitId);
   if (job) {
     for (const producerId of job.consumesFrom) {
-      if (canCleanupProducer(spec, plan, producerId, cleanedUp)) {
-        cleanupWorkUnit(spec, plan, producerId, repoPath, cleanedUp);
+      if (canCleanupProducer(spec, plan, producerId)) {
+        cleanupWorkUnit(spec, plan, producerId, repoPath);
       }
     }
   }
@@ -86,8 +94,8 @@ export function cleanupWorkUnit(
   const subPlan = spec.subPlans?.find(sp => sp.id === workUnitId);
   if (subPlan) {
     for (const producerId of subPlan.consumesFrom) {
-      if (canCleanupProducer(spec, plan, producerId, cleanedUp)) {
-        cleanupWorkUnit(spec, plan, producerId, repoPath, cleanedUp);
+      if (canCleanupProducer(spec, plan, producerId)) {
+        cleanupWorkUnit(spec, plan, producerId, repoPath);
       }
     }
   }
@@ -96,18 +104,23 @@ export function cleanupWorkUnit(
 /**
  * Check if a producer can be cleaned up.
  * A producer can only be cleaned up if ALL consumers that depend on it
- * have been merged and cleaned up.
+ * have been cleaned up (tracked in plan.cleanedWorkUnits).
  */
 export function canCleanupProducer(
   spec: PlanSpec,
   plan: InternalPlanState,
-  producerId: string,
-  cleanedUp: Set<string>
+  producerId: string
 ): boolean {
-  // Don't cleanup if already cleaned or not merged
-  if (cleanedUp.has(producerId)) return false;
-  if (!plan.mergedLeaves.has(producerId) && !plan.done.includes(producerId)) {
-    // Producer hasn't finished yet
+  // Initialize cleanedWorkUnits if needed (backward compat)
+  if (!plan.cleanedWorkUnits) {
+    plan.cleanedWorkUnits = new Set();
+  }
+  
+  // Don't cleanup if already cleaned
+  if (plan.cleanedWorkUnits.has(producerId)) return false;
+  
+  // Don't cleanup if not finished yet
+  if (!plan.done.includes(producerId) && !plan.completedSubPlans.has(producerId)) {
     return false;
   }
 
@@ -125,12 +138,7 @@ export function canCleanupProducer(
   }
 
   // Producer can be cleaned up if ALL consumers have been cleaned up
-  return consumers.every(
-    consumerId =>
-      cleanedUp.has(consumerId) ||
-      // A consumer counts as "cleaned up" if it was merged (for leaves)
-      plan.mergedLeaves.has(consumerId)
-  );
+  return consumers.every(consumerId => plan.cleanedWorkUnits.has(consumerId));
 }
 
 /**

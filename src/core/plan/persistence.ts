@@ -33,6 +33,7 @@ interface SerializedPlanState extends PlanState {
   _failedSubPlans: string[];
   _subPlanIntegrationBranches: [string, string][];
   _mergedLeaves: string[];
+  _cleanedWorkUnits: string[];
 }
 
 /**
@@ -155,6 +156,7 @@ export class PlanPersistence {
         state.subPlanIntegrationBranches?.entries() || []
       ),
       _mergedLeaves: Array.from(state.mergedLeaves || []),
+      _cleanedWorkUnits: Array.from(state.cleanedWorkUnits || []),
     };
   }
 
@@ -192,6 +194,7 @@ export class PlanPersistence {
       ),
       // Restore incremental delivery tracking
       mergedLeaves: new Set(data._mergedLeaves || []),
+      cleanedWorkUnits: new Set(data._cleanedWorkUnits || []),
     };
   }
 
