@@ -27,8 +27,18 @@ export class JobRunner {
     const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ctx.globalStorageUri.fsPath; 
     this.storeFile = path.join(ws,'.orchestrator','jobs','state.json'); 
     ensureDir(path.dirname(this.storeFile));
-    const cfg = readJSON<any>(path.join(ws,'.orchestrator','config.json'), {maxWorkers:0}); 
-    this.maxWorkers = cfg.maxWorkers && cfg.maxWorkers>0 ? cfg.maxWorkers : cpuCountMinusOne();
+    
+    // Priority: VS Code extension settings > file-based config > auto-detect
+    const extConfig = vscode.workspace.getConfiguration('copilotOrchestrator');
+    const extMaxConcurrent = extConfig.get<number>('maxConcurrentJobs', 0);
+    
+    if (extMaxConcurrent > 0) {
+      this.maxWorkers = extMaxConcurrent;
+    } else {
+      // Fallback to file-based config for backward compatibility
+      const cfg = readJSON<any>(path.join(ws,'.orchestrator','config.json'), {maxWorkers:0}); 
+      this.maxWorkers = cfg.maxWorkers && cfg.maxWorkers>0 ? cfg.maxWorkers : cpuCountMinusOne();
+    }
     
     // Load existing jobs and migrate old format
     const saved = readJSON<{jobs: any[] }>(this.storeFile,{jobs:[]});

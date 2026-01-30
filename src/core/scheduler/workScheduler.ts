@@ -1,13 +1,14 @@
 /**
- * @fileoverview Unified Work Scheduler Facade.
+ * @fileoverview Unified Work Scheduler with Global Concurrency Control.
  *
- * Provides a single entry point for scheduling both jobs and plans,
- * wrapping the existing JobRunner and PlanRunner implementations.
+ * The WorkScheduler manages all job execution with extension-level
+ * concurrency control via `copilotOrchestrator.maxConcurrentJobs`.
  *
- * This facade:
- * - Abstracts the difference between jobs and plans
- * - Provides a unified event model
- * - Enables future migration to the full scheduler abstraction
+ * Key design decisions:
+ * - Jobs are queued globally and executed FIFO up to maxConcurrentJobs
+ * - Plans do NOT count against concurrency (they just schedule jobs)
+ * - Concurrency is configured at extension level, not per-plan/per-API
+ * - Configuration changes are applied immediately
  *
  * @module core/scheduler/workScheduler
  */
@@ -16,9 +17,36 @@ import * as vscode from 'vscode';
 import { JobRunner, Job, JobSpec } from '../jobRunner';
 import { PlanRunner, PlanSpec, PlanState as RunnerPlanState } from '../planRunner';
 import { WorkUnitStatus, isTerminalStatus } from './types';
+import { cpuCountMinusOne } from '../utils';
 
 // Re-export PlanState with a distinct name to avoid collision
 export type PlanStateInfo = RunnerPlanState;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Configuration section name. */
+const CONFIG_SECTION = 'copilotOrchestrator';
+
+/** Configuration key for max concurrent jobs. */
+const CONFIG_MAX_CONCURRENT_JOBS = 'maxConcurrentJobs';
+
+/**
+ * Get the configured maximum concurrent jobs.
+ * Returns cpuCount - 1 if set to 0 (auto) or not configured.
+ */
+function getMaxConcurrentJobs(): number {
+  const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const value = config.get<number>(CONFIG_MAX_CONCURRENT_JOBS, 0);
+  
+  // 0 or unset = auto (CPU count - 1)
+  if (!value || value <= 0) {
+    return cpuCountMinusOne();
+  }
+  
+  return value;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -67,6 +95,26 @@ export interface WorkSchedulerEvents {
 
   /** Fired when a work unit completes (success, failure, or cancel). */
   onDidComplete: vscode.Event<UnifiedWorkUnit>;
+
+  /** Fired when concurrency configuration changes. */
+  onDidChangeConcurrency: vscode.Event<number>;
+}
+
+/**
+ * Statistics about the scheduler state.
+ */
+export interface SchedulerStats {
+  /** Number of jobs currently running. */
+  runningJobs: number;
+
+  /** Number of jobs waiting in queue. */
+  queuedJobs: number;
+
+  /** Maximum concurrent jobs allowed. */
+  maxConcurrentJobs: number;
+
+  /** Number of plans currently active (not counting against concurrency). */
+  activePlans: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -116,43 +164,59 @@ function mapPlanStatus(status: RunnerPlanState['status']): WorkUnitStatus {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Work Scheduler Facade
+// Work Scheduler
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Unified facade for scheduling jobs and plans.
+ * Unified scheduler managing jobs and plans with global concurrency control.
  *
- * Wraps the existing JobRunner and PlanRunner to provide a consistent
- * interface while maintaining backward compatibility.
+ * ## Concurrency Model
+ *
+ * - **Jobs** are the unit of work that consumes concurrency slots
+ * - **Plans** orchestrate jobs but do NOT consume concurrency slots
+ * - Global `maxConcurrentJobs` from extension settings controls parallelism
+ * - Jobs are executed FIFO (first-in, first-out)
+ *
+ * ## Configuration
+ *
+ * Set `copilotOrchestrator.maxConcurrentJobs` in VS Code settings:
+ * - `0` (default): Auto-detect based on CPU count - 1
+ * - `1-N`: Fixed concurrency limit
  *
  * @example
  * ```typescript
  * const scheduler = new WorkScheduler(ctx);
  *
- * // Schedule a job
- * scheduler.enqueueJob(jobSpec);
+ * // Check current state
+ * const stats = scheduler.getStats();
+ * console.log(`Running: ${stats.runningJobs}/${stats.maxConcurrentJobs}`);
  *
- * // Schedule a plan
+ * // Schedule jobs (queued until slot available)
+ * scheduler.enqueueJob(jobSpec1);
+ * scheduler.enqueueJob(jobSpec2);
+ *
+ * // Plans schedule jobs internally
  * scheduler.enqueuePlan(planSpec);
  *
- * // List all work
- * const all = scheduler.list();
- *
- * // React to changes
- * scheduler.events.onDidChange(unit => {
- *   console.log(`${unit.name} is now ${unit.status}`);
+ * // React to concurrency changes
+ * scheduler.events.onDidChangeConcurrency(max => {
+ *   console.log(`New max concurrent jobs: ${max}`);
  * });
  * ```
  */
 export class WorkScheduler {
+  private readonly ctx: vscode.ExtensionContext;
   private readonly jobRunner: JobRunner;
   private readonly planRunner: PlanRunner;
 
+  // Event emitters
   private readonly _onDidChange = new vscode.EventEmitter<UnifiedWorkUnit>();
   private readonly _onDidComplete = new vscode.EventEmitter<UnifiedWorkUnit>();
+  private readonly _onDidChangeConcurrency = new vscode.EventEmitter<number>();
 
   private pollInterval?: ReturnType<typeof setInterval>;
   private previousStates = new Map<string, WorkUnitStatus>();
+  private configDisposable?: vscode.Disposable;
 
   /**
    * Events emitted by the scheduler.
@@ -160,14 +224,61 @@ export class WorkScheduler {
   public readonly events: WorkSchedulerEvents = {
     onDidChange: this._onDidChange.event,
     onDidComplete: this._onDidComplete.event,
+    onDidChangeConcurrency: this._onDidChangeConcurrency.event,
   };
 
   constructor(ctx: vscode.ExtensionContext) {
+    this.ctx = ctx;
     this.jobRunner = new JobRunner(ctx);
     this.planRunner = new PlanRunner(this.jobRunner);
 
+    // Sync JobRunner's maxWorkers with our config
+    this.syncJobRunnerMaxWorkers();
+
+    // Watch for configuration changes
+    this.configDisposable = vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration(`${CONFIG_SECTION}.${CONFIG_MAX_CONCURRENT_JOBS}`)) {
+        const newMax = getMaxConcurrentJobs();
+        this.syncJobRunnerMaxWorkers();
+        this._onDidChangeConcurrency.fire(newMax);
+      }
+    });
+
     // Start polling for state changes
     this.startPolling();
+  }
+
+  /**
+   * Keep JobRunner's maxWorkers in sync with extension config.
+   */
+  private syncJobRunnerMaxWorkers(): void {
+    this.jobRunner.maxWorkers = getMaxConcurrentJobs();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Configuration
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Get maximum concurrent jobs from extension configuration.
+   */
+  get maxConcurrentJobs(): number {
+    return getMaxConcurrentJobs();
+  }
+
+  /**
+   * Get scheduler statistics.
+   */
+  getStats(): SchedulerStats {
+    const jobs = this.jobRunner.list();
+    const plans = this.planRunner.list();
+
+    return {
+      runningJobs: jobs.filter(j => j.status === 'running').length,
+      queuedJobs: jobs.filter(j => j.status === 'queued').length,
+      maxConcurrentJobs: this.maxConcurrentJobs,
+      activePlans: plans.filter(p => p.status === 'running' || p.status === 'queued').length,
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -176,9 +287,12 @@ export class WorkScheduler {
 
   /**
    * Enqueue a job for execution.
+   * Jobs are queued globally and executed FIFO up to maxConcurrentJobs.
    */
-  enqueueJob(spec: JobSpec): void {
+  enqueueJob(spec: JobSpec): string {
+    // Delegate to JobRunner which handles ID generation and persistence
     this.jobRunner.enqueue(spec);
+    return spec.id;
   }
 
   /**
@@ -196,7 +310,7 @@ export class WorkScheduler {
   }
 
   /**
-   * Cancel a running job.
+   * Cancel a running or queued job.
    */
   cancelJob(jobId: string): void {
     this.jobRunner.cancel(jobId);
@@ -207,6 +321,13 @@ export class WorkScheduler {
    */
   deleteJob(jobId: string): boolean {
     return this.jobRunner.delete(jobId);
+  }
+
+  /**
+   * Get a job by ID.
+   */
+  getJob(jobId: string): Job | undefined {
+    return this.jobRunner.list().find(j => j.id === jobId);
   }
 
   /**
@@ -222,13 +343,14 @@ export class WorkScheduler {
 
   /**
    * Enqueue a plan for execution.
+   * Plans orchestrate jobs but do NOT count against concurrency.
    */
   enqueuePlan(spec: PlanSpec): void {
     this.planRunner.enqueue(spec);
   }
 
   /**
-   * Cancel a running plan.
+   * Cancel a running plan and all its pending jobs.
    */
   cancelPlan(planId: string): void {
     this.planRunner.cancel(planId);
@@ -312,22 +434,8 @@ export class WorkScheduler {
     return false;
   }
 
-  /**
-   * Get maximum concurrent workers.
-   */
-  get maxWorkers(): number {
-    return this.jobRunner.maxWorkers;
-  }
-
-  /**
-   * Set maximum concurrent workers.
-   */
-  set maxWorkers(value: number) {
-    this.jobRunner.maxWorkers = value;
-  }
-
   // ─────────────────────────────────────────────────────────────────────────
-  // Internal
+  // Internal Helpers
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
@@ -386,8 +494,7 @@ export class WorkScheduler {
     let progress = 0;
 
     for (const phase of phases) {
-      const stepStatus =
-        stepStatuses[phase as keyof typeof stepStatuses];
+      const stepStatus = stepStatuses[phase as keyof typeof stepStatuses];
       if (stepStatus === 'success' || stepStatus === 'skipped') {
         progress = phaseWeights[phase];
       } else if (phase === currentStep) {
@@ -475,7 +582,9 @@ export class WorkScheduler {
    */
   dispose(): void {
     this.stopPolling();
+    this.configDisposable?.dispose();
     this._onDidChange.dispose();
     this._onDidComplete.dispose();
+    this._onDidChangeConcurrency.dispose();
   }
 }

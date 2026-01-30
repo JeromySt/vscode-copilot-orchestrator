@@ -193,10 +193,10 @@
           "default": ".worktrees",
           "description": "Directory name for git worktrees (relative to repository root)"
         },
-        "copilotOrchestrator.maxWorkers": {
+        "copilotOrchestrator.maxConcurrentJobs": {
           "type": "number",
           "default": 0,
-          "description": "Maximum concurrent job workers (0 = auto, based on CPU count minus 1)"
+          "description": "Maximum concurrent jobs (0 = auto, based on CPU count minus 1). Plans do not count against this limit."
         },
         "copilotOrchestrator.copilotCli.required": {
           "type": "boolean",

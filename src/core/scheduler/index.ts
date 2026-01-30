@@ -63,10 +63,12 @@ export { Scheduler } from './scheduler';
 export { JobExecutionStrategy, JobState } from './jobStrategy';
 export { PlanExecutionStrategy, PlanState } from './planStrategy';
 
-// Unified facade
+// Unified facade with global concurrency control
 export {
   WorkScheduler,
   UnifiedWorkUnit,
   WorkUnitType,
   WorkSchedulerEvents,
+  SchedulerStats,
+  PlanStateInfo,
 } from './workScheduler';
