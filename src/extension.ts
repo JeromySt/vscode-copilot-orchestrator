@@ -36,6 +36,12 @@ let mcpManager: McpServerManager | undefined;
 /** Process Monitor - retained for cleanup */
 let processMonitor: ProcessMonitor | undefined;
 
+/** Job Runner - retained for shutdown persistence */
+let jobRunner: import('./core/jobRunner').JobRunner | undefined;
+
+/** Plan Runner - retained for shutdown persistence */
+let planRunner: import('./core/planRunner').PlanRunner | undefined;
+
 // ============================================================================
 // ACTIVATION
 // ============================================================================
@@ -67,6 +73,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── Core Services ──────────────────────────────────────────────────────
   const { runner, plans, processMonitor: pm } = initializeCoreServices(context);
   processMonitor = pm;
+  jobRunner = runner;
+  planRunner = plans;
 
   // ── HTTP Server ────────────────────────────────────────────────────────
   // Must be started BEFORE MCP registration so the endpoint is available
@@ -107,9 +115,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 /**
  * Extension deactivation handler.
- * Cleans up resources when the extension is unloaded.
+ * Cleans up resources and persists state when the extension is unloaded.
  */
 export function deactivate(): void {
+  // Persist state synchronously before shutdown
+  try {
+    jobRunner?.persistSync();
+    planRunner?.persistSync();
+  } catch (e) {
+    console.error('Failed to persist state on deactivate:', e);
+  }
+  
   mcpManager?.stop();
   processMonitor = undefined;
+  jobRunner = undefined;
+  planRunner = undefined;
 }

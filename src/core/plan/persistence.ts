@@ -2,6 +2,7 @@
  * @fileoverview Plan Persistence - Save and load plan state to/from disk.
  * 
  * Single responsibility: Persist and restore plan state for extension restarts.
+ * Uses debounced async writes to avoid blocking the event loop.
  * 
  * @module core/plan/persistence
  */
@@ -49,6 +50,12 @@ interface PersistedData {
  */
 export class PlanPersistence {
   private filePath: string;
+  private saveTimer: NodeJS.Timeout | undefined;
+  private pendingSave: { plans: Map<string, InternalPlanState>; specs: Map<string, PlanSpec> } | undefined;
+  private isSaving = false;
+  
+  /** Debounce delay for saves (ms) */
+  private static readonly SAVE_DEBOUNCE_MS = 500;
 
   constructor(workspacePath: string) {
     this.filePath = workspacePath
@@ -64,7 +71,8 @@ export class PlanPersistence {
   }
 
   /**
-   * Persist plans and specs to disk.
+   * Persist plans and specs to disk (debounced, async).
+   * Multiple rapid calls will be coalesced into a single write.
    */
   save(
     plans: Map<string, InternalPlanState>,
@@ -72,6 +80,35 @@ export class PlanPersistence {
   ): void {
     if (!this.filePath) return;
 
+    // Store the latest state to save
+    this.pendingSave = { plans, specs };
+    
+    // If already scheduled, let the existing timer handle it
+    if (this.saveTimer) return;
+    
+    // Schedule a save
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      this.doSaveAsync();
+    }, PlanPersistence.SAVE_DEBOUNCE_MS);
+  }
+  
+  /**
+   * Force an immediate synchronous save (for shutdown).
+   */
+  saveSync(
+    plans: Map<string, InternalPlanState>,
+    specs: Map<string, PlanSpec>
+  ): void {
+    if (!this.filePath) return;
+    
+    // Clear any pending async save
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = undefined;
+    }
+    this.pendingSave = undefined;
+    
     try {
       const dir = path.dirname(this.filePath);
       if (!fs.existsSync(dir)) {
@@ -86,9 +123,46 @@ export class PlanPersistence {
       };
 
       fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf-8');
-      log.debug('Plans persisted', { planCount: data.plans.length });
+      log.debug('Plans persisted (sync)', { planCount: data.plans.length });
     } catch (error: any) {
       log.error('Failed to persist plans', { error: error.message });
+    }
+  }
+  
+  /**
+   * Perform the actual async save.
+   */
+  private async doSaveAsync(): Promise<void> {
+    if (!this.pendingSave || this.isSaving) return;
+    
+    const { plans, specs } = this.pendingSave;
+    this.pendingSave = undefined;
+    this.isSaving = true;
+    
+    try {
+      const dir = path.dirname(this.filePath);
+      if (!fs.existsSync(dir)) {
+        await fs.promises.mkdir(dir, { recursive: true });
+      }
+
+      const data: PersistedData = {
+        plans: Array.from(plans.entries()).map(([id, state]) =>
+          this.serializeState(state)
+        ),
+        specs: Array.from(specs.values()),
+      };
+
+      await fs.promises.writeFile(this.filePath, JSON.stringify(data, null, 2), 'utf-8');
+      log.debug('Plans persisted (async)', { planCount: data.plans.length });
+    } catch (error: any) {
+      log.error('Failed to persist plans', { error: error.message });
+    } finally {
+      this.isSaving = false;
+      
+      // If another save was requested while we were saving, do it now
+      if (this.pendingSave) {
+        this.doSaveAsync();
+      }
     }
   }
 

@@ -273,44 +273,47 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8">
   <style>
     body { 
-      font: 12px sans-serif; 
-      padding: 8px; 
+      font: 11px sans-serif; 
+      padding: 6px; 
       margin: 0; 
       color: var(--vscode-foreground); 
     }
     .header { 
       display: flex; 
-      gap: 8px; 
-      margin-bottom: 12px; 
+      gap: 6px; 
+      margin-bottom: 8px; 
       align-items: center; 
     }
+    .header h3 {
+      margin: 0;
+      font-size: 12px;
+      white-space: nowrap;
+    }
     .pill { 
-      padding: 2px 8px; 
+      padding: 1px 6px; 
       border-radius: 8px; 
       background: var(--vscode-badge-background); 
       color: var(--vscode-badge-foreground); 
-      font-size: 11px; 
+      font-size: 10px;
+      white-space: nowrap;
     }
     .plan-tree { }
     .plan-item { 
-      padding: 8px 10px; 
-      margin-bottom: 4px; 
-      border-radius: 6px; 
+      padding: 6px 8px; 
+      margin-bottom: 3px; 
+      border-radius: 4px; 
       cursor: pointer; 
       border: 1px solid var(--vscode-panel-border); 
       background: var(--vscode-editor-background);
       transition: background 0.15s;
+      overflow: hidden;
     }
     .plan-item:hover { 
       background: var(--vscode-list-hoverBackground); 
     }
     .plan-item.subplan {
-      margin-left: 16px;
+      margin-left: 12px;
       border-left: 2px solid var(--vscode-activityBar-activeBorder, #0078d4);
-      font-size: 11px;
-    }
-    .plan-item.subplan .plan-name {
-      font-size: 11px;
     }
     .plan-item.subplan-spec {
       border-left-style: dashed;
@@ -319,19 +322,25 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
     }
     .plan-name { 
       font-weight: 600; 
-      margin-bottom: 4px; 
-      font-size: 12px;
+      font-size: 11px;
       display: flex;
-      align-items: center;
-      gap: 6px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 4px;
+      line-height: 1.3;
+    }
+    .plan-name-text {
+      word-break: break-word;
+      flex: 1;
+      min-width: 0;
     }
     .plan-stats { 
       font-size: 10px; 
       opacity: 0.8; 
       display: flex; 
-      gap: 8px; 
+      gap: 6px; 
       flex-wrap: wrap;
-      margin-top: 4px;
+      margin-top: 3px;
     }
     .stat {
       display: flex;
@@ -431,7 +440,7 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
         if (p.runningSubPlans > 0) parts.push('<span class="icon icon-running">◐</span>' + p.runningSubPlans);
         if (p.failedSubPlans > 0) parts.push('<span class="icon icon-failed">✗</span>' + p.failedSubPlans);
         if (p.pendingSubPlans > 0) parts.push('<span class="icon icon-queued">○</span>' + p.pendingSubPlans);
-        subPlanInfo = '<span class="subplan-indicator">sub: ' + parts.join(' ') + '</span>';
+        subPlanInfo = '<span class="subplan-indicator">' + parts.join(' ') + '</span>';
       }
       
       // Different rendering for sub-plan specs (not yet launched) vs actual plans
@@ -442,12 +451,8 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
       // For sub-plan specs, show source info instead of progress stats
       let statsHtml = '';
       if (isSubPlanSpec) {
-        const consumesInfo = p.consumesFrom && p.consumesFrom.length > 0 
-          ? 'consumes from: ' + p.consumesFrom.join(', ') 
-          : 'root sub-plan';
         statsHtml = '<div class="plan-stats">' +
-          '<span class="stat">📁 ' + p.jobCount + ' jobs</span>' +
-          '<span class="stat" style="opacity:0.6">' + consumesInfo + '</span>' +
+          '<span class="stat">📁 ' + p.jobCount + '</span>' +
         '</div>';
       } else {
         statsHtml = '<div class="plan-stats">' +
@@ -461,9 +466,9 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
       let html = '<div class="' + itemClass + '" data-id="' + p.id + '" style="margin-left:' + indent + 'px">' +
         '<div class="plan-name">' +
           '<span class="status-badge ' + p.status + '">' + p.status + '</span>' +
-          icon + p.name +
-          subPlanInfo +
+          '<span class="plan-name-text">' + icon + p.name + '</span>' +
         '</div>' +
+        (subPlanInfo ? '<div class="plan-stats">' + subPlanInfo + '</div>' : '') +
         statsHtml +
       '</div>';
       

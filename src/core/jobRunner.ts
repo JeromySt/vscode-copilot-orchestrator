@@ -492,11 +492,55 @@ Focus on addressing the failure root cause while maintaining all original requir
     
     // Delete the job
     this.jobs.delete(id);
-    this.persist();
+    this.schedulePersist();
     return true;
   }
-  private persist(){ writeJSON(this.storeFile, { jobs: this.list() }); }
-  private pump(){ while (this.working < this.maxWorkers && this.queue.length){ const id = this.queue.shift()!; const job = this.jobs.get(id)!; this.run(job).catch(err=>{ this.writeLog(job, '[error] ' + String(err)); job.status = job.status==='canceled'?'canceled':'failed'; job.endedAt = Date.now(); this.persist(); }); this.working++; } }
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // Persistence - debounced async writes for crash recovery only
+  // ─────────────────────────────────────────────────────────────────────────
+  
+  private persistTimer: NodeJS.Timeout | undefined;
+  private isPersisting = false;
+  private static readonly PERSIST_DEBOUNCE_MS = 1000;
+  
+  /** Schedule a debounced async persist. */
+  private schedulePersist(): void {
+    if (this.persistTimer) return; // Already scheduled
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = undefined;
+      this.doPersistAsync();
+    }, JobRunner.PERSIST_DEBOUNCE_MS);
+  }
+  
+  /** Perform async persist. */
+  private async doPersistAsync(): Promise<void> {
+    if (this.isPersisting) return;
+    this.isPersisting = true;
+    try {
+      const data = JSON.stringify({ jobs: this.list() }, null, 2);
+      ensureDir(path.dirname(this.storeFile));
+      await fs.promises.writeFile(this.storeFile, data, 'utf-8');
+    } catch (e) {
+      console.error('Failed to persist jobs:', e);
+    } finally {
+      this.isPersisting = false;
+    }
+  }
+  
+  /** Force synchronous persist (for shutdown). */
+  persistSync(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = undefined;
+    }
+    writeJSON(this.storeFile, { jobs: this.list() });
+  }
+  
+  /** @deprecated Use schedulePersist() for normal operations. */
+  private persist() { this.schedulePersist(); }
+  
+  private pump(){ while (this.working < this.maxWorkers && this.queue.length){ const id = this.queue.shift()!; const job = this.jobs.get(id)!; this.run(job).catch(err=>{ this.writeLog(job, '[error] ' + String(err)); job.status = job.status==='canceled'?'canceled':'failed'; job.endedAt = Date.now(); this.schedulePersist(); }); this.working++; } }
   private async run(job: Job){
     job.status='running'; job.startedAt=Date.now(); 
     

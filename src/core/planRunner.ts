@@ -107,10 +107,17 @@ export class PlanRunner {
   // ============================================================================
 
   /**
-   * Persist plans state to disk.
+   * Persist plans state to disk (debounced, async).
    */
   private persist(): void {
     this.persistence.save(this.plans, this.specs);
+  }
+
+  /**
+   * Force synchronous persist (for shutdown).
+   */
+  persistSync(): void {
+    this.persistence.saveSync(this.plans, this.specs);
   }
 
   /**
@@ -154,7 +161,7 @@ export class PlanRunner {
     
     // Start the pump loop if we have incomplete plans
     if (resumed > 0 && !this.interval) {
-      this.interval = setInterval(() => this.pumpAll(), 500);
+      this.interval = setInterval(() => this.pumpAll(), 1500);
       log.info(`Pump loop started for ${resumed} resumed plans`);
     }
   }
@@ -385,7 +392,7 @@ export class PlanRunner {
     
     // Start the pump loop if not already running
     if (!this.interval) {
-      this.interval = setInterval(() => this.pumpAll(), 500);
+      this.interval = setInterval(() => this.pumpAll(), 1500);
     }
     
     log.info(`Plan ${id} queued with ${rootJobs.length} root jobs ready`);
@@ -485,7 +492,7 @@ export class PlanRunner {
     
     // Start pump loop if needed
     if (!this.interval) {
-      this.interval = setInterval(() => this.pumpAll(), 500);
+      this.interval = setInterval(() => this.pumpAll(), 1500);
     }
     
     log.info(`Plan ${id} retry started`, { requeuedJobs: plan.queued.length });
