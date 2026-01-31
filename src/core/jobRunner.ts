@@ -326,14 +326,39 @@ Focus on addressing the failure root cause while maintaining all original requir
     return true;
   }
   
+  /** Buffered log entries to batch writes */
+  private logBuffers: Map<string, string[]> = new Map();
+  private logFlushTimer: NodeJS.Timeout | undefined;
+  
   private writeLog(job: Job, message: string) {
     if (!job.logFile) return;
-    try {
-      const timestamp = new Date().toISOString();
-      const logLine = `[${timestamp}] ${message}`;
-      fs.appendFileSync(job.logFile, logLine + '\n', 'utf-8');
-    } catch (e) {
-      console.error(`Failed to write to log file ${job.logFile}:`, e);
+    
+    const timestamp = new Date().toISOString();
+    const logLine = `[${timestamp}] ${message}\n`;
+    
+    // Buffer log entries
+    const buffer = this.logBuffers.get(job.logFile) || [];
+    buffer.push(logLine);
+    this.logBuffers.set(job.logFile, buffer);
+    
+    // Schedule flush if not already scheduled
+    if (!this.logFlushTimer) {
+      this.logFlushTimer = setTimeout(() => this.flushLogs(), 100);
+    }
+  }
+  
+  private async flushLogs(): Promise<void> {
+    this.logFlushTimer = undefined;
+    
+    const buffers = new Map(this.logBuffers);
+    this.logBuffers.clear();
+    
+    for (const [logFile, lines] of buffers) {
+      try {
+        await fs.promises.appendFile(logFile, lines.join(''), 'utf-8');
+      } catch (e) {
+        console.error(`Failed to write to log file ${logFile}:`, e);
+      }
     }
   }
 
@@ -528,12 +553,27 @@ Focus on addressing the failure root cause while maintaining all original requir
     }
   }
   
-  /** Force synchronous persist (for shutdown). */
+  /** Force synchronous persist (for shutdown). Also flushes logs. */
   persistSync(): void {
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);
       this.persistTimer = undefined;
     }
+    
+    // Flush any buffered logs synchronously
+    if (this.logFlushTimer) {
+      clearTimeout(this.logFlushTimer);
+      this.logFlushTimer = undefined;
+    }
+    for (const [logFile, lines] of this.logBuffers) {
+      try {
+        fs.appendFileSync(logFile, lines.join(''), 'utf-8');
+      } catch (e) {
+        console.error(`Failed to flush logs to ${logFile}:`, e);
+      }
+    }
+    this.logBuffers.clear();
+    
     writeJSON(this.storeFile, { jobs: this.list() });
   }
   

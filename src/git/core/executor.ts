@@ -4,10 +4,14 @@
  * Single responsibility: Execute git commands safely with proper error handling.
  * All other git modules use this for command execution.
  * 
+ * Provides both sync (spawnSync) and async (spawn) variants:
+ * - Sync: Simpler, but BLOCKS the event loop
+ * - Async: Non-blocking, uses child process threads
+ * 
  * @module git/core/executor
  */
 
-import { spawnSync, SpawnSyncReturns } from 'child_process';
+import { spawnSync, spawn, SpawnSyncReturns } from 'child_process';
 
 /**
  * Logger function type for git operations.
@@ -142,5 +146,83 @@ export function execOrThrow(args: string[], cwd: string): string {
  */
 export function execOrNull(args: string[], cwd: string): string | null {
   const result = exec(args, { cwd });
+  return result.success ? result.stdout.trim() : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ASYNC VARIANTS - Non-blocking, use child process threads
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Execute a git command asynchronously (non-blocking).
+ * Uses child_process.spawn which runs in a separate process.
+ * 
+ * @param args - Git command arguments (without 'git' prefix)
+ * @param options - Execution options
+ * @returns Promise resolving to command result
+ */
+export async function execAsync(args: string[], options: ExecuteOptions): Promise<CommandResult> {
+  const { cwd, log, throwOnError = false, errorPrefix = 'Git command failed' } = options;
+  
+  return new Promise((resolve, reject) => {
+    const proc = spawn('git', args, {
+      cwd,
+      stdio: 'pipe'
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    proc.stdout?.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr?.on('data', (data) => { stderr += data.toString(); });
+    
+    proc.on('close', (code) => {
+      const commandResult: CommandResult = {
+        success: code === 0,
+        stdout,
+        stderr,
+        exitCode: code
+      };
+      
+      if (log && commandResult.stdout) {
+        log(commandResult.stdout.trim());
+      }
+      
+      if (!commandResult.success && throwOnError) {
+        const errorMsg = commandResult.stderr || `Exit code: ${code}`;
+        reject(new Error(`${errorPrefix}: git ${args.join(' ')} - ${errorMsg}`));
+      } else {
+        resolve(commandResult);
+      }
+    });
+    
+    proc.on('error', (err) => {
+      if (throwOnError) {
+        reject(new Error(`${errorPrefix}: git ${args.join(' ')} - ${err.message}`));
+      } else {
+        resolve({
+          success: false,
+          stdout: '',
+          stderr: err.message,
+          exitCode: null
+        });
+      }
+    });
+  });
+}
+
+/**
+ * Execute a git command asynchronously and return stdout or throw.
+ */
+export async function execAsyncOrThrow(args: string[], cwd: string): Promise<string> {
+  const result = await execAsync(args, { cwd, throwOnError: true });
+  return result.stdout.trim();
+}
+
+/**
+ * Execute a git command asynchronously and return stdout or null.
+ */
+export async function execAsyncOrNull(args: string[], cwd: string): Promise<string | null> {
+  const result = await execAsync(args, { cwd });
   return result.success ? result.stdout.trim() : null;
 }

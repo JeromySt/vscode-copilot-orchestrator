@@ -146,6 +146,7 @@ export async function handleGetJobLogSection(args: any, ctx: ToolHandlerContext)
  */
 export async function handleListJobs(args: any, ctx: ToolHandlerContext): Promise<any> {
   let jobs = ctx.runner.list();
+  
   if (args.status && args.status !== 'all') {
     const statusMap: Record<string, string[]> = {
       running: ['running', 'queued'],
@@ -155,6 +156,7 @@ export async function handleListJobs(args: any, ctx: ToolHandlerContext): Promis
     const allowed = statusMap[args.status] || [];
     jobs = jobs.filter(j => allowed.includes(j.status));
   }
+  
   return { jobs: jobs.map(j => buildJobStatus(j)), count: jobs.length };
 }
 
