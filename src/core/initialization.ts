@@ -285,9 +285,6 @@ export function initializePlansView(
       const spec = specs.find((s: PlanSpec) => s.id === p.id);
       const jobIdMap = planRunner.getJobIdMap ? planRunner.getJobIdMap(p.id) : undefined;
       
-      // Debug: log spec and subPlans availability
-      console.log(`[loadPlans] Plan ${p.id}: spec found=${!!spec}, subPlans=${spec?.subPlans?.length || 0}`);
-      
       return {
         id: p.id,
         name: spec?.name || p.id,

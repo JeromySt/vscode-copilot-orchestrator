@@ -124,6 +124,8 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _dataProvider?: PlanDataProvider;
   private _fileWatcher?: vscode.FileSystemWatcher;
+  private _refreshTimer?: NodeJS.Timeout;
+  private static readonly REFRESH_DEBOUNCE_MS = 250;
   
   constructor(private readonly _context: vscode.ExtensionContext) {}
   
@@ -166,6 +168,14 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
   }
   
   refresh() {
+    // Debounce refreshes to prevent excessive updates
+    if (this._refreshTimer) {
+      clearTimeout(this._refreshTimer);
+    }
+    this._refreshTimer = setTimeout(() => this._doRefresh(), PlansViewProvider.REFRESH_DEBOUNCE_MS);
+  }
+  
+  private _doRefresh() {
     if (!this._view || !this._dataProvider) return;
     
     const allPlans = this._dataProvider.getPlans();

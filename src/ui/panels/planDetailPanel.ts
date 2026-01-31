@@ -659,10 +659,6 @@ export class PlanDetailPanel {
     const jobs = plan.jobs;
     const progress = Math.round((plan.completed.length / jobs.length) * 100);
     
-    // Debug: log sub-plan data
-    console.log(`[PlanDetailPanel] Plan ${plan.id} has ${plan.subPlans?.length || 0} sub-plans:`, 
-      plan.subPlans?.map(sp => ({ id: sp.id, name: sp.name, jobs: sp.jobs?.length })));
-    
     // Generate Mermaid diagram definition
     const mermaidDef = this._generateMermaidDiagram(plan, mergeBranches);
     
