@@ -70,7 +70,7 @@ export async function createJob(request: ParsedRequest, context: RouteContext): 
   
   // Auto-derive targetBranch from baseBranch if not specified
   if (!spec.inputs.targetBranch) {
-    const isDefaultBranch = git.branches.isDefaultBranch(spec.inputs.baseBranch, spec.inputs.repoPath);
+    const isDefaultBranch = await git.branches.isDefaultBranch(spec.inputs.baseBranch, spec.inputs.repoPath);
     spec.inputs.targetBranch = isDefaultBranch
       ? `feature/${spec.name.replace(/\W+/g, '-').toLowerCase()}`
       : spec.inputs.baseBranch;

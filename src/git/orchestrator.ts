@@ -1,8 +1,9 @@
 /**
- * @fileoverview Orchestrator-specific git utilities.
+ * @fileoverview Orchestrator-specific git utilities (fully async).
  * 
  * Contains business logic specific to the orchestrator's branching strategy.
  * Uses the core git modules for actual git operations.
+ * All operations are async to avoid blocking the event loop.
  * 
  * @module git/orchestrator
  */
@@ -14,7 +15,7 @@ import { Logger } from '../core/logger';
 import * as branches from './core/branches';
 import * as worktrees from './core/worktrees';
 import * as repository from './core/repository';
-import { exec, GitLogger } from './core/executor';
+import { execAsync, GitLogger } from './core/executor';
 
 const log = Logger.for('git');
 
@@ -31,12 +32,13 @@ const log = Logger.for('git');
  * 
  * @returns Object with targetBranchRoot and whether a new branch needs to be created
  */
-export function resolveTargetBranchRoot(
+export async function resolveTargetBranchRoot(
   baseBranch: string,
   repoPath: string,
   featureBranchPrefix: string = 'copilot_jobs'
-): { targetBranchRoot: string; needsCreation: boolean } {
-  if (branches.isDefaultBranch(baseBranch, repoPath)) {
+): Promise<{ targetBranchRoot: string; needsCreation: boolean }> {
+  const isDefault = await branches.isDefaultBranch(baseBranch, repoPath);
+  if (isDefault) {
     // Default branch - must create a feature branch
     const featureBranch = `${featureBranchPrefix}/${randomUUID()}`;
     return { targetBranchRoot: featureBranch, needsCreation: true };
@@ -76,23 +78,23 @@ export interface JobWorktreeOptions {
  * 
  * @returns Absolute path to the created worktree
  */
-export function createJobWorktree(options: JobWorktreeOptions): string {
+export async function createJobWorktree(options: JobWorktreeOptions): Promise<string> {
   const { repoPath, worktreeRoot, jobId, baseBranch, targetBranch, logger } = options;
   const logFn = logger || ((msg: string) => log.debug(msg));
   
   // Ensure orchestrator directories are in .gitignore
-  ensureGitignorePatterns(repoPath, [worktreeRoot, '.orchestrator'], logFn);
+  await ensureGitignorePatterns(repoPath, [worktreeRoot, '.orchestrator'], logFn);
   
   // Fetch latest changes
   logFn('[git] Fetching latest changes...');
-  exec(['fetch', '--all', '--tags'], { cwd: repoPath });
+  await execAsync(['fetch', '--all', '--tags'], { cwd: repoPath });
   
   // Switch to base branch and try to pull
   logFn(`[git] Switching to base branch '${baseBranch}'`);
-  branches.checkout(baseBranch, repoPath);
+  await branches.checkout(baseBranch, repoPath);
   
   // Try to pull (non-fatal if fails)
-  const pullResult = exec(['pull', '--ff-only'], { cwd: repoPath });
+  const pullResult = await execAsync(['pull', '--ff-only'], { cwd: repoPath });
   if (!pullResult.success && pullResult.stderr && !pullResult.stderr.includes('no tracking information')) {
     logFn(`[git] Warning: Pull failed - ${pullResult.stderr}`);
   }
@@ -102,14 +104,15 @@ export function createJobWorktree(options: JobWorktreeOptions): string {
   const worktreePath = path.join(worktreeRootAbs, jobId);
   
   // Check if worktree already exists (for retry scenarios)
-  if (worktrees.isValid(worktreePath)) {
+  const isValidWt = await worktrees.isValid(worktreePath);
+  if (isValidWt) {
     logFn(`[git] Worktree already exists, reusing: ${worktreePath}`);
-    exec(['fetch', '--all'], { cwd: worktreePath });
+    await execAsync(['fetch', '--all'], { cwd: worktreePath });
     return worktreePath;
   }
   
   // Create new worktree
-  worktrees.create({
+  await worktrees.create({
     repoPath,
     worktreePath,
     branchName: targetBranch,
@@ -123,17 +126,17 @@ export function createJobWorktree(options: JobWorktreeOptions): string {
 /**
  * Remove a job worktree and optionally its branch.
  */
-export function removeJobWorktree(
+export async function removeJobWorktree(
   worktreePath: string,
   repoPath: string,
   options: { deleteBranch?: boolean; branchName?: string; logger?: GitLogger } = {}
-): void {
+): Promise<void> {
   const { deleteBranch = false, branchName, logger } = options;
   const logFn = logger || ((msg: string) => log.debug(msg));
   
   // Remove worktree
   try {
-    worktrees.remove(worktreePath, repoPath, logFn);
+    await worktrees.remove(worktreePath, repoPath, logFn);
   } catch (e) {
     logFn(`[git] Warning: Could not remove worktree: ${e}`);
   }
@@ -141,7 +144,7 @@ export function removeJobWorktree(
   // Delete branch if requested
   if (deleteBranch && branchName) {
     try {
-      branches.remove(branchName, repoPath, { force: true, log: logFn });
+      await branches.remove(branchName, repoPath, { force: true, log: logFn });
     } catch (e) {
       logFn(`[git] Warning: Could not delete branch: ${e}`);
     }
@@ -155,26 +158,27 @@ export function removeJobWorktree(
 /**
  * Finalize a worktree by staging and committing all changes.
  */
-export function finalizeWorktree(
+export async function finalizeWorktree(
   worktreePath: string,
   commitMessage: string,
   logger?: GitLogger
-): boolean {
+): Promise<boolean> {
   const logFn = logger || ((msg: string) => log.debug(msg));
   
   logFn('[git] Finalizing worktree changes...');
   
   // Stage all changes
-  repository.stageAll(worktreePath);
+  await repository.stageAll(worktreePath);
   
   // Check if there are staged changes
-  if (!repository.hasStagedChanges(worktreePath)) {
+  const hasStaged = await repository.hasStagedChanges(worktreePath);
+  if (!hasStaged) {
     logFn('[git] No changes to commit');
     return false;
   }
   
   // Commit
-  repository.commit(worktreePath, commitMessage, logFn);
+  await repository.commit(worktreePath, commitMessage, logFn);
   logFn('[git] ✓ Changes committed');
   return true;
 }
@@ -186,26 +190,27 @@ export function finalizeWorktree(
 /**
  * Squash merge a branch into another.
  */
-export function squashMerge(
+export async function squashMerge(
   sourceBranch: string,
   targetBranch: string,
   commitMessage: string,
   repoPath: string,
   logger?: GitLogger
-): void {
+): Promise<void> {
   const logFn = logger || ((msg: string) => log.debug(msg));
   
   logFn(`[git] Squash merging '${sourceBranch}' into '${targetBranch}'`);
   
   // Switch to target branch
-  branches.checkout(targetBranch, repoPath, logFn);
+  await branches.checkout(targetBranch, repoPath, logFn);
   
   // Squash merge
-  exec(['merge', '--squash', sourceBranch], { cwd: repoPath, throwOnError: true });
+  await execAsync(['merge', '--squash', sourceBranch], { cwd: repoPath, throwOnError: true });
   
   // Commit (may have nothing to commit if branches are in sync)
-  if (repository.hasStagedChanges(repoPath)) {
-    repository.commit(repoPath, commitMessage, logFn);
+  const hasStaged = await repository.hasStagedChanges(repoPath);
+  if (hasStaged) {
+    await repository.commit(repoPath, commitMessage, logFn);
     logFn('[git] ✓ Squash merge completed');
   } else {
     logFn('[git] ✓ No changes to commit (branches already in sync)');
@@ -219,17 +224,19 @@ export function squashMerge(
 /**
  * Ensure specified patterns are in .gitignore.
  */
-export function ensureGitignorePatterns(
+export async function ensureGitignorePatterns(
   repoPath: string,
   patterns: string[],
   logger?: GitLogger
-): void {
+): Promise<void> {
   const gitignorePath = path.join(repoPath, '.gitignore');
   
   try {
     let content = '';
-    if (fs.existsSync(gitignorePath)) {
-      content = fs.readFileSync(gitignorePath, 'utf-8');
+    try {
+      content = await fs.promises.readFile(gitignorePath, 'utf-8');
+    } catch {
+      // File doesn't exist
     }
     
     let modified = false;
@@ -246,7 +253,7 @@ export function ensureGitignorePatterns(
     if (modified) {
       const separator = content.endsWith('\n') || content === '' ? '' : '\n';
       const newContent = content + separator + '# Copilot Orchestrator\n' + linesToAdd.join('\n') + '\n';
-      fs.writeFileSync(gitignorePath, newContent, 'utf-8');
+      await fs.promises.writeFile(gitignorePath, newContent, 'utf-8');
       logger?.('[git] Updated .gitignore with orchestrator patterns');
     }
   } catch (e) {
@@ -259,5 +266,5 @@ export function ensureGitignorePatterns(
 // =============================================================================
 
 // Re-export commonly used functions from core modules
-export { isDefaultBranch, exists as branchExists, current as getCurrentBranch } from './core/branches';
+export { isDefaultBranch, exists as branchExists, currentOrNull as getCurrentBranch } from './core/branches';
 export { isValid as isValidWorktree, getBranch as getWorktreeBranch } from './core/worktrees';

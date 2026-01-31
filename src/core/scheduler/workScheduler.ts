@@ -319,7 +319,7 @@ export class WorkScheduler {
   /**
    * Delete a job and its resources.
    */
-  deleteJob(jobId: string): boolean {
+  async deleteJob(jobId: string): Promise<boolean> {
     return this.jobRunner.delete(jobId);
   }
 
@@ -423,7 +423,7 @@ export class WorkScheduler {
   /**
    * Delete any work unit by ID.
    */
-  delete(id: string): boolean {
+  async delete(id: string): Promise<boolean> {
     // Try job first
     const job = this.jobRunner.list().find((j: Job) => j.id === id);
     if (job) {

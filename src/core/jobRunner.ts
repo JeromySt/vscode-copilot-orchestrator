@@ -8,7 +8,7 @@ import { ensureDir, readJSON, writeJSON, cpuCountMinusOne } from './utils';
 import { isCopilotCliAvailable } from '../agent/cliCheckCore';
 import * as git from '../git';
 import type { CommitDetail, WorkSummary, JobMetrics, ExecutionAttempt, JobSpec, Job, StepStatuses } from './job/types';
-import { calculateWorkSummary as calculateWorkSummaryFromGit } from './job/workSummary';
+import { calculateWorkSummary } from './job/workSummary';
 import { extractMetricsFromLog as extractMetricsFromLogFile } from './job/metricsExtractor';
 
 // Re-export types for backward compatibility
@@ -420,7 +420,7 @@ Focus on addressing the failure root cause while maintaining all original requir
   }
 
   private async calculateWorkSummary(job: Job): Promise<WorkSummary> {
-    const summary = calculateWorkSummaryFromGit(job);
+    const summary = await calculateWorkSummary(job);
     this.writeLog(job, `[orchestrator] Work summary: ${summary.description}`);
     return summary;
   }
@@ -479,7 +479,7 @@ Focus on addressing the failure root cause while maintaining all original requir
     this.persist(); 
   }
   
-  delete(id: string) {
+  async delete(id: string) {
     const j = this.jobs.get(id);
     if (!j) return false;
     
@@ -500,8 +500,8 @@ Focus on addressing the failure root cause while maintaining all original requir
       const branchName = `copilot_jobs/${j.id}`;
       
       // Use git module to safely remove worktree and branch
-      git.worktrees.removeSafe(j.inputs.repoPath, worktreePath, { force: true });
-      git.branches.deleteLocal(j.inputs.repoPath, branchName, { force: true });
+      await git.worktrees.removeSafe(j.inputs.repoPath, worktreePath, { force: true });
+      await git.branches.deleteLocal(j.inputs.repoPath, branchName, { force: true });
       
       // Delete the log file if it exists
       if (j.logFile && fs.existsSync(j.logFile)) {
@@ -655,14 +655,14 @@ Focus on addressing the failure root cause while maintaining all original requir
       jobRoot = job.inputs.worktreePath;
       
       // Verify the worktree exists
-      if (!git.worktrees.isValid(jobRoot)) {
+      if (!await git.worktrees.isValid(jobRoot)) {
         const msg = `Plan-managed job worktree does not exist or is invalid: ${jobRoot}`;
         this.writeLog(job, '[preflight] ERROR: ' + msg);
         job.status = 'failed'; job.endedAt = Date.now(); this.persist(); this.working--; this.pump();
         return;
       }
       
-      worktreeBranch = git.worktrees.getBranch(jobRoot) || job.inputs.targetBranch;
+      worktreeBranch = await git.worktrees.getBranch(jobRoot) || job.inputs.targetBranch;
       this.writeLog(job, `[orchestrator] Plan-managed job using pre-created worktree: ${jobRoot}`);
       this.writeLog(job, `[orchestrator] Worktree branch: ${worktreeBranch}`);
     } else {
@@ -670,7 +670,7 @@ Focus on addressing the failure root cause while maintaining all original requir
       this.writeLog(job, '[orchestrator] Standalone job - managing worktree lifecycle');
       
       // Determine the targetBranchRoot based on whether baseBranch is a default branch
-      const { targetBranchRoot, needsCreation } = git.orchestrator.resolveTargetBranchRoot(
+      const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
         job.inputs.baseBranch,
         repoPath,
         'copilot_jobs'
@@ -679,7 +679,7 @@ Focus on addressing the failure root cause while maintaining all original requir
       if (needsCreation) {
         this.writeLog(job, `[orchestrator] Base branch '${job.inputs.baseBranch}' is a default branch`);
         this.writeLog(job, `[orchestrator] Creating feature branch: ${targetBranchRoot}`);
-        git.branches.create(targetBranchRoot, job.inputs.baseBranch, repoPath, s => this.writeLog(job, s));
+        await git.branches.create(targetBranchRoot, job.inputs.baseBranch, repoPath, s => this.writeLog(job, s));
         // Update the job's targetBranch to the new feature branch
         job.inputs.targetBranch = targetBranchRoot;
       } else {
@@ -694,7 +694,7 @@ Focus on addressing the failure root cause while maintaining all original requir
       jobRoot = path.join(wtRootAbs, job.id);
       
       this.writeLog(job, `[orchestrator] Creating worktree at: ${jobRoot}`);
-      git.worktrees.create({
+      await git.worktrees.create({
         repoPath,
         worktreePath: jobRoot,
         branchName: worktreeBranch,
@@ -934,11 +934,11 @@ Focus on addressing the failure root cause while maintaining all original requir
           this.writeLog(job, '[cleanup] Cleaning up worktree and temporary branch...');
           
           // Use git module to safely remove worktree and branch
-          git.worktrees.removeSafe(repoPath, jobRoot, { 
+          await git.worktrees.removeSafe(repoPath, jobRoot, { 
             force: true, 
             log: (s: string) => this.writeLog(job, `[cleanup] ${s}`) 
           });
-          git.branches.deleteLocal(repoPath, worktreeBranch, { 
+          await git.branches.deleteLocal(repoPath, worktreeBranch, { 
             force: true,
             log: (s: string) => this.writeLog(job, `[cleanup] ${s}`) 
           });
@@ -1249,14 +1249,14 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     
     // Stage all changes
     try {
-      git.repository.stageAll(jobRoot);
+      await git.repository.stageAll(jobRoot);
     } catch (e) {
       this.writeLog(job, '[commit] No changes to stage');
     }
     
     // Check if there are changes to commit
-    const hasChanges = git.repository.hasChanges(jobRoot);
-    const hasStagedChanges = git.repository.hasStagedChanges(jobRoot);
+    const hasChanges = await git.repository.hasChanges(jobRoot);
+    const hasStagedChanges = await git.repository.hasStagedChanges(jobRoot);
     
     if (!hasChanges && !hasStagedChanges) {
       this.writeLog(job, '[commit] No changes to commit - work may have already been committed');
@@ -1338,7 +1338,7 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     
     // Push the commit
     try {
-      const currentBranch = git.branches.current(jobRoot);
+      const currentBranch = await git.branches.current(jobRoot);
       const { execSync } = require('child_process');
       execSync(`git push origin "${currentBranch}"`, { cwd: jobRoot, stdio: 'pipe' });
       this.writeLog(job, `[commit] ✓ Pushed commit to origin/${currentBranch}`);
@@ -1378,18 +1378,18 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     // Note: All work should already be committed by the commit step
     // Just verify there are no uncommitted changes
     const { spawnSync, execSync } = require('child_process');
-    if (git.repository.hasChanges(jobRoot)) {
+    if (await git.repository.hasChanges(jobRoot)) {
       this.writeLog(job, '[mergeback] Warning: Found uncommitted changes, creating safety commit...');
       try {
-        git.repository.stageAll(jobRoot);
-        git.repository.commit(jobRoot, `orchestrator(${job.id}): safety commit before mergeback`);
+        await git.repository.stageAll(jobRoot);
+        await git.repository.commit(jobRoot, `orchestrator(${job.id}): safety commit before mergeback`);
       } catch (e) {
         // Ignore - might be nothing to commit
       }
     }
     
     // Verify target branch exists
-    if (!git.branches.exists(targetBranch, repoPath)) {
+    if (!await git.branches.exists(targetBranch, repoPath)) {
       const errorMsg = `Target branch '${targetBranch}' does not exist.`;
       this.writeLog(job, `[mergeback] CRITICAL ERROR: ${errorMsg}`);
       if (!job.stepStatuses) job.stepStatuses = {};

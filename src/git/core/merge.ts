@@ -1,12 +1,15 @@
 /**
- * @fileoverview Merge Operations - Git merge and conflict handling.
+ * @fileoverview Merge Operations - Git merge and conflict handling (fully async).
  * 
  * Single responsibility: Perform merges and handle conflicts.
+ * All operations are async to avoid blocking the event loop.
  * 
  * @module git/core/merge
  */
 
-import { exec, execOrNull, execOrThrow, GitLogger } from './executor';
+import * as fs from 'fs';
+import * as path from 'path';
+import { execAsync, execAsyncOrNull, execAsyncOrThrow, GitLogger } from './executor';
 
 /**
  * Result of a merge operation.
@@ -44,7 +47,7 @@ export interface MergeOptions {
  * @param options - Merge options
  * @returns Merge result indicating success and any conflicts
  */
-export function merge(options: MergeOptions): MergeResult {
+export async function merge(options: MergeOptions): Promise<MergeResult> {
   const { 
     source, 
     target, 
@@ -73,13 +76,13 @@ export function merge(options: MergeOptions): MergeResult {
   
   args.push(source);
   
-  const result = exec(args, { cwd });
+  const result = await execAsync(args, { cwd });
   
   if (result.success) {
     // For squash merges, we need to commit
     if (squash) {
       const commitMsg = message || `Merge branch '${source}'`;
-      const commitResult = exec(['commit', '-m', commitMsg], { cwd });
+      const commitResult = await execAsync(['commit', '-m', commitMsg], { cwd });
       if (!commitResult.success && !commitResult.stderr.includes('nothing to commit')) {
         log?.(`[merge] ⚠ Squash commit warning: ${commitResult.stderr}`);
       }
@@ -91,7 +94,7 @@ export function merge(options: MergeOptions): MergeResult {
   
   // Check if it's a conflict
   if (result.stderr.includes('CONFLICT') || result.stdout.includes('CONFLICT')) {
-    const conflicts = listConflicts(cwd);
+    const conflicts = await listConflicts(cwd);
     log?.(`[merge] ⚠ Merge conflicts in ${conflicts.length} file(s)`);
     return { 
       success: false, 
@@ -113,16 +116,16 @@ export function merge(options: MergeOptions): MergeResult {
 /**
  * Abort an in-progress merge.
  */
-export function abort(cwd: string, log?: GitLogger): void {
+export async function abort(cwd: string, log?: GitLogger): Promise<void> {
   log?.(`[merge] Aborting merge`);
-  exec(['merge', '--abort'], { cwd });
+  await execAsync(['merge', '--abort'], { cwd });
 }
 
 /**
  * List files with merge conflicts.
  */
-export function listConflicts(cwd: string): string[] {
-  const result = execOrNull(['diff', '--name-only', '--diff-filter=U'], cwd);
+export async function listConflicts(cwd: string): Promise<string[]> {
+  const result = await execAsyncOrNull(['diff', '--name-only', '--diff-filter=U'], cwd);
   if (!result) return [];
   return result.split(/\r?\n/).filter(Boolean);
 }
@@ -130,14 +133,17 @@ export function listConflicts(cwd: string): string[] {
 /**
  * Check if there's an in-progress merge.
  */
-export function isInProgress(cwd: string): boolean {
-  const result = exec(['rev-parse', '--git-path', 'MERGE_HEAD'], { cwd });
+export async function isInProgress(cwd: string): Promise<boolean> {
+  const result = await execAsync(['rev-parse', '--git-path', 'MERGE_HEAD'], { cwd });
   if (!result.success) return false;
   
-  const fs = require('fs');
-  const path = require('path');
   const mergeHead = path.join(cwd, result.stdout.trim());
-  return fs.existsSync(mergeHead);
+  try {
+    await fs.promises.access(mergeHead);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -147,24 +153,24 @@ export function isInProgress(cwd: string): boolean {
  * @param side - Which side to keep ('ours' or 'theirs')
  * @param cwd - Working directory
  */
-export function resolveBySide(file: string, side: 'ours' | 'theirs', cwd: string, log?: GitLogger): void {
+export async function resolveBySide(file: string, side: 'ours' | 'theirs', cwd: string, log?: GitLogger): Promise<void> {
   log?.(`[merge] Resolving '${file}' using '${side}'`);
-  execOrThrow(['checkout', `--${side}`, '--', file], cwd);
-  execOrThrow(['add', file], cwd);
+  await execAsyncOrThrow(['checkout', `--${side}`, '--', file], cwd);
+  await execAsyncOrThrow(['add', file], cwd);
   log?.(`[merge] ✓ Resolved '${file}'`);
 }
 
 /**
  * Mark conflicts as resolved and continue merge.
  */
-export function continueAfterResolve(cwd: string, message: string, log?: GitLogger): boolean {
+export async function continueAfterResolve(cwd: string, message: string, log?: GitLogger): Promise<boolean> {
   log?.(`[merge] Committing resolved merge`);
   
   // Stage all changes
-  exec(['add', '-A'], { cwd });
+  await execAsync(['add', '-A'], { cwd });
   
   // Commit the merge
-  const result = exec(['commit', '-m', message], { cwd });
+  const result = await execAsync(['commit', '-m', message], { cwd });
   
   if (result.success) {
     log?.(`[merge] ✓ Merge committed`);

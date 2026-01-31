@@ -2,7 +2,7 @@
  * @fileoverview Work Summary - Calculate and describe work performed by a job.
  * 
  * Single responsibility: Analyze git history to summarize job output.
- * Uses git/* modules for all git operations.
+ * Uses git/* modules for all git operations (async to avoid blocking).
  * 
  * @module core/job/workSummary
  */
@@ -18,7 +18,7 @@ const log: ComponentLogger = Logger.for('jobs');
  * Calculate a summary of work performed by a job.
  * Analyzes commits since the job branch forked from baseBranch.
  */
-export function calculateWorkSummary(job: Job): WorkSummary {
+export async function calculateWorkSummary(job: Job): Promise<WorkSummary> {
   // Use provided worktreePath for plan-managed jobs, otherwise build the path
   const worktreePath = job.inputs.worktreePath || 
     path.join(job.inputs.repoPath, job.inputs.worktreeRoot, job.id);
@@ -32,7 +32,7 @@ export function calculateWorkSummary(job: Job): WorkSummary {
 
   try {
     // Find the merge-base (where the worktree branch forked from baseBranch)
-    const mergeBase = git.branches.getMergeBase('HEAD', baseBranch, worktreePath);
+    const mergeBase = await git.branches.getMergeBase('HEAD', baseBranch, worktreePath);
     
     if (!mergeBase) {
       log.warn(`Could not find merge base for job`, { jobId: job.id, baseBranch });
@@ -40,12 +40,12 @@ export function calculateWorkSummary(job: Job): WorkSummary {
     }
 
     // Get commit list since merge base
-    const commitList = git.repository.getCommitLog(mergeBase, 'HEAD', worktreePath);
+    const commitList = await git.repository.getCommitLog(mergeBase, 'HEAD', worktreePath);
     commits = commitList.length;
 
     // Get detailed commit information
     for (const commit of commitList) {
-      const changes = git.repository.getCommitChanges(commit.hash, worktreePath);
+      const changes = await git.repository.getCommitChanges(commit.hash, worktreePath);
       
       const added: string[] = [];
       const modified: string[] = [];
@@ -72,7 +72,7 @@ export function calculateWorkSummary(job: Job): WorkSummary {
     }
 
     // Get total file changes since the fork point (for summary)
-    const totalChanges = git.repository.getDiffStats(mergeBase, 'HEAD', worktreePath);
+    const totalChanges = await git.repository.getDiffStats(mergeBase, 'HEAD', worktreePath);
     filesAdded = totalChanges.added;
     filesModified = totalChanges.modified;
     filesDeleted = totalChanges.deleted;
@@ -101,34 +101,45 @@ function createEmptySummary(): WorkSummary {
     filesAdded: 0,
     filesModified: 0,
     filesDeleted: 0,
-    description: 'No changes detected',
-    commitDetails: [],
+    description: 'No changes recorded',
+    commitDetails: []
   };
 }
 
 /**
- * Build a human-readable description of the work.
+ * Build a human-readable description from change stats.
  */
-function buildDescription(
-  commits: number,
-  filesAdded: number,
-  filesModified: number,
-  filesDeleted: number
-): string {
-  const parts: string[] = [];
-  
-  if (commits > 0) {
-    parts.push(`${commits} commit${commits !== 1 ? 's' : ''}`);
-  }
-  if (filesAdded > 0) {
-    parts.push(`${filesAdded} file${filesAdded !== 1 ? 's' : ''} added`);
-  }
-  if (filesModified > 0) {
-    parts.push(`${filesModified} file${filesModified !== 1 ? 's' : ''} modified`);
-  }
-  if (filesDeleted > 0) {
-    parts.push(`${filesDeleted} file${filesDeleted !== 1 ? 's' : ''} deleted`);
+function buildDescription(commits: number, added: number, modified: number, deleted: number): string {
+  if (commits === 0) {
+    return 'No changes recorded';
   }
 
-  return parts.length > 0 ? parts.join(', ') : 'No changes detected';
+  const parts: string[] = [];
+  
+  if (commits === 1) {
+    parts.push('1 commit');
+  } else {
+    parts.push(`${commits} commits`);
+  }
+
+  const fileParts: string[] = [];
+  if (added > 0) fileParts.push(`+${added}`);
+  if (modified > 0) fileParts.push(`~${modified}`);
+  if (deleted > 0) fileParts.push(`-${deleted}`);
+  
+  if (fileParts.length > 0) {
+    parts.push(`(${fileParts.join(', ')} files)`);
+  }
+
+  return parts.join(' ');
+}
+
+/**
+ * Re-export for backwards compatibility
+ */
+export function calculateWorkSummaryFromGit(job: Job): WorkSummary {
+  // Note: This sync wrapper is deprecated. Use calculateWorkSummary instead.
+  // Returns empty summary - caller should use async version
+  log.warn('calculateWorkSummaryFromGit is deprecated, use async calculateWorkSummary');
+  return createEmptySummary();
 }

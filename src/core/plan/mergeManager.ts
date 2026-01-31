@@ -4,7 +4,7 @@
  * Single responsibility: Merge completed job/sub-plan branches to target branches,
  * including incremental (leaf) merging and final RI merge.
  * 
- * Uses the git/* modules for all git operations - no direct execSync usage.
+ * Uses the git/* modules for all git operations - fully async to avoid blocking.
  * 
  * @module core/plan/mergeManager
  */
@@ -58,13 +58,13 @@ export function isLeafWorkUnit(spec: PlanSpec, workUnitId: string): boolean {
  * Merge a completed leaf job's branch to targetBranch immediately.
  * This provides incremental value to the user as work completes.
  */
-export function mergeLeafToTarget(
+export async function mergeLeafToTarget(
   spec: PlanSpec,
   plan: InternalPlanState,
   jobId: string,
   completedBranch: string,
   repoPath: string
-): boolean {
+): Promise<boolean> {
   const targetBranch = spec.targetBranch || spec.baseBranch || 'main';
   const planJob = spec.jobs.find(j => j.id === jobId);
   const config = getMergeConfig();
@@ -76,10 +76,10 @@ export function mergeLeafToTarget(
 
   try {
     // Checkout target branch
-    git.branches.checkout(repoPath, targetBranch);
+    await git.branches.checkout(repoPath, targetBranch);
 
     // Attempt merge
-    const mergeSuccess = attemptMerge(
+    const mergeSuccess = await attemptMerge(
       repoPath,
       completedBranch,
       targetBranch,
@@ -93,7 +93,7 @@ export function mergeLeafToTarget(
     }
 
     // Push the updated target branch
-    const pushSuccess = git.repository.push(repoPath, { branch: targetBranch });
+    const pushSuccess = await git.repository.push(repoPath, { branch: targetBranch });
     if (!pushSuccess) {
       log.warn(`Failed to push after leaf merge`);
     }
@@ -117,11 +117,11 @@ export function mergeLeafToTarget(
  * Perform the final RI merge for a completed plan.
  * With incremental leaf merging, this is primarily a fallback/cleanup.
  */
-export function performFinalMerge(
+export async function performFinalMerge(
   spec: PlanSpec,
   plan: InternalPlanState,
   repoPath: string
-): void {
+): Promise<void> {
   const targetBranch = spec.targetBranch || spec.baseBranch || 'main';
   const config = getMergeConfig();
 
@@ -148,7 +148,7 @@ export function performFinalMerge(
       planId: spec.id,
     });
     plan.riMergeCompleted = true;
-    cleanupIntegrationBranches(plan, repoPath);
+    await cleanupIntegrationBranches(plan, repoPath);
     return;
   }
 
@@ -161,7 +161,7 @@ export function performFinalMerge(
 
   try {
     // Checkout target branch
-    git.branches.checkout(repoPath, targetBranch);
+    await git.branches.checkout(repoPath, targetBranch);
 
     // Merge each unmerged leaf job's branch
     for (const leafJobId of unmergedLeaves) {
@@ -171,7 +171,7 @@ export function performFinalMerge(
 
       log.info(`Fallback merging ${leafBranch} into ${targetBranch}`);
 
-      const mergeSuccess = attemptMerge(
+      const mergeSuccess = await attemptMerge(
         repoPath,
         leafBranch,
         targetBranch,
@@ -188,7 +188,7 @@ export function performFinalMerge(
     }
 
     // Push the updated target branch
-    const pushSuccess = git.repository.push(repoPath, { branch: targetBranch });
+    const pushSuccess = await git.repository.push(repoPath, { branch: targetBranch });
     if (pushSuccess) {
       log.info(`RI merge completed and pushed`, { planId: spec.id, targetBranch });
     } else {
@@ -196,7 +196,7 @@ export function performFinalMerge(
     }
 
     plan.riMergeCompleted = true;
-    cleanupIntegrationBranches(plan, repoPath);
+    await cleanupIntegrationBranches(plan, repoPath);
   } catch (error: any) {
     log.error(`Final RI merge failed`, { planId: spec.id, error: error.message });
     plan.error = `RI merge failed: ${error.message}`;
@@ -207,15 +207,15 @@ export function performFinalMerge(
 /**
  * Attempt a git merge, using Copilot CLI to resolve conflicts if needed.
  */
-function attemptMerge(
+async function attemptMerge(
   repoPath: string,
   sourceBranch: string,
   targetBranch: string,
   commitMessage: string,
   config: MergeConfig
-): boolean {
+): Promise<boolean> {
   // Use git.merge module
-  const result = git.merge.merge({
+  const result = await git.merge.merge({
     source: sourceBranch,
     target: targetBranch,
     cwd: repoPath,
@@ -262,7 +262,7 @@ function attemptMerge(
       targetBranch,
     });
     // Abort the merge
-    git.merge.abort(repoPath);
+    await git.merge.abort(repoPath);
     return false;
   }
 
@@ -273,10 +273,10 @@ function attemptMerge(
 /**
  * Clean up integration branches created for sub-plans.
  */
-export function cleanupIntegrationBranches(
+export async function cleanupIntegrationBranches(
   plan: InternalPlanState,
   repoPath: string
-): void {
+): Promise<void> {
   if (!plan.subPlanIntegrationBranches || plan.subPlanIntegrationBranches.size === 0) {
     return;
   }
@@ -287,13 +287,13 @@ export function cleanupIntegrationBranches(
 
   for (const [subPlanId, integrationBranch] of plan.subPlanIntegrationBranches) {
     // Delete local branch
-    const localDeleted = git.branches.deleteLocal(repoPath, integrationBranch, { force: true });
+    const localDeleted = await git.branches.deleteLocal(repoPath, integrationBranch, { force: true });
     if (localDeleted) {
       log.debug(`Deleted local integration branch: ${integrationBranch}`);
     }
 
     // Delete remote branch
-    const remoteDeleted = git.branches.deleteRemote(repoPath, integrationBranch);
+    const remoteDeleted = await git.branches.deleteRemote(repoPath, integrationBranch);
     if (remoteDeleted) {
       log.debug(`Deleted remote integration branch: ${integrationBranch}`);
     }

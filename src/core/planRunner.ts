@@ -520,7 +520,7 @@ export class PlanRunner {
   /**
    * Main scheduling loop for a plan.
    */
-  private pump(spec: PlanSpec): void {
+  private async pump(spec: PlanSpec): Promise<void> {
     const plan = this.plans.get(spec.id);
     if (!plan) return;
     
@@ -542,7 +542,7 @@ export class PlanRunner {
     // Resolve targetBranchRoot on first pump (lazy initialization)
     if (!plan.targetBranchRoot) {
       const baseBranch = spec.baseBranch || 'main';
-      const { targetBranchRoot, needsCreation } = git.orchestrator.resolveTargetBranchRoot(
+      const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
         baseBranch,
         repoPath,
         `copilot_jobs/${spec.id}`
@@ -550,7 +550,7 @@ export class PlanRunner {
       
       if (needsCreation) {
         log.info(`Plan ${spec.id}: baseBranch '${baseBranch}' is a default branch, creating feature branch`);
-        git.branches.create(targetBranchRoot, baseBranch, repoPath, s => log.debug(s));
+        await git.branches.create(targetBranchRoot, baseBranch, repoPath, s => log.debug(s));
         plan.targetBranchRootCreated = true;
       } else {
         log.info(`Plan ${spec.id}: using non-default baseBranch '${baseBranch}' as targetBranchRoot`);
@@ -567,14 +567,14 @@ export class PlanRunner {
     // Schedule new jobs while under parallel limit and queue has items
     while (plan.running.length < maxParallel && plan.queued.length > 0) {
       const jobId = plan.queued.shift()!;
-      this.scheduleJob(spec, plan, jobId, repoPath);
+      await this.scheduleJob(spec, plan, jobId, repoPath);
     }
     
     // Check status of running jobs
-    this.updateJobStatuses(spec, plan);
+    await this.updateJobStatuses(spec, plan);
     
     // Check status of running sub-plans
-    this.updateSubPlanStatuses(spec, plan);
+    await this.updateSubPlanStatuses(spec, plan);
     
     // Check if plan is complete
     this.checkPlanCompletion(spec, plan);
@@ -586,7 +586,7 @@ export class PlanRunner {
    * Key: The baseBranch is computed from completed dependencies,
    * ensuring proper branch chaining through the DAG.
    */
-  private scheduleJob(spec: PlanSpec, plan: InternalPlanState, jobId: string, repoPath: string): void {
+  private async scheduleJob(spec: PlanSpec, plan: InternalPlanState, jobId: string, repoPath: string): Promise<void> {
     const planJob = spec.jobs.find(j => j.id === jobId);
     if (!planJob) {
       log.error(`Job ${jobId} not found in plan spec`);
@@ -620,7 +620,7 @@ export class PlanRunner {
     
     try {
       log.debug(`Creating worktree for job ${jobId} at ${worktreePath}`);
-      git.worktrees.create({
+      await git.worktrees.create({
         repoPath,
         worktreePath,
         branchName: targetBranch,  // The worktree branch IS the targetBranch
@@ -635,7 +635,7 @@ export class PlanRunner {
       
       // If job has multiple sources, merge the additional sources directly into the worktree
       if (additionalSources.length > 0) {
-        const mergeSuccess = this.mergeSourcesIntoWorktree(planJob, worktreePath, additionalSources);
+        const mergeSuccess = await this.mergeSourcesIntoWorktree(planJob, worktreePath, additionalSources);
         if (!mergeSuccess) {
           log.error(`Failed to merge sources into worktree for job ${jobId}`);
           plan.failed.push(jobId);
@@ -765,11 +765,11 @@ export class PlanRunner {
    * This is called after worktree creation when a job consumes from multiple sources.
    * Uses Copilot CLI for intelligent conflict resolution.
    */
-  private mergeSourcesIntoWorktree(
+  private async mergeSourcesIntoWorktree(
     job: PlanJob,
     worktreePath: string,
     additionalSources: string[]
-  ): boolean {
+  ): Promise<boolean> {
     if (additionalSources.length === 0) {
       return true;
     }
@@ -787,9 +787,9 @@ export class PlanRunner {
       log.debug(`Merging ${sourceBranch} into worktree at ${worktreePath}`);
       
       // First try with origin/ prefix
-      let mergeResult = git.merge.merge({
+      let mergeResult = await git.merge.merge({
         source: `origin/${sourceBranch}`,
-        target: git.branches.current(worktreePath),
+        target: await git.branches.current(worktreePath),
         cwd: worktreePath,
         message: `Merge ${sourceBranch} for job ${job.id}`,
         log: (msg: string) => log.debug(msg)
@@ -802,10 +802,10 @@ export class PlanRunner {
       
       // If conflict, try without origin/ prefix
       if (!mergeResult.hasConflicts) {
-        git.merge.abort(worktreePath);
-        mergeResult = git.merge.merge({
+        await git.merge.abort(worktreePath);
+        mergeResult = await git.merge.merge({
           source: sourceBranch,
-          target: git.branches.current(worktreePath),
+          target: await git.branches.current(worktreePath),
           cwd: worktreePath,
           message: `Merge ${sourceBranch} for job ${job.id}`,
           log: (msg: string) => log.debug(msg)
@@ -841,7 +841,7 @@ export class PlanRunner {
           });
           // Abort the merge
           try {
-            git.merge.abort(worktreePath);
+            await git.merge.abort(worktreePath);
           } catch {}
           return false;
         }
@@ -861,7 +861,7 @@ export class PlanRunner {
   /**
    * Update job statuses from the runner.
    */
-  private updateJobStatuses(spec: PlanSpec, plan: InternalPlanState): void {
+  private async updateJobStatuses(spec: PlanSpec, plan: InternalPlanState): Promise<void> {
     const runnerJobs = this.runner.list();
     
     for (const planJobId of [...plan.running]) {
@@ -873,7 +873,7 @@ export class PlanRunner {
       
       switch (runnerJob.status) {
         case 'succeeded':
-          this.handleJobSuccess(spec, plan, planJobId, runnerJob);
+          await this.handleJobSuccess(spec, plan, planJobId, runnerJob);
           break;
         case 'failed':
           this.handleJobFailure(plan, planJobId);
@@ -889,7 +889,7 @@ export class PlanRunner {
   /**
    * Update sub-plan statuses by checking their nested plan state.
    */
-  private updateSubPlanStatuses(spec: PlanSpec, plan: InternalPlanState): void {
+  private async updateSubPlanStatuses(spec: PlanSpec, plan: InternalPlanState): Promise<void> {
     if (!plan.runningSubPlans || plan.runningSubPlans.size === 0) {
       return;
     }
@@ -958,7 +958,7 @@ export class PlanRunner {
         
         // Check if this completion unblocks any jobs or other sub-plans
         // Use a synthetic job ID that represents the sub-plan completion
-        this.queueReadyDependentsForSubPlan(spec, plan, subPlanId);
+        await this.queueReadyDependentsForSubPlan(spec, plan, subPlanId);
         
       } else if (childPlan.status === 'failed' || childPlan.status === 'partial') {
         log.error(`Sub-plan ${subPlanId} (${childPlanId}) failed`, {
@@ -985,7 +985,7 @@ export class PlanRunner {
    * Queue jobs that were waiting for a sub-plan to complete.
    * Jobs can list sub-plan IDs in their consumesFrom to wait for sub-plan completion.
    */
-  private queueReadyDependentsForSubPlan(spec: PlanSpec, plan: InternalPlanState, completedSubPlanId: string): void {
+  private async queueReadyDependentsForSubPlan(spec: PlanSpec, plan: InternalPlanState, completedSubPlanId: string): Promise<void> {
     // Check all jobs that might be consuming from this sub-plan
     for (const job of spec.jobs) {
       // Skip if already processed
@@ -1024,7 +1024,7 @@ export class PlanRunner {
    * Handle a successful job completion.
    * Records the completed branch for dependency chaining.
    */
-  private handleJobSuccess(spec: PlanSpec, plan: InternalPlanState, jobId: string, runnerJob: Job): void {
+  private async handleJobSuccess(spec: PlanSpec, plan: InternalPlanState, jobId: string, runnerJob: Job): Promise<void> {
     // Remove from running, add to done
     plan.running = plan.running.filter(id => id !== jobId);
     plan.done.push(jobId);
@@ -1056,29 +1056,29 @@ export class PlanRunner {
     if (isLeaf && !spec.isSubPlan) {
       const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
       const repoPath = spec.repoPath || ws;
-      this.mergeLeafToTarget(spec, plan, jobId, completedBranch, repoPath);
+      await this.mergeLeafToTarget(spec, plan, jobId, completedBranch, repoPath);
     }
     
     // Check for jobs that depended on this one and are now ready
-    this.queueReadyDependents(spec, plan, jobId);
+    await this.queueReadyDependents(spec, plan, jobId);
   }
   
   /**
    * Immediately merge a completed leaf job's branch to targetBranch.
    * Delegates to mergeManager module.
    */
-  private mergeLeafToTarget(
+  private async mergeLeafToTarget(
     spec: PlanSpec, 
     plan: InternalPlanState, 
     jobId: string, 
     completedBranch: string,
     repoPath: string
-  ): void {
-    const success = mergeManager.mergeLeafToTarget(spec, plan, jobId, completedBranch, repoPath);
+  ): Promise<void> {
+    const success = await mergeManager.mergeLeafToTarget(spec, plan, jobId, completedBranch, repoPath);
     
     if (success && spec.cleanUpSuccessfulWork !== false) {
       // Clean up worktree/branch if enabled (default behavior)
-      cleanupManager.cleanupWorkUnit(spec, plan, jobId, repoPath);
+      await cleanupManager.cleanupWorkUnit(spec, plan, jobId, repoPath);
       this.persist();
     }
   }
@@ -1126,7 +1126,7 @@ export class PlanRunner {
   /**
    * Queue jobs and sub-plans whose consumesFrom sources are now satisfied.
    */
-  private queueReadyDependents(spec: PlanSpec, plan: InternalPlanState, completedJobId: string): void {
+  private async queueReadyDependents(spec: PlanSpec, plan: InternalPlanState, completedJobId: string): Promise<void> {
     const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
     const repoPath = spec.repoPath || ws;
     
@@ -1193,7 +1193,7 @@ export class PlanRunner {
           });
           
           // Launch the sub-plan
-          this.launchSubPlan(spec, plan, subPlanSpec, repoPath);
+          await this.launchSubPlan(spec, plan, subPlanSpec, repoPath);
         } else {
           const pendingSources = subPlanSpec.consumesFrom.filter(sourceId => 
             !plan.done.includes(sourceId) && !plan.completedSubPlans.has(sourceId)
@@ -1217,12 +1217,12 @@ export class PlanRunner {
    * 2. The sub-plan's jobs merge back to this integration branch
    * 3. When complete, consumers can receive the sub-plan's completed branch
    */
-  private launchSubPlan(
+  private async launchSubPlan(
     parentSpec: PlanSpec, 
     parentState: InternalPlanState, 
     subPlanSpec: SubPlanSpec,
     repoPath: string
-  ): void {
+  ): Promise<void> {
     const path = require('path');
     
     // Generate a unique ID for the child plan
@@ -1270,14 +1270,14 @@ export class PlanRunner {
     try {
       // Create the integration branch from the source branch
       // First, try to delete if it already exists
-      git.branches.deleteLocal(repoPath, integrationBranchName, { force: true });
+      await git.branches.deleteLocal(repoPath, integrationBranchName, { force: true });
       
       // Create branch from source
-      git.branches.create(integrationBranchName, sourceBranch, repoPath, 
+      await git.branches.create(integrationBranchName, sourceBranch, repoPath, 
         (msg: string) => log.debug(msg));
       
       // Push to remote
-      git.repository.push(repoPath, { 
+      await git.repository.push(repoPath, { 
         branch: integrationBranchName, 
         log: (msg: string) => log.debug(msg) 
       });

@@ -3,7 +3,7 @@
  * 
  * Single responsibility: Clean up worktrees and branches for completed work units.
  * 
- * Uses the git/* modules for all git operations - no direct execSync usage.
+ * Uses the git/* modules for all git operations - fully async to avoid blocking.
  * 
  * @module core/plan/cleanupManager
  */
@@ -22,12 +22,12 @@ const log: ComponentLogger = Logger.for('plans');
  * 
  * Uses plan.cleanedWorkUnits to track what has been cleaned across calls.
  */
-export function cleanupWorkUnit(
+export async function cleanupWorkUnit(
   spec: PlanSpec,
   plan: InternalPlanState,
   workUnitId: string,
   repoPath: string
-): void {
+): Promise<void> {
   // Initialize cleanedWorkUnits if needed (for backward compat with persisted plans)
   if (!plan.cleanedWorkUnits) {
     plan.cleanedWorkUnits = new Set();
@@ -38,18 +38,24 @@ export function cleanupWorkUnit(
 
   // Clean up the worktree
   const worktreePath = plan.worktreePaths.get(workUnitId);
-  if (worktreePath && fs.existsSync(worktreePath)) {
-    const removed = git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
-    if (removed) {
-      plan.worktreePaths.delete(workUnitId);
-      log.debug(`Cleaned up worktree for ${workUnitId}`, { path: worktreePath });
-    } else {
-      log.warn(`Failed to remove worktree for ${workUnitId}`, { path: worktreePath });
-      // Try force delete the directory anyway
-      try {
-        fs.rmSync(worktreePath, { recursive: true, force: true });
+  if (worktreePath) {
+    try {
+      await fs.promises.access(worktreePath);
+      const removed = await git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
+      if (removed) {
         plan.worktreePaths.delete(workUnitId);
-      } catch {}
+        log.debug(`Cleaned up worktree for ${workUnitId}`, { path: worktreePath });
+      } else {
+        log.warn(`Failed to remove worktree for ${workUnitId}`, { path: worktreePath });
+        // Try force delete the directory anyway
+        try {
+          await fs.promises.rm(worktreePath, { recursive: true, force: true });
+          plan.worktreePaths.delete(workUnitId);
+        } catch {}
+      }
+    } catch {
+      // Worktree doesn't exist, just clear the reference
+      plan.worktreePaths.delete(workUnitId);
     }
   }
 
@@ -57,13 +63,13 @@ export function cleanupWorkUnit(
   const completedBranch = plan.completedBranches.get(workUnitId);
   if (completedBranch) {
     // Delete local branch
-    const localDeleted = git.branches.deleteLocal(repoPath, completedBranch, { force: true });
+    const localDeleted = await git.branches.deleteLocal(repoPath, completedBranch, { force: true });
     if (localDeleted) {
       log.debug(`Deleted local branch for ${workUnitId}`, { branch: completedBranch });
     }
 
     // Delete remote branch
-    const remoteDeleted = git.branches.deleteRemote(repoPath, completedBranch);
+    const remoteDeleted = await git.branches.deleteRemote(repoPath, completedBranch);
     if (remoteDeleted) {
       log.debug(`Deleted remote branch for ${workUnitId}`, { branch: completedBranch });
     }
@@ -85,7 +91,7 @@ export function cleanupWorkUnit(
   if (job) {
     for (const producerId of job.consumesFrom) {
       if (canCleanupProducer(spec, plan, producerId)) {
-        cleanupWorkUnit(spec, plan, producerId, repoPath);
+        await cleanupWorkUnit(spec, plan, producerId, repoPath);
       }
     }
   }
@@ -95,7 +101,7 @@ export function cleanupWorkUnit(
   if (subPlan) {
     for (const producerId of subPlan.consumesFrom) {
       if (canCleanupProducer(spec, plan, producerId)) {
-        cleanupWorkUnit(spec, plan, producerId, repoPath);
+        await cleanupWorkUnit(spec, plan, producerId, repoPath);
       }
     }
   }
@@ -145,52 +151,55 @@ export function canCleanupProducer(
  * Clean up all worktrees and branches for a plan.
  * Used when deleting a plan or cleaning up after failure.
  */
-export function cleanupAllPlanResources(
+export async function cleanupAllPlanResources(
   spec: PlanSpec,
   plan: InternalPlanState,
   repoPath: string
-): void {
+): Promise<void> {
   log.info(`Cleaning up all resources for plan ${spec.id}`);
 
   // Clean up all worktrees
   for (const [workUnitId, worktreePath] of plan.worktreePaths) {
-    if (fs.existsSync(worktreePath)) {
-      const removed = git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
+    try {
+      await fs.promises.access(worktreePath);
+      const removed = await git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
       if (removed) {
         log.debug(`Removed worktree: ${worktreePath}`);
       } else {
         log.warn(`Failed to remove worktree ${worktreePath}`);
         try {
-          fs.rmSync(worktreePath, { recursive: true, force: true });
+          await fs.promises.rm(worktreePath, { recursive: true, force: true });
         } catch {}
       }
+    } catch {
+      // Doesn't exist, skip
     }
   }
   plan.worktreePaths.clear();
 
   // Clean up all branches (local and remote)
   for (const [workUnitId, branch] of plan.completedBranches) {
-    git.branches.deleteLocal(repoPath, branch, { force: true });
-    git.branches.deleteRemote(repoPath, branch);
+    await git.branches.deleteLocal(repoPath, branch, { force: true });
+    await git.branches.deleteRemote(repoPath, branch);
   }
   plan.completedBranches.clear();
 
   // Clean up integration branches
   if (plan.subPlanIntegrationBranches) {
     for (const [subPlanId, branch] of plan.subPlanIntegrationBranches) {
-      git.branches.deleteLocal(repoPath, branch, { force: true });
-      git.branches.deleteRemote(repoPath, branch);
+      await git.branches.deleteLocal(repoPath, branch, { force: true });
+      await git.branches.deleteRemote(repoPath, branch);
     }
     plan.subPlanIntegrationBranches.clear();
   }
 
   // Clean up targetBranchRoot if we created it
   if (plan.targetBranchRootCreated && plan.targetBranchRoot) {
-    const localDeleted = git.branches.deleteLocal(repoPath, plan.targetBranchRoot, { force: true });
+    const localDeleted = await git.branches.deleteLocal(repoPath, plan.targetBranchRoot, { force: true });
     if (localDeleted) {
       log.debug(`Deleted targetBranchRoot: ${plan.targetBranchRoot}`);
     }
-    git.branches.deleteRemote(repoPath, plan.targetBranchRoot);
+    await git.branches.deleteRemote(repoPath, plan.targetBranchRoot);
   }
 
   log.info(`Plan ${spec.id} resources cleaned up`);
@@ -199,15 +208,14 @@ export function cleanupAllPlanResources(
 /**
  * Clean up the worktree root directory for a plan.
  */
-export function cleanupWorktreeRoot(worktreeRoot: string): void {
-  if (fs.existsSync(worktreeRoot)) {
-    try {
-      fs.rmSync(worktreeRoot, { recursive: true, force: true });
-      log.debug(`Removed worktree root: ${worktreeRoot}`);
-    } catch (e: any) {
-      log.warn(`Failed to remove worktree root ${worktreeRoot}`, {
-        error: e.message,
-      });
-    }
+export async function cleanupWorktreeRoot(worktreeRoot: string): Promise<void> {
+  try {
+    await fs.promises.access(worktreeRoot);
+    await fs.promises.rm(worktreeRoot, { recursive: true, force: true });
+    log.debug(`Removed worktree root: ${worktreeRoot}`);
+  } catch (e: any) {
+    log.warn(`Failed to remove worktree root ${worktreeRoot}`, {
+      error: e.message,
+    });
   }
 }

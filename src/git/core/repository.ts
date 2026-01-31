@@ -1,12 +1,15 @@
 /**
- * @fileoverview Repository Operations - General git repository operations.
+ * @fileoverview Repository Operations - General git repository operations (fully async).
  * 
  * Single responsibility: Common repository queries and operations.
+ * All operations are async to avoid blocking the event loop.
  * 
  * @module git/core/repository
  */
 
-import { exec, execOrNull, execOrThrow, GitLogger, CommandResult } from './executor';
+import * as fs from 'fs';
+import * as path from 'path';
+import { execAsync, execAsyncOrNull, execAsyncOrThrow, GitLogger, CommandResult } from './executor';
 
 /**
  * Commit information.
@@ -31,7 +34,7 @@ export interface FileChange {
 /**
  * Fetch from remote.
  */
-export function fetch(cwd: string, options: { remote?: string; all?: boolean; tags?: boolean; log?: GitLogger } = {}): void {
+export async function fetch(cwd: string, options: { remote?: string; all?: boolean; tags?: boolean; log?: GitLogger } = {}): Promise<void> {
   const { remote = 'origin', all = false, tags = false, log } = options;
   
   const args = ['fetch'];
@@ -40,16 +43,16 @@ export function fetch(cwd: string, options: { remote?: string; all?: boolean; ta
   if (!all) args.push(remote);
   
   log?.(`[git] Fetching${all ? ' all remotes' : ` from ${remote}`}`);
-  execOrThrow(args, cwd);
+  await execAsyncOrThrow(args, cwd);
   log?.(`[git] ✓ Fetch complete`);
 }
 
 /**
  * Pull changes (fast-forward only).
  */
-export function pull(cwd: string, log?: GitLogger): boolean {
+export async function pull(cwd: string, log?: GitLogger): Promise<boolean> {
   log?.(`[git] Pulling changes (fast-forward only)`);
-  const result = exec(['pull', '--ff-only'], { cwd });
+  const result = await execAsync(['pull', '--ff-only'], { cwd });
   
   if (result.success) {
     log?.(`[git] ✓ Pull complete`);
@@ -69,7 +72,7 @@ export function pull(cwd: string, log?: GitLogger): boolean {
 /**
  * Push to remote.
  */
-export function push(cwd: string, options: { remote?: string; branch?: string; force?: boolean; log?: GitLogger } = {}): boolean {
+export async function push(cwd: string, options: { remote?: string; branch?: string; force?: boolean; log?: GitLogger } = {}): Promise<boolean> {
   const { remote = 'origin', branch, force = false, log } = options;
   
   const args = ['push', remote];
@@ -77,7 +80,7 @@ export function push(cwd: string, options: { remote?: string; branch?: string; f
   if (force) args.push('--force-with-lease');
   
   log?.(`[git] Pushing to ${remote}${branch ? `/${branch}` : ''}`);
-  const result = exec(args, { cwd });
+  const result = await execAsync(args, { cwd });
   
   if (result.success) {
     log?.(`[git] ✓ Push complete`);
@@ -91,17 +94,17 @@ export function push(cwd: string, options: { remote?: string; branch?: string; f
 /**
  * Stage all changes.
  */
-export function stageAll(cwd: string, log?: GitLogger): void {
+export async function stageAll(cwd: string, log?: GitLogger): Promise<void> {
   log?.(`[git] Staging all changes`);
-  execOrThrow(['add', '-A'], cwd);
+  await execAsyncOrThrow(['add', '-A'], cwd);
 }
 
 /**
  * Create a commit.
  */
-export function commit(cwd: string, message: string, log?: GitLogger): boolean {
+export async function commit(cwd: string, message: string, log?: GitLogger): Promise<boolean> {
   log?.(`[git] Creating commit`);
-  const result = exec(['commit', '-m', message], { cwd });
+  const result = await execAsync(['commit', '-m', message], { cwd });
   
   if (result.success) {
     log?.(`[git] ✓ Committed`);
@@ -120,32 +123,32 @@ export function commit(cwd: string, message: string, log?: GitLogger): boolean {
 /**
  * Check if there are uncommitted changes.
  */
-export function hasChanges(cwd: string): boolean {
-  const result = exec(['status', '--porcelain'], { cwd });
+export async function hasChanges(cwd: string): Promise<boolean> {
+  const result = await execAsync(['status', '--porcelain'], { cwd });
   return result.success && result.stdout.trim().length > 0;
 }
 
 /**
  * Check if there are staged changes.
  */
-export function hasStagedChanges(cwd: string): boolean {
-  const result = exec(['diff', '--cached', '--name-only'], { cwd });
+export async function hasStagedChanges(cwd: string): Promise<boolean> {
+  const result = await execAsync(['diff', '--cached', '--name-only'], { cwd });
   return result.success && result.stdout.trim().length > 0;
 }
 
 /**
  * Get the current HEAD commit hash.
  */
-export function getHead(cwd: string): string | null {
-  return execOrNull(['rev-parse', 'HEAD'], cwd);
+export async function getHead(cwd: string): Promise<string | null> {
+  return execAsyncOrNull(['rev-parse', 'HEAD'], cwd);
 }
 
 /**
  * Get commit log between two refs.
  */
-export function getCommitLog(from: string, to: string, cwd: string): CommitInfo[] {
+export async function getCommitLog(from: string, to: string, cwd: string): Promise<CommitInfo[]> {
   const format = '%H|%h|%an|%ai|%s';
-  const result = execOrNull(['log', `${from}..${to}`, `--pretty=format:${format}`, '--reverse'], cwd);
+  const result = await execAsyncOrNull(['log', `${from}..${to}`, `--pretty=format:${format}`, '--reverse'], cwd);
   
   if (!result) return [];
   
@@ -164,14 +167,14 @@ export function getCommitLog(from: string, to: string, cwd: string): CommitInfo[
 /**
  * Get files changed in a commit.
  */
-export function getCommitChanges(commitHash: string, cwd: string): FileChange[] {
-  const result = execOrNull(['diff-tree', '--no-commit-id', '--name-status', '-r', commitHash], cwd);
+export async function getCommitChanges(commitHash: string, cwd: string): Promise<FileChange[]> {
+  const result = await execAsyncOrNull(['diff-tree', '--no-commit-id', '--name-status', '-r', commitHash], cwd);
   
   if (!result) return [];
   
   return result.split(/\r?\n/).filter(Boolean).map(line => {
     const [status, ...pathParts] = line.split('\t');
-    const path = pathParts.join('\t');
+    const filePath = pathParts.join('\t');
     
     const statusMap: Record<string, FileChange['status']> = {
       'A': 'added',
@@ -183,7 +186,7 @@ export function getCommitChanges(commitHash: string, cwd: string): FileChange[] 
     
     return {
       status: statusMap[status.charAt(0)] || 'modified',
-      path
+      path: filePath
     };
   });
 }
@@ -191,8 +194,8 @@ export function getCommitChanges(commitHash: string, cwd: string): FileChange[] 
 /**
  * Get diff stats between two refs.
  */
-export function getDiffStats(from: string, to: string, cwd: string): { added: number; modified: number; deleted: number } {
-  const result = execOrNull(['diff', '--name-status', from, to], cwd);
+export async function getDiffStats(from: string, to: string, cwd: string): Promise<{ added: number; modified: number; deleted: number }> {
+  const result = await execAsyncOrNull(['diff', '--name-status', from, to], cwd);
   
   let added = 0, modified = 0, deleted = 0;
   
@@ -213,16 +216,15 @@ export function getDiffStats(from: string, to: string, cwd: string): { added: nu
 /**
  * Ensure orchestrator directories are in .gitignore.
  */
-export function ensureGitignore(repoPath: string, patterns: string[], log?: GitLogger): void {
-  const fs = require('fs');
-  const path = require('path');
-  
+export async function ensureGitignore(repoPath: string, patterns: string[], log?: GitLogger): Promise<void> {
   const gitignorePath = path.join(repoPath, '.gitignore');
   
   try {
     let content = '';
-    if (fs.existsSync(gitignorePath)) {
-      content = fs.readFileSync(gitignorePath, 'utf-8');
+    try {
+      content = await fs.promises.readFile(gitignorePath, 'utf-8');
+    } catch {
+      // File doesn't exist
     }
     
     let modified = false;
@@ -242,7 +244,7 @@ export function ensureGitignore(repoPath: string, patterns: string[], log?: GitL
       content += '# Copilot Orchestrator\n';
       content += toAdd.join('\n') + '\n';
       
-      fs.writeFileSync(gitignorePath, content, 'utf-8');
+      await fs.promises.writeFile(gitignorePath, content, 'utf-8');
       log?.(`[git] Updated .gitignore with orchestrator directories`);
     }
   } catch (e) {

@@ -147,8 +147,8 @@ async function handleStartJob(runner: JobRunner, worktreeRoot: string): Promise<
   let isOnDefaultBranch = false;
 
   try {
-    currentBranch = git.branches.currentOrNull(ws) || 'main';
-    isOnDefaultBranch = git.branches.isDefaultBranch(currentBranch, ws);
+    currentBranch = await git.branches.currentOrNull(ws) || 'main';
+    isOnDefaultBranch = await git.branches.isDefaultBranch(currentBranch, ws);
   } catch (e) {
     log.error('Failed to get git branch info', { error: e });
   }

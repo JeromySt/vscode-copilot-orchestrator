@@ -85,7 +85,7 @@ export function registerUtilityCommands(
       if (!ws) return;
 
       const git = await import('../git');
-      const files = git.merge.listConflicts(ws);
+      const files = await git.merge.listConflicts(ws);
       
       if (!files.length) {
         vscode.window.showInformationMessage('No merge conflicts detected.');
@@ -98,11 +98,11 @@ export function registerUtilityCommands(
       if (!side) return;
 
       for (const f of files) {
-        git.merge.resolveBySide(f, side as 'theirs' | 'ours', ws);
+        await git.merge.resolveBySide(f, side as 'theirs' | 'ours', ws);
       }
 
-      git.repository.stageAll(ws);
-      const ok = git.repository.commit(ws, `orchestrator: resolved conflicts preferring ${side}`);
+      await git.repository.stageAll(ws);
+      const ok = await git.repository.commit(ws, `orchestrator: resolved conflicts preferring ${side}`);
       
       vscode.window.showInformationMessage(
         ok ? 'Conflicts resolved and committed.' : 'Resolution applied; commit may be required.'

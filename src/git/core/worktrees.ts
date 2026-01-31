@@ -1,14 +1,15 @@
 /**
- * @fileoverview Worktree Operations - Git worktree management.
+ * @fileoverview Worktree Operations - Git worktree management (fully async).
  * 
  * Single responsibility: Create, remove, and query git worktrees.
+ * All operations are async to avoid blocking the event loop.
  * 
  * @module git/core/worktrees
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { exec, execOrThrow, execOrNull, GitLogger } from './executor';
+import { execAsync, execAsyncOrThrow, execAsyncOrNull, GitLogger } from './executor';
 import * as branches from './branches';
 
 /**
@@ -36,24 +37,26 @@ export interface CreateOptions {
  * @param options - Worktree creation options
  * @throws Error if worktree creation fails
  */
-export function create(options: CreateOptions): void {
+export async function create(options: CreateOptions): Promise<void> {
   const { repoPath, worktreePath, branchName, fromRef, log } = options;
   
   // Ensure parent directory exists
   const parentDir = path.dirname(worktreePath);
-  if (!fs.existsSync(parentDir)) {
-    fs.mkdirSync(parentDir, { recursive: true });
+  try {
+    await fs.promises.access(parentDir);
+  } catch {
+    await fs.promises.mkdir(parentDir, { recursive: true });
   }
   
   log?.(`[worktree] Creating worktree at '${worktreePath}' on branch '${branchName}' from '${fromRef}'`);
   
   // Use -B to create or reset the branch to fromRef's HEAD
-  execOrThrow(['worktree', 'add', '-B', branchName, worktreePath, fromRef], repoPath);
+  await execAsyncOrThrow(['worktree', 'add', '-B', branchName, worktreePath, fromRef], repoPath);
   
   log?.(`[worktree] ✓ Created worktree`);
   
   // Initialize submodules
-  initializeSubmodules(worktreePath, branchName, log);
+  await initializeSubmodules(worktreePath, branchName, log);
 }
 
 /**
@@ -63,20 +66,19 @@ export function create(options: CreateOptions): void {
  * @param repoPath - Path to the main repository
  * @param log - Optional logger
  */
-export function remove(worktreePath: string, repoPath: string, log?: GitLogger): void {
+export async function remove(worktreePath: string, repoPath: string, log?: GitLogger): Promise<void> {
   log?.(`[worktree] Removing worktree at '${worktreePath}'`);
-  execOrThrow(['worktree', 'remove', worktreePath, '--force'], repoPath);
-  exec(['worktree', 'prune'], { cwd: repoPath });
+  await execAsyncOrThrow(['worktree', 'remove', worktreePath, '--force'], repoPath);
+  await execAsync(['worktree', 'prune'], { cwd: repoPath });
   log?.(`[worktree] ✓ Removed worktree`);
   
   // Git worktree remove sometimes leaves empty directories behind
-  if (fs.existsSync(worktreePath)) {
-    try {
-      fs.rmSync(worktreePath, { recursive: true, force: true });
-      log?.(`[worktree] ✓ Removed leftover directory`);
-    } catch (e) {
-      // Ignore - best effort cleanup
-    }
+  try {
+    await fs.promises.access(worktreePath);
+    await fs.promises.rm(worktreePath, { recursive: true, force: true });
+    log?.(`[worktree] ✓ Removed leftover directory`);
+  } catch {
+    // Ignore - directory doesn't exist or cleanup failed
   }
 }
 
@@ -87,30 +89,29 @@ export function remove(worktreePath: string, repoPath: string, log?: GitLogger):
  * @param worktreePath - Path to the worktree to remove
  * @param options - Options including force flag and logger
  */
-export function removeSafe(
+export async function removeSafe(
   repoPath: string,
   worktreePath: string,
   options: { force?: boolean; log?: GitLogger } = {}
-): boolean {
+): Promise<boolean> {
   const { force = true, log } = options;
   log?.(`[worktree] Removing worktree at '${worktreePath}'`);
   const args = ['worktree', 'remove', worktreePath];
   if (force) args.push('--force');
-  const result = exec(args, { cwd: repoPath });
+  const result = await execAsync(args, { cwd: repoPath });
   if (result.success) {
-    exec(['worktree', 'prune'], { cwd: repoPath });
+    await execAsync(['worktree', 'prune'], { cwd: repoPath });
     log?.(`[worktree] ✓ Removed worktree`);
   }
   
   // Git worktree remove sometimes leaves empty directories behind
   // Clean up any remaining directory
-  if (fs.existsSync(worktreePath)) {
-    try {
-      fs.rmSync(worktreePath, { recursive: true, force: true });
-      log?.(`[worktree] ✓ Removed leftover directory`);
-    } catch (e) {
-      // Ignore - best effort cleanup
-    }
+  try {
+    await fs.promises.access(worktreePath);
+    await fs.promises.rm(worktreePath, { recursive: true, force: true });
+    log?.(`[worktree] ✓ Removed leftover directory`);
+  } catch {
+    // Ignore - directory doesn't exist or cleanup failed
   }
   
   return result.success;
@@ -119,23 +120,29 @@ export function removeSafe(
 /**
  * Check if a path is a valid git worktree.
  */
-export function isValid(worktreePath: string): boolean {
+export async function isValid(worktreePath: string): Promise<boolean> {
   const gitPath = path.join(worktreePath, '.git');
-  return fs.existsSync(worktreePath) && fs.existsSync(gitPath);
+  try {
+    await fs.promises.access(worktreePath);
+    await fs.promises.access(gitPath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Get the branch name of a worktree.
  */
-export function getBranch(worktreePath: string): string | null {
+export async function getBranch(worktreePath: string): Promise<string | null> {
   return branches.currentOrNull(worktreePath);
 }
 
 /**
  * List all worktrees for a repository.
  */
-export function list(repoPath: string): Array<{ path: string; branch: string | null }> {
-  const result = execOrNull(['worktree', 'list', '--porcelain'], repoPath);
+export async function list(repoPath: string): Promise<Array<{ path: string; branch: string | null }>> {
+  const result = await execAsyncOrNull(['worktree', 'list', '--porcelain'], repoPath);
   if (!result) return [];
   
   const worktrees: Array<{ path: string; branch: string | null }> = [];
@@ -164,8 +171,8 @@ export function list(repoPath: string): Array<{ path: string; branch: string | n
 /**
  * Prune stale worktree references.
  */
-export function prune(repoPath: string): void {
-  exec(['worktree', 'prune'], { cwd: repoPath });
+export async function prune(repoPath: string): Promise<void> {
+  await execAsync(['worktree', 'prune'], { cwd: repoPath });
 }
 
 // =============================================================================
@@ -175,9 +182,11 @@ export function prune(repoPath: string): void {
 /**
  * Initialize submodules in a worktree.
  */
-function initializeSubmodules(worktreePath: string, worktreeBranch: string, log?: GitLogger): void {
+async function initializeSubmodules(worktreePath: string, worktreeBranch: string, log?: GitLogger): Promise<void> {
   const gitmodulesPath = path.join(worktreePath, '.gitmodules');
-  if (!fs.existsSync(gitmodulesPath)) {
+  try {
+    await fs.promises.access(gitmodulesPath);
+  } catch {
     log?.(`[worktree] No submodules detected`);
     return;
   }
@@ -185,14 +194,14 @@ function initializeSubmodules(worktreePath: string, worktreeBranch: string, log?
   log?.(`[worktree] Initializing submodules...`);
   
   try {
-    exec(['submodule', 'update', '--init', '--recursive'], { 
+    await execAsync(['submodule', 'update', '--init', '--recursive'], { 
       cwd: worktreePath, 
       throwOnError: true 
     });
     log?.(`[worktree] ✓ Submodules initialized`);
     
     // Configure submodule.recurse for future git operations
-    exec(['config', 'submodule.recurse', 'true'], { cwd: worktreePath });
+    await execAsync(['config', 'submodule.recurse', 'true'], { cwd: worktreePath });
     log?.(`[worktree] ✓ Configured submodule.recurse`);
   } catch (error) {
     log?.(`[worktree] ⚠ Submodule initialization warning: ${error}`);

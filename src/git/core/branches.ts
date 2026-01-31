@@ -1,12 +1,13 @@
 /**
- * @fileoverview Branch Operations - Git branch management.
+ * @fileoverview Branch Operations - Git branch management (fully async).
  * 
  * Single responsibility: Create, delete, and query git branches.
+ * All operations are async to avoid blocking the event loop.
  * 
  * @module git/core/branches
  */
 
-import { exec, execOrNull, execOrThrow, GitLogger } from './executor';
+import { execAsync, execAsyncOrNull, execAsyncOrThrow, GitLogger } from './executor';
 
 /**
  * Check if a branch is considered a "default" branch.
@@ -17,11 +18,11 @@ import { exec, execOrNull, execOrThrow, GitLogger } from './executor';
  * @param branchName - Branch name to check (with or without refs/heads/ prefix)
  * @param repoPath - Path to the git repository
  */
-export function isDefaultBranch(branchName: string, repoPath: string): boolean {
+export async function isDefaultBranch(branchName: string, repoPath: string): Promise<boolean> {
   const baseName = branchName.replace(/^refs\/heads\//, '');
   
   // Check if git considers this the default branch via origin/HEAD
-  const originHead = execOrNull(['symbolic-ref', 'refs/remotes/origin/HEAD'], repoPath);
+  const originHead = await execAsyncOrNull(['symbolic-ref', 'refs/remotes/origin/HEAD'], repoPath);
   if (originHead) {
     const defaultRef = originHead.replace('refs/remotes/origin/', '');
     if (baseName === defaultRef) {
@@ -30,7 +31,7 @@ export function isDefaultBranch(branchName: string, repoPath: string): boolean {
   }
   
   // Fallback: check git config for init.defaultBranch
-  const configDefault = execOrNull(['config', '--get', 'init.defaultBranch'], repoPath);
+  const configDefault = await execAsyncOrNull(['config', '--get', 'init.defaultBranch'], repoPath);
   if (configDefault && baseName === configDefault) {
     return true;
   }
@@ -42,88 +43,88 @@ export function isDefaultBranch(branchName: string, repoPath: string): boolean {
 /**
  * Check if a local branch exists.
  */
-export function exists(branchName: string, repoPath: string): boolean {
-  const result = exec(['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], { cwd: repoPath });
+export async function exists(branchName: string, repoPath: string): Promise<boolean> {
+  const result = await execAsync(['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], { cwd: repoPath });
   return result.success;
 }
 
 /**
  * Check if a remote branch exists.
  */
-export function remoteExists(branchName: string, repoPath: string, remote: string = 'origin'): boolean {
-  const result = exec(['show-ref', '--verify', '--quiet', `refs/remotes/${remote}/${branchName}`], { cwd: repoPath });
+export async function remoteExists(branchName: string, repoPath: string, remote: string = 'origin'): Promise<boolean> {
+  const result = await execAsync(['show-ref', '--verify', '--quiet', `refs/remotes/${remote}/${branchName}`], { cwd: repoPath });
   return result.success;
 }
 
 /**
  * Get the current branch name.
  */
-export function current(repoPath: string): string {
-  return execOrThrow(['branch', '--show-current'], repoPath);
+export async function current(repoPath: string): Promise<string> {
+  return execAsyncOrThrow(['branch', '--show-current'], repoPath);
 }
 
 /**
  * Get the current branch name, or null if in detached HEAD state.
  */
-export function currentOrNull(repoPath: string): string | null {
-  return execOrNull(['branch', '--show-current'], repoPath);
+export async function currentOrNull(repoPath: string): Promise<string | null> {
+  return execAsyncOrNull(['branch', '--show-current'], repoPath);
 }
 
 /**
  * Create a local branch from another branch.
  */
-export function create(
+export async function create(
   branchName: string,
   fromBranch: string,
   repoPath: string,
   log?: GitLogger
-): void {
+): Promise<void> {
   log?.(`[branch] Creating branch '${branchName}' from '${fromBranch}'`);
-  execOrThrow(['branch', branchName, fromBranch], repoPath);
+  await execAsyncOrThrow(['branch', branchName, fromBranch], repoPath);
   log?.(`[branch] ✓ Created branch '${branchName}'`);
 }
 
 /**
  * Create or reset a branch to point at another branch/commit.
  */
-export function createOrReset(
+export async function createOrReset(
   branchName: string,
   fromRef: string,
   repoPath: string,
   log?: GitLogger
-): void {
+): Promise<void> {
   log?.(`[branch] Creating/resetting branch '${branchName}' to '${fromRef}'`);
-  execOrThrow(['branch', '-f', branchName, fromRef], repoPath);
+  await execAsyncOrThrow(['branch', '-f', branchName, fromRef], repoPath);
   log?.(`[branch] ✓ Branch '${branchName}' set to '${fromRef}'`);
 }
 
 /**
  * Delete a local branch (throws on error).
  */
-export function remove(
+export async function remove(
   branchName: string,
   repoPath: string,
   options: { force?: boolean; log?: GitLogger } = {}
-): void {
+): Promise<void> {
   const { force = false, log } = options;
   log?.(`[branch] Deleting branch '${branchName}'`);
   const flag = force ? '-D' : '-d';
-  execOrThrow(['branch', flag, branchName], repoPath);
+  await execAsyncOrThrow(['branch', flag, branchName], repoPath);
   log?.(`[branch] ✓ Deleted branch '${branchName}'`);
 }
 
 /**
  * Delete a local branch (returns success/failure, doesn't throw).
  */
-export function deleteLocal(
+export async function deleteLocal(
   repoPath: string,
   branchName: string,
   options: { force?: boolean; log?: GitLogger } = {}
-): boolean {
+): Promise<boolean> {
   const { force = false, log } = options;
   log?.(`[branch] Deleting local branch '${branchName}'`);
   const flag = force ? '-D' : '-d';
-  const result = exec(['branch', flag, branchName], { cwd: repoPath });
+  const result = await execAsync(['branch', flag, branchName], { cwd: repoPath });
   if (result.success) {
     log?.(`[branch] ✓ Deleted local branch '${branchName}'`);
   }
@@ -133,14 +134,14 @@ export function deleteLocal(
 /**
  * Delete a remote branch (returns success/failure, doesn't throw).
  */
-export function deleteRemote(
+export async function deleteRemote(
   repoPath: string,
   branchName: string,
   options: { remote?: string; log?: GitLogger } = {}
-): boolean {
+): Promise<boolean> {
   const { remote = 'origin', log } = options;
   log?.(`[branch] Deleting remote branch '${remote}/${branchName}'`);
-  const result = exec(['push', remote, '--delete', branchName], { cwd: repoPath });
+  const result = await execAsync(['push', remote, '--delete', branchName], { cwd: repoPath });
   if (result.success) {
     log?.(`[branch] ✓ Deleted remote branch '${remote}/${branchName}'`);
   }
@@ -150,17 +151,17 @@ export function deleteRemote(
 /**
  * Switch to a branch (throws on error).
  */
-export function checkout(repoPath: string, branchName: string, log?: GitLogger): void {
+export async function checkout(repoPath: string, branchName: string, log?: GitLogger): Promise<void> {
   log?.(`[branch] Switching to branch '${branchName}'`);
-  execOrThrow(['switch', branchName], repoPath);
+  await execAsyncOrThrow(['switch', branchName], repoPath);
   log?.(`[branch] ✓ Switched to '${branchName}'`);
 }
 
 /**
  * List all local branches.
  */
-export function list(repoPath: string): string[] {
-  const result = execOrNull(['branch', '--format=%(refname:short)'], repoPath);
+export async function list(repoPath: string): Promise<string[]> {
+  const result = await execAsyncOrNull(['branch', '--format=%(refname:short)'], repoPath);
   if (!result) return [];
   return result.split(/\r?\n/).filter(Boolean);
 }
@@ -168,13 +169,13 @@ export function list(repoPath: string): string[] {
 /**
  * Get the commit SHA a branch points to.
  */
-export function getCommit(branchName: string, repoPath: string): string | null {
-  return execOrNull(['rev-parse', branchName], repoPath);
+export async function getCommit(branchName: string, repoPath: string): Promise<string | null> {
+  return execAsyncOrNull(['rev-parse', branchName], repoPath);
 }
 
 /**
  * Get the merge base between two branches.
  */
-export function getMergeBase(branch1: string, branch2: string, repoPath: string): string | null {
-  return execOrNull(['merge-base', branch1, branch2], repoPath);
+export async function getMergeBase(branch1: string, branch2: string, repoPath: string): Promise<string | null> {
+  return execAsyncOrNull(['merge-base', branch1, branch2], repoPath);
 }
