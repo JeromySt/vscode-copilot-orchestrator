@@ -68,6 +68,16 @@ export function remove(worktreePath: string, repoPath: string, log?: GitLogger):
   execOrThrow(['worktree', 'remove', worktreePath, '--force'], repoPath);
   exec(['worktree', 'prune'], { cwd: repoPath });
   log?.(`[worktree] ✓ Removed worktree`);
+  
+  // Git worktree remove sometimes leaves empty directories behind
+  if (fs.existsSync(worktreePath)) {
+    try {
+      fs.rmSync(worktreePath, { recursive: true, force: true });
+      log?.(`[worktree] ✓ Removed leftover directory`);
+    } catch (e) {
+      // Ignore - best effort cleanup
+    }
+  }
 }
 
 /**
@@ -91,6 +101,18 @@ export function removeSafe(
     exec(['worktree', 'prune'], { cwd: repoPath });
     log?.(`[worktree] ✓ Removed worktree`);
   }
+  
+  // Git worktree remove sometimes leaves empty directories behind
+  // Clean up any remaining directory
+  if (fs.existsSync(worktreePath)) {
+    try {
+      fs.rmSync(worktreePath, { recursive: true, force: true });
+      log?.(`[worktree] ✓ Removed leftover directory`);
+    } catch (e) {
+      // Ignore - best effort cleanup
+    }
+  }
+  
   return result.success;
 }
 
