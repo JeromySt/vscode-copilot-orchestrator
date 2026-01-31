@@ -73,5 +73,11 @@ export async function handleToolCall(
   if (!handler) {
     return { error: `Unknown tool: ${name}` };
   }
-  return handler(args, context);
+  
+  try {
+    return await handler(args, context);
+  } catch (e: any) {
+    // Ensure errors are returned as structured responses, not thrown
+    return { error: e.message || String(e) };
+  }
 }

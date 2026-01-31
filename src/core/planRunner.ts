@@ -234,12 +234,15 @@ export class PlanRunner {
     let totalFilesDeleted = 0;
     const jobSummaries: NonNullable<PlanState['aggregatedWorkSummary']>['jobSummaries'] = [];
     
+    // Build a map of job IDs for fast lookup (only call list() once)
+    const jobsMap = new Map(this.runner.list().map(j => [j.id, j]));
+    
     // Include jobs that have been merged to targetBranch (from this plan)
     for (const planJobId of internal.mergedLeaves || []) {
       const runnerJobId = internal.jobIdMap.get(planJobId);
       if (!runnerJobId) continue;
       
-      const job = this.runner.list().find(j => j.id === runnerJobId);
+      const job = jobsMap.get(runnerJobId);
       if (!job || !job.workSummary) continue;
       
       const planJob = spec.jobs.find(j => j.id === planJobId);
