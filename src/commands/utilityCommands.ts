@@ -8,6 +8,7 @@
  * - Dashboard management
  * - Status inspection
  * - Log viewing
+ * - Orphaned resource cleanup
  * 
  * @module commands/utilityCommands
  */
@@ -146,6 +147,99 @@ export function registerUtilityCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.showLogs', () => {
       Logger.show();
+    })
+  );
+
+  // Clean up orphaned worktrees and branches
+  context.subscriptions.push(
+    vscode.commands.registerCommand('orchestrator.cleanupOrphans', async () => {
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!ws) {
+        vscode.window.showErrorMessage('No workspace folder open.');
+        return;
+      }
+
+      const git = await import('../git');
+      const log = Logger.for('jobs'); // Use 'jobs' component for cleanup logging
+
+      await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'Cleaning up orphaned resources...',
+        cancellable: false
+      }, async (progress) => {
+        let removedWorktrees = 0;
+        let removedBranches = 0;
+
+        // 1. List and remove orphaned worktrees
+        progress.report({ message: 'Scanning worktrees...' });
+        const worktrees = await git.worktrees.list(ws);
+        const orphanedWorktrees = worktrees.filter(wt => 
+          wt.branch?.startsWith('copilot_jobs/') || 
+          wt.path.includes('.worktrees')
+        );
+
+        for (const wt of orphanedWorktrees) {
+          // Skip the main worktree
+          if (wt.path === ws) continue;
+          
+          try {
+            progress.report({ message: `Removing worktree: ${wt.branch || wt.path}` });
+            await git.worktrees.removeSafe(ws, wt.path, { force: true });
+            removedWorktrees++;
+            log.info(`Removed orphaned worktree: ${wt.path}`);
+          } catch (e) {
+            log.warn(`Failed to remove worktree ${wt.path}: ${e}`);
+          }
+        }
+
+        // 2. Prune stale worktree references
+        progress.report({ message: 'Pruning stale references...' });
+        await git.worktrees.prune(ws);
+
+        // 3. List and remove orphaned branches
+        progress.report({ message: 'Scanning branches...' });
+        const branches = await git.branches.list(ws);
+        const currentBranch = await git.branches.current(ws);
+        
+        // Find copilot_jobs branches that are orphaned
+        const orphanedBranches = branches.filter(branch => 
+          branch.startsWith('copilot_jobs/') && 
+          branch !== currentBranch
+        );
+
+        // Checkout to a safe branch first if we're on a copilot_jobs branch
+        if (currentBranch.startsWith('copilot_jobs/')) {
+          progress.report({ message: 'Switching to safe branch...' });
+          try {
+            await git.branches.checkout(ws, 'main');
+          } catch {
+            try {
+              await git.branches.checkout(ws, 'master');
+            } catch {
+              log.warn('Could not switch to main/master branch');
+            }
+          }
+        }
+
+        for (const branch of orphanedBranches) {
+          try {
+            progress.report({ message: `Removing branch: ${branch}` });
+            const deleted = await git.branches.deleteLocal(ws, branch, { force: true });
+            if (deleted) {
+              removedBranches++;
+              log.info(`Removed orphaned branch: ${branch}`);
+            }
+          } catch (e) {
+            log.warn(`Failed to remove branch ${branch}: ${e}`);
+          }
+        }
+
+        vscode.window.showInformationMessage(
+          `Cleanup complete: removed ${removedWorktrees} worktrees and ${removedBranches} branches.`
+        );
+        
+        log.info(`Cleanup complete`, { removedWorktrees, removedBranches });
+      });
     })
   );
 }

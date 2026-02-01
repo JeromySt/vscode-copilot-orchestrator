@@ -150,6 +150,10 @@
       {
         "command": "orchestrator.showLogs",
         "title": "Copilot Orchestrator: Show Logs"
+      },
+      {
+        "command": "orchestrator.cleanupOrphans",
+        "title": "Copilot Orchestrator: Clean Up Orphaned Worktrees & Branches"
       }
     ],
     "views": {
