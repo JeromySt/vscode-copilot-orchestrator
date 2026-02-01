@@ -51,9 +51,11 @@ export async function create(options: CreateOptions): Promise<void> {
   log?.(`[worktree] Creating worktree at '${worktreePath}' on branch '${branchName}' from '${fromRef}'`);
   
   // Use -B to create or reset the branch to fromRef's HEAD
+  const wtAddStart = Date.now();
   await execAsyncOrThrow(['worktree', 'add', '-B', branchName, worktreePath, fromRef], repoPath);
+  const wtAddTime = Date.now() - wtAddStart;
   
-  log?.(`[worktree] ✓ Created worktree`);
+  log?.(`[worktree] ✓ Created worktree (${wtAddTime}ms)`);
   
   // Initialize submodules
   await initializeSubmodules(worktreePath, branchName, log);
@@ -194,11 +196,13 @@ async function initializeSubmodules(worktreePath: string, worktreeBranch: string
   log?.(`[worktree] Initializing submodules...`);
   
   try {
+    const submodStart = Date.now();
     await execAsync(['submodule', 'update', '--init', '--recursive'], { 
       cwd: worktreePath, 
       throwOnError: true 
     });
-    log?.(`[worktree] ✓ Submodules initialized`);
+    const submodTime = Date.now() - submodStart;
+    log?.(`[worktree] ✓ Submodules initialized (${submodTime}ms)`);
     
     // Configure submodule.recurse for future git operations
     await execAsync(['config', 'submodule.recurse', 'true'], { cwd: worktreePath });

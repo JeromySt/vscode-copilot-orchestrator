@@ -692,6 +692,7 @@ export class PlanRunner {
     const worktreePath = path.join(wtRootAbs, runnerJobId);
     
     try {
+      const wtStart = Date.now();
       log.debug(`Creating worktree for job ${jobId} at ${worktreePath}`);
       await git.worktrees.create({
         repoPath,
@@ -700,6 +701,10 @@ export class PlanRunner {
         fromRef: baseBranch,       // Created from baseBranch (first parent's completed branch or plan's targetBranchRoot)
         log: s => log.debug(s)
       });
+      const wtTime = Date.now() - wtStart;
+      if (wtTime > 500) {
+        log.warn(`Slow worktree creation for ${jobId} took ${wtTime}ms`);
+      }
       
       // Track worktree path for cleanup
       plan.worktreePaths.set(jobId, worktreePath);
