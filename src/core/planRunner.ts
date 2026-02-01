@@ -189,13 +189,7 @@ export class PlanRunner {
    * Get all plans (returns public PlanState without internal maps).
    */
   list(): PlanState[] {
-    return Array.from(this.plans.values()).map(p => {
-      const state = toPublicState(p);
-      if (p.mergedLeaves?.size > 0) {
-        state.aggregatedWorkSummary = this.aggregateWorkSummaries(p);
-      }
-      return state;
-    });
+    return Array.from(this.plans.values()).map(p => toPublicState(p));
   }
 
   /**
@@ -227,93 +221,111 @@ export class PlanRunner {
   get(id: string): PlanState | undefined {
     const plan = this.plans.get(id);
     if (!plan) return undefined;
-    
-    // Use the imported toPublicState, then add aggregated work summaries
-    const state = toPublicState(plan);
-    
-    // Aggregate work summaries from merged leaves - show as soon as any leaf is merged
-    if (plan.mergedLeaves?.size > 0) {
-      state.aggregatedWorkSummary = this.aggregateWorkSummaries(plan);
-    }
-    
-    return state;
+    return toPublicState(plan);
   }
   
   /**
-   * Aggregate work summaries from merged leaf jobs and completed sub-plans.
-   * Includes jobs merged to targetBranch and work summaries from child plans.
+   * Append a completed job's work summary to the plan's aggregated summary.
+   * Called once when a leaf job is merged - no need to recompute later.
+   * 
+   * @param plan - Internal plan state
+   * @param planJobId - Plan job ID (not runner job ID)
+   * @param jobName - Human-readable job name
    */
-  private aggregateWorkSummaries(internal: InternalPlanState): PlanState['aggregatedWorkSummary'] {
-    const spec = this.specs.get(internal.id);
-    if (!spec) return undefined;
+  private appendJobWorkSummary(
+    plan: InternalPlanState, 
+    planJobId: string, 
+    jobName: string
+  ): void {
+    const runnerJobId = plan.jobIdMap.get(planJobId);
+    if (!runnerJobId) return;
     
-    let totalCommits = 0;
-    let totalFilesAdded = 0;
-    let totalFilesModified = 0;
-    let totalFilesDeleted = 0;
-    const jobSummaries: NonNullable<PlanState['aggregatedWorkSummary']>['jobSummaries'] = [];
+    const job = this.runner.list().find(j => j.id === runnerJobId);
+    if (!job?.workSummary) return;
     
-    // Build a map of job IDs for fast lookup (only call list() once)
-    const jobsMap = new Map(this.runner.list().map(j => [j.id, j]));
+    const ws = job.workSummary;
     
-    // Include jobs that have been merged to targetBranch (from this plan)
-    for (const planJobId of internal.mergedLeaves || []) {
-      const runnerJobId = internal.jobIdMap.get(planJobId);
-      if (!runnerJobId) continue;
-      
-      const job = jobsMap.get(runnerJobId);
-      if (!job || !job.workSummary) continue;
-      
-      const planJob = spec.jobs.find(j => j.id === planJobId);
-      const ws = job.workSummary;
-      
-      totalCommits += ws.commits || 0;
-      totalFilesAdded += ws.filesAdded || 0;
-      totalFilesModified += ws.filesModified || 0;
-      totalFilesDeleted += ws.filesDeleted || 0;
-      
-      jobSummaries.push({
-        jobId: planJobId,
-        jobName: planJob?.name || planJobId,
-        commits: ws.commits || 0,
-        filesAdded: ws.filesAdded || 0,
-        filesModified: ws.filesModified || 0,
-        filesDeleted: ws.filesDeleted || 0,
-        description: ws.description || '',
-        commitDetails: ws.commitDetails
+    // Initialize aggregatedWorkSummary if needed
+    if (!plan.aggregatedWorkSummary) {
+      plan.aggregatedWorkSummary = {
+        totalCommits: 0,
+        totalFilesAdded: 0,
+        totalFilesModified: 0,
+        totalFilesDeleted: 0,
+        jobSummaries: []
+      };
+    }
+    
+    // Add to totals
+    plan.aggregatedWorkSummary.totalCommits += ws.commits || 0;
+    plan.aggregatedWorkSummary.totalFilesAdded += ws.filesAdded || 0;
+    plan.aggregatedWorkSummary.totalFilesModified += ws.filesModified || 0;
+    plan.aggregatedWorkSummary.totalFilesDeleted += ws.filesDeleted || 0;
+    
+    // Append job summary
+    plan.aggregatedWorkSummary.jobSummaries.push({
+      jobId: planJobId,
+      jobName: jobName,
+      commits: ws.commits || 0,
+      filesAdded: ws.filesAdded || 0,
+      filesModified: ws.filesModified || 0,
+      filesDeleted: ws.filesDeleted || 0,
+      description: ws.description || '',
+      commitDetails: ws.commitDetails
+    });
+    
+    log.debug(`Appended work summary for job ${planJobId}`, {
+      planId: plan.id,
+      commits: ws.commits,
+      totalJobs: plan.aggregatedWorkSummary.jobSummaries.length
+    });
+  }
+  
+  /**
+   * Append a completed sub-plan's aggregated work summary to the parent plan.
+   * Called once when a sub-plan completes - no need to recompute later.
+   */
+  private appendSubPlanWorkSummary(
+    parentPlan: InternalPlanState,
+    subPlanId: string,
+    childPlanId: string
+  ): void {
+    const childPlan = this.plans.get(childPlanId);
+    if (!childPlan?.aggregatedWorkSummary) return;
+    
+    const childWs = childPlan.aggregatedWorkSummary;
+    
+    // Initialize aggregatedWorkSummary if needed
+    if (!parentPlan.aggregatedWorkSummary) {
+      parentPlan.aggregatedWorkSummary = {
+        totalCommits: 0,
+        totalFilesAdded: 0,
+        totalFilesModified: 0,
+        totalFilesDeleted: 0,
+        jobSummaries: []
+      };
+    }
+    
+    // Add to totals
+    parentPlan.aggregatedWorkSummary.totalCommits += childWs.totalCommits;
+    parentPlan.aggregatedWorkSummary.totalFilesAdded += childWs.totalFilesAdded;
+    parentPlan.aggregatedWorkSummary.totalFilesModified += childWs.totalFilesModified;
+    parentPlan.aggregatedWorkSummary.totalFilesDeleted += childWs.totalFilesDeleted;
+    
+    // Append child job summaries with sub-plan prefix
+    for (const childJobSummary of childWs.jobSummaries) {
+      parentPlan.aggregatedWorkSummary.jobSummaries.push({
+        ...childJobSummary,
+        jobId: `${subPlanId}/${childJobSummary.jobId}`,
+        jobName: `${subPlanId}: ${childJobSummary.jobName}`
       });
     }
     
-    // Include work summaries from completed sub-plans (recursively)
-    for (const [subPlanId, childPlanId] of internal.completedSubPlans || []) {
-      const childPlanState = this.plans.get(childPlanId);
-      if (!childPlanState?.aggregatedWorkSummary) continue;
-      
-      const childWs = childPlanState.aggregatedWorkSummary;
-      totalCommits += childWs.totalCommits;
-      totalFilesAdded += childWs.totalFilesAdded;
-      totalFilesModified += childWs.totalFilesModified;
-      totalFilesDeleted += childWs.totalFilesDeleted;
-      
-      // Include child plan's job summaries with sub-plan prefix
-      for (const childJobSummary of childWs.jobSummaries) {
-        jobSummaries.push({
-          ...childJobSummary,
-          jobId: `${subPlanId}/${childJobSummary.jobId}`,
-          jobName: `${subPlanId}: ${childJobSummary.jobName}`
-        });
-      }
-    }
-    
-    if (jobSummaries.length === 0) return undefined;
-    
-    return {
-      totalCommits,
-      totalFilesAdded,
-      totalFilesModified,
-      totalFilesDeleted,
-      jobSummaries
-    };
+    log.debug(`Appended sub-plan work summary`, {
+      parentPlanId: parentPlan.id,
+      subPlanId,
+      childJobs: childWs.jobSummaries.length
+    });
   }
 
   /**
@@ -986,13 +998,23 @@ export class PlanRunner {
         plan.runningSubPlans.delete(subPlanId);
         plan.completedSubPlans.set(subPlanId, completedBranch || 'unknown');
         
+        // Append sub-plan's aggregated work summary to parent - computed once at completion
+        this.appendSubPlanWorkSummary(plan, subPlanId, childPlanId);
+        
         // Check if this sub-plan is a leaf (nothing consumes from it)
         // If so, immediately merge to targetBranch - user gets value right away!
         const isLeaf = mergeManager.isLeafWorkUnit(spec, subPlanId);
         if (isLeaf && completedBranch) {
           const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
           const repoPath = spec.repoPath || ws;
-          this.mergeLeafToTarget(spec, plan, subPlanId, completedBranch, repoPath);
+          // Note: For sub-plans, we DON'T call appendJobWorkSummary in mergeLeafToTarget
+          // because we already appended the sub-plan's aggregate above
+          await mergeManager.mergeLeafToTarget(spec, plan, subPlanId, completedBranch, repoPath);
+          // Clean up after merge if enabled
+          if (spec.cleanUpSuccessfulWork !== false) {
+            await cleanupManager.cleanupWorkUnit(spec, plan, subPlanId, repoPath);
+          }
+          this.persist();
         }
         
         // Check if this completion unblocks any jobs or other sub-plans
@@ -1105,6 +1127,9 @@ export class PlanRunner {
   /**
    * Immediately merge a completed leaf job's branch to targetBranch.
    * Delegates to mergeManager module.
+   * 
+   * After successful merge, appends the job's work summary to the plan's
+   * aggregated summary - this is computed ONCE at merge time, not on every enumeration.
    */
   private async mergeLeafToTarget(
     spec: PlanSpec, 
@@ -1113,11 +1138,17 @@ export class PlanRunner {
     completedBranch: string,
     repoPath: string
   ): Promise<void> {
+    const planJob = spec.jobs.find(j => j.id === jobId);
     const success = await mergeManager.mergeLeafToTarget(spec, plan, jobId, completedBranch, repoPath);
     
-    if (success && spec.cleanUpSuccessfulWork !== false) {
-      // Clean up worktree/branch if enabled (default behavior)
-      await cleanupManager.cleanupWorkUnit(spec, plan, jobId, repoPath);
+    if (success) {
+      // Append work summary to plan's aggregate - computed once at merge time
+      this.appendJobWorkSummary(plan, jobId, planJob?.name || jobId);
+      
+      if (spec.cleanUpSuccessfulWork !== false) {
+        // Clean up worktree/branch if enabled (default behavior)
+        await cleanupManager.cleanupWorkUnit(spec, plan, jobId, repoPath);
+      }
       this.persist();
     }
   }
