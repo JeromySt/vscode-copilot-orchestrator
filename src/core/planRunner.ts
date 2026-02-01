@@ -1643,7 +1643,7 @@ export class PlanRunner {
         }
       }
     } else if (finishedJobs + finishedSubPlans < totalJobs + totalSubPlans && 
-               plan.queued.length === 0 && plan.running.length === 0 && 
+               plan.queued.length === 0 && plan.preparing.length === 0 && plan.running.length === 0 && 
                runningSubPlans === 0) {
       // Stuck - some jobs/sub-plans couldn't be scheduled (broken dependencies)
       plan.status = 'partial';

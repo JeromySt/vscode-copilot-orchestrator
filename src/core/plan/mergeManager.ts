@@ -93,9 +93,12 @@ export async function mergeLeafToTarget(
     }
 
     // Push the updated target branch
-    const pushSuccess = await git.repository.push(repoPath, { branch: targetBranch });
+    const pushSuccess = await git.repository.push(repoPath, { 
+      branch: targetBranch,
+      log: s => log.debug(s)
+    });
     if (!pushSuccess) {
-      log.warn(`Failed to push after leaf merge`);
+      log.warn(`Failed to push after leaf merge - check if remote is configured and accessible`);
     }
 
     // Track that this leaf has been merged
@@ -188,11 +191,14 @@ export async function performFinalMerge(
     }
 
     // Push the updated target branch
-    const pushSuccess = await git.repository.push(repoPath, { branch: targetBranch });
+    const pushSuccess = await git.repository.push(repoPath, { 
+      branch: targetBranch,
+      log: s => log.debug(s)
+    });
     if (pushSuccess) {
       log.info(`RI merge completed and pushed`, { planId: spec.id, targetBranch });
     } else {
-      log.warn(`Failed to push ${targetBranch}`);
+      log.warn(`Failed to push ${targetBranch} - check if remote is configured and accessible`);
     }
 
     plan.riMergeCompleted = true;
