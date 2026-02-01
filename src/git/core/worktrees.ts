@@ -192,29 +192,34 @@ export async function prune(repoPath: string): Promise<void> {
 /**
  * Initialize submodules in a worktree (fire-and-forget, non-blocking).
  * Runs in background so it doesn't block the pump loop.
+ * Fully async - no synchronous file system operations.
  */
 function initializeSubmodulesBackground(worktreePath: string, worktreeBranch: string, log?: GitLogger): void {
-  // Check for .gitmodules synchronously first to avoid spawning unnecessary async work
-  const gitmodulesPath = path.join(worktreePath, '.gitmodules');
+  log?.(`[worktree] Checking for submodules...`);
   
-  // Use existsSync here since we're trying to avoid async overhead for the common case (no submodules)
-  if (!fs.existsSync(gitmodulesPath)) {
-    log?.(`[worktree] No submodules detected`);
-    return;
-  }
-  
-  log?.(`[worktree] Initializing submodules in background...`);
-  
-  // Fire and forget - don't await
-  initializeSubmodulesAsync(worktreePath, log).catch(err => {
-    log?.(`[worktree] ⚠ Background submodule init failed: ${err}`);
+  // Fire and forget - fully async check and init
+  checkAndInitSubmodules(worktreePath, log).catch(err => {
+    log?.(`[worktree] ⚠ Background submodule check/init failed: ${err}`);
   });
 }
 
 /**
- * Initialize submodules in a worktree (async implementation).
+ * Check for submodules and initialize if present (fully async).
  */
-async function initializeSubmodulesAsync(worktreePath: string, log?: GitLogger): Promise<void> {
+async function checkAndInitSubmodules(worktreePath: string, log?: GitLogger): Promise<void> {
+  const gitmodulesPath = path.join(worktreePath, '.gitmodules');
+  
+  // Async check for .gitmodules
+  try {
+    await fs.promises.access(gitmodulesPath);
+  } catch {
+    log?.(`[worktree] No submodules detected`);
+    return;
+  }
+  
+  // Submodules exist - initialize them
+  log?.(`[worktree] Initializing submodules in background...`);
+  
   try {
     const submodStart = Date.now();
     await execAsync(['submodule', 'update', '--init', '--recursive'], { 
