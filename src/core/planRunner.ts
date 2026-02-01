@@ -743,10 +743,9 @@ export class PlanRunner {
     additionalSources: string[]
   ): Promise<boolean> {
     try {
-      const wtStart = Date.now();
       log.debug(`Creating worktree for job ${jobId} at ${worktreePath}`);
       
-      await git.worktrees.create({
+      const timing = await git.worktrees.createWithTiming({
         repoPath,
         worktreePath,
         branchName: targetBranch,
@@ -754,9 +753,8 @@ export class PlanRunner {
         log: s => log.debug(s)
       });
       
-      const wtTime = Date.now() - wtStart;
-      if (wtTime > 500) {
-        log.warn(`Slow worktree creation for ${jobId} took ${wtTime}ms`);
+      if (timing.totalMs > 500) {
+        log.warn(`Slow worktree creation for ${jobId} took ${timing.totalMs}ms (worktree: ${timing.worktreeMs}ms, submodules: ${timing.submoduleMs}ms)`);
       }
       
       // Track worktree path for cleanup

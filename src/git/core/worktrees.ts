@@ -29,6 +29,15 @@ export interface CreateOptions {
 }
 
 /**
+ * Timing breakdown for worktree creation.
+ */
+export interface CreateTiming {
+  worktreeMs: number;
+  submoduleMs: number;
+  totalMs: number;
+}
+
+/**
  * Create a git worktree.
  * 
  * Creates or resets the branch to point at fromRef and creates a worktree
@@ -38,7 +47,22 @@ export interface CreateOptions {
  * @throws Error if worktree creation fails
  */
 export async function create(options: CreateOptions): Promise<void> {
+  await createWithTiming(options);
+}
+
+/**
+ * Create a git worktree and return timing breakdown.
+ * 
+ * Creates or resets the branch to point at fromRef and creates a worktree
+ * with that branch checked out. Also initializes submodules if present.
+ * 
+ * @param options - Worktree creation options
+ * @returns Timing breakdown
+ * @throws Error if worktree creation fails
+ */
+export async function createWithTiming(options: CreateOptions): Promise<CreateTiming> {
   const { repoPath, worktreePath, branchName, fromRef, log } = options;
+  const totalStart = Date.now();
   
   // Ensure parent directory exists
   const parentDir = path.dirname(worktreePath);
@@ -53,13 +77,15 @@ export async function create(options: CreateOptions): Promise<void> {
   // Use -B to create or reset the branch to fromRef's HEAD
   const wtAddStart = Date.now();
   await execAsyncOrThrow(['worktree', 'add', '-B', branchName, worktreePath, fromRef], repoPath);
-  const wtAddTime = Date.now() - wtAddStart;
+  const worktreeMs = Date.now() - wtAddStart;
   
-  log?.(`[worktree] ✓ Created worktree (${wtAddTime}ms)`);
+  log?.(`[worktree] ✓ Created worktree (${worktreeMs}ms)`);
   
-  // Initialize submodules in background (fire-and-forget) to avoid blocking the pump
-  // The job can start working immediately - submodules will be ready shortly
-  initializeSubmodulesBackground(worktreePath, branchName, log);
+  // Initialize submodules (await so we can time it)
+  const submoduleMs = await initializeSubmodules(worktreePath, branchName, log);
+  
+  const totalMs = Date.now() - totalStart;
+  return { worktreeMs, submoduleMs, totalMs };
 }
 
 /**
@@ -190,23 +216,10 @@ export async function prune(repoPath: string): Promise<void> {
 // =============================================================================
 
 /**
- * Initialize submodules in a worktree (fire-and-forget, non-blocking).
- * Runs in background so it doesn't block the pump loop.
- * Fully async - no synchronous file system operations.
+ * Initialize submodules in a worktree.
+ * Returns time taken in ms (0 if no submodules).
  */
-function initializeSubmodulesBackground(worktreePath: string, worktreeBranch: string, log?: GitLogger): void {
-  log?.(`[worktree] Checking for submodules...`);
-  
-  // Fire and forget - fully async check and init
-  checkAndInitSubmodules(worktreePath, log).catch(err => {
-    log?.(`[worktree] ⚠ Background submodule check/init failed: ${err}`);
-  });
-}
-
-/**
- * Check for submodules and initialize if present (fully async).
- */
-async function checkAndInitSubmodules(worktreePath: string, log?: GitLogger): Promise<void> {
+async function initializeSubmodules(worktreePath: string, worktreeBranch: string, log?: GitLogger): Promise<number> {
   const gitmodulesPath = path.join(worktreePath, '.gitmodules');
   
   // Async check for .gitmodules
@@ -214,11 +227,11 @@ async function checkAndInitSubmodules(worktreePath: string, log?: GitLogger): Pr
     await fs.promises.access(gitmodulesPath);
   } catch {
     log?.(`[worktree] No submodules detected`);
-    return;
+    return 0;
   }
   
   // Submodules exist - initialize them
-  log?.(`[worktree] Initializing submodules in background...`);
+  log?.(`[worktree] Initializing submodules...`);
   
   try {
     const submodStart = Date.now();
@@ -227,13 +240,14 @@ async function checkAndInitSubmodules(worktreePath: string, log?: GitLogger): Pr
       throwOnError: true 
     });
     const submodTime = Date.now() - submodStart;
-    log?.(`[worktree] ✓ Submodules initialized in background (${submodTime}ms)`);
+    log?.(`[worktree] ✓ Submodules initialized (${submodTime}ms)`);
     
     // Configure submodule.recurse for future git operations
     await execAsync(['config', 'submodule.recurse', 'true'], { cwd: worktreePath });
-    log?.(`[worktree] ✓ Configured submodule.recurse`);
+    
+    return submodTime;
   } catch (error) {
     log?.(`[worktree] ⚠ Submodule initialization warning: ${error}`);
-    // Don't fail - this is background work
+    return 0;
   }
 }
