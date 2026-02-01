@@ -41,7 +41,10 @@ export async function cleanupWorkUnit(
   if (worktreePath) {
     try {
       await fs.promises.access(worktreePath);
-      const removed = await git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
+      const removed = await git.worktrees.removeSafe(repoPath, worktreePath, { 
+        force: true,
+        log: s => log.debug(s)
+      });
       if (removed) {
         plan.worktreePaths.delete(workUnitId);
         log.debug(`Cleaned up worktree for ${workUnitId}`, { path: worktreePath });
@@ -63,16 +66,24 @@ export async function cleanupWorkUnit(
   const completedBranch = plan.completedBranches.get(workUnitId);
   if (completedBranch) {
     // Delete local branch
-    const localDeleted = await git.branches.deleteLocal(repoPath, completedBranch, { force: true });
+    const localDeleted = await git.branches.deleteLocal(repoPath, completedBranch, { 
+      force: true,
+      log: s => log.debug(s)
+    });
     if (localDeleted) {
       log.debug(`Deleted local branch for ${workUnitId}`, { branch: completedBranch });
+    } else {
+      log.warn(`Failed to delete local branch for ${workUnitId}`, { branch: completedBranch });
     }
 
     // Delete remote branch
-    const remoteDeleted = await git.branches.deleteRemote(repoPath, completedBranch);
+    const remoteDeleted = await git.branches.deleteRemote(repoPath, completedBranch, {
+      log: s => log.debug(s)
+    });
     if (remoteDeleted) {
       log.debug(`Deleted remote branch for ${workUnitId}`, { branch: completedBranch });
     }
+    // Note: remote delete failure is not logged as warning since remote may not exist
 
     plan.completedBranches.delete(workUnitId);
   }
@@ -162,7 +173,10 @@ export async function cleanupAllPlanResources(
   for (const [workUnitId, worktreePath] of plan.worktreePaths) {
     try {
       await fs.promises.access(worktreePath);
-      const removed = await git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
+      const removed = await git.worktrees.removeSafe(repoPath, worktreePath, { 
+        force: true,
+        log: s => log.debug(s)
+      });
       if (removed) {
         log.debug(`Removed worktree: ${worktreePath}`);
       } else {
@@ -179,27 +193,50 @@ export async function cleanupAllPlanResources(
 
   // Clean up all branches (local and remote)
   for (const [workUnitId, branch] of plan.completedBranches) {
-    await git.branches.deleteLocal(repoPath, branch, { force: true });
-    await git.branches.deleteRemote(repoPath, branch);
+    const localDeleted = await git.branches.deleteLocal(repoPath, branch, { 
+      force: true,
+      log: s => log.debug(s)
+    });
+    if (!localDeleted) {
+      log.warn(`Failed to delete local branch: ${branch}`);
+    }
+    await git.branches.deleteRemote(repoPath, branch, {
+      log: s => log.debug(s)
+    });
   }
   plan.completedBranches.clear();
 
   // Clean up integration branches
   if (plan.subPlanIntegrationBranches) {
     for (const [subPlanId, branch] of plan.subPlanIntegrationBranches) {
-      await git.branches.deleteLocal(repoPath, branch, { force: true });
-      await git.branches.deleteRemote(repoPath, branch);
+      const localDeleted = await git.branches.deleteLocal(repoPath, branch, { 
+        force: true,
+        log: s => log.debug(s)
+      });
+      if (!localDeleted) {
+        log.warn(`Failed to delete integration branch: ${branch}`);
+      }
+      await git.branches.deleteRemote(repoPath, branch, {
+        log: s => log.debug(s)
+      });
     }
     plan.subPlanIntegrationBranches.clear();
   }
 
   // Clean up targetBranchRoot if we created it
   if (plan.targetBranchRootCreated && plan.targetBranchRoot) {
-    const localDeleted = await git.branches.deleteLocal(repoPath, plan.targetBranchRoot, { force: true });
+    const localDeleted = await git.branches.deleteLocal(repoPath, plan.targetBranchRoot, { 
+      force: true,
+      log: s => log.debug(s)
+    });
     if (localDeleted) {
       log.debug(`Deleted targetBranchRoot: ${plan.targetBranchRoot}`);
+    } else {
+      log.warn(`Failed to delete targetBranchRoot: ${plan.targetBranchRoot}`);
     }
-    await git.branches.deleteRemote(repoPath, plan.targetBranchRoot);
+    await git.branches.deleteRemote(repoPath, plan.targetBranchRoot, {
+      log: s => log.debug(s)
+    });
   }
 
   log.info(`Plan ${spec.id} resources cleaned up`);

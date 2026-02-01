@@ -102,8 +102,15 @@ export async function removeSafe(
   const args = ['worktree', 'remove', worktreePath];
   if (force) args.push('--force');
   const result = await execAsync(args, { cwd: repoPath });
+  
+  if (!result.success) {
+    log?.(`[worktree] ⚠ git worktree remove failed: ${result.stderr}`);
+  }
+  
+  // Always prune to clean up stale worktree references
+  await execAsync(['worktree', 'prune'], { cwd: repoPath });
+  
   if (result.success) {
-    await execAsync(['worktree', 'prune'], { cwd: repoPath });
     log?.(`[worktree] ✓ Removed worktree`);
   }
   
