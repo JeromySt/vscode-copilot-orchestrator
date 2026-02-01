@@ -9,6 +9,37 @@
 
 import { execAsync, execAsyncOrNull, execAsyncOrThrow, GitLogger } from './executor';
 
+// Cache for default branch per repo (doesn't change during session)
+const defaultBranchCache = new Map<string, string | null>();
+
+/**
+ * Get the default branch for a repository (cached).
+ */
+async function getDefaultBranch(repoPath: string): Promise<string | null> {
+  if (defaultBranchCache.has(repoPath)) {
+    return defaultBranchCache.get(repoPath)!;
+  }
+  
+  // Check if git considers this the default branch via origin/HEAD
+  const originHead = await execAsyncOrNull(['symbolic-ref', 'refs/remotes/origin/HEAD'], repoPath);
+  if (originHead) {
+    const defaultRef = originHead.replace('refs/remotes/origin/', '');
+    defaultBranchCache.set(repoPath, defaultRef);
+    return defaultRef;
+  }
+  
+  // Fallback: check git config for init.defaultBranch
+  const configDefault = await execAsyncOrNull(['config', '--get', 'init.defaultBranch'], repoPath);
+  if (configDefault) {
+    defaultBranchCache.set(repoPath, configDefault);
+    return configDefault;
+  }
+  
+  // No explicit default found
+  defaultBranchCache.set(repoPath, null);
+  return null;
+}
+
 /**
  * Check if a branch is considered a "default" branch.
  * 
@@ -21,18 +52,9 @@ import { execAsync, execAsyncOrNull, execAsyncOrThrow, GitLogger } from './execu
 export async function isDefaultBranch(branchName: string, repoPath: string): Promise<boolean> {
   const baseName = branchName.replace(/^refs\/heads\//, '');
   
-  // Check if git considers this the default branch via origin/HEAD
-  const originHead = await execAsyncOrNull(['symbolic-ref', 'refs/remotes/origin/HEAD'], repoPath);
-  if (originHead) {
-    const defaultRef = originHead.replace('refs/remotes/origin/', '');
-    if (baseName === defaultRef) {
-      return true;
-    }
-  }
-  
-  // Fallback: check git config for init.defaultBranch
-  const configDefault = await execAsyncOrNull(['config', '--get', 'init.defaultBranch'], repoPath);
-  if (configDefault && baseName === configDefault) {
+  // Use cached default branch lookup
+  const defaultBranch = await getDefaultBranch(repoPath);
+  if (defaultBranch && baseName === defaultBranch) {
     return true;
   }
   
