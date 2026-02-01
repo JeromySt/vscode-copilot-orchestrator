@@ -757,7 +757,7 @@ export class PlanRunner {
 
   /**
    * Check preparing jobs and submit them to runner once their worktrees are ready.
-   * Uses Promise.race with resolved promises to check without blocking.
+   * Uses a settled flag approach to check completion without blocking.
    */
   private async checkPreparingJobs(spec: PlanSpec, plan: InternalPlanState, repoPath: string): Promise<void> {
     if (plan.preparing.length === 0) return;
@@ -765,7 +765,7 @@ export class PlanRunner {
     const jobsToSubmit: string[] = [];
     const jobsFailed: string[] = [];
     
-    // Check each preparing job's promise without blocking
+    // Check each preparing job's promise
     for (const jobId of [...plan.preparing]) {
       const promise = plan.worktreePromises.get(jobId);
       if (!promise) {
@@ -773,22 +773,29 @@ export class PlanRunner {
         continue;
       }
       
-      // Non-blocking check: race with an already-resolved promise
-      const status = await Promise.race([
-        promise.then(success => ({ done: true, success })),
-        Promise.resolve({ done: false, success: false })
+      // Check if promise has settled by racing with a timeout
+      // Use a minimal timeout (0ms) to just check if already resolved
+      const NOT_SETTLED = Symbol('not-settled');
+      const result = await Promise.race([
+        promise.then(
+          success => ({ settled: true as const, success }),
+          () => ({ settled: true as const, success: false })
+        ),
+        new Promise<typeof NOT_SETTLED>(resolve => setImmediate(() => resolve(NOT_SETTLED)))
       ]);
       
-      if (status.done) {
-        // Worktree creation completed
+      if (result !== NOT_SETTLED) {
+        // Worktree creation completed (or failed)
         plan.worktreePromises.delete(jobId);
-        if (status.success) {
+        if (result.success) {
           jobsToSubmit.push(jobId);
+          log.debug(`Worktree ready for job ${jobId}`);
         } else {
           jobsFailed.push(jobId);
+          log.warn(`Worktree creation failed for job ${jobId}`);
         }
       }
-      // If not done, job stays in preparing state
+      // If NOT_SETTLED, job stays in preparing state
     }
     
     // Submit ready jobs to runner
