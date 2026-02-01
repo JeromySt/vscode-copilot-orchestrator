@@ -57,8 +57,9 @@ export async function create(options: CreateOptions): Promise<void> {
   
   log?.(`[worktree] ✓ Created worktree (${wtAddTime}ms)`);
   
-  // Initialize submodules
-  await initializeSubmodules(worktreePath, branchName, log);
+  // Initialize submodules in background (fire-and-forget) to avoid blocking the pump
+  // The job can start working immediately - submodules will be ready shortly
+  initializeSubmodulesBackground(worktreePath, branchName, log);
 }
 
 /**
@@ -182,19 +183,31 @@ export async function prune(repoPath: string): Promise<void> {
 // =============================================================================
 
 /**
- * Initialize submodules in a worktree.
+ * Initialize submodules in a worktree (fire-and-forget, non-blocking).
+ * Runs in background so it doesn't block the pump loop.
  */
-async function initializeSubmodules(worktreePath: string, worktreeBranch: string, log?: GitLogger): Promise<void> {
+function initializeSubmodulesBackground(worktreePath: string, worktreeBranch: string, log?: GitLogger): void {
+  // Check for .gitmodules synchronously first to avoid spawning unnecessary async work
   const gitmodulesPath = path.join(worktreePath, '.gitmodules');
-  try {
-    await fs.promises.access(gitmodulesPath);
-  } catch {
+  
+  // Use existsSync here since we're trying to avoid async overhead for the common case (no submodules)
+  if (!fs.existsSync(gitmodulesPath)) {
     log?.(`[worktree] No submodules detected`);
     return;
   }
   
-  log?.(`[worktree] Initializing submodules...`);
+  log?.(`[worktree] Initializing submodules in background...`);
   
+  // Fire and forget - don't await
+  initializeSubmodulesAsync(worktreePath, log).catch(err => {
+    log?.(`[worktree] ⚠ Background submodule init failed: ${err}`);
+  });
+}
+
+/**
+ * Initialize submodules in a worktree (async implementation).
+ */
+async function initializeSubmodulesAsync(worktreePath: string, log?: GitLogger): Promise<void> {
   try {
     const submodStart = Date.now();
     await execAsync(['submodule', 'update', '--init', '--recursive'], { 
@@ -202,13 +215,13 @@ async function initializeSubmodules(worktreePath: string, worktreeBranch: string
       throwOnError: true 
     });
     const submodTime = Date.now() - submodStart;
-    log?.(`[worktree] ✓ Submodules initialized (${submodTime}ms)`);
+    log?.(`[worktree] ✓ Submodules initialized in background (${submodTime}ms)`);
     
     // Configure submodule.recurse for future git operations
     await execAsync(['config', 'submodule.recurse', 'true'], { cwd: worktreePath });
     log?.(`[worktree] ✓ Configured submodule.recurse`);
   } catch (error) {
     log?.(`[worktree] ⚠ Submodule initialization warning: ${error}`);
-    // Don't fail the worktree creation if submodule init fails
+    // Don't fail - this is background work
   }
 }
