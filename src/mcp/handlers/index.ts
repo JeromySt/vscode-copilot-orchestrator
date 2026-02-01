@@ -7,6 +7,7 @@
 export * from './jobHandlers';
 export * from './planHandlers';
 
+import { Logger } from '../../core/logger';
 import { ToolHandlerContext, ToolHandler } from '../types';
 import {
   handleCreateJob,
@@ -56,6 +57,8 @@ const toolHandlers: Record<string, ToolHandler> = {
   'retry_copilot_plan': handleRetryPlan
 };
 
+const log = Logger.for('mcp');
+
 /**
  * Handle an MCP tool call by routing to the appropriate handler.
  * 
@@ -80,7 +83,7 @@ export async function handleToolCall(
     const elapsed = Date.now() - startTime;
     if (elapsed > 100) {
       // Log slow tool calls for debugging
-      console.warn(`[MCP] Slow tool call: ${name} took ${elapsed}ms`);
+      log.warn(`Slow tool call: ${name} took ${elapsed}ms`);
     }
     return result;
   } catch (e: any) {

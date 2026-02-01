@@ -568,7 +568,7 @@ export class PlanRunner {
           await this.pump(spec);
           const planTime = Date.now() - planStart;
           if (planTime > 100) {
-            console.warn(`[PlanRunner] Pump for ${id} took ${planTime}ms`);
+            log.warn(`Slow pump for plan ${id} took ${planTime}ms`);
           }
         }
       }
@@ -579,7 +579,7 @@ export class PlanRunner {
       this.isPumping = false;
       const totalTime = Date.now() - pumpStart;
       if (totalTime > 200) {
-        console.warn(`[PlanRunner] pumpAll took ${totalTime}ms`);
+        log.warn(`Slow pumpAll cycle took ${totalTime}ms`);
       }
     }
   }

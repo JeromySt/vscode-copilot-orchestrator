@@ -36,7 +36,7 @@ export async function handleMcp(request: ParsedRequest, context: RouteContext): 
     
     const totalTime = Date.now() - requestStart;
     if (totalTime > 50) {
-      console.warn(`[MCP] Request ${rpcRequest.method} took ${totalTime}ms (body:${bodyReadTime}ms, parse:${parseTime}ms, handle:${handleTime}ms)`);
+      log.warn(`Slow MCP request: ${rpcRequest.method} took ${totalTime}ms (body:${bodyReadTime}ms, parse:${parseTime}ms, handle:${handleTime}ms)`);
     }
     
     log.debug('MCP response', { method: rpcRequest.method, hasError: !!response.error });
