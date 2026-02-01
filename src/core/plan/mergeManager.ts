@@ -23,6 +23,8 @@ const log: ComponentLogger = Logger.for('plans');
 interface MergeConfig {
   /** Which side to prefer on conflicts: 'ours' or 'theirs' */
   prefer: 'ours' | 'theirs';
+  /** Whether to push to remote after successful merge */
+  pushOnSuccess: boolean;
 }
 
 /**
@@ -32,6 +34,7 @@ function getMergeConfig(): MergeConfig {
   const cfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
   return {
     prefer: cfg.get<'ours' | 'theirs'>('prefer', 'theirs'),
+    pushOnSuccess: cfg.get<boolean>('pushOnSuccess', false),
   };
 }
 
@@ -92,13 +95,15 @@ export async function mergeLeafToTarget(
       return false;
     }
 
-    // Push the updated target branch
-    const pushSuccess = await git.repository.push(repoPath, { 
-      branch: targetBranch,
-      log: s => log.debug(s)
-    });
-    if (!pushSuccess) {
-      log.warn(`Failed to push after leaf merge - check if remote is configured and accessible`);
+    // Optionally push the updated target branch (only if pushOnSuccess is enabled)
+    if (config.pushOnSuccess) {
+      const pushSuccess = await git.repository.push(repoPath, { 
+        branch: targetBranch,
+        log: s => log.debug(s)
+      });
+      if (!pushSuccess) {
+        log.warn(`Failed to push after leaf merge - check if remote is configured and accessible`);
+      }
     }
 
     // Track that this leaf has been merged
@@ -107,6 +112,7 @@ export async function mergeLeafToTarget(
 
     log.info(`Leaf ${jobId} merged successfully`, {
       totalMerged: plan.mergedLeaves.size,
+      pushed: config.pushOnSuccess,
     });
 
     return true;
@@ -190,15 +196,19 @@ export async function performFinalMerge(
       }
     }
 
-    // Push the updated target branch
-    const pushSuccess = await git.repository.push(repoPath, { 
-      branch: targetBranch,
-      log: s => log.debug(s)
-    });
-    if (pushSuccess) {
-      log.info(`RI merge completed and pushed`, { planId: spec.id, targetBranch });
+    // Optionally push the updated target branch (only if pushOnSuccess is enabled)
+    if (config.pushOnSuccess) {
+      const pushSuccess = await git.repository.push(repoPath, { 
+        branch: targetBranch,
+        log: s => log.debug(s)
+      });
+      if (pushSuccess) {
+        log.info(`RI merge completed and pushed`, { planId: spec.id, targetBranch });
+      } else {
+        log.warn(`Failed to push ${targetBranch} - check if remote is configured and accessible`);
+      }
     } else {
-      log.warn(`Failed to push ${targetBranch} - check if remote is configured and accessible`);
+      log.info(`RI merge completed (push disabled)`, { planId: spec.id, targetBranch });
     }
 
     plan.riMergeCompleted = true;

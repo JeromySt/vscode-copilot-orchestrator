@@ -8,12 +8,21 @@
  * @module core/plan/cleanupManager
  */
 
+import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { Logger, ComponentLogger } from '../logger';
 import { PlanSpec, InternalPlanState } from './types';
 import * as git from '../../git';
 
 const log: ComponentLogger = Logger.for('plans');
+
+/**
+ * Check if remote operations are enabled (pushOnSuccess setting).
+ */
+function isPushEnabled(): boolean {
+  const cfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
+  return cfg.get<boolean>('pushOnSuccess', false);
+}
 
 /**
  * Clean up worktree and branch for a successfully merged work unit.
@@ -76,14 +85,15 @@ export async function cleanupWorkUnit(
       log.warn(`Failed to delete local branch for ${workUnitId}`, { branch: completedBranch });
     }
 
-    // Delete remote branch
-    const remoteDeleted = await git.branches.deleteRemote(repoPath, completedBranch, {
-      log: s => log.debug(s)
-    });
-    if (remoteDeleted) {
-      log.debug(`Deleted remote branch for ${workUnitId}`, { branch: completedBranch });
+    // Only delete remote branch if pushOnSuccess is enabled (branches were pushed)
+    if (isPushEnabled()) {
+      const remoteDeleted = await git.branches.deleteRemote(repoPath, completedBranch, {
+        log: s => log.debug(s)
+      });
+      if (remoteDeleted) {
+        log.debug(`Deleted remote branch for ${workUnitId}`, { branch: completedBranch });
+      }
     }
-    // Note: remote delete failure is not logged as warning since remote may not exist
 
     plan.completedBranches.delete(workUnitId);
   }
@@ -191,7 +201,9 @@ export async function cleanupAllPlanResources(
   }
   plan.worktreePaths.clear();
 
-  // Clean up all branches (local and remote)
+  const pushEnabled = isPushEnabled();
+
+  // Clean up all branches (local, and remote only if pushOnSuccess is enabled)
   for (const [workUnitId, branch] of plan.completedBranches) {
     const localDeleted = await git.branches.deleteLocal(repoPath, branch, { 
       force: true,
@@ -200,9 +212,11 @@ export async function cleanupAllPlanResources(
     if (!localDeleted) {
       log.warn(`Failed to delete local branch: ${branch}`);
     }
-    await git.branches.deleteRemote(repoPath, branch, {
-      log: s => log.debug(s)
-    });
+    if (pushEnabled) {
+      await git.branches.deleteRemote(repoPath, branch, {
+        log: s => log.debug(s)
+      });
+    }
   }
   plan.completedBranches.clear();
 
@@ -216,9 +230,11 @@ export async function cleanupAllPlanResources(
       if (!localDeleted) {
         log.warn(`Failed to delete integration branch: ${branch}`);
       }
-      await git.branches.deleteRemote(repoPath, branch, {
-        log: s => log.debug(s)
-      });
+      if (pushEnabled) {
+        await git.branches.deleteRemote(repoPath, branch, {
+          log: s => log.debug(s)
+        });
+      }
     }
     plan.subPlanIntegrationBranches.clear();
   }
@@ -234,9 +250,11 @@ export async function cleanupAllPlanResources(
     } else {
       log.warn(`Failed to delete targetBranchRoot: ${plan.targetBranchRoot}`);
     }
-    await git.branches.deleteRemote(repoPath, plan.targetBranchRoot, {
-      log: s => log.debug(s)
-    });
+    if (pushEnabled) {
+      await git.branches.deleteRemote(repoPath, plan.targetBranchRoot, {
+        log: s => log.debug(s)
+      });
+    }
   }
 
   log.info(`Plan ${spec.id} resources cleaned up`);

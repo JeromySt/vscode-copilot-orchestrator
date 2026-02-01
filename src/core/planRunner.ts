@@ -1480,11 +1480,14 @@ export class PlanRunner {
       await git.branches.create(integrationBranchName, sourceBranch, repoPath, 
         (msg: string) => log.debug(msg));
       
-      // Push to remote
-      await git.repository.push(repoPath, { 
-        branch: integrationBranchName, 
-        log: (msg: string) => log.debug(msg) 
-      });
+      // Only push if pushOnSuccess is enabled
+      const pushEnabled = vscode.workspace.getConfiguration('copilotOrchestrator.merge').get<boolean>('pushOnSuccess', false);
+      if (pushEnabled) {
+        await git.repository.push(repoPath, { 
+          branch: integrationBranchName, 
+          log: (msg: string) => log.debug(msg) 
+        });
+      }
       
       log.info(`Created integration branch for sub-plan: ${integrationBranchName} from ${sourceBranch}`);
       
