@@ -562,55 +562,61 @@ export class PlanRunner {
       return;
     }
     
-    // Mark as running if not already
-    if (!plan.startedAt) {
-      plan.startedAt = Date.now();
-    }
-    plan.status = 'running';
-    
-    // Get workspace and config
-    const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    const repoPath = spec.repoPath || ws;
-    
-    // Resolve targetBranchRoot on first pump (lazy initialization)
-    if (!plan.targetBranchRoot) {
-      const baseBranch = spec.baseBranch || 'main';
-      const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
-        baseBranch,
-        repoPath,
-        `copilot_jobs/${spec.id}`
-      );
+    try {
+      // Mark as running if not already
+      if (!plan.startedAt) {
+        plan.startedAt = Date.now();
+      }
+      plan.status = 'running';
       
-      if (needsCreation) {
-        log.info(`Plan ${spec.id}: baseBranch '${baseBranch}' is a default branch, creating feature branch`);
-        await git.branches.create(targetBranchRoot, baseBranch, repoPath, s => log.debug(s));
-        plan.targetBranchRootCreated = true;
-      } else {
-        log.info(`Plan ${spec.id}: using non-default baseBranch '${baseBranch}' as targetBranchRoot`);
-        plan.targetBranchRootCreated = false;
+      // Get workspace and config
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+      const repoPath = spec.repoPath || ws;
+      
+      // Resolve targetBranchRoot on first pump (lazy initialization)
+      if (!plan.targetBranchRoot) {
+        const baseBranch = spec.baseBranch || 'main';
+        const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
+          baseBranch,
+          repoPath,
+          `copilot_jobs/${spec.id}`
+        );
+        
+        if (needsCreation) {
+          log.info(`Plan ${spec.id}: baseBranch '${baseBranch}' is a default branch, creating feature branch`);
+          await git.branches.create(targetBranchRoot, baseBranch, repoPath, s => log.debug(s));
+          plan.targetBranchRootCreated = true;
+        } else {
+          log.info(`Plan ${spec.id}: using non-default baseBranch '${baseBranch}' as targetBranchRoot`);
+          plan.targetBranchRootCreated = false;
+        }
+        
+        plan.targetBranchRoot = targetBranchRoot;
+        log.info(`Plan ${spec.id}: targetBranchRoot = ${targetBranchRoot}`);
+      }
+      const maxParallel = spec.maxParallel && spec.maxParallel > 0 
+        ? spec.maxParallel 
+        : (this.runner as any).maxWorkers || 1;
+      
+      // Schedule new jobs while under parallel limit and queue has items
+      while (plan.running.length < maxParallel && plan.queued.length > 0) {
+        const jobId = plan.queued.shift()!;
+        await this.scheduleJob(spec, plan, jobId, repoPath);
       }
       
-      plan.targetBranchRoot = targetBranchRoot;
-      log.info(`Plan ${spec.id}: targetBranchRoot = ${targetBranchRoot}`);
+      // Check status of running jobs
+      await this.updateJobStatuses(spec, plan);
+      
+      // Check status of running sub-plans
+      await this.updateSubPlanStatuses(spec, plan);
+      
+      // Check if plan is complete
+      this.checkPlanCompletion(spec, plan);
+    } catch (error: any) {
+      log.error(`Error pumping plan ${spec.id}`, { error: error.message, stack: error.stack });
+      // Don't fail the plan on pump errors - just log and continue
+      // The plan will be retried on the next pump cycle
     }
-    const maxParallel = spec.maxParallel && spec.maxParallel > 0 
-      ? spec.maxParallel 
-      : (this.runner as any).maxWorkers || 1;
-    
-    // Schedule new jobs while under parallel limit and queue has items
-    while (plan.running.length < maxParallel && plan.queued.length > 0) {
-      const jobId = plan.queued.shift()!;
-      await this.scheduleJob(spec, plan, jobId, repoPath);
-    }
-    
-    // Check status of running jobs
-    await this.updateJobStatuses(spec, plan);
-    
-    // Check status of running sub-plans
-    await this.updateSubPlanStatuses(spec, plan);
-    
-    // Check if plan is complete
-    this.checkPlanCompletion(spec, plan);
   }
 
   /**

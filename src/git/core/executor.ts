@@ -40,6 +40,8 @@ export interface ExecuteOptions {
   throwOnError?: boolean;
   /** Custom error message prefix */
   errorPrefix?: string;
+  /** Timeout in milliseconds (default: 60000 = 1 minute) */
+  timeoutMs?: number;
 }
 
 /**
@@ -162,7 +164,7 @@ export function execOrNull(args: string[], cwd: string): string | null {
  * @returns Promise resolving to command result
  */
 export async function execAsync(args: string[], options: ExecuteOptions): Promise<CommandResult> {
-  const { cwd, log, throwOnError = false, errorPrefix = 'Git command failed' } = options;
+  const { cwd, log, throwOnError = false, errorPrefix = 'Git command failed', timeoutMs = 60000 } = options;
   
   return new Promise((resolve, reject) => {
     const proc = spawn('git', args, {
@@ -172,11 +174,35 @@ export async function execAsync(args: string[], options: ExecuteOptions): Promis
     
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    
+    // Set up timeout
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      proc.kill('SIGKILL');
+    }, timeoutMs);
     
     proc.stdout?.on('data', (data) => { stdout += data.toString(); });
     proc.stderr?.on('data', (data) => { stderr += data.toString(); });
     
     proc.on('close', (code) => {
+      clearTimeout(timeout);
+      
+      if (timedOut) {
+        const errorMsg = `Command timed out after ${timeoutMs}ms`;
+        if (throwOnError) {
+          reject(new Error(`${errorPrefix}: git ${args.join(' ')} - ${errorMsg}`));
+        } else {
+          resolve({
+            success: false,
+            stdout,
+            stderr: errorMsg,
+            exitCode: null
+          });
+        }
+        return;
+      }
+      
       const commandResult: CommandResult = {
         success: code === 0,
         stdout,
@@ -197,6 +223,7 @@ export async function execAsync(args: string[], options: ExecuteOptions): Promis
     });
     
     proc.on('error', (err) => {
+      clearTimeout(timeout);
       if (throwOnError) {
         reject(new Error(`${errorPrefix}: git ${args.join(' ')} - ${err.message}`));
       } else {
