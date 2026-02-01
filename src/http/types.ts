@@ -52,10 +52,14 @@ export async function readBody(req: IncomingMessage): Promise<string> {
 
 /**
  * Helper to send JSON response.
+ * Explicitly sets Content-Length to ensure client knows response is complete.
  */
 export function sendJson(res: ServerResponse, data: unknown, statusCode = 200): void {
+  const body = JSON.stringify(data);
   res.statusCode = statusCode;
-  res.end(JSON.stringify(data));
+  res.setHeader('Content-Length', Buffer.byteLength(body, 'utf-8'));
+  res.setHeader('Connection', 'close');
+  res.end(body);
 }
 
 /**
