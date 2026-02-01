@@ -36,6 +36,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import { JobRunner, JobSpec, Job } from './jobRunner';
 import { randomUUID } from 'crypto';
 import { Logger, ComponentLogger } from './logger';
@@ -598,6 +599,9 @@ export class PlanRunner {
       return;
     }
     
+    const timings: Record<string, number> = {};
+    let stepStart = Date.now();
+    
     try {
       // Mark as running if not already
       if (!plan.startedAt) {
@@ -611,17 +615,21 @@ export class PlanRunner {
       
       // Resolve targetBranchRoot on first pump (lazy initialization)
       if (!plan.targetBranchRoot) {
+        stepStart = Date.now();
         const baseBranch = spec.baseBranch || 'main';
         const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
           baseBranch,
           repoPath,
           `copilot_jobs/${spec.id}`
         );
+        timings['resolveTargetBranchRoot'] = Date.now() - stepStart;
         
         if (needsCreation) {
+          stepStart = Date.now();
           log.info(`Plan ${spec.id}: baseBranch '${baseBranch}' is a default branch, creating feature branch`);
           await git.branches.create(targetBranchRoot, baseBranch, repoPath, s => log.debug(s));
           plan.targetBranchRootCreated = true;
+          timings['createBranch'] = Date.now() - stepStart;
         } else {
           log.info(`Plan ${spec.id}: using non-default baseBranch '${baseBranch}' as targetBranchRoot`);
           plan.targetBranchRootCreated = false;
@@ -635,7 +643,9 @@ export class PlanRunner {
         : (this.runner as any).maxWorkers || 1;
       
       // Check preparing jobs (worktree creation completed?) - non-blocking
+      stepStart = Date.now();
       await this.checkPreparingJobs(spec, plan, repoPath);
+      timings['checkPreparingJobs'] = Date.now() - stepStart;
       
       // Collect jobs to start preparing (up to maxParallel - running - preparing)
       const slotsAvailable = maxParallel - plan.running.length - plan.preparing.length;
@@ -645,18 +655,32 @@ export class PlanRunner {
       }
       
       // Start worktree preparation for new jobs (fire-and-forget, non-blocking)
+      stepStart = Date.now();
       for (const jobId of jobsToPrepare) {
         this.startWorktreePreparation(spec, plan, jobId, repoPath);
       }
+      timings['startWorktreePrep'] = Date.now() - stepStart;
       
       // Check status of running jobs
+      stepStart = Date.now();
       await this.updateJobStatuses(spec, plan);
+      timings['updateJobStatuses'] = Date.now() - stepStart;
       
       // Check status of running sub-plans
+      stepStart = Date.now();
       await this.updateSubPlanStatuses(spec, plan);
+      timings['updateSubPlanStatuses'] = Date.now() - stepStart;
       
       // Check if plan is complete
+      stepStart = Date.now();
       this.checkPlanCompletion(spec, plan);
+      timings['checkPlanCompletion'] = Date.now() - stepStart;
+      
+      // Log slow operations
+      const slowOps = Object.entries(timings).filter(([_, ms]) => ms > 50);
+      if (slowOps.length > 0) {
+        log.warn(`Slow pump operations for ${spec.id}`, Object.fromEntries(slowOps));
+      }
     } catch (error: any) {
       log.error(`Error pumping plan ${spec.id}`, { error: error.message, stack: error.stack });
       // Don't fail the plan on pump errors - just log and continue
@@ -959,7 +983,6 @@ export class PlanRunner {
       return true;
     }
     
-    const { spawnSync } = require('child_process');
     const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
     const prefer = mergeCfg.get<'ours' | 'theirs'>('prefer', 'theirs');
     
@@ -1013,11 +1036,23 @@ export class PlanRunner {
         
         // Use string command with JSON.stringify to handle spaces in prompt
         const copilotCmd = `copilot -p ${JSON.stringify(mergeInstruction)} --allow-all-paths --allow-all-tools`;
-        const result = spawnSync(copilotCmd, [], {
-          cwd: worktreePath,
-          shell: true,
-          encoding: 'utf-8',
-          timeout: 300000 // 5 minute timeout
+        
+        // Run async to avoid blocking the event loop
+        const result = await new Promise<{ status: number | null }>((resolve) => {
+          const child = spawn(copilotCmd, [], {
+            cwd: worktreePath,
+            shell: true,
+            timeout: 300000, // 5 minute timeout
+          });
+          
+          child.on('close', (code) => {
+            resolve({ status: code });
+          });
+          
+          child.on('error', (err) => {
+            log.error('Copilot CLI spawn error', { error: err.message });
+            resolve({ status: 1 });
+          });
         });
         
         if (result.status !== 0) {

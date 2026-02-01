@@ -10,7 +10,7 @@
  */
 
 import * as vscode from 'vscode';
-import { spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import { Logger, ComponentLogger } from '../logger';
 import { PlanSpec, InternalPlanState } from './types';
 import * as git from '../../git';
@@ -264,11 +264,23 @@ async function attemptMerge(
     `Complete the merge and commit with message 'orchestrator: ${commitMessage}'`;
 
   const copilotCmd = `copilot -p ${JSON.stringify(mergeInstruction)} --allow-all-paths --allow-all-tools`;
-  const copilotResult = spawnSync(copilotCmd, [], {
-    cwd: repoPath,
-    shell: true,
-    encoding: 'utf-8',
-    timeout: 300000, // 5 minute timeout
+  
+  // Run async to avoid blocking the event loop
+  const copilotResult = await new Promise<{ status: number | null }>((resolve) => {
+    const child = spawn(copilotCmd, [], {
+      cwd: repoPath,
+      shell: true,
+      timeout: 300000, // 5 minute timeout
+    });
+    
+    child.on('close', (code) => {
+      resolve({ status: code });
+    });
+    
+    child.on('error', (err) => {
+      log.error('Copilot CLI spawn error', { error: err.message });
+      resolve({ status: 1 });
+    });
   });
 
   if (copilotResult.status !== 0) {
