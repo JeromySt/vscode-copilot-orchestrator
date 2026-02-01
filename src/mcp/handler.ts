@@ -141,9 +141,9 @@ export class McpHandler {
     
     const result = await handleToolCall(name, args || {}, this.context);
     
-    log.debug('Tool call result', { tool: name, result });
+    // Use compact JSON (no pretty printing) for faster serialization
     return this.successResponse(request.id, {
-      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+      content: [{ type: 'text', text: JSON.stringify(result) }]
     });
   }
 
