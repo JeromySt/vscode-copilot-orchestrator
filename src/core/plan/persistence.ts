@@ -141,7 +141,9 @@ export class PlanPersistence {
     
     try {
       const dir = path.dirname(this.filePath);
-      if (!fs.existsSync(dir)) {
+      try {
+        await fs.promises.access(dir);
+      } catch {
         await fs.promises.mkdir(dir, { recursive: true });
       }
 

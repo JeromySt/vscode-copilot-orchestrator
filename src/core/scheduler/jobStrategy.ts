@@ -55,6 +55,10 @@ export class JobExecutionStrategy implements ExecutionStrategy<JobSpec, JobState
   
   constructor(ctx: vscode.ExtensionContext) {
     this.ctx = ctx;
+    
+    // Ensure log directory exists (async, fire-and-forget at construction time)
+    const logDir = path.join(ctx.globalStorageUri.fsPath, 'logs');
+    fs.promises.mkdir(logDir, { recursive: true }).catch(() => {});
   }
   
   /**
@@ -62,9 +66,7 @@ export class JobExecutionStrategy implements ExecutionStrategy<JobSpec, JobState
    */
   createState(spec: JobSpec): JobState {
     const logDir = path.join(this.ctx.globalStorageUri.fsPath, 'logs');
-    if (!fs.existsSync(logDir)) {
-      fs.mkdirSync(logDir, { recursive: true });
-    }
+    // Directory already ensured in constructor
     
     return {
       id: spec.id || randomUUID(),
@@ -194,13 +196,11 @@ export class JobExecutionStrategy implements ExecutionStrategy<JobSpec, JobState
   async cleanup(id: string, state: JobState): Promise<void> {
     log.info(`Cleaning up job: ${id}`);
     
-    // Delete log file
-    if (state.logFile && fs.existsSync(state.logFile)) {
-      try {
-        fs.unlinkSync(state.logFile);
-      } catch (e) {
-        log.error('Failed to delete log file', { error: e });
-      }
+    // Delete log file (async)
+    if (state.logFile) {
+      fs.promises.unlink(state.logFile).catch(() => {
+        // Ignore - file might not exist
+      });
     }
     
     // Delete worktree if exists

@@ -1770,16 +1770,15 @@ export class PlanRunner {
       const repoPath = spec.repoPath || ws;
       this.cleanupIntegrationBranches(plan, repoPath);
       
-      // Clean up worktree root if it exists
+      // Clean up worktree root if it exists (async, fire-and-forget)
       const worktreeRoot = spec.worktreeRoot || path.join(repoPath, '.worktrees', id);
-      if (fs.existsSync(worktreeRoot)) {
-        log.debug(`Cleaning up worktree root: ${worktreeRoot}`);
-        try {
-          fs.rmSync(worktreeRoot, { recursive: true, force: true });
-        } catch (e: any) {
-          log.warn(`Failed to clean up worktree root: ${e.message}`);
-        }
-      }
+      fs.promises.access(worktreeRoot).then(() => {
+        return fs.promises.rm(worktreeRoot, { recursive: true, force: true });
+      }).then(() => {
+        log.debug(`Cleaned up worktree root: ${worktreeRoot}`);
+      }).catch(() => {
+        // Ignore - doesn't exist or already cleaned up
+      });
     }
     
     // Remove from maps

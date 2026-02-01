@@ -228,7 +228,8 @@ export async function getJobLog(request: ParsedRequest, context: RouteContext): 
   const fs = require('fs');
   let logContent = '';
   try {
-    logContent = fs.readFileSync(job.logFile, 'utf-8');
+    // Use async file read to avoid blocking event loop
+    logContent = await fs.promises.readFile(job.logFile, 'utf-8');
   } catch (e) {
     sendError(res, 'Failed to read log file', 500, { message: String(e) });
     return true;

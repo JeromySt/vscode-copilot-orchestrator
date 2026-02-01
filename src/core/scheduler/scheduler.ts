@@ -332,10 +332,37 @@ export class Scheduler<TSpec extends WorkUnitSpec, TState extends WorkUnit>
   // PERSISTENCE
   // ============================================================================
   
+  /** Debounce timer for async persistence */
+  private saveTimer?: NodeJS.Timeout;
+  
+  /** Flag to prevent overlapping saves */
+  private isSaving = false;
+  
+  /** Debounce interval for persistence (ms) */
+  private static readonly SAVE_DEBOUNCE_MS = 100;
+  
   /**
-   * Save state to disk.
+   * Save state to disk (debounced, async).
+   * Multiple rapid calls are coalesced into a single write.
    */
   protected persist(): void {
+    // If already scheduled, let the existing timer handle it
+    if (this.saveTimer) return;
+    
+    // Schedule an async save
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      this.doSaveAsync();
+    }, Scheduler.SAVE_DEBOUNCE_MS);
+  }
+  
+  /**
+   * Perform the actual async save.
+   */
+  private async doSaveAsync(): Promise<void> {
+    if (this.isSaving) return;
+    this.isSaving = true;
+    
     try {
       const data: any[] = [];
       
@@ -347,18 +374,27 @@ export class Scheduler<TSpec extends WorkUnitSpec, TState extends WorkUnit>
         });
       }
       
-      fs.writeFileSync(
+      const dir = path.dirname(this.config.persistPath);
+      try {
+        await fs.promises.access(dir);
+      } catch {
+        await fs.promises.mkdir(dir, { recursive: true });
+      }
+      
+      await fs.promises.writeFile(
         this.config.persistPath,
         JSON.stringify({ items: data }, null, 2),
         'utf-8'
       );
     } catch (err) {
       this.log.error('Failed to persist state', { error: err });
+    } finally {
+      this.isSaving = false;
     }
   }
   
   /**
-   * Load state from disk.
+   * Load state from disk (sync, called only at startup).
    */
   protected loadFromDisk(): void {
     try {
