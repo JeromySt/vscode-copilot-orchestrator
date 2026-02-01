@@ -81,6 +81,8 @@ export class PlanRunner {
   private specs = new Map<string, PlanSpec>();
   private interval?: NodeJS.Timeout;
   private persistence: PlanPersistence;
+  private isPumping = false; // Guard against overlapping pump cycles
+  private lastStateHash = ''; // Track state changes to avoid unnecessary notifications
   
   /** Event emitter for plan changes */
   private _onDidChange = new vscode.EventEmitter<void>();
@@ -97,9 +99,26 @@ export class PlanRunner {
 
   /**
    * Notify listeners that plans have changed.
+   * Only fires if state has actually changed since last notification.
    */
   private notifyChange(): void {
-    this._onDidChange.fire();
+    // Create a lightweight hash of the current state to detect changes
+    const stateHash = this.computeStateHash();
+    if (stateHash !== this.lastStateHash) {
+      this.lastStateHash = stateHash;
+      this._onDidChange.fire();
+    }
+  }
+  
+  /**
+   * Compute a lightweight hash of plan state for change detection.
+   */
+  private computeStateHash(): string {
+    const parts: string[] = [];
+    for (const [id, plan] of this.plans) {
+      parts.push(`${id}:${plan.status}:${plan.running.length}:${plan.done.length}:${plan.failed.length}:${plan.queued.length}`);
+    }
+    return parts.join('|');
   }
 
   // ============================================================================
@@ -504,17 +523,31 @@ export class PlanRunner {
 
   /**
    * Pump all plans.
+   * 
+   * Note: Plans are pumped sequentially to avoid git operation conflicts.
+   * Each plan may modify the repo, so we wait for each to complete.
+   * The isPumping guard prevents overlapping pump cycles if async ops take long.
    */
-  private pumpAll(): void {
-    for (const [id, _] of this.plans) {
-      const spec = this.specs.get(id);
-      if (spec) {
-        this.pump(spec);
-      }
+  private async pumpAll(): Promise<void> {
+    // Guard against overlapping pump cycles
+    if (this.isPumping) {
+      return;
     }
-    // Persist and notify listeners of any changes
-    this.persist();
-    this.notifyChange();
+    this.isPumping = true;
+    
+    try {
+      for (const [id, _] of this.plans) {
+        const spec = this.specs.get(id);
+        if (spec) {
+          await this.pump(spec);
+        }
+      }
+      // Persist and notify listeners of any changes
+      this.persist();
+      this.notifyChange();
+    } finally {
+      this.isPumping = false;
+    }
   }
 
   /**
