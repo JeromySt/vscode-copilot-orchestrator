@@ -632,10 +632,23 @@ export class PlanRunner {
         ? spec.maxParallel 
         : (this.runner as any).maxWorkers || 1;
       
-      // Schedule new jobs while under parallel limit and queue has items
-      while (plan.running.length < maxParallel && plan.queued.length > 0) {
-        const jobId = plan.queued.shift()!;
-        await this.scheduleJob(spec, plan, jobId, repoPath);
+      // Collect jobs to schedule (up to maxParallel - running)
+      const slotsAvailable = maxParallel - plan.running.length;
+      const jobsToSchedule: string[] = [];
+      while (jobsToSchedule.length < slotsAvailable && plan.queued.length > 0) {
+        jobsToSchedule.push(plan.queued.shift()!);
+      }
+      
+      // Schedule jobs in PARALLEL to avoid sequential worktree creation blocking
+      if (jobsToSchedule.length > 0) {
+        const scheduleStart = Date.now();
+        await Promise.all(jobsToSchedule.map(jobId => 
+          this.scheduleJob(spec, plan, jobId, repoPath)
+        ));
+        const scheduleTime = Date.now() - scheduleStart;
+        if (scheduleTime > 500) {
+          log.warn(`Scheduled ${jobsToSchedule.length} jobs in ${scheduleTime}ms (parallel)`);
+        }
       }
       
       // Check status of running jobs
