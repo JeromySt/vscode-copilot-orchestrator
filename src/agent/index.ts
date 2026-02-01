@@ -12,5 +12,5 @@ export {
   DelegatorCallbacks 
 } from './agentDelegator';
 
-export { isCopilotCliAvailable } from './cliCheckCore';
+export { isCopilotCliAvailable, checkCopilotCliAsync, resetCliCache, isCliCachePopulated } from './cliCheckCore';
 export { ensureCopilotCliInteractive, registerCopilotCliCheck } from './cliCheck';

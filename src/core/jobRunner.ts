@@ -605,10 +605,10 @@ Focus on addressing the failure root cause while maintaining all original requir
     job.currentAttemptId = attemptId;
     job.logFile = attemptLogFile; // Use attempt-specific log file
     
-    // Initialize log file
+    // Initialize log file (async, non-blocking)
     if (job.logFile) {
       try {
-        fs.writeFileSync(job.logFile, `=== Job ${job.name} (${job.id}) Attempt ${job.attempts.length} started at ${new Date(job.startedAt).toISOString()} ===\n`, 'utf-8');
+        await fs.promises.writeFile(job.logFile, `=== Job ${job.name} (${job.id}) Attempt ${job.attempts.length} started at ${new Date(job.startedAt).toISOString()} ===\n`, 'utf-8');
         this.writeLog(job, `Attempt ID: ${attemptId}`);
         this.writeLog(job, `Name: ${job.name}`);
         this.writeLog(job, `Task: ${job.task}`);
