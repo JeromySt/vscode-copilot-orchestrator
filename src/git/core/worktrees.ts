@@ -218,6 +218,11 @@ export async function prune(repoPath: string): Promise<void> {
 /**
  * Initialize submodules in a worktree.
  * Returns time taken in ms (0 if no submodules).
+ * 
+ * For worktrees, we need to:
+ * 1. Check if .gitmodules exists
+ * 2. Run submodule init to register submodules
+ * 3. Run submodule update to actually clone them
  */
 async function initializeSubmodules(worktreePath: string, worktreeBranch: string, log?: GitLogger): Promise<number> {
   const gitmodulesPath = path.join(worktreePath, '.gitmodules');
@@ -226,19 +231,49 @@ async function initializeSubmodules(worktreePath: string, worktreeBranch: string
   try {
     await fs.promises.access(gitmodulesPath);
   } catch {
-    log?.(`[worktree] No submodules detected`);
+    log?.(`[worktree] No submodules detected (no .gitmodules file)`);
     return 0;
   }
   
   // Submodules exist - initialize them
-  log?.(`[worktree] Initializing submodules...`);
+  log?.(`[worktree] .gitmodules found, initializing submodules...`);
   
   try {
     const submodStart = Date.now();
-    await execAsync(['submodule', 'update', '--init', '--recursive'], { 
-      cwd: worktreePath, 
-      throwOnError: true 
+    
+    // First, explicitly init submodules (required for worktrees)
+    log?.(`[worktree] Running: git submodule init`);
+    const initResult = await execAsync(['submodule', 'init'], { 
+      cwd: worktreePath,
+      timeoutMs: 30000
     });
+    if (!initResult.success) {
+      log?.(`[worktree] ⚠ submodule init warning: ${initResult.stderr}`);
+    }
+    
+    // Then update with recursive to clone nested submodules
+    log?.(`[worktree] Running: git submodule update --init --recursive`);
+    const updateResult = await execAsync(['submodule', 'update', '--init', '--recursive'], { 
+      cwd: worktreePath, 
+      timeoutMs: 300000 // 5 minutes for large submodules
+    });
+    
+    if (!updateResult.success) {
+      log?.(`[worktree] ⚠ submodule update failed: ${updateResult.stderr}`);
+      // Try alternative: sync and then update
+      log?.(`[worktree] Trying: git submodule sync --recursive`);
+      await execAsync(['submodule', 'sync', '--recursive'], { cwd: worktreePath });
+      
+      log?.(`[worktree] Retrying: git submodule update --init --recursive`);
+      const retryResult = await execAsync(['submodule', 'update', '--init', '--recursive'], { 
+        cwd: worktreePath, 
+        timeoutMs: 300000
+      });
+      if (!retryResult.success) {
+        log?.(`[worktree] ⚠ submodule update retry failed: ${retryResult.stderr}`);
+      }
+    }
+    
     const submodTime = Date.now() - submodStart;
     log?.(`[worktree] ✓ Submodules initialized (${submodTime}ms)`);
     
@@ -247,7 +282,7 @@ async function initializeSubmodules(worktreePath: string, worktreeBranch: string
     
     return submodTime;
   } catch (error) {
-    log?.(`[worktree] ⚠ Submodule initialization warning: ${error}`);
+    log?.(`[worktree] ⚠ Submodule initialization error: ${error}`);
     return 0;
   }
 }
