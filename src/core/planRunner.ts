@@ -559,11 +559,17 @@ export class PlanRunner {
     }
     this.isPumping = true;
     
+    const pumpStart = Date.now();
     try {
       for (const [id, _] of this.plans) {
         const spec = this.specs.get(id);
         if (spec) {
+          const planStart = Date.now();
           await this.pump(spec);
+          const planTime = Date.now() - planStart;
+          if (planTime > 100) {
+            console.warn(`[PlanRunner] Pump for ${id} took ${planTime}ms`);
+          }
         }
       }
       // Persist and notify listeners of any changes
@@ -571,6 +577,10 @@ export class PlanRunner {
       this.notifyChange();
     } finally {
       this.isPumping = false;
+      const totalTime = Date.now() - pumpStart;
+      if (totalTime > 200) {
+        console.warn(`[PlanRunner] pumpAll took ${totalTime}ms`);
+      }
     }
   }
 
