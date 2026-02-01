@@ -226,8 +226,8 @@ export class JobRunner {
       spec.id = randomUUID();
     }
     
+    // Log directory is ensured in constructor, no need to check every time
     const logDir = path.join(this.ctx.globalStorageUri.fsPath, 'logs');
-    ensureDir(logDir);
     const logFile = path.join(logDir, `${spec.id}.log`);
     const job: Job = { 
       ...spec, 
@@ -544,7 +544,7 @@ Focus on addressing the failure root cause while maintaining all original requir
     this.isPersisting = true;
     try {
       const data = JSON.stringify({ jobs: this.list() }, null, 2);
-      ensureDir(path.dirname(this.storeFile));
+      // Directory is ensured in constructor, no need to check every time
       await fs.promises.writeFile(this.storeFile, data, 'utf-8');
     } catch (e) {
       console.error('Failed to persist jobs:', e);
