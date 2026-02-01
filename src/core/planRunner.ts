@@ -404,6 +404,7 @@ export class PlanRunner {
       completedBranches: new Map(),
       worktreePaths: new Map(),
       worktreePromises: new Map(),
+      worktreeResults: new Map(),
       // Sub-plan tracking
       pendingSubPlans: new Set(spec.subPlans?.map(sp => sp.id) || []),
       runningSubPlans: new Map(),
@@ -728,7 +729,7 @@ export class PlanRunner {
 
   /**
    * Async worktree creation - runs in background without blocking the pump.
-   * Returns true if worktree was created successfully, false on failure.
+   * Sets result in plan.worktreeResults when complete (for non-blocking check).
    */
   private async prepareWorktreeAsync(
     spec: PlanSpec, 
@@ -768,13 +769,20 @@ export class PlanRunner {
         const mergeSuccess = await this.mergeSourcesIntoWorktree(planJob, worktreePath, additionalSources);
         if (!mergeSuccess) {
           log.error(`Failed to merge sources into worktree for job ${jobId}`);
+          // Set result for non-blocking check
+          plan.worktreeResults.set(jobId, { success: false, error: 'Failed to merge sources' });
           return false;
         }
       }
       
+      // Set result for non-blocking check
+      plan.worktreeResults.set(jobId, { success: true });
       return true;
     } catch (err) {
-      log.error(`Failed to create worktree for job ${jobId}: ${err}`);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      log.error(`Failed to create worktree for job ${jobId}: ${errorMsg}`);
+      // Set result for non-blocking check
+      plan.worktreeResults.set(jobId, { success: false, error: errorMsg });
       return false;
     }
   }
@@ -789,43 +797,36 @@ export class PlanRunner {
     const jobsToSubmit: string[] = [];
     const jobsFailed: string[] = [];
     
-    // Check each preparing job's promise
+    // Check each preparing job's settled flag - TRUE non-blocking
     for (const jobId of [...plan.preparing]) {
-      const promise = plan.worktreePromises.get(jobId);
-      if (!promise) {
-        log.warn(`No worktree promise found for preparing job ${jobId}`);
+      const result = plan.worktreeResults.get(jobId);
+      
+      // If no result yet, worktree is still being created - skip
+      if (result === undefined) {
         continue;
       }
       
-      // Check if promise has settled by racing with a timeout
-      // Use a minimal timeout (0ms) to just check if already resolved
-      const NOT_SETTLED = Symbol('not-settled');
-      const result = await Promise.race([
-        promise.then(
-          success => ({ settled: true as const, success }),
-          () => ({ settled: true as const, success: false })
-        ),
-        new Promise<typeof NOT_SETTLED>(resolve => setImmediate(() => resolve(NOT_SETTLED)))
-      ]);
+      // Result is set - worktree creation completed (or failed)
+      plan.worktreeResults.delete(jobId);
       
-      if (result !== NOT_SETTLED) {
-        // Worktree creation completed (or failed)
-        plan.worktreePromises.delete(jobId);
-        if (result.success) {
-          jobsToSubmit.push(jobId);
-          log.debug(`Worktree ready for job ${jobId}`);
-        } else {
-          jobsFailed.push(jobId);
-          log.warn(`Worktree creation failed for job ${jobId}`);
-        }
+      if (result.success) {
+        jobsToSubmit.push(jobId);
+        log.debug(`Worktree ready for job ${jobId}`);
+      } else {
+        jobsFailed.push(jobId);
+        log.warn(`Worktree creation failed for job ${jobId}: ${result.error}`);
       }
-      // If NOT_SETTLED, job stays in preparing state
     }
     
     // Submit ready jobs to runner
+    const submitStart = Date.now();
     for (const jobId of jobsToSubmit) {
       plan.preparing = plan.preparing.filter(id => id !== jobId);
       await this.submitJobToRunner(spec, plan, jobId, repoPath);
+    }
+    const submitTime = Date.now() - submitStart;
+    if (submitTime > 50) {
+      log.warn(`checkPreparingJobs: submitting ${jobsToSubmit.length} jobs took ${submitTime}ms`);
     }
     
     // Mark failed jobs

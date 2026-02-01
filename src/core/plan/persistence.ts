@@ -273,6 +273,8 @@ export class PlanPersistence {
       // Restore incremental delivery tracking
       mergedLeaves: new Set(data._mergedLeaves || []),
       cleanedWorkUnits: new Set(data._cleanedWorkUnits || []),
+      // Runtime state - not persisted
+      worktreeResults: new Map(),
     };
   }
 

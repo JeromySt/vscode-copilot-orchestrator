@@ -232,8 +232,10 @@ export interface InternalPlanState extends Omit<PlanState, 'pendingSubPlans' | '
   completedBranches: Map<string, string>;
   /** Map of plan job ID -> worktree path */
   worktreePaths: Map<string, string>;
-  /** Map of plan job ID -> worktree creation promise (for async preparation) */
+  /** Map of plan job ID -> worktree creation promise (for async preparation) - NOT USED FOR CHECKING */
   worktreePromises: Map<string, Promise<boolean>>;
+  /** Map of plan job ID -> worktree creation result (set when promise completes) - USED FOR NON-BLOCKING CHECK */
+  worktreeResults: Map<string, { success: boolean; error?: string }>;
   /** 
    * The targetBranchRoot for this plan.
    * - If baseBranch was a default branch, this is a new feature branch
@@ -282,6 +284,7 @@ export function createInternalState(id: string): InternalPlanState {
     completedBranches: new Map(),
     worktreePaths: new Map(),
     worktreePromises: new Map(),
+    worktreeResults: new Map(),
     pendingSubPlans: new Set(),
     runningSubPlans: new Map(),
     completedSubPlans: new Map(),
