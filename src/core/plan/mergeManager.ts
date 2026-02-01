@@ -287,6 +287,14 @@ async function attemptMerge(
 }
 
 /**
+ * Check if remote operations are enabled (pushOnSuccess setting).
+ */
+function isPushEnabled(): boolean {
+  const cfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
+  return cfg.get<boolean>('pushOnSuccess', false);
+}
+
+/**
  * Clean up integration branches created for sub-plans.
  */
 export async function cleanupIntegrationBranches(
@@ -301,17 +309,29 @@ export async function cleanupIntegrationBranches(
     planId: plan.id,
   });
 
+  const pushEnabled = isPushEnabled();
+
   for (const [subPlanId, integrationBranch] of plan.subPlanIntegrationBranches) {
     // Delete local branch
-    const localDeleted = await git.branches.deleteLocal(repoPath, integrationBranch, { force: true });
+    const localDeleted = await git.branches.deleteLocal(repoPath, integrationBranch, { 
+      force: true,
+      log: s => log.debug(s)
+    });
     if (localDeleted) {
       log.debug(`Deleted local integration branch: ${integrationBranch}`);
+    } else {
+      // Branch might be checked out - this is okay, it will be cleaned up later
+      log.debug(`Could not delete integration branch (may be checked out): ${integrationBranch}`);
     }
 
-    // Delete remote branch
-    const remoteDeleted = await git.branches.deleteRemote(repoPath, integrationBranch);
-    if (remoteDeleted) {
-      log.debug(`Deleted remote integration branch: ${integrationBranch}`);
+    // Only delete remote branch if pushOnSuccess is enabled
+    if (pushEnabled) {
+      const remoteDeleted = await git.branches.deleteRemote(repoPath, integrationBranch, {
+        log: s => log.debug(s)
+      });
+      if (remoteDeleted) {
+        log.debug(`Deleted remote integration branch: ${integrationBranch}`);
+      }
     }
   }
 }

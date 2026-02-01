@@ -179,6 +179,26 @@ export async function cleanupAllPlanResources(
 ): Promise<void> {
   log.info(`Cleaning up all resources for plan ${spec.id}`);
 
+  // First, ensure we're on a safe branch (not one we're about to delete)
+  // Switch to baseBranch or main/master
+  const safeBranch = spec.baseBranch || 'main';
+  try {
+    const currentBranch = await git.branches.current(repoPath);
+    // Check if current branch is one we might delete
+    const branchesToDelete = new Set<string>();
+    for (const [, branch] of plan.completedBranches) branchesToDelete.add(branch);
+    for (const [, branch] of plan.subPlanIntegrationBranches || []) branchesToDelete.add(branch);
+    if (plan.targetBranchRootCreated && plan.targetBranchRoot) branchesToDelete.add(plan.targetBranchRoot);
+    
+    if (branchesToDelete.has(currentBranch)) {
+      log.debug(`Switching from ${currentBranch} to ${safeBranch} before cleanup`);
+      await git.branches.checkout(repoPath, safeBranch);
+    }
+  } catch (err) {
+    // Ignore - we'll proceed with cleanup and handle individual failures
+    log.debug(`Could not check/switch branch before cleanup: ${err}`);
+  }
+
   // Clean up all worktrees
   for (const [workUnitId, worktreePath] of plan.worktreePaths) {
     try {
