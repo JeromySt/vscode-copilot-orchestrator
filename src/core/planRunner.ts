@@ -1173,22 +1173,30 @@ export class PlanRunner {
         
         // Check if this sub-plan is a leaf (nothing consumes from it)
         // If so, immediately merge to targetBranch - user gets value right away!
+        // Fire-and-forget to avoid blocking the pump loop
         const isLeaf = mergeManager.isLeafWorkUnit(spec, subPlanId);
         if (isLeaf && completedBranch) {
           const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
           const repoPath = spec.repoPath || ws;
+          const shouldCleanup = spec.cleanUpSuccessfulWork !== false;
           // Note: For sub-plans, we DON'T call appendJobWorkSummary in mergeLeafToTarget
           // because we already appended the sub-plan's aggregate above
-          await mergeManager.mergeLeafToTarget(spec, plan, subPlanId, completedBranch, repoPath);
-          // Clean up after merge if enabled
-          if (spec.cleanUpSuccessfulWork !== false) {
-            await cleanupManager.cleanupWorkUnit(spec, plan, subPlanId, repoPath);
-          }
-          this.persist();
+          // Fire-and-forget - don't await
+          (async () => {
+            try {
+              await mergeManager.mergeLeafToTarget(spec, plan, subPlanId, completedBranch, repoPath);
+              if (shouldCleanup) {
+                await cleanupManager.cleanupWorkUnit(spec, plan, subPlanId, repoPath);
+              }
+              this.persist();
+            } catch (err: any) {
+              log.error(`Background merge/cleanup failed for sub-plan ${subPlanId}`, { error: err.message });
+            }
+          })();
         }
         
         // Check if this completion unblocks any jobs or other sub-plans
-        // Use a synthetic job ID that represents the sub-plan completion
+        // This is fast (just state updates) so we can await it
         await this.queueReadyDependentsForSubPlan(spec, plan, subPlanId);
         
       } else if (childPlan.status === 'failed' || childPlan.status === 'partial') {
@@ -1254,6 +1262,8 @@ export class PlanRunner {
   /**
    * Handle a successful job completion.
    * Records the completed branch for dependency chaining.
+   * 
+   * NOTE: Merge and cleanup operations are fire-and-forget to avoid blocking the pump.
    */
   private async handleJobSuccess(spec: PlanSpec, plan: InternalPlanState, jobId: string, runnerJob: Job): Promise<void> {
     // Remove from running, add to done
@@ -1283,14 +1293,19 @@ export class PlanRunner {
     
     // Check if this is a leaf job (nothing consumes from it)
     // If so, immediately merge to targetBranch - user gets value right away!
+    // Fire-and-forget to avoid blocking the pump loop
     const isLeaf = mergeManager.isLeafWorkUnit(spec, jobId);
     if (isLeaf && !spec.isSubPlan) {
       const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
       const repoPath = spec.repoPath || ws;
-      await this.mergeLeafToTarget(spec, plan, jobId, completedBranch, repoPath);
+      // Fire-and-forget - don't await
+      this.mergeLeafToTarget(spec, plan, jobId, completedBranch, repoPath).catch(err => {
+        log.error(`Background merge failed for ${jobId}`, { error: err.message });
+      });
     }
     
     // Check for jobs that depended on this one and are now ready
+    // This is fast (just state updates) so we can await it
     await this.queueReadyDependents(spec, plan, jobId);
   }
   
