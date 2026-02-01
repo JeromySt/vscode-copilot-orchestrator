@@ -7,7 +7,6 @@
  * @module ui/templates/jobDetailsHtml
  */
 
-import * as fs from 'fs';
 import { getJobDetailsCss } from './jobDetailsCss';
 import { getJobDetailsJs } from './jobDetailsJs';
 
@@ -466,8 +465,9 @@ function buildAttemptCard(attempt: AttemptData, idx: number, job: JobData): stri
     </div>
   ` : '';
 
-  // Log viewer
-  const logViewerContent = attempt.logFile && fs.existsSync(attempt.logFile)
+  // Log viewer - assume log file exists (JS will handle missing files)
+  // Avoiding fs.existsSync to prevent blocking the event loop
+  const logViewerContent = attempt.logFile
     ? '<div class="loading">Loading log...</div>'
     : '<div class="no-log">No log file available</div>';
 
