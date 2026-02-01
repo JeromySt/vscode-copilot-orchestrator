@@ -140,42 +140,33 @@ export class McpServerManager implements IMcpManager {
   }
   
   /**
-   * Check MCP endpoint health by sending a tools/list request.
+   * Check MCP endpoint health using the fast /health endpoint.
    */
   private async checkHealth(): Promise<void> {
-    const url = `http://${this.config.host}:${this.config.port}/mcp`;
+    const url = `http://${this.config.host}:${this.config.port}/health`;
     log.debug('Health check starting', { url });
     
     try {
       const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 'health-check',
-          method: 'tools/list'
-        })
+        method: 'GET',
+        // Short timeout for health checks
+        signal: AbortSignal.timeout(2000)
       });
       
       log.debug('Health check response', { status: response.status, ok: response.ok });
       
       if (response.ok) {
-        const data = await response.json() as any;
-        if (data.result && data.result.tools) {
-          this.consecutiveFailures = 0;
-          if (this.status !== 'connected') {
-            log.info('Health check passed - connected', { toolCount: data.result.tools.length });
-            this.setStatus('connected');
-          } else {
-            log.debug('Health check passed', { toolCount: data.result.tools.length });
-          }
-          return;
+        this.consecutiveFailures = 0;
+        if (this.status !== 'connected') {
+          log.info('Health check passed - connected');
+          this.setStatus('connected');
         } else {
-          log.debug('Health check invalid response', { data });
+          log.debug('Health check passed');
         }
+        return;
       }
       
-      // Response not OK or invalid data
+      // Response not OK
       this.handleHealthCheckFailure(`HTTP ${response.status}`);
     } catch (error: any) {
       log.debug('Health check error', { error: error.message });

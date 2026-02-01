@@ -73,6 +73,13 @@ function createRequestHandler(context: RouteContext) {
       return;
     }
     
+    // Fast health check endpoint - returns immediately without any processing
+    if (req.method === 'GET' && url.pathname === '/health') {
+      res.statusCode = 200;
+      res.end('{"status":"ok"}');
+      return;
+    }
+    
     const request: ParsedRequest = {
       req,
       res,
