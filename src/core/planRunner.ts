@@ -84,6 +84,10 @@ export class PlanRunner {
   private isPumping = false; // Guard against overlapping pump cycles
   private lastStateHash = ''; // Track state changes to avoid unnecessary notifications
   
+  /** Cached public states - updated when plans change, returned instantly on list() */
+  private cachedPublicStates: PlanState[] = [];
+  private publicStateCacheValid = false;
+  
   /** Event emitter for plan changes */
   private _onDidChange = new vscode.EventEmitter<void>();
   public readonly onDidChange = this._onDidChange.event;
@@ -102,6 +106,9 @@ export class PlanRunner {
    * Only fires if state has actually changed since last notification.
    */
   private notifyChange(): void {
+    // Invalidate public state cache
+    this.publicStateCacheValid = false;
+    
     // Create a lightweight hash of the current state to detect changes
     const stateHash = this.computeStateHash();
     if (stateHash !== this.lastStateHash) {
@@ -187,9 +194,14 @@ export class PlanRunner {
 
   /**
    * Get all plans (returns public PlanState without internal maps).
+   * Uses cached states for instant response - cache is invalidated when state changes.
    */
   list(): PlanState[] {
-    return Array.from(this.plans.values()).map(p => toPublicState(p));
+    if (!this.publicStateCacheValid) {
+      this.cachedPublicStates = Array.from(this.plans.values()).map(p => toPublicState(p));
+      this.publicStateCacheValid = true;
+    }
+    return this.cachedPublicStates;
   }
 
   /**

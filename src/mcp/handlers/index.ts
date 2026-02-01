@@ -69,13 +69,20 @@ export async function handleToolCall(
   args: any,
   context: ToolHandlerContext
 ): Promise<any> {
+  const startTime = Date.now();
   const handler = toolHandlers[name];
   if (!handler) {
     return { error: `Unknown tool: ${name}` };
   }
   
   try {
-    return await handler(args, context);
+    const result = await handler(args, context);
+    const elapsed = Date.now() - startTime;
+    if (elapsed > 100) {
+      // Log slow tool calls for debugging
+      console.warn(`[MCP] Slow tool call: ${name} took ${elapsed}ms`);
+    }
+    return result;
   } catch (e: any) {
     // Ensure errors are returned as structured responses, not thrown
     return { error: e.message || String(e) };
