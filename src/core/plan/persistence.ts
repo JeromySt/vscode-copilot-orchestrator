@@ -242,6 +242,7 @@ export class PlanPersistence {
       id: data.id,
       status: data.status,
       queued: data.queued || [],
+      preparing: [],  // Preparing jobs are not persisted (they'll be re-queued)
       running: data.running || [],
       done: data.done || [],
       failed: data.failed || [],
@@ -256,6 +257,7 @@ export class PlanPersistence {
       jobIdMap: new Map(data._jobIdMap || []),
       completedBranches: new Map(data._completedBranches || []),
       worktreePaths: new Map(data._worktreePaths || []),
+      worktreePromises: new Map(),  // Promises are not persisted (async in-flight state)
       targetBranchRoot: data._targetBranchRoot,
       targetBranchRootCreated: data._targetBranchRootCreated,
       // Restore sub-plan state

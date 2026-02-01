@@ -123,7 +123,7 @@ export class PlanRunner {
   private computeStateHash(): string {
     const parts: string[] = [];
     for (const [id, plan] of this.plans) {
-      parts.push(`${id}:${plan.status}:${plan.running.length}:${plan.done.length}:${plan.failed.length}:${plan.queued.length}`);
+      parts.push(`${id}:${plan.status}:${plan.queued.length}:${plan.preparing.length}:${plan.running.length}:${plan.done.length}:${plan.failed.length}`);
     }
     return parts.join('|');
   }
@@ -393,6 +393,7 @@ export class PlanRunner {
       id,
       status: 'queued',
       queued: [],
+      preparing: [],
       running: [],
       done: [],
       failed: [],
@@ -401,6 +402,7 @@ export class PlanRunner {
       jobIdMap: new Map(),
       completedBranches: new Map(),
       worktreePaths: new Map(),
+      worktreePromises: new Map(),
       // Sub-plan tracking
       pendingSubPlans: new Set(spec.subPlans?.map(sp => sp.id) || []),
       runningSubPlans: new Map(),
@@ -632,23 +634,19 @@ export class PlanRunner {
         ? spec.maxParallel 
         : (this.runner as any).maxWorkers || 1;
       
-      // Collect jobs to schedule (up to maxParallel - running)
-      const slotsAvailable = maxParallel - plan.running.length;
-      const jobsToSchedule: string[] = [];
-      while (jobsToSchedule.length < slotsAvailable && plan.queued.length > 0) {
-        jobsToSchedule.push(plan.queued.shift()!);
+      // Check preparing jobs (worktree creation completed?) - non-blocking
+      await this.checkPreparingJobs(spec, plan, repoPath);
+      
+      // Collect jobs to start preparing (up to maxParallel - running - preparing)
+      const slotsAvailable = maxParallel - plan.running.length - plan.preparing.length;
+      const jobsToPrepare: string[] = [];
+      while (jobsToPrepare.length < slotsAvailable && plan.queued.length > 0) {
+        jobsToPrepare.push(plan.queued.shift()!);
       }
       
-      // Schedule jobs in PARALLEL to avoid sequential worktree creation blocking
-      if (jobsToSchedule.length > 0) {
-        const scheduleStart = Date.now();
-        await Promise.all(jobsToSchedule.map(jobId => 
-          this.scheduleJob(spec, plan, jobId, repoPath)
-        ));
-        const scheduleTime = Date.now() - scheduleStart;
-        if (scheduleTime > 500) {
-          log.warn(`Scheduled ${jobsToSchedule.length} jobs in ${scheduleTime}ms (parallel)`);
-        }
+      // Start worktree preparation for new jobs (fire-and-forget, non-blocking)
+      for (const jobId of jobsToPrepare) {
+        this.startWorktreePreparation(spec, plan, jobId, repoPath);
       }
       
       // Check status of running jobs
@@ -667,53 +665,70 @@ export class PlanRunner {
   }
 
   /**
-   * Schedule a job for execution.
+   * Start worktree preparation for a job (fire-and-forget).
    * 
-   * Key: The baseBranch is computed from completed dependencies,
-   * ensuring proper branch chaining through the DAG.
+   * This kicks off worktree creation asynchronously and stores a Promise
+   * in plan.worktreePromises. The pump will check these promises on subsequent
+   * cycles and submit jobs to the runner once their worktrees are ready.
    */
-  private async scheduleJob(spec: PlanSpec, plan: InternalPlanState, jobId: string, repoPath: string): Promise<void> {
+  private startWorktreePreparation(spec: PlanSpec, plan: InternalPlanState, jobId: string, repoPath: string): void {
     const planJob = spec.jobs.find(j => j.id === jobId);
     if (!planJob) {
       log.error(`Job ${jobId} not found in plan spec`);
       return;
     }
+
+    // Move to preparing state
+    plan.preparing.push(jobId);
     
-    // Compute the base branch for this job (chain from parent, or first of multiple parents)
+    // Compute branch info needed for worktree
     const { baseBranch, additionalSources } = this.computeBaseBranch(spec, plan, planJob, repoPath);
-    
-    // Use pre-computed runner job ID (assigned when plan was enqueued)
     const runnerJobId = planJob.runnerJobId!;
-    
-    // Map plan job ID to runner job ID
-    plan.jobIdMap.set(jobId, runnerJobId);
-    
-    // Use pre-computed target branch (also assigned when plan was enqueued)
     const targetBranch = planJob.inputs.targetBranch!;
     
-    log.info(`Scheduling job: ${jobId}`, {
-      planId: spec.id,
-      runnerJobId,
-      baseBranch,
-      targetBranch,
-      consumesFrom: planJob.consumesFrom,
-      additionalSources: additionalSources.length > 0 ? additionalSources : undefined
-    });
+    // Map plan job ID to runner job ID early
+    plan.jobIdMap.set(jobId, runnerJobId);
     
-    // Create worktree for this job (plan manages worktrees, not the job)
     const wtRootAbs = path.join(repoPath, spec.worktreeRoot || '.worktrees');
     const worktreePath = path.join(wtRootAbs, runnerJobId);
     
+    log.debug(`Starting async worktree preparation for job ${jobId}`);
+    
+    // Fire-and-forget worktree creation - store the promise for later checking
+    const worktreePromise = this.prepareWorktreeAsync(
+      spec, plan, planJob, jobId, repoPath, worktreePath, targetBranch, baseBranch, additionalSources
+    );
+    
+    plan.worktreePromises.set(jobId, worktreePromise);
+  }
+
+  /**
+   * Async worktree creation - runs in background without blocking the pump.
+   * Returns true if worktree was created successfully, false on failure.
+   */
+  private async prepareWorktreeAsync(
+    spec: PlanSpec, 
+    plan: InternalPlanState, 
+    planJob: PlanJob, 
+    jobId: string, 
+    repoPath: string, 
+    worktreePath: string, 
+    targetBranch: string, 
+    baseBranch: string, 
+    additionalSources: string[]
+  ): Promise<boolean> {
     try {
       const wtStart = Date.now();
       log.debug(`Creating worktree for job ${jobId} at ${worktreePath}`);
+      
       await git.worktrees.create({
         repoPath,
         worktreePath,
-        branchName: targetBranch,  // The worktree branch IS the targetBranch
-        fromRef: baseBranch,       // Created from baseBranch (first parent's completed branch or plan's targetBranchRoot)
+        branchName: targetBranch,
+        fromRef: baseBranch,
         log: s => log.debug(s)
       });
+      
       const wtTime = Date.now() - wtStart;
       if (wtTime > 500) {
         log.warn(`Slow worktree creation for ${jobId} took ${wtTime}ms`);
@@ -724,21 +739,94 @@ export class PlanRunner {
       
       log.info(`Created worktree for job ${jobId}: ${worktreePath} on branch ${targetBranch}`);
       
-      // If job has multiple sources, merge the additional sources directly into the worktree
+      // If job has multiple sources, merge the additional sources
       if (additionalSources.length > 0) {
         const mergeSuccess = await this.mergeSourcesIntoWorktree(planJob, worktreePath, additionalSources);
         if (!mergeSuccess) {
           log.error(`Failed to merge sources into worktree for job ${jobId}`);
-          plan.failed.push(jobId);
-          return;
+          return false;
         }
       }
+      
+      return true;
     } catch (err) {
       log.error(`Failed to create worktree for job ${jobId}: ${err}`);
+      return false;
+    }
+  }
+
+  /**
+   * Check preparing jobs and submit them to runner once their worktrees are ready.
+   * Uses Promise.race with resolved promises to check without blocking.
+   */
+  private async checkPreparingJobs(spec: PlanSpec, plan: InternalPlanState, repoPath: string): Promise<void> {
+    if (plan.preparing.length === 0) return;
+    
+    const jobsToSubmit: string[] = [];
+    const jobsFailed: string[] = [];
+    
+    // Check each preparing job's promise without blocking
+    for (const jobId of [...plan.preparing]) {
+      const promise = plan.worktreePromises.get(jobId);
+      if (!promise) {
+        log.warn(`No worktree promise found for preparing job ${jobId}`);
+        continue;
+      }
+      
+      // Non-blocking check: race with an already-resolved promise
+      const status = await Promise.race([
+        promise.then(success => ({ done: true, success })),
+        Promise.resolve({ done: false, success: false })
+      ]);
+      
+      if (status.done) {
+        // Worktree creation completed
+        plan.worktreePromises.delete(jobId);
+        if (status.success) {
+          jobsToSubmit.push(jobId);
+        } else {
+          jobsFailed.push(jobId);
+        }
+      }
+      // If not done, job stays in preparing state
+    }
+    
+    // Submit ready jobs to runner
+    for (const jobId of jobsToSubmit) {
+      plan.preparing = plan.preparing.filter(id => id !== jobId);
+      await this.submitJobToRunner(spec, plan, jobId, repoPath);
+    }
+    
+    // Mark failed jobs
+    for (const jobId of jobsFailed) {
+      plan.preparing = plan.preparing.filter(id => id !== jobId);
       plan.failed.push(jobId);
-      plan.queued = plan.queued.filter(id => id !== jobId);
+      this.publicStateCacheValid = false;
+    }
+  }
+
+  /**
+   * Submit a job to the runner (worktree already created).
+   */
+  private async submitJobToRunner(spec: PlanSpec, plan: InternalPlanState, jobId: string, repoPath: string): Promise<void> {
+    const planJob = spec.jobs.find(j => j.id === jobId);
+    if (!planJob) {
+      log.error(`Job ${jobId} not found in plan spec`);
       return;
     }
+    
+    const { baseBranch } = this.computeBaseBranch(spec, plan, planJob, repoPath);
+    const runnerJobId = planJob.runnerJobId!;
+    const targetBranch = planJob.inputs.targetBranch!;
+    const worktreePath = plan.worktreePaths.get(jobId)!;
+    
+    log.info(`Submitting job: ${jobId}`, {
+      planId: spec.id,
+      runnerJobId,
+      baseBranch,
+      targetBranch,
+      worktreePath
+    });
     
     // Create job spec for the runner - marked as plan-managed
     const jobSpec: JobSpec = {
@@ -751,10 +839,8 @@ export class PlanRunner {
         targetBranch,
         worktreeRoot: spec.worktreeRoot || '.worktrees',
         instructions: planJob.inputs?.instructions || '',
-        // Plan-managed job settings
         isPlanManaged: true,
         worktreePath: worktreePath,
-        // Track parent plan for UI grouping
         planId: spec.id
       },
       policy: {
@@ -777,6 +863,7 @@ export class PlanRunner {
     log.debug(`Job ${jobId} submitted to runner`, {
       planId: spec.id,
       queued: plan.queued.length,
+      preparing: plan.preparing.length,
       running: plan.running.length,
       done: plan.done.length
     });

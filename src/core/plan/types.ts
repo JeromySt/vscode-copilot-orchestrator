@@ -177,6 +177,8 @@ export interface PlanState {
   status: PlanStatus;
   /** Jobs waiting to be scheduled */
   queued: string[];
+  /** Jobs whose worktrees are being created (async) */
+  preparing: string[];
   /** Currently running jobs */
   running: string[];
   /** Successfully completed jobs */
@@ -230,6 +232,8 @@ export interface InternalPlanState extends Omit<PlanState, 'pendingSubPlans' | '
   completedBranches: Map<string, string>;
   /** Map of plan job ID -> worktree path */
   worktreePaths: Map<string, string>;
+  /** Map of plan job ID -> worktree creation promise (for async preparation) */
+  worktreePromises: Map<string, Promise<boolean>>;
   /** 
    * The targetBranchRoot for this plan.
    * - If baseBranch was a default branch, this is a new feature branch
@@ -268,6 +272,7 @@ export function createInternalState(id: string): InternalPlanState {
     id,
     status: 'queued',
     queued: [],
+    preparing: [],
     running: [],
     done: [],
     failed: [],
@@ -276,6 +281,7 @@ export function createInternalState(id: string): InternalPlanState {
     jobIdMap: new Map(),
     completedBranches: new Map(),
     worktreePaths: new Map(),
+    worktreePromises: new Map(),
     pendingSubPlans: new Set(),
     runningSubPlans: new Map(),
     completedSubPlans: new Map(),
@@ -293,6 +299,7 @@ export function toPublicState(internal: InternalPlanState): PlanState {
     id: internal.id,
     status: internal.status,
     queued: [...internal.queued],
+    preparing: [...internal.preparing],
     running: [...internal.running],
     done: [...internal.done],
     failed: [...internal.failed],
