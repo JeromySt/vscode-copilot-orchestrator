@@ -101,6 +101,8 @@ export class PlanDetailPanel {
       existingPanel._panel.reveal(column);
       // Show loading state while refreshing
       existingPanel._panel.webview.html = existingPanel._getLoadingHtml();
+      // Reset state hash to force re-render (we just set loading HTML)
+      existingPanel._lastStateHash = '';
       // Defer content loading to allow loading state to render
       setImmediate(() => existingPanel._update());
       return existingPanel;
