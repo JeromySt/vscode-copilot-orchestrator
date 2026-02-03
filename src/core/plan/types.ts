@@ -256,7 +256,7 @@ export interface InternalPlanState extends Omit<PlanState, 'pendingSubPlans' | '
   pendingSubPlans: Set<string>;
   /** Sub-plans currently running (sub-plan ID -> child plan ID) */
   runningSubPlans: Map<string, string>;
-  /** Sub-plans that have completed (sub-plan ID -> completed commit SHA) */
+  /** Sub-plans that have completed (sub-plan ID -> child plan ID) */
   completedSubPlans: Map<string, string>;
   /** Sub-plans that have failed */
   failedSubPlans: Set<string>;

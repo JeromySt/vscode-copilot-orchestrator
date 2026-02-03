@@ -1309,7 +1309,8 @@ export class PlanRunner {
         }
         
         plan.runningSubPlans.delete(subPlanId);
-        plan.completedSubPlans.set(subPlanId, completedCommit || 'unknown');
+        // Store childPlanId (not commit) so UI can navigate to sub-plan detail view
+        plan.completedSubPlans.set(subPlanId, childPlanId);
         this.persist();  // Persist sub-plan completion immediately
         
         // Append sub-plan's aggregated work summary to parent - computed once at completion
