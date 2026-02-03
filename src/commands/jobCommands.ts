@@ -401,7 +401,7 @@ async function handleShowJobDetails(
   setImmediate(() => {
     const job = runner.list().find(j => j.id === currentJobId);
     if (!job) {
-      panel.webview.html = `<html><body style="padding:20px;font-family:sans-serif;color:#cc0000;"><h2>❌ Job not found</h2><p>Job ${currentJobId} could not be located.</p></body></html>`;
+      panel.webview.html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';"></head><body style="padding:20px;font-family:sans-serif;color:#cc0000;"><h2>❌ Job not found</h2><p>Job ${currentJobId} could not be located.</p></body></html>`;
       return;
     }
 
@@ -428,12 +428,10 @@ function setupJobDetailMessageHandler(
   jobDetailPanels: Map<string, vscode.WebviewPanel>,
   processMonitor: ProcessMonitor
 ): void {
-  const fs = require('fs');
-
   panel.webview.onDidReceiveMessage(async message => {
     switch (message.command) {
       case 'getLogContent':
-        handleGetLogContent(panel, message);
+        await handleGetLogContent(panel, message);
         break;
       case 'copyToClipboard':
         await vscode.env.clipboard.writeText(message.text);
@@ -465,35 +463,41 @@ function setupJobDetailMessageHandler(
   });
 }
 
-function handleGetLogContent(panel: vscode.WebviewPanel, message: any): void {
-  const fs = require('fs');
+async function handleGetLogContent(panel: vscode.WebviewPanel, message: any): Promise<void> {
+  const fs = require('fs').promises;
   const { logPath, section } = message;
 
-  if (!fs.existsSync(logPath)) return;
+  try {
+    let content = await fs.readFile(logPath, 'utf-8');
 
-  let content = fs.readFileSync(logPath, 'utf-8');
+    if (section && section !== 'FULL') {
+      const start = content.indexOf(`========== ${section} SECTION START ==========`);
+      const end = content.indexOf(`========== ${section} SECTION END ==========`);
 
-  if (section && section !== 'FULL') {
-    const start = content.indexOf(`========== ${section} SECTION START ==========`);
-    const end = content.indexOf(`========== ${section} SECTION END ==========`);
-
-    if (start !== -1 && end !== -1) {
-      content = content.substring(start, end + `========== ${section} SECTION END ==========`.length);
-    } else if (start !== -1) {
-      content = content.substring(start);
-    } else {
-      content = `No ${section} section found in log`;
+      if (start !== -1 && end !== -1) {
+        content = content.substring(start, end + `========== ${section} SECTION END ==========`.length);
+      } else if (start !== -1) {
+        content = content.substring(start);
+      } else {
+        content = `No ${section} section found in log`;
+      }
     }
-  }
 
-  panel.webview.postMessage({ command: 'updateLogContent', logPath, section, content });
+    panel.webview.postMessage({ command: 'updateLogContent', logPath, section, content });
+  } catch {
+    // File doesn't exist or can't be read
+  }
 }
 
 async function handleOpenLog(runner: JobRunner, message: any, jobId: string): Promise<void> {
-  const fs = require('fs');
+  const fs = require('fs').promises;
   const { logPath, section, isRunning } = message;
 
-  if (!fs.existsSync(logPath)) return;
+  try {
+    await fs.access(logPath);
+  } catch {
+    return; // File doesn't exist
+  }
 
   const doc = await vscode.workspace.openTextDocument(logPath);
   const editor = await vscode.window.showTextDocument(doc, {
@@ -559,10 +563,22 @@ async function handleGetProcessStats(
     const snapshot = await processMonitor.getSnapshot();
     const stats = processMonitor.buildTree(job.processIds, snapshot);
     if (stats?.length) {
-      panel.webview.postMessage({ command: 'updateProcessStats', stats });
+      // Check if webview is still valid before posting message
+      try {
+        panel.webview.postMessage({ command: 'updateProcessStats', stats });
+      } catch (postError: any) {
+        // Webview was disposed - this is expected when panel is closed
+        if (postError.message?.includes('disposed')) {
+          return; // Silently ignore - panel was closed
+        }
+        throw postError; // Re-throw unexpected errors
+      }
     }
-  } catch (error) {
-    log.error('Failed to get process stats', { error, jobId });
+  } catch (error: any) {
+    // Only log if it's not a disposal error
+    if (!error.message?.includes('disposed')) {
+      log.error('Failed to get process stats', { error, jobId });
+    }
   }
 }
 
@@ -599,10 +615,21 @@ function setupAutoRefresh(
     const panelRef = jobDetailPanels.get(jobId);
     if (panelRef) {
       const currentStepStatuses = JSON.stringify(job.stepStatuses || {});
-      const needsFullRender = lastJobStatus !== job.status || lastStepStatuses !== currentStepStatuses;
+      const needsUpdate = lastJobStatus !== job.status || lastStepStatuses !== currentStepStatuses;
       
-      if (needsFullRender) {
-        panelRef.webview.html = getJobDetailsHtml(job as any);
+      if (needsUpdate) {
+        // Send incremental update via postMessage instead of full HTML re-render
+        panelRef.webview.postMessage({
+          command: 'updateJobData',
+          job: {
+            id: job.id,
+            status: job.status,
+            currentStep: job.currentStep,
+            stepStatuses: job.stepStatuses,
+            startedAt: job.startedAt,
+            endedAt: job.endedAt
+          }
+        });
         lastJobStatus = job.status;
         lastStepStatuses = currentStepStatuses;
       }

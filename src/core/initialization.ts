@@ -312,6 +312,9 @@ export function initializePlansView(
         // RI merge status
         riMergeCompleted: p.riMergeCompleted,
         // Sub-plan information from spec and state
+        // Note: planRunner.list() returns PlanState where these are already converted:
+        // - runningSubPlans is Record<string, string>
+        // - completedSubPlans is string[]
         subPlans: spec?.subPlans,
         pendingSubPlans: p.pendingSubPlans,
         runningSubPlans: p.runningSubPlans,

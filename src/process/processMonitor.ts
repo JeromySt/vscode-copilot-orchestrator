@@ -7,10 +7,51 @@
  * @module process/processMonitor
  */
 
-import { execSync, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import * as os from 'os';
 import { ProcessInfo, ProcessNode } from '../types';
 import { IProcessMonitor } from '../interfaces/IProcessMonitor';
+
+/**
+ * Execute a command asynchronously and return stdout.
+ */
+function execAsync(command: string, args: string[], timeoutMs = 5000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args, {
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    let killed = false;
+    
+    const timer = setTimeout(() => {
+      killed = true;
+      proc.kill('SIGTERM');
+      reject(new Error(`Command timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    
+    proc.stdout?.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr?.on('data', (data) => { stderr += data.toString(); });
+    
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed) return;
+      if (code === 0 || stdout) {
+        resolve(stdout);
+      } else {
+        reject(new Error(`Command failed with code ${code}: ${stderr}`));
+      }
+    });
+    
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
 
 /**
  * Process monitor implementation supporting Windows and Unix systems.
@@ -169,11 +210,10 @@ export class ProcessMonitor implements IProcessMonitor {
    */
   private async getWindowsProcesses(): Promise<ProcessInfo[]> {
     try {
-      // Combined CIM query for efficiency
-      const output = execSync(
-        `powershell -NoProfile -Command "$procs = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,WorkingSetSize,CreationDate,ThreadCount,HandleCount,Priority,ExecutablePath; $perf = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Select-Object IDProcess,PercentProcessorTime; $cpuMap = @{}; foreach ($p in $perf) { if ($p.IDProcess) { $cpuMap[$p.IDProcess] = $p.PercentProcessorTime } }; $result = @(); foreach ($proc in $procs) { $result += @{ ProcessId = $proc.ProcessId; ParentProcessId = $proc.ParentProcessId; Name = $proc.Name; CommandLine = $proc.CommandLine; WorkingSetSize = $proc.WorkingSetSize; CPU = if ($cpuMap.ContainsKey($proc.ProcessId)) { $cpuMap[$proc.ProcessId] } else { 0 }; CreationDate = if ($proc.CreationDate) { $proc.CreationDate.ToString('o') } else { $null }; ThreadCount = $proc.ThreadCount; HandleCount = $proc.HandleCount; Priority = $proc.Priority; ExecutablePath = $proc.ExecutablePath } }; $result | ConvertTo-Json"`,
-        { encoding: 'utf-8', timeout: 5000 }
-      );
+      // Combined CIM query for efficiency - run asynchronously to avoid blocking
+      const psCommand = `$procs = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,WorkingSetSize,CreationDate,ThreadCount,HandleCount,Priority,ExecutablePath; $perf = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Select-Object IDProcess,PercentProcessorTime; $cpuMap = @{}; foreach ($p in $perf) { if ($p.IDProcess) { $cpuMap[$p.IDProcess] = $p.PercentProcessorTime } }; $result = @(); foreach ($proc in $procs) { $result += @{ ProcessId = $proc.ProcessId; ParentProcessId = $proc.ParentProcessId; Name = $proc.Name; CommandLine = $proc.CommandLine; WorkingSetSize = $proc.WorkingSetSize; CPU = if ($cpuMap.ContainsKey($proc.ProcessId)) { $cpuMap[$proc.ProcessId] } else { 0 }; CreationDate = if ($proc.CreationDate) { $proc.CreationDate.ToString('o') } else { $null }; ThreadCount = $proc.ThreadCount; HandleCount = $proc.HandleCount; Priority = $proc.Priority; ExecutablePath = $proc.ExecutablePath } }; $result | ConvertTo-Json`;
+      
+      const output = await execAsync('powershell', ['-NoProfile', '-Command', psCommand], 5000);
       
       const data = JSON.parse(output);
       const procs = Array.isArray(data) ? data : [data];
@@ -203,12 +243,9 @@ export class ProcessMonitor implements IProcessMonitor {
    */
   private async getUnixProcesses(): Promise<ProcessInfo[]> {
     try {
-      const output = execSync(
-        'ps -eo pid,ppid,%cpu,rss,comm,args 2>/dev/null || true',
-        { encoding: 'utf-8', timeout: 3000 }
-      ).trim();
+      const output = await execAsync('ps', ['-eo', 'pid,ppid,%cpu,rss,comm,args'], 3000);
       
-      const lines = output.split('\n').slice(1); // Skip header
+      const lines = output.trim().split('\n').slice(1); // Skip header
       const processes: ProcessInfo[] = [];
       
       for (const line of lines) {
@@ -244,11 +281,8 @@ export class ProcessMonitor implements IProcessMonitor {
    */
   private async terminateWindows(pid: number, force: boolean): Promise<void> {
     try {
-      const flag = force ? '/F' : '';
-      execSync(`taskkill ${flag} /T /PID ${pid}`, { 
-        stdio: 'ignore',
-        timeout: 5000 
-      });
+      const args = force ? ['/F', '/T', '/PID', String(pid)] : ['/T', '/PID', String(pid)];
+      await execAsync('taskkill', args, 5000);
     } catch (e) {
       console.error(`Failed to terminate Windows process ${pid}:`, e);
     }
@@ -259,16 +293,14 @@ export class ProcessMonitor implements IProcessMonitor {
    */
   private async terminateUnix(pid: number, force: boolean): Promise<void> {
     try {
-      // Get all descendant PIDs
-      const result = spawnSync('pgrep', ['-P', String(pid)], { 
-        encoding: 'utf-8' 
-      });
-      
-      const childPids = result.stdout
-        ?.trim()
-        .split('\n')
-        .filter(p => p)
-        .map(p => parseInt(p, 10)) || [];
+      // Get all descendant PIDs asynchronously
+      let childPids: number[] = [];
+      try {
+        const result = await execAsync('pgrep', ['-P', String(pid)], 2000);
+        childPids = result.trim().split('\n').filter(p => p).map(p => parseInt(p, 10));
+      } catch {
+        // pgrep returns non-zero if no children found
+      }
       
       // Terminate children first
       for (const childPid of childPids) {

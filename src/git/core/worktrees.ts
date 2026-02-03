@@ -54,7 +54,8 @@ export async function create(options: CreateOptions): Promise<void> {
  * Create a git worktree and return timing breakdown.
  * 
  * Creates or resets the branch to point at fromRef and creates a worktree
- * with that branch checked out. Also initializes submodules if present.
+ * with that branch checked out. For submodules, creates symlinks to the
+ * original submodule folders (avoiding expensive re-checkout).
  * 
  * @param options - Worktree creation options
  * @returns Timing breakdown
@@ -81,8 +82,8 @@ export async function createWithTiming(options: CreateOptions): Promise<CreateTi
   
   log?.(`[worktree] ✓ Created worktree (${worktreeMs}ms)`);
   
-  // Initialize submodules (await so we can time it)
-  const submoduleMs = await initializeSubmodules(worktreePath, branchName, log);
+  // Setup submodules via symlinks (much faster than full checkout)
+  const submoduleMs = await setupSubmoduleSymlinks(repoPath, worktreePath, log);
   
   const totalMs = Date.now() - totalStart;
   return { worktreeMs, submoduleMs, totalMs };
@@ -154,6 +155,85 @@ export async function removeSafe(
 }
 
 /**
+ * Create a worktree in detached HEAD mode at a specific commit/branch.
+ * 
+ * This is useful when you don't need a branch - commits can be merged by SHA.
+ * Benefits: No branch to manage/cleanup, no "branch already checked out" errors.
+ * 
+ * @param repoPath - Path to the main repository
+ * @param worktreePath - Path where the worktree will be created
+ * @param commitish - Branch name or commit to checkout (detached)
+ * @param log - Optional logger
+ * @throws Error if worktree creation fails
+ */
+export async function createDetached(
+  repoPath: string,
+  worktreePath: string,
+  commitish: string,
+  log?: GitLogger
+): Promise<void> {
+  await createDetachedWithTiming(repoPath, worktreePath, commitish, log);
+}
+
+/**
+ * Create a worktree in detached HEAD mode and return timing info.
+ * 
+ * This is the preferred method for job worktrees:
+ * - No branch created (detached HEAD)
+ * - Returns the base commit SHA for tracking
+ * - Submodules set up via symlinks
+ * 
+ * @param repoPath - Path to the main repository
+ * @param worktreePath - Path where the worktree will be created
+ * @param commitish - Branch name or commit to start from (detached)
+ * @param log - Optional logger
+ * @returns Timing breakdown and base commit SHA
+ */
+export async function createDetachedWithTiming(
+  repoPath: string,
+  worktreePath: string,
+  commitish: string,
+  log?: GitLogger
+): Promise<CreateTiming & { baseCommit: string }> {
+  const totalStart = Date.now();
+  
+  // Ensure parent directory exists
+  const parentDir = path.dirname(worktreePath);
+  try {
+    await fs.promises.access(parentDir);
+  } catch {
+    await fs.promises.mkdir(parentDir, { recursive: true });
+  }
+  
+  // Resolve the commitish to a SHA first (for tracking)
+  const resolveResult = await execAsync(['rev-parse', commitish], { cwd: repoPath });
+  const baseCommit = resolveResult.success ? resolveResult.stdout.trim() : commitish;
+  
+  log?.(`[worktree] Creating detached worktree at '${worktreePath}' from '${commitish}' (${baseCommit.slice(0, 8)})`);
+  
+  // Use --detach to create worktree in detached HEAD mode
+  const wtAddStart = Date.now();
+  await execAsyncOrThrow(['worktree', 'add', '--detach', worktreePath, commitish], repoPath);
+  const worktreeMs = Date.now() - wtAddStart;
+  
+  log?.(`[worktree] ✓ Created detached worktree (${worktreeMs}ms)`);
+  
+  // Setup submodules via symlinks
+  const submoduleMs = await setupSubmoduleSymlinks(repoPath, worktreePath, log);
+  
+  const totalMs = Date.now() - totalStart;
+  return { worktreeMs, submoduleMs, totalMs, baseCommit };
+}
+
+/**
+ * Get the current HEAD commit SHA from a worktree.
+ */
+export async function getHeadCommit(worktreePath: string): Promise<string | null> {
+  const result = await execAsync(['rev-parse', 'HEAD'], { cwd: worktreePath });
+  return result.success ? result.stdout.trim() : null;
+}
+
+/**
  * Check if a path is a valid git worktree.
  */
 export async function isValid(worktreePath: string): Promise<boolean> {
@@ -216,73 +296,112 @@ export async function prune(repoPath: string): Promise<void> {
 // =============================================================================
 
 /**
- * Initialize submodules in a worktree.
- * Returns time taken in ms (0 if no submodules).
+ * Setup submodules in a worktree using symlinks.
  * 
- * For worktrees, we need to:
- * 1. Check if .gitmodules exists
- * 2. Run submodule init to register submodules
- * 3. Run submodule update to actually clone them
+ * Instead of running expensive `git submodule update --init --recursive`,
+ * we create symlinks from the worktree's submodule paths to the original
+ * submodule folders in the main repo. This is MUCH faster and works because:
+ * - The main repo's submodules are already initialized
+ * - Submodule content doesn't typically change between branches
+ * - If it does, the user can manually init submodules
+ * 
+ * Returns time taken in ms (0 if no submodules).
  */
-async function initializeSubmodules(worktreePath: string, worktreeBranch: string, log?: GitLogger): Promise<number> {
+async function setupSubmoduleSymlinks(repoPath: string, worktreePath: string, log?: GitLogger): Promise<number> {
   const gitmodulesPath = path.join(worktreePath, '.gitmodules');
   
-  // Async check for .gitmodules
+  log?.(`[worktree] Checking for submodules at: ${gitmodulesPath}`);
+  
+  // Check if .gitmodules exists in worktree
   try {
     await fs.promises.access(gitmodulesPath);
-  } catch {
-    log?.(`[worktree] No submodules detected (no .gitmodules file)`);
+    const stats = await fs.promises.stat(gitmodulesPath);
+    if (stats.size === 0) {
+      log?.(`[worktree] .gitmodules exists but is empty - no submodules`);
+      return 0;
+    }
+    log?.(`[worktree] .gitmodules found (${stats.size} bytes)`);
+  } catch (err: any) {
+    log?.(`[worktree] No submodules detected: ${err.code || err.message}`);
     return 0;
   }
   
-  // Submodules exist - initialize them
-  log?.(`[worktree] .gitmodules found, initializing submodules...`);
+  const submodStart = Date.now();
   
-  try {
-    const submodStart = Date.now();
+  // Parse .gitmodules to get submodule paths
+  const listResult = await execAsync(
+    ['config', '--file', gitmodulesPath, '--get-regexp', '^submodule\\..*\\.path$'],
+    { cwd: worktreePath }
+  );
+  
+  if (!listResult.success || !listResult.stdout.trim()) {
+    log?.(`[worktree] Could not parse .gitmodules`);
+    return 0;
+  }
+  
+  const lines = listResult.stdout.trim().split(/\r?\n/).filter(Boolean);
+  let symlinksCreated = 0;
+  let symlinksFailed = 0;
+  
+  for (const line of lines) {
+    const match = line.match(/^submodule\.(.*?)\.path\s+(.*)$/);
+    if (!match) continue;
     
-    // First, explicitly init submodules (required for worktrees)
-    log?.(`[worktree] Running: git submodule init`);
-    const initResult = await execAsync(['submodule', 'init'], { 
-      cwd: worktreePath,
-      timeoutMs: 30000
-    });
-    if (!initResult.success) {
-      log?.(`[worktree] ⚠ submodule init warning: ${initResult.stderr}`);
-    }
+    const submoduleName = match[1];
+    const submodulePath = match[2];
     
-    // Then update with recursive to clone nested submodules
-    log?.(`[worktree] Running: git submodule update --init --recursive`);
-    const updateResult = await execAsync(['submodule', 'update', '--init', '--recursive'], { 
-      cwd: worktreePath, 
-      timeoutMs: 300000 // 5 minutes for large submodules
-    });
+    const sourceInRepo = path.join(repoPath, submodulePath);
+    const destInWorktree = path.join(worktreePath, submodulePath);
     
-    if (!updateResult.success) {
-      log?.(`[worktree] ⚠ submodule update failed: ${updateResult.stderr}`);
-      // Try alternative: sync and then update
-      log?.(`[worktree] Trying: git submodule sync --recursive`);
-      await execAsync(['submodule', 'sync', '--recursive'], { cwd: worktreePath });
-      
-      log?.(`[worktree] Retrying: git submodule update --init --recursive`);
-      const retryResult = await execAsync(['submodule', 'update', '--init', '--recursive'], { 
-        cwd: worktreePath, 
-        timeoutMs: 300000
-      });
-      if (!retryResult.success) {
-        log?.(`[worktree] ⚠ submodule update retry failed: ${retryResult.stderr}`);
+    try {
+      // Check if submodule exists in main repo
+      const sourceStats = await fs.promises.stat(sourceInRepo);
+      if (!sourceStats.isDirectory()) {
+        log?.(`[worktree] ⚠ Submodule '${submoduleName}' at '${sourceInRepo}' is not a directory`);
+        symlinksFailed++;
+        continue;
       }
+      
+      // Ensure parent directory exists in worktree
+      await fs.promises.mkdir(path.dirname(destInWorktree), { recursive: true });
+      
+      // Remove any existing file/directory at destination
+      try {
+        const destStats = await fs.promises.lstat(destInWorktree);
+        if (destStats.isSymbolicLink() || destStats.isFile()) {
+          await fs.promises.unlink(destInWorktree);
+        } else if (destStats.isDirectory()) {
+          await fs.promises.rm(destInWorktree, { recursive: true, force: true });
+        }
+      } catch {
+        // Destination doesn't exist, that's fine
+      }
+      
+      // Create symlink (use junction on Windows for directory symlinks without admin rights)
+      const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+      await fs.promises.symlink(sourceInRepo, destInWorktree, symlinkType);
+      
+      symlinksCreated++;
+      log?.(`[worktree] ✓ Symlinked submodule '${submoduleName}': ${destInWorktree} -> ${sourceInRepo}`);
+      
+    } catch (err: any) {
+      symlinksFailed++;
+      log?.(`[worktree] ⚠ Failed to symlink submodule '${submoduleName}': ${err.message}`);
     }
-    
-    const submodTime = Date.now() - submodStart;
-    log?.(`[worktree] ✓ Submodules initialized (${submodTime}ms)`);
-    
-    // Configure submodule.recurse for future git operations
-    await execAsync(['config', 'submodule.recurse', 'true'], { cwd: worktreePath });
-    
-    return submodTime;
-  } catch (error) {
-    log?.(`[worktree] ⚠ Submodule initialization error: ${error}`);
-    return 0;
   }
+  
+  const submodTime = Date.now() - submodStart;
+  
+  if (symlinksCreated > 0) {
+    log?.(`[worktree] ✓ Created ${symlinksCreated} submodule symlink(s) in ${submodTime}ms`);
+  }
+  
+  if (symlinksFailed > 0) {
+    log?.(`[worktree] ⚠ ${symlinksFailed} submodule symlink(s) failed - run 'git submodule update --init' in worktree if needed`);
+  }
+  
+  // Configure submodule.recurse for git operations (in case user does init later)
+  await execAsync(['config', 'submodule.recurse', 'true'], { cwd: worktreePath });
+  
+  return submodTime;
 }

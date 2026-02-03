@@ -10,6 +10,7 @@
 
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import { Logger, ComponentLogger } from '../logger';
 import { PlanSpec, InternalPlanState } from './types';
 import * as git from '../../git';
@@ -37,13 +38,22 @@ export async function cleanupWorkUnit(
   workUnitId: string,
   repoPath: string
 ): Promise<void> {
+  log.info(`Starting cleanup for work unit ${workUnitId}`, {
+    planId: spec.id,
+    hasWorktreePath: plan.worktreePaths.has(workUnitId),
+    hasCompletedCommit: plan.completedCommits.has(workUnitId),
+  });
+  
   // Initialize cleanedWorkUnits if needed (for backward compat with persisted plans)
   if (!plan.cleanedWorkUnits) {
     plan.cleanedWorkUnits = new Set();
   }
   
   // Avoid re-cleaning already cleaned work units
-  if (plan.cleanedWorkUnits.has(workUnitId)) return;
+  if (plan.cleanedWorkUnits.has(workUnitId)) {
+    log.debug(`Skipping cleanup for ${workUnitId} - already cleaned`);
+    return;
+  }
 
   // Clean up the worktree
   const worktreePath = plan.worktreePaths.get(workUnitId);
@@ -71,47 +81,29 @@ export async function cleanupWorkUnit(
     }
   }
 
-  // Clean up the branch (only the job-specific branch, not merge branches)
-  const completedBranch = plan.completedBranches.get(workUnitId);
-  if (completedBranch) {
-    // Delete local branch
-    const localDeleted = await git.branches.deleteLocal(repoPath, completedBranch, { 
-      force: true,
-      log: s => log.debug(s)
-    });
-    if (localDeleted) {
-      log.debug(`Deleted local branch for ${workUnitId}`, { branch: completedBranch });
-    } else {
-      log.warn(`Failed to delete local branch for ${workUnitId}`, { branch: completedBranch });
-    }
-
-    // Only delete remote branch if pushOnSuccess is enabled (branches were pushed)
-    if (isPushEnabled()) {
-      const remoteDeleted = await git.branches.deleteRemote(repoPath, completedBranch, {
-        log: s => log.debug(s)
-      });
-      if (remoteDeleted) {
-        log.debug(`Deleted remote branch for ${workUnitId}`, { branch: completedBranch });
-      }
-    }
-
-    plan.completedBranches.delete(workUnitId);
-  }
+  // NOTE: With detached HEAD worktrees, there are no branches to clean up.
+  // Commits are tracked by SHA in completedCommits, which don't need cleanup.
+  // Clear the commit reference since the worktree is gone.
+  plan.completedCommits.delete(workUnitId);
+  plan.baseCommits.delete(workUnitId);
 
   // Mark this work unit as cleaned
   plan.cleanedWorkUnits.add(workUnitId);
 
   log.info(`Cleaned up work unit ${workUnitId}`, {
     worktree: !!worktreePath,
-    branch: !!completedBranch,
   });
 
   // Now check if any upstream producers can be cleaned up
   // A producer can be cleaned up if ALL its consumers have been cleaned up
   const job = spec.jobs.find(j => j.id === workUnitId);
-  if (job) {
+  if (job && job.consumesFrom.length > 0) {
+    log.debug(`Checking if producers of ${workUnitId} can be cleaned up`, { producers: job.consumesFrom });
     for (const producerId of job.consumesFrom) {
-      if (canCleanupProducer(spec, plan, producerId)) {
+      const canCleanup = canCleanupProducer(spec, plan, producerId);
+      log.debug(`Producer ${producerId} cleanup check: ${canCleanup}`);
+      if (canCleanup) {
+        log.info(`Triggering cleanup for producer ${producerId} (all consumers cleaned)`);
         await cleanupWorkUnit(spec, plan, producerId, repoPath);
       }
     }
@@ -119,9 +111,10 @@ export async function cleanupWorkUnit(
 
   // Also check sub-plan producers
   const subPlan = spec.subPlans?.find(sp => sp.id === workUnitId);
-  if (subPlan) {
+  if (subPlan && subPlan.consumesFrom.length > 0) {
     for (const producerId of subPlan.consumesFrom) {
       if (canCleanupProducer(spec, plan, producerId)) {
+        log.info(`Triggering cleanup for producer ${producerId} (all consumers cleaned)`);
         await cleanupWorkUnit(spec, plan, producerId, repoPath);
       }
     }
@@ -171,33 +164,24 @@ export function canCleanupProducer(
 /**
  * Clean up all worktrees and branches for a plan.
  * Used when deleting a plan or cleaning up after failure.
+ * 
+ * NOTE: This may change the main repo's checked-out branch if it's currently
+ * on a branch that will be deleted. This is acceptable because cleanup is
+ * only triggered by explicit user action (delete plan), not during normal operation.
+ * 
+ * NOTE: With detached HEAD worktrees, there are no branches to clean up.
+ * We only need to remove worktrees and clear commit tracking.
  */
 export async function cleanupAllPlanResources(
   spec: PlanSpec,
   plan: InternalPlanState,
   repoPath: string
 ): Promise<void> {
-  log.info(`Cleaning up all resources for plan ${spec.id}`);
-
-  // First, ensure we're on a safe branch (not one we're about to delete)
-  // Switch to baseBranch or main/master
-  const safeBranch = spec.baseBranch || 'main';
-  try {
-    const currentBranch = await git.branches.current(repoPath);
-    // Check if current branch is one we might delete
-    const branchesToDelete = new Set<string>();
-    for (const [, branch] of plan.completedBranches) branchesToDelete.add(branch);
-    for (const [, branch] of plan.subPlanIntegrationBranches || []) branchesToDelete.add(branch);
-    if (plan.targetBranchRootCreated && plan.targetBranchRoot) branchesToDelete.add(plan.targetBranchRoot);
-    
-    if (branchesToDelete.has(currentBranch)) {
-      log.debug(`Switching from ${currentBranch} to ${safeBranch} before cleanup`);
-      await git.branches.checkout(repoPath, safeBranch);
-    }
-  } catch (err) {
-    // Ignore - we'll proceed with cleanup and handle individual failures
-    log.debug(`Could not check/switch branch before cleanup: ${err}`);
-  }
+  log.info(`Cleaning up all resources for plan ${spec.id}`, {
+    worktreeCount: plan.worktreePaths.size,
+    commitCount: plan.completedCommits.size,
+    worktrees: Array.from(plan.worktreePaths.entries()),
+  });
 
   // Clean up all worktrees
   for (const [workUnitId, worktreePath] of plan.worktreePaths) {
@@ -221,63 +205,38 @@ export async function cleanupAllPlanResources(
   }
   plan.worktreePaths.clear();
 
-  const pushEnabled = isPushEnabled();
-
-  // Clean up all branches (local, and remote only if pushOnSuccess is enabled)
-  for (const [workUnitId, branch] of plan.completedBranches) {
-    const localDeleted = await git.branches.deleteLocal(repoPath, branch, { 
-      force: true,
-      log: s => log.debug(s)
-    });
-    if (!localDeleted) {
-      log.warn(`Failed to delete local branch: ${branch}`);
-    }
-    if (pushEnabled) {
-      await git.branches.deleteRemote(repoPath, branch, {
-        log: s => log.debug(s)
-      });
-    }
-  }
-  plan.completedBranches.clear();
-
-  // Clean up integration branches
-  if (plan.subPlanIntegrationBranches) {
-    for (const [subPlanId, branch] of plan.subPlanIntegrationBranches) {
-      const localDeleted = await git.branches.deleteLocal(repoPath, branch, { 
-        force: true,
-        log: s => log.debug(s)
-      });
-      if (!localDeleted) {
-        log.warn(`Failed to delete integration branch: ${branch}`);
-      }
-      if (pushEnabled) {
-        await git.branches.deleteRemote(repoPath, branch, {
-          log: s => log.debug(s)
-        });
-      }
-    }
-    plan.subPlanIntegrationBranches.clear();
-  }
-
-  // Clean up targetBranchRoot if we created it
-  if (plan.targetBranchRootCreated && plan.targetBranchRoot) {
-    const localDeleted = await git.branches.deleteLocal(repoPath, plan.targetBranchRoot, { 
-      force: true,
-      log: s => log.debug(s)
-    });
-    if (localDeleted) {
-      log.debug(`Deleted targetBranchRoot: ${plan.targetBranchRoot}`);
-    } else {
-      log.warn(`Failed to delete targetBranchRoot: ${plan.targetBranchRoot}`);
-    }
-    if (pushEnabled) {
-      await git.branches.deleteRemote(repoPath, plan.targetBranchRoot, {
-        log: s => log.debug(s)
-      });
-    }
-  }
+  // Clear commit tracking (no branches to delete with detached HEAD worktrees)
+  plan.completedCommits.clear();
+  plan.baseCommits.clear();
+  plan.completedSubPlans.clear();
 
   log.info(`Plan ${spec.id} resources cleaned up`);
+  
+  // Clean up the worktree root directory for this plan
+  // Note: spec.worktreeRoot uses internal UUID for consistency
+  const internalId = (spec as any)._internalId || spec.id;
+  const worktreeRoot = path.join(repoPath, spec.worktreeRoot || `.worktrees/${internalId}`);
+  log.debug(`Cleaning up worktree root: ${worktreeRoot}`);
+  await cleanupWorktreeRoot(worktreeRoot);
+  
+  // Also clean up any temporary merge worktrees that may have been left behind
+  const mergeWorktreeDir = path.join(repoPath, '.worktrees');
+  try {
+    const entries = await fs.promises.readdir(mergeWorktreeDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name.startsWith('_merge_')) {
+        const mergePath = path.join(mergeWorktreeDir, entry.name);
+        log.debug(`Cleaning up leftover merge worktree: ${mergePath}`);
+        try {
+          await git.worktrees.removeSafe(repoPath, mergePath, { force: true });
+        } catch {
+          await fs.promises.rm(mergePath, { recursive: true, force: true }).catch(() => {});
+        }
+      }
+    }
+  } catch {
+    // .worktrees dir doesn't exist, that's fine
+  }
 }
 
 /**

@@ -177,8 +177,10 @@ export function getJobDetailsJs(jobJson: string): string {
         tab.classList.add('active');
         logViewer.setAttribute('data-section', section);
         
-        // Show loading indicator without clearing content (reduces jumpiness)
+        // Show loading indicator immediately for visual feedback
         const currentScroll = document.documentElement.scrollTop || document.body.scrollTop;
+        logViewer.classList.add('loading-content');
+        logViewer.innerHTML = '<div class="loading-indicator">⏳ Loading ' + (section === 'FULL' ? 'full log' : section.toLowerCase() + ' section') + '...</div>';
         loadLog(logViewer);
         
         // Restore scroll position after a brief delay
@@ -298,25 +300,97 @@ export function getJobDetailsJs(jobJson: string): string {
     window.addEventListener('message', event => {
       const message = event.data;
       
+      if (message.command === 'updateJobData') {
+        // Incremental update of job data without full HTML re-render
+        const job = message.job;
+        currentJob = job;
+        
+        // Update status badge
+        const statusBadge = document.getElementById('job-status-badge');
+        if (statusBadge) {
+          statusBadge.className = 'status-badge ' + job.status;
+          const statusText = { running: '● Running', queued: '◯ Queued', succeeded: '✓ Succeeded', failed: '✗ Failed', canceled: '⊘ Canceled' };
+          statusBadge.textContent = statusText[job.status] || job.status;
+        }
+        
+        // Update current step
+        const stepEl = document.getElementById('job-current-step');
+        if (stepEl && job.currentStep) {
+          stepEl.textContent = job.currentStep;
+        }
+        
+        // Update step status badges
+        if (job.stepStatuses) {
+          for (const [step, status] of Object.entries(job.stepStatuses)) {
+            const stepBadge = document.getElementById('step-' + step);
+            if (stepBadge) {
+              stepBadge.className = 'phase-badge ' + status;
+              const icons = { success: '✓', failed: '✗', running: '●', pending: '○', skipped: '–' };
+              stepBadge.innerHTML = (icons[status] || '○') + ' ' + step.charAt(0).toUpperCase() + step.slice(1);
+            }
+          }
+        }
+        
+        // Update duration if job completed
+        if (job.status !== 'running' && job.status !== 'queued') {
+          const liveDur = document.querySelector('.live-duration');
+          if (liveDur && job.startedAt && job.endedAt) {
+            const elapsed = Math.floor((job.endedAt - job.startedAt) / 1000);
+            liveDur.textContent = formatDuration(elapsed);
+            liveDur.classList.remove('live-duration');
+          }
+        }
+        
+        // Update action buttons visibility
+        const cancelBtn = document.querySelector('.action-btn[data-action="cancel"]');
+        const retryBtn = document.querySelector('.action-btn[data-action="retry"]');
+        const deleteBtn = document.querySelector('.action-btn[data-action="delete"]');
+        
+        if (cancelBtn) {
+          cancelBtn.style.display = (job.status === 'running' || job.status === 'queued') ? 'inline-block' : 'none';
+        }
+        if (retryBtn) {
+          retryBtn.style.display = (job.status === 'failed' || job.status === 'canceled') ? 'inline-block' : 'none';
+        }
+        if (deleteBtn) {
+          deleteBtn.style.display = (job.status !== 'running' && job.status !== 'queued') ? 'inline-block' : 'none';
+        }
+        
+        // Update log viewer running state
+        document.querySelectorAll('.log-viewer').forEach(viewer => {
+          const wasRunning = viewer.getAttribute('data-running') === 'true';
+          const isRunning = job.status === 'running';
+          viewer.setAttribute('data-running', isRunning ? 'true' : 'false');
+          
+          // If just completed, load final log state
+          if (wasRunning && !isRunning) {
+            loadLog(viewer);
+          }
+        });
+        
+        return;
+      }
+      
       if (message.command === 'updateLogContent') {
         document.querySelectorAll('.log-viewer').forEach(viewer => {
           if (viewer.getAttribute('data-log') === message.logPath &&
               viewer.getAttribute('data-section') === message.section) {
             
-            // Only update if content actually changed to avoid layout thrashing
+            // Remove loading state
+            viewer.classList.remove('loading-content');
+            
+            // Update content
             const newContent = message.content || 'No log content';
-            if (viewer.textContent !== newContent) {
-              const shouldAutoScroll = autoScrollEnabled.get(viewer) !== false;
-              const scrollTop = viewer.scrollTop;
-              
-              viewer.textContent = newContent;
-              
-              if (viewer.getAttribute('data-running') === 'true' && shouldAutoScroll) {
-                viewer.scrollTop = viewer.scrollHeight;
-              } else {
-                // Preserve scroll position for non-running logs
-                viewer.scrollTop = scrollTop;
-              }
+            const shouldAutoScroll = autoScrollEnabled.get(viewer) !== false;
+            const scrollTop = viewer.scrollTop;
+            
+            viewer.textContent = newContent;
+            
+            if (viewer.getAttribute('data-running') === 'true' && shouldAutoScroll) {
+              viewer.scrollTop = viewer.scrollHeight;
+            } else {
+              // Preserve scroll position for non-running logs
+              viewer.scrollTop = scrollTop;
             }
           }
         });

@@ -24,7 +24,9 @@ const log: ComponentLogger = Logger.for('plans');
  */
 interface SerializedPlanState extends PlanState {
   _jobIdMap: [string, string][];
-  _completedBranches: [string, string][];
+  _completedCommits: [string, string][];
+  _baseCommits: [string, string][];
+  _completedBranches?: [string, string][];  // Legacy - for backwards compatibility
   _worktreePaths: [string, string][];
   _targetBranchRoot?: string;
   _targetBranchRootCreated?: boolean;
@@ -32,7 +34,6 @@ interface SerializedPlanState extends PlanState {
   _runningSubPlans: [string, string][];
   _completedSubPlans: [string, string][];
   _failedSubPlans: string[];
-  _subPlanIntegrationBranches: [string, string][];
   _mergedLeaves: string[];
   _cleanedWorkUnits: string[];
 }
@@ -220,7 +221,8 @@ export class PlanPersistence {
     return {
       ...toPublicState(state),
       _jobIdMap: Array.from(state.jobIdMap.entries()),
-      _completedBranches: Array.from(state.completedBranches.entries()),
+      _completedCommits: Array.from(state.completedCommits.entries()),
+      _baseCommits: Array.from(state.baseCommits.entries()),
       _worktreePaths: Array.from(state.worktreePaths.entries()),
       _targetBranchRoot: state.targetBranchRoot,
       _targetBranchRootCreated: state.targetBranchRootCreated,
@@ -228,9 +230,6 @@ export class PlanPersistence {
       _runningSubPlans: Array.from(state.runningSubPlans?.entries() || []),
       _completedSubPlans: Array.from(state.completedSubPlans?.entries() || []),
       _failedSubPlans: Array.from(state.failedSubPlans || []),
-      _subPlanIntegrationBranches: Array.from(
-        state.subPlanIntegrationBranches?.entries() || []
-      ),
       _mergedLeaves: Array.from(state.mergedLeaves || []),
       _cleanedWorkUnits: Array.from(state.cleanedWorkUnits || []),
     };
@@ -257,7 +256,8 @@ export class PlanPersistence {
       aggregatedWorkSummary: data.aggregatedWorkSummary,
       // Restore Maps from arrays
       jobIdMap: new Map(data._jobIdMap || []),
-      completedBranches: new Map(data._completedBranches || []),
+      completedCommits: new Map(data._completedCommits || data._completedBranches || []),
+      baseCommits: new Map(data._baseCommits || []),
       worktreePaths: new Map(data._worktreePaths || []),
       worktreePromises: new Map(),  // Promises are not persisted (async in-flight state)
       targetBranchRoot: data._targetBranchRoot,
@@ -267,9 +267,6 @@ export class PlanPersistence {
       runningSubPlans: new Map(data._runningSubPlans || []),
       completedSubPlans: new Map(data._completedSubPlans || []),
       failedSubPlans: new Set(data._failedSubPlans || []),
-      subPlanIntegrationBranches: new Map(
-        data._subPlanIntegrationBranches || []
-      ),
       // Restore incremental delivery tracking
       mergedLeaves: new Set(data._mergedLeaves || []),
       cleanedWorkUnits: new Set(data._cleanedWorkUnits || []),

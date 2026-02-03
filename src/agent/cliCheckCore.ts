@@ -86,7 +86,3 @@ async function hasGhCopilotAsync(): Promise<boolean> {
     }, 5000);
   });
 }
-
-// Keep sync versions for backward compatibility but mark as slow
-function cmdOk(cmd: string): boolean { try { cp.execSync(cmd, { stdio: 'ignore', timeout: 5000 }); return true; } catch { return false; } }
-function hasGhCopilot(): boolean { try { const out = cp.execSync('gh extension list', { encoding: 'utf8', timeout: 5000 }); return /github\/gh-copilot/i.test(out); } catch { return false; } }

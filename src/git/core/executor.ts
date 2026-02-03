@@ -47,18 +47,13 @@ export interface ExecuteOptions {
 /**
  * Execute a git command with proper error handling.
  * 
+ * @deprecated Use execAsync instead to avoid blocking the extension host.
+ * This sync function is kept for backward compatibility only.
+ * 
  * @param args - Git command arguments (without 'git' prefix)
  * @param options - Execution options
  * @returns Command result
  * @throws Error if throwOnError is true and command fails
- * 
- * @example
- * ```typescript
- * const result = exec(['status', '--porcelain'], { cwd: repoPath });
- * if (result.success) {
- *   console.log(result.stdout);
- * }
- * ```
  */
 export function exec(args: string[], options: ExecuteOptions): CommandResult {
   const { cwd, log, throwOnError = false, errorPrefix = 'Git command failed' } = options;
@@ -90,6 +85,9 @@ export function exec(args: string[], options: ExecuteOptions): CommandResult {
 
 /**
  * Execute a shell command (for complex git pipelines).
+ * 
+ * @deprecated Use execShellAsync instead to avoid blocking the extension host.
+ * This sync function is kept for backward compatibility only.
  * 
  * @param cmd - Shell command string
  * @param options - Execution options
@@ -129,6 +127,8 @@ export function execShell(cmd: string, options: ExecuteOptions): CommandResult {
  * Execute a git command and return trimmed stdout on success.
  * Throws on failure.
  * 
+ * @deprecated Use execAsyncOrThrow instead to avoid blocking the extension host.
+ * 
  * @param args - Git command arguments
  * @param cwd - Working directory
  * @returns Trimmed stdout
@@ -141,6 +141,8 @@ export function execOrThrow(args: string[], cwd: string): string {
 
 /**
  * Execute a git command and return stdout or null on failure.
+ * 
+ * @deprecated Use execAsyncOrNull instead to avoid blocking the extension host.
  * 
  * @param args - Git command arguments
  * @param cwd - Working directory

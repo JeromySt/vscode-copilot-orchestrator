@@ -531,6 +531,20 @@ export function getJobDetailsCss(): string {
       opacity: 0.6;
       padding: 20px;
     }
+    .log-viewer.loading-content {
+      opacity: 0.7;
+    }
+    .log-viewer .loading-indicator {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--vscode-descriptionForeground);
+      font-size: 13px;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.5; }
+      50% { opacity: 1; }
+    }
     .loading { 
       padding: 12px; 
       text-align: center; 

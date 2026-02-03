@@ -195,24 +195,35 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
       launchedChildrenMap.set(parentId, siblings);
     }
     
-    // Helper to determine sub-plan status
-    const getSubPlanStatus = (plan: Plan, subPlanId: string): string => {
-      if (plan.completedSubPlans?.includes(subPlanId)) return 'completed';
-      if (plan.runningSubPlans && plan.runningSubPlans[subPlanId]) return 'running';
-      if (plan.failedSubPlans?.includes(subPlanId)) return 'failed';
-      return 'pending';
-    };
-    
     // Helper function to build plan tree data including sub-plan specs
     const buildPlanTree = (plan: Plan, depth: number = 0): any => {
       // Get launched child plans
       const launchedChildren = launchedChildrenMap.get(plan.id) || [];
       
+      // Track which sub-plan IDs have been launched (from child plans or state)
+      const launchedSubPlanIds = new Set<string>();
+      
+      // Add IDs from launched child plans (extract sub-plan ID from "parentId/subPlanId")
+      for (const child of launchedChildren) {
+        const parts = child.id.split('/');
+        if (parts.length >= 2) {
+          launchedSubPlanIds.add(parts[parts.length - 1]);
+        }
+      }
+      
+      // Also track from state (runningSubPlans, completedSubPlans, failedSubPlans)
+      if (plan.runningSubPlans) {
+        Object.keys(plan.runningSubPlans).forEach(id => launchedSubPlanIds.add(id));
+      }
+      if (plan.completedSubPlans) {
+        plan.completedSubPlans.forEach(id => launchedSubPlanIds.add(id));
+      }
+      if (plan.failedSubPlans) {
+        plan.failedSubPlans.forEach(id => launchedSubPlanIds.add(id));
+      }
+      
       // Get sub-plan specs that haven't been launched yet (from spec)
       const subPlanSpecs = plan.subPlans || [];
-      const launchedSubPlanIds = new Set(Object.keys(plan.runningSubPlans || {}));
-      const completedSubPlanIds = new Set(plan.completedSubPlans || []);
-      const failedSubPlanIds = new Set(plan.failedSubPlans || []);
       
       // Build children array: launched child plans + pending sub-plan specs
       const children: any[] = [];
@@ -222,28 +233,30 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
         children.push(buildPlanTree(child, depth + 1));
       }
       
-      // Add pending sub-plan specs (not yet launched)
+      // Add pending sub-plan specs (only if NOT launched)
       for (const spSpec of subPlanSpecs) {
-        const status = getSubPlanStatus(plan, spSpec.id);
-        // Only show pending sub-plans as specs (running/completed are shown as launched children)
-        if (status === 'pending') {
-          children.push({
-            id: `${plan.id}/${spSpec.id}`,
-            name: spSpec.name || spSpec.id,
-            status: 'pending',
-            jobCount: spSpec.jobs?.length || 0,
-            completed: 0,
-            running: 0,
-            failed: 0,
-            queued: spSpec.jobs?.length || 0,
-            progress: 0,
-            depth: depth + 1,
-            isSubPlan: true,
-            isSubPlanSpec: true, // Marker that this is a spec, not launched
-            consumesFrom: spSpec.consumesFrom,
-            children: [] // Sub-plan specs don't show their jobs until launched
-          });
+        // Skip if this sub-plan has been launched (it's shown as a child plan)
+        if (launchedSubPlanIds.has(spSpec.id)) {
+          continue;
         }
+        
+        // This sub-plan hasn't been launched yet - show as pending spec
+        children.push({
+          id: `${plan.id}/${spSpec.id}`,
+          name: spSpec.name || spSpec.id,
+          status: 'pending',
+          jobCount: spSpec.jobs?.length || 0,
+          completed: 0,
+          running: 0,
+          failed: 0,
+          queued: spSpec.jobs?.length || 0,
+          progress: 0,
+          depth: depth + 1,
+          isSubPlan: true,
+          isSubPlanSpec: true, // Marker that this is a spec, not launched
+          consumesFrom: spSpec.consumesFrom,
+          children: [] // Sub-plan specs don't show their jobs until launched
+        });
       }
       
       return {
@@ -281,6 +294,7 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
   <style>
     body { 
       font: 11px sans-serif; 

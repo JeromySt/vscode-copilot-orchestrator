@@ -39,8 +39,8 @@ export interface PlanState extends WorkUnit {
   canceled: string[];
   /** Map of plan job ID to runner job ID */
   jobIdMap: Map<string, string>;
-  /** Map of completed job ID to its branch name */
-  completedBranches: Map<string, string>;
+  /** Map of completed job ID to its commit SHA */
+  completedCommits: Map<string, string>;
   /** Target branch root for this plan */
   targetBranchRoot?: string;
 }
@@ -80,7 +80,7 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
       failed: [],
       canceled: [],
       jobIdMap: new Map(),
-      completedBranches: new Map()
+      completedCommits: new Map()
     };
   }
   
@@ -184,9 +184,9 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
         case 'succeeded':
           state.running = state.running.filter(id => id !== jobId);
           state.completed.push(jobId);
-          // Record the completed branch
-          if ((job as any).inputs?.targetBranch) {
-            state.completedBranches.set(jobId, (job as any).inputs.targetBranch);
+          // Record the completed commit (if available)
+          if ((job as any).completedCommit) {
+            state.completedCommits.set(jobId, (job as any).completedCommit);
           }
           // Queue dependent jobs
           this.queueDependentJobs(jobId, state);
@@ -274,7 +274,7 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
       failed: state.failed,
       canceled: state.canceled,
       jobIdMap: Object.fromEntries(state.jobIdMap),
-      completedBranches: Object.fromEntries(state.completedBranches),
+      completedCommits: Object.fromEntries(state.completedCommits),
       targetBranchRoot: state.targetBranchRoot,
       queuedAt: state.queuedAt,
       startedAt: state.startedAt,
@@ -297,7 +297,7 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
       failed: d.failed || [],
       canceled: d.canceled || [],
       jobIdMap: new Map(Object.entries(d.jobIdMap || {})),
-      completedBranches: new Map(Object.entries(d.completedBranches || {})),
+      completedCommits: new Map(Object.entries(d.completedCommits || {})),
       targetBranchRoot: d.targetBranchRoot,
       queuedAt: d.queuedAt,
       startedAt: d.startedAt,
@@ -314,15 +314,15 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
     }
     
     if (job.consumesFrom.length === 1) {
-      // Single dependency - use its completed branch
-      const depBranch = state.completedBranches.get(job.consumesFrom[0]);
-      return depBranch || state.targetBranchRoot || 'main';
+      // Single dependency - use its completed commit
+      const depCommit = state.completedCommits.get(job.consumesFrom[0]);
+      return depCommit || state.targetBranchRoot || 'main';
     }
     
     // Multiple dependencies - would need merge branch
-    // For now, use first dependency's branch
-    const firstDepBranch = state.completedBranches.get(job.consumesFrom[0]);
-    return firstDepBranch || state.targetBranchRoot || 'main';
+    // For now, use first dependency's commit
+    const firstDepCommit = state.completedCommits.get(job.consumesFrom[0]);
+    return firstDepCommit || state.targetBranchRoot || 'main';
   }
   
   private queueDependentJobs(completedJobId: string, state: PlanState): void {

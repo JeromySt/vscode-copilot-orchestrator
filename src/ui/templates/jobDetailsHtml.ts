@@ -23,6 +23,7 @@ export function getJobDetailsLoadingHtml(jobName: string = 'Loading...'): string
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
   <style>
     body { 
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -606,11 +607,21 @@ function buildProcessModalHtml(): string {
 
 /**
  * Build header section with job title, status, and action buttons.
+ * Elements have IDs for incremental updates via postMessage.
  * 
  * @param job - Job data
  * @returns HTML string for header section
  */
 function buildHeaderHtml(job: JobData): string {
+  // Status badge text
+  const statusText: Record<string, string> = {
+    running: '● Running',
+    queued: '◯ Queued',
+    succeeded: '✓ Succeeded',
+    failed: '✗ Failed',
+    canceled: '⊘ Canceled'
+  };
+  
   // Duration display logic
   let durationHtml = '';
   if (job.status === 'running' && job.startedAt) {
@@ -620,26 +631,23 @@ function buildHeaderHtml(job: JobData): string {
     durationHtml = `<span class="duration-display">${formatDuration(durationSecs)}</span>`;
   }
 
-  // Action buttons based on status
-  let actionButtonsHtml = '';
-  if (job.status === 'running' || job.status === 'queued') {
-    actionButtonsHtml += `<button class="action-btn cancel-btn" data-action="cancel" data-job-id="${job.id}">⏹ Cancel</button>`;
-  }
-  if (job.status === 'failed') {
-    actionButtonsHtml += `<button class="action-btn retry-btn" data-action="retry" data-job-id="${job.id}">🔄 Retry with AI Analysis</button>`;
-  }
-  // Only show delete button for standalone jobs (not part of a plan)
-  // Plan-managed jobs can only be deleted by deleting the root plan
+  // Action buttons - all rendered but hidden based on status for incremental updates
   const isPlanManaged = job.planId || job.inputs?.planId;
-  if (!isPlanManaged) {
-    actionButtonsHtml += `<button class="action-btn delete-btn" data-action="delete" data-job-id="${job.id}">🗑 Delete</button>`;
-  }
+  const showCancel = job.status === 'running' || job.status === 'queued';
+  const showRetry = job.status === 'failed' || job.status === 'canceled';
+  const showDelete = !isPlanManaged && job.status !== 'running' && job.status !== 'queued';
+  
+  const actionButtonsHtml = `
+    <button class="action-btn cancel-btn" data-action="cancel" data-job-id="${job.id}" style="display: ${showCancel ? 'inline-block' : 'none'}">⏹ Cancel</button>
+    <button class="action-btn retry-btn" data-action="retry" data-job-id="${job.id}" style="display: ${showRetry ? 'inline-block' : 'none'}">🔄 Retry with AI Analysis</button>
+    ${!isPlanManaged ? `<button class="action-btn delete-btn" data-action="delete" data-job-id="${job.id}" style="display: ${showDelete ? 'inline-block' : 'none'}">🗑 Delete</button>` : ''}
+  `;
 
   return `
     <div class="header">
       <div class="header-top">
         <div class="title-section">
-          <h2>${escapeHtml(job.name)}<span class="status-badge status-${job.status}">${job.status}</span>${durationHtml}</h2>
+          <h2>${escapeHtml(job.name)}<span id="job-status-badge" class="status-badge ${job.status}">${statusText[job.status] || job.status}</span>${durationHtml}</h2>
         </div>
       </div>
       <div class="action-buttons">
@@ -686,6 +694,7 @@ export function getJobDetailsHtml(job: JobData): string {
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
   <style>
 ${css}
   </style>

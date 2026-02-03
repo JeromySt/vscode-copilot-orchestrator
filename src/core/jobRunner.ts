@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { randomUUID } from 'crypto';
 import { ensureDir, readJSON, writeJSON, cpuCountMinusOne } from './utils';
-import { isCopilotCliAvailable } from '../agent/cliCheckCore';
+import { isCopilotCliAvailable, checkCopilotCliAsync, isCliCachePopulated } from '../agent/cliCheckCore';
 import * as git from '../git';
 import type { CommitDetail, WorkSummary, JobMetrics, ExecutionAttempt, JobSpec, Job, StepStatuses } from './job/types';
 import { calculateWorkSummary } from './job/workSummary';
@@ -425,7 +425,7 @@ Focus on addressing the failure root cause while maintaining all original requir
     return summary;
   }
 
-  private extractMetricsFromLog(job: Job): JobMetrics {
+  private async extractMetricsFromLog(job: Job): Promise<JobMetrics> {
     return extractMetricsFromLogFile(job);
   }
 
@@ -452,31 +452,50 @@ Focus on addressing the failure root cause while maintaining all original requir
       }
       
       // Also kill by PID (in case we reloaded and lost in-memory references)
-      // This is critical for hung processes
+      // This is critical for hung processes - do this async to avoid blocking
       if (j.processIds && j.processIds.length > 0) {
-        const { spawn, execSync } = require('child_process');
-        j.processIds.forEach(pid => {
-          try {
-            // Use platform-specific kill command - force kill for hung processes
-            if (process.platform === 'win32') {
-              // On Windows, kill process tree to ensure all child processes are terminated
-              execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' });
-              this.writeLog(j, `[orchestrator] Force-killed process tree for PID ${pid}`);
-            } else {
-              // On Unix, send SIGKILL for immediate termination
-              process.kill(pid, 'SIGKILL');
-              this.writeLog(j, `[orchestrator] Force-killed process PID ${pid}`);
-            }
-          } catch (e) {
-            // Process may have already exited, that's fine
-            this.writeLog(j, `[orchestrator] Process PID ${pid} already exited or not found`);
-          }
-        });
+        const pidsToKill = [...j.processIds];
         j.processIds = [];
+        
+        // Fire-and-forget async termination to avoid blocking extension host
+        this.killProcessesAsync(pidsToKill, j).catch(e => {
+          console.error('Failed to kill processes:', e);
+        });
       }
     }
     
     this.persist(); 
+  }
+  
+  /** Kill processes asynchronously to avoid blocking */
+  private async killProcessesAsync(pids: number[], job: Job): Promise<void> {
+    const { spawn } = require('child_process');
+    
+    for (const pid of pids) {
+      try {
+        if (process.platform === 'win32') {
+          // Use spawn instead of execSync for non-blocking
+          await new Promise<void>((resolve) => {
+            const proc = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], {
+              stdio: 'ignore',
+              windowsHide: true
+            });
+            proc.on('close', () => resolve());
+            proc.on('error', () => resolve());
+            // Don't wait forever
+            setTimeout(resolve, 5000);
+          });
+          this.writeLog(job, `[orchestrator] Force-killed process tree for PID ${pid}`);
+        } else {
+          // On Unix, process.kill is non-blocking
+          process.kill(pid, 'SIGKILL');
+          this.writeLog(job, `[orchestrator] Force-killed process PID ${pid}`);
+        }
+      } catch (e) {
+        // Process may have already exited, that's fine
+        this.writeLog(job, `[orchestrator] Process PID ${pid} already exited or not found`);
+      }
+    }
   }
   
   async delete(id: string) {
@@ -631,20 +650,29 @@ Focus on addressing the failure root cause while maintaining all original requir
 
     // ---- Pre-flight: enforce Copilot CLI if configured ----
     const enforce = vscode.workspace.getConfiguration('copilotOrchestrator.copilotCli').get<boolean>('enforceInJobs', true);
-    if (enforce && !isCopilotCliAvailable()) {
-      const msg = 'Pre-flight: GitHub Copilot CLI not detected. Job blocked to keep runs consistent. Use "Copilot Orchestrator: Check Copilot CLI" to install.';
-      this.writeLog(job, '[preflight] '+msg);
-      vscode.window.showWarningMessage(msg, 'Check Copilot CLI').then(choice=>{ if (choice==='Check Copilot CLI') vscode.commands.executeCommand('orchestrator.copilotCli.check'); });
-      job.status='failed'; job.endedAt=Date.now(); this.persist(); this.working--; this.pump(); return;
+    if (enforce) {
+      // Ensure cache is populated before checking
+      let cliAvailable: boolean;
+      if (isCliCachePopulated()) {
+        cliAvailable = isCopilotCliAvailable();
+      } else {
+        cliAvailable = await checkCopilotCliAsync();
+      }
+      
+      if (!cliAvailable) {
+        const msg = 'Pre-flight: GitHub Copilot CLI not detected. Job blocked to keep runs consistent. Use "Copilot Orchestrator: Check Copilot CLI" to install.';
+        this.writeLog(job, '[preflight] '+msg);
+        vscode.window.showWarningMessage(msg, 'Check Copilot CLI').then(choice=>{ if (choice==='Check Copilot CLI') vscode.commands.executeCommand('orchestrator.copilotCli.check'); });
+        job.status='failed'; job.endedAt=Date.now(); this.persist(); this.working--; this.pump(); return;
+      }
     }
 
     const repoPath = job.inputs.repoPath;
     const isPlanManaged = job.inputs.isPlanManaged === true;
     let jobRoot: string;
-    let worktreeBranch: string;
     
     if (isPlanManaged) {
-      // Plan-managed job: worktree is pre-created by the plan
+      // Plan-managed job: worktree is pre-created by the plan (detached HEAD)
       if (!job.inputs.worktreePath) {
         const msg = 'Plan-managed job is missing worktreePath';
         this.writeLog(job, '[preflight] ERROR: ' + msg);
@@ -662,9 +690,7 @@ Focus on addressing the failure root cause while maintaining all original requir
         return;
       }
       
-      worktreeBranch = await git.worktrees.getBranch(jobRoot) || job.inputs.targetBranch;
-      this.writeLog(job, `[orchestrator] Plan-managed job using pre-created worktree: ${jobRoot}`);
-      this.writeLog(job, `[orchestrator] Worktree branch: ${worktreeBranch}`);
+      this.writeLog(job, `[orchestrator] Plan-managed job using pre-created detached worktree: ${jobRoot}`);
     } else {
       // Standalone job: we manage the worktree lifecycle
       this.writeLog(job, '[orchestrator] Standalone job - managing worktree lifecycle');
@@ -687,20 +713,17 @@ Focus on addressing the failure root cause while maintaining all original requir
         job.inputs.targetBranch = targetBranchRoot;
       }
       
-      // Create worktree for the job
-      // The worktree branch is a temporary branch that will be merged back
-      worktreeBranch = `copilot_jobs/${job.id}`;
+      // Create detached worktree for the job (no branch - commits tracked by SHA)
       const wtRootAbs = path.join(repoPath, job.inputs.worktreeRoot);
       jobRoot = path.join(wtRootAbs, job.id);
       
-      this.writeLog(job, `[orchestrator] Creating worktree at: ${jobRoot}`);
-      await git.worktrees.create({
+      this.writeLog(job, `[orchestrator] Creating detached worktree at: ${jobRoot}`);
+      await git.worktrees.createDetached(
         repoPath,
-        worktreePath: jobRoot,
-        branchName: worktreeBranch,
-        fromRef: job.inputs.targetBranch,
-        log: s => this.writeLog(job, s)
-      });
+        jobRoot,
+        job.inputs.targetBranch,
+        s => this.writeLog(job, s)
+      );
     }
 
     const execStep = async (label: string, cmd: string) => {
@@ -866,8 +889,8 @@ Focus on addressing the failure root cause while maintaining all original requir
         this.writeLog(job, '========== POSTCHECKS SECTION END ==========');
         this.writeLog(job, '');
         
-        // Extract metrics from logs after postchecks
-        const metrics = this.extractMetricsFromLog(job);
+        // Extract metrics from logs after postchecks (async to avoid blocking)
+        const metrics = await this.extractMetricsFromLog(job);
         if (Object.keys(metrics).length > 0) {
           job.metrics = metrics;
           if (job.attempts && job.currentAttemptId) {
@@ -908,11 +931,21 @@ Focus on addressing the failure root cause while maintaining all original requir
       } else {
         // Standalone job: perform mergeback and cleanup
         
+        // Get the final commit SHA from the worktree before cleanup
+        const finalCommit = await git.worktrees.getHeadCommit(jobRoot);
+        if (!finalCommit) {
+          const msg = 'Could not get HEAD commit from worktree';
+          this.writeLog(job, `[mergeback] ERROR: ${msg}`);
+          job.status = 'failed';
+          this.persist();
+          throw new Error(msg);
+        }
+        
         // Attempt mergeback - if it fails, mark job as failed
         job.currentStep = 'mergeback';
         this.persist();
         try {
-          await this.mergeBack(job, repoPath, jobRoot, worktreeBranch);
+          await this.mergeBackByCommit(job, repoPath, finalCommit);
         } catch (e) {
           this.writeLog(job, '[mergeback] FAILED: '+String(e));
           job.status = 'failed';
@@ -926,20 +959,16 @@ Focus on addressing the failure root cause while maintaining all original requir
           throw e; // Re-throw to skip cleanup
         }
         
-        // Auto-cleanup worktree and temporary branch after successful mergeback
+        // Auto-cleanup worktree after successful mergeback (no branch to clean)
         job.currentStep = 'cleanup';
         this.persist();
         this.writeLog(job, '\n========== CLEANUP SECTION START ==========');
         try {
-          this.writeLog(job, '[cleanup] Cleaning up worktree and temporary branch...');
+          this.writeLog(job, '[cleanup] Cleaning up worktree...');
           
-          // Use git module to safely remove worktree and branch
+          // Use git module to safely remove worktree (no branch with detached HEAD)
           await git.worktrees.removeSafe(repoPath, jobRoot, { 
             force: true, 
-            log: (s: string) => this.writeLog(job, `[cleanup] ${s}`) 
-          });
-          await git.branches.deleteLocal(repoPath, worktreeBranch, { 
-            force: true,
             log: (s: string) => this.writeLog(job, `[cleanup] ${s}`) 
           });
           
@@ -1028,10 +1057,6 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     this.writeLog(job, `[${label}] ⚠️  This step requires manual AI agent intervention`);
     this.writeLog(job, `[${label}] Open the worktree and use GitHub Copilot to complete the task`);
     this.writeLog(job, `[${label}] Or use the Copilot Orchestrator MCP tools to delegate automatically`);
-    
-    // For now, we'll create a placeholder commit so the job can proceed
-    // In the future, this could wait for actual agent completion
-    const { spawnSync } = require('child_process');
     
     // Check if Copilot CLI is available for automated delegation
     const copilotAvailable = isCopilotCliAvailable();
@@ -1216,20 +1241,13 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
       });
     }
     
-    // Create a marker commit indicating agent delegation
-    spawnSync('git', ['add', '.copilot-task.md'], { cwd: jobRoot });
-    const commitResult = spawnSync('git', [
-      'commit', 
-      '-m', 
-      `orchestrator(${job.id}): AI agent task created\n\n${taskDescription}`,
-      '--allow-empty'
-    ], { 
-      cwd: jobRoot,
-      encoding: 'utf-8'
-    });
-    
-    if (commitResult.status === 0) {
+    // Create a marker commit indicating agent delegation (async to avoid blocking)
+    try {
+      await git.repository.stageAll(jobRoot);
+      await git.repository.commit(jobRoot, `orchestrator(${job.id}): AI agent task created\n\n${taskDescription}`, { allowEmpty: true });
       this.writeLog(job, `[${label}] Created marker commit for agent delegation`);
+    } catch (e) {
+      this.writeLog(job, `[${label}] Could not create marker commit: ${e}`);
     }
     
     // This step succeeds - the actual work is delegated
@@ -1243,8 +1261,6 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
    * This runs for both standalone and plan-managed jobs.
    */
   private async commitWork(job: Job, jobRoot: string): Promise<void> {
-    const { spawnSync, execSync } = require('child_process');
-    
     this.writeLog(job, '[commit] Checking for uncommitted changes...');
     
     // Stage all changes
@@ -1277,11 +1293,21 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     
     this.writeLog(job, '[commit] Running Copilot CLI to generate commit...');
     
-    const result = spawnSync(copilotCmd, [], {
-      cwd: jobRoot,
-      shell: true,
-      encoding: 'utf-8',
-      timeout: 120000 // 2 minute timeout for commit
+    // Run Copilot CLI async to avoid blocking the event loop
+    const result = await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn(copilotCmd, [], {
+        cwd: jobRoot,
+        shell: true,
+        timeout: 120000 // 2 minute timeout for commit
+      });
+      
+      let stdout = '';
+      let stderr = '';
+      child.stdout?.on('data', (data) => { stdout += data.toString(); });
+      child.stderr?.on('data', (data) => { stderr += data.toString(); });
+      
+      child.on('close', (code) => resolve({ status: code, stdout, stderr }));
+      child.on('error', (err) => resolve({ status: 1, stdout: '', stderr: err.message }));
     });
     
     if (result.status !== 0) {
@@ -1290,19 +1316,16 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
         this.writeLog(job, `[commit] stderr: ${result.stderr}`);
       }
       
-      // Fallback: create commit with default message
+      // Fallback: create commit with default message (async)
       this.writeLog(job, '[commit] Falling back to default commit message...');
       try {
-        execSync(`git commit -m "orchestrator(${job.id}): ${job.name || job.task}"`, { 
-          cwd: jobRoot, 
-          stdio: 'pipe' 
-        });
+        await git.repository.commit(jobRoot, `orchestrator(${job.id}): ${job.name || job.task}`);
         this.writeLog(job, '[commit] ✓ Created fallback commit');
       } catch (fallbackError) {
         this.writeLog(job, `[commit] Fallback commit also failed: ${fallbackError}`);
         // Check if already committed
-        const checkStatus = spawnSync('git', ['status', '--porcelain'], { cwd: jobRoot, encoding: 'utf-8' });
-        if (!checkStatus.stdout || checkStatus.stdout.trim().length === 0) {
+        const stillHasChanges = await git.repository.hasChanges(jobRoot);
+        if (!stillHasChanges) {
           this.writeLog(job, '[commit] ✓ Changes appear to have been committed');
         }
       }
@@ -1317,17 +1340,14 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
       }
     }
     
-    // Verify commit was created
-    const verifyResult = spawnSync('git', ['status', '--porcelain'], { cwd: jobRoot, encoding: 'utf-8' });
-    if (verifyResult.stdout && verifyResult.stdout.trim().length > 0) {
+    // Verify commit was created (async)
+    const stillPending = await git.repository.hasChanges(jobRoot);
+    if (stillPending) {
       // Still have uncommitted changes - Copilot might not have committed
       this.writeLog(job, '[commit] Changes still pending, creating final commit...');
       try {
-        execSync(`git add -A && git commit -m "orchestrator(${job.id}): finalize work for ${job.name || job.task}"`, { 
-          cwd: jobRoot, 
-          shell: true,
-          stdio: 'pipe' 
-        });
+        await git.repository.stageAll(jobRoot);
+        await git.repository.commit(jobRoot, `orchestrator(${job.id}): finalize work for ${job.name || job.task}`);
         this.writeLog(job, '[commit] ✓ Created final commit');
       } catch (e) {
         // Might fail if nothing to commit, that's OK
@@ -1336,27 +1356,27 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
       this.writeLog(job, '[commit] ✓ All changes committed successfully');
     }
     
-    // Push the commit
-    try {
-      const currentBranch = await git.branches.current(jobRoot);
-      const { execSync } = require('child_process');
-      execSync(`git push origin "${currentBranch}"`, { cwd: jobRoot, stdio: 'pipe' });
-      this.writeLog(job, `[commit] ✓ Pushed commit to origin/${currentBranch}`);
-    } catch (pushError) {
-      this.writeLog(job, `[commit] ⚠ Could not push commit: ${pushError}`);
-    }
+    // NOTE: We intentionally do NOT push worktree commits to origin.
+    // Worktree commits are local-only for parallel work. Only the target
+    // branch is pushed after successful merge (if pushOnSuccess is enabled).
+    this.writeLog(job, '[commit] Worktree commits remain local (not pushed to origin)');
   }
   
   /**
-   * Merge the worktree branch back into the target branch.
+   * Merge the worktree commit back into the target branch.
+   * 
+   * IMPORTANT: Uses a temporary worktree for merge to avoid modifying
+   * the main repository's working directory.
    * 
    * For standalone jobs:
-   * - worktreeBranch contains the work (e.g., copilot_jobs/<jobId>)
+   * - sourceCommit is the final commit from the job's detached worktree
    * - targetBranch is where we merge into (e.g., the feature branch or user branch)
    */
-  private async mergeBack(job: Job, repoPath: string, jobRoot: string, worktreeBranch: string){
+  private async mergeBackByCommit(job: Job, repoPath: string, sourceCommit: string){
     this.writeLog(job, '\n========== MERGEBACK SECTION START ==========');
     const cp = require('child_process');
+    const path = require('path');
+    const fs = require('fs').promises;
     
     const targetBranch = job.inputs.targetBranch;
     
@@ -1373,20 +1393,7 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
       p.on('exit',(code:number)=> code===0? resolve(): reject(new Error(cmd+` -> exit ${code}`))); 
     });
     
-    this.writeLog(job, `[mergeback] Merging '${worktreeBranch}' into '${targetBranch}'`);
-    
-    // Note: All work should already be committed by the commit step
-    // Just verify there are no uncommitted changes
-    const { spawnSync, execSync } = require('child_process');
-    if (await git.repository.hasChanges(jobRoot)) {
-      this.writeLog(job, '[mergeback] Warning: Found uncommitted changes, creating safety commit...');
-      try {
-        await git.repository.stageAll(jobRoot);
-        await git.repository.commit(jobRoot, `orchestrator(${job.id}): safety commit before mergeback`);
-      } catch (e) {
-        // Ignore - might be nothing to commit
-      }
-    }
+    this.writeLog(job, `[mergeback] Merging commit '${sourceCommit.slice(0, 8)}' into '${targetBranch}'`);
     
     // Verify target branch exists
     if (!await git.branches.exists(targetBranch, repoPath)) {
@@ -1399,17 +1406,52 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
       throw new Error(errorMsg);
     }
     
-    // Switch to target branch and squash merge the worktree branch
-    await run(`git switch "${targetBranch}"`, repoPath);
+    // Create a temporary worktree for the merge to avoid touching main repo
+    const mergeWorktreePath = path.join(repoPath, '.worktrees', `_merge_${job.id}_${Date.now()}`);
     
     try {
-      // Squash merge the worktree branch
-      await run(`git merge --squash "${worktreeBranch}"`, repoPath);
+      this.writeLog(job, `[mergeback] Creating temp merge worktree at ${mergeWorktreePath}`);
+      
+      // Create detached worktree on target branch for the merge
+      await git.worktrees.createDetached(
+        repoPath,
+        mergeWorktreePath,
+        targetBranch,
+        s => this.writeLog(job, '[mergeback] ' + s)
+      );
+      
+      // Checkout target branch in the merge worktree (we're currently detached)
+      await run(`git checkout "${targetBranch}"`, mergeWorktreePath);
+      
+      // Squash merge the source commit into target in the merge worktree
+      await run(`git merge --squash "${sourceCommit}"`, mergeWorktreePath);
       
       // Commit the squash merge
-      await run(`git commit -m "orchestrator(${job.id}): squash merge from ${worktreeBranch}" || echo "no changes to commit"`, repoPath);
+      await run(`git commit -m "orchestrator(${job.id}): squash merge from commit ${sourceCommit.slice(0, 8)}" || echo "no changes to commit"`, mergeWorktreePath);
       
-      this.writeLog(job, `[mergeback] ✓ Squash merged '${worktreeBranch}' into '${targetBranch}'`);
+      this.writeLog(job, `[mergeback] ✓ Squash merged commit '${sourceCommit.slice(0, 8)}' into '${targetBranch}'`);
+      
+      if (!job.stepStatuses) job.stepStatuses = {};
+      job.stepStatuses.mergeback = 'success';
+      this.syncStepStatusesToAttempt(job);
+      this.persist();
+      
+      // Push to remote if configured (from the merge worktree)
+      const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
+      const pushOnSuccess = mergeCfg.get<boolean>('pushOnSuccess', false);
+      
+      if (pushOnSuccess) {
+        this.writeLog(job, `[mergeback] Pushing ${targetBranch} to origin...`);
+        try {
+          await run(`git push origin ${targetBranch}`, mergeWorktreePath);
+          this.writeLog(job, '[mergeback] ✓ Pushed to remote successfully');
+        } catch (pushError) {
+          this.writeLog(job, '[mergeback] ⚠ Push failed: ' + String(pushError));
+          this.writeLog(job, '[mergeback] Changes are committed locally but not pushed');
+        }
+      } else {
+        this.writeLog(job, '[mergeback] ✓ Changes committed locally. Push manually when ready (pushOnSuccess is disabled).');
+      }
     } catch (mergeError) {
       this.writeLog(job, `[mergeback] Squash merge failed: ${mergeError}`);
       if (!job.stepStatuses) job.stepStatuses = {};
@@ -1417,28 +1459,15 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
       this.syncStepStatusesToAttempt(job);
       this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');
       throw mergeError;
-    }
-    
-    if (!job.stepStatuses) job.stepStatuses = {};
-    job.stepStatuses.mergeback = 'success';
-    this.syncStepStatusesToAttempt(job);
-    this.persist();
-    
-    // Push to remote if configured
-    const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
-    const pushOnSuccess = mergeCfg.get<boolean>('pushOnSuccess', false);
-    
-    if (pushOnSuccess) {
-      this.writeLog(job, `[mergeback] Pushing ${targetBranch} to origin...`);
+    } finally {
+      // Clean up the temporary merge worktree
       try {
-        await run(`git push origin ${targetBranch}`, repoPath);
-        this.writeLog(job, '[mergeback] ✓ Pushed to remote successfully');
-      } catch (pushError) {
-        this.writeLog(job, '[mergeback] ⚠ Push failed: ' + String(pushError));
-        this.writeLog(job, '[mergeback] Changes are committed locally but not pushed');
+        await git.worktrees.removeSafe(repoPath, mergeWorktreePath, { force: true });
+      } catch {
+        try {
+          await fs.rm(mergeWorktreePath, { recursive: true, force: true });
+        } catch {}
       }
-    } else {
-      this.writeLog(job, '[mergeback] ✓ Changes committed locally. Push manually when ready (pushOnSuccess is disabled).');
     }
     
     this.writeLog(job, '========== MERGEBACK SECTION END ==========\n');

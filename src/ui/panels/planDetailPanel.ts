@@ -47,6 +47,8 @@ export class PlanDetailPanel {
   private _updateInterval?: NodeJS.Timeout;
   private _getPlan: (id: string) => Plan | undefined;
   private _getMergeBranches?: GetMergeBranchesCallback;
+  /** Last rendered state hash to avoid unnecessary re-renders */
+  private _lastStateHash: string = '';
   
   private constructor(
     panel: vscode.WebviewPanel,
@@ -272,6 +274,7 @@ export class PlanDetailPanel {
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
   <title>Work Summary: ${this._escapeHtml(plan.name)}</title>
   <style>
     * { box-sizing: border-box; }
@@ -529,6 +532,22 @@ export class PlanDetailPanel {
       return;
     }
     
+    // Compute state hash to detect changes - only re-render if state actually changed
+    const stateHash = JSON.stringify({
+      status: this._plan.status,
+      completed: this._plan.completed,
+      running: this._plan.running,
+      failed: this._plan.failed,
+      queued: this._plan.queued,
+      jobStatuses: this._plan.jobs.map(j => ({ id: j.planJobId, jobId: j.jobId, status: j.status }))
+    });
+    
+    if (stateHash === this._lastStateHash) {
+      // No changes, skip re-render
+      return;
+    }
+    this._lastStateHash = stateHash;
+    
     // Get merge branches if callback is provided
     const mergeBranches = this._getMergeBranches ? this._getMergeBranches(this._planId) : undefined;
     
@@ -541,6 +560,7 @@ export class PlanDetailPanel {
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
   <style>
     body { 
       font: 14px sans-serif; 
@@ -568,6 +588,7 @@ export class PlanDetailPanel {
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
   <style>
     * { box-sizing: border-box; }
     body { 
@@ -670,6 +691,7 @@ export class PlanDetailPanel {
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' https://cdn.jsdelivr.net;">
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <style>${getPlanDetailCss()}</style>
 </head>

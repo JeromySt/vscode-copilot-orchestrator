@@ -130,7 +130,7 @@ export async function handleCreatePlan(args: any, ctx: ToolHandlerContext): Prom
     id: planId,
     name: args.name || `Plan ${planId}`,
     repoPath: ctx.workspacePath,
-    worktreeRoot: `.worktrees/${planId}`,
+    // worktreeRoot is NOT set here - enqueue() will set it using internal UUID for consistency
     baseBranch: args.baseBranch || 'main',  // Plan's starting point
     targetBranch: args.targetBranch,         // Optional: where to merge final results
     maxParallel: args.maxParallel,

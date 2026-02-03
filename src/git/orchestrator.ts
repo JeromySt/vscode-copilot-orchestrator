@@ -85,19 +85,13 @@ export async function createJobWorktree(options: JobWorktreeOptions): Promise<st
   // Ensure orchestrator directories are in .gitignore
   await ensureGitignorePatterns(repoPath, [worktreeRoot, '.orchestrator'], logFn);
   
-  // Fetch latest changes
+  // Fetch latest changes (does not affect working directory)
   logFn('[git] Fetching latest changes...');
   await execAsync(['fetch', '--all', '--tags'], { cwd: repoPath });
   
-  // Switch to base branch and try to pull
-  logFn(`[git] Switching to base branch '${baseBranch}'`);
-  await branches.checkout(baseBranch, repoPath);
-  
-  // Try to pull (non-fatal if fails)
-  const pullResult = await execAsync(['pull', '--ff-only'], { cwd: repoPath });
-  if (!pullResult.success && pullResult.stderr && !pullResult.stderr.includes('no tracking information')) {
-    logFn(`[git] Warning: Pull failed - ${pullResult.stderr}`);
-  }
+  // NOTE: We intentionally do NOT checkout baseBranch in the main repo.
+  // All work happens in worktrees to avoid disrupting the user's working directory.
+  // The worktree will be created from the fetched baseBranch ref directly.
   
   // Create worktree path
   const worktreeRootAbs = path.join(repoPath, worktreeRoot);
@@ -111,12 +105,23 @@ export async function createJobWorktree(options: JobWorktreeOptions): Promise<st
     return worktreePath;
   }
   
-  // Create new worktree
+  // Create new worktree from the base branch ref (fetched, not checked out)
+  // Use origin/baseBranch if available, otherwise local baseBranch
+  let fromRef = baseBranch;
+  const remoteRef = `origin/${baseBranch}`;
+  const hasRemote = await branches.exists(remoteRef, repoPath);
+  if (hasRemote) {
+    fromRef = remoteRef;
+    logFn(`[git] Creating worktree from ${fromRef}`);
+  } else {
+    logFn(`[git] Creating worktree from local ${fromRef}`);
+  }
+  
   await worktrees.create({
     repoPath,
     worktreePath,
     branchName: targetBranch,
-    fromRef: baseBranch,
+    fromRef,
     log: logFn
   });
   
@@ -178,7 +183,7 @@ export async function finalizeWorktree(
   }
   
   // Commit
-  await repository.commit(worktreePath, commitMessage, logFn);
+  await repository.commit(worktreePath, commitMessage, { log: logFn });
   logFn('[git] ✓ Changes committed');
   return true;
 }
@@ -189,28 +194,36 @@ export async function finalizeWorktree(
 
 /**
  * Squash merge a branch into another.
+ * 
+ * IMPORTANT: This function operates in the provided repoPath, which should
+ * be a worktree path, NOT the main repository. The caller is responsible
+ * for ensuring the target branch is checked out in the worktree.
  */
 export async function squashMerge(
   sourceBranch: string,
   targetBranch: string,
   commitMessage: string,
-  repoPath: string,
+  worktreePath: string,
   logger?: GitLogger
 ): Promise<void> {
   const logFn = logger || ((msg: string) => log.debug(msg));
   
   logFn(`[git] Squash merging '${sourceBranch}' into '${targetBranch}'`);
   
-  // Switch to target branch
-  await branches.checkout(targetBranch, repoPath, logFn);
+  // Verify we're on the target branch
+  const currentBranch = await branches.current(worktreePath);
+  if (currentBranch !== targetBranch) {
+    logFn(`[git] Switching to target branch '${targetBranch}'`);
+    await branches.checkout(targetBranch, worktreePath, logFn);
+  }
   
   // Squash merge
-  await execAsync(['merge', '--squash', sourceBranch], { cwd: repoPath, throwOnError: true });
+  await execAsync(['merge', '--squash', sourceBranch], { cwd: worktreePath, throwOnError: true });
   
   // Commit (may have nothing to commit if branches are in sync)
-  const hasStaged = await repository.hasStagedChanges(repoPath);
+  const hasStaged = await repository.hasStagedChanges(worktreePath);
   if (hasStaged) {
-    await repository.commit(repoPath, commitMessage, logFn);
+    await repository.commit(worktreePath, commitMessage, { log: logFn });
     logFn('[git] ✓ Squash merge completed');
   } else {
     logFn('[git] ✓ No changes to commit (branches already in sync)');

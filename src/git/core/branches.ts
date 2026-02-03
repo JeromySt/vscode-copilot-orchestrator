@@ -108,6 +108,12 @@ export async function create(
 
 /**
  * Create or reset a branch to point at another branch/commit.
+ * 
+ * If the branch is currently checked out in the main repo:
+ * - If working directory is clean: uses `git reset --hard` (safe)
+ * - If uncommitted changes exist: throws error (won't discard user's work)
+ * 
+ * If the branch is checked out in another worktree: throws error
  */
 export async function createOrReset(
   branchName: string,
@@ -116,8 +122,52 @@ export async function createOrReset(
   log?: GitLogger
 ): Promise<void> {
   log?.(`[branch] Creating/resetting branch '${branchName}' to '${fromRef}'`);
-  await execAsyncOrThrow(['branch', '-f', branchName, fromRef], repoPath);
-  log?.(`[branch] ✓ Branch '${branchName}' set to '${fromRef}'`);
+  
+  // Try the simple approach first
+  const result = await execAsync(['branch', '-f', branchName, fromRef], { cwd: repoPath });
+  
+  if (result.success) {
+    log?.(`[branch] ✓ Branch '${branchName}' set to '${fromRef}'`);
+    return;
+  }
+  
+  // Check if the branch is checked out (can't force-update checked out branches)
+  if (result.stderr.includes('used by worktree') || result.stderr.includes('checked out')) {
+    log?.(`[branch] Branch '${branchName}' is checked out, checking if safe to reset`);
+    
+    // Find which worktree has this branch checked out
+    const currentBranch = await current(repoPath);
+    
+    if (currentBranch === branchName) {
+      // Branch is checked out in main repo
+      // Check for uncommitted changes first - we won't discard user's work
+      const statusResult = await execAsync(['status', '--porcelain'], { cwd: repoPath });
+      const hasUncommittedChanges = statusResult.success && statusResult.stdout.trim().length > 0;
+      
+      if (hasUncommittedChanges) {
+        log?.(`[branch] ⚠ Cannot reset - uncommitted changes would be lost`);
+        throw new Error(
+          `Cannot update branch '${branchName}' - it is checked out with uncommitted changes. ` +
+          `Please commit or stash your changes first.`
+        );
+      }
+      
+      // Safe to reset - no uncommitted changes
+      log?.(`[branch] Working directory clean, resetting to '${fromRef}'`);
+      await execAsyncOrThrow(['reset', '--hard', fromRef], repoPath);
+      log?.(`[branch] ✓ Reset '${branchName}' to '${fromRef}' via git reset`);
+      return;
+    }
+    
+    // Branch is checked out in a different worktree - we can't update it safely
+    throw new Error(
+      `Cannot update branch '${branchName}' - it is checked out in another worktree. ` +
+      `Remove the worktree first or use a different target branch.`
+    );
+  }
+  
+  // Some other error
+  throw new Error(`Git command failed: git branch -f ${branchName} ${fromRef} - ${result.stderr}`);
 }
 
 /**

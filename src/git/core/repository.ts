@@ -102,9 +102,14 @@ export async function stageAll(cwd: string, log?: GitLogger): Promise<void> {
 /**
  * Create a commit.
  */
-export async function commit(cwd: string, message: string, log?: GitLogger): Promise<boolean> {
+export async function commit(cwd: string, message: string, options: { allowEmpty?: boolean; log?: GitLogger } = {}): Promise<boolean> {
+  const { allowEmpty = false, log } = options;
   log?.(`[git] Creating commit`);
-  const result = await execAsync(['commit', '-m', message], { cwd });
+  
+  const args = ['commit', '-m', message];
+  if (allowEmpty) args.push('--allow-empty');
+  
+  const result = await execAsync(args, { cwd });
   
   if (result.success) {
     log?.(`[git] ✓ Committed`);
@@ -141,6 +146,14 @@ export async function hasStagedChanges(cwd: string): Promise<boolean> {
  */
 export async function getHead(cwd: string): Promise<string | null> {
   return execAsyncOrNull(['rev-parse', 'HEAD'], cwd);
+}
+
+/**
+ * Resolve a ref (branch name, tag, commit, etc.) to a full commit SHA.
+ */
+export async function resolveRef(ref: string, cwd: string): Promise<string> {
+  const result = await execAsyncOrThrow(['rev-parse', ref], cwd);
+  return result.trim();
 }
 
 /**
@@ -250,4 +263,69 @@ export async function ensureGitignore(repoPath: string, patterns: string[], log?
   } catch (e) {
     log?.(`[git] ⚠ Could not update .gitignore: ${e}`);
   }
+}
+
+// =============================================================================
+// STASH OPERATIONS
+// =============================================================================
+
+/**
+ * Check if there are uncommitted changes (staged or unstaged).
+ */
+export async function hasUncommittedChanges(cwd: string): Promise<boolean> {
+  const result = await execAsync(['status', '--porcelain'], { cwd });
+  return result.success && result.stdout.trim().length > 0;
+}
+
+/**
+ * Stash uncommitted changes with a message.
+ * Returns true if changes were stashed, false if nothing to stash.
+ */
+export async function stashPush(cwd: string, message: string, log?: GitLogger): Promise<boolean> {
+  log?.(`[git] Stashing changes: ${message}`);
+  
+  // Check if there's anything to stash
+  const hasChanges = await hasUncommittedChanges(cwd);
+  if (!hasChanges) {
+    log?.(`[git] Nothing to stash`);
+    return false;
+  }
+  
+  const result = await execAsync(['stash', 'push', '-m', message], { cwd });
+  if (result.success) {
+    log?.(`[git] ✓ Changes stashed`);
+    return true;
+  }
+  
+  throw new Error(`Failed to stash changes: ${result.stderr}`);
+}
+
+/**
+ * Pop the most recent stash.
+ */
+export async function stashPop(cwd: string, log?: GitLogger): Promise<boolean> {
+  log?.(`[git] Popping stash`);
+  
+  const result = await execAsync(['stash', 'pop'], { cwd });
+  if (result.success) {
+    log?.(`[git] ✓ Stash popped`);
+    return true;
+  }
+  
+  // "No stash entries found" is not an error for our purposes
+  if (result.stderr.includes('No stash entries found')) {
+    log?.(`[git] No stash to pop`);
+    return false;
+  }
+  
+  throw new Error(`Failed to pop stash: ${result.stderr}`);
+}
+
+/**
+ * List stash entries.
+ */
+export async function stashList(cwd: string): Promise<string[]> {
+  const result = await execAsyncOrNull(['stash', 'list'], cwd);
+  if (!result) return [];
+  return result.split(/\r?\n/).filter(Boolean);
 }

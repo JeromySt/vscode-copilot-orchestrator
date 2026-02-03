@@ -76,8 +76,10 @@ export interface SubPlanJob {
  * Sub-plans can themselves have sub-plans, enabling arbitrary nesting.
  */
 export interface SubPlanSpec {
-  /** Unique sub-plan ID within the parent plan */
+  /** Unique sub-plan ID within the parent plan (user-friendly name) */
   id: string;
+  /** Internal UUID for branch naming (auto-generated) */
+  _internalId?: string;
   /** Human-readable name */
   name?: string;
   /** IDs of work units (jobs or sub-plans) that must complete before this sub-plan starts. */
@@ -98,8 +100,10 @@ export interface SubPlanSpec {
  * Plan specification defining the execution DAG.
  */
 export interface PlanSpec {
-  /** Unique plan ID */
+  /** Unique plan ID (user-friendly name) */
   id: string;
+  /** Internal UUID for branch naming (auto-generated) */
+  _internalId?: string;
   /** Human-readable name */
   name?: string;
   /** Repository path (defaults to workspace) */
@@ -228,8 +232,10 @@ export type PlanStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancel
 export interface InternalPlanState extends Omit<PlanState, 'pendingSubPlans' | 'runningSubPlans' | 'completedSubPlans' | 'failedSubPlans' | 'mergedLeaves'> {
   /** Map of plan job ID -> actual JobRunner job ID (GUID) */
   jobIdMap: Map<string, string>;
-  /** Map of plan job ID -> completed branch name */
-  completedBranches: Map<string, string>;
+  /** Map of plan job ID -> completed commit SHA (final HEAD after work) */
+  completedCommits: Map<string, string>;
+  /** Map of plan job ID -> base commit SHA (starting point when worktree was created) */
+  baseCommits: Map<string, string>;
   /** Map of plan job ID -> worktree path */
   worktreePaths: Map<string, string>;
   /** Map of plan job ID -> worktree creation promise (for async preparation) - NOT USED FOR CHECKING */
@@ -250,15 +256,13 @@ export interface InternalPlanState extends Omit<PlanState, 'pendingSubPlans' | '
   pendingSubPlans: Set<string>;
   /** Sub-plans currently running (sub-plan ID -> child plan ID) */
   runningSubPlans: Map<string, string>;
-  /** Sub-plans that have completed (sub-plan ID -> completed branch) */
+  /** Sub-plans that have completed (sub-plan ID -> completed commit SHA) */
   completedSubPlans: Map<string, string>;
   /** Sub-plans that have failed */
   failedSubPlans: Set<string>;
-  /** Integration branches created for sub-plans (sub-plan ID -> branch name) */
-  subPlanIntegrationBranches?: Map<string, string>;
   /** Work units (jobs/sub-plans) that have been merged to targetBranch */
   mergedLeaves: Set<string>;
-  /** Work units whose worktrees/branches have been cleaned up */
+  /** Work units whose worktrees have been cleaned up */
   cleanedWorkUnits: Set<string>;
 }
 
@@ -281,7 +285,8 @@ export function createInternalState(id: string): InternalPlanState {
     canceled: [],
     submitted: [],
     jobIdMap: new Map(),
-    completedBranches: new Map(),
+    completedCommits: new Map(),
+    baseCommits: new Map(),
     worktreePaths: new Map(),
     worktreePromises: new Map(),
     worktreeResults: new Map(),

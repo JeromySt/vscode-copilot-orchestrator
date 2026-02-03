@@ -82,6 +82,7 @@ export class JobsViewProvider implements vscode.WebviewViewProvider {
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
   <style>
     body { font: 12px sans-serif; padding: 8px; margin: 0; color: var(--vscode-foreground); }
     .header { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }

@@ -1,16 +1,36 @@
 
 import * as vscode from 'vscode';
-import * as cp from 'child_process';
-import { isCopilotCliAvailable } from './cliCheckCore';
+import { isCopilotCliAvailable, checkCopilotCliAsync, isCliCachePopulated } from './cliCheckCore';
+
+// Async command check helper
+async function cmdOkAsync(cmd: string): Promise<boolean> {
+  const cp = await import('child_process');
+  return new Promise((resolve) => {
+    const proc = cp.spawn(cmd, [], { shell: true, stdio: 'ignore' });
+    proc.on('close', (code) => resolve(code === 0));
+    proc.on('error', () => resolve(false));
+    setTimeout(() => { proc.kill(); resolve(false); }, 5000);
+  });
+}
 
 export async function ensureCopilotCliInteractive(reason: string) {
   const cfg = vscode.workspace.getConfiguration('copilotOrchestrator');
   const required = cfg.get<boolean>('copilotCli.required', true);
   if (!required) return true;
-  if (isCopilotCliAvailable()) return true;
+  
+  // Wait for async check to complete if cache not yet populated
+  let cliAvailable: boolean;
+  if (isCliCachePopulated()) {
+    cliAvailable = isCopilotCliAvailable();
+  } else {
+    // Do the actual async check and wait for result
+    cliAvailable = await checkCopilotCliAsync();
+  }
+  
+  if (cliAvailable) return true;
 
   const preferred = cfg.get<'gh'|'npm'|'auto'>('copilotCli.preferredInstall','auto');
-  const hasGh = cmdOk('gh --version');
+  const hasGh = await cmdOkAsync('gh --version');
   const ghAction = (preferred==='gh' || (preferred==='auto' && hasGh)) && hasGh ? 'Install via gh' : undefined;
 
   const choice = await vscode.window.showWarningMessage(
@@ -23,8 +43,6 @@ export async function ensureCopilotCliInteractive(reason: string) {
   if (choice==='Install via npm') { const t = vscode.window.createTerminal({ name: 'Install Copilot CLI (npm)' }); t.show(); t.sendText('npm i -g @githubnext/github-copilot-cli', true); t.sendText('# When complete, run: copilot --help', true); return false; }
   if (choice==='Install via gh') { const t = vscode.window.createTerminal({ name: 'Install Copilot CLI (gh extension)' }); t.show(); t.sendText('gh extension install github/gh-copilot', true); t.sendText('# When complete, run: gh copilot --help', true); return false; }
   return false;
-
-  function cmdOk(cmd: string): boolean { try { cp.execSync(cmd, { stdio: 'ignore' }); return true; } catch { return false; } }
 }
 
 export function registerCopilotCliCheck(context: vscode.ExtensionContext) {

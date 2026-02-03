@@ -57,15 +57,15 @@ const ERROR_PATTERN = /(\d+)\s*error(?:s|\(s\))?/i;
 const WARNING_PATTERN = /(\d+)\s*warning(?:s|\(s\))?/i;
 
 /**
- * Extract metrics from a job's log file.
+ * Extract metrics from a job's log file (async to avoid blocking).
  */
-export function extractMetricsFromLog(job: Job): JobMetrics {
+export async function extractMetricsFromLog(job: Job): Promise<JobMetrics> {
   const metrics: JobMetrics = {};
 
   if (!job.logFile) return metrics;
 
   try {
-    const logContent = fs.readFileSync(job.logFile, 'utf-8');
+    const logContent = await fs.promises.readFile(job.logFile, 'utf-8');
     
     // Extract test counts
     extractTestMetrics(logContent, metrics);

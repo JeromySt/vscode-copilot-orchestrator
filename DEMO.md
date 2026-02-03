@@ -55,9 +55,10 @@ Shows detailed job information with timestamps and logs.
    - Runs on localhost:39219 by default
    - Serves both MCP and REST endpoints
 
-4. **Git Worktrees** (`src/git/gitWorktrees.ts`)
+4. **Git Worktrees** (`src/git/core/worktrees.ts`)
    - Isolates each job in separate working directory
    - Prevents conflicts between parallel jobs
+   - Uses symlinks for submodules (fast setup)
    - Auto-cleanup after merge
 
 5. **Views & UI**

@@ -9,8 +9,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import { isCopilotCliAvailable } from './cliCheckCore';
+import * as git from '../git';
 
 // ============================================================================
 // TYPES
@@ -392,19 +393,20 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
    * Create a marker commit indicating agent delegation.
    */
   private async createMarkerCommit(worktreePath: string, jobId: string, taskDescription: string, label: string): Promise<void> {
-    spawnSync('git', ['add', '.copilot-task.md'], { cwd: worktreePath });
-    const commitResult = spawnSync('git', [
-      'commit',
-      '-m',
-      `orchestrator(${jobId}): AI agent task created\n\n${taskDescription}`,
-      '--allow-empty'
-    ], {
-      cwd: worktreePath,
-      encoding: 'utf-8'
-    });
+    try {
+      // Stage the task file using git/* module
+      await git.executor.execAsync(['add', '.copilot-task.md'], { cwd: worktreePath });
+      
+      // Create the marker commit using git/* module
+      const commitMessage = `orchestrator(${jobId}): AI agent task created\n\n${taskDescription}`;
+      const committed = await git.repository.commit(worktreePath, commitMessage, { allowEmpty: true });
 
-    if (commitResult.status === 0) {
-      this.logger.log(`[${label}] Created marker commit for agent delegation`);
+      if (committed) {
+        this.logger.log(`[${label}] Created marker commit for agent delegation`);
+      }
+    } catch (e: any) {
+      // Non-fatal - log and continue
+      this.logger.log(`[${label}] Could not create marker commit: ${e.message}`);
     }
   }
 }

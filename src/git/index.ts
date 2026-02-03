@@ -56,7 +56,7 @@ export * as orchestrator from './orchestrator';
 // =============================================================================
 
 export type { GitLogger, CommandResult, ExecuteOptions } from './core/executor';
-export type { MergeResult, MergeOptions } from './core/merge';
+export type { MergeResult, MergeOptions, MergeTreeResult, MergeTreeOptions } from './core/merge';
 export type { CommitInfo, FileChange } from './core/repository';
 export type { CreateOptions as WorktreeCreateOptions } from './core/worktrees';
 export type { JobWorktreeOptions } from './orchestrator';
