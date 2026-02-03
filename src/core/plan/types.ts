@@ -209,8 +209,8 @@ export interface PlanState {
   pendingSubPlans?: string[];
   /** Sub-plans currently running (map of sub-plan ID -> child plan ID) */
   runningSubPlans?: Record<string, string>;
-  /** Sub-plans that have completed */
-  completedSubPlans?: string[];
+  /** Sub-plans that have completed (map of sub-plan ID -> child plan ID) */
+  completedSubPlans?: Record<string, string>;
   /** Sub-plans that have failed */
   failedSubPlans?: string[];
   
@@ -320,7 +320,7 @@ export function toPublicState(internal: InternalPlanState): PlanState {
     mergedLeaves: internal.mergedLeaves.size > 0 ? Array.from(internal.mergedLeaves) : undefined,
     pendingSubPlans: internal.pendingSubPlans.size > 0 ? Array.from(internal.pendingSubPlans) : undefined,
     runningSubPlans: internal.runningSubPlans.size > 0 ? Object.fromEntries(internal.runningSubPlans) : undefined,
-    completedSubPlans: internal.completedSubPlans.size > 0 ? Array.from(internal.completedSubPlans.keys()) : undefined,
+    completedSubPlans: internal.completedSubPlans.size > 0 ? Object.fromEntries(internal.completedSubPlans) : undefined,
     failedSubPlans: internal.failedSubPlans.size > 0 ? Array.from(internal.failedSubPlans) : undefined,
     aggregatedWorkSummary: internal.aggregatedWorkSummary,
   };

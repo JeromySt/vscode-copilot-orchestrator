@@ -314,7 +314,7 @@ export function initializePlansView(
         // Sub-plan information from spec and state
         // Note: planRunner.list() returns PlanState where these are already converted:
         // - runningSubPlans is Record<string, string>
-        // - completedSubPlans is string[]
+        // - completedSubPlans is Record<string, string>
         subPlans: spec?.subPlans,
         pendingSubPlans: p.pendingSubPlans,
         runningSubPlans: p.runningSubPlans,

@@ -72,8 +72,8 @@ export interface Plan {
   pendingSubPlans?: string[];
   /** Sub-plans currently running (subPlanId -> childPlanId) */
   runningSubPlans?: Record<string, string>;
-  /** Sub-plans that completed */
-  completedSubPlans?: string[];
+  /** Sub-plans that completed (subPlanId -> childPlanId) */
+  completedSubPlans?: Record<string, string>;
   /** Sub-plans that failed */
   failedSubPlans?: string[];
   /** Parent plan ID if this is a sub-plan */
@@ -216,7 +216,7 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
         Object.keys(plan.runningSubPlans).forEach(id => launchedSubPlanIds.add(id));
       }
       if (plan.completedSubPlans) {
-        plan.completedSubPlans.forEach(id => launchedSubPlanIds.add(id));
+        Object.keys(plan.completedSubPlans).forEach(id => launchedSubPlanIds.add(id));
       }
       if (plan.failedSubPlans) {
         plan.failedSubPlans.forEach(id => launchedSubPlanIds.add(id));
@@ -274,7 +274,7 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
         // Sub-plan tracking
         pendingSubPlans: plan.pendingSubPlans?.length || 0,
         runningSubPlans: Object.keys(plan.runningSubPlans || {}).length,
-        completedSubPlans: plan.completedSubPlans?.length || 0,
+        completedSubPlans: Object.keys(plan.completedSubPlans || {}).length,
         failedSubPlans: plan.failedSubPlans?.length || 0,
         // Children (launched sub-plans + pending sub-plan specs)
         children

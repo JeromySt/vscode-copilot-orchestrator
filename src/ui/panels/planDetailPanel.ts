@@ -789,13 +789,12 @@ ${mermaidDef}
       const sanitizedId = 'subplan_' + sp.id.replace(/[^a-zA-Z0-9]/g, '_');
       
       // Get the child plan ID from runningSubPlans or completedSubPlans
-      // The child plan ID is the full plan ID (parentId/subPlanId)
+      // Both are now Record<string, string> (subPlanId -> childPlanId)
       let childPlanId: string | null = null;
       if (plan.runningSubPlans && plan.runningSubPlans[sp.id]) {
         childPlanId = plan.runningSubPlans[sp.id];
-      } else if (plan.completedSubPlans?.includes(sp.id)) {
-        // For completed sub-plans, construct the ID from parent + sub-plan ID
-        childPlanId = `${plan.id}/${sp.id}`;
+      } else if (plan.completedSubPlans && plan.completedSubPlans[sp.id]) {
+        childPlanId = plan.completedSubPlans[sp.id];
       }
       
       map[sanitizedId] = {
@@ -906,7 +905,7 @@ ${mermaidDef}
     
     // Helper to get sub-plan status class
     const getSubPlanStatus = (spId: string): string => {
-      if (plan.completedSubPlans?.includes(spId)) return 'subplanCompleted';
+      if (plan.completedSubPlans && plan.completedSubPlans[spId]) return 'subplanCompleted';
       if (plan.runningSubPlans && plan.runningSubPlans[spId]) return 'subplanRunning';
       if (plan.failedSubPlans?.includes(spId)) return 'subplanFailed';
       return 'subplanPending';

@@ -875,6 +875,23 @@ Focus on addressing the failure root cause while maintaining all original requir
         }
         this.writeLog(job, `[orchestrator] Work summary: ${summary.description}`);
         this.persist();
+        
+        // VALIDATION: Jobs must produce at least one commit
+        // A job that completes without making any changes is unexpected and indicates
+        // either a bug in the task execution or an invalid task specification.
+        if (summary.commits === 0) {
+          const msg = 'Job completed work step but produced no commits. Jobs are expected to make changes to the codebase.';
+          this.writeLog(job, `[orchestrator] FAILED: ${msg}`);
+          if (!job.stepStatuses) job.stepStatuses = {};
+          job.stepStatuses.commit = 'failed';
+          this.syncStepStatusesToAttempt(job);
+          job.status = 'failed';
+          job.endedAt = Date.now();
+          this.persist();
+          this.working--;
+          this.pump();
+          return;
+        }
       } else {
         if (!job.stepStatuses) job.stepStatuses = {};
         job.stepStatuses.commit = 'skipped';
