@@ -473,21 +473,29 @@ export class DagRunner extends EventEmitter {
   }
   
   /**
-   * Retry failed nodes in a DAG
+   * Resume a DAG that may have been paused or completed with failures.
+   * This ensures the pump is running to process any ready nodes.
    */
-  retry(dagId: string): boolean {
+  resume(dagId: string): boolean {
     const dag = this.dags.get(dagId);
-    const sm = this.stateMachines.get(dagId);
-    if (!dag || !sm) return false;
+    if (!dag) return false;
     
-    log.info(`Retrying DAG: ${dagId}`);
+    log.info(`Resuming DAG: ${dagId}`);
     
-    // This is a simplified retry - in practice, we might need to:
-    // 1. Reset failed nodes to pending/ready
-    // 2. Clear blocked nodes that could now proceed
-    // For now, just log - actual retry logic needs more thought
+    // Ensure pump is running
+    this.startPump();
     
-    return false; // TODO: Implement proper retry
+    // Persist the current state
+    this.persistence.save(dag);
+    
+    return true;
+  }
+  
+  /**
+   * Get a DAG by ID (for external access)
+   */
+  getDag(dagId: string): DagInstance | undefined {
+    return this.dags.get(dagId);
   }
   
   // ============================================================================

@@ -488,3 +488,86 @@ export async function handleDeleteDag(args: any, ctx: DagHandlerContext): Promis
       : `Failed to delete DAG ${args.id}`,
   };
 }
+
+/**
+ * Retry failed nodes in a DAG
+ */
+export async function handleRetryDag(args: any, ctx: DagHandlerContext): Promise<any> {
+  if (!args.id) {
+    return { success: false, error: 'DAG id is required' };
+  }
+  
+  const dag = ctx.dagRunner.getDag(args.id);
+  if (!dag) {
+    return { success: false, error: `DAG ${args.id} not found` };
+  }
+  
+  // Determine which nodes to retry
+  let nodeIdsToRetry: string[] = args.nodeIds || [];
+  
+  if (nodeIdsToRetry.length === 0) {
+    // No specific nodes - retry all failed nodes
+    for (const [nodeId, state] of dag.nodeStates) {
+      if (state.status === 'failed') {
+        nodeIdsToRetry.push(nodeId);
+      }
+    }
+  }
+  
+  if (nodeIdsToRetry.length === 0) {
+    return { 
+      success: false, 
+      error: 'No failed nodes to retry',
+      dagId: args.id,
+    };
+  }
+  
+  // Reset the failed nodes
+  const retriedNodes: string[] = [];
+  for (const nodeId of nodeIdsToRetry) {
+    const state = dag.nodeStates.get(nodeId);
+    if (state && (state.status === 'failed' || state.status === 'blocked')) {
+      // Reset state
+      state.status = 'ready';
+      state.error = undefined;
+      state.startedAt = undefined;
+      state.endedAt = undefined;
+      // Keep attempts count for tracking
+      retriedNodes.push(nodeId);
+    }
+  }
+  
+  // Also unblock any nodes that were blocked due to these failures
+  for (const [nodeId, state] of dag.nodeStates) {
+    if (state.status === 'blocked') {
+      const node = dag.nodes.get(nodeId);
+      if (node) {
+        // Check if all dependencies are now non-failed
+        let allDepsOk = true;
+        for (const depId of node.dependencies) {
+          const depState = dag.nodeStates.get(depId);
+          if (depState && depState.status === 'failed') {
+            allDepsOk = false;
+            break;
+          }
+        }
+        if (allDepsOk) {
+          state.status = 'pending';
+        }
+      }
+    }
+  }
+  
+  // Resume the DAG if it was stopped
+  ctx.dagRunner.resume(args.id);
+  
+  return {
+    success: true,
+    message: `Retrying ${retriedNodes.length} node(s)`,
+    dagId: args.id,
+    retriedNodes: retriedNodes.map(id => {
+      const node = dag.nodes.get(id);
+      return { id, name: node?.name || id };
+    }),
+  };
+}

@@ -316,5 +316,32 @@ EXAMPLES:
         required: ['id']
       }
     },
+    
+    {
+      name: 'retry_copilot_dag',
+      description: `Retry failed nodes in a DAG. 
+
+This resets failed nodes back to 'ready' state and resumes execution.
+Use after fixing issues that caused the failures.
+
+Options:
+- Retry all failed nodes (default)
+- Retry specific nodes by ID`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { 
+            type: 'string', 
+            description: 'DAG ID to retry' 
+          },
+          nodeIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional: specific node IDs to retry. If omitted, retries all failed nodes.'
+          }
+        },
+        required: ['id']
+      }
+    },
   ];
 }
