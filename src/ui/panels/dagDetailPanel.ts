@@ -166,6 +166,14 @@ export class DagDetailPanel {
       };
     }
     
+    // Get branch info
+    const baseBranch = dag.spec.baseBranch || 'main';
+    const targetBranch = dag.targetBranch || baseBranch;
+    const showBranchFlow = baseBranch !== targetBranch || dag.targetBranch;
+    
+    // Build work summary from node states
+    const workSummaryHtml = this._buildWorkSummaryHtml(dag);
+    
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -182,7 +190,7 @@ export class DagDetailPanel {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 16px;
+      margin-bottom: 12px;
     }
     .header h2 { margin: 0; }
     .status-badge {
@@ -197,6 +205,32 @@ export class DagDetailPanel {
     .status-badge.failed { background: rgba(244, 135, 113, 0.2); color: #f48771; }
     .status-badge.partial { background: rgba(255, 204, 0, 0.2); color: #cca700; }
     .status-badge.pending { background: rgba(133, 133, 133, 0.2); color: #858585; }
+    
+    /* Branch flow */
+    .branch-flow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 10px 14px;
+      background: var(--vscode-sideBar-background);
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .branch-name {
+      padding: 3px 8px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      border-radius: 4px;
+      font-family: monospace;
+    }
+    .branch-arrow {
+      color: var(--vscode-descriptionForeground);
+    }
+    .branch-label {
+      color: var(--vscode-descriptionForeground);
+      font-size: 11px;
+    }
     
     .stats {
       display: flex;
@@ -244,6 +278,7 @@ export class DagDetailPanel {
       padding: 16px;
       border-radius: 8px;
       overflow: auto;
+      margin-bottom: 16px;
     }
     
     /* Mermaid node styling */
@@ -256,6 +291,76 @@ export class DagDetailPanel {
     .mermaid .node.blocked rect { fill: #3c3c3c; stroke: #858585; stroke-dasharray: 5,5; }
     
     .mermaid .node { cursor: pointer; }
+    
+    /* Work Summary */
+    .work-summary {
+      background: var(--vscode-sideBar-background);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .work-summary h3 {
+      margin: 0 0 12px 0;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--vscode-descriptionForeground);
+    }
+    .work-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .work-stat {
+      text-align: center;
+      padding: 12px;
+      background: var(--vscode-editor-background);
+      border-radius: 6px;
+    }
+    .work-stat-value {
+      font-size: 20px;
+      font-weight: 600;
+    }
+    .work-stat-value.added { color: #4ec9b0; }
+    .work-stat-value.modified { color: #dcdcaa; }
+    .work-stat-value.deleted { color: #f48771; }
+    .work-stat-label {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      margin-top: 4px;
+    }
+    
+    .job-summaries {
+      border-top: 1px solid var(--vscode-widget-border);
+      padding-top: 12px;
+    }
+    .job-summary {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--vscode-widget-border);
+      cursor: pointer;
+    }
+    .job-summary:hover {
+      background: var(--vscode-list-hoverBackground);
+      margin: 0 -8px;
+      padding: 8px;
+    }
+    .job-summary:last-child { border-bottom: none; }
+    .job-name {
+      font-weight: 500;
+    }
+    .job-stats {
+      display: flex;
+      gap: 12px;
+      font-size: 12px;
+    }
+    .job-stats .stat-commits { color: var(--vscode-descriptionForeground); }
+    .job-stats .stat-added { color: #4ec9b0; }
+    .job-stats .stat-modified { color: #dcdcaa; }
+    .job-stats .stat-deleted { color: #f48771; }
     
     .actions {
       margin-top: 16px;
@@ -277,6 +382,10 @@ export class DagDetailPanel {
       background: var(--vscode-button-secondaryBackground);
       color: var(--vscode-button-secondaryForeground);
     }
+    .action-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
@@ -284,6 +393,18 @@ export class DagDetailPanel {
     <h2>${this._escapeHtml(dag.spec.name)}</h2>
     <span class="status-badge ${status}">${status}</span>
   </div>
+  
+  ${showBranchFlow ? `
+  <div class="branch-flow">
+    <span class="branch-label">Base:</span>
+    <span class="branch-name">${this._escapeHtml(baseBranch)}</span>
+    <span class="branch-arrow">→</span>
+    <span class="branch-label">Work</span>
+    <span class="branch-arrow">→</span>
+    <span class="branch-label">Target:</span>
+    <span class="branch-name">${this._escapeHtml(targetBranch)}</span>
+  </div>
+  ` : ''}
   
   <div class="stats">
     <div class="stat">
@@ -321,10 +442,14 @@ ${mermaidDef}
     </pre>
   </div>
   
+  ${workSummaryHtml}
+  
   <div class="actions">
     ${status === 'running' || status === 'pending' ? 
       '<button class="action-btn secondary" onclick="cancelDag()">Cancel</button>' : ''}
     <button class="action-btn secondary" onclick="refresh()">Refresh</button>
+    ${status === 'succeeded' ? 
+      '<button class="action-btn primary" onclick="showWorkSummary()">View Work Summary</button>' : ''}
   </div>
   
   <script>
@@ -367,6 +492,16 @@ ${mermaidDef}
       }
     });
     
+    // Handle job summary clicks
+    document.querySelectorAll('.job-summary').forEach(el => {
+      el.addEventListener('click', () => {
+        const nodeId = el.dataset.nodeId;
+        if (nodeId) {
+          vscode.postMessage({ type: 'openNode', nodeId });
+        }
+      });
+    });
+    
     function cancelDag() {
       vscode.postMessage({ type: 'cancel' });
     }
@@ -374,9 +509,110 @@ ${mermaidDef}
     function refresh() {
       vscode.postMessage({ type: 'refresh' });
     }
+    
+    function showWorkSummary() {
+      vscode.postMessage({ type: 'showWorkSummary' });
+    }
   </script>
 </body>
 </html>`;
+  }
+  
+  /**
+   * Build work summary HTML from node execution states
+   */
+  private _buildWorkSummaryHtml(dag: DagInstance): string {
+    // Count totals across all nodes
+    let totalCommits = 0;
+    let totalAdded = 0;
+    let totalModified = 0;
+    let totalDeleted = 0;
+    
+    const jobSummaries: Array<{
+      nodeId: string;
+      name: string;
+      commits: number;
+      added: number;
+      modified: number;
+      deleted: number;
+    }> = [];
+    
+    for (const [nodeId, node] of dag.nodes) {
+      if (node.type !== 'job') continue;
+      
+      const state = dag.nodeStates.get(nodeId);
+      if (!state || state.status !== 'succeeded') continue;
+      
+      const ws = state.workSummary;
+      if (!ws) continue;
+      
+      const commits = ws.commits || 0;
+      const added = ws.filesAdded || 0;
+      const modified = ws.filesModified || 0;
+      const deleted = ws.filesDeleted || 0;
+      
+      totalCommits += commits;
+      totalAdded += added;
+      totalModified += modified;
+      totalDeleted += deleted;
+      
+      if (commits > 0 || added > 0 || modified > 0 || deleted > 0) {
+        jobSummaries.push({
+          nodeId,
+          name: node.name,
+          commits,
+          added,
+          modified,
+          deleted,
+        });
+      }
+    }
+    
+    // Don't show if no work done
+    if (totalCommits === 0 && totalAdded === 0 && totalModified === 0 && totalDeleted === 0) {
+      return '';
+    }
+    
+    const jobSummariesHtml = jobSummaries.map(j => `
+      <div class="job-summary" data-node-id="${j.nodeId}">
+        <span class="job-name">${this._escapeHtml(j.name)}</span>
+        <span class="job-stats">
+          <span class="stat-commits">${j.commits} commits</span>
+          <span class="stat-added">+${j.added}</span>
+          <span class="stat-modified">~${j.modified}</span>
+          <span class="stat-deleted">-${j.deleted}</span>
+        </span>
+      </div>
+    `).join('');
+    
+    return `
+    <div class="work-summary">
+      <h3>Work Summary</h3>
+      <div class="work-summary-grid">
+        <div class="work-stat">
+          <div class="work-stat-value">${totalCommits}</div>
+          <div class="work-stat-label">Commits</div>
+        </div>
+        <div class="work-stat">
+          <div class="work-stat-value added">+${totalAdded}</div>
+          <div class="work-stat-label">Files Added</div>
+        </div>
+        <div class="work-stat">
+          <div class="work-stat-value modified">~${totalModified}</div>
+          <div class="work-stat-label">Modified</div>
+        </div>
+        <div class="work-stat">
+          <div class="work-stat-value deleted">-${totalDeleted}</div>
+          <div class="work-stat-label">Deleted</div>
+        </div>
+      </div>
+      ${jobSummaries.length > 0 ? `
+      <div class="job-summaries">
+        ${jobSummariesHtml}
+      </div>
+      ` : ''}
+    </div>
+    `;
   }
   
   private _buildMermaidDiagram(dag: DagInstance): string {

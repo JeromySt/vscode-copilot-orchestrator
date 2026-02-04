@@ -506,8 +506,9 @@ export class DagRunner extends EventEmitter {
           nodeState.completedCommit = result.completedCommit;
         }
         
-        // Store work summary
+        // Store work summary on node state and aggregate to DAG
         if (result.workSummary) {
+          nodeState.workSummary = result.workSummary;
           this.appendWorkSummary(dag, result.workSummary);
         }
         

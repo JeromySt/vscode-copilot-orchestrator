@@ -273,6 +273,9 @@ export interface NodeExecutionState {
   
   /** Execution attempt count */
   attempts: number;
+  
+  /** Work summary (files changed, commits) - set on success */
+  workSummary?: JobWorkSummary;
 }
 
 /**
