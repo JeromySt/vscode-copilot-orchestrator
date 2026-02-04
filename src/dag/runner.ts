@@ -664,13 +664,13 @@ export class DagRunner extends EventEmitter {
           await this.mergeLeafToTarget(dag, node, nodeState.completedCommit);
         }
         
-        // Cleanup worktree if enabled (for ALL successful nodes, not just leaves)
-        if (dag.cleanUpSuccessfulWork) {
-          await this.cleanupWorktree(worktreePath, dag.repoPath);
-        }
-        
         sm.transition(node.id, 'succeeded');
         this.emit('nodeCompleted', dag.id, node.id, true);
+        
+        // Try to cleanup eligible worktrees (this node and any ancestors that are now safe)
+        if (dag.cleanUpSuccessfulWork) {
+          await this.cleanupEligibleWorktrees(dag, sm);
+        }
         
         log.info(`Job succeeded: ${node.name}`, {
           dagId: dag.id,
@@ -1003,6 +1003,77 @@ export class DagRunner extends EventEmitter {
         path: worktreePath,
         error: error.message,
       });
+    }
+  }
+  
+  /**
+   * Clean up worktrees for nodes that are safe to clean up.
+   * 
+   * A node's worktree is safe to clean up when:
+   * 1. The node itself has succeeded (has a completedCommit)
+   * 2. ALL of its dependents have succeeded (they've consumed our commit)
+   * 3. The worktree hasn't already been cleaned up
+   * 
+   * This ensures we don't lose state that downstream nodes might need.
+   * For leaf nodes (no dependents), they can be cleaned up immediately after success.
+   * For intermediate nodes, we wait until all children have completed.
+   */
+  private async cleanupEligibleWorktrees(
+    dag: DagInstance,
+    sm: DagStateMachine
+  ): Promise<void> {
+    const eligibleNodes: string[] = [];
+    
+    for (const [nodeId, state] of dag.nodeStates) {
+      // Skip if not succeeded or no worktree or already cleaned
+      if (state.status !== 'succeeded' || !state.worktreePath) {
+        continue;
+      }
+      
+      // Check if worktree still exists
+      const fs = require('fs');
+      if (!fs.existsSync(state.worktreePath)) {
+        continue; // Already cleaned up
+      }
+      
+      const node = dag.nodes.get(nodeId);
+      if (!node) continue;
+      
+      // Leaf nodes (no dependents) can always be cleaned up after success
+      if (node.dependents.length === 0) {
+        eligibleNodes.push(nodeId);
+        continue;
+      }
+      
+      // For non-leaf nodes, check if ALL dependents have succeeded
+      // This means they've all had a chance to consume our commit
+      let allDependentsSucceeded = true;
+      for (const depId of node.dependents) {
+        const depState = dag.nodeStates.get(depId);
+        if (!depState || depState.status !== 'succeeded') {
+          allDependentsSucceeded = false;
+          break;
+        }
+      }
+      
+      if (allDependentsSucceeded) {
+        eligibleNodes.push(nodeId);
+      }
+    }
+    
+    // Clean up eligible worktrees
+    if (eligibleNodes.length > 0) {
+      log.debug(`Cleaning up ${eligibleNodes.length} eligible worktrees`, {
+        dagId: dag.id,
+        nodes: eligibleNodes.map(id => dag.nodes.get(id)?.name || id),
+      });
+      
+      for (const nodeId of eligibleNodes) {
+        const state = dag.nodeStates.get(nodeId);
+        if (state?.worktreePath) {
+          await this.cleanupWorktree(state.worktreePath, dag.repoPath);
+        }
+      }
     }
   }
   
