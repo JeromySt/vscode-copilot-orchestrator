@@ -373,17 +373,20 @@ import { execAsyncOrThrow } from '../../git/core/executor';
 
 /**
  * Check if a work unit is a leaf (nothing consumes from it).
+ * 
+ * @param spec - Plan specification
+ * @param workUnitName - Name of the work unit (job or sub-plan name, used in consumesFrom)
  */
-export function isLeafWorkUnit(spec: PlanSpec, workUnitId: string): boolean {
-  // Check if any job consumes from this work unit
+export function isLeafWorkUnit(spec: PlanSpec, workUnitName: string): boolean {
+  // Check if any job consumes from this work unit (consumesFrom uses names)
   for (const job of spec.jobs) {
-    if (job.consumesFrom.includes(workUnitId)) {
+    if (job.consumesFrom.includes(workUnitName)) {
       return false;
     }
   }
   // Check if any sub-plan consumes from this work unit
   for (const sp of spec.subPlans || []) {
-    if (sp.consumesFrom.includes(workUnitId)) {
+    if (sp.consumesFrom.includes(workUnitName)) {
       return false;
     }
   }
@@ -399,22 +402,22 @@ export function isLeafWorkUnit(spec: PlanSpec, workUnitId: string): boolean {
  * 
  * @param spec - Plan specification
  * @param plan - Internal plan state
- * @param jobId - ID of the completed job
+ * @param jobName - Name of the completed job (used for state tracking)
  * @param completedCommit - Commit SHA or branch name to merge from
  * @param repoPath - Path to the repository
  */
 export async function mergeLeafToTarget(
   spec: PlanSpec,
   plan: InternalPlanState,
-  jobId: string,
+  jobName: string,
   completedCommit: string,
   repoPath: string
 ): Promise<boolean> {
   const targetBranch = spec.targetBranch || spec.baseBranch || 'main';
-  const planJob = spec.jobs.find(j => j.id === jobId);
+  const planJob = spec.jobs.find(j => j.name === jobName);
   const config = getMergeConfig();
 
-  log.info(`Merging leaf ${jobId} to ${targetBranch}`, {
+  log.info(`Merging leaf ${jobName} to ${targetBranch}`, {
     planId: spec.id,
     completedCommit: completedCommit.length > 20 ? completedCommit.slice(0, 8) : completedCommit,
   });
@@ -428,23 +431,23 @@ export async function mergeLeafToTarget(
       repoPath,
       completedCommit,  // Can be branch name or commit SHA
       targetBranch,
-      `Merge ${planJob?.name || jobId} from plan ${spec.name || spec.id}`,
+      `Merge ${planJob?.name || jobName} from plan ${spec.name}`,
       config
     );
 
     if (!result.success) {
-      log.error(`Failed to merge leaf ${jobId}`, { error: result.error });
+      log.error(`Failed to merge leaf ${jobName}`, { error: result.error });
       if (!result.userStateRestored) {
         log.error(`CRITICAL: User's workspace state may not have been fully restored`);
       }
       return false;
     }
 
-    // Track that this leaf has been merged
-    plan.mergedLeaves.add(jobId);
+    // Track that this leaf has been merged (keyed by name)
+    plan.mergedLeaves.add(jobName);
     plan.riMergeCompleted = true;
 
-    log.info(`Leaf ${jobId} merged successfully`, {
+    log.info(`Leaf ${jobName} merged successfully`, {
       totalMerged: plan.mergedLeaves.size,
       pushed: config.pushOnSuccess,
       newCommit: result.newCommit?.slice(0, 8),
@@ -452,7 +455,7 @@ export async function mergeLeafToTarget(
 
     return true;
   } catch (error: any) {
-    log.error(`Failed to merge leaf ${jobId}`, { error: error.message });
+    log.error(`Failed to merge leaf ${jobName}`, { error: error.message });
     return false;
   } finally {
     // Always release the lock
@@ -475,6 +478,7 @@ export async function performFinalMerge(
   const config = getMergeConfig();
 
   // Find leaf jobs (jobs that no other job or sub-plan consumes from)
+  // consumesFrom references job names, so we check by name
   const allConsumedFrom = new Set<string>();
   for (const job of spec.jobs) {
     job.consumesFrom.forEach(source => allConsumedFrom.add(source));
@@ -483,17 +487,18 @@ export async function performFinalMerge(
     sp.consumesFrom.forEach(source => allConsumedFrom.add(source));
   }
 
-  const allLeafIds = new Set(
+  // Filter leaf jobs by name (consumesFrom uses names, plan.done uses names)
+  const allLeafNames = new Set(
     spec.jobs
-      .filter(j => !allConsumedFrom.has(j.id) && plan.done.includes(j.id))
-      .map(j => j.id)
+      .filter(j => !allConsumedFrom.has(j.name) && plan.done.includes(j.name))
+      .map(j => j.name)
   );
 
-  // Check which leaves haven't been merged yet
-  const unmergedLeaves = [...allLeafIds].filter(id => !plan.mergedLeaves.has(id));
+  // Check which leaves haven't been merged yet (mergedLeaves is keyed by name)
+  const unmergedLeaves = [...allLeafNames].filter(name => !plan.mergedLeaves.has(name));
 
   if (unmergedLeaves.length === 0) {
-    log.info(`All ${allLeafIds.size} leaves already merged incrementally`, {
+    log.info(`All ${allLeafNames.size} leaves already merged incrementally`, {
       planId: spec.id,
     });
     plan.riMergeCompleted = true;
@@ -514,9 +519,9 @@ export async function performFinalMerge(
   
   try {
     // Merge each unmerged leaf job's commit safely, preserving user state
-    for (const leafJobId of unmergedLeaves) {
-      const leafJob = spec.jobs.find(j => j.id === leafJobId);
-      const leafCommit = plan.completedCommits.get(leafJobId);
+    for (const leafJobName of unmergedLeaves) {
+      const leafJob = spec.jobs.find(j => j.name === leafJobName);
+      const leafCommit = plan.completedCommits.get(leafJobName);
       if (!leafCommit || !leafJob) continue;
 
       log.info(`Fallback merging commit ${leafCommit.slice(0, 8)} into ${targetBranch}`);
@@ -525,12 +530,12 @@ export async function performFinalMerge(
         repoPath,
         leafCommit,
         targetBranch,
-        `Merge ${leafJob.name || leafJob.id} from plan ${spec.name || spec.id}`,
+        `Merge ${leafJob.name} from plan ${spec.name}`,
         config
       );
 
       if (result.success) {
-        plan.mergedLeaves.add(leafJobId);
+        plan.mergedLeaves.add(leafJobName);
         log.info(`Merged ${leafCommit.slice(0, 8)} to ${targetBranch}`, { newCommit: result.newCommit?.slice(0, 8) });
       } else {
         if (!result.userStateRestored) {

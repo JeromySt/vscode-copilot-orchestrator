@@ -435,9 +435,16 @@ export function getJobDetailsCss(): string {
     .log-tab.active {
       opacity: 1;
       background: var(--vscode-tab-activeBackground);
-      border-color: var(--vscode-panel-border);
+      border-color: var(--vscode-focusBorder);
       border-bottom: 2px solid var(--vscode-tab-activeBackground);
+      border-top: 2px solid var(--vscode-focusBorder);
       z-index: 2;
+      box-shadow: 0 -2px 8px rgba(0, 120, 212, 0.2);
+    }
+    /* Full log tab special styling */
+    .log-tab[data-section="FULL"].active {
+      background: linear-gradient(180deg, var(--vscode-tab-activeBackground) 0%, rgba(0, 120, 212, 0.1) 100%);
+      border-top-color: var(--vscode-progressBar-background);
     }
     .log-tab.phase-tab-success {
       background: rgba(78, 201, 176, 0.1);

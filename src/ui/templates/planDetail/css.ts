@@ -138,6 +138,17 @@ export function getPlanDetailCss(): string {
     .mermaid .node.failed .nodeLabel {
       cursor: pointer !important;
     }
+
+    /* Nodes that are wired as clickable in the webview JS */
+    .mermaid g.node.clickable-node,
+    .mermaid g.node.clickable-node * {
+      cursor: pointer !important;
+    }
+
+    .mermaid g.cluster.clickable-node,
+    .mermaid g.cluster.clickable-node * {
+      cursor: pointer !important;
+    }
     
     .mermaid .node.running:hover rect,
     .mermaid .node.completed:hover rect,

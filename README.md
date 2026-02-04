@@ -86,12 +86,12 @@ The orchestrator:
 work: "@agent Add validation to the user registration form"
 
 # Feature with context
-work: "@copilot Implement dark mode support using CSS variables"
+work: "@agent Implement dark mode support using CSS variables"
 
 # Bug fix
 work: "@agent Fix the memory leak in the WebSocket connection handler"
 
-# Traditional command (still supported)
+# Traditional shell command (still supported)
 work: "npm run build && npm run deploy"
 ```
 
@@ -302,8 +302,8 @@ For complex workflows, a job can itself be a complete plan. This enables hierarc
                               ┌───────────┐
                               │  prepare  │  ← Stage 1: Single pre-step
                               └─────┬─────┘
-            ┌─────────────┬─────────┴─────────┬─────────────┐
-            │             │                   │             │
+            ┌─────────────┬─────────┴────┬───────────┐
+            │             │              │           │
       ┌─────▼─────┐ ┌─────▼────┐ ┌───────▼───┐ ┌─────▼──────┐
       │api-service│ │web-client│ │mobile-cli │ │docs-update │  ← Stage 2: 4 parallel
       └─────┬─────┘ └─────┬────┘ └─────┬─────┘ └──────┬─────┘
@@ -321,8 +321,8 @@ For complex workflows, a job can itself be a complete plan. This enables hierarc
                    └─────────────┬─────────────┘
                                  │
                    ┌─────────────▼─────────────┐
-                  │         deploy            │  ← Stage 4: Single post-step
-                  └───────────────────────────┘
+                   │         deploy            │  ← Stage 4: Single post-step
+                   └───────────────────────────┘
 ```
 
 This pattern enables:

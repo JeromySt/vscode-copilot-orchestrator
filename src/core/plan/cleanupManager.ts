@@ -31,17 +31,19 @@ function isPushEnabled(): boolean {
  * consumers now cleaned up.
  * 
  * Uses plan.cleanedWorkUnits to track what has been cleaned across calls.
+ * 
+ * @param workUnitName - The job or sub-plan name (used for state tracking)
  */
 export async function cleanupWorkUnit(
   spec: PlanSpec,
   plan: InternalPlanState,
-  workUnitId: string,
+  workUnitName: string,
   repoPath: string
 ): Promise<void> {
-  log.info(`Starting cleanup for work unit ${workUnitId}`, {
+  log.info(`Starting cleanup for work unit ${workUnitName}`, {
     planId: spec.id,
-    hasWorktreePath: plan.worktreePaths.has(workUnitId),
-    hasCompletedCommit: plan.completedCommits.has(workUnitId),
+    hasWorktreePath: plan.worktreePaths.has(workUnitName),
+    hasCompletedCommit: plan.completedCommits.has(workUnitName),
   });
   
   // Initialize cleanedWorkUnits if needed (for backward compat with persisted plans)
@@ -50,13 +52,13 @@ export async function cleanupWorkUnit(
   }
   
   // Avoid re-cleaning already cleaned work units
-  if (plan.cleanedWorkUnits.has(workUnitId)) {
-    log.debug(`Skipping cleanup for ${workUnitId} - already cleaned`);
+  if (plan.cleanedWorkUnits.has(workUnitName)) {
+    log.debug(`Skipping cleanup for ${workUnitName} - already cleaned`);
     return;
   }
 
-  // Clean up the worktree
-  const worktreePath = plan.worktreePaths.get(workUnitId);
+  // Clean up the worktree (keyed by name)
+  const worktreePath = plan.worktreePaths.get(workUnitName);
   if (worktreePath) {
     try {
       await fs.promises.access(worktreePath);
@@ -65,57 +67,58 @@ export async function cleanupWorkUnit(
         log: s => log.debug(s)
       });
       if (removed) {
-        plan.worktreePaths.delete(workUnitId);
-        log.debug(`Cleaned up worktree for ${workUnitId}`, { path: worktreePath });
+        plan.worktreePaths.delete(workUnitName);
+        log.debug(`Cleaned up worktree for ${workUnitName}`, { path: worktreePath });
       } else {
-        log.warn(`Failed to remove worktree for ${workUnitId}`, { path: worktreePath });
+        log.warn(`Failed to remove worktree for ${workUnitName}`, { path: worktreePath });
         // Try force delete the directory anyway
         try {
           await fs.promises.rm(worktreePath, { recursive: true, force: true });
-          plan.worktreePaths.delete(workUnitId);
+          plan.worktreePaths.delete(workUnitName);
         } catch {}
       }
     } catch {
       // Worktree doesn't exist, just clear the reference
-      plan.worktreePaths.delete(workUnitId);
+      plan.worktreePaths.delete(workUnitName);
     }
   }
 
   // NOTE: With detached HEAD worktrees, there are no branches to clean up.
   // Commits are tracked by SHA in completedCommits, which don't need cleanup.
   // Clear the commit reference since the worktree is gone.
-  plan.completedCommits.delete(workUnitId);
-  plan.baseCommits.delete(workUnitId);
+  plan.completedCommits.delete(workUnitName);
+  plan.baseCommits.delete(workUnitName);
 
-  // Mark this work unit as cleaned
-  plan.cleanedWorkUnits.add(workUnitId);
+  // Mark this work unit as cleaned (keyed by name)
+  plan.cleanedWorkUnits.add(workUnitName);
 
-  log.info(`Cleaned up work unit ${workUnitId}`, {
+  log.info(`Cleaned up work unit ${workUnitName}`, {
     worktree: !!worktreePath,
   });
 
   // Now check if any upstream producers can be cleaned up
   // A producer can be cleaned up if ALL its consumers have been cleaned up
-  const job = spec.jobs.find(j => j.id === workUnitId);
+  // consumesFrom references job/sub-plan names
+  const job = spec.jobs.find(j => j.name === workUnitName);
   if (job && job.consumesFrom.length > 0) {
-    log.debug(`Checking if producers of ${workUnitId} can be cleaned up`, { producers: job.consumesFrom });
-    for (const producerId of job.consumesFrom) {
-      const canCleanup = canCleanupProducer(spec, plan, producerId);
-      log.debug(`Producer ${producerId} cleanup check: ${canCleanup}`);
+    log.debug(`Checking if producers of ${workUnitName} can be cleaned up`, { producers: job.consumesFrom });
+    for (const producerName of job.consumesFrom) {
+      const canCleanup = canCleanupProducer(spec, plan, producerName);
+      log.debug(`Producer ${producerName} cleanup check: ${canCleanup}`);
       if (canCleanup) {
-        log.info(`Triggering cleanup for producer ${producerId} (all consumers cleaned)`);
-        await cleanupWorkUnit(spec, plan, producerId, repoPath);
+        log.info(`Triggering cleanup for producer ${producerName} (all consumers cleaned)`);
+        await cleanupWorkUnit(spec, plan, producerName, repoPath);
       }
     }
   }
 
   // Also check sub-plan producers
-  const subPlan = spec.subPlans?.find(sp => sp.id === workUnitId);
+  const subPlan = spec.subPlans?.find(sp => sp.name === workUnitName);
   if (subPlan && subPlan.consumesFrom.length > 0) {
-    for (const producerId of subPlan.consumesFrom) {
-      if (canCleanupProducer(spec, plan, producerId)) {
-        log.info(`Triggering cleanup for producer ${producerId} (all consumers cleaned)`);
-        await cleanupWorkUnit(spec, plan, producerId, repoPath);
+    for (const producerName of subPlan.consumesFrom) {
+      if (canCleanupProducer(spec, plan, producerName)) {
+        log.info(`Triggering cleanup for producer ${producerName} (all consumers cleaned)`);
+        await cleanupWorkUnit(spec, plan, producerName, repoPath);
       }
     }
   }
@@ -125,11 +128,13 @@ export async function cleanupWorkUnit(
  * Check if a producer can be cleaned up.
  * A producer can only be cleaned up if ALL consumers that depend on it
  * have been cleaned up (tracked in plan.cleanedWorkUnits).
+ * 
+ * @param producerName - The job or sub-plan name of the producer
  */
 export function canCleanupProducer(
   spec: PlanSpec,
   plan: InternalPlanState,
-  producerId: string
+  producerName: string
 ): boolean {
   // Initialize cleanedWorkUnits if needed (backward compat)
   if (!plan.cleanedWorkUnits) {
@@ -137,28 +142,28 @@ export function canCleanupProducer(
   }
   
   // Don't cleanup if already cleaned
-  if (plan.cleanedWorkUnits.has(producerId)) return false;
+  if (plan.cleanedWorkUnits.has(producerName)) return false;
   
-  // Don't cleanup if not finished yet
-  if (!plan.done.includes(producerId) && !plan.completedSubPlans.has(producerId)) {
+  // Don't cleanup if not finished yet (done and completedSubPlans are keyed by name)
+  if (!plan.done.includes(producerName) && !plan.completedSubPlans.has(producerName)) {
     return false;
   }
 
-  // Find all consumers of this producer
-  const consumers: string[] = [];
+  // Find all consumers of this producer (consumesFrom references names)
+  const consumerNames: string[] = [];
   for (const job of spec.jobs) {
-    if (job.consumesFrom.includes(producerId)) {
-      consumers.push(job.id);
+    if (job.consumesFrom.includes(producerName)) {
+      consumerNames.push(job.name);
     }
   }
   for (const sp of spec.subPlans || []) {
-    if (sp.consumesFrom.includes(producerId)) {
-      consumers.push(sp.id);
+    if (sp.consumesFrom.includes(producerName)) {
+      consumerNames.push(sp.name);
     }
   }
 
-  // Producer can be cleaned up if ALL consumers have been cleaned up
-  return consumers.every(consumerId => plan.cleanedWorkUnits.has(consumerId));
+  // Producer can be cleaned up if ALL consumers have been cleaned up (by name)
+  return consumerNames.every(consumerName => plan.cleanedWorkUnits.has(consumerName));
 }
 
 /**
@@ -183,8 +188,8 @@ export async function cleanupAllPlanResources(
     worktrees: Array.from(plan.worktreePaths.entries()),
   });
 
-  // Clean up all worktrees
-  for (const [workUnitId, worktreePath] of plan.worktreePaths) {
+  // Clean up all worktrees (keyed by name in worktreePaths)
+  for (const [workUnitName, worktreePath] of plan.worktreePaths) {
     try {
       await fs.promises.access(worktreePath);
       const removed = await git.worktrees.removeSafe(repoPath, worktreePath, { 
@@ -192,7 +197,7 @@ export async function cleanupAllPlanResources(
         log: s => log.debug(s)
       });
       if (removed) {
-        log.debug(`Removed worktree: ${worktreePath}`);
+        log.debug(`Removed worktree for ${workUnitName}: ${worktreePath}`);
       } else {
         log.warn(`Failed to remove worktree ${worktreePath}`);
         try {
@@ -213,9 +218,8 @@ export async function cleanupAllPlanResources(
   log.info(`Plan ${spec.id} resources cleaned up`);
   
   // Clean up the worktree root directory for this plan
-  // Note: spec.worktreeRoot uses internal UUID for consistency
-  const internalId = (spec as any)._internalId || spec.id;
-  const worktreeRoot = path.join(repoPath, spec.worktreeRoot || `.worktrees/${internalId}`);
+  // spec.id is the UUID used for worktree paths
+  const worktreeRoot = path.join(repoPath, spec.worktreeRoot || `.worktrees/${spec.id}`);
   log.debug(`Cleaning up worktree root: ${worktreeRoot}`);
   await cleanupWorktreeRoot(worktreeRoot);
   

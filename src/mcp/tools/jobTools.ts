@@ -57,44 +57,45 @@ EXAMPLES:
     },
     {
       name: 'get_copilot_job_status',
-      description: 'Get status of a job including progress, current step, and completion state.',
+      description: 'Get status of a job. IMPORTANT: Use the job UUID, not the producer_id. ' +
+                   'For plan jobs, get the UUID from create_copilot_plan response (jobIdMapping field) or list_copilot_jobs.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Job ID' }
+          id: { type: 'string', description: 'Job UUID (not producer_id). Get from jobIdMapping in create_copilot_plan response or list_copilot_jobs.' }
         },
         required: ['id']
       }
     },
     {
       name: 'get_copilot_jobs_batch_status',
-      description: 'Get status of multiple jobs at once. Efficient for monitoring parallel jobs.',
+      description: 'Get status of multiple jobs at once. Efficient for monitoring parallel jobs. Use job UUIDs, not producer_ids.',
       inputSchema: {
         type: 'object',
         properties: {
-          ids: { type: 'array', items: { type: 'string' }, description: 'Array of job IDs' }
+          ids: { type: 'array', items: { type: 'string' }, description: 'Array of job UUIDs (not producer_ids)' }
         },
         required: ['ids']
       }
     },
     {
       name: 'get_copilot_job_details',
-      description: 'Get full job details including configuration, attempts, and work history.',
+      description: 'Get full job details including configuration, attempts, and work history. Use job UUID, not producer_id.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Job ID' }
+          id: { type: 'string', description: 'Job UUID (not producer_id)' }
         },
         required: ['id']
       }
     },
     {
       name: 'get_copilot_job_log_section',
-      description: 'Get logs for a specific phase of a job (prechecks, work, commit, postchecks, mergeback, cleanup).',
+      description: 'Get logs for a specific phase of a job. Use job UUID, not producer_id.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Job ID' },
+          id: { type: 'string', description: 'Job UUID (not producer_id)' },
           section: { 
             type: 'string', 
             enum: ['prechecks', 'work', 'commit', 'postchecks', 'mergeback', 'cleanup', 'full'],
@@ -106,7 +107,7 @@ EXAMPLES:
     },
     {
       name: 'list_copilot_jobs',
-      description: 'List all orchestrator jobs with their basic status.',
+      description: 'List all orchestrator jobs with their basic status. Returns job UUIDs that can be used with other job tools.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -116,11 +117,11 @@ EXAMPLES:
     },
     {
       name: 'cancel_copilot_job',
-      description: 'Cancel a running job. Kills any running processes and marks the job as canceled.',
+      description: 'Cancel a running job. Use job UUID, not producer_id.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Job ID to cancel' }
+          id: { type: 'string', description: 'Job UUID to cancel' }
         },
         required: ['id']
       }

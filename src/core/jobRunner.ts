@@ -28,6 +28,9 @@ export class JobRunner {
     this.storeFile = path.join(ws,'.orchestrator','jobs','state.json'); 
     ensureDir(path.dirname(this.storeFile));
     
+    console.log(`[JobRunner] Workspace folder: ${ws}`);
+    console.log(`[JobRunner] Loading state from: ${this.storeFile}`);
+    
     // Priority: VS Code extension settings > file-based config > auto-detect
     const extConfig = vscode.workspace.getConfiguration('copilotOrchestrator');
     const extMaxConcurrent = extConfig.get<number>('maxConcurrentJobs', 0);
@@ -42,6 +45,7 @@ export class JobRunner {
     
     // Load existing jobs and migrate old format
     const saved = readJSON<{jobs: any[] }>(this.storeFile,{jobs:[]});
+    console.log(`[JobRunner] Loaded ${saved.jobs.length} jobs from disk`);
     const logDir = path.join(this.ctx.globalStorageUri.fsPath, 'logs');
     ensureDir(logDir);
     
@@ -855,11 +859,26 @@ Focus on addressing the failure root cause while maintaining all original requir
           if (!job.stepStatuses) job.stepStatuses = {};
           job.stepStatuses.commit = 'success';
           this.syncStepStatusesToAttempt(job);
-        } catch (e) {
-          this.writeLog(job, '[commit] Warning: Commit step encountered an issue: ' + String(e));
-          // Don't fail the job for commit issues - the work is done
+        } catch (e: any) {
+          const errorMsg = String(e?.message || e);
+          // "No work produced" is a job failure - the work step didn't do anything
+          if (errorMsg.includes('produced no work')) {
+            this.writeLog(job, '[commit] FAILED: ' + errorMsg);
+            if (!job.stepStatuses) job.stepStatuses = {};
+            job.stepStatuses.commit = 'failed';
+            this.syncStepStatusesToAttempt(job);
+            this.writeLog(job, '========== COMMIT SECTION END ==========');
+            job.status = 'failed';
+            job.endedAt = Date.now();
+            this.persist();
+            this.working--;
+            this.pump();
+            return;
+          }
+          // Other commit issues (e.g., git failures) - warn but don't fail
+          this.writeLog(job, '[commit] Warning: Commit step encountered an issue: ' + errorMsg);
           if (!job.stepStatuses) job.stepStatuses = {};
-          job.stepStatuses.commit = 'success'; // Still mark as success since work completed
+          job.stepStatuses.commit = 'success'; // Still mark as success since work was done
           this.syncStepStatusesToAttempt(job);
         }
         this.writeLog(job, '========== COMMIT SECTION END ==========');
@@ -1276,6 +1295,9 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
    * Commit all pending work in the worktree using Copilot CLI.
    * Creates a meaningful commit message describing the work done.
    * This runs for both standalone and plan-managed jobs.
+   * 
+   * VALIDATION: Either the work stage made commits, or there must be uncommitted
+   * changes to commit. If neither is true, the job produced no work.
    */
   private async commitWork(job: Job, jobRoot: string): Promise<void> {
     this.writeLog(job, '[commit] Checking for uncommitted changes...');
@@ -1292,8 +1314,34 @@ ${job.copilotSessionId ? `Session ID: ${job.copilotSessionId}\n\nThis job has an
     const hasStagedChanges = await git.repository.hasStagedChanges(jobRoot);
     
     if (!hasChanges && !hasStagedChanges) {
-      this.writeLog(job, '[commit] No changes to commit - work may have already been committed');
-      return;
+      // No uncommitted changes - check if commits were made during the work stage
+      // This is valid if the work step (or Copilot) already committed changes
+      this.writeLog(job, '[commit] No uncommitted changes found, verifying commits exist since job started...');
+      
+      const baseBranch = job.inputs.baseBranch || 'main';
+      try {
+        const mergeBase = await git.branches.getMergeBase('HEAD', baseBranch, jobRoot);
+        if (mergeBase) {
+          const commitList = await git.repository.getCommitLog(mergeBase, 'HEAD', jobRoot);
+          if (commitList.length > 0) {
+            this.writeLog(job, `[commit] ✓ Found ${commitList.length} commit(s) since job branch was created:`);
+            // Log each commit for visibility
+            for (const commit of commitList) {
+              const shortMsg = commit.message.split('\n')[0].substring(0, 80);
+              this.writeLog(job, `[commit]   - ${commit.shortHash}: ${shortMsg}`);
+            }
+            this.writeLog(job, `[commit] All commits will be included in the work summary.`);
+            return; // Success - work was committed during work stage
+          }
+        }
+      } catch (e: any) {
+        this.writeLog(job, `[commit] Warning: Could not check commit history: ${e.message}`);
+      }
+      
+      // No commits and no uncommitted changes = no work produced
+      const errMsg = 'No commits made and no uncommitted changes found. The job produced no work.';
+      this.writeLog(job, `[commit] FAILED: ${errMsg}`);
+      throw new Error(errMsg);
     }
     
     this.writeLog(job, '[commit] Found uncommitted changes, creating commit with Copilot CLI...');

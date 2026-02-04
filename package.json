@@ -50,7 +50,7 @@
       "activitybar": [
         {
           "id": "copilot-orchestrator",
-          "title": "Copilot",
+          "title": "Copilot Orchestrator",
           "icon": "media/copilot-icon.svg"
         }
       ]
@@ -59,10 +59,6 @@
       {
         "command": "orchestrator.createJob",
         "title": "Copilot Orchestrator: Create Job"
-      },
-      {
-        "command": "orchestrator.openDashboard",
-        "title": "Copilot Orchestrator: Open Dashboard"
       },
       {
         "command": "orchestrator.cancelJob",

@@ -4,9 +4,8 @@
  * @module ui
  */
 
-export { createDashboard } from './webview';
-export { JobsViewProvider, JobDataProvider } from './viewProvider';
 export { PlansViewProvider, PlanDataProvider, Plan, PlanJob } from './plansViewProvider';
+export { JobsViewProvider, JobDataProvider } from './viewProvider';
 export { PlanDetailPanel } from './panels/planDetailPanel';
 export { OrchestratorNotebookSerializer, registerNotebookController } from './notebook';
 export { attachStatusBar } from './statusBar';

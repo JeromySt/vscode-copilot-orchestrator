@@ -15,11 +15,12 @@ import * as fs from 'fs';
  * Plan job details from plans.json
  */
 export interface PlanJob {
-  planJobId: string;
-  jobId: string | null;
+  planJobId: string;  // The canonical key for state lookups (producerId or derived)
+  jobId: string | null;  // UUID for runner operations
   nestedPlanId?: string | null;
   isNestedPlan?: boolean;
-  name?: string;
+  name: string;  // User-friendly display name
+  producerId?: string;  // User-controlled DAG reference key (may be derived for legacy data)
   task?: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   consumesFrom: string[];
@@ -35,12 +36,14 @@ export interface PlanJob {
  */
 export interface SubPlanSpec {
   id: string;
-  name?: string;
+  name: string;
+  producerId?: string;  // User-controlled DAG reference key (may be derived for legacy data)
   consumesFrom: string[];
   maxParallel?: number;
   jobs: Array<{
     id: string;
-    name?: string;
+    name: string;
+    producerId?: string;
     task: string;
     consumesFrom: string[];
   }>;
@@ -75,7 +78,7 @@ export interface Plan {
   /** Sub-plans that completed (subPlanId -> childPlanId) */
   completedSubPlans?: Record<string, string>;
   /** Sub-plans that failed */
-  failedSubPlans?: string[];
+  failedSubPlans?: Record<string, string>;
   /** Parent plan ID if this is a sub-plan */
   parentPlanId?: string;
   /** Aggregated work summary across all completed jobs */
@@ -126,11 +129,18 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
   private _fileWatcher?: vscode.FileSystemWatcher;
   private _refreshTimer?: NodeJS.Timeout;
   private static readonly REFRESH_DEBOUNCE_MS = 250;
+  private _outputChannel: vscode.OutputChannel;
   
-  constructor(private readonly _context: vscode.ExtensionContext) {}
+  constructor(private readonly _context: vscode.ExtensionContext) {
+    this._outputChannel = vscode.window.createOutputChannel('Copilot Plans Panel');
+    this._outputChannel.appendLine('=== Plans Panel Initialized ===');
+  }
   
   setDataProvider(provider: PlanDataProvider) {
+    this._outputChannel.appendLine('[setDataProvider] Setting data provider');
     this._dataProvider = provider;
+    const plans = provider.getPlans();
+    this._outputChannel.appendLine(`[setDataProvider] Data provider has ${plans.length} plans available`);
     this.refresh();
   }
   
@@ -139,6 +149,7 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
     context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken
   ) {
+    this._outputChannel.appendLine('[resolveWebviewView] Panel view is being resolved');
     this._view = webviewView;
     
     webviewView.webview.options = {
@@ -146,6 +157,7 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: []
     };
     
+    this._outputChannel.appendLine('[resolveWebviewView] Setting HTML content');
     webviewView.webview.html = this._getHtml();
     
     // Handle messages from webview
@@ -176,7 +188,9 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
   }
   
   private _doRefresh() {
-    if (!this._view || !this._dataProvider) return;
+    if (!this._view || !this._dataProvider) {
+      return;
+    }
     
     const allPlans = this._dataProvider.getPlans();
     
@@ -219,7 +233,7 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
         Object.keys(plan.completedSubPlans).forEach(id => launchedSubPlanIds.add(id));
       }
       if (plan.failedSubPlans) {
-        plan.failedSubPlans.forEach(id => launchedSubPlanIds.add(id));
+        Object.keys(plan.failedSubPlans).forEach(id => launchedSubPlanIds.add(id));
       }
       
       // Get sub-plan specs that haven't been launched yet (from spec)
@@ -236,7 +250,9 @@ export class PlansViewProvider implements vscode.WebviewViewProvider {
       // Add pending sub-plan specs (only if NOT launched)
       for (const spSpec of subPlanSpecs) {
         // Skip if this sub-plan has been launched (it's shown as a child plan)
-        if (launchedSubPlanIds.has(spSpec.id)) {
+        // State maps use producerId as the key
+        const spKey = spSpec.producerId || spSpec.name || spSpec.id;
+        if (launchedSubPlanIds.has(spKey)) {
           continue;
         }
         

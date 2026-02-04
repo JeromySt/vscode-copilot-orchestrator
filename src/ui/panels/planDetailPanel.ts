@@ -541,7 +541,12 @@ export class PlanDetailPanel {
       running: this._plan.running,
       failed: this._plan.failed,
       queued: this._plan.queued,
-      jobStatuses: this._plan.jobs.map(j => ({ id: j.planJobId, jobId: j.jobId, status: j.status }))
+      jobStatuses: this._plan.jobs.map(j => ({ id: j.planJobId, jobId: j.jobId, status: j.status })),
+      // Include sub-plan state to detect sub-plan completion/failure
+      pendingSubPlans: this._plan.pendingSubPlans,
+      runningSubPlans: this._plan.runningSubPlans,
+      completedSubPlans: this._plan.completedSubPlans,
+      failedSubPlans: this._plan.failedSubPlans,
     });
     
     if (stateHash === this._lastStateHash) {
@@ -780,27 +785,34 @@ ${mermaidDef}
   }
 
   /**
-   * Build a map of sanitized sub-plan IDs to their data for click handling
+   * Build a map of sanitized sub-plan IDs to their data for click handling.
+   * State maps are keyed by producerId (REQUIRED field).
    */
-  private _buildSubPlanDataMap(plan: Plan): Record<string, { subPlanId: string, childPlanId: string | null }> {
-    const map: Record<string, { subPlanId: string, childPlanId: string | null }> = {};
+  private _buildSubPlanDataMap(plan: Plan): Record<string, { subPlanName: string, childPlanId: string | null }> {
+    const map: Record<string, { subPlanName: string, childPlanId: string | null }> = {};
     const subPlans = plan.subPlans || [];
     
     for (const sp of subPlans) {
-      // Use same sanitization as in _generateMermaidDiagram
-      const sanitizedId = 'subplan_' + sp.id.replace(/[^a-zA-Z0-9]/g, '_');
+      // Use name for display, producerId (with fallback to name) for state lookups
+      const spName = sp.name || sp.id;
+      const key = sp.producerId || sp.name || sp.id;  // Canonical key for state lookups
+      const sanitizedId = 'subplan_' + spName.replace(/[^a-zA-Z0-9]/g, '_');
       
-      // Get the child plan ID from runningSubPlans or completedSubPlans
-      // Both are now Record<string, string> (subPlanId -> childPlanId)
+      // Get the child plan ID from runningSubPlans or completedSubPlans.
+      // State maps are keyed by canonical key (producerId or name).
       let childPlanId: string | null = null;
-      if (plan.runningSubPlans && plan.runningSubPlans[sp.id]) {
-        childPlanId = plan.runningSubPlans[sp.id];
-      } else if (plan.completedSubPlans && plan.completedSubPlans[sp.id]) {
-        childPlanId = plan.completedSubPlans[sp.id];
-      }
+
+      childPlanId =
+        (plan.runningSubPlans && plan.runningSubPlans[key])
+          ? plan.runningSubPlans[key]
+          : (plan.completedSubPlans && plan.completedSubPlans[key])
+            ? plan.completedSubPlans[key]
+            : (plan.failedSubPlans && plan.failedSubPlans[key])
+              ? plan.failedSubPlans[key]
+              : null;
       
       map[sanitizedId] = {
-        subPlanId: sp.id,
+        subPlanName: spName,
         childPlanId
       };
     }
@@ -824,10 +836,16 @@ ${mermaidDef}
       jobMap.set(job.planJobId, job);
     }
     
-    // Create sub-plan lookup map
+    // Create sub-plan lookup map.
+    // consumesFrom uses producerId, but we also map name/id for robustness
     const subPlanMap = new Map<string, SubPlanSpec>();
     for (const sp of subPlans) {
+      const spName = sp.name || sp.id;
+      subPlanMap.set(spName, sp);
       subPlanMap.set(sp.id, sp);
+      if (sp.producerId) {
+        subPlanMap.set(sp.producerId, sp);
+      }
     }
     
     // Start flowchart (LR = left to right)
@@ -861,10 +879,18 @@ ${mermaidDef}
       const sanitizedId = 'job_' + job.planJobId.replace(/[^a-zA-Z0-9]/g, '_');
       idMap.set(job.planJobId, sanitizedId);
     }
-    // Add sub-plans to ID map
+    // Add sub-plans to ID map.
+    // We primarily key by name for diagram/node identity, but also add id as an alias
+    // so edges can resolve even if consumesFrom contains UUID ids.
     for (const sp of subPlans) {
-      const sanitizedId = 'subplan_' + sp.id.replace(/[^a-zA-Z0-9]/g, '_');
+      const spName = sp.name || sp.id;
+      const sanitizedId = 'subplan_' + spName.replace(/[^a-zA-Z0-9]/g, '_');
+      idMap.set(spName, sanitizedId);
       idMap.set(sp.id, sanitizedId);
+      // consumesFrom uses producerId, so add that mapping too
+      if (sp.producerId) {
+        idMap.set(sp.producerId, sanitizedId);
+      }
     }
     
     // Add baseBranch node if different from targetBranch (on the far left)
@@ -905,11 +931,31 @@ ${mermaidDef}
     // Add some padding for visual consistency
     globalMaxLen = Math.max(globalMaxLen, 25);
     
-    // Helper to get sub-plan status class
-    const getSubPlanStatus = (spId: string): string => {
-      if (plan.completedSubPlans && plan.completedSubPlans[spId]) return 'subplanCompleted';
-      if (plan.runningSubPlans && plan.runningSubPlans[spId]) return 'subplanRunning';
-      if (plan.failedSubPlans?.includes(spId)) return 'subplanFailed';
+    // Helper to get sub-plan status class.
+    // State maps are keyed by canonical key (producerId or name).
+    const getSubPlanStatus = (sp: SubPlanSpec): string => {
+      const key = sp.producerId || sp.name || sp.id;
+      const completed = plan.completedSubPlans && plan.completedSubPlans[key];
+      const running = plan.runningSubPlans && plan.runningSubPlans[key];
+      const failed = plan.failedSubPlans && key in plan.failedSubPlans;
+
+      if (completed) return 'subplanCompleted';
+      if (running) return 'subplanRunning';
+      if (failed) return 'subplanFailed';
+      return 'subplanPending';
+    };
+
+    // Convenience for when we only have a key (from consumesFrom) and want status.
+    const getSubPlanStatusByProducerId = (key: string): string => {
+      const sp = subPlanMap.get(key);
+      if (sp) return getSubPlanStatus(sp);
+      // Probe state maps directly using key.
+      const completed = plan.completedSubPlans && plan.completedSubPlans[key];
+      const running = plan.runningSubPlans && plan.runningSubPlans[key];
+      const failed = plan.failedSubPlans && key in plan.failedSubPlans;
+      if (completed) return 'subplanCompleted';
+      if (running) return 'subplanRunning';
+      if (failed) return 'subplanFailed';
       return 'subplanPending';
     };
     
@@ -934,8 +980,8 @@ ${mermaidDef}
       
       // Add sub-plans in this stage (hexagon shape)
       for (const sp of level.subPlans) {
-        const sanitizedId = idMap.get(sp.id)!;
         const spName = sp.name || sp.id;
+        const sanitizedId = idMap.get(spName)!;
         const jobCount = sp.jobs?.length || 0;
         const rawLabel = `📁 ${spName} (${jobCount} jobs)`;
         const paddedLabel = this._padLabel(rawLabel, globalMaxLen);
@@ -957,8 +1003,9 @@ ${mermaidDef}
     
     // Apply status classes to sub-plan nodes
     for (const sp of subPlans) {
-      const sanitizedId = idMap.get(sp.id)!;
-      lines.push(`  class ${sanitizedId} ${getSubPlanStatus(sp.id)}`);
+      const spName = sp.name || sp.id;
+      const sanitizedId = idMap.get(spName)!;
+      lines.push(`  class ${sanitizedId} ${getSubPlanStatus(sp)}`);
     }
     lines.push('');
     
@@ -996,6 +1043,7 @@ ${mermaidDef}
     const rootSubPlans = subPlans.filter(sp => sp.consumesFrom.length === 0);
     
     // Find leaf work units (jobs/sub-plans that nothing else consumes from)
+    // consumesFrom contains names (planJobId for jobs, name for sub-plans)
     const allConsumedFrom = new Set<string>();
     for (const job of jobs) {
       job.consumesFrom.forEach(source => allConsumedFrom.add(source));
@@ -1003,8 +1051,12 @@ ${mermaidDef}
     for (const sp of subPlans) {
       sp.consumesFrom.forEach(source => allConsumedFrom.add(source));
     }
+    // Check against planJobId (which is the job name) and sp.name for sub-plans
     const leafJobs = jobs.filter(j => !allConsumedFrom.has(j.planJobId));
-    const leafSubPlans = subPlans.filter(sp => !allConsumedFrom.has(sp.id));
+    const leafSubPlans = subPlans.filter(sp => {
+      const spName = sp.name || sp.id;
+      return !allConsumedFrom.has(spName) && !allConsumedFrom.has(sp.id);
+    });
     
     // Add edges
     lines.push('  %% Connections');
@@ -1020,9 +1072,10 @@ ${mermaidDef}
     
     // Connect targetBranch source to root sub-plans
     for (const sp of rootSubPlans) {
-      const sanitizedId = idMap.get(sp.id)!;
+      const spName = sp.name || sp.id;
+      const sanitizedId = idMap.get(spName)!;
       lines.push(`  TARGET_SOURCE --> ${sanitizedId}`);
-      const spStatus = getSubPlanStatus(sp.id);
+      const spStatus = getSubPlanStatus(sp);
       const edgeStatus = ['subplanRunning', 'subplanCompleted', 'subplanFailed'].includes(spStatus) ? 'completed' : 'pending';
       edges.push({ from: 'TARGET_SOURCE', to: sanitizedId, status: edgeStatus });
     }
@@ -1044,7 +1097,7 @@ ${mermaidDef}
           if (sourceJob) {
             edges.push({ from: sanitizedSourceId, to: sanitizedJobId, status: this._getEdgeStatus(sourceJob) });
           } else if (sourceSubPlan) {
-            const spStatus = getSubPlanStatus(sourceId);
+            const spStatus = getSubPlanStatusByProducerId(sourceId);
             edges.push({ from: sanitizedSourceId, to: sanitizedJobId, status: spStatus === 'subplanCompleted' ? 'completed' : 'pending' });
           }
         }
@@ -1055,19 +1108,21 @@ ${mermaidDef}
     for (const sp of subPlans) {
       if (sp.consumesFrom.length === 0) continue;
       
-      const sanitizedSpId = idMap.get(sp.id)!;
+      const spName = sp.name || sp.id;
+      const sanitizedSpId = idMap.get(spName)!;
       
-      for (const sourceId of sp.consumesFrom) {
-        const sanitizedSourceId = idMap.get(sourceId);
+      // consumesFrom contains names
+      for (const sourceName of sp.consumesFrom) {
+        const sanitizedSourceId = idMap.get(sourceName);
         if (sanitizedSourceId) {
           lines.push(`  ${sanitizedSourceId} --> ${sanitizedSpId}`);
-          const sourceJob = jobMap.get(sourceId);
-          const sourceSubPlan = subPlanMap.get(sourceId);
+          const sourceJob = jobMap.get(sourceName);
+          const sourceSubPlan = subPlanMap.get(sourceName);
           if (sourceJob) {
             edges.push({ from: sanitizedSourceId, to: sanitizedSpId, status: this._getEdgeStatus(sourceJob) });
           } else if (sourceSubPlan) {
-            const spStatus = getSubPlanStatus(sourceId);
-            edges.push({ from: sanitizedSourceId, to: sanitizedSpId, status: spStatus === 'subplanCompleted' ? 'completed' : 'pending' });
+            const sourceSpStatus = getSubPlanStatusByProducerId(sourceName);
+            edges.push({ from: sanitizedSourceId, to: sanitizedSpId, status: sourceSpStatus === 'subplanCompleted' ? 'completed' : 'pending' });
           }
         }
       }
@@ -1082,9 +1137,10 @@ ${mermaidDef}
     
     // Connect leaf sub-plans to targetBranch destination
     for (const sp of leafSubPlans) {
-      const sanitizedId = idMap.get(sp.id)!;
+      const spName = sp.name || sp.id;
+      const sanitizedId = idMap.get(spName)!;
       lines.push(`  ${sanitizedId} --> TARGET_DEST`);
-      const spStatus = getSubPlanStatus(sp.id);
+      const spStatus = getSubPlanStatus(sp);
       edges.push({ from: sanitizedId, to: 'TARGET_DEST', status: spStatus === 'subplanCompleted' ? 'completed' : 'pending' });
     }
     
@@ -1166,42 +1222,70 @@ ${mermaidDef}
   /**
    * Build levels from job consumesFrom for stage grouping
    * Includes both jobs and sub-plans as work units
+   * Items are placed in the stage immediately after their latest dependency
    */
   private _buildLevels(jobs: PlanJob[], subPlans: SubPlanSpec[] = []): Array<{ jobs: PlanJob[], subPlans: SubPlanSpec[] }> {
     const levels: Array<{ jobs: PlanJob[], subPlans: SubPlanSpec[] }> = [];
     const placedJobs = new Set<string>();
     const placedSubPlans = new Set<string>();
     
-    // Build set of all work unit IDs for dependency checking
-    const allJobIds = new Set(jobs.map(j => j.planJobId));
-    const allSubPlanIds = new Set(subPlans.map(sp => sp.id));
+    // Build lookup maps for dependency resolution
+    // Jobs: map ALL possible keys (planJobId, name, producerId) to canonical key
+    const jobKeyMap = new Map<string, string>(); // any key -> canonical key (planJobId)
+    for (const j of jobs) {
+      const canonicalKey = j.planJobId;
+      jobKeyMap.set(canonicalKey, canonicalKey);
+      if (j.name) jobKeyMap.set(j.name, canonicalKey);
+      if (j.producerId) jobKeyMap.set(j.producerId, canonicalKey);
+    }
+    const allJobKeys = new Set(jobKeyMap.keys());
+    
+    // Sub-plans: map ALL possible keys (producerId, name, id) to canonical key
+    const subPlanKeyMap = new Map<string, string>(); // any key -> canonical key
+    for (const sp of subPlans) {
+      const canonicalKey = sp.producerId || sp.name || sp.id;
+      subPlanKeyMap.set(canonicalKey, canonicalKey);
+      if (sp.producerId) subPlanKeyMap.set(sp.producerId, canonicalKey);
+      if (sp.name) subPlanKeyMap.set(sp.name, canonicalKey);
+      if (sp.id) subPlanKeyMap.set(sp.id, canonicalKey);
+    }
+    const allSubPlanKeys = new Set(subPlanKeyMap.keys());
+    
+    // Helper to get canonical keys
+    const getJobCanonicalKey = (j: PlanJob): string => j.planJobId;
+    const getSubPlanCanonicalKey = (sp: SubPlanSpec): string => sp.producerId || sp.name || sp.id;
+    
+    // Helper to check if a dependency source is satisfied (placed in a previous level)
+    const isSourcePlaced = (source: string): boolean => {
+      // Check if it's a placed job
+      const jobCanonical = jobKeyMap.get(source);
+      if (jobCanonical && placedJobs.has(jobCanonical)) return true;
+      // Check if it's a placed sub-plan
+      const subPlanCanonical = subPlanKeyMap.get(source);
+      if (subPlanCanonical && placedSubPlans.has(subPlanCanonical)) return true;
+      // External source (not in our plan) is considered satisfied
+      if (!allJobKeys.has(source) && !allSubPlanKeys.has(source)) return true;
+      return false;
+    };
     
     while (placedJobs.size < jobs.length || placedSubPlans.size < subPlans.length) {
-      // Find jobs ready for this level
+      // Find jobs ready for this level (all dependencies placed in previous levels)
       const levelJobs = jobs.filter(j => {
-        if (placedJobs.has(j.planJobId)) return false;
-        // Ready if all consumesFrom sources are placed (jobs or sub-plans)
-        return j.consumesFrom.every(source => 
-          placedJobs.has(source) || placedSubPlans.has(source) || 
-          (!allJobIds.has(source) && !allSubPlanIds.has(source)) // External source
-        );
+        if (placedJobs.has(getJobCanonicalKey(j))) return false;
+        return j.consumesFrom.every(isSourcePlaced);
       });
       
       // Find sub-plans ready for this level
       const levelSubPlans = subPlans.filter(sp => {
-        if (placedSubPlans.has(sp.id)) return false;
-        // Ready if all consumesFrom sources are placed
-        return sp.consumesFrom.every(source =>
-          placedJobs.has(source) || placedSubPlans.has(source) ||
-          (!allJobIds.has(source) && !allSubPlanIds.has(source))
-        );
+        if (placedSubPlans.has(getSubPlanCanonicalKey(sp))) return false;
+        return sp.consumesFrom.every(isSourcePlaced);
       });
       
       // If nothing is ready, break to avoid infinite loop (shouldn't happen with valid plans)
       if (levelJobs.length === 0 && levelSubPlans.length === 0) {
-        // Add remaining as final level
-        const remainingJobs = jobs.filter(j => !placedJobs.has(j.planJobId));
-        const remainingSubPlans = subPlans.filter(sp => !placedSubPlans.has(sp.id));
+        // Add remaining as final level (handles cycles or missing deps)
+        const remainingJobs = jobs.filter(j => !placedJobs.has(getJobCanonicalKey(j)));
+        const remainingSubPlans = subPlans.filter(sp => !placedSubPlans.has(getSubPlanCanonicalKey(sp)));
         if (remainingJobs.length > 0 || remainingSubPlans.length > 0) {
           levels.push({ jobs: remainingJobs, subPlans: remainingSubPlans });
         }
@@ -1209,8 +1293,8 @@ ${mermaidDef}
       }
       
       levels.push({ jobs: levelJobs, subPlans: levelSubPlans });
-      levelJobs.forEach(j => placedJobs.add(j.planJobId));
-      levelSubPlans.forEach(sp => placedSubPlans.add(sp.id));
+      levelJobs.forEach(j => placedJobs.add(getJobCanonicalKey(j)));
+      levelSubPlans.forEach(sp => placedSubPlans.add(getSubPlanCanonicalKey(sp)));
     }
     
     return levels;

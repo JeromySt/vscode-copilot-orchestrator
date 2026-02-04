@@ -3,6 +3,14 @@
  * 
  * Single responsibility: Define the data structures for plans, jobs, and state.
  * 
+ * ID/ProducerId/Name Convention (SIMPLIFIED - no backward compatibility):
+ * - `producerId`: REQUIRED - User-controlled reference used in consumesFrom for DAG dependencies
+ *   Format: [a-z0-9-]{5,64} (lowercase letters, numbers, hyphens, 5-64 characters)
+ * - `id`: UUID (GUID) - internal, auto-generated, used for worktree paths, branch naming
+ * - `name`: Human-readable string - used for display and logging (defaults to producerId)
+ * 
+ * All state tracking (queued, running, done, etc.) is keyed by producerId.
+ * 
  * @module core/plan/types
  */
 
@@ -14,17 +22,17 @@
  * A job within a plan, with dependency and branching information.
  */
 export interface PlanJob {
-  /** Unique job ID within the plan */
+  /** Unique job ID (UUID/GUID) - internal, auto-generated for worktree paths, branch naming */
   id: string;
-  /** Pre-computed runner job ID (GUID) - assigned when plan is enqueued */
-  runnerJobId?: string;
+  /** Human-readable job name - used for display and logging (defaults to producerId) */
+  name: string;
+  /** User-controlled reference ID - used in consumesFrom arrays for DAG dependencies. Required for new plans, derived for legacy. */
+  producerId?: string;
   /** Pre-computed nested plan ID (if this job creates a sub-plan) - assigned when plan is enqueued */
   nestedPlanId?: string;
-  /** Human-readable name */
-  name?: string;
   /** Task description */
   task?: string;
-  /** IDs of work units (jobs or sub-plans) this job consumes from (producer→consumer). */
+  /** Producer IDs of work units (jobs or sub-plans) this job consumes from (producer→consumer). */
   consumesFrom: string[];
   /** Nested plan specification (if this job is a sub-plan) */
   plan?: Omit<PlanSpec, 'id' | 'repoPath' | 'worktreeRoot'>;
@@ -52,11 +60,15 @@ export interface PlanJob {
  * Job definition within a sub-plan.
  */
 export interface SubPlanJob {
+  /** Unique job ID (UUID/GUID) - internal, auto-generated */
   id: string;
-  name?: string;
+  /** Human-readable job name - used for display (defaults to producerId) */
+  name: string;
+  /** User-controlled reference ID - used in consumesFrom arrays within the sub-plan. Required for new plans, derived for legacy. */
+  producerId?: string;
   task: string;
   work?: string;
-  /** IDs of jobs within the sub-plan this job consumes from (producer→consumer). */
+  /** Producer IDs of jobs within the sub-plan this job consumes from (producer→consumer). */
   consumesFrom: string[];
   prechecks?: string;
   postchecks?: string;
@@ -76,13 +88,13 @@ export interface SubPlanJob {
  * Sub-plans can themselves have sub-plans, enabling arbitrary nesting.
  */
 export interface SubPlanSpec {
-  /** Unique sub-plan ID within the parent plan (user-friendly name) */
+  /** Unique sub-plan ID (UUID/GUID) - internal, auto-generated for worktree paths, branch naming */
   id: string;
-  /** Internal UUID for branch naming (auto-generated) */
-  _internalId?: string;
-  /** Human-readable name */
-  name?: string;
-  /** IDs of work units (jobs or sub-plans) that must complete before this sub-plan starts. */
+  /** Human-readable sub-plan name - used for display and logging (defaults to producerId) */
+  name: string;
+  /** User-controlled reference ID - used in consumesFrom arrays for DAG dependencies. Required for new plans, derived for legacy. */
+  producerId?: string;
+  /** Producer IDs of work units (jobs or sub-plans) that must complete before this sub-plan starts. */
   consumesFrom: string[];
   /** Maximum parallel jobs in the sub-plan */
   maxParallel?: number;
@@ -100,15 +112,13 @@ export interface SubPlanSpec {
  * Plan specification defining the execution DAG.
  */
 export interface PlanSpec {
-  /** Unique plan ID (user-friendly name) */
+  /** Unique plan ID (UUID/GUID) - used for worktree paths, branch naming, state indexing */
   id: string;
-  /** Internal UUID for branch naming (auto-generated) */
-  _internalId?: string;
-  /** Human-readable name */
-  name?: string;
+  /** Human-readable plan name - used for display and logging */
+  name: string;
   /** Repository path (defaults to workspace) */
   repoPath?: string;
-  /** Worktree root for this plan (defaults to .worktrees/<planId>) */
+  /** Worktree root for this plan (defaults to .worktrees/<id>) */
   worktreeRoot?: string;
   /** Base branch the plan starts from */
   baseBranch?: string;
@@ -207,12 +217,12 @@ export interface PlanState {
   // Sub-plan status (optional, only present if plan has sub-plans)
   /** Sub-plans that have not yet been triggered */
   pendingSubPlans?: string[];
-  /** Sub-plans currently running (map of sub-plan ID -> child plan ID) */
+  /** Sub-plans currently running (map of sub-plan producerId -> child plan ID) */
   runningSubPlans?: Record<string, string>;
-  /** Sub-plans that have completed (map of sub-plan ID -> child plan ID) */
+  /** Sub-plans that have completed (map of sub-plan producerId -> child plan ID) */
   completedSubPlans?: Record<string, string>;
-  /** Sub-plans that have failed */
-  failedSubPlans?: string[];
+  /** Sub-plans that have failed (map of sub-plan producerId -> child plan ID, empty string if never launched) */
+  failedSubPlans?: Record<string, string>;
   
   /** Aggregated work summary across all completed jobs in the plan */
   aggregatedWorkSummary?: AggregatedWorkSummary;
@@ -228,19 +238,22 @@ export type PlanStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancel
 /**
  * Internal plan state with Maps for efficient tracking.
  * This extends PlanState but uses Maps instead of arrays/records for performance.
+ * 
+ * All Maps are keyed by job/sub-plan NAME (the user-friendly identifier used in consumesFrom),
+ * NOT by UUID. This allows the DAG logic to work with the names users specify.
  */
 export interface InternalPlanState extends Omit<PlanState, 'pendingSubPlans' | 'runningSubPlans' | 'completedSubPlans' | 'failedSubPlans' | 'mergedLeaves'> {
-  /** Map of plan job ID -> actual JobRunner job ID (GUID) */
+  /** Map of job name -> job UUID (for looking up the actual job ID) */
   jobIdMap: Map<string, string>;
-  /** Map of plan job ID -> completed commit SHA (final HEAD after work) */
+  /** Map of job name -> completed commit SHA (final HEAD after work) */
   completedCommits: Map<string, string>;
-  /** Map of plan job ID -> base commit SHA (starting point when worktree was created) */
+  /** Map of job name -> base commit SHA (starting point when worktree was created) */
   baseCommits: Map<string, string>;
-  /** Map of plan job ID -> worktree path */
+  /** Map of job name -> worktree path */
   worktreePaths: Map<string, string>;
-  /** Map of plan job ID -> worktree creation promise (for async preparation) - NOT USED FOR CHECKING */
+  /** Map of job name -> worktree creation promise (for async preparation) - NOT USED FOR CHECKING */
   worktreePromises: Map<string, Promise<boolean>>;
-  /** Map of plan job ID -> worktree creation result (set when promise completes) - USED FOR NON-BLOCKING CHECK */
+  /** Map of job name -> worktree creation result (set when promise completes) - USED FOR NON-BLOCKING CHECK */
   worktreeResults: Map<string, { success: boolean; error?: string }>;
   /** 
    * The targetBranchRoot for this plan.
@@ -251,18 +264,18 @@ export interface InternalPlanState extends Omit<PlanState, 'pendingSubPlans' | '
   /** Whether targetBranchRoot was created by the plan (vs using existing branch) */
   targetBranchRootCreated?: boolean;
   
-  // Sub-plan tracking (using Sets/Maps internally)
-  /** Sub-plans that haven't been triggered yet */
+  // Sub-plan tracking (using Sets/Maps internally, keyed by sub-plan NAME)
+  /** Sub-plan names that haven't been triggered yet */
   pendingSubPlans: Set<string>;
-  /** Sub-plans currently running (sub-plan ID -> child plan ID) */
+  /** Sub-plan names currently running (sub-plan name -> child plan ID) */
   runningSubPlans: Map<string, string>;
-  /** Sub-plans that have completed (sub-plan ID -> child plan ID) */
+  /** Sub-plan names that have completed (sub-plan name -> child plan ID) */
   completedSubPlans: Map<string, string>;
-  /** Sub-plans that have failed */
-  failedSubPlans: Set<string>;
-  /** Work units (jobs/sub-plans) that have been merged to targetBranch */
+  /** Sub-plan names that have failed (sub-plan name -> child plan ID) */
+  failedSubPlans: Map<string, string>;
+  /** Work unit names (jobs/sub-plans) that have been merged to targetBranch */
   mergedLeaves: Set<string>;
-  /** Work units whose worktrees have been cleaned up */
+  /** Work unit names whose worktrees have been cleaned up */
   cleanedWorkUnits: Set<string>;
 }
 
@@ -293,7 +306,7 @@ export function createInternalState(id: string): InternalPlanState {
     pendingSubPlans: new Set(),
     runningSubPlans: new Map(),
     completedSubPlans: new Map(),
-    failedSubPlans: new Set(),
+    failedSubPlans: new Map(),
     mergedLeaves: new Set(),
     cleanedWorkUnits: new Set(),
   };
@@ -321,7 +334,7 @@ export function toPublicState(internal: InternalPlanState): PlanState {
     pendingSubPlans: internal.pendingSubPlans.size > 0 ? Array.from(internal.pendingSubPlans) : undefined,
     runningSubPlans: internal.runningSubPlans.size > 0 ? Object.fromEntries(internal.runningSubPlans) : undefined,
     completedSubPlans: internal.completedSubPlans.size > 0 ? Object.fromEntries(internal.completedSubPlans) : undefined,
-    failedSubPlans: internal.failedSubPlans.size > 0 ? Array.from(internal.failedSubPlans) : undefined,
+    failedSubPlans: internal.failedSubPlans.size > 0 ? Object.fromEntries(internal.failedSubPlans) : undefined,
     aggregatedWorkSummary: internal.aggregatedWorkSummary,
   };
 }

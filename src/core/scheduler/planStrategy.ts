@@ -74,7 +74,8 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
       id: spec.id || `plan-${Date.now()}`,
       status: 'queued',
       spec,
-      queued: rootJobs.map(j => j.id),
+      // Queue by job name (used for state tracking and consumesFrom references)
+      queued: rootJobs.map(j => j.name),
       running: [],
       completed: [],
       failed: [],
@@ -98,19 +99,21 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
     const maxParallel = state.spec.maxParallel || 4;
     const available = Math.min(maxCount, maxParallel - currentlyRunning);
     
-    for (const jobId of state.queued) {
+    // state.queued contains job names
+    for (const jobName of state.queued) {
       if (ready.length >= available) break;
       
-      const job = state.spec.jobs.find(j => j.id === jobId);
+      // Find job by name
+      const job = state.spec.jobs.find(j => j.name === jobName);
       if (!job) continue;
       
-      // Check if all dependencies are satisfied
+      // Check if all dependencies are satisfied (consumesFrom uses names)
       const depsCompleted = job.consumesFrom.every(
-        depId => state.completed.includes(depId)
+        depName => state.completed.includes(depName)
       );
       
       if (depsCompleted) {
-        ready.push(jobId);
+        ready.push(jobName);
       }
     }
     
@@ -121,18 +124,19 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
    * Execute a job within the plan.
    * This delegates to the JobScheduler.
    */
-  async execute(jobId: string, state: PlanState): Promise<void> {
-    const planJob = state.spec.jobs.find(j => j.id === jobId);
+  async execute(jobName: string, state: PlanState): Promise<void> {
+    // Find job by name (state arrays use names)
+    const planJob = state.spec.jobs.find(j => j.name === jobName);
     if (!planJob) {
-      log.error(`Job ${jobId} not found in plan ${state.id}`);
+      log.error(`Job ${jobName} not found in plan ${state.id}`);
       return;
     }
     
-    log.info(`Scheduling job ${jobId} for plan ${state.id}`);
+    log.info(`Scheduling job ${jobName} for plan ${state.id}`);
     
-    // Mark as running in plan state
-    state.queued = state.queued.filter(id => id !== jobId);
-    state.running.push(jobId);
+    // Mark as running in plan state (by name)
+    state.queued = state.queued.filter(name => name !== jobName);
+    state.running.push(jobName);
     
     if (state.status === 'queued') {
       state.status = 'running';
@@ -143,9 +147,10 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
     const baseBranch = this.computeBaseBranch(planJob, state);
     
     // Create job spec for the JobScheduler
+    // Note: planJob.id is already the UUID, planJob.name is user-friendly
     const runnerJobId = this.jobScheduler.enqueue({
-      id: planJob.runnerJobId,
-      name: planJob.name || planJob.id,
+      id: planJob.id,
+      name: planJob.name,
       task: planJob.task || 'plan-job',
       inputs: {
         ...planJob.inputs,
@@ -162,8 +167,8 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
       }
     });
     
-    // Track the mapping
-    state.jobIdMap.set(jobId, runnerJobId);
+    // Track the mapping (jobName -> runnerJobId)
+    state.jobIdMap.set(jobName, runnerJobId);
   }
   
   /**
@@ -172,9 +177,9 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
   updateStatus(state: PlanState): void {
     if (state.status !== 'running') return;
     
-    // Check status of each running job
-    for (const jobId of [...state.running]) {
-      const runnerJobId = state.jobIdMap.get(jobId);
+    // Check status of each running job (running array contains names)
+    for (const jobName of [...state.running]) {
+      const runnerJobId = state.jobIdMap.get(jobName);
       if (!runnerJobId) continue;
       
       const job = this.jobScheduler.get(runnerJobId);
@@ -182,24 +187,24 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
       
       switch (job.status) {
         case 'succeeded':
-          state.running = state.running.filter(id => id !== jobId);
-          state.completed.push(jobId);
+          state.running = state.running.filter(name => name !== jobName);
+          state.completed.push(jobName);
           // Record the completed commit (if available)
           if ((job as any).completedCommit) {
-            state.completedCommits.set(jobId, (job as any).completedCommit);
+            state.completedCommits.set(jobName, (job as any).completedCommit);
           }
           // Queue dependent jobs
-          this.queueDependentJobs(jobId, state);
+          this.queueDependentJobs(jobName, state);
           break;
           
         case 'failed':
-          state.running = state.running.filter(id => id !== jobId);
-          state.failed.push(jobId);
+          state.running = state.running.filter(name => name !== jobName);
+          state.failed.push(jobName);
           break;
           
         case 'canceled':
-          state.running = state.running.filter(id => id !== jobId);
-          state.canceled.push(jobId);
+          state.running = state.running.filter(name => name !== jobName);
+          state.canceled.push(jobName);
           break;
       }
     }
@@ -232,9 +237,9 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
   cancel(id: string, state: PlanState): void {
     log.info(`Canceling plan: ${id}`);
     
-    // Cancel all running jobs
-    for (const jobId of state.running) {
-      const runnerJobId = state.jobIdMap.get(jobId);
+    // Cancel all running jobs (running array contains names)
+    for (const jobName of state.running) {
+      const runnerJobId = state.jobIdMap.get(jobName);
       if (runnerJobId) {
         this.jobScheduler.cancel(runnerJobId);
       }
@@ -325,18 +330,19 @@ export class PlanExecutionStrategy implements ExecutionStrategy<PlanSpec, PlanSt
     return firstDepCommit || state.targetBranchRoot || 'main';
   }
   
-  private queueDependentJobs(completedJobId: string, state: PlanState): void {
-    // Find jobs that depend on the completed job
+  private queueDependentJobs(completedJobName: string, state: PlanState): void {
+    // Find jobs that depend on the completed job (consumesFrom uses names)
     for (const job of state.spec.jobs) {
-      if (job.consumesFrom.includes(completedJobId)) {
-        // Check if all dependencies are now complete
+      if (job.consumesFrom.includes(completedJobName)) {
+        // Check if all dependencies are now complete (by name)
         const allDepsComplete = job.consumesFrom.every(
-          depId => state.completed.includes(depId)
+          depName => state.completed.includes(depName)
         );
         
-        if (allDepsComplete && !state.queued.includes(job.id) && 
-            !state.running.includes(job.id) && !state.completed.includes(job.id)) {
-          state.queued.push(job.id);
+        // Queue by name, check against name
+        if (allDepsComplete && !state.queued.includes(job.name) && 
+            !state.running.includes(job.name) && !state.completed.includes(job.name)) {
+          state.queued.push(job.name);
         }
       }
     }

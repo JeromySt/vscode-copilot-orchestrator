@@ -5,7 +5,6 @@
  * - Git conflict resolution
  * - Test generation
  * - Documentation generation
- * - Dashboard management
  * - Status inspection
  * - Log viewing
  * - Orphaned resource cleanup
@@ -22,25 +21,11 @@ import { Logger } from '../core/logger';
 // ============================================================================
 
 /**
- * Dashboard interface - matches the return type of createDashboard.
- */
-export interface DashboardPanel {
-  update(jobs: any[]): void;
-  dispose(): void;
-}
-
-/**
  * Dependencies for utility commands.
  */
 export interface UtilityCommandsDependencies {
   /** Callback to trigger UI refresh */
   updateUI: () => void;
-  /** Function to create dashboard panel */
-  createDashboard: (context: vscode.ExtensionContext) => DashboardPanel;
-  /** Reference to dashboard panel (may be null) */
-  getDashboard: () => DashboardPanel | undefined;
-  /** Setter for dashboard panel */
-  setDashboard: (panel: DashboardPanel | undefined) => void;
 }
 
 // ============================================================================
@@ -57,24 +42,11 @@ export function registerUtilityCommands(
   context: vscode.ExtensionContext,
   deps: UtilityCommandsDependencies
 ): void {
-  const { updateUI, createDashboard, getDashboard, setDashboard } = deps;
+  const { updateUI } = deps;
 
   // Inspect Status - Refresh UI
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.inspectStatus', () => {
-      updateUI();
-    })
-  );
-
-  // Open Dashboard
-  context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.openDashboard', () => {
-      let dashboard = getDashboard();
-      if (!dashboard) {
-        dashboard = createDashboard(context);
-        setDashboard(dashboard);
-        context.subscriptions.push(dashboard);
-      }
       updateUI();
     })
   );

@@ -43,8 +43,6 @@ export class JobsViewProvider implements vscode.WebviewViewProvider {
       
       if (message.type === 'openJob') {
         vscode.commands.executeCommand('orchestrator.showJobDetails', message.jobId);
-      } else if (message.type === 'openDashboard') {
-        vscode.commands.executeCommand('orchestrator.openDashboard');
       } else if (message.type === 'refresh') {
         this.refresh();
       }
@@ -59,8 +57,9 @@ export class JobsViewProvider implements vscode.WebviewViewProvider {
     if (!this._view || !this._dataProvider) return;
     
     const allJobs = this._dataProvider.getJobs();
+    
     // Filter out plan-managed jobs - they're shown under their parent plan
-    const standaloneJobs = allJobs.filter(j => !j.inputs.planId);
+    const standaloneJobs = allJobs.filter(j => !j.inputs?.planId);
     const runningStandalone = standaloneJobs.filter(j => j.status === 'running').length;
     
     this._view.webview.postMessage({ 
@@ -82,7 +81,6 @@ export class JobsViewProvider implements vscode.WebviewViewProvider {
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
   <style>
     body { font: 12px sans-serif; padding: 8px; margin: 0; color: var(--vscode-foreground); }
     .header { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
@@ -98,8 +96,6 @@ export class JobsViewProvider implements vscode.WebviewViewProvider {
     .status-badge.queued { background: rgba(133, 133, 133, 0.1); border-left: 3px solid var(--vscode-descriptionForeground, #858585); color: var(--vscode-descriptionForeground, #858585); }
     .status-badge.canceled { background: rgba(133, 133, 133, 0.1); border-left: 3px solid var(--vscode-descriptionForeground, #858585); color: var(--vscode-descriptionForeground, #858585); }
     .empty { padding: 20px; text-align: center; opacity: 0.6; }
-    .open-dashboard { margin-top: 12px; padding: 6px 12px; width: 100%; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 4px; cursor: pointer; }
-    .open-dashboard:hover { background: var(--vscode-button-hoverBackground); }
   </style>
 </head>
 <body>
@@ -107,8 +103,7 @@ export class JobsViewProvider implements vscode.WebviewViewProvider {
     <h3 style="margin:0">Jobs</h3>
     <span class="pill" id="badge">0 total</span>
   </div>
-  <div id="jobs"></div>
-  <button class="open-dashboard" id="openDashboard">Open Dashboard</button>
+  <div id="jobs"><div class="empty">Loading...</div></div>
   
   <script>
     const vscode = acquireVsCodeApi();
@@ -121,22 +116,6 @@ export class JobsViewProvider implements vscode.WebviewViewProvider {
       return hours + 'h ' + mins + 'm';
     }
     
-    function updateRunningDurations() {
-      document.querySelectorAll('.job-item').forEach(el => {
-        const startedAt = parseInt(el.getAttribute('data-started'));
-        if (startedAt && el.getAttribute('data-status') === 'running') {
-          const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-          const durSpan = el.querySelector('.duration');
-          if (durSpan) {
-            durSpan.textContent = formatDuration(elapsed);
-          }
-        }
-      });
-    }
-    
-    // Update running durations every second
-    setInterval(updateRunningDurations, 1000);
-    
     window.addEventListener('message', ev => {
       if (ev.data.type === 'update') {
         const jobs = ev.data.jobs || [];
@@ -144,24 +123,20 @@ export class JobsViewProvider implements vscode.WebviewViewProvider {
         
         const container = document.getElementById('jobs');
         if (jobs.length === 0) {
-          container.innerHTML = '<div class="empty">No jobs yet</div>';
+          container.innerHTML = '<div class="empty">No standalone jobs</div>';
         } else {
           container.innerHTML = jobs.map(j => {
             const dur = j.duration ? formatDuration(j.duration) : '';
-            return '<div class="job-item" data-id="' + j.id + '" data-status="' + j.status + '" data-started="' + (j.startedAt || '') + '">' +
+            return '<div class="job-item" data-id="' + j.id + '">' +
               '<div class="job-name">' + j.name + '</div>' +
               '<div class="job-details">' +
                 '<span class="status-badge ' + j.status + '">' + j.status + '</span>' +
                 (j.currentStep ? '<span>' + j.currentStep + '</span>' : '') +
-                (j.status === 'running' ? '<span class="duration">calculating...</span>' : (dur ? '<span>' + dur + '</span>' : '')) +
+                (dur ? '<span>' + dur + '</span>' : '') +
               '</div>' +
             '</div>';
           }).join('');
           
-          // Initial update of running durations
-          updateRunningDurations();
-          
-          // Add click handlers
           document.querySelectorAll('.job-item').forEach(el => {
             el.addEventListener('click', () => {
               vscode.postMessage({ type: 'openJob', jobId: el.getAttribute('data-id') });
@@ -171,11 +146,6 @@ export class JobsViewProvider implements vscode.WebviewViewProvider {
       }
     });
     
-    document.getElementById('openDashboard').addEventListener('click', () => {
-      vscode.postMessage({ type: 'openDashboard' });
-    });
-    
-    // Request initial data
     vscode.postMessage({ type: 'refresh' });
   </script>
 </body>

@@ -160,6 +160,32 @@ export function getJobDetailsJs(jobJson: string): string {
     // LOG TAB HANDLING
     // ==========================================
     
+    // Auto-switch to failed tab if job failed
+    function autoSelectFailedTab() {
+      const latestAttempt = document.querySelector('.attempt-card:first-child');
+      if (!latestAttempt) return;
+      
+      // Find the first failed phase tab
+      const failedTab = latestAttempt.querySelector('.log-tab.phase-tab-failed');
+      if (failedTab && currentJob.status === 'failed') {
+        // Switch to the failed tab
+        const fullTab = latestAttempt.querySelector('.log-tab[data-section="FULL"]');
+        if (fullTab) fullTab.classList.remove('active');
+        failedTab.classList.add('active');
+        
+        const logViewer = latestAttempt.querySelector('.log-viewer');
+        if (logViewer) {
+          const section = failedTab.getAttribute('data-section');
+          logViewer.setAttribute('data-section', section);
+          // Load the filtered log content for the failed section
+          loadLog(logViewer);
+        }
+      }
+    }
+    
+    // Run after DOM is ready
+    setTimeout(autoSelectFailedTab, 100);
+    
     document.querySelectorAll('.log-tab').forEach(tab => {
       tab.addEventListener('click', (e) => {
         e.preventDefault();

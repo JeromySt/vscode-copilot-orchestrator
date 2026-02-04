@@ -4,7 +4,7 @@
     {
       "label": "Build",
       "type": "shell",
-      "command": "npm run build",
+      "command": "npm run compile",
       "group": "build",
       "problemMatcher": "$tsc"
     }

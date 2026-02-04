@@ -14,7 +14,7 @@ import {
   initializeCoreServices,
   initializeHttpServer,
   initializeMcpServer,
-  initializeSidebarView,
+  initializeJobsView,
   initializePlansView,
   initializeNotebookSupport,
   createUIManager,
@@ -84,7 +84,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   mcpManager = initializeMcpServer(context, config.http, config.mcp);
 
   // ── Sidebar View ───────────────────────────────────────────────────────
-  const jobsView = initializeSidebarView(context, runner);
+  const jobsView = initializeJobsView(context, runner);
 
   // ── Plans View ─────────────────────────────────────────────────────────
   initializePlansView(context, plans);

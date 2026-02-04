@@ -33,7 +33,7 @@ interface SerializedPlanState extends PlanState {
   _pendingSubPlans: string[];
   _runningSubPlans: [string, string][];
   _completedSubPlans: [string, string][];
-  _failedSubPlans: string[];
+  _failedSubPlans: [string, string][];
   _mergedLeaves: string[];
   _cleanedWorkUnits: string[];
 }
@@ -198,8 +198,17 @@ export class PlanPersistence {
       // Restore plan states
       if (data.plans) {
         for (const planData of data.plans) {
-          const state = this.deserializeState(planData);
-          plans.set(state.id, state);
+          try {
+            const state = this.deserializeState(planData);
+            plans.set(state.id, state);
+          } catch (planError: any) {
+            log.error('Failed to deserialize plan, skipping', { 
+              planId: planData?.id, 
+              error: planError.message,
+              stack: planError.stack
+            });
+            // Continue loading other plans
+          }
         }
       }
 
@@ -229,7 +238,7 @@ export class PlanPersistence {
       _pendingSubPlans: Array.from(state.pendingSubPlans || []),
       _runningSubPlans: Array.from(state.runningSubPlans?.entries() || []),
       _completedSubPlans: Array.from(state.completedSubPlans?.entries() || []),
-      _failedSubPlans: Array.from(state.failedSubPlans || []),
+      _failedSubPlans: Array.from(state.failedSubPlans?.entries() || []),
       _mergedLeaves: Array.from(state.mergedLeaves || []),
       _cleanedWorkUnits: Array.from(state.cleanedWorkUnits || []),
     };
@@ -263,16 +272,65 @@ export class PlanPersistence {
       targetBranchRoot: data._targetBranchRoot,
       targetBranchRootCreated: data._targetBranchRootCreated,
       // Restore sub-plan state
-      pendingSubPlans: new Set(data._pendingSubPlans || []),
-      runningSubPlans: new Map(data._runningSubPlans || []),
-      completedSubPlans: new Map(data._completedSubPlans || []),
-      failedSubPlans: new Set(data._failedSubPlans || []),
+      // Note: Old format stored these without _ prefix, new format uses _ prefix for internal arrays
+      pendingSubPlans: new Set(data._pendingSubPlans || data.pendingSubPlans || []),
+      runningSubPlans: this.deserializeSubPlanMap(data._runningSubPlans, data.runningSubPlans),
+      completedSubPlans: this.deserializeSubPlanMap(data._completedSubPlans, data.completedSubPlans),
+      // Handle backwards compatibility: old format was string[], new format is [string, string][]
+      failedSubPlans: this.deserializeFailedSubPlans(data._failedSubPlans || data.failedSubPlans),
       // Restore incremental delivery tracking
       mergedLeaves: new Set(data._mergedLeaves || []),
       cleanedWorkUnits: new Set(data._cleanedWorkUnits || []),
       // Runtime state - not persisted
       worktreeResults: new Map(),
     };
+  }
+  
+  /**
+   * Deserialize failedSubPlans with backwards compatibility.
+   * Old format: string[] (just keys)
+   * New format: [string, string][] (key -> childPlanId pairs)
+   */
+  private deserializeFailedSubPlans(data: any): Map<string, string> {
+    if (!data || !Array.isArray(data)) {
+      return new Map();
+    }
+    
+    // Check if it's the old format (array of strings) or new format (array of pairs)
+    if (data.length === 0) {
+      return new Map();
+    }
+    
+    // If first element is a string, it's old format
+    if (typeof data[0] === 'string') {
+      // Old format: convert string[] to Map<string, string> with empty child plan IDs
+      return new Map(data.map((key: string) => [key, '']));
+    }
+    
+    // New format: array of [key, value] pairs
+    return new Map(data);
+  }
+  
+  /**
+   * Deserialize sub-plan Map with backwards compatibility.
+   * Old format: Record<string, string> (object from PlanState)
+   * New format: [string, string][] (array of pairs)
+   */
+  private deserializeSubPlanMap(
+    arrayData: [string, string][] | undefined, 
+    objectData: Record<string, string> | undefined
+  ): Map<string, string> {
+    // Prefer the array format if available
+    if (arrayData && Array.isArray(arrayData) && arrayData.length > 0) {
+      return new Map(arrayData);
+    }
+    
+    // Fall back to object format (from old PlanState spread)
+    if (objectData && typeof objectData === 'object' && !Array.isArray(objectData)) {
+      return new Map(Object.entries(objectData));
+    }
+    
+    return new Map();
   }
 
   /**

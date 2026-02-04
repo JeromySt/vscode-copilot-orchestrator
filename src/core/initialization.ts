@@ -16,8 +16,8 @@ import { PlanRunner, PlanSpec } from './planRunner';
 import { ProcessMonitor } from '../process/processMonitor';
 import { McpServerManager, McpConfig } from '../mcp/mcpServerManager';
 import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
-import { JobsViewProvider } from '../ui/viewProvider';
 import { PlansViewProvider, Plan, PlanDetailPanel } from '../ui';
+import { JobsViewProvider, JobDataProvider } from '../ui/viewProvider';
 import { OrchestratorNotebookSerializer, registerNotebookController } from '../ui/notebook';
 import { attachStatusBar } from '../ui/statusBar';
 import { getJobDetailsHtml } from '../ui/templates/jobDetailsHtml';
@@ -26,10 +26,8 @@ import {
   registerMcpCommands, 
   registerUtilityCommands,
   registerJobCommands,
-  promptMcpServerRegistration,
-  DashboardPanel
+  promptMcpServerRegistration
 } from '../commands';
-import { createDashboard } from '../ui/webview';
 
 // ============================================================================
 // CONFIGURATION TYPES
@@ -238,30 +236,33 @@ export function initializeMcpServer(
   return manager;
 }
 
-// ============================================================================
-// SIDEBAR & VIEWS
-// ============================================================================
-
 /**
  * Initialize the sidebar jobs view.
  */
-export function initializeSidebarView(
+export function initializeJobsView(
   context: vscode.ExtensionContext,
   runner: JobRunner
 ): JobsViewProvider {
-  console.log('[Init] Initializing sidebar view...');
+  console.log('[Init] Initializing jobs view...');
   
+  // Log current job count from runner
+  const initialJobs = runner.list();
+  console.log(`[Init] JobRunner has ${initialJobs.length} jobs loaded`);
+  if (initialJobs.length > 0) {
+    console.log('[Init] Job IDs:', initialJobs.map(j => j.id).join(', '));
+  }
+
   const jobsView = new JobsViewProvider(context);
-  
-  jobsView.setDataProvider({
+  const provider: JobDataProvider = {
     getJobs: () => runner.list()
-  });
-  
+  };
+  jobsView.setDataProvider(provider);
+
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(JobsViewProvider.viewType, jobsView)
   );
 
-  console.log('[Init] Sidebar view ready');
+  console.log('[Init] Jobs view ready');
   return jobsView;
 }
 
@@ -273,6 +274,13 @@ export function initializePlansView(
   planRunner: PlanRunner
 ): PlansViewProvider {
   console.log('[Init] Initializing plans view...');
+  
+  // Log initial plan count
+  const initialPlans = planRunner.list();
+  console.log(`[Init] PlanRunner has ${initialPlans.length} plans loaded`);
+  if (initialPlans.length > 0) {
+    console.log('[Init] Plan IDs:', initialPlans.map(p => p.id).join(', '));
+  }
   
   const plansView = new PlansViewProvider(context);
   
@@ -290,17 +298,25 @@ export function initializePlansView(
         name: spec?.name || p.id,
         status: p.status as Plan['status'],
         maxParallel: spec?.maxParallel || 1,
-        jobs: (spec?.jobs || []).map(j => ({
-          planJobId: j.id,
-          jobId: jobIdMap?.get(j.id) || null,
-          name: j.name,
-          task: j.task,
-          status: p.done.includes(j.id) ? 'completed' as const :
-                  p.running.includes(j.id) ? 'running' as const :
-                  p.failed.includes(j.id) ? 'failed' as const :
-                  'pending' as const,
-          consumesFrom: j.consumesFrom
-        })),
+        // Map spec jobs to UI jobs
+        // State arrays are keyed by producerId (with fallback to name for legacy)
+        jobs: (spec?.jobs || []).map(j => {
+          // Get canonical key (producerId if available, fallback to name)
+          const key = j.producerId || j.name || j.id;
+          return {
+            planJobId: key,
+            jobId: jobIdMap?.get(key) || null,
+            nestedPlanId: j.nestedPlanId || null,
+            name: j.name || key,
+            producerId: j.producerId,
+            task: j.task,
+            status: p.done.includes(key) ? 'completed' as const :
+                    p.running.includes(key) ? 'running' as const :
+                    p.failed.includes(key) ? 'failed' as const :
+                    'pending' as const,
+            consumesFrom: j.consumesFrom || []
+          };
+        }),
         queued: p.queued,
         running: p.running,
         completed: p.done,
@@ -312,9 +328,7 @@ export function initializePlansView(
         // RI merge status
         riMergeCompleted: p.riMergeCompleted,
         // Sub-plan information from spec and state
-        // Note: planRunner.list() returns PlanState where these are already converted:
-        // - runningSubPlans is Record<string, string>
-        // - completedSubPlans is Record<string, string>
+        // State maps are keyed by producerId
         subPlans: spec?.subPlans,
         pendingSubPlans: p.pendingSubPlans,
         runningSubPlans: p.runningSubPlans,
@@ -470,10 +484,9 @@ export function initializeNotebookSupport(
 // ============================================================================
 
 /**
- * UI state manager for dashboard and job detail panels.
+ * UI state manager for job detail panels.
  */
 export interface UIManager {
-  dashboard: DashboardPanel | undefined;
   jobDetailPanels: Map<string, vscode.WebviewPanel>;
   jobsView: JobsViewProvider;
   updateUI: () => void;
@@ -487,18 +500,22 @@ export function createUIManager(
   runner: JobRunner,
   jobsView: JobsViewProvider
 ): UIManager {
-  let dashboard: DashboardPanel | undefined;
   const jobDetailPanels = new Map<string, vscode.WebviewPanel>();
 
+  // Track last known state to avoid unnecessary refreshes
+  let lastJobsHash = '';
+  
   const updateUI = (): void => {
     const jobs = runner.list();
     
-    if (dashboard) {
-      dashboard.update(jobs);
+    // Only refresh Jobs view if there's an actual change
+    const jobsHash = jobs.map(j => `${j.id}:${j.status}`).join('|');
+    if (jobsHash !== lastJobsHash) {
+      lastJobsHash = jobsHash;
+      jobsView.refresh();
     }
-    
-    jobsView.refresh();
 
+    // Update detail panels only if status changed
     for (const [jobId, panel] of jobDetailPanels.entries()) {
       const job = jobs.find(j => j.id === jobId);
       if (job) {
@@ -511,13 +528,11 @@ export function createUIManager(
     }
   };
 
-  // Periodic UI refresh
-  const refreshInterval = setInterval(updateUI, 1000);
+  // Periodic UI refresh - only every 2 seconds since we have change detection
+  const refreshInterval = setInterval(updateUI, 2000);
   context.subscriptions.push({ dispose: () => clearInterval(refreshInterval) });
 
   return {
-    get dashboard() { return dashboard; },
-    set dashboard(d) { dashboard = d; },
     jobDetailPanels,
     jobsView,
     updateUI
@@ -560,10 +575,7 @@ export function registerAllCommands(
 
   // Utility commands (dashboard, etc.)
   registerUtilityCommands(context, {
-    updateUI: uiManager.updateUI,
-    createDashboard: (ctx) => createDashboard(ctx) as DashboardPanel,
-    getDashboard: () => uiManager.dashboard,
-    setDashboard: (panel) => { uiManager.dashboard = panel; }
+    updateUI: uiManager.updateUI
   });
 
   // Job commands

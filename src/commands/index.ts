@@ -7,5 +7,5 @@
  */
 
 export { registerMcpCommands, promptMcpServerRegistration } from './mcpCommands';
-export { registerUtilityCommands, UtilityCommandsDependencies, DashboardPanel } from './utilityCommands';
+export { registerUtilityCommands, UtilityCommandsDependencies } from './utilityCommands';
 export { registerJobCommands, JobCommandDependencies } from './jobCommands';
