@@ -193,7 +193,8 @@ export class DefaultJobExecutor implements JobExecutor {
       const commitResult = await this.commitChanges(
         node,
         worktreePath,
-        executionKey
+        executionKey,
+        context.baseCommit
       );
       
       if (!commitResult.success) {
@@ -374,21 +375,35 @@ export class DefaultJobExecutor implements JobExecutor {
   
   /**
    * Commit changes in the worktree
+   * 
+   * VALIDATION: Either the work stage made commits, or there must be uncommitted
+   * changes to commit. If neither is true, the job produced no work and we fail.
    */
   private async commitChanges(
     node: JobNode,
     worktreePath: string,
-    executionKey: string
+    executionKey: string,
+    baseCommit: string
   ): Promise<{ success: boolean; commit?: string; error?: string }> {
     try {
-      // Check if there are changes to commit
+      // Check if there are uncommitted changes to commit
       const hasChanges = await git.repository.hasUncommittedChanges(worktreePath);
       
       if (!hasChanges) {
-        // No changes - get current HEAD
+        // No uncommitted changes - check if commits were made during the work stage
+        this.logInfo(executionKey, 'commit', 'No uncommitted changes, checking for commits since base...');
+        
         const head = await git.worktrees.getHeadCommit(worktreePath);
-        this.logInfo(executionKey, 'commit', 'No changes to commit');
-        return { success: true, commit: head || undefined };
+        if (head && head !== baseCommit) {
+          // Commits were made during work stage (e.g., by @agent)
+          this.logInfo(executionKey, 'commit', `Work stage made commits, HEAD: ${head.slice(0, 8)}`);
+          return { success: true, commit: head };
+        }
+        
+        // No commits and no uncommitted changes = no work produced
+        const error = 'No commits made and no uncommitted changes found. The job produced no work.';
+        this.logError(executionKey, 'commit', error);
+        return { success: false, error };
       }
       
       // Stage all changes
