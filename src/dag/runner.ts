@@ -379,6 +379,11 @@ export class DagRunner extends EventEmitter {
     // Cancel if running
     this.cancel(dagId);
     
+    // Clean up worktrees and branches in background
+    this.cleanupDagResources(dag).catch(err => {
+      log.error(`Failed to cleanup DAG resources`, { dagId, error: err.message });
+    });
+    
     // Remove from memory
     this.dags.delete(dagId);
     this.stateMachines.delete(dagId);
@@ -387,6 +392,94 @@ export class DagRunner extends EventEmitter {
     this.persistence.delete(dagId);
     
     return true;
+  }
+  
+  /**
+   * Clean up all resources associated with a DAG (worktrees, branches, logs)
+   */
+  private async cleanupDagResources(dag: DagInstance): Promise<void> {
+    const repoPath = dag.repoPath;
+    const cleanupErrors: string[] = [];
+    
+    // Collect all worktree paths and branch names from node states
+    const worktreePaths: string[] = [];
+    const branchNames: string[] = [];
+    
+    for (const [nodeId, state] of dag.nodeStates) {
+      if (state.worktreePath) {
+        worktreePaths.push(state.worktreePath);
+      }
+      if (state.branchName) {
+        branchNames.push(state.branchName);
+      }
+    }
+    
+    log.info(`Cleaning up DAG resources`, {
+      dagId: dag.id,
+      worktrees: worktreePaths.length,
+      branches: branchNames.length,
+    });
+    
+    // Remove worktrees first (before branches, since worktrees reference branches)
+    for (const worktreePath of worktreePaths) {
+      try {
+        await git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
+        log.debug(`Removed worktree: ${worktreePath}`);
+      } catch (error: any) {
+        cleanupErrors.push(`worktree ${worktreePath}: ${error.message}`);
+      }
+    }
+    
+    // Remove branches
+    for (const branchName of branchNames) {
+      try {
+        await git.branches.remove(branchName, repoPath, { force: true });
+        log.debug(`Removed branch: ${branchName}`);
+      } catch (error: any) {
+        // Branch might already be deleted or not exist
+        if (!error.message?.includes('not found')) {
+          cleanupErrors.push(`branch ${branchName}: ${error.message}`);
+        }
+      }
+    }
+    
+    // Try to clean up the worktree root directory if it exists and is empty
+    if (dag.worktreeRoot) {
+      try {
+        const fs = require('fs');
+        const entries = fs.readdirSync(dag.worktreeRoot);
+        if (entries.length === 0) {
+          fs.rmdirSync(dag.worktreeRoot);
+          log.debug(`Removed empty worktree root: ${dag.worktreeRoot}`);
+        }
+      } catch (error: any) {
+        // Directory might not exist or not be empty - that's fine
+      }
+    }
+    
+    // Clean up log files
+    if (this.executor) {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const storagePath = (this.executor as any).storagePath;
+        if (storagePath) {
+          const dagLogsDir = path.join(storagePath, dag.id);
+          if (fs.existsSync(dagLogsDir)) {
+            fs.rmSync(dagLogsDir, { recursive: true, force: true });
+            log.debug(`Removed log directory: ${dagLogsDir}`);
+          }
+        }
+      } catch (error: any) {
+        cleanupErrors.push(`logs: ${error.message}`);
+      }
+    }
+    
+    if (cleanupErrors.length > 0) {
+      log.warn(`Some cleanup operations failed`, { errors: cleanupErrors });
+    } else {
+      log.info(`DAG cleanup completed successfully`, { dagId: dag.id });
+    }
   }
   
   /**
