@@ -150,18 +150,46 @@
       {
         "command": "orchestrator.cleanupOrphans",
         "title": "Copilot Orchestrator: Clean Up Orphaned Worktrees & Branches"
+      },
+      {
+        "command": "orchestrator.showDagDetails",
+        "title": "Copilot Orchestrator: Show DAG Details"
+      },
+      {
+        "command": "orchestrator.showNodeDetails",
+        "title": "Copilot Orchestrator: Show Node Details"
+      },
+      {
+        "command": "orchestrator.cancelDag",
+        "title": "Copilot Orchestrator: Cancel DAG",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "orchestrator.deleteDag",
+        "title": "Copilot Orchestrator: Delete DAG",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "orchestrator.refreshDags",
+        "title": "Copilot Orchestrator: Refresh DAGs",
+        "icon": "$(refresh)"
       }
     ],
     "views": {
       "copilot-orchestrator": [
         {
+          "id": "orchestrator.dagsView",
+          "name": "DAGs",
+          "type": "webview"
+        },
+        {
           "id": "orchestrator.jobsView",
-          "name": "Jobs",
+          "name": "Jobs (Legacy)",
           "type": "webview"
         },
         {
           "id": "orchestrator.plansView",
-          "name": "Plans",
+          "name": "Plans (Legacy)",
           "type": "webview"
         }
       ]
