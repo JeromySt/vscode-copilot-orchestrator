@@ -138,7 +138,8 @@ export class DefaultJobExecutor implements JobExecutor {
           }
         } else {
           // Run shell command
-          this.logInfo(executionKey, 'work', `Running: ${node.work}`);
+          this.logInfo(executionKey, 'work', `Running in ${worktreePath}: ${node.work}`);
+          log.debug(`Executing work command`, { cwd: worktreePath, command: node.work });
           
           const workResult = await this.runCommand(
             node.work,
@@ -155,6 +156,10 @@ export class DefaultJobExecutor implements JobExecutor {
             };
           }
         }
+      } else {
+        // No work command - this is unusual but not an error
+        this.logInfo(executionKey, 'work', 'No work command specified - skipping');
+        log.warn(`Job ${node.name} has no work command`);
       }
       
       // Check if aborted

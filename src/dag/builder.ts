@@ -12,6 +12,7 @@
  * @module dag/builder
  */
 
+import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import {
   DagSpec,
@@ -212,7 +213,7 @@ export function buildDag(
   
   // Determine worktree root
   const repoPath = options.repoPath || spec.repoPath || process.cwd();
-  const worktreeRoot = options.worktreeRoot || `${repoPath}/.worktrees/${dagId.slice(0, 8)}`;
+  const worktreeRoot = options.worktreeRoot || path.join(repoPath, '.worktrees', dagId.slice(0, 8));
   
   return {
     id: dagId,

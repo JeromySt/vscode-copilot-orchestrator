@@ -13,6 +13,7 @@
  * @module dag/runner
  */
 
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
 import {
@@ -603,8 +604,8 @@ export class DagRunner extends EventEmitter {
       const baseCommitish = baseCommits.length > 0 ? baseCommits[0] : dag.baseBranch;
       const additionalSources = baseCommits.slice(1);
       
-      // Create worktree path (no branch name - detached HEAD mode)
-      const worktreePath = `${dag.worktreeRoot}/${node.producerId}`;
+      // Create worktree path (use path.join for cross-platform compatibility)
+      const worktreePath = path.join(dag.worktreeRoot, node.producerId);
       
       // Store in state (no branchName since we use detached HEAD)
       nodeState.worktreePath = worktreePath;
@@ -865,7 +866,7 @@ export class DagRunner extends EventEmitter {
     });
     
     const repoPath = dag.repoPath;
-    const mergeWorktreePath = `${dag.worktreeRoot}/_merge_${node.id.slice(0, 8)}_${Date.now()}`;
+    const mergeWorktreePath = path.join(dag.worktreeRoot, `_merge_${node.id.slice(0, 8)}_${Date.now()}`);
     
     try {
       // Create a temp detached worktree on target branch
