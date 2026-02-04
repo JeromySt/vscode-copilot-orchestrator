@@ -1,68 +1,37 @@
 /**
  * @fileoverview Plan HTTP route handlers.
  * 
- * Handles all /plan* endpoints.
+ * DEPRECATED: These routes are from the old PlanRunner system.
+ * The DAG system uses the MCP endpoint directly.
  * 
  * @module http/routes/plans
+ * @deprecated Use MCP tools via /mcp endpoint instead
  */
 
-import { RouteContext, ParsedRequest, readBody, sendJson, sendError } from '../types';
+import { Logger } from '../../core/logger';
+import { RouteContext, ParsedRequest, sendJson } from '../types';
 
-/**
- * POST /plan - Create plan
- */
-export async function createPlan(request: ParsedRequest, context: RouteContext): Promise<boolean> {
-  const { req, res, method, pathname } = request;
-  
-  if (method !== 'POST' || pathname !== '/plan') return false;
-  
-  const body = await readBody(req);
-  const spec = JSON.parse(body);
-  context.plans.enqueue(spec);
-  sendJson(res, { ok: true, id: spec.id, message: 'Plan created successfully' });
-  return true;
-}
+const log = Logger.for('http');
 
 /**
- * GET /plan/:id - Get plan status
+ * @deprecated Legacy route - returns empty list
  */
-export async function getPlan(request: ParsedRequest, context: RouteContext): Promise<boolean> {
+async function listPlans(request: ParsedRequest, context: RouteContext): Promise<boolean> {
   const { res, method, pathname } = request;
   
-  if (method !== 'GET' || !pathname.startsWith('/plan/')) return false;
-  if (pathname.endsWith('/cancelPlan')) return false;
+  if (method !== 'GET' || pathname !== '/plans') return false;
   
-  const id = pathname.split('/')[2];
-  const plan = context.plans.get(id);
-  
-  if (!plan) {
-    sendError(res, 'Plan not found', 404, { id });
-    return true;
-  }
-  
-  sendJson(res, plan);
+  sendJson(res, { 
+    plans: [], 
+    count: 0, 
+    message: 'DEPRECATED: Use MCP tools via /mcp endpoint' 
+  });
   return true;
 }
 
 /**
- * POST /plan/:id/cancelPlan - Cancel plan
- */
-export async function cancelPlan(request: ParsedRequest, context: RouteContext): Promise<boolean> {
-  const { res, method, pathname } = request;
-  
-  if (method !== 'POST' || !pathname.endsWith('/cancelPlan')) return false;
-  
-  const id = pathname.split('/')[2];
-  context.plans.cancel(id);
-  sendJson(res, { ok: true, id, message: 'Plan cancelled' });
-  return true;
-}
-
-/**
- * All plan route handlers.
+ * Plan routes - all deprecated
  */
 export const planRoutes = [
-  createPlan,
-  getPlan,
-  cancelPlan
+  listPlans,
 ];

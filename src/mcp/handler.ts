@@ -11,12 +11,20 @@
  * @module mcp/mcpHandler
  */
 
-import { JobRunner } from '../core/jobRunner';
-import { PlanRunner } from '../core/planRunner';
+import { DagRunner } from '../dag/runner';
 import { Logger, ComponentLogger } from '../core/logger';
 import { JsonRpcRequest, JsonRpcResponse, ToolHandlerContext } from './types';
-import { getAllToolDefinitions } from './tools';
-import { handleToolCall } from './handlers';
+import { getDagToolDefinitions } from './tools/dagTools';
+import {
+  handleCreateDag,
+  handleCreateJob,
+  handleGetDagStatus,
+  handleListDags,
+  handleGetNodeDetails,
+  handleGetNodeLogs,
+  handleCancelDag,
+  handleDeleteDag,
+} from './handlers/dagHandlers';
 
 /** MCP component logger */
 const log: ComponentLogger = Logger.for('mcp');
@@ -27,8 +35,15 @@ const PROTOCOL_VERSION = '2024-11-05';
 /** Server info for initialize response */
 const SERVER_INFO = {
   name: 'copilot-orchestrator',
-  version: '0.5.0'
+  version: '0.6.0'  // Bumped for DAG rewrite
 };
+
+/**
+ * Extended context for DAG handlers
+ */
+interface DagHandlerContext extends ToolHandlerContext {
+  dagRunner: DagRunner;
+}
 
 /**
  * MCP Handler class for processing MCP HTTP requests.
@@ -37,17 +52,22 @@ const SERVER_INFO = {
  * to specialized handlers.
  */
 export class McpHandler {
-  private readonly context: ToolHandlerContext;
+  private readonly context: DagHandlerContext;
 
   /**
    * Create a new MCP handler.
    * 
-   * @param runner - Job runner instance
-   * @param plans - Plan runner instance
+   * @param dagRunner - DAG runner instance
    * @param workspacePath - Workspace root path
    */
-  constructor(runner: JobRunner, plans: PlanRunner, workspacePath: string) {
-    this.context = { runner, plans, workspacePath };
+  constructor(dagRunner: DagRunner, workspacePath: string) {
+    this.context = { 
+      dagRunner, 
+      workspacePath,
+      // Legacy fields - kept for type compatibility
+      runner: null as any,
+      plans: null as any,
+    };
     log.info('MCP Handler initialized', { workspacePath });
   }
 
@@ -114,20 +134,10 @@ export class McpHandler {
    * Handle tools/list request.
    */
   private handleToolsList(request: JsonRpcRequest): JsonRpcResponse {
-    const tools = getAllToolDefinitions();
+    const tools = getDagToolDefinitions();
     log.info('Tools list requested', { toolCount: tools.length });
     log.debug('Tools list - tool names', { tools: tools.map(t => t.name) });
     
-    // Log full schema for each tool for debugging
-    for (const tool of tools) {
-      log.debug(`Tool schema: ${tool.name}`, { 
-        name: tool.name,
-        description: tool.description.substring(0, 100) + '...',
-        inputSchema: tool.inputSchema 
-      });
-    }
-    
-    log.debug('Tools list response sent', { toolCount: tools.length });
     return this.successResponse(request.id, { tools });
   }
 
@@ -139,9 +149,46 @@ export class McpHandler {
     log.info('Tool call', { tool: name });
     log.debug('Tool call arguments', { tool: name, args });
     
-    const result = await handleToolCall(name, args || {}, this.context);
+    let result: any;
     
-    // Use compact JSON (no pretty printing) for faster serialization
+    // Route to appropriate handler
+    switch (name) {
+      case 'create_copilot_dag':
+        result = await handleCreateDag(args || {}, this.context);
+        break;
+        
+      case 'create_copilot_job':
+        result = await handleCreateJob(args || {}, this.context);
+        break;
+        
+      case 'get_copilot_dag_status':
+        result = await handleGetDagStatus(args || {}, this.context);
+        break;
+        
+      case 'list_copilot_dags':
+        result = await handleListDags(args || {}, this.context);
+        break;
+        
+      case 'get_copilot_node_details':
+        result = await handleGetNodeDetails(args || {}, this.context);
+        break;
+        
+      case 'get_copilot_node_logs':
+        result = await handleGetNodeLogs(args || {}, this.context);
+        break;
+        
+      case 'cancel_copilot_dag':
+        result = await handleCancelDag(args || {}, this.context);
+        break;
+        
+      case 'delete_copilot_dag':
+        result = await handleDeleteDag(args || {}, this.context);
+        break;
+        
+      default:
+        result = { success: false, error: `Unknown tool: ${name}` };
+    }
+    
     return this.successResponse(request.id, {
       content: [{ type: 'text', text: JSON.stringify(result) }]
     });

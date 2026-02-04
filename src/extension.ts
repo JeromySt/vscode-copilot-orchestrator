@@ -2,8 +2,9 @@
  * @fileoverview VS Code Copilot Orchestrator Extension - Main Entry Point
  * 
  * This file is the composition root for the extension. It orchestrates
- * the initialization of all components in a clean, declarative manner.
- * All logic is delegated to specialized initialization routines.
+ * the initialization of all components using the DAG-based system.
+ * 
+ * Everything is a DAG - even a single job.
  * 
  * @module extension
  */
@@ -11,19 +12,15 @@
 import * as vscode from 'vscode';
 import {
   loadConfiguration,
-  initializeCoreServices,
+  initializeDagRunner,
   initializeHttpServer,
   initializeMcpServer,
-  initializeJobsView,
-  initializePlansView,
-  initializeNotebookSupport,
-  createUIManager,
-  initializeCopilotCli,
-  registerAllCommands,
-  showMcpRegistrationPrompt
-} from './core/initialization';
+  initializeDagsView,
+  registerDagCommands,
+} from './core/dagInitialization';
 import { McpServerManager } from './mcp/mcpServerManager';
 import { ProcessMonitor } from './process/processMonitor';
+import { DagRunner } from './dag';
 import { Logger } from './core/logger';
 
 // ============================================================================
@@ -36,11 +33,8 @@ let mcpManager: McpServerManager | undefined;
 /** Process Monitor - retained for cleanup */
 let processMonitor: ProcessMonitor | undefined;
 
-/** Job Runner - retained for shutdown persistence */
-let jobRunner: import('./core/jobRunner').JobRunner | undefined;
-
-/** Plan Runner - retained for shutdown persistence */
-let planRunner: import('./core/planRunner').PlanRunner | undefined;
+/** DAG Runner - retained for shutdown persistence */
+let dagRunner: DagRunner | undefined;
 
 // ============================================================================
 // ACTIVATION
@@ -51,12 +45,11 @@ let planRunner: import('./core/planRunner').PlanRunner | undefined;
  * 
  * Initializes all components in order:
  * 1. Load configuration
- * 2. Core services (JobRunner, PlanRunner, ProcessMonitor)
- * 3. HTTP API server
- * 4. MCP server
- * 5. UI components (sidebar, notebooks)
+ * 2. DAG runner (replaces JobRunner + PlanRunner)
+ * 3. HTTP API server with MCP endpoint
+ * 4. MCP registration with VS Code
+ * 5. UI components
  * 6. Commands
- * 7. Copilot CLI check
  * 
  * @param context - VS Code extension context
  */
@@ -70,43 +63,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const config = loadConfiguration();
   extLog.debug('Configuration loaded', config);
 
-  // ── Core Services ──────────────────────────────────────────────────────
-  const { runner, plans, processMonitor: pm } = initializeCoreServices(context);
+  // ── DAG Runner ─────────────────────────────────────────────────────────
+  const { dagRunner: runner, processMonitor: pm } = initializeDagRunner(context);
   processMonitor = pm;
-  jobRunner = runner;
-  planRunner = plans;
+  dagRunner = runner;
 
   // ── HTTP Server ────────────────────────────────────────────────────────
-  // Must be started BEFORE MCP registration so the endpoint is available
-  await initializeHttpServer(context, runner, plans, config.http);
+  await initializeHttpServer(context, dagRunner, config.http);
 
   // ── MCP Server ─────────────────────────────────────────────────────────
   mcpManager = initializeMcpServer(context, config.http, config.mcp);
 
-  // ── Sidebar View ───────────────────────────────────────────────────────
-  const jobsView = initializeJobsView(context, runner);
-
-  // ── Plans View ─────────────────────────────────────────────────────────
-  initializePlansView(context, plans);
-
-  // ── Notebook Support ───────────────────────────────────────────────────
-  initializeNotebookSupport(context, runner);
-
-  // ── UI Manager ─────────────────────────────────────────────────────────
-  const uiManager = createUIManager(context, runner, jobsView);
+  // ── DAGs View ──────────────────────────────────────────────────────────
+  initializeDagsView(context, dagRunner);
 
   // ── Commands ───────────────────────────────────────────────────────────
-  registerAllCommands(context, runner, uiManager, processMonitor);
-
-  // ── Copilot CLI ────────────────────────────────────────────────────────
-  await initializeCopilotCli(context);
-
-  // ── MCP Registration Prompt ────────────────────────────────────────────
-  await showMcpRegistrationPrompt(context);
+  registerDagCommands(context, dagRunner);
 
   // ── Complete ───────────────────────────────────────────────────────────
   extLog.info('Extension activated successfully');
-  vscode.window.showInformationMessage('Copilot Orchestrator is ready!');
+  vscode.window.showInformationMessage('Copilot Orchestrator is ready! (DAG Mode)');
 }
 
 // ============================================================================
@@ -120,14 +96,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 export function deactivate(): void {
   // Persist state synchronously before shutdown
   try {
-    jobRunner?.persistSync();
-    planRunner?.persistSync();
+    dagRunner?.persistSync();
   } catch (e) {
     console.error('Failed to persist state on deactivate:', e);
   }
   
   mcpManager?.stop();
   processMonitor = undefined;
-  jobRunner = undefined;
-  planRunner = undefined;
+  dagRunner = undefined;
 }

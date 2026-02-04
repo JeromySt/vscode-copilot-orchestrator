@@ -1,21 +1,25 @@
 /**
- * @fileoverview HTTP Server Module
+ * @fileoverview HTTP Server Module (LEGACY)
  * 
- * Clean, modular HTTP server for the orchestrator.
- * Routes are extracted into separate handler modules.
+ * NOTE: This file is being phased out in favor of the inline HTTP server
+ * in dagInitialization.ts. It exists here for backward compatibility
+ * during the transition period.
  * 
  * @module http/server
+ * @deprecated Use the DAG-based HTTP server in dagInitialization.ts
  */
 
 import * as http from 'http';
-import { JobRunner } from '../core/jobRunner';
-import { PlanRunner } from '../core/planRunner';
+// Legacy imports - commented out during DAG transition
+// import { JobRunner } from '../core/jobRunner';
+// import { PlanRunner } from '../core/planRunner';
 import { McpHandler } from '../mcp/handler';
 import { Logger } from '../core/logger';
 import { RouteContext, ParsedRequest, RouteHandler, sendJson, sendError } from './types';
 import { jobRoutes } from './routes/jobs';
 import { planRoutes } from './routes/plans';
 import { mcpRoutes } from './routes/mcp';
+import { DagRunner } from '../dag';
 
 const log = Logger.for('http');
 
@@ -118,15 +122,14 @@ function createRequestHandler(context: RouteContext) {
 /**
  * Start the HTTP server.
  * 
- * @param runner - Job runner instance
- * @param plans - Plan runner instance
+ * @deprecated Use initializeHttpServer in dagInitialization.ts instead
+ * @param dagRunner - DAG runner instance
  * @param host - Host to bind to
  * @param port - Port to listen on
  * @returns HTTP server instance
  */
 export function startHttpServer(
-  runner: JobRunner,
-  plans: PlanRunner,
+  dagRunner: DagRunner,
   host: string,
   port: number
 ): http.Server {
@@ -137,8 +140,8 @@ export function startHttpServer(
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
   
   // Create context
-  const mcpHandler = new McpHandler(runner, plans, workspacePath);
-  const context: RouteContext = { runner, plans, mcpHandler };
+  const mcpHandler = new McpHandler(dagRunner, workspacePath);
+  const context: RouteContext = { dagRunner, mcpHandler };
   
   // Create server
   const server = http.createServer(createRequestHandler(context));
@@ -155,10 +158,10 @@ export function startHttpServer(
 
 /**
  * Start HTTP server and return a promise that resolves when listening.
+ * @deprecated Use initializeHttpServer in dagInitialization.ts instead
  */
 export function startHttpServerAsync(
-  runner: JobRunner,
-  plans: PlanRunner,
+  dagRunner: DagRunner,
   host: string,
   port: number
 ): Promise<http.Server> {
@@ -168,8 +171,8 @@ export function startHttpServerAsync(
     const vscode = require('vscode');
     const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
     
-    const mcpHandler = new McpHandler(runner, plans, workspacePath);
-    const context: RouteContext = { runner, plans, mcpHandler };
+    const mcpHandler = new McpHandler(dagRunner, workspacePath);
+    const context: RouteContext = { dagRunner, mcpHandler };
     
     const server = http.createServer(createRequestHandler(context));
     
