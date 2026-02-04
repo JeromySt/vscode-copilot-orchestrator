@@ -276,6 +276,13 @@ export interface NodeExecutionState {
   
   /** Work summary (files changed, commits) - set on success */
   workSummary?: JobWorkSummary;
+  
+  /** 
+   * Whether this leaf node's commit was successfully merged to targetBranch.
+   * Only set for leaf nodes when targetBranch is specified.
+   * Worktree cleanup is blocked until this is true (or node is not a leaf).
+   */
+  mergedToTarget?: boolean;
 }
 
 /**

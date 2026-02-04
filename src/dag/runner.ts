@@ -661,7 +661,11 @@ export class DagRunner extends EventEmitter {
         
         // Handle leaf node merge to target branch
         if (dag.leaves.includes(node.id) && dag.targetBranch && nodeState.completedCommit) {
-          await this.mergeLeafToTarget(dag, node, nodeState.completedCommit);
+          const mergeSuccess = await this.mergeLeafToTarget(dag, node, nodeState.completedCommit);
+          nodeState.mergedToTarget = mergeSuccess;
+          if (!mergeSuccess) {
+            log.warn(`Leaf ${node.name} succeeded but merge to ${dag.targetBranch} failed - worktree preserved for manual retry`);
+          }
         }
         
         sm.transition(node.id, 'succeeded');
@@ -842,13 +846,15 @@ export class DagRunner extends EventEmitter {
    * - Squash merge the source commit
    * - Commit and optionally push
    * - Clean up the temp worktree
+   * 
+   * @returns true if merge succeeded, false if it failed
    */
   private async mergeLeafToTarget(
     dag: DagInstance,
     node: JobNode,
     completedCommit: string
-  ): Promise<void> {
-    if (!dag.targetBranch) return;
+  ): Promise<boolean> {
+    if (!dag.targetBranch) return true; // No target = nothing to merge = success
     
     log.info(`Merging leaf to target: ${node.name} -> ${dag.targetBranch}`, {
       commit: completedCommit.slice(0, 8),
@@ -891,17 +897,20 @@ export class DagRunner extends EventEmitter {
           log.info(`Pushed ${dag.targetBranch} to origin`);
         } catch (pushError: any) {
           log.warn(`Push failed: ${pushError.message}`);
+          // Push failure doesn't mean merge failed - the commit is local
         }
       }
+      
+      return true; // Merge succeeded
       
     } catch (error: any) {
       log.error(`Failed to merge leaf to target`, {
         node: node.name,
         error: error.message,
       });
-      // Don't fail the node for merge failures - it succeeded, just merge failed
+      return false; // Merge failed - worktree should be preserved
     } finally {
-      // Clean up the temp merge worktree
+      // Clean up the temp merge worktree (not the node's worktree!)
       try {
         await git.worktrees.removeSafe(repoPath, mergeWorktreePath, { force: true });
       } catch {
@@ -1039,9 +1048,19 @@ export class DagRunner extends EventEmitter {
       const node = dag.nodes.get(nodeId);
       if (!node) continue;
       
-      // Leaf nodes (no dependents) can always be cleaned up after success
+      // Leaf nodes (no dependents) - can only be cleaned up after successful merge to target
       if (node.dependents.length === 0) {
-        eligibleNodes.push(nodeId);
+        // If there's a targetBranch, we need mergedToTarget to be true
+        // If no targetBranch, there's nothing to merge so it's safe to clean up
+        if (dag.targetBranch) {
+          if (state.mergedToTarget === true) {
+            eligibleNodes.push(nodeId);
+          }
+          // If mergedToTarget is false or undefined, keep the worktree for manual retry
+        } else {
+          // No targetBranch = no merge needed = safe to cleanup
+          eligibleNodes.push(nodeId);
+        }
         continue;
       }
       
