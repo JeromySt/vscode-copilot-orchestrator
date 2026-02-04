@@ -121,7 +121,11 @@ export function initializeDagRunner(
   log.info('Initializing DAG runner...');
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-  const storagePath = path.join(context.globalStorageUri.fsPath, 'dags');
+  
+  // Store everything in workspace .orchestrator folder (or fallback to globalStorage)
+  const storagePath = workspacePath 
+    ? path.join(workspacePath, '.orchestrator', 'dags')
+    : path.join(context.globalStorageUri.fsPath, 'dags');
   
   const config: DagRunnerConfig = {
     storagePath,
@@ -134,10 +138,10 @@ export function initializeDagRunner(
   const executor = new DefaultJobExecutor();
   const processMonitor = new ProcessMonitor();
   
-  // Wire up executor with logs in workspace .orchestrator directory
+  // Wire up executor with logs in the same .orchestrator directory
   const logsPath = workspacePath 
     ? path.join(workspacePath, '.orchestrator')
-    : storagePath;
+    : path.join(context.globalStorageUri.fsPath);
   executor.setStoragePath(logsPath);
   dagRunner.setExecutor(executor);
   
