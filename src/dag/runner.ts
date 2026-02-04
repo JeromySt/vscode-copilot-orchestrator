@@ -301,8 +301,9 @@ export class DagRunner extends EventEmitter {
    * Get execution logs for a node
    */
   getNodeLogs(dagId: string, nodeId: string, phase?: 'all' | 'prechecks' | 'work' | 'postchecks' | 'commit'): string {
-    if (!this.executor) return '';
+    if (!this.executor) return 'No executor available.';
     
+    // First try memory logs
     let logs: LogEntry[] = [];
     if (phase && phase !== 'all' && this.executor.getLogsForPhase) {
       logs = this.executor.getLogsForPhase(dagId, nodeId, phase);
@@ -310,14 +311,30 @@ export class DagRunner extends EventEmitter {
       logs = this.executor.getLogs(dagId, nodeId);
     }
     
-    if (logs.length === 0) return 'No logs available.';
+    if (logs.length > 0) {
+      return logs.map((entry: LogEntry) => {
+        const time = new Date(entry.timestamp).toLocaleTimeString();
+        const prefix = entry.type === 'stderr' ? '[ERR]' : 
+                       entry.type === 'info' ? '[INFO]' : '';
+        return `[${time}] ${prefix} ${entry.message}`;
+      }).join('\n');
+    }
     
-    return logs.map((entry: LogEntry) => {
-      const time = new Date(entry.timestamp).toLocaleTimeString();
-      const prefix = entry.type === 'stderr' ? '[ERR]' : 
-                     entry.type === 'info' ? '[INFO]' : '';
-      return `[${time}] ${prefix} ${entry.message}`;
-    }).join('\n');
+    // Try reading from log file
+    if ('readLogsFromFile' in this.executor && typeof (this.executor as any).readLogsFromFile === 'function') {
+      const fileContent = (this.executor as any).readLogsFromFile(dagId, nodeId);
+      if (fileContent && !fileContent.startsWith('No log file')) {
+        // Filter by phase if requested
+        if (phase && phase !== 'all') {
+          const phaseMarker = `[${phase.toUpperCase()}]`;
+          const lines = fileContent.split('\n').filter((line: string) => line.includes(phaseMarker));
+          return lines.length > 0 ? lines.join('\n') : `No logs for ${phase} phase.`;
+        }
+        return fileContent;
+      }
+    }
+    
+    return 'No logs available.';
   }
   
   // ============================================================================

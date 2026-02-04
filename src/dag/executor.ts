@@ -46,7 +46,21 @@ interface ActiveExecution {
 export class DefaultJobExecutor implements JobExecutor {
   private activeExecutions = new Map<string, ActiveExecution>();
   private executionLogs = new Map<string, LogEntry[]>();
+  private logFiles = new Map<string, string>(); // execution key -> log file path
   private agentDelegator?: any; // IAgentDelegator interface
+  private storagePath?: string;
+  
+  /**
+   * Set storage path for log files
+   */
+  setStoragePath(storagePath: string): void {
+    this.storagePath = storagePath;
+    // Ensure logs directory exists
+    const logsDir = path.join(storagePath, 'logs');
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+  }
   
   /**
    * Set the agent delegator for @agent tasks
@@ -513,44 +527,109 @@ export class DefaultJobExecutor implements JobExecutor {
   // LOGGING
   // ============================================================================
   
+  /**
+   * Get or create log file path for an execution
+   */
+  private getLogFilePath(executionKey: string): string | undefined {
+    if (!this.storagePath) return undefined;
+    
+    let logFile = this.logFiles.get(executionKey);
+    if (!logFile) {
+      const logsDir = path.join(this.storagePath, 'logs');
+      const safeKey = executionKey.replace(/[^a-zA-Z0-9-_]/g, '_');
+      logFile = path.join(logsDir, `${safeKey}.log`);
+      this.logFiles.set(executionKey, logFile);
+    }
+    return logFile;
+  }
+  
+  /**
+   * Append a log entry to file
+   */
+  private appendToLogFile(executionKey: string, entry: LogEntry): void {
+    const logFile = this.getLogFilePath(executionKey);
+    if (!logFile) return;
+    
+    try {
+      const time = new Date(entry.timestamp).toISOString();
+      const prefix = entry.type === 'stderr' ? '[ERR]' : 
+                     entry.type === 'error' ? '[ERROR]' :
+                     entry.type === 'info' ? '[INFO]' : '';
+      const line = `[${time}] [${entry.phase.toUpperCase()}] ${prefix} ${entry.message}\n`;
+      fs.appendFileSync(logFile, line, 'utf8');
+    } catch (err) {
+      // Ignore file write errors
+    }
+  }
+  
+  /**
+   * Read logs from file for a completed execution
+   */
+  readLogsFromFile(dagId: string, nodeId: string): string {
+    const executionKey = `${dagId}:${nodeId}`;
+    const logFile = this.getLogFilePath(executionKey);
+    
+    if (!logFile || !fs.existsSync(logFile)) {
+      return 'No log file found.';
+    }
+    
+    try {
+      return fs.readFileSync(logFile, 'utf8');
+    } catch (err) {
+      return `Error reading log file: ${err}`;
+    }
+  }
+  
   private logOutput(
     executionKey: string,
     phase: ExecutionPhase,
     type: 'stdout' | 'stderr',
     message: string
   ): void {
+    const entry: LogEntry = {
+      timestamp: Date.now(),
+      phase,
+      type,
+      message,
+    };
+    
     const logs = this.executionLogs.get(executionKey);
     if (logs) {
-      logs.push({
-        timestamp: Date.now(),
-        phase,
-        type,
-        message,
-      });
+      logs.push(entry);
     }
+    
+    this.appendToLogFile(executionKey, entry);
   }
   
   private logInfo(executionKey: string, phase: ExecutionPhase, message: string): void {
+    const entry: LogEntry = {
+      timestamp: Date.now(),
+      phase,
+      type: 'info',
+      message,
+    };
+    
     const logs = this.executionLogs.get(executionKey);
     if (logs) {
-      logs.push({
-        timestamp: Date.now(),
-        phase,
-        type: 'info',
-        message,
-      });
+      logs.push(entry);
     }
+    
+    this.appendToLogFile(executionKey, entry);
   }
   
   private logError(executionKey: string, phase: ExecutionPhase, message: string): void {
+    const entry: LogEntry = {
+      timestamp: Date.now(),
+      phase,
+      type: 'error',
+      message,
+    };
+    
     const logs = this.executionLogs.get(executionKey);
     if (logs) {
-      logs.push({
-        timestamp: Date.now(),
-        phase,
-        type: 'error',
-        message,
-      });
+      logs.push(entry);
     }
+    
+    this.appendToLogFile(executionKey, entry);
   }
 }
