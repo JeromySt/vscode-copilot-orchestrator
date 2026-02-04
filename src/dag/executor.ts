@@ -21,17 +21,14 @@ import {
   JobExecutionResult,
   JobWorkSummary,
   CommitDetail,
+  ExecutionPhase,
+  LogEntry,
 } from './types';
 import { JobExecutor } from './runner';
 import { Logger } from '../core/logger';
 import * as git from '../git';
 
 const log = Logger.for('job-executor');
-
-/**
- * Execution step phases
- */
-type ExecutionPhase = 'prechecks' | 'work' | 'postchecks' | 'commit';
 
 /**
  * Active execution tracking
@@ -41,16 +38,6 @@ interface ActiveExecution {
   nodeId: string;
   process?: ChildProcess;
   aborted: boolean;
-}
-
-/**
- * Log entry for job execution
- */
-interface LogEntry {
-  timestamp: number;
-  phase: ExecutionPhase;
-  type: 'stdout' | 'stderr' | 'info' | 'error';
-  message: string;
 }
 
 /**

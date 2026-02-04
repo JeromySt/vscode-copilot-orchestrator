@@ -29,6 +29,8 @@ import {
   DagCompletionEvent,
   WorkSummary,
   JobWorkSummary,
+  LogEntry,
+  ExecutionPhase,
 } from './types';
 import { buildDag, buildSingleJobDag, DagValidationError } from './builder';
 import { DagStateMachine } from './stateMachine';
@@ -57,6 +59,8 @@ export interface DagRunnerEvents {
 export interface JobExecutor {
   execute(context: ExecutionContext): Promise<JobExecutionResult>;
   cancel(dagId: string, nodeId: string): void;
+  getLogs?(dagId: string, nodeId: string): LogEntry[];
+  getLogsForPhase?(dagId: string, nodeId: string, phase: ExecutionPhase): LogEntry[];
 }
 
 /**
@@ -291,6 +295,29 @@ export class DagRunner extends EventEmitter {
       counts,
       progress,
     };
+  }
+  
+  /**
+   * Get execution logs for a node
+   */
+  getNodeLogs(dagId: string, nodeId: string, phase?: 'all' | 'prechecks' | 'work' | 'postchecks' | 'commit'): string {
+    if (!this.executor) return '';
+    
+    let logs: LogEntry[] = [];
+    if (phase && phase !== 'all' && this.executor.getLogsForPhase) {
+      logs = this.executor.getLogsForPhase(dagId, nodeId, phase);
+    } else if (this.executor.getLogs) {
+      logs = this.executor.getLogs(dagId, nodeId);
+    }
+    
+    if (logs.length === 0) return 'No logs available.';
+    
+    return logs.map((entry: LogEntry) => {
+      const time = new Date(entry.timestamp).toLocaleTimeString();
+      const prefix = entry.type === 'stderr' ? '[ERR]' : 
+                     entry.type === 'info' ? '[INFO]' : '';
+      return `[${time}] ${prefix} ${entry.message}`;
+    }).join('\n');
   }
   
   // ============================================================================

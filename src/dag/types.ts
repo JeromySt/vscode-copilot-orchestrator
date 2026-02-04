@@ -457,3 +457,22 @@ export interface ExecutionContext {
   /** Abort signal for cancellation */
   abortSignal?: AbortSignal;
 }
+
+// ============================================================================
+// LOG TYPES
+// ============================================================================
+
+/**
+ * Execution phase for logging
+ */
+export type ExecutionPhase = 'prechecks' | 'work' | 'postchecks' | 'commit' | 'cleanup';
+
+/**
+ * Log entry for job execution
+ */
+export interface LogEntry {
+  timestamp: number;
+  phase: ExecutionPhase;
+  type: 'stdout' | 'stderr' | 'info' | 'error';
+  message: string;
+}
