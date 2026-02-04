@@ -259,14 +259,14 @@ export interface NodeExecutionState {
   /** Error message if failed */
   error?: string;
   
-  /** Completed commit SHA (for jobs) */
+  /** Base commit SHA the worktree was created from */
+  baseCommit?: string;
+  
+  /** Completed commit SHA (for jobs) - the final commit after work is done */
   completedCommit?: string;
   
-  /** Worktree path (for jobs) */
+  /** Worktree path (for jobs) - detached HEAD mode, no branch */
   worktreePath?: string;
-  
-  /** Branch name (for jobs) */
-  branchName?: string;
   
   /** Child DAG ID (for subdags) */
   childDagId?: string;
@@ -442,14 +442,11 @@ export interface ExecutionContext {
   /** Node being executed */
   node: JobNode;
   
-  /** Base commit SHA to branch from */
+  /** Base commit SHA the worktree was created from */
   baseCommit: string;
   
-  /** Worktree path */
+  /** Worktree path (detached HEAD mode - no branch) */
   worktreePath: string;
-  
-  /** Branch name */
-  branchName: string;
   
   /** Callback to report progress */
   onProgress?: (step: string) => void;

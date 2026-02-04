@@ -427,9 +427,9 @@ export async function handleGetNodeDetails(args: any, ctx: DagHandlerContext): P
       startedAt: state.startedAt,
       endedAt: state.endedAt,
       error: state.error,
+      baseCommit: state.baseCommit,
       completedCommit: state.completedCommit,
       worktreePath: state.worktreePath,
-      branchName: state.branchName,
     },
   };
 }

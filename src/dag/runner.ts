@@ -395,51 +395,36 @@ export class DagRunner extends EventEmitter {
   }
   
   /**
-   * Clean up all resources associated with a DAG (worktrees, branches, logs)
+   * Clean up all resources associated with a DAG (worktrees, logs)
+   * 
+   * NOTE: With detached HEAD worktrees, there are no branches to clean up.
+   * We only remove worktrees and log files.
    */
   private async cleanupDagResources(dag: DagInstance): Promise<void> {
     const repoPath = dag.repoPath;
     const cleanupErrors: string[] = [];
     
-    // Collect all worktree paths and branch names from node states
+    // Collect all worktree paths from node states
     const worktreePaths: string[] = [];
-    const branchNames: string[] = [];
     
     for (const [nodeId, state] of dag.nodeStates) {
       if (state.worktreePath) {
         worktreePaths.push(state.worktreePath);
-      }
-      if (state.branchName) {
-        branchNames.push(state.branchName);
       }
     }
     
     log.info(`Cleaning up DAG resources`, {
       dagId: dag.id,
       worktrees: worktreePaths.length,
-      branches: branchNames.length,
     });
     
-    // Remove worktrees first (before branches, since worktrees reference branches)
+    // Remove worktrees (detached HEAD - no branches to clean up)
     for (const worktreePath of worktreePaths) {
       try {
         await git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
         log.debug(`Removed worktree: ${worktreePath}`);
       } catch (error: any) {
         cleanupErrors.push(`worktree ${worktreePath}: ${error.message}`);
-      }
-    }
-    
-    // Remove branches
-    for (const branchName of branchNames) {
-      try {
-        await git.branches.remove(branchName, repoPath, { force: true });
-        log.debug(`Removed branch: ${branchName}`);
-      } catch (error: any) {
-        // Branch might already be deleted or not exist
-        if (!error.message?.includes('not found')) {
-          cleanupErrors.push(`branch ${branchName}: ${error.message}`);
-        }
       }
     }
     
@@ -608,27 +593,52 @@ export class DagRunner extends EventEmitter {
       nodeState.attempts++;
       this.emit('nodeStarted', dag.id, node.id);
       
-      // Determine base commit
-      const baseCommit = sm.getBaseCommitForNode(node.id);
+      // Determine base commits from dependencies (RI/FI model)
+      // First commit is the base, additional commits are merged in
+      const baseCommits = sm.getBaseCommitsForNode(node.id);
+      const baseCommitish = baseCommits.length > 0 ? baseCommits[0] : dag.baseBranch;
+      const additionalSources = baseCommits.slice(1);
       
-      // Create worktree
-      const branchName = `dag-${dag.id.slice(0, 8)}/${node.producerId}`;
+      // Create worktree path (no branch name - detached HEAD mode)
       const worktreePath = `${dag.worktreeRoot}/${node.producerId}`;
       
-      // Store in state
-      nodeState.branchName = branchName;
+      // Store in state (no branchName since we use detached HEAD)
       nodeState.worktreePath = worktreePath;
       
-      // Setup worktree
-      await this.setupWorktree(dag, node, baseCommit, branchName, worktreePath);
+      // Setup detached worktree
+      log.debug(`Creating detached worktree for job ${node.name} at ${worktreePath} from ${baseCommitish}`);
+      const timing = await git.worktrees.createDetachedWithTiming(
+        dag.repoPath,
+        worktreePath,
+        baseCommitish,
+        s => log.debug(s)
+      );
+      
+      if (timing.totalMs > 500) {
+        log.warn(`Slow worktree creation for ${node.name} took ${timing.totalMs}ms`);
+      }
+      
+      // Store the base commit SHA for tracking
+      nodeState.baseCommit = timing.baseCommit;
+      
+      // If job has multiple dependencies, merge the additional commits into the worktree
+      if (additionalSources.length > 0) {
+        log.info(`Merging ${additionalSources.length} additional source commits for job ${node.name}`);
+        const mergeSuccess = await this.mergeSourcesIntoWorktree(node, worktreePath, additionalSources);
+        if (!mergeSuccess) {
+          nodeState.error = 'Failed to merge sources from dependencies';
+          sm.transition(node.id, 'failed');
+          this.emit('nodeCompleted', dag.id, node.id, false);
+          return;
+        }
+      }
       
       // Build execution context
       const context: ExecutionContext = {
         dag,
         node,
-        baseCommit: baseCommit || dag.baseBranch,
+        baseCommit: timing.baseCommit,
         worktreePath,
-        branchName,
         onProgress: (step) => {
           log.debug(`Job progress: ${node.name} - ${step}`);
         },
@@ -649,14 +659,14 @@ export class DagRunner extends EventEmitter {
           this.appendWorkSummary(dag, result.workSummary);
         }
         
-        // Handle leaf node merge
-        if (dag.leaves.includes(node.id) && dag.targetBranch) {
-          await this.mergeLeafToTarget(dag, node, nodeState.completedCommit!);
+        // Handle leaf node merge to target branch
+        if (dag.leaves.includes(node.id) && dag.targetBranch && nodeState.completedCommit) {
+          await this.mergeLeafToTarget(dag, node, nodeState.completedCommit);
         }
         
-        // Cleanup worktree if enabled
-        if (dag.cleanUpSuccessfulWork && dag.leaves.includes(node.id)) {
-          await this.cleanupWorktree(worktreePath, branchName, dag.repoPath);
+        // Cleanup worktree if enabled (for ALL successful nodes, not just leaves)
+        if (dag.cleanUpSuccessfulWork) {
+          await this.cleanupWorktree(worktreePath, dag.repoPath);
         }
         
         sm.transition(node.id, 'succeeded');
@@ -824,33 +834,14 @@ export class DagRunner extends EventEmitter {
   // ============================================================================
   
   /**
-   * Setup worktree for a job
-   */
-  private async setupWorktree(
-    dag: DagInstance,
-    node: JobNode,
-    baseCommit: string | undefined,
-    branchName: string,
-    worktreePath: string
-  ): Promise<void> {
-    const repoPath = dag.repoPath;
-    const base = baseCommit || dag.baseBranch;
-    
-    log.debug(`Setting up worktree: ${worktreePath}`, {
-      branch: branchName,
-      base,
-    });
-    
-    await git.worktrees.create({
-      repoPath,
-      worktreePath,
-      branchName,
-      fromRef: base,
-    });
-  }
-  
-  /**
-   * Merge a leaf node's commit to target branch
+   * Merge a leaf node's commit to target branch using a temp worktree.
+   * 
+   * Uses the same model as planRunner/jobRunner:
+   * - Create a temp detached worktree on the target branch
+   * - Checkout the target branch
+   * - Squash merge the source commit
+   * - Commit and optionally push
+   * - Clean up the temp worktree
    */
   private async mergeLeafToTarget(
     dag: DagInstance,
@@ -863,37 +854,150 @@ export class DagRunner extends EventEmitter {
       commit: completedCommit.slice(0, 8),
     });
     
+    const repoPath = dag.repoPath;
+    const mergeWorktreePath = `${dag.worktreeRoot}/_merge_${node.id.slice(0, 8)}_${Date.now()}`;
+    
     try {
-      // First checkout the target branch, then merge
-      await git.branches.checkout(dag.repoPath, dag.targetBranch);
-      await git.merge.merge({
-        source: completedCommit,
-        target: dag.targetBranch,
-        cwd: dag.repoPath,
-        message: `Merge ${node.name} from DAG ${dag.spec.name}`
+      // Create a temp detached worktree on target branch
+      log.debug(`Creating temp merge worktree at ${mergeWorktreePath}`);
+      await git.worktrees.createDetached(
+        repoPath,
+        mergeWorktreePath,
+        dag.targetBranch,
+        s => log.debug(s)
+      );
+      
+      // Checkout target branch in the merge worktree (we're currently detached)
+      await this.runGitCommand(mergeWorktreePath, `git checkout "${dag.targetBranch}"`);
+      
+      // Squash merge the source commit into target
+      await this.runGitCommand(mergeWorktreePath, `git merge --squash "${completedCommit}"`);
+      
+      // Commit the squash merge
+      const commitMessage = `DAG ${dag.spec.name}: merge ${node.name} (commit ${completedCommit.slice(0, 8)})`;
+      await this.runGitCommand(mergeWorktreePath, `git commit -m "${commitMessage}" || echo "no changes to commit"`);
+      
+      log.info(`Merged leaf ${node.name} to ${dag.targetBranch}`, {
+        commit: completedCommit.slice(0, 8),
       });
+      
+      // Push if configured
+      const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
+      const pushOnSuccess = mergeCfg.get<boolean>('pushOnSuccess', false);
+      
+      if (pushOnSuccess) {
+        try {
+          await this.runGitCommand(mergeWorktreePath, `git push origin ${dag.targetBranch}`);
+          log.info(`Pushed ${dag.targetBranch} to origin`);
+        } catch (pushError: any) {
+          log.warn(`Push failed: ${pushError.message}`);
+        }
+      }
+      
     } catch (error: any) {
       log.error(`Failed to merge leaf to target`, {
         node: node.name,
         error: error.message,
       });
       // Don't fail the node for merge failures - it succeeded, just merge failed
+    } finally {
+      // Clean up the temp merge worktree
+      try {
+        await git.worktrees.removeSafe(repoPath, mergeWorktreePath, { force: true });
+      } catch {
+        try {
+          const fs = require('fs');
+          fs.rmSync(mergeWorktreePath, { recursive: true, force: true });
+        } catch {}
+      }
     }
   }
   
   /**
-   * Clean up a worktree after successful completion
+   * Merge additional source commits into a worktree.
+   * 
+   * This is called when a job has multiple dependencies (RI/FI model).
+   * The worktree is already created from the first dependency's commit,
+   * and we merge in the remaining dependency commits.
+   * 
+   * Uses full merge (not squash) to preserve history for downstream jobs.
+   */
+  private async mergeSourcesIntoWorktree(
+    node: JobNode,
+    worktreePath: string,
+    additionalSources: string[]
+  ): Promise<boolean> {
+    if (additionalSources.length === 0) {
+      return true;
+    }
+    
+    log.info(`Merging ${additionalSources.length} source commits into worktree for ${node.name}`);
+    
+    for (const sourceCommit of additionalSources) {
+      const shortSha = sourceCommit.slice(0, 8);
+      log.debug(`Merging commit ${shortSha} into worktree at ${worktreePath}`);
+      
+      try {
+        // Merge by commit SHA directly (no branch needed)
+        const mergeResult = await git.merge.merge({
+          source: sourceCommit,
+          target: 'HEAD',
+          cwd: worktreePath,
+          message: `Merge parent commit ${shortSha} for job ${node.name}`,
+          fastForward: true,
+        });
+        
+        if (mergeResult.success) {
+          log.debug(`Merge of commit ${shortSha} succeeded`);
+        } else if (mergeResult.hasConflicts) {
+          log.error(`Merge conflict for commit ${shortSha}`, {
+            conflicts: mergeResult.conflictFiles,
+          });
+          // TODO: Use Copilot CLI to resolve conflicts (like planRunner does)
+          return false;
+        } else {
+          log.error(`Merge failed for commit ${shortSha}: ${mergeResult.error}`);
+          return false;
+        }
+      } catch (error: any) {
+        log.error(`Exception merging commit ${shortSha}: ${error.message}`);
+        return false;
+      }
+    }
+    
+    return true;
+  }
+  
+  /**
+   * Run a git command in a directory
+   */
+  private async runGitCommand(cwd: string, command: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const cp = require('child_process');
+      const p = cp.spawn(command, { cwd, shell: true });
+      let stderr = '';
+      p.stderr?.on('data', (d: any) => stderr += d.toString());
+      p.on('exit', (code: number) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`${command} failed with exit code ${code}: ${stderr}`));
+        }
+      });
+    });
+  }
+  
+  /**
+   * Clean up a worktree after successful completion (detached HEAD - no branch)
    */
   private async cleanupWorktree(
     worktreePath: string,
-    branchName: string,
     repoPath: string
   ): Promise<void> {
     log.debug(`Cleaning up worktree: ${worktreePath}`);
     
     try {
-      await git.worktrees.remove(repoPath, worktreePath);
-      await git.branches.remove(branchName, repoPath, { force: true });
+      await git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
     } catch (error: any) {
       log.warn(`Failed to cleanup worktree`, {
         path: worktreePath,

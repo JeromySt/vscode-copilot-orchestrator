@@ -360,26 +360,26 @@ export class NodeDetailPanel {
   </div>
   
   <!-- Git Information -->
-  ${state.worktreePath || state.branchName || state.completedCommit ? `
+  ${state.worktreePath || state.baseCommit || state.completedCommit ? `
   <div class="section">
     <h3>Git Information</h3>
     <div class="meta-grid">
-      ${state.branchName ? `
+      ${state.baseCommit ? `
       <div class="meta-item">
-        <div class="meta-label">Branch</div>
-        <div class="meta-value mono">${this._escapeHtml(state.branchName)}</div>
+        <div class="meta-label">Base Commit</div>
+        <div class="meta-value mono">${state.baseCommit.slice(0, 12)}</div>
       </div>
       ` : ''}
       ${state.completedCommit ? `
       <div class="meta-item">
-        <div class="meta-label">Commit</div>
+        <div class="meta-label">Completed Commit</div>
         <div class="meta-value mono">${state.completedCommit.slice(0, 12)}</div>
       </div>
       ` : ''}
     </div>
     ${state.worktreePath ? `
     <div class="config-item">
-      <div class="config-label">Worktree</div>
+      <div class="config-label">Worktree (detached HEAD)</div>
       <div class="config-value mono">${this._escapeHtml(state.worktreePath)}</div>
     </div>
     ` : ''}

@@ -400,26 +400,42 @@ export class DagStateMachine extends EventEmitter {
   }
   
   /**
-   * Get the base commit for a node (from its dependencies)
+   * Get the base commits for a node from its dependencies.
+   * 
+   * For RI/FI (Reverse Integration / Forward Integration) model:
+   * - Root nodes (no dependencies): return empty array, caller uses baseBranch
+   * - Single dependency: return that commit as the base
+   * - Multiple dependencies: return all commits - first is base, rest are merged in
+   * 
+   * @returns Array of commit SHAs from completed dependencies
    */
-  getBaseCommitForNode(nodeId: string): string | undefined {
+  getBaseCommitsForNode(nodeId: string): string[] {
     const node = this.dag.nodes.get(nodeId);
-    if (!node) return undefined;
+    if (!node) return [];
     
-    // If no dependencies, use the DAG's base branch
+    // If no dependencies, use the DAG's base branch (caller handles this)
     if (node.dependencies.length === 0) {
-      return undefined; // Caller should use baseBranch
+      return [];
     }
     
-    // Get the commit from the first dependency (for now, simple approach)
-    // In a more complex scenario, we might need to merge commits
+    // Gather commits from all completed dependencies
+    const commits: string[] = [];
     for (const depId of node.dependencies) {
       const depState = this.dag.nodeStates.get(depId);
       if (depState?.completedCommit) {
-        return depState.completedCommit;
+        commits.push(depState.completedCommit);
       }
     }
     
-    return undefined;
+    return commits;
+  }
+  
+  /**
+   * Get the base commit for a node (from its dependencies)
+   * @deprecated Use getBaseCommitsForNode() for proper multi-dependency support
+   */
+  getBaseCommitForNode(nodeId: string): string | undefined {
+    const commits = this.getBaseCommitsForNode(nodeId);
+    return commits.length > 0 ? commits[0] : undefined;
   }
 }
