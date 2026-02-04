@@ -88,8 +88,11 @@ export function initializeDagRunner(
   const executor = new DefaultJobExecutor();
   const processMonitor = new ProcessMonitor();
   
-  // Wire up executor with storage path for logs
-  executor.setStoragePath(storagePath);
+  // Wire up executor with logs in workspace .orchestrator directory
+  const logsPath = workspacePath 
+    ? path.join(workspacePath, '.orchestrator')
+    : storagePath;
+  executor.setStoragePath(logsPath);
   dagRunner.setExecutor(executor);
   
   // Initialize (load persisted DAGs)
