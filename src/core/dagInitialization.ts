@@ -63,6 +63,52 @@ export function loadConfiguration(): ExtensionConfig {
 }
 
 // ============================================================================
+// GITIGNORE HELPER
+// ============================================================================
+
+/**
+ * Ensure entries are in .gitignore (adds them if missing)
+ */
+function ensureGitignoreEntries(workspacePath: string, entries: string[]): void {
+  const fs = require('fs');
+  const gitignorePath = path.join(workspacePath, '.gitignore');
+  
+  try {
+    // Read existing .gitignore or create empty
+    let content = '';
+    if (fs.existsSync(gitignorePath)) {
+      content = fs.readFileSync(gitignorePath, 'utf8');
+    }
+    
+    const lines = content.split('\n');
+    const toAdd: string[] = [];
+    
+    for (const entry of entries) {
+      // Check if entry already exists (with or without trailing slash)
+      const entryBase = entry.replace(/\/$/, '');
+      const exists = lines.some((line: string) => {
+        const trimmed = line.trim();
+        return trimmed === entry || trimmed === entryBase || trimmed === entryBase + '/';
+      });
+      
+      if (!exists) {
+        toAdd.push(entry);
+      }
+    }
+    
+    if (toAdd.length > 0) {
+      // Add a comment and the entries
+      const addition = '\n# Copilot Orchestrator\n' + toAdd.join('\n') + '\n';
+      const newContent = content.endsWith('\n') ? content + addition : content + '\n' + addition;
+      fs.writeFileSync(gitignorePath, newContent, 'utf8');
+      log.info('Added entries to .gitignore', { entries: toAdd });
+    }
+  } catch (err: any) {
+    log.warn('Failed to update .gitignore', { error: err.message });
+  }
+}
+
+// ============================================================================
 // CORE SERVICES
 // ============================================================================
 
@@ -94,6 +140,11 @@ export function initializeDagRunner(
     : storagePath;
   executor.setStoragePath(logsPath);
   dagRunner.setExecutor(executor);
+  
+  // Ensure .orchestrator and .worktrees are in .gitignore
+  if (workspacePath) {
+    ensureGitignoreEntries(workspacePath, ['.orchestrator/', '.worktrees/']);
+  }
   
   // Initialize (load persisted DAGs)
   dagRunner.initialize().catch(err => {
