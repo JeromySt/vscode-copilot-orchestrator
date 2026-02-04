@@ -26,6 +26,7 @@ export class DagsViewProvider implements vscode.WebviewViewProvider {
     // Listen for DAG events to refresh
     _dagRunner.on('dagCreated', () => this.refresh());
     _dagRunner.on('dagCompleted', () => this.refresh());
+    _dagRunner.on('dagDeleted', () => this.refresh());
     _dagRunner.on('nodeTransition', () => this.scheduleRefresh());
   }
   

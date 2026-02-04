@@ -48,6 +48,7 @@ export interface DagRunnerEvents {
   'dagCreated': (dag: DagInstance) => void;
   'dagStarted': (dag: DagInstance) => void;
   'dagCompleted': (dag: DagInstance, status: DagStatus) => void;
+  'dagDeleted': (dagId: string) => void;
   'nodeTransition': (event: NodeTransitionEvent) => void;
   'nodeStarted': (dagId: string, nodeId: string) => void;
   'nodeCompleted': (dagId: string, nodeId: string, success: boolean) => void;
@@ -390,6 +391,9 @@ export class DagRunner extends EventEmitter {
     
     // Remove from persistence
     this.persistence.delete(dagId);
+    
+    // Notify listeners
+    this.emit('dagDeleted', dagId);
     
     return true;
   }
