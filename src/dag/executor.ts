@@ -97,6 +97,7 @@ export class DefaultJobExecutor implements JobExecutor {
       // Run prechecks
       if (node.prechecks) {
         context.onProgress?.('Running prechecks');
+        this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION START ==========');
         this.logInfo(executionKey, 'prechecks', `Running: ${node.prechecks}`);
         
         const precheckResult = await this.runCommand(
@@ -106,6 +107,9 @@ export class DefaultJobExecutor implements JobExecutor {
           executionKey,
           'prechecks'
         );
+        
+        this.logInfo(executionKey, 'prechecks', `Exit code: ${precheckResult.success ? 0 : 'non-zero'}`);
+        this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION END ==========');
         
         if (!precheckResult.success) {
           return {
@@ -123,15 +127,19 @@ export class DefaultJobExecutor implements JobExecutor {
       // Run main work
       if (node.work) {
         context.onProgress?.('Running work');
+        this.logInfo(executionKey, 'work', '========== WORK SECTION START ==========');
         
         if (node.work.startsWith('@agent')) {
           // Delegate to agent
+          this.logInfo(executionKey, 'work', `Delegating to @agent: ${node.work}`);
           const agentResult = await this.runAgentWork(
             node,
             worktreePath,
             execution,
             executionKey
           );
+          
+          this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
           
           if (!agentResult.success) {
             return agentResult;
@@ -149,6 +157,9 @@ export class DefaultJobExecutor implements JobExecutor {
             'work'
           );
           
+          this.logInfo(executionKey, 'work', `Exit code: ${workResult.success ? 0 : 'non-zero'}`);
+          this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
+          
           if (!workResult.success) {
             return {
               success: false,
@@ -158,7 +169,9 @@ export class DefaultJobExecutor implements JobExecutor {
         }
       } else {
         // No work command - this is unusual but not an error
+        this.logInfo(executionKey, 'work', '========== WORK SECTION START ==========');
         this.logInfo(executionKey, 'work', 'No work command specified - skipping');
+        this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
         log.warn(`Job ${node.name} has no work command`);
       }
       
@@ -170,6 +183,7 @@ export class DefaultJobExecutor implements JobExecutor {
       // Run postchecks
       if (node.postchecks) {
         context.onProgress?.('Running postchecks');
+        this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION START ==========');
         this.logInfo(executionKey, 'postchecks', `Running: ${node.postchecks}`);
         
         const postcheckResult = await this.runCommand(
@@ -179,6 +193,9 @@ export class DefaultJobExecutor implements JobExecutor {
           executionKey,
           'postchecks'
         );
+        
+        this.logInfo(executionKey, 'postchecks', `Exit code: ${postcheckResult.success ? 0 : 'non-zero'}`);
+        this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION END ==========');
         
         if (!postcheckResult.success) {
           return {
@@ -195,12 +212,14 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Commit changes
       context.onProgress?.('Committing changes');
+      this.logInfo(executionKey, 'commit', '========== COMMIT SECTION START ==========');
       const commitResult = await this.commitChanges(
         node,
         worktreePath,
         executionKey,
         context.baseCommit
       );
+      this.logInfo(executionKey, 'commit', '========== COMMIT SECTION END ==========');
       
       if (!commitResult.success) {
         return {
@@ -318,6 +337,9 @@ export class DefaultJobExecutor implements JobExecutor {
       proc.on('close', (code) => {
         execution.process = undefined;
         
+        // Log the exit code
+        this.logInfo(executionKey, phase, `Process exited with code: ${code}`);
+        
         if (execution.aborted) {
           resolve({ success: false, error: 'Execution canceled' });
         } else if (code === 0) {
@@ -391,14 +413,26 @@ export class DefaultJobExecutor implements JobExecutor {
     baseCommit: string
   ): Promise<{ success: boolean; commit?: string; error?: string }> {
     try {
+      // Log git status for debugging
+      this.logInfo(executionKey, 'commit', `Checking git status in ${worktreePath}`);
+      const statusOutput = await this.getGitStatus(worktreePath);
+      if (statusOutput) {
+        this.logInfo(executionKey, 'commit', `Git status:\n${statusOutput}`);
+      } else {
+        this.logInfo(executionKey, 'commit', 'Git status: clean (no changes)');
+      }
+      
       // Check if there are uncommitted changes to commit
       const hasChanges = await git.repository.hasUncommittedChanges(worktreePath);
+      this.logInfo(executionKey, 'commit', `hasUncommittedChanges: ${hasChanges}`);
       
       if (!hasChanges) {
         // No uncommitted changes - check if commits were made during the work stage
         this.logInfo(executionKey, 'commit', 'No uncommitted changes, checking for commits since base...');
         
         const head = await git.worktrees.getHeadCommit(worktreePath);
+        this.logInfo(executionKey, 'commit', `HEAD: ${head?.slice(0, 8) || 'unknown'}, baseCommit: ${baseCommit.slice(0, 8)}`);
+        
         if (head && head !== baseCommit) {
           // Commits were made during work stage (e.g., by @agent)
           this.logInfo(executionKey, 'commit', `Work stage made commits, HEAD: ${head.slice(0, 8)}`);
@@ -412,22 +446,37 @@ export class DefaultJobExecutor implements JobExecutor {
       }
       
       // Stage all changes
+      this.logInfo(executionKey, 'commit', 'Staging all changes...');
       await git.repository.stageAll(worktreePath);
       
       // Commit
       const message = `[DAG] ${node.task}`;
+      this.logInfo(executionKey, 'commit', `Creating commit: "${message}"`);
       await git.repository.commit(worktreePath, message);
       
       // Get the new commit SHA
       const commit = await git.worktrees.getHeadCommit(worktreePath);
       
-      this.logInfo(executionKey, 'commit', `Committed: ${commit?.slice(0, 8)}`);
+      this.logInfo(executionKey, 'commit', `✓ Committed: ${commit?.slice(0, 8)}`);
       
       return { success: true, commit: commit || undefined };
     } catch (error: any) {
       this.logError(executionKey, 'commit', `Commit error: ${error.message}`);
       return { success: false, error: error.message };
     }
+  }
+  
+  /**
+   * Get git status output for debugging
+   */
+  private async getGitStatus(cwd: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      const proc = spawn('git', ['status', '--porcelain'], { cwd });
+      let output = '';
+      proc.stdout?.on('data', (data) => output += data.toString());
+      proc.on('close', () => resolve(output.trim() || null));
+      proc.on('error', () => resolve(null));
+    });
   }
   
   /**
