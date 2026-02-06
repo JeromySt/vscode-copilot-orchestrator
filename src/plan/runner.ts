@@ -949,16 +949,18 @@ export class PlanRunner extends EventEmitter {
       // Store in state (no branchName since we use detached HEAD)
       nodeState.worktreePath = worktreePath;
       
-      // Setup detached worktree
-      log.debug(`Creating detached worktree for job ${node.name} at ${worktreePath} from ${baseCommitish}`);
-      const timing = await git.worktrees.createDetachedWithTiming(
+      // Setup detached worktree (or reuse existing one for retries)
+      log.debug(`Setting up worktree for job ${node.name} at ${worktreePath} from ${baseCommitish}`);
+      const timing = await git.worktrees.createOrReuseDetached(
         plan.repoPath,
         worktreePath,
         baseCommitish,
         s => log.debug(s)
       );
       
-      if (timing.totalMs > 500) {
+      if (timing.reused) {
+        log.info(`Reusing existing worktree for ${node.name} (retry)`);
+      } else if (timing.totalMs > 500) {
         log.warn(`Slow worktree creation for ${node.name} took ${timing.totalMs}ms`);
       }
       

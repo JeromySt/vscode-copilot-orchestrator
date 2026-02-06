@@ -226,6 +226,46 @@ export async function createDetachedWithTiming(
 }
 
 /**
+ * Create or reuse a detached worktree.
+ * 
+ * If the worktree already exists and is valid, reuses it.
+ * Otherwise creates a new detached worktree.
+ * 
+ * @param repoPath - Path to the main repository
+ * @param worktreePath - Path where the worktree will be created
+ * @param commitish - Branch name or commit to start from (detached)
+ * @param log - Optional logger
+ * @returns Timing breakdown, base commit SHA, and whether it was reused
+ */
+export async function createOrReuseDetached(
+  repoPath: string,
+  worktreePath: string,
+  commitish: string,
+  log?: GitLogger
+): Promise<CreateTiming & { baseCommit: string; reused: boolean }> {
+  // Check if worktree already exists and is valid
+  if (await isValid(worktreePath)) {
+    log?.(`[worktree] Reusing existing worktree at '${worktreePath}'`);
+    
+    // Get the current HEAD as the base commit
+    const headCommit = await getHeadCommit(worktreePath);
+    const baseCommit = headCommit || commitish;
+    
+    return {
+      worktreeMs: 0,
+      submoduleMs: 0,
+      totalMs: 0,
+      baseCommit,
+      reused: true,
+    };
+  }
+  
+  // Create new worktree
+  const result = await createDetachedWithTiming(repoPath, worktreePath, commitish, log);
+  return { ...result, reused: false };
+}
+
+/**
  * Get the current HEAD commit SHA from a worktree.
  */
 export async function getHeadCommit(worktreePath: string): Promise<string | null> {
