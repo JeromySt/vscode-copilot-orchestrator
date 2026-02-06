@@ -16,7 +16,7 @@ import * as vscode from 'vscode';
 import { PlanRunner, PlanInstance, JobNode, SubPlanNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord } from '../../plan';
 
 /**
- * Format a WorkSpec for display
+ * Format a WorkSpec for display (plain text)
  */
 function formatWorkSpec(spec: WorkSpec | undefined): string {
   if (!spec) return '';
@@ -37,6 +37,89 @@ function formatWorkSpec(spec: WorkSpec | undefined): string {
     default:
       return JSON.stringify(spec);
   }
+}
+
+/**
+ * Format a WorkSpec for HTML display with proper formatting
+ */
+function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) => string): string {
+  if (!spec) return '';
+  
+  if (typeof spec === 'string') {
+    return `<code class="work-command">${escapeHtml(spec)}</code>`;
+  }
+  
+  switch (spec.type) {
+    case 'process': {
+      const args = spec.args?.join(' ') || '';
+      const cmd = `${spec.executable} ${args}`.trim();
+      return `<div class="work-type-badge process">process</div><code class="work-command">${escapeHtml(cmd)}</code>`;
+    }
+    case 'shell': {
+      const shellLabel = spec.shell || 'shell';
+      return `<div class="work-type-badge shell">${escapeHtml(shellLabel)}</div><code class="work-command">${escapeHtml(spec.command)}</code>`;
+    }
+    case 'agent': {
+      // Format agent instructions with proper line breaks and list detection
+      const instructions = spec.instructions || '';
+      const formatted = formatAgentInstructions(instructions, escapeHtml);
+      return `<div class="work-type-badge agent">agent</div><div class="work-instructions">${formatted}</div>`;
+    }
+    default:
+      return `<code>${escapeHtml(JSON.stringify(spec))}</code>`;
+  }
+}
+
+/**
+ * Format agent instructions with proper structure
+ */
+function formatAgentInstructions(instructions: string, escapeHtml: (s: string) => string): string {
+  // Split on numbered items (1. 2. 3. etc) or bullet points
+  const lines = instructions.split(/(?=\d+\.\s|^-\s)/gm);
+  
+  if (lines.length <= 1) {
+    // No numbered list detected, just format with line breaks
+    return escapeHtml(instructions).replace(/\n/g, '<br>');
+  }
+  
+  // Build a structured list
+  let html = '';
+  let inList = false;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    
+    const numberedMatch = trimmed.match(/^(\d+)\.\s*(.*)/);
+    const bulletMatch = trimmed.match(/^-\s*(.*)/);
+    
+    if (numberedMatch) {
+      if (!inList) {
+        html += '<ol class="work-list">';
+        inList = true;
+      }
+      const [, num, content] = numberedMatch;
+      html += `<li>${escapeHtml(content)}</li>`;
+    } else if (bulletMatch) {
+      if (inList) {
+        html += '</ol>';
+        inList = false;
+      }
+      html += `<div class="work-bullet">• ${escapeHtml(bulletMatch[1])}</div>`;
+    } else {
+      if (inList) {
+        html += '</ol>';
+        inList = false;
+      }
+      html += `<p>${escapeHtml(trimmed)}</p>`;
+    }
+  }
+  
+  if (inList) {
+    html += '</ol>';
+  }
+  
+  return html;
 }
 
 /**
@@ -444,9 +527,9 @@ export class NodeDetailPanel {
       <div class="config-value">${this._escapeHtml(jobNode.task)}</div>
     </div>
     ${jobNode.work ? `
-    <div class="config-item">
+    <div class="config-item work-item">
       <div class="config-label">Work</div>
-      <div class="config-value mono">${this._escapeHtml(formatWorkSpec(jobNode.work))}</div>
+      <div class="config-value work-content">${formatWorkSpecHtml(jobNode.work, this._escapeHtml)}</div>
     </div>
     ` : ''}
     ${jobNode.instructions ? `
@@ -1317,6 +1400,75 @@ export class NodeDetailPanel {
       margin-bottom: 4px;
     }
     .config-value { }
+    
+    /* Work Display Formatting */
+    .work-item .config-value {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .work-type-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-bottom: 6px;
+    }
+    .work-type-badge.agent {
+      background: rgba(99, 179, 237, 0.2);
+      color: #63b3ed;
+      border: 1px solid rgba(99, 179, 237, 0.3);
+    }
+    .work-type-badge.shell {
+      background: rgba(72, 187, 120, 0.2);
+      color: #48bb78;
+      border: 1px solid rgba(72, 187, 120, 0.3);
+    }
+    .work-type-badge.process {
+      background: rgba(237, 137, 54, 0.2);
+      color: #ed8936;
+      border: 1px solid rgba(237, 137, 54, 0.3);
+    }
+    .work-command {
+      display: block;
+      background: var(--vscode-textCodeBlock-background);
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-family: var(--vscode-editor-font-family), monospace;
+      font-size: 12px;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .work-instructions {
+      background: var(--vscode-textCodeBlock-background);
+      padding: 12px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .work-instructions p {
+      margin: 0 0 8px 0;
+    }
+    .work-instructions p:last-child {
+      margin-bottom: 0;
+    }
+    .work-list {
+      margin: 8px 0;
+      padding-left: 24px;
+    }
+    .work-list li {
+      margin-bottom: 6px;
+      line-height: 1.5;
+    }
+    .work-list li:last-child {
+      margin-bottom: 0;
+    }
+    .work-bullet {
+      margin: 4px 0;
+      padding-left: 8px;
+    }
     
     /* Error */
     .error-box {
