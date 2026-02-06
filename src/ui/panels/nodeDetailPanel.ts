@@ -418,6 +418,9 @@ export class NodeDetailPanel {
     // Build phase status indicators
     const phaseStatus = this._getPhaseStatus(state);
     
+    // Determine initial phase to show
+    const initialPhase = this._getInitialPhase(phaseStatus, state.status);
+    
     // Build work summary HTML
     const workSummaryHtml = state.workSummary 
       ? this._buildWorkSummaryHtml(state.workSummary)
@@ -628,10 +631,12 @@ export class NodeDetailPanel {
   <script>
     const vscode = acquireVsCodeApi();
     let currentPhase = ${this._currentPhase ? `'${this._currentPhase}'` : 'null'};
+    const initialPhase = ${initialPhase ? `'${initialPhase}'` : 'null'};
     
-    // Restore phase selection if we had one
-    if (currentPhase) {
-      setTimeout(() => selectPhase(currentPhase), 50);
+    // Auto-select a phase on load: restore previous selection, or use initial phase
+    const phaseToSelect = currentPhase || initialPhase;
+    if (phaseToSelect) {
+      setTimeout(() => selectPhase(phaseToSelect), 50);
     }
     
     function openPlan(planId) {
@@ -967,6 +972,36 @@ export class NodeDetailPanel {
     }
     
     return result;
+  }
+  
+  /**
+   * Determine the initial phase to show based on current state
+   */
+  private _getInitialPhase(phaseStatus: Record<string, string>, nodeStatus: string): string {
+    // If node is running, show the currently running phase
+    if (nodeStatus === 'running') {
+      const phases = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+      for (const phase of phases) {
+        if (phaseStatus[phase] === 'running') {
+          return phase;
+        }
+      }
+      // Default to work if we can't tell which phase is running
+      return 'work';
+    }
+    
+    // If node failed, show the failed phase
+    if (nodeStatus === 'failed') {
+      const phases = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+      for (const phase of phases) {
+        if (phaseStatus[phase] === 'failed') {
+          return phase;
+        }
+      }
+    }
+    
+    // For completed or other states, show all log
+    return 'all';
   }
   
   private _buildPhaseTabs(phaseStatus: Record<string, string>, isRunning: boolean): string {
