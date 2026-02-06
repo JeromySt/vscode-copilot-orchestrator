@@ -30,23 +30,38 @@ PRODUCER_ID IS REQUIRED:
 - Used in 'dependencies' arrays to establish execution order
 - Jobs with dependencies: [] are root jobs that start immediately
 
+NESTED SUB-DAGS ("OUT AND BACK" PATTERN):
+- Sub-DAGs can contain nested sub-DAGs for hierarchical work decomposition
+- Pattern: init → sub-dag → finish (work fans out, then converges back)
+- Each nesting level has its own scope for dependencies
+- Example 3-level nesting: main-init → Sub-DAG A → main-finish
+                            └→ a-init → Sub-DAG B → a-finish
+                                └→ b-init → Sub-DAG C → b-finish
+
 EXECUTION CONTEXT:
-- All commands run in a SHELL PROCESS (cmd.exe on Windows, /bin/sh on Unix)
 - Each job gets its own git worktree for isolated work
 - Dependencies chain commits - dependent jobs start from their parent's commit
 
-WORK OPTIONS:
-- Shell command: "npm run build"
-- Agent delegation: "@agent Implement the login feature"
+WORK OPTIONS (work/prechecks/postchecks accept):
+1. String: "npm run build" (runs in default shell) or "@agent Implement feature" 
+2. Process spec: { type: "process", executable: "dotnet", args: ["build", "-c", "Release"] }
+3. Shell spec: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
+4. Agent spec: { type: "agent", instructions: "Implement the feature", maxTurns: 10 }
 
-EXAMPLE:
-{
-  "name": "Build and Test",
-  "jobs": [
-    { "producer_id": "build", "task": "Build app", "dependencies": [], "work": "npm run build" },
-    { "producer_id": "test", "task": "Run tests", "dependencies": ["build"], "work": "npm test" }
-  ]
-}`,
+SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"
+
+EXAMPLES:
+// Simple string command
+{ "work": "npm run build" }
+
+// Direct process (no shell quoting issues)
+{ "work": { "type": "process", "executable": "node", "args": ["--version"] }}
+
+// PowerShell with explicit shell
+{ "work": { "type": "shell", "command": "Get-ChildItem -Recurse", "shell": "powershell" }}
+
+// AI Agent with rich config
+{ "work": { "type": "agent", "instructions": "Add error handling to api.ts", "contextFiles": ["src/api.ts"] }}`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -90,8 +105,14 @@ EXAMPLE:
                   description: 'Task description (required)' 
                 },
                 work: { 
-                  type: 'string', 
-                  description: 'Shell command OR "@agent <task>" for AI delegation' 
+                  description: `Work to perform. Can be:
+1. STRING: Shell command like "npm run build" or "@agent Do something" for AI
+2. PROCESS OBJECT: { "type": "process", "executable": "node", "args": ["script.js"] }
+3. SHELL OBJECT: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
+4. AGENT OBJECT: { "type": "agent", "instructions": "Implement feature X" }
+
+For process type, args is an array - no shell quoting needed.
+For shell type, shell can be: cmd, powershell, pwsh, bash, sh`,
                 },
                 dependencies: {
                   type: 'array',
@@ -99,12 +120,10 @@ EXAMPLE:
                   description: 'Array of producer_id values this job depends on. Empty [] for root jobs.'
                 },
                 prechecks: { 
-                  type: 'string', 
-                  description: 'Shell command to validate before work' 
+                  description: 'Validation before work. String command or object with type: process/shell' 
                 },
                 postchecks: { 
-                  type: 'string', 
-                  description: 'Shell command to validate after work' 
+                  description: 'Validation after work. String command or object with type: process/shell' 
                 },
                 instructions: { 
                   type: 'string', 
@@ -116,7 +135,7 @@ EXAMPLE:
           },
           subDags: {
             type: 'array',
-            description: 'Optional nested DAGs that run as a unit',
+            description: 'Optional nested DAGs that run as a unit. Supports recursive nesting for "out and back" patterns.',
             items: {
               type: 'object',
               properties: {
@@ -132,7 +151,7 @@ EXAMPLE:
                 dependencies: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'Producer IDs this sub-DAG depends on'
+                  description: 'Producer IDs this sub-DAG depends on (parent scope jobs or sibling sub-DAGs)'
                 },
                 maxParallel: { 
                   type: 'number', 
@@ -140,7 +159,12 @@ EXAMPLE:
                 },
                 jobs: {
                   type: 'array',
-                  description: 'Jobs within this sub-DAG (same schema as top-level jobs)',
+                  description: 'Jobs within this sub-DAG (same schema as top-level jobs). Dependencies reference other jobs/sub-DAGs in this scope.',
+                  items: { type: 'object' }
+                },
+                subDags: {
+                  type: 'array',
+                  description: 'Nested sub-DAGs within this sub-DAG (recursive). Forms "out and back" pattern: init → sub-DAG → finish',
                   items: { type: 'object' }
                 }
               },

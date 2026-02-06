@@ -181,16 +181,6 @@
           "id": "orchestrator.dagsView",
           "name": "DAGs",
           "type": "webview"
-        },
-        {
-          "id": "orchestrator.jobsView",
-          "name": "Jobs (Legacy)",
-          "type": "webview"
-        },
-        {
-          "id": "orchestrator.plansView",
-          "name": "Plans (Legacy)",
-          "type": "webview"
         }
       ]
     },

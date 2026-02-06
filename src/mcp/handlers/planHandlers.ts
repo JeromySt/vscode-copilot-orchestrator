@@ -65,6 +65,87 @@ function mapSubPlans(subPlans: any[] | undefined): SubPlanSpec[] | undefined {
 }
 
 /**
+ * Recursively validate sub-plans structure.
+ * Validates producer_id, jobs, consumesFrom at each level.
+ * 
+ * @param subPlans - Array of sub-plans to validate
+ * @param parentPath - Path to parent for error messages (e.g., "sub-plan-a > sub-plan-b")
+ * @returns Validation result with error message if invalid
+ */
+function validateSubPlansRecursively(
+  subPlans: any[] | undefined, 
+  parentPath: string
+): { valid: boolean; error?: string } {
+  if (!subPlans) return { valid: true };
+  
+  if (!Array.isArray(subPlans)) {
+    const location = parentPath ? `in ${parentPath}` : '';
+    return { valid: false, error: `'subPlans'${location} must be an array` };
+  }
+  
+  for (let i = 0; i < subPlans.length; i++) {
+    const sp = subPlans[i];
+    const spPath = parentPath ? `${parentPath} > ${sp.producer_id || `subPlan[${i}]`}` : (sp.producer_id || `subPlan[${i}]`);
+    
+    // producer_id is required
+    if (!sp.producer_id) {
+      const location = parentPath ? `in ${parentPath}` : '';
+      return { valid: false, error: `SubPlan at index ${i}${location} is missing required 'producer_id' field` };
+    }
+    
+    // Validate producer_id format
+    if (!PRODUCER_ID_PATTERN.test(sp.producer_id)) {
+      return { 
+        valid: false, 
+        error: `SubPlan '${spPath}' has invalid producer_id format. ` +
+               `Must be 5-64 characters, lowercase letters (a-z), numbers (0-9), and hyphens (-) only.`
+      };
+    }
+    
+    // Jobs array is required
+    if (!sp.jobs || !Array.isArray(sp.jobs) || sp.jobs.length === 0) {
+      return { valid: false, error: `SubPlan '${spPath}' must have at least one job` };
+    }
+    
+    // consumesFrom is required for sub-plans
+    if (!sp.consumesFrom || !Array.isArray(sp.consumesFrom)) {
+      return { valid: false, error: `SubPlan '${spPath}' is missing required 'consumesFrom' array` };
+    }
+    
+    // Validate jobs in this sub-plan
+    for (let j = 0; j < sp.jobs.length; j++) {
+      const spJob = sp.jobs[j];
+      
+      if (!spJob.producer_id) {
+        return { valid: false, error: `Job at index ${j} in '${spPath}' is missing required 'producer_id' field` };
+      }
+      
+      if (!PRODUCER_ID_PATTERN.test(spJob.producer_id)) {
+        return { 
+          valid: false, 
+          error: `Job '${spJob.producer_id}' in '${spPath}' has invalid producer_id format. ` +
+                 `Must be 5-64 characters, lowercase letters (a-z), numbers (0-9), and hyphens (-) only.`
+        };
+      }
+      
+      if (!spJob.task) {
+        return { valid: false, error: `Job '${spJob.producer_id}' in '${spPath}' is missing required 'task' field` };
+      }
+    }
+    
+    // Recursively validate nested sub-plans
+    if (sp.subPlans) {
+      const nestedResult = validateSubPlansRecursively(sp.subPlans, spPath);
+      if (!nestedResult.valid) {
+        return nestedResult;
+      }
+    }
+  }
+  
+  return { valid: true };
+}
+
+/**
  * Validate plan input strictly according to schema.
  * - Validates required fields (producer_id, task)
  * - Validates producer_id format (lowercase, numbers, hyphens, 5-64 chars)
@@ -119,60 +200,10 @@ function validateAndTransformPlanInput(args: any): { valid: boolean; error?: str
     }
   }
   
-  // Validate subPlans if present
-  if (args.subPlans) {
-    if (!Array.isArray(args.subPlans)) {
-      return { valid: false, error: `'subPlans' must be an array`, transformed: args };
-    }
-    for (let i = 0; i < args.subPlans.length; i++) {
-      const sp = args.subPlans[i];
-      
-      // producer_id is required
-      if (!sp.producer_id) {
-        return { valid: false, error: `SubPlan at index ${i} is missing required 'producer_id' field`, transformed: args };
-      }
-      
-      // Validate producer_id format
-      if (!PRODUCER_ID_PATTERN.test(sp.producer_id)) {
-        return { 
-          valid: false, 
-          error: `SubPlan '${sp.producer_id}' has invalid producer_id format. ` +
-                 `Must be 5-64 characters, lowercase letters (a-z), numbers (0-9), and hyphens (-) only.`,
-          transformed: args 
-        };
-      }
-      
-      if (!sp.jobs || !Array.isArray(sp.jobs) || sp.jobs.length === 0) {
-        return { valid: false, error: `SubPlan '${sp.producer_id}' must have at least one job`, transformed: args };
-      }
-      
-      // consumesFrom is required for sub-plans
-      if (!sp.consumesFrom || !Array.isArray(sp.consumesFrom)) {
-        return { valid: false, error: `SubPlan '${sp.producer_id}' is missing required 'consumesFrom' array`, transformed: args };
-      }
-      
-      // Validate sub-plan jobs
-      for (let j = 0; j < sp.jobs.length; j++) {
-        const spJob = sp.jobs[j];
-        
-        if (!spJob.producer_id) {
-          return { valid: false, error: `Job at index ${j} in sub-plan '${sp.producer_id}' is missing required 'producer_id' field`, transformed: args };
-        }
-        
-        if (!PRODUCER_ID_PATTERN.test(spJob.producer_id)) {
-          return { 
-            valid: false, 
-            error: `Job '${spJob.producer_id}' in sub-plan '${sp.producer_id}' has invalid producer_id format. ` +
-                   `Must be 5-64 characters, lowercase letters (a-z), numbers (0-9), and hyphens (-) only.`,
-            transformed: args 
-          };
-        }
-        
-        if (!spJob.task) {
-          return { valid: false, error: `Job '${spJob.producer_id}' in sub-plan '${sp.producer_id}' is missing required 'task' field`, transformed: args };
-        }
-      }
-    }
+  // Validate subPlans recursively
+  const subPlanValidation = validateSubPlansRecursively(args.subPlans, '');
+  if (!subPlanValidation.valid) {
+    return { valid: false, error: subPlanValidation.error, transformed: args };
   }
   
   // =========================================================================
@@ -263,81 +294,10 @@ function validateProducerIdsAndReferences(args: any): { valid: boolean; error?: 
     }
   }
   
-  // Validate consumesFrom references for sub-plans
-  for (const sp of args.subPlans || []) {
-    for (const ref of sp.consumesFrom || []) {
-      if (!validPlanRefs.has(ref)) {
-        const suggestions = findSimilarNames(ref, validPlanRefs);
-        const suggestionMsg = suggestions.length > 0 
-          ? ` Did you mean: ${suggestions.map(s => `'${s}'`).join(' or ')}?`
-          : '';
-        return {
-          valid: false,
-          error: `Sub-plan '${sp.producer_id}' has invalid consumesFrom reference '${ref}'. ` +
-                 `No job or sub-plan with that producer_id exists.${suggestionMsg} ` +
-                 `Valid producer_ids: ${[...validPlanRefs].map(n => `'${n}'`).join(', ')}`
-        };
-      }
-      
-      // Self-reference check
-      if (ref === sp.producer_id) {
-        return {
-          valid: false,
-          error: `Sub-plan '${sp.producer_id}' cannot reference itself in consumesFrom.`
-        };
-      }
-    }
-    
-    // Validate jobs within the sub-plan (internal scope)
-    const subPlanJobProducerIds = new Set<string>();
-    
-    // Collect producer_ids within sub-plan
-    for (const spJob of sp.jobs || []) {
-      const producerId = spJob.producer_id;
-      if (subPlanJobProducerIds.has(producerId)) {
-        return {
-          valid: false,
-          error: `Duplicate producer_id '${producerId}' in sub-plan '${sp.producer_id}'. Each job must have a unique producer_id.`
-        };
-      }
-      subPlanJobProducerIds.add(producerId);
-    }
-    
-    // Validate consumesFrom within sub-plan (jobs can only reference other jobs in the same sub-plan)
-    for (const spJob of sp.jobs || []) {
-      for (const ref of spJob.consumesFrom || []) {
-        if (!subPlanJobProducerIds.has(ref)) {
-          const suggestions = findSimilarNames(ref, subPlanJobProducerIds);
-          const suggestionMsg = suggestions.length > 0 
-            ? ` Did you mean: ${suggestions.map(s => `'${s}'`).join(' or ')}?`
-            : '';
-          return {
-            valid: false,
-            error: `Job '${spJob.producer_id}' in sub-plan '${sp.producer_id}' has invalid consumesFrom '${ref}'. ` +
-                   `Jobs within a sub-plan can only reference other jobs in the same sub-plan.${suggestionMsg} ` +
-                   `Valid producer_ids in '${sp.producer_id}': ${[...subPlanJobProducerIds].map(n => `'${n}'`).join(', ')}`
-          };
-        }
-        
-        // Self-reference check
-        if (ref === spJob.producer_id) {
-          return {
-            valid: false,
-            error: `Job '${spJob.producer_id}' in sub-plan '${sp.producer_id}' cannot reference itself in consumesFrom.`
-          };
-        }
-      }
-    }
-    
-    // Check for cycles within this sub-plan
-    const subPlanCycle = detectCycle(sp.jobs || [], 'sub-plan');
-    if (subPlanCycle) {
-      return {
-        valid: false,
-        error: `Circular dependency detected in sub-plan '${sp.producer_id}': ${subPlanCycle.join(' -> ')} -> ${subPlanCycle[0]}. ` +
-               `Jobs cannot have circular dependencies.`
-      };
-    }
+  // Validate consumesFrom references for sub-plans (recursive)
+  const subPlanValidation = validateSubPlanReferencesRecursively(args.subPlans || [], validPlanRefs, '');
+  if (!subPlanValidation.valid) {
+    return subPlanValidation;
   }
   
   // =========================================================================
@@ -355,6 +315,139 @@ function validateProducerIdsAndReferences(args: any): { valid: boolean; error?: 
       error: `Circular dependency detected in plan: ${planCycle.join(' -> ')} -> ${planCycle[0]}. ` +
              `Work units cannot have circular dependencies.`
     };
+  }
+  
+  return { valid: true };
+}
+
+/**
+ * Recursively validate consumesFrom references for sub-plans.
+ * 
+ * For each sub-plan level:
+ * - Sub-plans' consumesFrom must reference valid parent-scope IDs
+ * - Jobs within a sub-plan can only reference other jobs/sub-plans in that same sub-plan
+ * - Nested sub-plans are validated recursively
+ * 
+ * @param subPlans - Array of sub-plans to validate
+ * @param parentScopeRefs - Valid references from parent scope (for sub-plan consumesFrom)
+ * @param parentPath - Path for error messages (e.g., "sub-plan-a > sub-plan-b")
+ */
+function validateSubPlanReferencesRecursively(
+  subPlans: any[],
+  parentScopeRefs: Set<string>,
+  parentPath: string
+): { valid: boolean; error?: string } {
+  for (const sp of subPlans) {
+    const spPath = parentPath ? `${parentPath} > ${sp.producer_id}` : sp.producer_id;
+    
+    // Validate sub-plan's consumesFrom references parent scope
+    for (const ref of sp.consumesFrom || []) {
+      if (!parentScopeRefs.has(ref)) {
+        const suggestions = findSimilarNames(ref, parentScopeRefs);
+        const suggestionMsg = suggestions.length > 0 
+          ? ` Did you mean: ${suggestions.map(s => `'${s}'`).join(' or ')}?`
+          : '';
+        return {
+          valid: false,
+          error: `Sub-plan '${spPath}' has invalid consumesFrom reference '${ref}'. ` +
+                 `No job or sub-plan with that producer_id exists in parent scope.${suggestionMsg} ` +
+                 `Valid producer_ids: ${[...parentScopeRefs].map(n => `'${n}'`).join(', ')}`
+        };
+      }
+      
+      // Self-reference check
+      if (ref === sp.producer_id) {
+        return {
+          valid: false,
+          error: `Sub-plan '${spPath}' cannot reference itself in consumesFrom.`
+        };
+      }
+    }
+    
+    // Build the internal scope for this sub-plan (jobs + nested sub-plans)
+    const internalJobIds = new Set<string>();
+    const internalSubPlanIds = new Set<string>();
+    
+    // Collect job producer_ids and check for duplicates
+    for (const spJob of sp.jobs || []) {
+      const producerId = spJob.producer_id;
+      if (internalJobIds.has(producerId)) {
+        return {
+          valid: false,
+          error: `Duplicate producer_id '${producerId}' in '${spPath}'. Each job must have a unique producer_id.`
+        };
+      }
+      internalJobIds.add(producerId);
+    }
+    
+    // Collect nested sub-plan producer_ids and check for duplicates/collisions
+    for (const nestedSp of sp.subPlans || []) {
+      const producerId = nestedSp.producer_id;
+      if (internalSubPlanIds.has(producerId)) {
+        return {
+          valid: false,
+          error: `Duplicate producer_id '${producerId}' in nested sub-plans of '${spPath}'.`
+        };
+      }
+      if (internalJobIds.has(producerId)) {
+        return {
+          valid: false,
+          error: `producer_id '${producerId}' is used by both a job and a nested sub-plan in '${spPath}'.`
+        };
+      }
+      internalSubPlanIds.add(producerId);
+    }
+    
+    // All valid references within this sub-plan (jobs + nested sub-plans)
+    const internalRefs = new Set([...internalJobIds, ...internalSubPlanIds]);
+    
+    // Validate job consumesFrom within sub-plan
+    for (const spJob of sp.jobs || []) {
+      for (const ref of spJob.consumesFrom || []) {
+        if (!internalRefs.has(ref)) {
+          const suggestions = findSimilarNames(ref, internalRefs);
+          const suggestionMsg = suggestions.length > 0 
+            ? ` Did you mean: ${suggestions.map(s => `'${s}'`).join(' or ')}?`
+            : '';
+          return {
+            valid: false,
+            error: `Job '${spJob.producer_id}' in '${spPath}' has invalid consumesFrom '${ref}'. ` +
+                   `Jobs within a sub-plan can only reference other jobs or nested sub-plans in the same sub-plan.${suggestionMsg} ` +
+                   `Valid producer_ids in '${spPath}': ${[...internalRefs].map(n => `'${n}'`).join(', ')}`
+          };
+        }
+        
+        // Self-reference check
+        if (ref === spJob.producer_id) {
+          return {
+            valid: false,
+            error: `Job '${spJob.producer_id}' in '${spPath}' cannot reference itself in consumesFrom.`
+          };
+        }
+      }
+    }
+    
+    // Check for cycles within this sub-plan (jobs + nested sub-plans)
+    const subPlanNodes = [
+      ...(sp.jobs || []).map((j: any) => ({ producer_id: j.producer_id, consumesFrom: j.consumesFrom || [] })),
+      ...(sp.subPlans || []).map((nsp: any) => ({ producer_id: nsp.producer_id, consumesFrom: nsp.consumesFrom || [] }))
+    ];
+    const subPlanCycle = detectCycle(subPlanNodes, 'sub-plan');
+    if (subPlanCycle) {
+      return {
+        valid: false,
+        error: `Circular dependency detected in '${spPath}': ${subPlanCycle.join(' -> ')} -> ${subPlanCycle[0]}. ` +
+               `Jobs and nested sub-plans cannot have circular dependencies.`
+      };
+    }
+    
+    // Recursively validate nested sub-plans
+    if (sp.subPlans && sp.subPlans.length > 0) {
+      const nestedResult = validateSubPlanReferencesRecursively(sp.subPlans, internalRefs, spPath);
+      if (!nestedResult.valid) {
+        return nestedResult;
+      }
+    }
   }
   
   return { valid: true };

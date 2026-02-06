@@ -17,6 +17,12 @@ export function getJobToolDefinitions(): McpTool[] {
       name: 'create_copilot_job',
       description: `Create a new orchestrator job in an isolated git worktree. The job will run prechecks, execute work, run postchecks, and merge changes back.
 
+WORKTREE ISOLATION:
+- The job runs in its own ISOLATED git worktree branched from baseBranch
+- The worktree only contains committed state from the base branch
+- The job must create any directories it needs - do not assume they exist
+- After completion, changes are committed and merged back to the target branch
+
 EXECUTION CONTEXT:
 - All commands (prechecks, work, postchecks) execute in a SHELL PROCESS (cmd.exe on Windows, /bin/sh on Unix)
 - Commands run in the worktree directory, NOT PowerShell - use shell syntax accordingly

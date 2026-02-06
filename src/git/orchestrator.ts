@@ -279,5 +279,5 @@ export async function ensureGitignorePatterns(
 // =============================================================================
 
 // Re-export commonly used functions from core modules
-export { isDefaultBranch, exists as branchExists, currentOrNull as getCurrentBranch } from './core/branches';
+export { isDefaultBranch, exists as branchExists, currentOrNull as getCurrentBranch, create as createBranch } from './core/branches';
 export { isValid as isValidWorktree, getBranch as getWorktreeBranch } from './core/worktrees';

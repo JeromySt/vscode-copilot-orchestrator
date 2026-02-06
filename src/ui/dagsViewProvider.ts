@@ -9,6 +9,8 @@
 
 import * as vscode from 'vscode';
 import { DagRunner, DagInstance, DagStatus, NodeStatus } from '../dag';
+import { DagDetailPanel } from './panels/dagDetailPanel';
+import { NodeDetailPanel } from './panels/nodeDetailPanel';
 
 /**
  * DAGs View Provider - webview in the sidebar showing DAGs list
@@ -26,7 +28,12 @@ export class DagsViewProvider implements vscode.WebviewViewProvider {
     // Listen for DAG events to refresh
     _dagRunner.on('dagCreated', () => this.refresh());
     _dagRunner.on('dagCompleted', () => this.refresh());
-    _dagRunner.on('dagDeleted', () => this.refresh());
+    _dagRunner.on('dagDeleted', (dagId) => {
+      // Close any open panels for this DAG
+      DagDetailPanel.closeForDag(dagId);
+      NodeDetailPanel.closeForDag(dagId);
+      this.refresh();
+    });
     _dagRunner.on('nodeTransition', () => this.scheduleRefresh());
   }
   

@@ -16,6 +16,7 @@ import {
   SubDagNode,
   NodeExecutionState,
   WorkSummary,
+  WorkSpec,
 } from './types';
 import { Logger } from '../core/logger';
 
@@ -55,9 +56,9 @@ interface SerializedNode {
   dependents: string[];
   // Job-specific
   task?: string;
-  work?: string;
-  prechecks?: string;
-  postchecks?: string;
+  work?: WorkSpec;
+  prechecks?: WorkSpec;
+  postchecks?: WorkSpec;
   instructions?: string;
   baseBranch?: string;
   // SubDag-specific

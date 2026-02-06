@@ -42,6 +42,14 @@ IMPORTANT - PRODUCER_ID IS REQUIRED:
 - Must be unique within the plan (or within a sub-plan for nested jobs)
 - Jobs with consumesFrom: [] are root jobs that start immediately
 
+WORKTREE ISOLATION - CRITICAL DESIGN REQUIREMENT:
+- Each job runs in its own ISOLATED git worktree
+- A job can ONLY see filesystem state from its DIRECT DEPENDENCY CHAIN (ancestors)
+- Sibling jobs (parallel jobs at the same level) do NOT share filesystem state
+- If job B needs a directory created by job A, then B MUST depend on A via consumesFrom
+- Each job should create any directories it needs - do NOT assume siblings have created them
+- Example: If "setup" creates /build/ and "compile" needs it, "compile" must have "setup" in consumesFrom
+
 EXAMPLE PLAN STRUCTURE:
 {
   "name": "Build and Test",
@@ -89,7 +97,7 @@ WORK FIELD OPTIONS:
                 consumesFrom: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'Array of producer_id values of jobs or sub-plans this job depends on. Must match producer_id exactly. Jobs with empty consumesFrom [] are root jobs that start immediately.'
+                  description: 'Array of producer_id values of jobs or sub-plans this job depends on. Must match producer_id exactly. Jobs with empty consumesFrom [] are root jobs that start immediately. IMPORTANT: This job will ONLY inherit filesystem state (files, directories) from jobs listed here and their ancestors. Sibling jobs NOT in this chain will not share their filesystem changes.'
                 },
                 baseBranch: { type: 'string', description: 'Override base branch (only for root jobs with no consumesFrom)' },
                 prechecks: { 
@@ -120,7 +128,7 @@ WORK FIELD OPTIONS:
                 consumesFrom: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'Array of producer_id values of jobs or sub-plans that must complete before this sub-plan starts.'
+                  description: 'Array of producer_id values of jobs or sub-plans that must complete before this sub-plan starts. The sub-plan will inherit filesystem state from these dependencies.'
                 },
                 maxParallel: { type: 'number', description: 'Max concurrent jobs in sub-plan' },
                 jobs: {
@@ -140,7 +148,7 @@ WORK FIELD OPTIONS:
                         type: 'string', 
                         description: 'Shell command (runs in cmd/sh, NOT PowerShell) OR "@agent <task>" for Copilot' 
                       },
-                      consumesFrom: { type: 'array', items: { type: 'string' }, description: 'Array of producer_id values of other jobs WITHIN THIS SUB-PLAN that this job depends on.' },
+                      consumesFrom: { type: 'array', items: { type: 'string' }, description: 'Array of producer_id values of other jobs WITHIN THIS SUB-PLAN that this job depends on. This job only inherits filesystem state from jobs in this dependency chain.' },
                       prechecks: { type: 'string', description: 'Shell command (runs in cmd/sh, NOT PowerShell)' },
                       postchecks: { type: 'string', description: 'Shell command (runs in cmd/sh, NOT PowerShell)' },
                       instructions: { type: 'string' }

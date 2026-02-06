@@ -15,6 +15,8 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
+import { ProcessMonitor } from '../process';
+import { ProcessNode } from '../types';
 import {
   JobNode,
   ExecutionContext,
@@ -23,6 +25,11 @@ import {
   CommitDetail,
   ExecutionPhase,
   LogEntry,
+  WorkSpec,
+  ProcessSpec,
+  ShellSpec,
+  AgentSpec,
+  normalizeWorkSpec,
 } from './types';
 import { JobExecutor } from './runner';
 import { Logger } from '../core/logger';
@@ -38,6 +45,7 @@ interface ActiveExecution {
   nodeId: string;
   process?: ChildProcess;
   aborted: boolean;
+  startTime?: number;
 }
 
 /**
@@ -49,6 +57,7 @@ export class DefaultJobExecutor implements JobExecutor {
   private logFiles = new Map<string, string>(); // execution key -> log file path
   private agentDelegator?: any; // IAgentDelegator interface
   private storagePath?: string;
+  private processMonitor = new ProcessMonitor();
   
   /**
    * Set storage path for log files
@@ -85,12 +94,16 @@ export class DefaultJobExecutor implements JobExecutor {
     this.activeExecutions.set(executionKey, execution);
     this.executionLogs.set(executionKey, []);
     
+    // Track per-phase statuses
+    const stepStatuses: JobExecutionResult['stepStatuses'] = {};
+    
     try {
       // Ensure worktree exists
       if (!fs.existsSync(worktreePath)) {
         return {
           success: false,
           error: `Worktree does not exist: ${worktreePath}`,
+          stepStatuses,
         };
       }
       
@@ -98,30 +111,34 @@ export class DefaultJobExecutor implements JobExecutor {
       if (node.prechecks) {
         context.onProgress?.('Running prechecks');
         this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION START ==========');
-        this.logInfo(executionKey, 'prechecks', `Running: ${node.prechecks}`);
         
-        const precheckResult = await this.runCommand(
+        const precheckResult = await this.runWorkSpec(
           node.prechecks,
           worktreePath,
           execution,
           executionKey,
-          'prechecks'
+          'prechecks',
+          node
         );
         
-        this.logInfo(executionKey, 'prechecks', `Exit code: ${precheckResult.success ? 0 : 'non-zero'}`);
         this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION END ==========');
         
         if (!precheckResult.success) {
+          stepStatuses.prechecks = 'failed';
           return {
             success: false,
             error: `Prechecks failed: ${precheckResult.error}`,
+            stepStatuses,
           };
         }
+        stepStatuses.prechecks = 'success';
+      } else {
+        stepStatuses.prechecks = 'skipped';
       }
       
       // Check if aborted
       if (execution.aborted) {
-        return { success: false, error: 'Execution canceled' };
+        return { success: false, error: 'Execution canceled', stepStatuses };
       }
       
       // Run main work
@@ -129,85 +146,72 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Running work');
         this.logInfo(executionKey, 'work', '========== WORK SECTION START ==========');
         
-        if (node.work.startsWith('@agent')) {
-          // Delegate to agent
-          this.logInfo(executionKey, 'work', `Delegating to @agent: ${node.work}`);
-          const agentResult = await this.runAgentWork(
-            node,
-            worktreePath,
-            execution,
-            executionKey
-          );
-          
-          this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
-          
-          if (!agentResult.success) {
-            return agentResult;
-          }
-        } else {
-          // Run shell command
-          this.logInfo(executionKey, 'work', `Running in ${worktreePath}: ${node.work}`);
-          log.debug(`Executing work command`, { cwd: worktreePath, command: node.work });
-          
-          const workResult = await this.runCommand(
-            node.work,
-            worktreePath,
-            execution,
-            executionKey,
-            'work'
-          );
-          
-          this.logInfo(executionKey, 'work', `Exit code: ${workResult.success ? 0 : 'non-zero'}`);
-          this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
-          
-          if (!workResult.success) {
-            return {
-              success: false,
-              error: `Work failed: ${workResult.error}`,
-            };
-          }
+        const workResult = await this.runWorkSpec(
+          node.work,
+          worktreePath,
+          execution,
+          executionKey,
+          'work',
+          node
+        );
+        
+        this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
+        
+        if (!workResult.success) {
+          stepStatuses.work = 'failed';
+          return {
+            success: false,
+            error: `Work failed: ${workResult.error}`,
+            stepStatuses,
+          };
         }
+        stepStatuses.work = 'success';
       } else {
         // No work command - this is unusual but not an error
         this.logInfo(executionKey, 'work', '========== WORK SECTION START ==========');
-        this.logInfo(executionKey, 'work', 'No work command specified - skipping');
+        this.logInfo(executionKey, 'work', 'No work specified - skipping');
         this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
-        log.warn(`Job ${node.name} has no work command`);
+        log.warn(`Job ${node.name} has no work specified`);
+        stepStatuses.work = 'skipped';
       }
       
       // Check if aborted
       if (execution.aborted) {
-        return { success: false, error: 'Execution canceled' };
+        return { success: false, error: 'Execution canceled', stepStatuses };
       }
       
       // Run postchecks
       if (node.postchecks) {
         context.onProgress?.('Running postchecks');
         this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION START ==========');
-        this.logInfo(executionKey, 'postchecks', `Running: ${node.postchecks}`);
         
-        const postcheckResult = await this.runCommand(
+        const postcheckResult = await this.runWorkSpec(
           node.postchecks,
           worktreePath,
           execution,
           executionKey,
-          'postchecks'
+          'postchecks',
+          node
         );
         
-        this.logInfo(executionKey, 'postchecks', `Exit code: ${postcheckResult.success ? 0 : 'non-zero'}`);
         this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION END ==========');
         
         if (!postcheckResult.success) {
+          stepStatuses.postchecks = 'failed';
           return {
             success: false,
             error: `Postchecks failed: ${postcheckResult.error}`,
+            stepStatuses,
           };
         }
+        stepStatuses.postchecks = 'success';
+      } else {
+        stepStatuses.postchecks = 'skipped';
       }
       
       // Check if aborted
       if (execution.aborted) {
-        return { success: false, error: 'Execution canceled' };
+        return { success: false, error: 'Execution canceled', stepStatuses };
       }
       
       // Commit changes
@@ -222,11 +226,14 @@ export class DefaultJobExecutor implements JobExecutor {
       this.logInfo(executionKey, 'commit', '========== COMMIT SECTION END ==========');
       
       if (!commitResult.success) {
+        stepStatuses.commit = 'failed';
         return {
           success: false,
           error: `Commit failed: ${commitResult.error}`,
+          stepStatuses,
         };
       }
+      stepStatuses.commit = 'success';
       
       // Get work summary
       const workSummary = await this.computeWorkSummary(
@@ -239,6 +246,7 @@ export class DefaultJobExecutor implements JobExecutor {
         success: true,
         completedCommit: commitResult.commit,
         workSummary,
+        stepStatuses,
       };
       
     } catch (error: any) {
@@ -246,6 +254,7 @@ export class DefaultJobExecutor implements JobExecutor {
       return {
         success: false,
         error: error.message,
+        stepStatuses,
       };
     } finally {
       this.activeExecutions.delete(executionKey);
@@ -291,54 +300,246 @@ export class DefaultJobExecutor implements JobExecutor {
     return this.getLogs(dagId, nodeId).filter(entry => entry.phase === phase);
   }
   
+  /**
+   * Get process stats for a running execution
+   */
+  async getProcessStats(dagId: string, nodeId: string): Promise<{
+    pid: number | null;
+    running: boolean;
+    tree: ProcessNode[];
+    duration: number | null;
+  }> {
+    const executionKey = `${dagId}:${nodeId}`;
+    const execution = this.activeExecutions.get(executionKey);
+    
+    if (!execution || !execution.process?.pid) {
+      return { pid: null, running: false, tree: [], duration: null };
+    }
+    
+    const pid = execution.process.pid;
+    const running = this.processMonitor.isRunning(pid);
+    const duration = execution.startTime ? Date.now() - execution.startTime : null;
+    
+    // Build process tree
+    let tree: ProcessNode[] = [];
+    try {
+      const snapshot = await this.processMonitor.getSnapshot();
+      tree = this.processMonitor.buildTree([pid], snapshot);
+    } catch {
+      // Ignore process tree errors
+    }
+    
+    return { pid, running, tree, duration };
+  }
+  
+  /**
+   * Get process stats for multiple running executions (more efficient than calling getProcessStats multiple times)
+   * Fetches snapshot once and builds trees for all.
+   */
+  async getAllProcessStats(nodeKeys: Array<{ dagId: string; nodeId: string; nodeName: string }>): Promise<Array<{
+    nodeId: string;
+    nodeName: string;
+    pid: number | null;
+    running: boolean;
+    tree: ProcessNode[];
+    duration: number | null;
+  }>> {
+    if (nodeKeys.length === 0) return [];
+    
+    // Fetch snapshot once for all nodes
+    let snapshot: any[] = [];
+    try {
+      snapshot = await this.processMonitor.getSnapshot();
+    } catch {
+      // Ignore snapshot errors
+    }
+    
+    const results: Array<{
+      nodeId: string;
+      nodeName: string;
+      pid: number | null;
+      running: boolean;
+      tree: ProcessNode[];
+      duration: number | null;
+    }> = [];
+    
+    for (const { dagId, nodeId, nodeName } of nodeKeys) {
+      const executionKey = `${dagId}:${nodeId}`;
+      const execution = this.activeExecutions.get(executionKey);
+      
+      if (!execution || !execution.process?.pid) {
+        continue;
+      }
+      
+      const pid = execution.process.pid;
+      const running = this.processMonitor.isRunning(pid);
+      const duration = execution.startTime ? Date.now() - execution.startTime : null;
+      
+      // Build process tree from shared snapshot
+      let tree: ProcessNode[] = [];
+      if (running && snapshot.length > 0) {
+        try {
+          tree = this.processMonitor.buildTree([pid], snapshot);
+        } catch {
+          // Ignore tree building errors
+        }
+      }
+      
+      if (running || pid) {
+        results.push({ nodeId, nodeName, pid, running, tree, duration });
+      }
+    }
+    
+    return results;
+  }
+
+  /**
+   * Check if an execution is active
+   */
+  isActive(dagId: string, nodeId: string): boolean {
+    const executionKey = `${dagId}:${nodeId}`;
+    return this.activeExecutions.has(executionKey);
+  }
+  
+  /**
+   * Log a message for a node execution (public API for runner to log merge operations)
+   */
+  log(dagId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void {
+    const executionKey = `${dagId}:${nodeId}`;
+    
+    // Ensure logs array exists
+    if (!this.executionLogs.has(executionKey)) {
+      this.executionLogs.set(executionKey, []);
+    }
+    
+    const entry: LogEntry = {
+      timestamp: Date.now(),
+      phase,
+      type,
+      message,
+    };
+    
+    const logs = this.executionLogs.get(executionKey);
+    if (logs) {
+      logs.push(entry);
+    }
+    
+    this.appendToLogFile(executionKey, entry);
+  }
+
   // ============================================================================
   // PRIVATE METHODS
   // ============================================================================
   
   /**
-   * Run a shell command
+   * Run a WorkSpec (dispatches to appropriate handler)
    */
-  private async runCommand(
-    command: string,
-    cwd: string,
+  private async runWorkSpec(
+    spec: WorkSpec | undefined,
+    worktreePath: string,
+    execution: ActiveExecution,
+    executionKey: string,
+    phase: ExecutionPhase,
+    node: JobNode
+  ): Promise<{ success: boolean; error?: string; isAgent?: boolean }> {
+    const normalized = normalizeWorkSpec(spec);
+    
+    if (!normalized) {
+      return { success: true }; // No work to do
+    }
+    
+    this.logInfo(executionKey, phase, `Work type: ${normalized.type}`);
+    
+    switch (normalized.type) {
+      case 'process':
+        return this.runProcess(normalized, worktreePath, execution, executionKey, phase);
+      
+      case 'shell':
+        return this.runShell(normalized, worktreePath, execution, executionKey, phase);
+      
+      case 'agent':
+        const result = await this.runAgent(normalized, worktreePath, execution, executionKey, node);
+        return { ...result, isAgent: true };
+      
+      default:
+        return { success: false, error: `Unknown work type: ${(normalized as any).type}` };
+    }
+  }
+  
+  /**
+   * Run a direct process (no shell)
+   */
+  private async runProcess(
+    spec: ProcessSpec,
+    worktreePath: string,
     execution: ActiveExecution,
     executionKey: string,
     phase: ExecutionPhase
   ): Promise<{ success: boolean; error?: string }> {
     return new Promise((resolve) => {
-      // Determine shell based on platform
-      const isWindows = process.platform === 'win32';
-      const shell = isWindows ? 'cmd.exe' : '/bin/sh';
-      const shellArgs = isWindows ? ['/c', command] : ['-c', command];
+      const cwd = spec.cwd ? path.resolve(worktreePath, spec.cwd) : worktreePath;
+      const args = spec.args || [];
+      const env = { ...process.env, ...spec.env };
       
-      const proc = spawn(shell, shellArgs, {
+      // Log the process being spawned
+      this.logInfo(executionKey, phase, `Process: ${spec.executable}`);
+      this.logInfo(executionKey, phase, `Arguments: ${JSON.stringify(args)}`);
+      this.logInfo(executionKey, phase, `Working directory: ${cwd}`);
+      if (spec.env) {
+        this.logInfo(executionKey, phase, `Environment overrides: ${JSON.stringify(spec.env)}`);
+      }
+      
+      const proc = spawn(spec.executable, args, {
         cwd,
-        env: { ...process.env },
+        env,
         stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       
       execution.process = proc;
       
+      // Log process start with PID
+      const startTime = Date.now();
+      execution.startTime = startTime;
+      this.logInfo(executionKey, phase, `Process started: PID ${proc.pid}`);
+      
       let stdout = '';
       let stderr = '';
+      let timeoutHandle: NodeJS.Timeout | undefined;
       
-      proc.stdout?.on('data', (data) => {
-        const text = data.toString();
-        stdout += text;
-        this.logOutput(executionKey, phase, 'stdout', text);
+      // Set timeout if specified
+      if (spec.timeout) {
+        timeoutHandle = setTimeout(() => {
+          this.logError(executionKey, phase, `Process timed out after ${spec.timeout}ms (PID: ${proc.pid})`);
+          try {
+            if (process.platform === 'win32') {
+              spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
+            } else {
+              proc.kill('SIGTERM');
+            }
+          } catch (e) { /* ignore */ }
+        }, spec.timeout);
+      }
+      
+      proc.stdout?.setEncoding('utf8');
+      proc.stderr?.setEncoding('utf8');
+      
+      proc.stdout?.on('data', (data: string) => {
+        stdout += data;
+        this.logOutput(executionKey, phase, 'stdout', data);
       });
       
-      proc.stderr?.on('data', (data) => {
-        const text = data.toString();
-        stderr += text;
-        this.logOutput(executionKey, phase, 'stderr', text);
+      proc.stderr?.on('data', (data: string) => {
+        stderr += data;
+        this.logOutput(executionKey, phase, 'stderr', data);
       });
       
       proc.on('close', (code) => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
         execution.process = undefined;
         
-        // Log the exit code
-        this.logInfo(executionKey, phase, `Process exited with code: ${code}`);
+        const duration = Date.now() - startTime;
+        this.logInfo(executionKey, phase, `Process exited: PID ${proc.pid}, code ${code}, duration ${duration}ms`);
         
         if (execution.aborted) {
           resolve({ success: false, error: 'Execution canceled' });
@@ -353,38 +554,182 @@ export class DefaultJobExecutor implements JobExecutor {
       });
       
       proc.on('error', (err) => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
         execution.process = undefined;
+        const duration = Date.now() - startTime;
+        this.logError(executionKey, phase, `Process error: PID ${proc.pid}, error: ${err.message}, duration ${duration}ms`);
         resolve({ success: false, error: err.message });
       });
     });
   }
   
   /**
-   * Run @agent work
+   * Run a shell command
    */
-  private async runAgentWork(
-    node: JobNode,
+  private async runShell(
+    spec: ShellSpec,
     worktreePath: string,
     execution: ActiveExecution,
-    executionKey: string
-  ): Promise<JobExecutionResult> {
+    executionKey: string,
+    phase: ExecutionPhase
+  ): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      const cwd = spec.cwd ? path.resolve(worktreePath, spec.cwd) : worktreePath;
+      const env = { ...process.env, ...spec.env };
+      
+      // Determine shell based on spec or platform default
+      const isWindows = process.platform === 'win32';
+      let shell: string;
+      let shellArgs: string[];
+      
+      switch (spec.shell) {
+        case 'cmd':
+          shell = 'cmd.exe';
+          shellArgs = ['/c', spec.command];
+          break;
+        case 'powershell':
+          shell = 'powershell.exe';
+          shellArgs = ['-NoProfile', '-NonInteractive', '-Command', spec.command];
+          break;
+        case 'pwsh':
+          shell = 'pwsh';
+          shellArgs = ['-NoProfile', '-NonInteractive', '-Command', spec.command];
+          break;
+        case 'bash':
+          shell = 'bash';
+          shellArgs = ['-c', spec.command];
+          break;
+        case 'sh':
+          shell = '/bin/sh';
+          shellArgs = ['-c', spec.command];
+          break;
+        default:
+          // Platform default
+          shell = isWindows ? 'cmd.exe' : '/bin/sh';
+          shellArgs = isWindows ? ['/c', spec.command] : ['-c', spec.command];
+      }
+      
+      // Log the shell command being spawned
+      this.logInfo(executionKey, phase, `Shell: ${shell}`);
+      this.logInfo(executionKey, phase, `Command: ${spec.command}`);
+      this.logInfo(executionKey, phase, `Working directory: ${cwd}`);
+      if (spec.env) {
+        this.logInfo(executionKey, phase, `Environment overrides: ${JSON.stringify(spec.env)}`);
+      }
+      
+      const proc = spawn(shell, shellArgs, {
+        cwd,
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      
+      execution.process = proc;
+      
+      // Log process start with PID
+      const startTime = Date.now();
+      execution.startTime = startTime;
+      this.logInfo(executionKey, phase, `Shell started: PID ${proc.pid}`);
+      
+      let stdout = '';
+      let stderr = '';
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      
+      // Set timeout if specified
+      if (spec.timeout) {
+        timeoutHandle = setTimeout(() => {
+          this.logError(executionKey, phase, `Shell command timed out after ${spec.timeout}ms (PID: ${proc.pid})`);
+          try {
+            if (process.platform === 'win32') {
+              spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
+            } else {
+              proc.kill('SIGTERM');
+            }
+          } catch (e) { /* ignore */ }
+        }, spec.timeout);
+      }
+      
+      proc.stdout?.setEncoding('utf8');
+      proc.stderr?.setEncoding('utf8');
+      
+      proc.stdout?.on('data', (data: string) => {
+        stdout += data;
+        this.logOutput(executionKey, phase, 'stdout', data);
+      });
+      
+      proc.stderr?.on('data', (data: string) => {
+        stderr += data;
+        this.logOutput(executionKey, phase, 'stderr', data);
+      });
+      
+      proc.on('close', (code) => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        execution.process = undefined;
+        
+        const duration = Date.now() - startTime;
+        this.logInfo(executionKey, phase, `Shell exited: PID ${proc.pid}, code ${code}, duration ${duration}ms`);
+        
+        if (execution.aborted) {
+          resolve({ success: false, error: 'Execution canceled' });
+        } else if (code === 0) {
+          resolve({ success: true });
+        } else {
+          resolve({
+            success: false,
+            error: `Exit code ${code}: ${stderr || stdout}`.trim(),
+          });
+        }
+      });
+      
+      proc.on('error', (err) => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        execution.process = undefined;
+        const duration = Date.now() - startTime;
+        this.logError(executionKey, phase, `Shell error: PID ${proc.pid}, error: ${err.message}, duration ${duration}ms`);
+        resolve({ success: false, error: err.message });
+      });
+    });
+  }
+  
+  /**
+   * Run agent work with rich config
+   */
+  private async runAgent(
+    spec: AgentSpec,
+    worktreePath: string,
+    execution: ActiveExecution,
+    executionKey: string,
+    node: JobNode
+  ): Promise<{ success: boolean; error?: string }> {
     if (!this.agentDelegator) {
       return {
         success: false,
-        error: '@agent work requires an agent delegator to be configured',
+        error: 'Agent work requires an agent delegator to be configured',
       };
     }
     
-    // Extract the task from "@agent <task>"
-    const agentTask = node.work!.replace(/^@agent\s*/i, '').trim() || node.task;
-    
-    this.logInfo(executionKey, 'work', `Delegating to agent: ${agentTask}`);
+    this.logInfo(executionKey, 'work', `Agent instructions: ${spec.instructions}`);
+    if (spec.model) {
+      this.logInfo(executionKey, 'work', `Agent model: ${spec.model}`);
+    }
+    if (spec.contextFiles?.length) {
+      this.logInfo(executionKey, 'work', `Agent context files: ${spec.contextFiles.join(', ')}`);
+    }
+    if (spec.maxTurns) {
+      this.logInfo(executionKey, 'work', `Agent max turns: ${spec.maxTurns}`);
+    }
+    if (spec.context) {
+      this.logInfo(executionKey, 'work', `Agent context: ${spec.context}`);
+    }
     
     try {
       const result = await this.agentDelegator.delegate({
-        task: agentTask,
-        instructions: node.instructions,
+        task: spec.instructions,
+        instructions: node.instructions || spec.context,
         worktreePath,
+        model: spec.model,
+        contextFiles: spec.contextFiles,
+        maxTurns: spec.maxTurns,
       });
       
       if (result.success) {
@@ -420,6 +765,11 @@ export class DefaultJobExecutor implements JobExecutor {
         this.logInfo(executionKey, 'commit', `Git status:\n${statusOutput}`);
       } else {
         this.logInfo(executionKey, 'commit', 'Git status: clean (no changes)');
+        // Show ignored files for troubleshooting when no changes detected
+        const ignoredFiles = await this.getIgnoredFiles(worktreePath);
+        if (ignoredFiles) {
+          this.logInfo(executionKey, 'commit', `Ignored files (not tracked by git):\n${ignoredFiles}`);
+        }
       }
       
       // Check if there are uncommitted changes to commit
@@ -475,6 +825,33 @@ export class DefaultJobExecutor implements JobExecutor {
       let output = '';
       proc.stdout?.on('data', (data) => output += data.toString());
       proc.on('close', () => resolve(output.trim() || null));
+      proc.on('error', () => resolve(null));
+    });
+  }
+  
+  /**
+   * Get list of ignored files for troubleshooting.
+   * Uses git status --ignored to show files excluded by .gitignore.
+   */
+  private async getIgnoredFiles(cwd: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      // --ignored --short shows ignored files with !! prefix
+      const proc = spawn('git', ['status', '--ignored', '--short'], { cwd });
+      let output = '';
+      proc.stdout?.on('data', (data) => output += data.toString());
+      proc.on('close', () => {
+        // Filter to only lines starting with !! (ignored files)
+        const lines = output.split('\n')
+          .filter(line => line.startsWith('!!'))
+          .map(line => line.slice(3).trim()) // Remove !! prefix
+          .slice(0, 50); // Limit to 50 files to avoid huge output
+        if (lines.length === 0) {
+          resolve(null);
+        } else {
+          const result = lines.join('\n');
+          resolve(lines.length === 50 ? result + '\n... (truncated)' : result);
+        }
+      });
       proc.on('error', () => resolve(null));
     });
   }

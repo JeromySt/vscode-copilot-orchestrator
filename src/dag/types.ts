@@ -68,9 +68,128 @@ export function isValidTransition(from: NodeStatus, to: NodeStatus): boolean {
 // NODE SPECIFICATION (User Input)
 // ============================================================================
 
+// ============================================================================
+// WORK SPECIFICATION TYPES
+// ============================================================================
+
+/**
+ * Direct process spawn (no shell interpretation).
+ * Arguments are passed directly - no quoting issues.
+ */
+export interface ProcessSpec {
+  type: 'process';
+  
+  /** Executable to run (e.g., "node", "dotnet", "powershell.exe") */
+  executable: string;
+  
+  /** Arguments as array - no shell quoting needed */
+  args?: string[];
+  
+  /** Additional environment variables */
+  env?: Record<string, string>;
+  
+  /** Override working directory (relative to worktree or absolute) */
+  cwd?: string;
+  
+  /** Process timeout in milliseconds */
+  timeout?: number;
+}
+
+/**
+ * Shell command execution.
+ * Command is interpreted by the shell.
+ */
+export interface ShellSpec {
+  type: 'shell';
+  
+  /** Shell command string */
+  command: string;
+  
+  /** 
+   * Specific shell to use:
+   * - 'cmd' - Windows cmd.exe
+   * - 'powershell' - Windows PowerShell
+   * - 'pwsh' - PowerShell Core (cross-platform)
+   * - 'bash' - Bash shell
+   * - 'sh' - Default POSIX shell
+   * - undefined - Platform default (cmd on Windows, sh on Unix)
+   */
+  shell?: 'cmd' | 'powershell' | 'pwsh' | 'bash' | 'sh';
+  
+  /** Additional environment variables */
+  env?: Record<string, string>;
+  
+  /** Override working directory */
+  cwd?: string;
+  
+  /** Process timeout in milliseconds */
+  timeout?: number;
+}
+
+/**
+ * AI Agent delegation.
+ * Work is performed by Copilot agent.
+ */
+export interface AgentSpec {
+  type: 'agent';
+  
+  /** Instructions for the agent (what to do) */
+  instructions: string;
+  
+  /** Optional model preference */
+  model?: string;
+  
+  /** Files to include in agent context (relative to worktree) */
+  contextFiles?: string[];
+  
+  /** Maximum agent turns/iterations */
+  maxTurns?: number;
+  
+  /** Additional environment context to provide */
+  context?: string;
+}
+
+/**
+ * Work specification - what to execute.
+ * Can be:
+ * - string: Legacy format, interpreted as shell command or "@agent ..." 
+ * - ProcessSpec: Direct process spawn
+ * - ShellSpec: Shell command with explicit shell choice
+ * - AgentSpec: AI agent delegation
+ */
+export type WorkSpec = string | ProcessSpec | ShellSpec | AgentSpec;
+
+/**
+ * Normalize a WorkSpec to its structured form.
+ * Handles backwards compatibility with string format.
+ */
+export function normalizeWorkSpec(spec: WorkSpec | undefined): ProcessSpec | ShellSpec | AgentSpec | undefined {
+  if (spec === undefined) {
+    return undefined;
+  }
+  
+  if (typeof spec === 'string') {
+    // Legacy string format
+    if (spec.startsWith('@agent')) {
+      const instructions = spec.replace(/^@agent\s*/i, '').trim();
+      return {
+        type: 'agent',
+        instructions: instructions || 'Complete the task as specified',
+      };
+    }
+    // Default to shell command
+    return {
+      type: 'shell',
+      command: spec,
+    };
+  }
+  
+  return spec;
+}
+
 /**
  * Specification for a job node (user input).
- * Jobs execute shell commands or delegate to @agent.
+ * Jobs execute processes, shell commands, or delegate to AI agents.
  */
 export interface JobNodeSpec {
   /** User-controlled identifier for DAG references (used in consumesFrom) */
@@ -83,19 +202,31 @@ export interface JobNodeSpec {
   task: string;
   
   /** 
-   * Work to perform:
-   * - Shell command (runs in cmd/sh)
-   * - "@agent <task>" for Copilot delegation
+   * Work to perform. Can be:
+   * - string: Shell command or "@agent <instructions>"
+   * - ProcessSpec: Direct process spawn with args array
+   * - ShellSpec: Shell command with explicit shell choice
+   * - AgentSpec: AI agent delegation with rich config
    */
-  work?: string;
+  work?: WorkSpec;
   
-  /** Shell command to run before work (validation) */
-  prechecks?: string;
+  /** 
+   * Validation before work. Can be:
+   * - string: Shell command
+   * - ProcessSpec: Direct process spawn
+   * - ShellSpec: Shell command with explicit shell
+   */
+  prechecks?: WorkSpec;
   
-  /** Shell command to run after work (validation) */
-  postchecks?: string;
+  /** 
+   * Validation after work. Can be:
+   * - string: Shell command
+   * - ProcessSpec: Direct process spawn
+   * - ShellSpec: Shell command with explicit shell
+   */
+  postchecks?: WorkSpec;
   
-  /** Additional instructions for @agent tasks */
+  /** Additional instructions for agent tasks (legacy, use AgentSpec.instructions) */
   instructions?: string;
   
   /** IDs of nodes this job depends on (consumesFrom) */
@@ -199,16 +330,16 @@ export interface JobNode extends BaseNode {
   /** Task description */
   task: string;
   
-  /** Work command or @agent instruction */
-  work?: string;
+  /** Work specification (normalized from input) */
+  work?: WorkSpec;
   
-  /** Prechecks command */
-  prechecks?: string;
+  /** Prechecks specification */
+  prechecks?: WorkSpec;
   
-  /** Postchecks command */
-  postchecks?: string;
+  /** Postchecks specification */
+  postchecks?: WorkSpec;
   
-  /** Agent instructions */
+  /** Agent instructions (legacy support) */
   instructions?: string;
   
   /** Override base branch */
@@ -236,9 +367,23 @@ export interface SubDagNode extends BaseNode {
  */
 export type DagNode = JobNode | SubDagNode;
 
+/**
+ * Check if a node performs work (has a work specification).
+ * Nodes with work consume execution resources and count against parallelism limits.
+ * Sub-DAG nodes are coordination nodes that don't perform work directly.
+ */
+export function nodePerformsWork(node: DagNode): boolean {
+  return 'work' in node && node.work !== undefined;
+}
+
 // ============================================================================
 // DAG STATE (Execution State)
 // ============================================================================
+
+/**
+ * Per-phase execution status
+ */
+export type PhaseStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped';
 
 /**
  * Execution state for a single node
@@ -283,6 +428,23 @@ export interface NodeExecutionState {
    * Worktree cleanup is blocked until this is true (or node is not a leaf).
    */
   mergedToTarget?: boolean;
+  
+  /**
+   * Whether the worktree has been cleaned up (removed from disk).
+   * Set to true after successful cleanup to prevent "Open Worktree" button.
+   */
+  worktreeCleanedUp?: boolean;
+
+  /**
+   * Per-phase execution status for detailed UI display.
+   * Tracks prechecks, work, commit, postchecks phases individually.
+   */
+  stepStatuses?: {
+    prechecks?: PhaseStatus;
+    work?: PhaseStatus;
+    commit?: PhaseStatus;
+    postchecks?: PhaseStatus;
+  };
 }
 
 /**
@@ -437,6 +599,13 @@ export interface JobExecutionResult {
   error?: string;
   completedCommit?: string;
   workSummary?: JobWorkSummary;
+  /** Per-phase status for UI display */
+  stepStatuses?: {
+    prechecks?: PhaseStatus;
+    work?: PhaseStatus;
+    commit?: PhaseStatus;
+    postchecks?: PhaseStatus;
+  };
 }
 
 /**
@@ -469,7 +638,7 @@ export interface ExecutionContext {
 /**
  * Execution phase for logging
  */
-export type ExecutionPhase = 'prechecks' | 'work' | 'postchecks' | 'commit' | 'cleanup';
+export type ExecutionPhase = 'setup' | 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'cleanup';
 
 /**
  * Log entry for job execution

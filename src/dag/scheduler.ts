@@ -11,7 +11,7 @@
  * @module dag/scheduler
  */
 
-import { DagInstance, DagNode } from './types';
+import { DagInstance, DagNode, nodePerformsWork } from './types';
 import { DagStateMachine } from './stateMachine';
 
 /**
@@ -37,7 +37,7 @@ export class DagScheduler {
    * 
    * @param dag - The DAG instance
    * @param stateMachine - The state machine for the DAG
-   * @param currentGlobalRunning - Current number of globally running jobs
+   * @param currentGlobalRunning - Current number of globally running jobs (excluding sub-DAG coordination nodes)
    * @returns Array of node IDs to schedule
    */
   selectNodes(
@@ -51,9 +51,17 @@ export class DagScheduler {
       return [];
     }
     
-    // Get counts
-    const counts = stateMachine.getStatusCounts();
-    const currentDagRunning = counts.running + counts.scheduled;
+    // Count only nodes that perform work (have a 'work' spec)
+    // Sub-DAGs and other coordination nodes don't consume execution resources
+    let currentDagRunning = 0;
+    for (const [nodeId, state] of dag.nodeStates) {
+      if (state.status === 'running' || state.status === 'scheduled') {
+        const node = dag.nodes.get(nodeId);
+        if (node && nodePerformsWork(node)) {
+          currentDagRunning++;
+        }
+      }
+    }
     
     // Calculate available slots
     const dagAvailable = dag.maxParallel - currentDagRunning;

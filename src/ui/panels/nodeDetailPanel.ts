@@ -13,9 +13,33 @@
  */
 
 import * as vscode from 'vscode';
-import { DagRunner, DagInstance, JobNode, SubDagNode, NodeExecutionState, JobWorkSummary } from '../../dag';
+import { DagRunner, DagInstance, JobNode, SubDagNode, NodeExecutionState, JobWorkSummary, WorkSpec } from '../../dag';
 import { getJobDetailsCss } from '../templates/jobDetailsCss';
 import { getJobDetailsJs } from '../templates/jobDetailsJs';
+
+/**
+ * Format a WorkSpec for display
+ */
+function formatWorkSpec(spec: WorkSpec | undefined): string {
+  if (!spec) return '';
+  
+  if (typeof spec === 'string') {
+    return spec;
+  }
+  
+  switch (spec.type) {
+    case 'process':
+      const args = spec.args?.join(' ') || '';
+      return `[process] ${spec.executable} ${args}`.trim();
+    case 'shell':
+      const shell = spec.shell ? `[${spec.shell}] ` : '';
+      return `${shell}${spec.command}`;
+    case 'agent':
+      return `[agent] ${spec.instructions}`;
+    default:
+      return JSON.stringify(spec);
+  }
+}
 
 /**
  * Node Detail Panel - shows job/node execution details with logs
@@ -28,6 +52,8 @@ export class NodeDetailPanel {
   private _nodeId: string;
   private _disposables: vscode.Disposable[] = [];
   private _updateInterval?: NodeJS.Timeout;
+  private _currentPhase: string | null = null;
+  private _lastStatus: string | null = null;
   
   private constructor(
     panel: vscode.WebviewPanel,
@@ -50,9 +76,24 @@ export class NodeDetailPanel {
       const dag = this._dagRunner.get(this._dagId);
       const state = dag?.nodeStates.get(this._nodeId);
       if (state?.status === 'running' || state?.status === 'scheduled') {
+        // Status changed - do full update
+        if (this._lastStatus !== state.status) {
+          this._lastStatus = state.status;
+          this._update();
+        } else if (this._currentPhase) {
+          // Just refresh the current log view
+          this._sendLog(this._currentPhase);
+        }
+      } else if (this._lastStatus === 'running' || this._lastStatus === 'scheduled') {
+        // Transitioned from running to terminal - do full update
+        this._lastStatus = state?.status || null;
         this._update();
+        // Send final log update
+        if (this._currentPhase) {
+          setTimeout(() => this._sendLog(this._currentPhase!), 100);
+        }
       }
-    }, 1000);
+    }, 500);
     
     // Handle panel disposal
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -98,6 +139,25 @@ export class NodeDetailPanel {
     NodeDetailPanel.panels.set(key, nodePanel);
   }
   
+  /**
+   * Close all node panels associated with a DAG (used when DAG is deleted)
+   */
+  public static closeForDag(dagId: string): void {
+    // Find and close all panels whose key starts with this dagId
+    const keysToClose: string[] = [];
+    for (const key of NodeDetailPanel.panels.keys()) {
+      if (key.startsWith(`${dagId}:`)) {
+        keysToClose.push(key);
+      }
+    }
+    for (const key of keysToClose) {
+      const panel = NodeDetailPanel.panels.get(key);
+      if (panel) {
+        panel.dispose();
+      }
+    }
+  }
+  
   public dispose() {
     const key = `${this._dagId}:${this._nodeId}`;
     NodeDetailPanel.panels.delete(key);
@@ -130,17 +190,34 @@ export class NodeDetailPanel {
         this._update();
         break;
       case 'getLog':
+        this._currentPhase = message.phase;
         this._sendLog(message.phase);
         break;
+      case 'getProcessStats':
+        this._sendProcessStats();
+        break;
+      case 'copyToClipboard':
+        if (message.text) {
+          vscode.env.clipboard.writeText(message.text);
+        }
+        break;
     }
+  }
+  
+  private async _sendProcessStats() {
+    const stats = await this._dagRunner.getProcessStats(this._dagId, this._nodeId);
+    this._panel.webview.postMessage({
+      type: 'processStats',
+      ...stats
+    });
   }
   
   private async _sendLog(phase: string) {
     const dag = this._dagRunner.get(this._dagId);
     const node = dag?.nodes.get(this._nodeId);
-    if (!node || node.type !== 'job') return;
+    if (!node) return;
     
-    // Get logs from executor
+    // Get logs from executor (works for both jobs and sub-dag nodes)
     const logs = this._dagRunner.getNodeLogs(this._dagId, this._nodeId, phase as any);
     
     this._panel.webview.postMessage({
@@ -240,6 +317,11 @@ export class NodeDetailPanel {
       ? this._buildWorkSummaryHtml(state.workSummary)
       : '';
     
+    // Build child DAG summary HTML if this is a subdag node
+    const childDagSummaryHtml = subDagNode?.childDagId
+      ? this._buildChildDagSummaryHtml(subDagNode.childDagId)
+      : '';
+
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -290,6 +372,20 @@ export class NodeDetailPanel {
     ` : ''}
   </div>
   
+  ${(state.status === 'running' || state.status === 'scheduled') && isJob ? `
+  <!-- Process Tree (only for running jobs) -->
+  <div class="section process-tree-section" id="processTreeSection">
+    <div class="process-tree-header" data-expanded="true">
+      <span class="process-tree-chevron">▼</span>
+      <span class="process-tree-icon">⚡</span>
+      <span class="process-tree-title" id="processTreeTitle">Running Processes</span>
+    </div>
+    <div class="process-tree" id="processTree">
+      <div class="process-loading">Loading process tree...</div>
+    </div>
+  </div>
+  ` : ''}
+  
   ${isJob && jobNode ? `
   <!-- Job Configuration -->
   <div class="section">
@@ -301,7 +397,7 @@ export class NodeDetailPanel {
     ${jobNode.work ? `
     <div class="config-item">
       <div class="config-label">Work</div>
-      <div class="config-value mono">${this._escapeHtml(jobNode.work)}</div>
+      <div class="config-value mono">${this._escapeHtml(formatWorkSpec(jobNode.work))}</div>
     </div>
     ` : ''}
     ${jobNode.instructions ? `
@@ -339,10 +435,12 @@ export class NodeDetailPanel {
       <div class="config-label">Child DAG</div>
       <div class="config-value">
         <a onclick="openDag('${subDagNode.childDagId}')" class="link">${subDagNode.childDagId.slice(0, 8)}...</a>
+        <button class="action-btn secondary" style="margin-left: 8px; padding: 2px 8px; font-size: 11px;" onclick="openDag('${subDagNode.childDagId}')">Open DAG</button>
       </div>
     </div>
     ` : ''}
   </div>
+  ${childDagSummaryHtml}
   ` : ''}
   
   <!-- Dependencies -->
@@ -379,8 +477,8 @@ export class NodeDetailPanel {
     </div>
     ${state.worktreePath ? `
     <div class="config-item">
-      <div class="config-label">Worktree (detached HEAD)</div>
-      <div class="config-value mono">${this._escapeHtml(state.worktreePath)}</div>
+      <div class="config-label">Worktree${state.worktreeCleanedUp ? ' (cleaned up)' : ' (detached HEAD)'}</div>
+      <div class="config-value mono" style="${state.worktreeCleanedUp ? 'text-decoration: line-through; opacity: 0.6;' : ''}">${this._escapeHtml(state.worktreePath)}</div>
     </div>
     ` : ''}
   </div>
@@ -388,13 +486,18 @@ export class NodeDetailPanel {
   
   <!-- Actions -->
   <div class="actions">
-    ${state.worktreePath ? '<button class="action-btn" onclick="openWorktree()">Open Worktree</button>' : ''}
+    ${state.worktreePath && !state.worktreeCleanedUp ? '<button class="action-btn" onclick="openWorktree()">Open Worktree</button>' : ''}
     <button class="action-btn" onclick="refresh()">Refresh</button>
   </div>
   
   <script>
     const vscode = acquireVsCodeApi();
-    let currentPhase = null;
+    let currentPhase = ${this._currentPhase ? `'${this._currentPhase}'` : 'null'};
+    
+    // Restore phase selection if we had one
+    if (currentPhase) {
+      setTimeout(() => selectPhase(currentPhase), 50);
+    }
     
     function openDag(dagId) {
       vscode.postMessage({ type: 'openDag', dagId });
@@ -427,11 +530,136 @@ export class NodeDetailPanel {
       const msg = event.data;
       if (msg.type === 'logContent' && msg.phase === currentPhase) {
         const viewer = document.getElementById('logViewer');
-        viewer.innerHTML = '<pre class="log-content">' + escapeHtml(msg.content) + '</pre>';
+        viewer.innerHTML = '<pre class="log-content" tabindex="0">' + escapeHtml(msg.content) + '</pre>';
         viewer.scrollTop = viewer.scrollHeight;
+        
+        // Setup log viewer keyboard shortcuts
+        const logContent = viewer.querySelector('.log-content');
+        if (logContent) {
+          logContent.addEventListener('click', () => logContent.focus());
+          logContent.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+              e.preventDefault();
+              e.stopPropagation();
+              const selection = window.getSelection();
+              const range = document.createRange();
+              range.selectNodeContents(logContent);
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              window.getSelection().removeAllRanges();
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+              const selectedText = window.getSelection().toString();
+              if (selectedText) {
+                e.preventDefault();
+                vscode.postMessage({ type: 'copyToClipboard', text: selectedText });
+              }
+            }
+          });
+        }
+      }
+      
+      // Handle process stats messages
+      if (msg.type === 'processStats') {
+        renderProcessTree(msg);
       }
     });
     
+    // Process tree rendering
+    let lastKnownTree = [];
+    
+    function renderProcessTree(stats) {
+      const treeEl = document.getElementById('processTree');
+      const titleEl = document.getElementById('processTreeTitle');
+      if (!treeEl || !titleEl) return;
+      
+      if (!stats.pid || !stats.running) {
+        if (lastKnownTree.length === 0) {
+          treeEl.innerHTML = '<div class="process-loading">No active process</div>';
+          titleEl.textContent = 'Processes';
+        }
+        return;
+      }
+      
+      const tree = stats.tree || [];
+      lastKnownTree = tree;
+      
+      if (tree.length === 0) {
+        treeEl.innerHTML = '<div class="process-loading">Process running (PID ' + stats.pid + ')</div>';
+        titleEl.innerHTML = 'Processes <span style="opacity: 0.7; font-weight: normal;">PID ' + stats.pid + '</span>';
+        return;
+      }
+      
+      // Count processes and sum stats
+      function countAndSum(proc) {
+        let count = 1;
+        let cpu = proc.cpu || 0;
+        let memory = proc.memory || 0;
+        if (proc.children) {
+          for (const child of proc.children) {
+            const childStats = countAndSum(child);
+            count += childStats.count;
+            cpu += childStats.cpu;
+            memory += childStats.memory;
+          }
+        }
+        return { count, cpu, memory };
+      }
+      
+      const totals = tree.reduce((acc, proc) => {
+        const s = countAndSum(proc);
+        return { count: acc.count + s.count, cpu: acc.cpu + s.cpu, memory: acc.memory + s.memory };
+      }, { count: 0, cpu: 0, memory: 0 });
+      
+      const memMB = (totals.memory / 1024 / 1024).toFixed(1);
+      titleEl.innerHTML = 'Processes <span style="opacity: 0.7; font-weight: normal;">(' + totals.count + ' • ' + totals.cpu.toFixed(0) + '% CPU • ' + memMB + ' MB)</span>';
+      
+      // Render process nodes
+      function renderNode(proc, depth) {
+        const memMB = ((proc.memory || 0) / 1024 / 1024).toFixed(1);
+        const cpuPct = (proc.cpu || 0).toFixed(0);
+        const indent = depth * 16;
+        const arrow = depth > 0 ? '↳ ' : '';
+        
+        let html = '<div class="process-node" style="margin-left: ' + indent + 'px;">';
+        html += '<div class="process-node-header">';
+        html += '<span class="process-node-icon">⚙️</span>';
+        html += '<span class="process-node-name">' + arrow + escapeHtml(proc.name) + '</span>';
+        html += '<span class="process-node-pid">PID ' + proc.pid + '</span>';
+        html += '</div>';
+        html += '<div class="process-node-stats">';
+        html += '<span class="process-stat">CPU: ' + cpuPct + '%</span>';
+        html += '<span class="process-stat">Mem: ' + memMB + ' MB</span>';
+        html += '</div>';
+        if (proc.commandLine) {
+          html += '<div class="process-node-cmdline">' + escapeHtml(proc.commandLine) + '</div>';
+        }
+        html += '</div>';
+        
+        if (proc.children) {
+          for (const child of proc.children) {
+            html += renderNode(child, depth + 1);
+          }
+        }
+        
+        return html;
+      }
+      
+      treeEl.innerHTML = tree.map(p => renderNode(p, 0)).join('');
+    }
+    
+    // Poll for process stats if running
+    const processTreeSection = document.getElementById('processTreeSection');
+    if (processTreeSection) {
+      vscode.postMessage({ type: 'getProcessStats' });
+      setInterval(() => {
+        vscode.postMessage({ type: 'getProcessStats' });
+      }, 2000);
+    }
+
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
@@ -443,48 +671,85 @@ export class NodeDetailPanel {
   }
   
   private _getPhaseStatus(state: NodeExecutionState): Record<string, string> {
-    // Derive phase status from execution state
-    // For now, simplified - in production would track per-phase
-    const status = state.status;
-    
-    if (status === 'succeeded') {
+    // Use tracked stepStatuses if available (from executor)
+    if (state.stepStatuses) {
       return {
-        prechecks: 'success',
-        work: 'success',
-        commit: 'success',
-        postchecks: 'success',
-      };
-    } else if (status === 'failed') {
-      return {
-        prechecks: 'success',
-        work: 'failed',
-        commit: 'pending',
-        postchecks: 'pending',
-      };
-    } else if (status === 'running') {
-      return {
-        prechecks: 'success',
-        work: 'running',
-        commit: 'pending',
-        postchecks: 'pending',
+        prechecks: state.stepStatuses.prechecks || 'pending',
+        work: state.stepStatuses.work || 'pending',
+        commit: state.stepStatuses.commit || 'pending',
+        postchecks: state.stepStatuses.postchecks || 'pending',
       };
     }
     
-    return {
+    // Fallback: derive phase status from execution state and error message
+    const status = state.status;
+    const error = state.error || '';
+    
+    // Default all to pending
+    const result: Record<string, string> = {
+      'merge-fi': 'pending',
       prechecks: 'pending',
       work: 'pending',
       commit: 'pending',
       postchecks: 'pending',
+      'merge-ri': 'pending',
     };
+    
+    if (status === 'succeeded') {
+      // All phases succeeded
+      result['merge-fi'] = 'success';
+      result.prechecks = 'success';
+      result.work = 'success';
+      result.commit = 'success';
+      result.postchecks = 'success';
+      result['merge-ri'] = 'success';
+    } else if (status === 'failed') {
+      // Determine which phase failed based on error message
+      if (error.includes('merge sources') || error.includes('Forward integration')) {
+        result['merge-fi'] = 'failed';
+      } else if (error.includes('Prechecks failed')) {
+        result['merge-fi'] = 'success';
+        result.prechecks = 'failed';
+      } else if (error.includes('Work failed')) {
+        result['merge-fi'] = 'success';
+        result.prechecks = 'success';
+        result.work = 'failed';
+      } else if (error.includes('Commit failed') || error.includes('produced no work')) {
+        result['merge-fi'] = 'success';
+        result.prechecks = 'success';
+        result.work = 'success';
+        result.commit = 'failed';
+      } else if (error.includes('Postchecks failed')) {
+        result['merge-fi'] = 'success';
+        result.prechecks = 'success';
+        result.work = 'success';
+        result.commit = 'success';
+        result.postchecks = 'failed';
+      } else {
+        // Unknown error - assume work failed
+        result['merge-fi'] = 'success';
+        result.prechecks = 'success';
+        result.work = 'failed';
+      }
+    } else if (status === 'running') {
+      // Running - can't tell exactly which phase, default to work
+      result['merge-fi'] = 'success';
+      result.prechecks = 'success';
+      result.work = 'running';
+    }
+    
+    return result;
   }
   
   private _buildPhaseTabs(phaseStatus: Record<string, string>, isRunning: boolean): string {
     const phases = [
       { id: 'all', name: 'Full Log', icon: '📋' },
+      { id: 'merge-fi', name: 'Merge FI', icon: this._getMergeIcon(phaseStatus['merge-fi'], '↓') },
       { id: 'prechecks', name: 'Prechecks', icon: this._getPhaseIcon(phaseStatus.prechecks) },
       { id: 'work', name: 'Work', icon: this._getPhaseIcon(phaseStatus.work) },
       { id: 'commit', name: 'Commit', icon: this._getPhaseIcon(phaseStatus.commit) },
       { id: 'postchecks', name: 'Postchecks', icon: this._getPhaseIcon(phaseStatus.postchecks) },
+      { id: 'merge-ri', name: 'Merge RI', icon: this._getMergeIcon(phaseStatus['merge-ri'], '↑') },
     ];
     
     return phases.map(p => `
@@ -507,9 +772,45 @@ export class NodeDetailPanel {
     }
   }
   
+  private _getMergeIcon(status: string, arrow: string): string {
+    switch (status) {
+      case 'success': return `✓${arrow}`;
+      case 'failed': return `✗${arrow}`;
+      case 'running': return `⟳${arrow}`;
+      case 'skipped': return `○${arrow}`;
+      default: return `○${arrow}`;
+    }
+  }
+  
   private _buildWorkSummaryHtml(ws: JobWorkSummary): string {
     if (!ws || (ws.commits === 0 && ws.filesAdded === 0 && ws.filesModified === 0 && ws.filesDeleted === 0)) {
       return '';
+    }
+    
+    // Build commit details HTML if available
+    let commitsHtml = '';
+    if (ws.commitDetails && ws.commitDetails.length > 0) {
+      commitsHtml = `<div class="commits-list">`;
+      for (const commit of ws.commitDetails) {
+        let filesHtml = '';
+        if (commit.filesAdded?.length) {
+          filesHtml += commit.filesAdded.map(f => `<div class="file-item file-added">+${this._escapeHtml(f)}</div>`).join('');
+        }
+        if (commit.filesModified?.length) {
+          filesHtml += commit.filesModified.map(f => `<div class="file-item file-modified">~${this._escapeHtml(f)}</div>`).join('');
+        }
+        if (commit.filesDeleted?.length) {
+          filesHtml += commit.filesDeleted.map(f => `<div class="file-item file-deleted">-${this._escapeHtml(f)}</div>`).join('');
+        }
+        
+        commitsHtml += `
+          <div class="commit-item">
+            <code class="commit-hash">${this._escapeHtml(commit.shortHash)}</code>
+            <span class="commit-message">${this._escapeHtml(commit.message)}</span>
+            ${filesHtml ? `<div class="commit-files">${filesHtml}</div>` : ''}
+          </div>`;
+      }
+      commitsHtml += `</div>`;
     }
     
     return `
@@ -534,6 +835,88 @@ export class NodeDetailPanel {
         </div>
       </div>
       ${ws.description ? `<div class="work-summary-desc">${this._escapeHtml(ws.description)}</div>` : ''}
+      ${commitsHtml}
+    </div>
+    `;
+  }
+  
+  /**
+   * Build HTML summary of a child DAG's execution results
+   */
+  private _buildChildDagSummaryHtml(childDagId: string): string {
+    const childDag = this._dagRunner.get(childDagId);
+    if (!childDag) {
+      return '';
+    }
+    
+    // Count job statuses
+    let succeeded = 0, failed = 0, blocked = 0, running = 0, pending = 0;
+    const jobResults: Array<{name: string; status: string; error?: string; commit?: string}> = [];
+    
+    for (const [nodeId, state] of childDag.nodeStates) {
+      const node = childDag.nodes.get(nodeId);
+      if (state.status === 'succeeded') succeeded++;
+      else if (state.status === 'failed') failed++;
+      else if (state.status === 'blocked') blocked++;
+      else if (state.status === 'running') running++;
+      else pending++;
+      
+      jobResults.push({
+        name: node?.name || nodeId.slice(0, 8),
+        status: state.status,
+        error: state.error,
+        commit: state.completedCommit?.slice(0, 8),
+      });
+    }
+    
+    const total = childDag.nodes.size;
+    const ws = childDag.workSummary;
+    
+    return `
+    <div class="section">
+      <h3>Child DAG Results</h3>
+      <div class="work-summary-stats">
+        <div class="work-stat">
+          <div class="work-stat-value">${total}</div>
+          <div class="work-stat-label">Jobs</div>
+        </div>
+        <div class="work-stat added">
+          <div class="work-stat-value">${succeeded}</div>
+          <div class="work-stat-label">Succeeded</div>
+        </div>
+        <div class="work-stat deleted">
+          <div class="work-stat-value">${failed}</div>
+          <div class="work-stat-label">Failed</div>
+        </div>
+        <div class="work-stat">
+          <div class="work-stat-value">${blocked}</div>
+          <div class="work-stat-label">Blocked</div>
+        </div>
+      </div>
+      ${ws ? `
+      <div class="child-dag-work" style="margin-top: 12px; padding: 8px; background: var(--vscode-sideBar-background); border-radius: 4px;">
+        <span style="color: var(--vscode-descriptionForeground);">Work:</span>
+        <span>${ws.totalCommits} commits</span>
+        <span style="color: #4ec9b0;">+${ws.totalFilesAdded}</span>
+        <span style="color: #dcdcaa;">~${ws.totalFilesModified}</span>
+        <span style="color: #f48771;">-${ws.totalFilesDeleted}</span>
+      </div>
+      ` : ''}
+      <div class="child-dag-jobs" style="margin-top: 12px;">
+        ${jobResults.map(j => `
+          <div class="child-job-row" style="display: flex; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--vscode-widget-border);">
+            <span class="status-icon" style="margin-right: 8px;">${
+              j.status === 'succeeded' ? '✓' : 
+              j.status === 'failed' ? '✗' : 
+              j.status === 'blocked' ? '⊘' :
+              j.status === 'running' ? '◐' : '○'
+            }</span>
+            <span style="flex: 1; ${j.status === 'failed' ? 'color: #f48771;' : ''}">${this._escapeHtml(j.name)}</span>
+            ${j.commit ? `<span class="mono" style="font-size: 11px; color: var(--vscode-descriptionForeground);">${j.commit}</span>` : ''}
+          </div>
+          ${j.error ? `<div style="font-size: 11px; color: #f48771; padding-left: 24px; margin-bottom: 4px;">${this._escapeHtml(j.error.slice(0, 100))}${j.error.length > 100 ? '...' : ''}</div>` : ''}
+        `).join('')}
+      </div>
     </div>
     `;
   }
@@ -693,6 +1076,12 @@ export class NodeDetailPanel {
       line-height: 1.4;
       white-space: pre-wrap;
       word-break: break-word;
+      user-select: text;
+      -webkit-user-select: text;
+      cursor: text;
+    }
+    .log-viewer:focus-within {
+      outline: 1px solid var(--vscode-focusBorder);
     }
     
     /* Dependencies */
@@ -739,6 +1128,126 @@ export class NodeDetailPanel {
       margin-top: 12px;
       font-style: italic;
       color: var(--vscode-descriptionForeground);
+    }
+    
+    /* Commit Details */
+    .commits-list {
+      margin-top: 16px;
+      border-top: 1px solid var(--vscode-panel-border);
+      padding-top: 12px;
+    }
+    .commit-item {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .commit-item:last-child {
+      border-bottom: none;
+    }
+    .commit-hash {
+      background: var(--vscode-textCodeBlock-background);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #dcdcaa;
+    }
+    .commit-message {
+      margin-left: 8px;
+      font-size: 13px;
+    }
+    .commit-files {
+      margin-top: 8px;
+      margin-left: 60px;
+      font-size: 11px;
+      font-family: var(--vscode-editor-font-family), monospace;
+    }
+    .file-item {
+      padding: 2px 0;
+    }
+    .file-added { color: #4ec9b0; }
+    .file-modified { color: #dcdcaa; }
+    .file-deleted { color: #f48771; }
+    
+    /* Process Tree */
+    .process-tree-section {
+      border-left: 3px solid var(--vscode-progressBar-background);
+    }
+    .process-tree-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+      margin-bottom: 12px;
+    }
+    .process-tree-header:hover { opacity: 0.8; }
+    .process-tree-chevron {
+      font-size: 10px;
+      transition: transform 0.2s;
+      opacity: 0.7;
+    }
+    .process-tree-icon { font-size: 16px; }
+    .process-tree-title {
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      opacity: 0.8;
+    }
+    .process-tree {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .process-loading {
+      padding: 12px;
+      text-align: center;
+      color: var(--vscode-descriptionForeground);
+      font-style: italic;
+    }
+    .process-node {
+      background: var(--vscode-editor-background);
+      border-radius: 4px;
+      padding: 8px 10px;
+      border-left: 2px solid var(--vscode-progressBar-background);
+    }
+    .process-node-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .process-node-icon { font-size: 14px; }
+    .process-node-name {
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--vscode-foreground);
+    }
+    .process-node-pid {
+      font-size: 10px;
+      opacity: 0.6;
+      font-family: monospace;
+    }
+    .process-node-stats {
+      display: flex;
+      gap: 12px;
+      margin-top: 4px;
+      padding-left: 22px;
+    }
+    .process-stat {
+      font-size: 11px;
+      font-family: monospace;
+      color: var(--vscode-descriptionForeground);
+    }
+    .process-node-cmdline {
+      font-size: 10px;
+      opacity: 0.5;
+      font-family: monospace;
+      margin-top: 4px;
+      padding-left: 22px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     
     /* Actions */
