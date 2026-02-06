@@ -1309,8 +1309,9 @@ ${mermaidDef}
       const svgElement = document.querySelector('.mermaid svg');
       if (!svgElement) return;
       
-      // Find all text elements in the SVG
-      const textElements = svgElement.querySelectorAll('text, tspan');
+      // Find all potential text-containing elements in the SVG
+      // Mermaid uses foreignObject with various nested elements for htmlLabels
+      const allElements = svgElement.querySelectorAll('foreignObject *, text, tspan, .nodeLabel, .label');
       
       for (const [sanitizedId, data] of Object.entries(nodeData)) {
         if (!data.startedAt) continue;
@@ -1323,13 +1324,18 @@ ${mermaidDef}
         const durationStr = formatDurationLive(duration);
         
         // Find text element containing this node's name and update duration
-        for (const textEl of textElements) {
+        for (const textEl of allElements) {
+          // Skip elements without direct text content
+          if (!textEl.childNodes.length || textEl.children.length > 0) continue;
+          
           const text = textEl.textContent || '';
-          // Check if this text contains the node name (with checkmark or other status icon)
-          if (text.includes(data.name)) {
-            // Replace duration pattern: " | Xm Ys" or " | Xh Ym" or " | Xs" or " | < 1s"
-            const newText = text.replace(/\s*\|\s*(<\s*1s|\d+s|\d+m\s*\d+s|\d+h\s*\d+m)/, ' | ' + durationStr);
-            if (newText !== text) {
+          // Check if this text contains the node name
+          if (text.includes(data.name) && text.includes('|')) {
+            // Replace the duration part after the pipe
+            // Format: "icon NodeName | Xs" or "icon NodeName | Xm Ys"
+            const pipeIndex = text.lastIndexOf('|');
+            if (pipeIndex > 0) {
+              const newText = text.substring(0, pipeIndex + 1) + ' ' + durationStr;
               textEl.textContent = newText;
             }
             break;
