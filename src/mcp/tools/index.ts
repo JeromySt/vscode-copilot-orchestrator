@@ -4,14 +4,14 @@
  * @module mcp/tools
  */
 
-export { getDagToolDefinitions, PRODUCER_ID_PATTERN } from './dagTools';
+export { getPlanToolDefinitions, PRODUCER_ID_PATTERN } from './planTools';
 
 import { McpTool } from '../types';
-import { getDagToolDefinitions } from './dagTools';
+import { getPlanToolDefinitions } from './planTools';
 
 /**
  * Get all MCP tool definitions.
  */
 export function getAllToolDefinitions(): McpTool[] {
-  return getDagToolDefinitions();
+  return getPlanToolDefinitions();
 }

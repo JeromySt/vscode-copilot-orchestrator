@@ -1,29 +1,29 @@
 /**
- * @fileoverview DAG MCP Tool Handlers
+ * @fileoverview Plan MCP Tool Handlers
  * 
- * Implements the business logic for all DAG-related MCP tools.
+ * Implements the business logic for all Plan-related MCP tools.
  * 
- * @module mcp/handlers/dagHandlers
+ * @module mcp/handlers/planHandlers
  */
 
 import { ToolHandlerContext } from '../types';
 import { 
-  DagSpec, 
-  DagInstance, 
+  PlanSpec, 
+  PlanInstance, 
   JobNodeSpec, 
-  SubDagNodeSpec,
+  SubPlanNodeSpec,
   NodeStatus,
-  DagStatus,
-} from '../../dag/types';
-import { DagRunner } from '../../dag/runner';
-import { PRODUCER_ID_PATTERN } from '../tools/dagTools';
+  PlanStatus,
+} from '../../plan/types';
+import { PlanRunner } from '../../plan/runner';
+import { PRODUCER_ID_PATTERN } from '../tools/planTools';
 import * as git from '../../git';
 
 /**
- * Extended context with DAG runner
+ * Extended context with Plan Runner
  */
-interface DagHandlerContext extends ToolHandlerContext {
-  dagRunner: DagRunner;
+interface PlanHandlerContext extends ToolHandlerContext {
+  PlanRunner: PlanRunner;
 }
 
 // ============================================================================
@@ -31,14 +31,14 @@ interface DagHandlerContext extends ToolHandlerContext {
 // ============================================================================
 
 /**
- * Recursively map sub-DAGs from input to SubDagNodeSpec
+ * Recursively map sub-plans from input to SubPlanNodeSpec
  */
-function mapSubDagsRecursively(subDags: any[] | undefined): SubDagNodeSpec[] | undefined {
-  if (!subDags || !Array.isArray(subDags) || subDags.length === 0) {
+function mapsubPlansRecursively(subPlans: any[] | undefined): SubPlanNodeSpec[] | undefined {
+  if (!subPlans || !Array.isArray(subPlans) || subPlans.length === 0) {
     return undefined;
   }
   
-  return subDags.map((s: any): SubDagNodeSpec => ({
+  return subPlans.map((s: any): SubPlanNodeSpec => ({
     producerId: s.producer_id,
     name: s.name || s.producer_id,
     dependencies: s.dependencies || [],
@@ -53,140 +53,140 @@ function mapSubDagsRecursively(subDags: any[] | undefined): SubDagNodeSpec[] | u
       postchecks: j.postchecks,
       instructions: j.instructions,
     })),
-    subDags: mapSubDagsRecursively(s.subDags),  // Recursive!
+    subPlans: mapsubPlansRecursively(s.subPlans),  // Recursive!
   }));
 }
 
 /**
- * Recursively validate sub-DAGs with proper scope isolation.
+ * Recursively validate sub-plans with proper scope isolation.
  * 
  * SCOPING RULES:
- * - Each sub-DAG has its own isolated scope for producer_ids
- * - Jobs within a sub-DAG can only reference other jobs/sub-DAGs in the same sub-DAG
- * - Nested sub-DAGs have their own isolated scope (producer_ids can repeat at different levels)
- * - A sub-DAG's external dependencies (its own dependencies array) reference the PARENT scope
+ * - Each sub-plan has its own isolated scope for producer_ids
+ * - Jobs within a sub-plan can only reference other jobs/sub-plans in the same sub-plan
+ * - Nested sub-plans have their own isolated scope (producer_ids can repeat at different levels)
+ * - A sub-plan's external dependencies (its own dependencies array) reference the PARENT scope
  * 
- * @param subDags - Array of sub-DAGs to validate
+ * @param subPlans - Array of sub-plans to validate
  * @param siblingProducerIds - Set of producer_ids at this level (for sibling duplicate checking)
  * @param path - Current path for error messages
  * @param errors - Array to add errors to
  */
-function validateSubDagsRecursively(
-  subDags: any[] | undefined,
+function validatesubPlansRecursively(
+  subPlans: any[] | undefined,
   siblingProducerIds: Set<string>,
   path: string,
   errors: string[]
 ): void {
-  if (!subDags || !Array.isArray(subDags)) return;
+  if (!subPlans || !Array.isArray(subPlans)) return;
   
-  for (let i = 0; i < subDags.length; i++) {
-    const subDag = subDags[i];
-    const subDagPath = path ? `${path} > ${subDag.producer_id || `subDag[${i}]`}` : (subDag.producer_id || `subDag[${i}]`);
+  for (let i = 0; i < subPlans.length; i++) {
+    const subPlan = subPlans[i];
+    const subPlanPath = path ? `${path} > ${subPlan.producer_id || `subPlan[${i}]`}` : (subPlan.producer_id || `subPlan[${i}]`);
     
-    if (!subDag.producer_id) {
-      errors.push(`Sub-DAG at index ${i}${path ? ` in ${path}` : ''} is missing required 'producer_id' field`);
+    if (!subPlan.producer_id) {
+      errors.push(`sub-plan at index ${i}${path ? ` in ${path}` : ''} is missing required 'producer_id' field`);
       continue;
     }
     
-    if (!PRODUCER_ID_PATTERN.test(subDag.producer_id)) {
-      errors.push(`Sub-DAG '${subDagPath}' has invalid producer_id format`);
+    if (!PRODUCER_ID_PATTERN.test(subPlan.producer_id)) {
+      errors.push(`sub-plan '${subPlanPath}' has invalid producer_id format`);
       continue;
     }
     
     // Only check for duplicates among siblings at this level
-    if (siblingProducerIds.has(subDag.producer_id)) {
-      errors.push(`Duplicate producer_id: '${subDag.producer_id}' at level ${path || 'root'}`);
+    if (siblingProducerIds.has(subPlan.producer_id)) {
+      errors.push(`Duplicate producer_id: '${subPlan.producer_id}' at level ${path || 'root'}`);
       continue;
     }
-    siblingProducerIds.add(subDag.producer_id);
+    siblingProducerIds.add(subPlan.producer_id);
     
-    if (!subDag.jobs || !Array.isArray(subDag.jobs) || subDag.jobs.length === 0) {
-      errors.push(`Sub-DAG '${subDagPath}' must have at least one job`);
+    if (!subPlan.jobs || !Array.isArray(subPlan.jobs) || subPlan.jobs.length === 0) {
+      errors.push(`sub-plan '${subPlanPath}' must have at least one job`);
     }
     
-    if (!Array.isArray(subDag.dependencies)) {
-      errors.push(`Sub-DAG '${subDagPath}' must have a 'dependencies' array`);
+    if (!Array.isArray(subPlan.dependencies)) {
+      errors.push(`sub-plan '${subPlanPath}' must have a 'dependencies' array`);
     }
     
     // =========================================================================
-    // INTERNAL SCOPE VALIDATION (jobs and nested sub-DAGs within this sub-DAG)
+    // INTERNAL SCOPE VALIDATION (jobs and nested sub-plans within this sub-plan)
     // =========================================================================
     
-    // Validate jobs within this sub-DAG (isolated scope)
+    // Validate jobs within this sub-plan (isolated scope)
     const internalJobIds = new Set<string>();
-    for (let j = 0; j < (subDag.jobs || []).length; j++) {
-      const job = subDag.jobs[j];
+    for (let j = 0; j < (subPlan.jobs || []).length; j++) {
+      const job = subPlan.jobs[j];
       
       if (!job.producer_id) {
-        errors.push(`Job at index ${j} in '${subDagPath}' is missing required 'producer_id' field`);
+        errors.push(`Job at index ${j} in '${subPlanPath}' is missing required 'producer_id' field`);
         continue;
       }
       
       if (!PRODUCER_ID_PATTERN.test(job.producer_id)) {
-        errors.push(`Job '${job.producer_id}' in '${subDagPath}' has invalid producer_id format`);
+        errors.push(`Job '${job.producer_id}' in '${subPlanPath}' has invalid producer_id format`);
         continue;
       }
       
-      // Check duplicates only within this sub-DAG's internal scope
+      // Check duplicates only within this sub-plan's internal scope
       if (internalJobIds.has(job.producer_id)) {
-        errors.push(`Duplicate producer_id '${job.producer_id}' within '${subDagPath}'`);
+        errors.push(`Duplicate producer_id '${job.producer_id}' within '${subPlanPath}'`);
         continue;
       }
       internalJobIds.add(job.producer_id);
       
       if (!job.task) {
-        errors.push(`Job '${job.producer_id}' in '${subDagPath}' is missing required 'task' field`);
+        errors.push(`Job '${job.producer_id}' in '${subPlanPath}' is missing required 'task' field`);
       }
       
       if (!Array.isArray(job.dependencies)) {
-        errors.push(`Job '${job.producer_id}' in '${subDagPath}' must have a 'dependencies' array`);
+        errors.push(`Job '${job.producer_id}' in '${subPlanPath}' must have a 'dependencies' array`);
       }
     }
     
-    // Collect nested sub-DAG producer_ids for internal scope
-    const internalNestedSubDagIds = new Set<string>();
-    if (subDag.subDags && Array.isArray(subDag.subDags)) {
-      for (const nested of subDag.subDags) {
+    // Collect nested sub-plan producer_ids for internal scope
+    const internalNestedSubplanIds = new Set<string>();
+    if (subPlan.subPlans && Array.isArray(subPlan.subPlans)) {
+      for (const nested of subPlan.subPlans) {
         if (nested.producer_id) {
-          // Check for duplicates among internal nested sub-DAGs
-          if (internalNestedSubDagIds.has(nested.producer_id) || internalJobIds.has(nested.producer_id)) {
-            errors.push(`Duplicate producer_id '${nested.producer_id}' within '${subDagPath}'`);
+          // Check for duplicates among internal nested sub-plans
+          if (internalNestedSubplanIds.has(nested.producer_id) || internalJobIds.has(nested.producer_id)) {
+            errors.push(`Duplicate producer_id '${nested.producer_id}' within '${subPlanPath}'`);
           } else {
-            internalNestedSubDagIds.add(nested.producer_id);
+            internalNestedSubplanIds.add(nested.producer_id);
           }
         }
       }
     }
     
-    // Valid references within this sub-DAG's internal scope
-    const validInternalRefs = new Set([...internalJobIds, ...internalNestedSubDagIds]);
+    // Valid references within this sub-plan's internal scope
+    const validInternalRefs = new Set([...internalJobIds, ...internalNestedSubplanIds]);
     
-    // Validate job dependencies (must reference other internal jobs/sub-DAGs)
-    for (const job of subDag.jobs || []) {
+    // Validate job dependencies (must reference other internal jobs/sub-plans)
+    for (const job of subPlan.jobs || []) {
       if (!Array.isArray(job.dependencies)) continue;
       
       for (const dep of job.dependencies) {
         if (!validInternalRefs.has(dep)) {
           errors.push(
-            `Job '${job.producer_id}' in '${subDagPath}' references unknown dependency '${dep}'. ` +
+            `Job '${job.producer_id}' in '${subPlanPath}' references unknown dependency '${dep}'. ` +
             `Valid producer_ids in this scope: ${[...validInternalRefs].join(', ') || '(none)'}`
           );
         }
         if (dep === job.producer_id) {
-          errors.push(`Job '${job.producer_id}' in '${subDagPath}' cannot depend on itself`);
+          errors.push(`Job '${job.producer_id}' in '${subPlanPath}' cannot depend on itself`);
         }
       }
     }
     
-    // Validate nested sub-DAG dependencies (must reference internal jobs/sub-DAGs)
-    if (subDag.subDags && Array.isArray(subDag.subDags)) {
-      for (const nested of subDag.subDags) {
+    // Validate nested sub-plan dependencies (must reference internal jobs/sub-plans)
+    if (subPlan.subPlans && Array.isArray(subPlan.subPlans)) {
+      for (const nested of subPlan.subPlans) {
         if (!Array.isArray(nested.dependencies)) continue;
         
         for (const dep of nested.dependencies) {
           if (!validInternalRefs.has(dep)) {
             errors.push(
-              `Sub-DAG '${nested.producer_id}' in '${subDagPath}' references unknown dependency '${dep}'. ` +
+              `sub-plan '${nested.producer_id}' in '${subPlanPath}' references unknown dependency '${dep}'. ` +
               `Valid producer_ids in this scope: ${[...validInternalRefs].join(', ') || '(none)'}`
             );
           }
@@ -194,24 +194,24 @@ function validateSubDagsRecursively(
       }
     }
     
-    // Recursively validate nested sub-DAGs with a FRESH scope
-    // Each nested sub-DAG has its own isolated internal scope
-    validateSubDagsRecursively(subDag.subDags, new Set<string>(), subDagPath, errors);
+    // Recursively validate nested sub-plans with a FRESH scope
+    // Each nested sub-plan has its own isolated internal scope
+    validatesubPlansRecursively(subPlan.subPlans, new Set<string>(), subPlanPath, errors);
   }
 }
 
 /**
- * Validate and transform DAG input
+ * Validate and transform Plan input
  */
-function validateDagInput(args: any): { valid: boolean; error?: string; spec?: DagSpec } {
+function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: PlanSpec } {
   // Name is required
   if (!args.name || typeof args.name !== 'string') {
-    return { valid: false, error: 'DAG must have a name' };
+    return { valid: false, error: 'Plan must have a name' };
   }
   
   // Jobs array is required
   if (!args.jobs || !Array.isArray(args.jobs) || args.jobs.length === 0) {
-    return { valid: false, error: 'DAG must have at least one job in the jobs array' };
+    return { valid: false, error: 'Plan must have at least one job in the jobs array' };
   }
   
   // Collect all producer_ids for reference validation at root level
@@ -255,21 +255,21 @@ function validateDagInput(args: any): { valid: boolean; error?: string; spec?: D
     }
   }
   
-  // Validate sub-DAGs recursively (they have their own internal scope)
-  // Also collect root-level sub-DAG producer_ids
-  if (args.subDags && Array.isArray(args.subDags)) {
-    for (const subDag of args.subDags) {
-      if (subDag.producer_id) {
-        if (allProducerIds.has(subDag.producer_id)) {
-          errors.push(`Duplicate producer_id: '${subDag.producer_id}'`);
+  // Validate sub-plans recursively (they have their own internal scope)
+  // Also collect root-level sub-plan producer_ids
+  if (args.subPlans && Array.isArray(args.subPlans)) {
+    for (const subPlan of args.subPlans) {
+      if (subPlan.producer_id) {
+        if (allProducerIds.has(subPlan.producer_id)) {
+          errors.push(`Duplicate producer_id: '${subPlan.producer_id}'`);
         } else {
-          allProducerIds.add(subDag.producer_id);
+          allProducerIds.add(subPlan.producer_id);
         }
       }
     }
     
-    // Validate sub-DAGs structure recursively
-    validateSubDagsRecursively(args.subDags, new Set<string>(), '', errors);
+    // Validate sub-plans structure recursively
+    validatesubPlansRecursively(args.subPlans, new Set<string>(), '', errors);
   }
   
   // Validate root-level job dependency references
@@ -289,15 +289,15 @@ function validateDagInput(args: any): { valid: boolean; error?: string; spec?: D
     }
   }
   
-  // Validate root-level sub-DAG dependency references
-  if (args.subDags) {
-    for (const subDag of args.subDags) {
-      if (!Array.isArray(subDag.dependencies)) continue;
+  // Validate root-level sub-plan dependency references
+  if (args.subPlans) {
+    for (const subPlan of args.subPlans) {
+      if (!Array.isArray(subPlan.dependencies)) continue;
       
-      for (const dep of subDag.dependencies) {
+      for (const dep of subPlan.dependencies) {
         if (!allProducerIds.has(dep)) {
           errors.push(
-            `Sub-DAG '${subDag.producer_id}' references unknown dependency '${dep}'`
+            `sub-plan '${subPlan.producer_id}' references unknown dependency '${dep}'`
           );
         }
       }
@@ -308,8 +308,8 @@ function validateDagInput(args: any): { valid: boolean; error?: string; spec?: D
     return { valid: false, error: errors.join('; ') };
   }
   
-  // Transform to DagSpec using recursive mapping
-  const spec: DagSpec = {
+  // Transform to PlanSpec using recursive mapping
+  const spec: PlanSpec = {
     name: args.name,
     baseBranch: args.baseBranch,
     targetBranch: args.targetBranch,
@@ -326,7 +326,7 @@ function validateDagInput(args: any): { valid: boolean; error?: string; spec?: D
       instructions: j.instructions,
       baseBranch: j.baseBranch,
     })),
-    subDags: mapSubDagsRecursively(args.subDags),  // Recursive mapping!
+    subPlans: mapsubPlansRecursively(args.subPlans),  // Recursive mapping!
   };
   
   return { valid: true, spec };
@@ -337,11 +337,11 @@ function validateDagInput(args: any): { valid: boolean; error?: string; spec?: D
 // ============================================================================
 
 /**
- * Create a DAG
+ * Create a Plan
  */
-export async function handleCreateDag(args: any, ctx: DagHandlerContext): Promise<any> {
+export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   // Validate input
-  const validation = validateDagInput(args);
+  const validation = validatePlanInput(args);
   if (!validation.valid || !validation.spec) {
     return {
       success: false,
@@ -366,7 +366,7 @@ export async function handleCreateDag(args: any, ctx: DagHandlerContext): Promis
       const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
         baseBranch,
         repoPath,
-        'copilot_dag'
+        'copilot_plan'
       );
       validation.spec.targetBranch = targetBranchRoot;
       
@@ -379,30 +379,30 @@ export async function handleCreateDag(args: any, ctx: DagHandlerContext): Promis
       }
     }
     
-    // Create the DAG
-    const dag = ctx.dagRunner.enqueue(validation.spec);
+    // Create the Plan
+    const plan = ctx.PlanRunner.enqueue(validation.spec);
     
     // Build node mapping for response
     const nodeMapping: Record<string, string> = {};
-    for (const [producerId, nodeId] of dag.producerIdToNodeId) {
+    for (const [producerId, nodeId] of plan.producerIdToNodeId) {
       nodeMapping[producerId] = nodeId;
     }
     
     return {
       success: true,
-      dagId: dag.id,
-      name: dag.spec.name,
-      baseBranch: dag.baseBranch,
-      targetBranch: dag.targetBranch,
-      message: `DAG '${dag.spec.name}' created with ${dag.nodes.size} nodes. ` +
-               `Base: ${dag.baseBranch}, Target: ${dag.targetBranch}. ` +
-               `Use dagId '${dag.id}' to monitor progress.`,
+      planId: plan.id,
+      name: plan.spec.name,
+      baseBranch: plan.baseBranch,
+      targetBranch: plan.targetBranch,
+      message: `Plan '${plan.spec.name}' created with ${plan.nodes.size} nodes. ` +
+               `Base: ${plan.baseBranch}, Target: ${plan.targetBranch}. ` +
+               `Use planId '${plan.id}' to monitor progress.`,
       nodeMapping,
       status: {
         status: 'pending',
-        nodes: dag.nodes.size,
-        roots: dag.roots.length,
-        leaves: dag.leaves.length,
+        nodes: plan.nodes.size,
+        roots: plan.roots.length,
+        leaves: plan.leaves.length,
       },
     };
   } catch (error: any) {
@@ -414,9 +414,9 @@ export async function handleCreateDag(args: any, ctx: DagHandlerContext): Promis
 }
 
 /**
- * Create a single job (becomes a DAG with one node)
+ * Create a single job (becomes a Plan with one node)
  */
-export async function handleCreateJob(args: any, ctx: DagHandlerContext): Promise<any> {
+export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promise<any> {
   if (!args.name) {
     return { success: false, error: 'Job must have a name' };
   }
@@ -438,7 +438,7 @@ export async function handleCreateJob(args: any, ctx: DagHandlerContext): Promis
       const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
         baseBranch,
         repoPath,
-        'copilot_dag'
+        'copilot_plan'
       );
       targetBranch = targetBranchRoot;
       
@@ -450,7 +450,7 @@ export async function handleCreateJob(args: any, ctx: DagHandlerContext): Promis
       }
     }
     
-    const dag = ctx.dagRunner.enqueueJob({
+    const plan = ctx.PlanRunner.enqueueJob({
       name: args.name,
       task: args.task,
       work: args.work,
@@ -462,15 +462,15 @@ export async function handleCreateJob(args: any, ctx: DagHandlerContext): Promis
     });
     
     // Get the single node ID
-    const nodeId = dag.roots[0];
+    const nodeId = plan.roots[0];
     
     return {
       success: true,
-      dagId: dag.id,
+      planId: plan.id,
       nodeId,
-      baseBranch: dag.baseBranch,
-      targetBranch: dag.targetBranch,
-      message: `Job '${args.name}' created. Base: ${dag.baseBranch}, Target: ${dag.targetBranch}. Use dagId '${dag.id}' to monitor progress.`,
+      baseBranch: plan.baseBranch,
+      targetBranch: plan.targetBranch,
+      message: `Job '${args.name}' created. Base: ${plan.baseBranch}, Target: ${plan.targetBranch}. Use planId '${plan.id}' to monitor progress.`,
     };
   } catch (error: any) {
     return {
@@ -481,25 +481,25 @@ export async function handleCreateJob(args: any, ctx: DagHandlerContext): Promis
 }
 
 /**
- * Get DAG status
+ * Get Plan status
  */
-export async function handleGetDagStatus(args: any, ctx: DagHandlerContext): Promise<any> {
+export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): Promise<any> {
   if (!args.id) {
-    return { success: false, error: 'DAG id is required' };
+    return { success: false, error: 'Plan id is required' };
   }
   
-  const status = ctx.dagRunner.getStatus(args.id);
+  const status = ctx.PlanRunner.getStatus(args.id);
   if (!status) {
-    return { success: false, error: `DAG not found: ${args.id}` };
+    return { success: false, error: `Plan not found: ${args.id}` };
   }
   
-  const { dag, status: dagStatus, counts, progress } = status;
+  const { plan, status: planStatus, counts, progress } = status;
   
   // Build node status list
   const nodes: any[] = [];
-  for (const [nodeId, state] of dag.nodeStates) {
-    const node = dag.nodes.get(nodeId);
-    const isLeaf = dag.leaves.includes(nodeId);
+  for (const [nodeId, state] of plan.nodeStates) {
+    const node = plan.nodes.get(nodeId);
+    const isLeaf = plan.leaves.includes(nodeId);
     nodes.push({
       id: nodeId,
       producerId: node?.producerId,
@@ -518,52 +518,52 @@ export async function handleGetDagStatus(args: any, ctx: DagHandlerContext): Pro
   
   return {
     success: true,
-    dagId: dag.id,
-    name: dag.spec.name,
-    status: dagStatus,
+    planId: plan.id,
+    name: plan.spec.name,
+    status: planStatus,
     progress: Math.round(progress * 100),
     counts,
     nodes,
-    createdAt: dag.createdAt,
-    startedAt: dag.startedAt,
-    endedAt: dag.endedAt,
-    workSummary: dag.workSummary,
+    createdAt: plan.createdAt,
+    startedAt: plan.startedAt,
+    endedAt: plan.endedAt,
+    workSummary: plan.workSummary,
   };
 }
 
 /**
- * List all DAGs
+ * List all Plans
  */
-export async function handleListDags(args: any, ctx: DagHandlerContext): Promise<any> {
-  let dags = ctx.dagRunner.getAll();
+export async function handleListPlans(args: any, ctx: PlanHandlerContext): Promise<any> {
+  let Plans = ctx.PlanRunner.getAll();
   
   // Filter by status if specified
   if (args.status) {
-    dags = dags.filter(dag => {
-      const sm = ctx.dagRunner.getStateMachine(dag.id);
-      return sm?.computeDagStatus() === args.status;
+    Plans = Plans.filter(plan => {
+      const sm = ctx.PlanRunner.getStateMachine(plan.id);
+      return sm?.computePlanStatus() === args.status;
     });
   }
   
   // Sort by creation time (newest first)
-  dags.sort((a, b) => b.createdAt - a.createdAt);
+  Plans.sort((a, b) => b.createdAt - a.createdAt);
   
   return {
     success: true,
-    count: dags.length,
-    dags: dags.map(dag => {
-      const sm = ctx.dagRunner.getStateMachine(dag.id);
+    count: Plans.length,
+    Plans: Plans.map(plan => {
+      const sm = ctx.PlanRunner.getStateMachine(plan.id);
       const counts = sm?.getStatusCounts();
       
       return {
-        id: dag.id,
-        name: dag.spec.name,
-        status: sm?.computeDagStatus() || 'unknown',
-        nodes: dag.nodes.size,
+        id: plan.id,
+        name: plan.spec.name,
+        status: sm?.computePlanStatus() || 'unknown',
+        nodes: plan.nodes.size,
         counts,
-        createdAt: dag.createdAt,
-        startedAt: dag.startedAt,
-        endedAt: dag.endedAt,
+        createdAt: plan.createdAt,
+        startedAt: plan.startedAt,
+        endedAt: plan.endedAt,
       };
     }),
   };
@@ -572,29 +572,29 @@ export async function handleListDags(args: any, ctx: DagHandlerContext): Promise
 /**
  * Get node details
  */
-export async function handleGetNodeDetails(args: any, ctx: DagHandlerContext): Promise<any> {
-  if (!args.dagId) {
-    return { success: false, error: 'dagId is required' };
+export async function handleGetNodeDetails(args: any, ctx: PlanHandlerContext): Promise<any> {
+  if (!args.planId) {
+    return { success: false, error: 'planId is required' };
   }
   
   if (!args.nodeId) {
     return { success: false, error: 'nodeId is required' };
   }
   
-  const dag = ctx.dagRunner.get(args.dagId);
-  if (!dag) {
-    return { success: false, error: `DAG not found: ${args.dagId}` };
+  const plan = ctx.PlanRunner.get(args.planId);
+  if (!plan) {
+    return { success: false, error: `Plan not found: ${args.planId}` };
   }
   
   // Try to find node by ID or producer_id
   let nodeId = args.nodeId;
-  if (!dag.nodes.has(nodeId)) {
+  if (!plan.nodes.has(nodeId)) {
     // Try by producer_id
-    nodeId = dag.producerIdToNodeId.get(args.nodeId) || '';
+    nodeId = plan.producerIdToNodeId.get(args.nodeId) || '';
   }
   
-  const node = dag.nodes.get(nodeId);
-  const state = dag.nodeStates.get(nodeId);
+  const node = plan.nodes.get(nodeId);
+  const state = plan.nodeStates.get(nodeId);
   
   if (!node || !state) {
     return { success: false, error: `Node not found: ${args.nodeId}` };
@@ -608,11 +608,11 @@ export async function handleGetNodeDetails(args: any, ctx: DagHandlerContext): P
       name: node.name,
       type: node.type,
       dependencies: node.dependencies.map(depId => {
-        const depNode = dag.nodes.get(depId);
+        const depNode = plan.nodes.get(depId);
         return { id: depId, producerId: depNode?.producerId, name: depNode?.name };
       }),
       dependents: node.dependents.map(depId => {
-        const depNode = dag.nodes.get(depId);
+        const depNode = plan.nodes.get(depId);
         return { id: depId, producerId: depNode?.producerId, name: depNode?.name };
       }),
       ...(node.type === 'job' ? {
@@ -632,8 +632,8 @@ export async function handleGetNodeDetails(args: any, ctx: DagHandlerContext): P
       baseCommit: state.baseCommit,
       completedCommit: state.completedCommit,
       worktreePath: state.worktreePath,
-      mergedToTarget: dag.leaves.includes(nodeId) ? state.mergedToTarget : undefined,
-      isLeaf: dag.leaves.includes(nodeId),
+      mergedToTarget: plan.leaves.includes(nodeId) ? state.mergedToTarget : undefined,
+      isLeaf: plan.leaves.includes(nodeId),
     },
   };
 }
@@ -641,27 +641,27 @@ export async function handleGetNodeDetails(args: any, ctx: DagHandlerContext): P
 /**
  * Get node logs
  */
-export async function handleGetNodeLogs(args: any, ctx: DagHandlerContext): Promise<any> {
-  if (!args.dagId || !args.nodeId) {
-    return { success: false, error: 'dagId and nodeId are required' };
+export async function handleGetNodeLogs(args: any, ctx: PlanHandlerContext): Promise<any> {
+  if (!args.planId || !args.nodeId) {
+    return { success: false, error: 'planId and nodeId are required' };
   }
   
-  const dag = ctx.dagRunner.get(args.dagId);
-  if (!dag) {
-    return { success: false, error: `DAG not found: ${args.dagId}` };
+  const plan = ctx.PlanRunner.get(args.planId);
+  if (!plan) {
+    return { success: false, error: `Plan not found: ${args.planId}` };
   }
   
-  const node = dag.nodes.get(args.nodeId);
+  const node = plan.nodes.get(args.nodeId);
   if (!node) {
     return { success: false, error: `Node not found: ${args.nodeId}` };
   }
   
   const phase = args.phase || 'all';
-  const logs = ctx.dagRunner.getNodeLogs(args.dagId, args.nodeId, phase);
+  const logs = ctx.PlanRunner.getNodeLogs(args.planId, args.nodeId, phase);
   
   return {
     success: true,
-    dagId: args.dagId,
+    planId: args.planId,
     nodeId: args.nodeId,
     nodeName: node.name,
     phase,
@@ -670,52 +670,52 @@ export async function handleGetNodeLogs(args: any, ctx: DagHandlerContext): Prom
 }
 
 /**
- * Cancel a DAG
+ * Cancel a Plan
  */
-export async function handleCancelDag(args: any, ctx: DagHandlerContext): Promise<any> {
+export async function handleCancelPlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   if (!args.id) {
-    return { success: false, error: 'DAG id is required' };
+    return { success: false, error: 'Plan id is required' };
   }
   
-  const success = ctx.dagRunner.cancel(args.id);
+  const success = ctx.PlanRunner.cancel(args.id);
   
   return {
     success,
     message: success 
-      ? `DAG ${args.id} has been canceled` 
-      : `Failed to cancel DAG ${args.id}`,
+      ? `Plan ${args.id} has been canceled` 
+      : `Failed to cancel Plan ${args.id}`,
   };
 }
 
 /**
- * Delete a DAG
+ * Delete a Plan
  */
-export async function handleDeleteDag(args: any, ctx: DagHandlerContext): Promise<any> {
+export async function handleDeletePlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   if (!args.id) {
-    return { success: false, error: 'DAG id is required' };
+    return { success: false, error: 'Plan id is required' };
   }
   
-  const success = ctx.dagRunner.delete(args.id);
+  const success = ctx.PlanRunner.delete(args.id);
   
   return {
     success,
     message: success 
-      ? `DAG ${args.id} has been deleted` 
-      : `Failed to delete DAG ${args.id}`,
+      ? `Plan ${args.id} has been deleted` 
+      : `Failed to delete Plan ${args.id}`,
   };
 }
 
 /**
- * Retry failed nodes in a DAG
+ * Retry failed nodes in a Plan
  */
-export async function handleRetryDag(args: any, ctx: DagHandlerContext): Promise<any> {
+export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   if (!args.id) {
-    return { success: false, error: 'DAG id is required' };
+    return { success: false, error: 'Plan id is required' };
   }
   
-  const dag = ctx.dagRunner.getDag(args.id);
-  if (!dag) {
-    return { success: false, error: `DAG ${args.id} not found` };
+  const plan = ctx.PlanRunner.getPlan(args.id);
+  if (!plan) {
+    return { success: false, error: `Plan ${args.id} not found` };
   }
   
   // Determine which nodes to retry
@@ -723,7 +723,7 @@ export async function handleRetryDag(args: any, ctx: DagHandlerContext): Promise
   
   if (nodeIdsToRetry.length === 0) {
     // No specific nodes - retry all failed nodes
-    for (const [nodeId, state] of dag.nodeStates) {
+    for (const [nodeId, state] of plan.nodeStates) {
       if (state.status === 'failed') {
         nodeIdsToRetry.push(nodeId);
       }
@@ -734,7 +734,7 @@ export async function handleRetryDag(args: any, ctx: DagHandlerContext): Promise
     return { 
       success: false, 
       error: 'No failed nodes to retry',
-      dagId: args.id,
+      planId: args.id,
     };
   }
   
@@ -745,13 +745,13 @@ export async function handleRetryDag(args: any, ctx: DagHandlerContext): Promise
     clearWorktree: args.clearWorktree || false,
   };
   
-  // Retry the failed nodes using the DagRunner method
+  // Retry the failed nodes using the PlanRunner method
   const retriedNodes: Array<{ id: string; name: string }> = [];
   const errors: Array<{ id: string; error: string }> = [];
   
   for (const nodeId of nodeIdsToRetry) {
-    const result = ctx.dagRunner.retryNode(args.id, nodeId, retryOptions);
-    const node = dag.nodes.get(nodeId);
+    const result = ctx.PlanRunner.retryNode(args.id, nodeId, retryOptions);
+    const node = plan.nodes.get(nodeId);
     
     if (result.success) {
       retriedNodes.push({ id: nodeId, name: node?.name || nodeId });
@@ -760,15 +760,15 @@ export async function handleRetryDag(args: any, ctx: DagHandlerContext): Promise
     }
   }
   
-  // Resume the DAG if it was stopped
-  ctx.dagRunner.resume(args.id);
+  // Resume the Plan if it was stopped
+  ctx.PlanRunner.resume(args.id);
   
   return {
     success: retriedNodes.length > 0,
     message: retriedNodes.length > 0 
       ? `Retrying ${retriedNodes.length} node(s)` 
       : 'No nodes were retried',
-    dagId: args.id,
+    planId: args.id,
     retriedNodes,
     errors: errors.length > 0 ? errors : undefined,
   };
@@ -777,26 +777,26 @@ export async function handleRetryDag(args: any, ctx: DagHandlerContext): Promise
 /**
  * Get failure context for a failed node
  */
-export async function handleGetNodeFailureContext(args: any, ctx: DagHandlerContext): Promise<any> {
-  if (!args.dagId) {
-    return { success: false, error: 'dagId is required' };
+export async function handleGetNodeFailureContext(args: any, ctx: PlanHandlerContext): Promise<any> {
+  if (!args.planId) {
+    return { success: false, error: 'planId is required' };
   }
   if (!args.nodeId) {
     return { success: false, error: 'nodeId is required' };
   }
   
-  const result = ctx.dagRunner.getNodeFailureContext(args.dagId, args.nodeId);
+  const result = ctx.PlanRunner.getNodeFailureContext(args.planId, args.nodeId);
   
   if ('error' in result) {
     return { success: false, error: result.error };
   }
   
-  const dag = ctx.dagRunner.getDag(args.dagId);
-  const node = dag?.nodes.get(args.nodeId);
+  const plan = ctx.PlanRunner.getPlan(args.planId);
+  const node = plan?.nodes.get(args.nodeId);
   
   return {
     success: true,
-    dagId: args.dagId,
+    planId: args.planId,
     nodeId: args.nodeId,
     nodeName: node?.name || args.nodeId,
     phase: result.phase,

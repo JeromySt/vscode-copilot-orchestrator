@@ -7,14 +7,14 @@
  */
 
 import { IncomingMessage, ServerResponse } from 'http';
-import { DagRunner } from '../dag';
+import { PlanRunner } from '\.\./plan';
 import { McpHandler } from '../mcp/handler';
 
 /**
  * Context passed to all route handlers.
  */
 export interface RouteContext {
-  dagRunner: DagRunner;
+  PlanRunner: PlanRunner;
   mcpHandler: McpHandler;
 }
 

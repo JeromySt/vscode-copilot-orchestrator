@@ -7,13 +7,13 @@
  * - Work summary with commit details
  * - Process tree for running jobs
  * 
- * Ported from the legacy Job Details panel to work with DAG nodes.
+ * Ported from the legacy Job Details panel to work with Plan nodes.
  * 
  * @module ui/panels/nodeDetailPanel
  */
 
 import * as vscode from 'vscode';
-import { DagRunner, DagInstance, JobNode, SubDagNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord } from '../../dag';
+import { PlanRunner, PlanInstance, JobNode, SubPlanNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord } from '../../plan';
 
 /**
  * Format a WorkSpec for display
@@ -46,7 +46,7 @@ export class NodeDetailPanel {
   private static panels = new Map<string, NodeDetailPanel>();
   
   private readonly _panel: vscode.WebviewPanel;
-  private _dagId: string;
+  private _planId: string;
   private _nodeId: string;
   private _disposables: vscode.Disposable[] = [];
   private _updateInterval?: NodeJS.Timeout;
@@ -55,12 +55,12 @@ export class NodeDetailPanel {
   
   private constructor(
     panel: vscode.WebviewPanel,
-    dagId: string,
+    planId: string,
     nodeId: string,
-    private _dagRunner: DagRunner
+    private _planRunner: PlanRunner
   ) {
     this._panel = panel;
-    this._dagId = dagId;
+    this._planId = planId;
     this._nodeId = nodeId;
     
     // Show loading state immediately
@@ -71,8 +71,8 @@ export class NodeDetailPanel {
     
     // Setup update interval for running nodes
     this._updateInterval = setInterval(() => {
-      const dag = this._dagRunner.get(this._dagId);
-      const state = dag?.nodeStates.get(this._nodeId);
+      const plan = this._planRunner.get(this._planId);
+      const state = plan?.nodeStates.get(this._nodeId);
       if (state?.status === 'running' || state?.status === 'scheduled') {
         // Status changed - do full update
         if (this._lastStatus !== state.status) {
@@ -106,11 +106,11 @@ export class NodeDetailPanel {
   
   public static createOrShow(
     extensionUri: vscode.Uri,
-    dagId: string,
+    planId: string,
     nodeId: string,
-    dagRunner: DagRunner
+    planRunner: PlanRunner
   ) {
-    const key = `${dagId}:${nodeId}`;
+    const key = `${planId}:${nodeId}`;
     
     const existing = NodeDetailPanel.panels.get(key);
     if (existing) {
@@ -119,8 +119,8 @@ export class NodeDetailPanel {
       return;
     }
     
-    const dag = dagRunner.get(dagId);
-    const node = dag?.nodes.get(nodeId);
+    const plan = planRunner.get(planId);
+    const node = plan?.nodes.get(nodeId);
     const title = node ? `Node: ${node.name}` : `Node: ${nodeId.slice(0, 8)}`;
     
     const panel = vscode.window.createWebviewPanel(
@@ -133,18 +133,18 @@ export class NodeDetailPanel {
       }
     );
     
-    const nodePanel = new NodeDetailPanel(panel, dagId, nodeId, dagRunner);
+    const nodePanel = new NodeDetailPanel(panel, planId, nodeId, planRunner);
     NodeDetailPanel.panels.set(key, nodePanel);
   }
   
   /**
-   * Close all node panels associated with a DAG (used when DAG is deleted)
+   * Close all node panels associated with a Plan (used when Plan is deleted)
    */
-  public static closeForDag(dagId: string): void {
-    // Find and close all panels whose key starts with this dagId
+  public static closeForPlan(planId: string): void {
+    // Find and close all panels whose key starts with this planId
     const keysToClose: string[] = [];
     for (const key of NodeDetailPanel.panels.keys()) {
-      if (key.startsWith(`${dagId}:`)) {
+      if (key.startsWith(`${planId}:`)) {
         keysToClose.push(key);
       }
     }
@@ -157,7 +157,7 @@ export class NodeDetailPanel {
   }
   
   public dispose() {
-    const key = `${this._dagId}:${this._nodeId}`;
+    const key = `${this._planId}:${this._nodeId}`;
     NodeDetailPanel.panels.delete(key);
     
     if (this._updateInterval) {
@@ -174,12 +174,12 @@ export class NodeDetailPanel {
   
   private _handleMessage(message: any) {
     switch (message.type) {
-      case 'openDag':
-        vscode.commands.executeCommand('orchestrator.showDagDetails', message.dagId);
+      case 'openPlan':
+        vscode.commands.executeCommand('orchestrator.showPlanDetails', message.planId);
         break;
       case 'openWorktree':
-        const dag = this._dagRunner.get(this._dagId);
-        const state = dag?.nodeStates.get(this._nodeId);
+        const plan = this._planRunner.get(this._planId);
+        const state = plan?.nodeStates.get(this._nodeId);
         if (state?.worktreePath) {
           vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(state.worktreePath), { forceNewWindow: true });
         }
@@ -201,13 +201,13 @@ export class NodeDetailPanel {
         }
         break;
       case 'retryNode':
-        this._retryNode(message.dagId, message.nodeId, message.resumeSession);
+        this._retryNode(message.planId, message.nodeId, message.resumeSession);
         break;
     }
   }
   
-  private _retryNode(dagId: string, nodeId: string, resumeSession: boolean) {
-    const result = this._dagRunner.retryNode(dagId, nodeId, {
+  private _retryNode(planId: string, nodeId: string, resumeSession: boolean) {
+    const result = this._planRunner.retryNode(planId, nodeId, {
       resumeSession,
       clearWorktree: false,
     });
@@ -221,7 +221,7 @@ export class NodeDetailPanel {
   }
   
   private async _sendProcessStats() {
-    const stats = await this._dagRunner.getProcessStats(this._dagId, this._nodeId);
+    const stats = await this._planRunner.getProcessStats(this._planId, this._nodeId);
     this._panel.webview.postMessage({
       type: 'processStats',
       ...stats
@@ -229,12 +229,12 @@ export class NodeDetailPanel {
   }
   
   private async _sendLog(phase: string) {
-    const dag = this._dagRunner.get(this._dagId);
-    const node = dag?.nodes.get(this._nodeId);
+    const plan = this._planRunner.get(this._planId);
+    const node = plan?.nodes.get(this._nodeId);
     if (!node) return;
     
-    // Get logs from executor (works for both jobs and sub-dag nodes)
-    const logs = this._dagRunner.getNodeLogs(this._dagId, this._nodeId, phase as any);
+    // Get logs from executor (works for both jobs and sub-plan nodes)
+    const logs = this._planRunner.getNodeLogs(this._planId, this._nodeId, phase as any);
     
     this._panel.webview.postMessage({
       type: 'logContent',
@@ -244,21 +244,21 @@ export class NodeDetailPanel {
   }
   
   private _update() {
-    const dag = this._dagRunner.get(this._dagId);
-    if (!dag) {
-      this._panel.webview.html = this._getErrorHtml('DAG not found');
+    const plan = this._planRunner.get(this._planId);
+    if (!plan) {
+      this._panel.webview.html = this._getErrorHtml('Plan not found');
       return;
     }
     
-    const node = dag.nodes.get(this._nodeId);
-    const state = dag.nodeStates.get(this._nodeId);
+    const node = plan.nodes.get(this._nodeId);
+    const state = plan.nodeStates.get(this._nodeId);
     
     if (!node || !state) {
       this._panel.webview.html = this._getErrorHtml('Node not found');
       return;
     }
     
-    this._panel.webview.html = this._getHtml(dag, node, state);
+    this._panel.webview.html = this._getHtml(plan, node, state);
   }
   
   private _getLoadingHtml(): string {
@@ -313,13 +313,13 @@ export class NodeDetailPanel {
   }
   
   private _getHtml(
-    dag: DagInstance,
-    node: JobNode | SubDagNode,
+    plan: PlanInstance,
+    node: JobNode | SubPlanNode,
     state: NodeExecutionState
   ): string {
     const isJob = node.type === 'job';
     const jobNode = isJob ? node as JobNode : null;
-    const subDagNode = !isJob ? node as SubDagNode : null;
+    const subPlanNode = !isJob ? node as SubPlanNode : null;
     
     const duration = state.startedAt 
       ? this._formatDuration(Math.round(((state.endedAt || Date.now()) - state.startedAt) / 1000))
@@ -333,9 +333,9 @@ export class NodeDetailPanel {
       ? this._buildWorkSummaryHtml(state.workSummary)
       : '';
     
-    // Build child DAG summary HTML if this is a subdag node
-    const childDagSummaryHtml = subDagNode?.childDagId
-      ? this._buildChildDagSummaryHtml(subDagNode.childDagId)
+    // Build child Plan summary HTML if this is a subPlan node
+    const childPlanSummaryHtml = subPlanNode?.childPlanId
+      ? this._buildchildPlanSummaryHtml(subPlanNode.childPlanId)
       : '';
     
     // Build attempt history HTML (only if multiple attempts)
@@ -353,7 +353,7 @@ export class NodeDetailPanel {
 </head>
 <body>
   <div class="breadcrumb">
-    <a onclick="openDag('${dag.id}')">${this._escapeHtml(dag.spec.name)}</a> / ${this._escapeHtml(node.name)}
+    <a onclick="openPlan('${plan.id}')">${this._escapeHtml(plan.spec.name)}</a> / ${this._escapeHtml(node.name)}
   </div>
   
   <div class="header">
@@ -367,7 +367,7 @@ export class NodeDetailPanel {
     <div class="meta-grid">
       <div class="meta-item">
         <div class="meta-label">Type</div>
-        <div class="meta-value">${node.type === 'job' ? 'Job' : 'Sub-DAG'}</div>
+        <div class="meta-value">${node.type === 'job' ? 'Job' : 'sub-plan'}</div>
       </div>
       <div class="meta-item">
         <div class="meta-label">Attempts</div>
@@ -403,10 +403,10 @@ export class NodeDetailPanel {
     ` : ''}
     ${state.status === 'failed' ? `
     <div class="retry-section">
-      <button class="retry-btn" data-action="retry-node" data-dag-id="${dag.id}" data-node-id="${node.id}">
+      <button class="retry-btn" data-action="retry-node" data-plan-id="${plan.id}" data-node-id="${node.id}">
         🔄 Retry Node
       </button>
-      <button class="retry-btn secondary" data-action="retry-node-fresh" data-dag-id="${dag.id}" data-node-id="${node.id}">
+      <button class="retry-btn secondary" data-action="retry-node-fresh" data-plan-id="${plan.id}" data-node-id="${node.id}">
         🆕 Retry (Fresh Session)
       </button>
     </div>
@@ -463,25 +463,25 @@ export class NodeDetailPanel {
   ${workSummaryHtml}
   ` : ''}
   
-  ${subDagNode ? `
-  <!-- Sub-DAG Info -->
+  ${subPlanNode ? `
+  <!-- sub-plan Info -->
   <div class="section">
-    <h3>Sub-DAG Configuration</h3>
+    <h3>sub-plan Configuration</h3>
     <div class="config-item">
       <div class="config-label">Jobs</div>
-      <div class="config-value">${subDagNode.childSpec.jobs.length} jobs defined</div>
+      <div class="config-value">${subPlanNode.childSpec.jobs.length} jobs defined</div>
     </div>
-    ${subDagNode.childDagId ? `
+    ${subPlanNode.childPlanId ? `
     <div class="config-item">
-      <div class="config-label">Child DAG</div>
+      <div class="config-label">child Plan</div>
       <div class="config-value">
-        <a onclick="openDag('${subDagNode.childDagId}')" class="link">${subDagNode.childDagId.slice(0, 8)}...</a>
-        <button class="action-btn secondary" style="margin-left: 8px; padding: 2px 8px; font-size: 11px;" onclick="openDag('${subDagNode.childDagId}')">Open DAG</button>
+        <a onclick="openPlan('${subPlanNode.childPlanId}')" class="link">${subPlanNode.childPlanId.slice(0, 8)}...</a>
+        <button class="action-btn secondary" style="margin-left: 8px; padding: 2px 8px; font-size: 11px;" onclick="openPlan('${subPlanNode.childPlanId}')">Open Plan</button>
       </div>
     </div>
     ` : ''}
   </div>
-  ${childDagSummaryHtml}
+  ${childPlanSummaryHtml}
   ` : ''}
   
   <!-- Dependencies -->
@@ -490,8 +490,8 @@ export class NodeDetailPanel {
     ${node.dependencies.length > 0 ? `
     <div class="deps-list">
       ${node.dependencies.map(depId => {
-        const depNode = dag.nodes.get(depId);
-        const depState = dag.nodeStates.get(depId);
+        const depNode = plan.nodes.get(depId);
+        const depState = plan.nodeStates.get(depId);
         return `<span class="dep-badge ${depState?.status || 'pending'}">${this._escapeHtml(depNode?.name || depId)}</span>`;
       }).join('')}
     </div>
@@ -543,8 +543,8 @@ export class NodeDetailPanel {
       setTimeout(() => selectPhase(currentPhase), 50);
     }
     
-    function openDag(dagId) {
-      vscode.postMessage({ type: 'openDag', dagId });
+    function openPlan(planId) {
+      vscode.postMessage({ type: 'openPlan', planId });
     }
     
     function openWorktree() {
@@ -567,13 +567,13 @@ export class NodeDetailPanel {
     document.querySelectorAll('.retry-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const action = btn.getAttribute('data-action');
-        const dagId = btn.getAttribute('data-dag-id');
+        const planId = btn.getAttribute('data-plan-id');
         const nodeId = btn.getAttribute('data-node-id');
         
         if (action === 'retry-node') {
-          vscode.postMessage({ type: 'retryNode', dagId, nodeId, resumeSession: true });
+          vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: true });
         } else if (action === 'retry-node-fresh') {
-          vscode.postMessage({ type: 'retryNode', dagId, nodeId, resumeSession: false });
+          vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
         }
       });
     });
@@ -930,11 +930,11 @@ export class NodeDetailPanel {
   }
   
   /**
-   * Build HTML summary of a child DAG's execution results
+   * Build HTML summary of a child Plan's execution results
    */
-  private _buildChildDagSummaryHtml(childDagId: string): string {
-    const childDag = this._dagRunner.get(childDagId);
-    if (!childDag) {
+  private _buildchildPlanSummaryHtml(childPlanId: string): string {
+    const childPlan = this._planRunner.get(childPlanId);
+    if (!childPlan) {
       return '';
     }
     
@@ -942,8 +942,8 @@ export class NodeDetailPanel {
     let succeeded = 0, failed = 0, blocked = 0, running = 0, pending = 0;
     const jobResults: Array<{name: string; status: string; error?: string; commit?: string}> = [];
     
-    for (const [nodeId, state] of childDag.nodeStates) {
-      const node = childDag.nodes.get(nodeId);
+    for (const [nodeId, state] of childPlan.nodeStates) {
+      const node = childPlan.nodes.get(nodeId);
       if (state.status === 'succeeded') succeeded++;
       else if (state.status === 'failed') failed++;
       else if (state.status === 'blocked') blocked++;
@@ -958,12 +958,12 @@ export class NodeDetailPanel {
       });
     }
     
-    const total = childDag.nodes.size;
-    const ws = childDag.workSummary;
+    const total = childPlan.nodes.size;
+    const ws = childPlan.workSummary;
     
     return `
     <div class="section">
-      <h3>Child DAG Results</h3>
+      <h3>Child Plan Results</h3>
       <div class="work-summary-stats">
         <div class="work-stat">
           <div class="work-stat-value">${total}</div>
@@ -983,7 +983,7 @@ export class NodeDetailPanel {
         </div>
       </div>
       ${ws ? `
-      <div class="child-dag-work" style="margin-top: 12px; padding: 8px; background: var(--vscode-sideBar-background); border-radius: 4px;">
+      <div class="child-plan-work" style="margin-top: 12px; padding: 8px; background: var(--vscode-sideBar-background); border-radius: 4px;">
         <span style="color: var(--vscode-descriptionForeground);">Work:</span>
         <span>${ws.totalCommits} commits</span>
         <span style="color: #4ec9b0;">+${ws.totalFilesAdded}</span>
@@ -991,7 +991,7 @@ export class NodeDetailPanel {
         <span style="color: #f48771;">-${ws.totalFilesDeleted}</span>
       </div>
       ` : ''}
-      <div class="child-dag-jobs" style="margin-top: 12px;">
+      <div class="child-plan-jobs" style="margin-top: 12px;">
         ${jobResults.map(j => `
           <div class="child-job-row" style="display: flex; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--vscode-widget-border);">
             <span class="status-icon" style="margin-right: 8px;">${

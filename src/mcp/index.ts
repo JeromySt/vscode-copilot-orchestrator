@@ -5,8 +5,8 @@
  * 
  * Structure:
  * - types.ts - Shared type definitions
- * - tools/dagTools.ts - DAG tool definitions (schemas)
- * - handlers/dagHandlers.ts - DAG tool handlers
+ * - tools/planTools.ts - Plan tool definitions (schemas)
+ * - handlers/planHandlers.ts - Plan tool handlers
  * - handler.ts - Main MCP protocol handler
  * - mcpServerManager.ts - Server lifecycle management
  * - mcpDefinitionProvider.ts - VS Code MCP registration
@@ -25,4 +25,4 @@ export * from './mcpServerManager';
 export * from './mcpDefinitionProvider';
 
 // Tools (for advanced use)
-export { getAllToolDefinitions, getDagToolDefinitions } from './tools';
+export { getAllToolDefinitions, getPlanToolDefinitions } from './tools';

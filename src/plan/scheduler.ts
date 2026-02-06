@@ -1,5 +1,5 @@
 /**
- * @fileoverview DAG Scheduler
+ * @fileoverview Plan Scheduler
  * 
  * Decides which ready nodes to execute based on:
  * - Available capacity (maxParallel)
@@ -8,11 +8,11 @@
  * 
  * The scheduler is stateless - it just picks nodes based on current state.
  * 
- * @module dag/scheduler
+ * @module plan/scheduler
  */
 
-import { DagInstance, DagNode, nodePerformsWork } from './types';
-import { DagStateMachine } from './stateMachine';
+import { PlanInstance, PlanNode, nodePerformsWork } from './types';
+import { PlanStateMachine } from './stateMachine';
 
 /**
  * Scheduler options
@@ -23,9 +23,9 @@ export interface SchedulerOptions {
 }
 
 /**
- * DAG Scheduler - picks which nodes to execute
+ * Plan Scheduler - picks which nodes to execute
  */
-export class DagScheduler {
+export class PlanScheduler {
   private globalMaxParallel: number;
   
   constructor(options: SchedulerOptions = {}) {
@@ -33,16 +33,16 @@ export class DagScheduler {
   }
   
   /**
-   * Select nodes to schedule from a DAG.
+   * Select nodes to schedule from a Plan.
    * 
-   * @param dag - The DAG instance
-   * @param stateMachine - The state machine for the DAG
-   * @param currentGlobalRunning - Current number of globally running jobs (excluding sub-DAG coordination nodes)
+   * @param Plan - The Plan instance
+   * @param stateMachine - The state machine for the Plan
+   * @param currentGlobalRunning - Current number of globally running jobs (excluding sub-plan coordination nodes)
    * @returns Array of node IDs to schedule
    */
   selectNodes(
-    dag: DagInstance,
-    stateMachine: DagStateMachine,
+    plan: PlanInstance,
+    stateMachine: PlanStateMachine,
     currentGlobalRunning: number = 0
   ): string[] {
     // Get ready nodes
@@ -52,21 +52,21 @@ export class DagScheduler {
     }
     
     // Count only nodes that perform work (have a 'work' spec)
-    // Sub-DAGs and other coordination nodes don't consume execution resources
-    let currentDagRunning = 0;
-    for (const [nodeId, state] of dag.nodeStates) {
+    // sub-plans and other coordination nodes don't consume execution resources
+    let currentPlanRunning = 0;
+    for (const [nodeId, state] of plan.nodeStates) {
       if (state.status === 'running' || state.status === 'scheduled') {
-        const node = dag.nodes.get(nodeId);
+        const node = plan.nodes.get(nodeId);
         if (node && nodePerformsWork(node)) {
-          currentDagRunning++;
+          currentPlanRunning++;
         }
       }
     }
     
     // Calculate available slots
-    const dagAvailable = dag.maxParallel - currentDagRunning;
+    const planAvailable = plan.maxParallel - currentPlanRunning;
     const globalAvailable = this.globalMaxParallel - currentGlobalRunning;
-    const available = Math.min(dagAvailable, globalAvailable);
+    const available = Math.min(planAvailable, globalAvailable);
     
     if (available <= 0) {
       return [];
@@ -77,7 +77,7 @@ export class DagScheduler {
     // - Number of dependents (more dependents = higher priority)
     // - Estimated duration
     // - User-specified priority
-    const sortedNodes = this.prioritizeNodes(dag, readyNodes);
+    const sortedNodes = this.prioritizeNodes(plan, readyNodes);
     
     // Take up to available slots
     return sortedNodes.slice(0, available);
@@ -87,10 +87,10 @@ export class DagScheduler {
    * Prioritize nodes for scheduling.
    * Current strategy: Prefer nodes with more dependents (unlocks more work).
    */
-  private prioritizeNodes(dag: DagInstance, nodeIds: string[]): string[] {
+  private prioritizeNodes(plan: PlanInstance, nodeIds: string[]): string[] {
     return nodeIds.sort((a, b) => {
-      const nodeA = dag.nodes.get(a);
-      const nodeB = dag.nodes.get(b);
+      const nodeA = plan.nodes.get(a);
+      const nodeB = plan.nodes.get(b);
       
       if (!nodeA || !nodeB) return 0;
       

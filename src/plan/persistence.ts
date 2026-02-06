@@ -1,31 +1,31 @@
 /**
- * @fileoverview DAG Persistence
+ * @fileoverview Plan Persistence
  * 
- * Handles saving and loading DAG state to/from disk.
+ * Handles saving and loading Plan state to/from disk.
  * Uses JSON format for simplicity and human readability.
  * 
- * @module dag/persistence
+ * @module plan/persistence
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import {
-  DagInstance,
-  DagNode,
+  PlanInstance,
+  PlanNode,
   JobNode,
-  SubDagNode,
+  SubPlanNode,
   NodeExecutionState,
   WorkSummary,
   WorkSpec,
 } from './types';
 import { Logger } from '../core/logger';
 
-const log = Logger.for('dag-persistence');
+const log = Logger.for('plan-persistence');
 
 /**
- * Serialized DAG format for persistence
+ * Serialized Plan format for persistence
  */
-interface SerializedDag {
+interface SerializedPlan {
   id: string;
   spec: any;
   nodes: SerializedNode[];
@@ -33,7 +33,7 @@ interface SerializedDag {
   roots: string[];
   leaves: string[];
   nodeStates: Record<string, NodeExecutionState>;
-  parentDagId?: string;
+  parentPlanId?: string;
   parentNodeId?: string;
   repoPath: string;
   baseBranch: string;
@@ -51,7 +51,7 @@ interface SerializedNode {
   id: string;
   producerId: string;
   name: string;
-  type: 'job' | 'subdag';
+  type: 'job' | 'subPlan';
   dependencies: string[];
   dependents: string[];
   // Job-specific
@@ -61,16 +61,16 @@ interface SerializedNode {
   postchecks?: WorkSpec;
   instructions?: string;
   baseBranch?: string;
-  // SubDag-specific
+  // subPlan-specific
   childSpec?: any;
   maxParallel?: number;
-  childDagId?: string;
+  childPlanId?: string;
 }
 
 /**
- * DAG Persistence Manager
+ * Plan Persistence Manager
  */
-export class DagPersistence {
+export class PlanPersistence {
   private storagePath: string;
   
   constructor(storagePath: string) {
@@ -84,110 +84,110 @@ export class DagPersistence {
     }
   }
   
-  private getDagFilePath(dagId: string): string {
-    return path.join(this.storagePath, `dag-${dagId}.json`);
+  private getPlanFilePath(planId: string): string {
+    return path.join(this.storagePath, `plan-${planId}.json`);
   }
   
   private getIndexFilePath(): string {
-    return path.join(this.storagePath, 'dags-index.json');
+    return path.join(this.storagePath, 'plans-index.json');
   }
   
   /**
-   * Save a DAG to disk
+   * Save a Plan to disk
    */
-  save(dag: DagInstance): void {
+  save(plan: PlanInstance): void {
     try {
-      const serialized = this.serialize(dag);
-      const filePath = this.getDagFilePath(dag.id);
+      const serialized = this.serialize(plan);
+      const filePath = this.getPlanFilePath(plan.id);
       fs.writeFileSync(filePath, JSON.stringify(serialized, null, 2));
       
       // Update index
-      this.updateIndex(dag.id, dag.spec.name, dag.createdAt);
+      this.updateIndex(plan.id, plan.spec.name, plan.createdAt);
       
-      log.debug(`Saved DAG: ${dag.id}`, { name: dag.spec.name });
+      log.debug(`Saved Plan: ${plan.id}`, { name: plan.spec.name });
     } catch (error: any) {
-      log.error(`Failed to save DAG: ${dag.id}`, { error: error.message });
+      log.error(`Failed to save Plan: ${plan.id}`, { error: error.message });
       throw error;
     }
   }
   
   /**
-   * Save a DAG synchronously (for shutdown)
+   * Save a Plan synchronously (for shutdown)
    */
-  saveSync(dag: DagInstance): void {
-    this.save(dag);
+  saveSync(plan: PlanInstance): void {
+    this.save(plan);
   }
   
   /**
-   * Load a DAG from disk
+   * Load a Plan from disk
    */
-  load(dagId: string): DagInstance | undefined {
+  load(planId: string): PlanInstance | undefined {
     try {
-      const filePath = this.getDagFilePath(dagId);
+      const filePath = this.getPlanFilePath(planId);
       if (!fs.existsSync(filePath)) {
         return undefined;
       }
       
       const content = fs.readFileSync(filePath, 'utf-8');
-      const serialized: SerializedDag = JSON.parse(content);
+      const serialized: SerializedPlan = JSON.parse(content);
       return this.deserialize(serialized);
     } catch (error: any) {
-      log.error(`Failed to load DAG: ${dagId}`, { error: error.message });
+      log.error(`Failed to load Plan: ${planId}`, { error: error.message });
       return undefined;
     }
   }
   
   /**
-   * Load all DAGs from disk
+   * Load all Plans from disk
    */
-  loadAll(): DagInstance[] {
-    const dags: DagInstance[] = [];
+  loadAll(): PlanInstance[] {
+    const plans: PlanInstance[] = [];
     
     try {
       const files = fs.readdirSync(this.storagePath)
-        .filter(f => f.startsWith('dag-') && f.endsWith('.json'));
+        .filter(f => f.startsWith('plan-') && f.endsWith('.json'));
       
       for (const file of files) {
         try {
-          const dagId = file.replace('dag-', '').replace('.json', '');
-          const dag = this.load(dagId);
-          if (dag) {
-            dags.push(dag);
+          const planId = file.replace('plan-', '').replace('.json', '');
+          const plan = this.load(planId);
+          if (plan) {
+            plans.push(plan);
           }
         } catch (error: any) {
-          log.warn(`Failed to load DAG file: ${file}`, { error: error.message });
+          log.warn(`Failed to load Plan file: ${file}`, { error: error.message });
         }
       }
     } catch (error: any) {
-      log.error('Failed to load DAGs', { error: error.message });
+      log.error('Failed to load Plans', { error: error.message });
     }
     
-    return dags;
+    return plans;
   }
   
   /**
-   * Delete a DAG from disk
+   * Delete a Plan from disk
    */
-  delete(dagId: string): boolean {
+  delete(planId: string): boolean {
     try {
-      const filePath = this.getDagFilePath(dagId);
+      const filePath = this.getPlanFilePath(planId);
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
-        this.removeFromIndex(dagId);
-        log.debug(`Deleted DAG: ${dagId}`);
+        this.removeFromIndex(planId);
+        log.debug(`Deleted Plan: ${planId}`);
         return true;
       }
       return false;
     } catch (error: any) {
-      log.error(`Failed to delete DAG: ${dagId}`, { error: error.message });
+      log.error(`Failed to delete Plan: ${planId}`, { error: error.message });
       return false;
     }
   }
   
   /**
-   * Get list of all DAG IDs
+   * Get list of all Plan IDs
    */
-  listDagIds(): string[] {
+  listplanIds(): string[] {
     try {
       const indexPath = this.getIndexFilePath();
       if (!fs.existsSync(indexPath)) {
@@ -195,21 +195,21 @@ export class DagPersistence {
       }
       
       const content = fs.readFileSync(indexPath, 'utf-8');
-      const index: DagIndex = JSON.parse(content);
-      return Object.keys(index.dags);
+      const index: PlanIndex = JSON.parse(content);
+      return Object.keys(index.plans);
     } catch (error: any) {
-      log.error('Failed to list DAG IDs', { error: error.message });
+      log.error('Failed to list Plan IDs', { error: error.message });
       return [];
     }
   }
   
   /**
-   * Serialize a DAG for storage
+   * Serialize a Plan for storage
    */
-  private serialize(dag: DagInstance): SerializedDag {
+  private serialize(plan: PlanInstance): SerializedPlan {
     const nodes: SerializedNode[] = [];
     
-    for (const node of dag.nodes.values()) {
+    for (const node of plan.nodes.values()) {
       const serializedNode: SerializedNode = {
         id: node.id,
         producerId: node.producerId,
@@ -227,11 +227,11 @@ export class DagPersistence {
         serializedNode.postchecks = jobNode.postchecks;
         serializedNode.instructions = jobNode.instructions;
         serializedNode.baseBranch = jobNode.baseBranch;
-      } else if (node.type === 'subdag') {
-        const subDagNode = node as SubDagNode;
-        serializedNode.childSpec = subDagNode.childSpec;
-        serializedNode.maxParallel = subDagNode.maxParallel;
-        serializedNode.childDagId = subDagNode.childDagId;
+      } else if (node.type === 'subPlan') {
+        const subPlanNode = node as SubPlanNode;
+        serializedNode.childSpec = subPlanNode.childSpec;
+        serializedNode.maxParallel = subPlanNode.maxParallel;
+        serializedNode.childPlanId = subPlanNode.childPlanId;
       }
       
       nodes.push(serializedNode);
@@ -239,45 +239,45 @@ export class DagPersistence {
     
     // Convert nodeStates Map to object
     const nodeStates: Record<string, NodeExecutionState> = {};
-    for (const [nodeId, state] of dag.nodeStates) {
+    for (const [nodeId, state] of plan.nodeStates) {
       nodeStates[nodeId] = state;
     }
     
     // Convert producerIdToNodeId Map to object
     const producerIdToNodeId: Record<string, string> = {};
-    for (const [producerId, nodeId] of dag.producerIdToNodeId) {
+    for (const [producerId, nodeId] of plan.producerIdToNodeId) {
       producerIdToNodeId[producerId] = nodeId;
     }
     
     return {
-      id: dag.id,
-      spec: dag.spec,
+      id: plan.id,
+      spec: plan.spec,
       nodes,
       producerIdToNodeId,
-      roots: dag.roots,
-      leaves: dag.leaves,
+      roots: plan.roots,
+      leaves: plan.leaves,
       nodeStates,
-      parentDagId: dag.parentDagId,
-      parentNodeId: dag.parentNodeId,
-      repoPath: dag.repoPath,
-      baseBranch: dag.baseBranch,
-      targetBranch: dag.targetBranch,
-      worktreeRoot: dag.worktreeRoot,
-      createdAt: dag.createdAt,
-      startedAt: dag.startedAt,
-      endedAt: dag.endedAt,
-      cleanUpSuccessfulWork: dag.cleanUpSuccessfulWork,
-      maxParallel: dag.maxParallel,
-      workSummary: dag.workSummary,
+      parentPlanId: plan.parentPlanId,
+      parentNodeId: plan.parentNodeId,
+      repoPath: plan.repoPath,
+      baseBranch: plan.baseBranch,
+      targetBranch: plan.targetBranch,
+      worktreeRoot: plan.worktreeRoot,
+      createdAt: plan.createdAt,
+      startedAt: plan.startedAt,
+      endedAt: plan.endedAt,
+      cleanUpSuccessfulWork: plan.cleanUpSuccessfulWork,
+      maxParallel: plan.maxParallel,
+      workSummary: plan.workSummary,
     };
   }
   
   /**
-   * Deserialize a DAG from storage
+   * Deserialize a Plan from storage
    */
-  private deserialize(data: SerializedDag): DagInstance {
+  private deserialize(data: SerializedPlan): PlanInstance {
     // Rebuild nodes Map
-    const nodes = new Map<string, DagNode>();
+    const nodes = new Map<string, PlanNode>();
     
     for (const serializedNode of data.nodes) {
       if (serializedNode.type === 'job') {
@@ -296,15 +296,15 @@ export class DagPersistence {
           dependents: serializedNode.dependents,
         };
         nodes.set(node.id, node);
-      } else if (serializedNode.type === 'subdag') {
-        const node: SubDagNode = {
+      } else if (serializedNode.type === 'subPlan') {
+        const node: SubPlanNode = {
           id: serializedNode.id,
           producerId: serializedNode.producerId,
           name: serializedNode.name,
-          type: 'subdag',
+          type: 'subPlan',
           childSpec: serializedNode.childSpec,
           maxParallel: serializedNode.maxParallel,
-          childDagId: serializedNode.childDagId,
+          childPlanId: serializedNode.childPlanId,
           dependencies: serializedNode.dependencies,
           dependents: serializedNode.dependents,
         };
@@ -332,7 +332,7 @@ export class DagPersistence {
       roots: data.roots,
       leaves: data.leaves,
       nodeStates,
-      parentDagId: data.parentDagId,
+      parentPlanId: data.parentPlanId,
       parentNodeId: data.parentNodeId,
       repoPath: data.repoPath,
       baseBranch: data.baseBranch,
@@ -348,11 +348,11 @@ export class DagPersistence {
   }
   
   /**
-   * Update the DAG index
+   * Update the Plan index
    */
-  private updateIndex(dagId: string, name: string, createdAt: number): void {
+  private updateIndex(planId: string, name: string, createdAt: number): void {
     const indexPath = this.getIndexFilePath();
-    let index: DagIndex = { dags: {} };
+    let index: PlanIndex = { plans: {} };
     
     if (fs.existsSync(indexPath)) {
       try {
@@ -362,20 +362,20 @@ export class DagPersistence {
       }
     }
     
-    index.dags[dagId] = { name, createdAt };
+    index.plans[planId] = { name, createdAt };
     fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
   }
   
   /**
-   * Remove a DAG from the index
+   * Remove a Plan from the index
    */
-  private removeFromIndex(dagId: string): void {
+  private removeFromIndex(planId: string): void {
     const indexPath = this.getIndexFilePath();
     if (!fs.existsSync(indexPath)) return;
     
     try {
-      const index: DagIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-      delete index.dags[dagId];
+      const index: PlanIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+      delete index.plans[planId];
       fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
     } catch {
       // Ignore errors
@@ -386,6 +386,6 @@ export class DagPersistence {
 /**
  * Index file format
  */
-interface DagIndex {
-  dags: Record<string, { name: string; createdAt: number }>;
+interface PlanIndex {
+  plans: Record<string, { name: string; createdAt: number }>;
 }

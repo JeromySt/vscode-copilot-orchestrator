@@ -8,7 +8,7 @@
  * - Committing changes
  * - Computing work summaries
  * 
- * @module dag/executor
+ * @module plan/executor
  */
 
 import * as vscode from 'vscode';
@@ -41,7 +41,7 @@ const log = Logger.for('job-executor');
  * Active execution tracking
  */
 interface ActiveExecution {
-  dagId: string;
+  planId: string;
   nodeId: string;
   process?: ChildProcess;
   aborted: boolean;
@@ -82,12 +82,12 @@ export class DefaultJobExecutor implements JobExecutor {
    * Execute a job
    */
   async execute(context: ExecutionContext): Promise<JobExecutionResult> {
-    const { dag, node, worktreePath } = context;
-    const executionKey = `${dag.id}:${node.id}`;
+    const { plan, node, worktreePath } = context;
+    const executionKey = `${plan.id}:${node.id}`;
     
     // Track this execution
     const execution: ActiveExecution = {
-      dagId: dag.id,
+      planId: plan.id,
       nodeId: node.id,
       aborted: false,
     };
@@ -284,8 +284,8 @@ export class DefaultJobExecutor implements JobExecutor {
   /**
    * Cancel an execution
    */
-  cancel(dagId: string, nodeId: string): void {
-    const executionKey = `${dagId}:${nodeId}`;
+  cancel(planId: string, nodeId: string): void {
+    const executionKey = `${planId}:${nodeId}`;
     const execution = this.activeExecutions.get(executionKey);
     
     if (execution) {
@@ -308,28 +308,28 @@ export class DefaultJobExecutor implements JobExecutor {
   /**
    * Get execution logs for a job
    */
-  getLogs(dagId: string, nodeId: string): LogEntry[] {
-    const executionKey = `${dagId}:${nodeId}`;
+  getLogs(planId: string, nodeId: string): LogEntry[] {
+    const executionKey = `${planId}:${nodeId}`;
     return this.executionLogs.get(executionKey) || [];
   }
   
   /**
    * Get logs for a specific phase
    */
-  getLogsForPhase(dagId: string, nodeId: string, phase: ExecutionPhase): LogEntry[] {
-    return this.getLogs(dagId, nodeId).filter(entry => entry.phase === phase);
+  getLogsForPhase(planId: string, nodeId: string, phase: ExecutionPhase): LogEntry[] {
+    return this.getLogs(planId, nodeId).filter(entry => entry.phase === phase);
   }
   
   /**
    * Get process stats for a running execution
    */
-  async getProcessStats(dagId: string, nodeId: string): Promise<{
+  async getProcessStats(planId: string, nodeId: string): Promise<{
     pid: number | null;
     running: boolean;
     tree: ProcessNode[];
     duration: number | null;
   }> {
-    const executionKey = `${dagId}:${nodeId}`;
+    const executionKey = `${planId}:${nodeId}`;
     const execution = this.activeExecutions.get(executionKey);
     
     if (!execution || !execution.process?.pid) {
@@ -356,7 +356,7 @@ export class DefaultJobExecutor implements JobExecutor {
    * Get process stats for multiple running executions (more efficient than calling getProcessStats multiple times)
    * Fetches snapshot once and builds trees for all.
    */
-  async getAllProcessStats(nodeKeys: Array<{ dagId: string; nodeId: string; nodeName: string }>): Promise<Array<{
+  async getAllProcessStats(nodeKeys: Array<{ planId: string; nodeId: string; nodeName: string }>): Promise<Array<{
     nodeId: string;
     nodeName: string;
     pid: number | null;
@@ -383,8 +383,8 @@ export class DefaultJobExecutor implements JobExecutor {
       duration: number | null;
     }> = [];
     
-    for (const { dagId, nodeId, nodeName } of nodeKeys) {
-      const executionKey = `${dagId}:${nodeId}`;
+    for (const { planId, nodeId, nodeName } of nodeKeys) {
+      const executionKey = `${planId}:${nodeId}`;
       const execution = this.activeExecutions.get(executionKey);
       
       if (!execution || !execution.process?.pid) {
@@ -416,16 +416,16 @@ export class DefaultJobExecutor implements JobExecutor {
   /**
    * Check if an execution is active
    */
-  isActive(dagId: string, nodeId: string): boolean {
-    const executionKey = `${dagId}:${nodeId}`;
+  isActive(planId: string, nodeId: string): boolean {
+    const executionKey = `${planId}:${nodeId}`;
     return this.activeExecutions.has(executionKey);
   }
   
   /**
    * Log a message for a node execution (public API for runner to log merge operations)
    */
-  log(dagId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void {
-    const executionKey = `${dagId}:${nodeId}`;
+  log(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void {
+    const executionKey = `${planId}:${nodeId}`;
     
     // Ensure logs array exists
     if (!this.executionLogs.has(executionKey)) {
@@ -834,7 +834,7 @@ export class DefaultJobExecutor implements JobExecutor {
       await git.repository.stageAll(worktreePath);
       
       // Commit
-      const message = `[DAG] ${node.task}`;
+      const message = `[Plan] ${node.task}`;
       this.logInfo(executionKey, 'commit', `Creating commit: "${message}"`);
       await git.repository.commit(worktreePath, message);
       
@@ -974,7 +974,7 @@ export class DefaultJobExecutor implements JobExecutor {
           hash: headCommit,
           shortHash: headCommit.slice(0, 8),
           message: 'Work completed',
-          author: 'DAG Runner',
+          author: 'Plan Runner',
           date: new Date().toISOString(),
           filesAdded,
           filesModified,
@@ -1045,8 +1045,8 @@ export class DefaultJobExecutor implements JobExecutor {
   /**
    * Read logs from file for a completed execution
    */
-  readLogsFromFile(dagId: string, nodeId: string): string {
-    const executionKey = `${dagId}:${nodeId}`;
+  readLogsFromFile(planId: string, nodeId: string): string {
+    const executionKey = `${planId}:${nodeId}`;
     const logFile = this.getLogFilePath(executionKey);
     
     if (!logFile || !fs.existsSync(logFile)) {

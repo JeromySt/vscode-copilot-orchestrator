@@ -11,22 +11,22 @@
  * @module mcp/mcpHandler
  */
 
-import { DagRunner } from '../dag/runner';
+import { PlanRunner } from '../plan/runner';
 import { Logger, ComponentLogger } from '../core/logger';
 import { JsonRpcRequest, JsonRpcResponse, ToolHandlerContext } from './types';
-import { getDagToolDefinitions } from './tools/dagTools';
+import { getPlanToolDefinitions } from './tools/planTools';
 import {
-  handleCreateDag,
+  handleCreatePlan,
   handleCreateJob,
-  handleGetDagStatus,
-  handleListDags,
+  handleGetPlanStatus,
+  handleListPlans,
   handleGetNodeDetails,
   handleGetNodeLogs,
-  handleCancelDag,
-  handleDeleteDag,
-  handleRetryDag,
+  handleCancelPlan,
+  handleDeletePlan,
+  handleRetryPlan,
   handleGetNodeFailureContext,
-} from './handlers/dagHandlers';
+} from './handlers/planHandlers';
 
 /** MCP component logger */
 const log: ComponentLogger = Logger.for('mcp');
@@ -37,14 +37,14 @@ const PROTOCOL_VERSION = '2024-11-05';
 /** Server info for initialize response */
 const SERVER_INFO = {
   name: 'copilot-orchestrator',
-  version: '0.6.0'  // Bumped for DAG rewrite
+  version: '0.6.0'  // Bumped for Plan rewrite
 };
 
 /**
- * Extended context for DAG handlers
+ * Extended context for Plan handlers
  */
-interface DagHandlerContext extends ToolHandlerContext {
-  dagRunner: DagRunner;
+interface PlanHandlerContext extends ToolHandlerContext {
+  PlanRunner: PlanRunner;
 }
 
 /**
@@ -54,17 +54,17 @@ interface DagHandlerContext extends ToolHandlerContext {
  * to specialized handlers.
  */
 export class McpHandler {
-  private readonly context: DagHandlerContext;
+  private readonly context: PlanHandlerContext;
 
   /**
    * Create a new MCP handler.
    * 
-   * @param dagRunner - DAG runner instance
+   * @param PlanRunner - Plan Runner instance
    * @param workspacePath - Workspace root path
    */
-  constructor(dagRunner: DagRunner, workspacePath: string) {
+  constructor(PlanRunner: PlanRunner, workspacePath: string) {
     this.context = { 
-      dagRunner, 
+      PlanRunner, 
       workspacePath,
       // Legacy fields - kept for type compatibility
       runner: null as any,
@@ -136,7 +136,7 @@ export class McpHandler {
    * Handle tools/list request.
    */
   private handleToolsList(request: JsonRpcRequest): JsonRpcResponse {
-    const tools = getDagToolDefinitions();
+    const tools = getPlanToolDefinitions();
     log.info('Tools list requested', { toolCount: tools.length });
     log.debug('Tools list - tool names', { tools: tools.map(t => t.name) });
     
@@ -155,20 +155,20 @@ export class McpHandler {
     
     // Route to appropriate handler
     switch (name) {
-      case 'create_copilot_dag':
-        result = await handleCreateDag(args || {}, this.context);
+      case 'create_copilot_plan':
+        result = await handleCreatePlan(args || {}, this.context);
         break;
         
       case 'create_copilot_job':
         result = await handleCreateJob(args || {}, this.context);
         break;
         
-      case 'get_copilot_dag_status':
-        result = await handleGetDagStatus(args || {}, this.context);
+      case 'get_copilot_plan_status':
+        result = await handleGetPlanStatus(args || {}, this.context);
         break;
         
-      case 'list_copilot_dags':
-        result = await handleListDags(args || {}, this.context);
+      case 'list_copilot_plans':
+        result = await handleListPlans(args || {}, this.context);
         break;
         
       case 'get_copilot_node_details':
@@ -179,16 +179,16 @@ export class McpHandler {
         result = await handleGetNodeLogs(args || {}, this.context);
         break;
         
-      case 'cancel_copilot_dag':
-        result = await handleCancelDag(args || {}, this.context);
+      case 'cancel_copilot_plan':
+        result = await handleCancelPlan(args || {}, this.context);
         break;
         
-      case 'delete_copilot_dag':
-        result = await handleDeleteDag(args || {}, this.context);
+      case 'delete_copilot_plan':
+        result = await handleDeletePlan(args || {}, this.context);
         break;
         
-      case 'retry_copilot_dag':
-        result = await handleRetryDag(args || {}, this.context);
+      case 'retry_copilot_plan':
+        result = await handleRetryPlan(args || {}, this.context);
         break;
         
       case 'get_node_failure_context':

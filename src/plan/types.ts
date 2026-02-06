@@ -1,16 +1,16 @@
 /**
- * @fileoverview DAG Core Types
+ * @fileoverview Plan Core Types
  * 
- * Defines the fundamental types for the DAG-based orchestration system.
- * Everything is a DAG - even a single job is a DAG with one node.
+ * Defines the fundamental types for the Plan-based orchestration system.
+ * Everything is a Plan - even a single job is a Plan with one node.
  * 
  * Key Concepts:
- * - DagSpec: User-facing specification for creating a DAG
- * - Dag: Immutable topology (nodes + edges)
- * - DagState: Mutable execution state (single source of truth)
+ * - PlanSpec: User-facing specification for creating a Plan
+ * - Plan: Immutable topology (nodes + edges)
+ * - Planstate: Mutable execution state (single source of truth)
  * - NodeStatus: Valid states for a node
  * 
- * @module dag/types
+ * @module plan/types
  */
 
 // ============================================================================
@@ -192,7 +192,7 @@ export function normalizeWorkSpec(spec: WorkSpec | undefined): ProcessSpec | She
  * Jobs execute processes, shell commands, or delegate to AI agents.
  */
 export interface JobNodeSpec {
-  /** User-controlled identifier for DAG references (used in consumesFrom) */
+  /** User-controlled identifier for Plan references (used in consumesFrom) */
   producerId: string;
   
   /** Human-friendly display name (defaults to producerId) */
@@ -237,34 +237,34 @@ export interface JobNodeSpec {
 }
 
 /**
- * Specification for a sub-DAG node (user input).
- * Sub-DAGs are nested DAGs that run as a unit.
+ * Specification for a sub-plan node (user input).
+ * sub-plans are nested Plans that run as a unit.
  */
-export interface SubDagNodeSpec {
-  /** User-controlled identifier for DAG references */
+export interface SubPlanNodeSpec {
+  /** User-controlled identifier for Plan references */
   producerId: string;
   
   /** Human-friendly display name */
   name?: string;
   
-  /** Jobs within this sub-DAG */
+  /** Jobs within this sub-plan */
   jobs: JobNodeSpec[];
   
-  /** Nested sub-DAGs (recursive) */
-  subDags?: SubDagNodeSpec[];
+  /** Nested sub-plans (recursive) */
+  subPlans?: SubPlanNodeSpec[];
   
-  /** IDs of nodes this sub-DAG depends on */
+  /** IDs of nodes this sub-plan depends on */
   dependencies: string[];
   
-  /** Max parallel jobs in this sub-DAG */
+  /** Max parallel jobs in this sub-plan */
   maxParallel?: number;
 }
 
 /**
- * Full DAG specification (user input for creating a DAG).
+ * Full Plan specification (user input for creating a Plan).
  */
-export interface DagSpec {
-  /** Human-friendly name for the DAG */
+export interface PlanSpec {
+  /** Human-friendly name for the Plan */
   name: string;
   
   /** Repository path (defaults to workspace) */
@@ -282,11 +282,11 @@ export interface DagSpec {
   /** Whether to clean up worktrees after successful merges (default: true) */
   cleanUpSuccessfulWork?: boolean;
   
-  /** Job nodes in this DAG */
+  /** Job nodes in this Plan */
   jobs: JobNodeSpec[];
   
-  /** Sub-DAG nodes */
-  subDags?: SubDagNodeSpec[];
+  /** sub-plan nodes */
+  subPlans?: SubPlanNodeSpec[];
 }
 
 // ============================================================================
@@ -296,13 +296,13 @@ export interface DagSpec {
 /**
  * Type discriminator for nodes
  */
-export type NodeType = 'job' | 'subdag';
+export type NodeType = 'job' | 'subPlan';
 
 /**
  * Base node properties (shared by all node types)
  */
 interface BaseNode {
-  /** Unique ID within the DAG (UUID, auto-generated) */
+  /** Unique ID within the Plan (UUID, auto-generated) */
   id: string;
   
   /** User-controlled reference key (used in dependencies) */
@@ -347,37 +347,37 @@ export interface JobNode extends BaseNode {
 }
 
 /**
- * Sub-DAG node (internal representation)
+ * sub-plan node (internal representation)
  */
-export interface SubDagNode extends BaseNode {
-  type: 'subdag';
+export interface SubPlanNode extends BaseNode {
+  type: 'subPlan';
   
-  /** The nested DAG specification */
-  childSpec: DagSpec;
+  /** The nested Plan specification */
+  childSpec: PlanSpec;
   
-  /** Max parallel for the sub-DAG */
+  /** Max parallel for the sub-plan */
   maxParallel?: number;
   
-  /** Child DAG ID when instantiated (set when node starts running) */
-  childDagId?: string;
+  /** Child Plan ID when instantiated (set when node starts running) */
+  childPlanId?: string;
 }
 
 /**
  * Union type for all node types
  */
-export type DagNode = JobNode | SubDagNode;
+export type PlanNode = JobNode | SubPlanNode;
 
 /**
  * Check if a node performs work (has a work specification).
  * Nodes with work consume execution resources and count against parallelism limits.
- * Sub-DAG nodes are coordination nodes that don't perform work directly.
+ * sub-plan nodes are coordination nodes that don't perform work directly.
  */
-export function nodePerformsWork(node: DagNode): boolean {
+export function nodePerformsWork(node: PlanNode): boolean {
   return 'work' in node && node.work !== undefined;
 }
 
 // ============================================================================
-// DAG STATE (Execution State)
+// Plan STATE (Execution State)
 // ============================================================================
 
 /**
@@ -413,8 +413,8 @@ export interface NodeExecutionState {
   /** Worktree path (for jobs) - detached HEAD mode, no branch */
   worktreePath?: string;
   
-  /** Child DAG ID (for subdags) */
-  childDagId?: string;
+  /** Child Plan ID (for subPlans) */
+  childPlanId?: string;
   
   /** Execution attempt count */
   attempts: number;
@@ -514,9 +514,9 @@ export interface AttemptRecord {
 }
 
 /**
- * Overall DAG status (derived from node states)
+ * Overall Plan status (derived from node states)
  */
-export type DagStatus = 
+export type PlanStatus = 
   | 'pending'    // Not started
   | 'running'    // At least one node running
   | 'succeeded'  // All nodes succeeded
@@ -525,17 +525,17 @@ export type DagStatus =
   | 'canceled';  // User canceled
 
 /**
- * Full DAG instance (topology + state)
+ * Full Plan instance (topology + state)
  */
-export interface DagInstance {
-  /** Unique DAG ID (UUID) */
+export interface PlanInstance {
+  /** Unique Plan ID (UUID) */
   id: string;
   
-  /** The DAG specification */
-  spec: DagSpec;
+  /** The Plan specification */
+  spec: PlanSpec;
   
   /** Map of node ID to node definition */
-  nodes: Map<string, DagNode>;
+  nodes: Map<string, PlanNode>;
   
   /** Map of producerId to node ID (for resolving references) */
   producerIdToNodeId: Map<string, string>;
@@ -549,10 +549,10 @@ export interface DagInstance {
   /** Map of node ID to execution state */
   nodeStates: Map<string, NodeExecutionState>;
   
-  /** Parent DAG ID (if this is a sub-DAG) */
-  parentDagId?: string;
+  /** Parent Plan ID (if this is a sub-plan) */
+  parentPlanId?: string;
   
-  /** Parent node ID (the subdag node in parent) */
+  /** Parent node ID (the subPlan node in parent) */
   parentNodeId?: string;
   
   /** Repository path */
@@ -567,7 +567,7 @@ export interface DagInstance {
   /** Worktree root directory */
   worktreeRoot: string;
   
-  /** When the DAG was created */
+  /** When the Plan was created */
   createdAt: number;
   
   /** When execution started */
@@ -619,7 +619,7 @@ export interface CommitDetail {
 }
 
 /**
- * Aggregated work summary for a DAG
+ * Aggregated work summary for a Plan
  */
 export interface WorkSummary {
   totalCommits: number;
@@ -637,7 +637,7 @@ export interface WorkSummary {
  * Event emitted when a node transitions state
  */
 export interface NodeTransitionEvent {
-  dagId: string;
+  planId: string;
   nodeId: string;
   from: NodeStatus;
   to: NodeStatus;
@@ -645,11 +645,11 @@ export interface NodeTransitionEvent {
 }
 
 /**
- * Event emitted when a DAG completes
+ * Event emitted when a Plan completes
  */
-export interface DagCompletionEvent {
-  dagId: string;
-  status: DagStatus;
+export interface PlanCompletionEvent {
+  planId: string;
+  status: PlanStatus;
   timestamp: number;
 }
 
@@ -684,8 +684,8 @@ export interface JobExecutionResult {
  * Context passed to executor
  */
 export interface ExecutionContext {
-  /** DAG instance */
-  dag: DagInstance;
+  /** Plan instance */
+  plan: PlanInstance;
   
   /** Node being executed */
   node: JobNode;

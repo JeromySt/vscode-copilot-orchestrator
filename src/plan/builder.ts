@@ -1,62 +1,62 @@
 /**
- * @fileoverview DAG Builder
+ * @fileoverview Plan Builder
  * 
- * Builds an immutable DAG topology from a DagSpec.
+ * Builds an immutable Plan topology from a PlanSpec.
  * Handles:
  * - Assigning UUIDs to nodes
  * - Resolving producerId references to node IDs
  * - Computing dependents (reverse edges)
  * - Identifying roots and leaves
- * - Validating the DAG (no cycles, valid references)
+ * - Validating the Plan (no cycles, valid references)
  * 
- * @module dag/builder
+ * @module plan/builder
  */
 
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  DagSpec,
-  DagInstance,
-  DagNode,
+  PlanSpec,
+  PlanInstance,
+  PlanNode,
   JobNode,
-  SubDagNode,
+  SubPlanNode,
   JobNodeSpec,
-  SubDagNodeSpec,
+  SubPlanNodeSpec,
   NodeExecutionState,
 } from './types';
 
 /**
- * Validation error for DAG building
+ * Validation error for Plan building
  */
-export class DagValidationError extends Error {
+export class PlanValidationError extends Error {
   constructor(message: string, public details?: string[]) {
     super(message);
-    this.name = 'DagValidationError';
+    this.name = 'PlanValidationError';
   }
 }
 
 /**
- * Build a DagInstance from a DagSpec.
+ * Build a PlanInstance from a PlanSpec.
  * 
- * @param spec - The DAG specification
+ * @param spec - The Plan specification
  * @param options - Optional build options
- * @returns A fully constructed DagInstance
- * @throws DagValidationError if the spec is invalid
+ * @returns A fully constructed PlanInstance
+ * @throws PlanValidationError if the spec is invalid
  */
-export function buildDag(
-  spec: DagSpec,
+export function buildPlan(
+  spec: PlanSpec,
   options: {
-    parentDagId?: string;
+    parentPlanId?: string;
     parentNodeId?: string;
     repoPath?: string;
     worktreeRoot?: string;
   } = {}
-): DagInstance {
-  const dagId = uuidv4();
+): PlanInstance {
+  const planId = uuidv4();
   const errors: string[] = [];
   
-  // Maps for building the DAG
-  const nodes = new Map<string, DagNode>();
+  // Maps for building the Plan
+  const nodes = new Map<string, PlanNode>();
   const producerIdToNodeId = new Map<string, string>();
   
   // First pass: Create all nodes and build producerId map
@@ -91,50 +91,50 @@ export function buildDag(
     producerIdToNodeId.set(jobSpec.producerId, nodeId);
   }
   
-  // Process sub-DAGs
-  for (const subDagSpec of spec.subDags || []) {
-    if (!subDagSpec.producerId) {
-      errors.push(`Sub-DAG is missing required 'producerId' field`);
+  // Process sub-plans
+  for (const subPlanSpec of spec.subPlans || []) {
+    if (!subPlanSpec.producerId) {
+      errors.push(`sub-plan is missing required 'producerId' field`);
       continue;
     }
     
-    if (producerIdToNodeId.has(subDagSpec.producerId)) {
-      errors.push(`Duplicate producerId: '${subDagSpec.producerId}'`);
+    if (producerIdToNodeId.has(subPlanSpec.producerId)) {
+      errors.push(`Duplicate producerId: '${subPlanSpec.producerId}'`);
       continue;
     }
     
     const nodeId = uuidv4();
     
-    // Build the child DagSpec from the SubDagNodeSpec
-    const childSpec: DagSpec = {
-      name: subDagSpec.name || subDagSpec.producerId,
-      jobs: subDagSpec.jobs,
-      subDags: subDagSpec.subDags,
-      maxParallel: subDagSpec.maxParallel,
+    // Build the child PlanSpec from the SubPlanNodeSpec
+    const childSpec: PlanSpec = {
+      name: subPlanSpec.name || subPlanSpec.producerId,
+      jobs: subPlanSpec.jobs,
+      subPlans: subPlanSpec.subPlans,
+      maxParallel: subPlanSpec.maxParallel,
       baseBranch: spec.baseBranch,
-      targetBranch: undefined, // Sub-DAGs don't have their own target branch
+      targetBranch: undefined, // sub-plans don't have their own target branch
       cleanUpSuccessfulWork: spec.cleanUpSuccessfulWork,
     };
     
-    const node: SubDagNode = {
+    const node: SubPlanNode = {
       id: nodeId,
-      producerId: subDagSpec.producerId,
-      name: subDagSpec.name || subDagSpec.producerId,
-      type: 'subdag',
+      producerId: subPlanSpec.producerId,
+      name: subPlanSpec.name || subPlanSpec.producerId,
+      type: 'subPlan',
       childSpec,
-      maxParallel: subDagSpec.maxParallel,
+      maxParallel: subPlanSpec.maxParallel,
       dependencies: [], // Will be resolved in second pass
       dependents: [],
     };
     
     nodes.set(nodeId, node);
-    producerIdToNodeId.set(subDagSpec.producerId, nodeId);
+    producerIdToNodeId.set(subPlanSpec.producerId, nodeId);
   }
   
   // Second pass: Resolve dependencies (producerId -> nodeId)
   const allSpecs = [
     ...spec.jobs.map(j => ({ producerId: j.producerId, dependencies: j.dependencies })),
-    ...(spec.subDags || []).map(s => ({ producerId: s.producerId, dependencies: s.dependencies })),
+    ...(spec.subPlans || []).map(s => ({ producerId: s.producerId, dependencies: s.dependencies })),
   ];
   
   for (const nodeSpec of allSpecs) {
@@ -188,17 +188,17 @@ export function buildDag(
   
   // Validate: Must have at least one node
   if (nodes.size === 0) {
-    errors.push('DAG must have at least one node');
+    errors.push('Plan must have at least one node');
   }
   
   // Validate: Must have at least one root
   if (roots.length === 0 && nodes.size > 0) {
-    errors.push('DAG has no root nodes (all nodes have dependencies) - this indicates a cycle');
+    errors.push('Plan has no root nodes (all nodes have dependencies) - this indicates a cycle');
   }
   
   // Throw if there are errors
   if (errors.length > 0) {
-    throw new DagValidationError('Invalid DAG specification', errors);
+    throw new PlanValidationError('Invalid Plan specification', errors);
   }
   
   // Build initial node states
@@ -213,17 +213,17 @@ export function buildDag(
   
   // Determine worktree root
   const repoPath = options.repoPath || spec.repoPath || process.cwd();
-  const worktreeRoot = options.worktreeRoot || path.join(repoPath, '.worktrees', dagId.slice(0, 8));
+  const worktreeRoot = options.worktreeRoot || path.join(repoPath, '.worktrees', planId.slice(0, 8));
   
   return {
-    id: dagId,
+    id: planId,
     spec,
     nodes,
     producerIdToNodeId,
     roots,
     leaves,
     nodeStates,
-    parentDagId: options.parentDagId,
+    parentPlanId: options.parentPlanId,
     parentNodeId: options.parentNodeId,
     repoPath,
     baseBranch: spec.baseBranch || 'main',
@@ -236,10 +236,10 @@ export function buildDag(
 }
 
 /**
- * Detect cycles in the DAG using DFS.
+ * Detect cycles in the Plan using DFS.
  * Returns an error message if a cycle is found, null otherwise.
  */
-function detectCycles(nodes: Map<string, DagNode>): string | null {
+function detectCycles(nodes: Map<string, PlanNode>): string | null {
   const visited = new Set<string>();
   const visiting = new Set<string>();
   const path: string[] = [];
@@ -287,10 +287,10 @@ function detectCycles(nodes: Map<string, DagNode>): string | null {
 }
 
 /**
- * Create a simple single-job DAG from minimal input.
- * Convenience function for creating a DAG with just one job.
+ * Create a simple single-job Plan from minimal input.
+ * Convenience function for creating a Plan with just one job.
  */
-export function buildSingleJobDag(
+export function buildSingleJobPlan(
   jobSpec: {
     name: string;
     task: string;
@@ -306,10 +306,10 @@ export function buildSingleJobDag(
     repoPath?: string;
     worktreeRoot?: string;
   }
-): DagInstance {
+): PlanInstance {
   const producerId = jobSpec.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 64);
   
-  const spec: DagSpec = {
+  const spec: PlanSpec = {
     name: jobSpec.name,
     baseBranch: jobSpec.baseBranch,
     targetBranch: jobSpec.targetBranch,
@@ -326,5 +326,5 @@ export function buildSingleJobDag(
     }],
   };
   
-  return buildDag(spec, options);
+  return buildPlan(spec, options);
 }

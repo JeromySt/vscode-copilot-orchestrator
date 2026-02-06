@@ -2,7 +2,7 @@
  * @fileoverview HTTP Module Index
  * 
  * Central export for HTTP server functionality.
- * NOTE: The primary HTTP server is now in dagInitialization.ts.
+ * NOTE: The primary HTTP server is now in planInitialization.ts.
  * This module is retained for the legacy server and type definitions.
  * 
  * @module http

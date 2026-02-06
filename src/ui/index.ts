@@ -4,7 +4,7 @@
  * @module ui
  */
 
-export { DagsViewProvider } from './dagsViewProvider';
-export { DagDetailPanel } from './panels/dagDetailPanel';
+export { plansViewProvider } from './plansViewProvider';
+export { planDetailPanel } from './panels/planDetailPanel';
 export { NodeDetailPanel } from './panels/nodeDetailPanel';
 export { attachStatusBar } from './statusBar';

@@ -1,7 +1,7 @@
 /**
- * @fileoverview DAG State Machine
+ * @fileoverview Plan State Machine
  * 
- * The single source of truth for DAG execution state.
+ * The single source of truth for Plan execution state.
  * Enforces valid state transitions and emits events.
  * 
  * Key Principles:
@@ -10,39 +10,39 @@
  * - Invalid transitions are rejected (not silently ignored)
  * - Events are emitted for all state changes
  * 
- * @module dag/stateMachine
+ * @module plan/stateMachine
  */
 
 import { EventEmitter } from 'events';
 import {
-  DagInstance,
+  PlanInstance,
   NodeStatus,
   NodeExecutionState,
-  DagStatus,
+  PlanStatus,
   NodeTransitionEvent,
-  DagCompletionEvent,
+  PlanCompletionEvent,
   isValidTransition,
   isTerminal,
   TERMINAL_STATES,
 } from './types';
 import { Logger } from '../core/logger';
 
-const log = Logger.for('dag-state');
+const log = Logger.for('plan-state');
 
 /**
  * Events emitted by the state machine
  */
 export interface StateMachineEvents {
   'transition': (event: NodeTransitionEvent) => void;
-  'dagComplete': (event: DagCompletionEvent) => void;
-  'nodeReady': (dagId: string, nodeId: string) => void;
+  'planComplete': (event: PlanCompletionEvent) => void;
+  'nodeReady': (planId: string, nodeId: string) => void;
 }
 
 /**
- * DAG State Machine - manages execution state for a DAG
+ * Plan State Machine - manages execution state for a Plan
  */
-export class DagStateMachine extends EventEmitter {
-  constructor(private dag: DagInstance) {
+export class PlanStateMachine extends EventEmitter {
+  constructor(private plan: PlanInstance) {
     super();
   }
   
@@ -50,14 +50,14 @@ export class DagStateMachine extends EventEmitter {
    * Get the current status of a node
    */
   getNodeStatus(nodeId: string): NodeStatus | undefined {
-    return this.dag.nodeStates.get(nodeId)?.status;
+    return this.plan.nodeStates.get(nodeId)?.status;
   }
   
   /**
    * Get the full execution state of a node
    */
   getNodeState(nodeId: string): NodeExecutionState | undefined {
-    return this.dag.nodeStates.get(nodeId);
+    return this.plan.nodeStates.get(nodeId);
   }
   
   /**
@@ -73,7 +73,7 @@ export class DagStateMachine extends EventEmitter {
     newStatus: NodeStatus,
     updates?: Partial<NodeExecutionState>
   ): boolean {
-    const state = this.dag.nodeStates.get(nodeId);
+    const state = this.plan.nodeStates.get(nodeId);
     if (!state) {
       log.error(`Cannot transition unknown node: ${nodeId}`);
       return false;
@@ -84,7 +84,7 @@ export class DagStateMachine extends EventEmitter {
     // Check if transition is valid
     if (!isValidTransition(currentStatus, newStatus)) {
       log.warn(`Invalid transition rejected: ${nodeId} ${currentStatus} -> ${newStatus}`, {
-        dagId: this.dag.id,
+        planId: this.plan.id,
       });
       return false;
     }
@@ -111,13 +111,13 @@ export class DagStateMachine extends EventEmitter {
     }
     
     log.debug(`Node transition: ${nodeId} ${currentStatus} -> ${newStatus}`, {
-      dagId: this.dag.id,
-      nodeName: this.dag.nodes.get(nodeId)?.name,
+      planId: this.plan.id,
+      nodeName: this.plan.nodes.get(nodeId)?.name,
     });
     
     // Emit transition event
     const event: NodeTransitionEvent = {
-      dagId: this.dag.id,
+      planId: this.plan.id,
       nodeId,
       from: currentStatus,
       to: newStatus,
@@ -149,9 +149,9 @@ export class DagStateMachine extends EventEmitter {
       this.propagateBlocked(nodeId);
     }
     
-    // Check if DAG is complete after any terminal transition
+    // Check if Plan is complete after any terminal transition
     if (isTerminal(to)) {
-      this.checkDagCompletion();
+      this.checkPlanCompletion();
     }
   }
   
@@ -159,15 +159,15 @@ export class DagStateMachine extends EventEmitter {
    * Check if dependents of a succeeded node are now ready
    */
   private checkDependentsReady(succeededNodeId: string): void {
-    const node = this.dag.nodes.get(succeededNodeId);
+    const node = this.plan.nodes.get(succeededNodeId);
     if (!node) return;
     
     for (const dependentId of node.dependents) {
       if (this.areDependenciesMet(dependentId)) {
-        const dependentState = this.dag.nodeStates.get(dependentId);
+        const dependentState = this.plan.nodeStates.get(dependentId);
         if (dependentState?.status === 'pending') {
           this.transition(dependentId, 'ready');
-          this.emit('nodeReady', this.dag.id, dependentId);
+          this.emit('nodeReady', this.plan.id, dependentId);
         }
       }
     }
@@ -182,14 +182,14 @@ export class DagStateMachine extends EventEmitter {
     
     while (queue.length > 0) {
       const nodeId = queue.shift()!;
-      const node = this.dag.nodes.get(nodeId);
+      const node = this.plan.nodes.get(nodeId);
       if (!node) continue;
       
       for (const dependentId of node.dependents) {
         if (visited.has(dependentId)) continue;
         visited.add(dependentId);
         
-        const dependentState = this.dag.nodeStates.get(dependentId);
+        const dependentState = this.plan.nodeStates.get(dependentId);
         if (dependentState && !isTerminal(dependentState.status)) {
           this.transition(dependentId, 'blocked', {
             error: `Blocked: dependency '${node.name}' failed`,
@@ -204,11 +204,11 @@ export class DagStateMachine extends EventEmitter {
    * Check if all dependencies of a node are satisfied
    */
   areDependenciesMet(nodeId: string): boolean {
-    const node = this.dag.nodes.get(nodeId);
+    const node = this.plan.nodes.get(nodeId);
     if (!node) return false;
     
     for (const depId of node.dependencies) {
-      const depState = this.dag.nodeStates.get(depId);
+      const depState = this.plan.nodeStates.get(depId);
       if (depState?.status !== 'succeeded') {
         return false;
       }
@@ -221,11 +221,11 @@ export class DagStateMachine extends EventEmitter {
    * Check if any dependency has failed
    */
   hasDependencyFailed(nodeId: string): boolean {
-    const node = this.dag.nodes.get(nodeId);
+    const node = this.plan.nodes.get(nodeId);
     if (!node) return false;
     
     for (const depId of node.dependencies) {
-      const depState = this.dag.nodeStates.get(depId);
+      const depState = this.plan.nodeStates.get(depId);
       if (depState?.status === 'failed' || depState?.status === 'blocked') {
         return true;
       }
@@ -235,38 +235,38 @@ export class DagStateMachine extends EventEmitter {
   }
   
   /**
-   * Check if the DAG has completed and emit event if so
+   * Check if the Plan has completed and emit event if so
    */
-  private checkDagCompletion(): void {
-    const status = this.computeDagStatus();
+  private checkPlanCompletion(): void {
+    const status = this.computePlanStatus();
     
-    // DAG is complete if status is not pending or running
+    // Plan is complete if status is not pending or running
     if (status !== 'pending' && status !== 'running') {
-      // Update DAG end time if not set
-      if (!this.dag.endedAt) {
-        this.dag.endedAt = Date.now();
+      // Update Plan end time if not set
+      if (!this.plan.endedAt) {
+        this.plan.endedAt = Date.now();
       }
       
-      const event: DagCompletionEvent = {
-        dagId: this.dag.id,
+      const event: PlanCompletionEvent = {
+        planId: this.plan.id,
         status,
         timestamp: Date.now(),
       };
       
-      log.info(`DAG completed: ${this.dag.spec.name}`, {
-        dagId: this.dag.id,
+      log.info(`Plan completed: ${this.plan.spec.name}`, {
+        planId: this.plan.id,
         status,
-        duration: this.dag.endedAt - (this.dag.startedAt || this.dag.createdAt),
+        duration: this.plan.endedAt - (this.plan.startedAt || this.plan.createdAt),
       });
       
-      this.emit('dagComplete', event);
+      this.emit('planComplete', event);
     }
   }
   
   /**
-   * Compute the overall DAG status from node states
+   * Compute the overall Plan status from node states
    */
-  computeDagStatus(): DagStatus {
+  computePlanStatus(): PlanStatus {
     let hasRunning = false;
     let hasPending = false;
     let hasReady = false;
@@ -275,7 +275,7 @@ export class DagStateMachine extends EventEmitter {
     let hasSucceeded = false;
     let hasCanceled = false;
     
-    for (const state of this.dag.nodeStates.values()) {
+    for (const state of this.plan.nodeStates.values()) {
       switch (state.status) {
         case 'running':
           hasRunning = true;
@@ -312,13 +312,13 @@ export class DagStateMachine extends EventEmitter {
     // If there are ready or pending nodes (and no running), we're still going
     if (hasReady || hasPending) {
       // Check if all pending/ready nodes are actually blocked
-      const activeNonTerminal = Array.from(this.dag.nodeStates.values())
+      const activeNonTerminal = Array.from(this.plan.nodeStates.values())
         .filter(s => s.status === 'pending' || s.status === 'ready')
         .length;
       
       if (activeNonTerminal > 0) {
         // If we have the start time, we're running
-        if (this.dag.startedAt) {
+        if (this.plan.startedAt) {
           return 'running';
         }
         return 'pending';
@@ -351,7 +351,7 @@ export class DagStateMachine extends EventEmitter {
    */
   getNodesByStatus(status: NodeStatus): string[] {
     const result: string[] = [];
-    for (const [nodeId, state] of this.dag.nodeStates) {
+    for (const [nodeId, state] of this.plan.nodeStates) {
       if (state.status === status) {
         result.push(nodeId);
       }
@@ -375,7 +375,7 @@ export class DagStateMachine extends EventEmitter {
    * @returns true if reset succeeded
    */
   resetNodeToPending(nodeId: string): boolean {
-    const state = this.dag.nodeStates.get(nodeId);
+    const state = this.plan.nodeStates.get(nodeId);
     if (!state) {
       log.error(`Cannot reset unknown node: ${nodeId}`);
       return false;
@@ -389,13 +389,13 @@ export class DagStateMachine extends EventEmitter {
     state.status = newStatus;
     
     log.info(`Node reset for retry: ${nodeId} ${oldStatus} -> ${newStatus}`, {
-      dagId: this.dag.id,
-      nodeName: this.dag.nodes.get(nodeId)?.name,
+      planId: this.plan.id,
+      nodeName: this.plan.nodes.get(nodeId)?.name,
     });
     
     // Emit transition event
     const event: NodeTransitionEvent = {
-      dagId: this.dag.id,
+      planId: this.plan.id,
       nodeId,
       from: oldStatus,
       to: newStatus,
@@ -405,7 +405,7 @@ export class DagStateMachine extends EventEmitter {
     
     // If we're ready, emit nodeReady
     if (newStatus === 'ready') {
-      this.emit('nodeReady', this.dag.id, nodeId);
+      this.emit('nodeReady', this.plan.id, nodeId);
     }
     
     // Unblock any downstream nodes that were blocked due to this node
@@ -419,11 +419,11 @@ export class DagStateMachine extends EventEmitter {
    * Called when a failed node is being retried.
    */
   private unblockDownstream(nodeId: string): void {
-    const node = this.dag.nodes.get(nodeId);
+    const node = this.plan.nodes.get(nodeId);
     if (!node) return;
     
     for (const dependentId of node.dependents) {
-      const dependentState = this.dag.nodeStates.get(dependentId);
+      const dependentState = this.plan.nodeStates.get(dependentId);
       if (dependentState?.status === 'blocked') {
         // Check if this is the only failed/blocked dependency
         if (!this.hasDependencyFailed(dependentId)) {
@@ -432,8 +432,8 @@ export class DagStateMachine extends EventEmitter {
           dependentState.error = undefined;
           
           log.debug(`Unblocked downstream node: ${dependentId}`, {
-            dagId: this.dag.id,
-            nodeName: this.dag.nodes.get(dependentId)?.name,
+            planId: this.plan.id,
+            nodeName: this.plan.nodes.get(dependentId)?.name,
           });
           
           // Recursively unblock further downstream
@@ -458,7 +458,7 @@ export class DagStateMachine extends EventEmitter {
       canceled: 0,
     };
     
-    for (const state of this.dag.nodeStates.values()) {
+    for (const state of this.plan.nodeStates.values()) {
       counts[state.status]++;
     }
     
@@ -469,7 +469,7 @@ export class DagStateMachine extends EventEmitter {
    * Cancel all non-terminal nodes
    */
   cancelAll(): void {
-    for (const [nodeId, state] of this.dag.nodeStates) {
+    for (const [nodeId, state] of this.plan.nodeStates) {
       if (!isTerminal(state.status)) {
         this.transition(nodeId, 'canceled');
       }
@@ -487,10 +487,10 @@ export class DagStateMachine extends EventEmitter {
    * @returns Array of commit SHAs from completed dependencies
    */
   getBaseCommitsForNode(nodeId: string): string[] {
-    const node = this.dag.nodes.get(nodeId);
+    const node = this.plan.nodes.get(nodeId);
     if (!node) return [];
     
-    // If no dependencies, use the DAG's base branch (caller handles this)
+    // If no dependencies, use the Plan's base branch (caller handles this)
     if (node.dependencies.length === 0) {
       return [];
     }
@@ -498,7 +498,7 @@ export class DagStateMachine extends EventEmitter {
     // Gather commits from all completed dependencies
     const commits: string[] = [];
     for (const depId of node.dependencies) {
-      const depState = this.dag.nodeStates.get(depId);
+      const depState = this.plan.nodeStates.get(depId);
       if (depState?.completedCommit) {
         commits.push(depState.completedCommit);
       }

@@ -8,5 +8,5 @@
 
 export { detectWorkspace, Detected } from './detector';
 export { ensureDir, readJSON, writeJSON, cpuCountMinusOne } from './utils';
-export * from './dagInitialization';
+export * from './planInitialization';
 export { Logger, ComponentLogger } from './logger';

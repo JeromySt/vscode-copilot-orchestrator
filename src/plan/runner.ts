@@ -1,16 +1,16 @@
 /**
- * @fileoverview DAG Runner
+ * @fileoverview Plan Runner
  * 
- * Main orchestrator for DAG execution. Combines:
- * - DAG building
+ * Main orchestrator for Plan execution. Combines:
+ * - Plan building
  * - State machine management
  * - Scheduling
  * - Execution delegation
  * - Persistence
  * 
- * This is the primary interface for creating and running DAGs.
+ * This is the primary interface for creating and running Plans.
  * 
- * @module dag/runner
+ * @module plan/runner
  */
 
 import * as path from 'path';
@@ -18,17 +18,17 @@ import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
 import {
-  DagSpec,
-  DagInstance,
-  DagNode,
+  PlanSpec,
+  PlanInstance,
+  PlanNode,
   JobNode,
-  SubDagNode,
+  SubPlanNode,
   NodeStatus,
-  DagStatus,
+  PlanStatus,
   JobExecutionResult,
   ExecutionContext,
   NodeTransitionEvent,
-  DagCompletionEvent,
+  PlanCompletionEvent,
   WorkSummary,
   JobWorkSummary,
   LogEntry,
@@ -37,27 +37,27 @@ import {
   nodePerformsWork,
   AttemptRecord,
 } from './types';
-import { buildDag, buildSingleJobDag, DagValidationError } from './builder';
-import { DagStateMachine } from './stateMachine';
-import { DagScheduler } from './scheduler';
-import { DagPersistence } from './persistence';
+import { buildPlan, buildSingleJobPlan, PlanValidationError } from './builder';
+import { PlanStateMachine } from './stateMachine';
+import { PlanScheduler } from './scheduler';
+import { PlanPersistence } from './persistence';
 import { Logger } from '../core/logger';
 import * as git from '../git';
 
-const log = Logger.for('dag-runner');
+const log = Logger.for('plan-runner');
 
 /**
- * Events emitted by the DAG runner
+ * Events emitted by the Plan Runner
  */
-export interface DagRunnerEvents {
-  'dagCreated': (dag: DagInstance) => void;
-  'dagStarted': (dag: DagInstance) => void;
-  'dagCompleted': (dag: DagInstance, status: DagStatus) => void;
-  'dagDeleted': (dagId: string) => void;
+export interface PlanRunnerEvents {
+  'planCreated': (plan: PlanInstance) => void;
+  'planStarted': (plan: PlanInstance) => void;
+  'planCompleted': (plan: PlanInstance, status: PlanStatus) => void;
+  'planDeleted': (planId: string) => void;
   'nodeTransition': (event: NodeTransitionEvent) => void;
-  'nodeStarted': (dagId: string, nodeId: string) => void;
-  'nodeCompleted': (dagId: string, nodeId: string, success: boolean) => void;
-  'nodeRetry': (dagId: string, nodeId: string) => void;
+  'nodeStarted': (planId: string, nodeId: string) => void;
+  'nodeCompleted': (planId: string, nodeId: string, success: boolean) => void;
+  'nodeRetry': (planId: string, nodeId: string) => void;
 }
 
 /**
@@ -65,16 +65,16 @@ export interface DagRunnerEvents {
  */
 export interface JobExecutor {
   execute(context: ExecutionContext): Promise<JobExecutionResult>;
-  cancel(dagId: string, nodeId: string): void;
-  getLogs?(dagId: string, nodeId: string): LogEntry[];
-  getLogsForPhase?(dagId: string, nodeId: string, phase: ExecutionPhase): LogEntry[];
-  log?(dagId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void;
+  cancel(planId: string, nodeId: string): void;
+  getLogs?(planId: string, nodeId: string): LogEntry[];
+  getLogsForPhase?(planId: string, nodeId: string, phase: ExecutionPhase): LogEntry[];
+  log?(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void;
 }
 
 /**
- * DAG Runner configuration
+ * Plan Runner configuration
  */
-export interface DagRunnerConfig {
+export interface PlanRunnerConfig {
   /** Storage path for persistence */
   storagePath: string;
   
@@ -101,25 +101,25 @@ export interface RetryNodeOptions {
 }
 
 /**
- * DAG Runner - orchestrates DAG execution
+ * Plan Runner - orchestrates Plan execution
  */
-export class DagRunner extends EventEmitter {
-  private dags = new Map<string, DagInstance>();
-  private stateMachines = new Map<string, DagStateMachine>();
-  private scheduler: DagScheduler;
-  private persistence: DagPersistence;
+export class PlanRunner extends EventEmitter {
+  private plans = new Map<string, PlanInstance>();
+  private stateMachines = new Map<string, PlanStateMachine>();
+  private scheduler: PlanScheduler;
+  private persistence: PlanPersistence;
   private executor?: JobExecutor;
   private pumpTimer?: NodeJS.Timeout;
-  private config: DagRunnerConfig;
+  private config: PlanRunnerConfig;
   private isRunning = false;
   
-  constructor(config: DagRunnerConfig) {
+  constructor(config: PlanRunnerConfig) {
     super();
     this.config = config;
-    this.scheduler = new DagScheduler({
+    this.scheduler = new PlanScheduler({
       globalMaxParallel: config.maxParallel || 8,
     });
-    this.persistence = new DagPersistence(config.storagePath);
+    this.persistence = new PlanPersistence(config.storagePath);
   }
   
   /**
@@ -132,28 +132,28 @@ export class DagRunner extends EventEmitter {
   /**
    * Log a message to the executor (helper for merge operations)
    */
-  private execLog(dagId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void {
+  private execLog(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void {
     if (this.executor?.log) {
-      this.executor.log(dagId, nodeId, phase, type, message);
+      this.executor.log(planId, nodeId, phase, type, message);
     }
   }
   
   /**
-   * Initialize the runner - load persisted DAGs and start pump
+   * Initialize the runner - load persisted Plans and start pump
    */
   async initialize(): Promise<void> {
-    log.info('Initializing DAG runner');
+    log.info('Initializing Plan Runner');
     
-    // Load persisted DAGs
-    const loadedDags = this.persistence.loadAll();
-    for (const dag of loadedDags) {
-      this.dags.set(dag.id, dag);
-      const sm = new DagStateMachine(dag);
+    // Load persisted Plans
+    const loadedPlans = this.persistence.loadAll();
+    for (const plan of loadedPlans) {
+      this.plans.set(plan.id, plan);
+      const sm = new PlanStateMachine(plan);
       this.setupStateMachineListeners(sm);
-      this.stateMachines.set(dag.id, sm);
+      this.stateMachines.set(plan.id, sm);
     }
     
-    log.info(`Loaded ${loadedDags.length} DAGs from persistence`);
+    log.info(`Loaded ${loadedPlans.length} Plans from persistence`);
     
     // Start the pump
     this.startPump();
@@ -164,74 +164,74 @@ export class DagRunner extends EventEmitter {
    * Shutdown the runner - persist state and stop pump
    */
   async shutdown(): Promise<void> {
-    log.info('Shutting down DAG runner');
+    log.info('Shutting down Plan Runner');
     this.stopPump();
     
-    // Persist all DAGs
-    for (const dag of this.dags.values()) {
-      this.persistence.save(dag);
+    // Persist all Plans
+    for (const plan of this.plans.values()) {
+      this.persistence.save(plan);
     }
     
     this.isRunning = false;
   }
   
   /**
-   * Persist all DAGs synchronously (for emergency shutdown)
+   * Persist all Plans synchronously (for emergency shutdown)
    */
   persistSync(): void {
-    for (const dag of this.dags.values()) {
-      this.persistence.saveSync(dag);
+    for (const plan of this.plans.values()) {
+      this.persistence.saveSync(plan);
     }
   }
   
   // ============================================================================
-  // DAG CREATION
+  // Plan CREATION
   // ============================================================================
   
   /**
-   * Create and enqueue a DAG from a specification.
+   * Create and enqueue a Plan from a specification.
    * 
-   * @param spec - The DAG specification
-   * @returns The created DAG instance
-   * @throws DagValidationError if the spec is invalid
+   * @param spec - The Plan specification
+   * @returns The created Plan instance
+   * @throws PlanValidationError if the spec is invalid
    */
-  enqueue(spec: DagSpec): DagInstance {
-    log.info(`Creating DAG: ${spec.name}`, {
+  enqueue(spec: PlanSpec): PlanInstance {
+    log.info(`Creating Plan: ${spec.name}`, {
       jobs: spec.jobs.length,
-      subDags: spec.subDags?.length || 0,
+      subPlans: spec.subPlans?.length || 0,
     });
     
-    // Build the DAG
-    const dag = buildDag(spec, {
+    // Build the Plan
+    const plan = buildPlan(spec, {
       repoPath: spec.repoPath || this.config.defaultRepoPath,
     });
     
-    // Store the DAG
-    this.dags.set(dag.id, dag);
+    // Store the Plan
+    this.plans.set(plan.id, plan);
     
     // Create state machine
-    const sm = new DagStateMachine(dag);
+    const sm = new PlanStateMachine(plan);
     this.setupStateMachineListeners(sm);
-    this.stateMachines.set(dag.id, sm);
+    this.stateMachines.set(plan.id, sm);
     
     // Persist
-    this.persistence.save(dag);
+    this.persistence.save(plan);
     
     // Emit event
-    this.emit('dagCreated', dag);
+    this.emit('planCreated', plan);
     
-    log.info(`DAG created: ${dag.id}`, {
+    log.info(`Plan created: ${plan.id}`, {
       name: spec.name,
-      nodes: dag.nodes.size,
-      roots: dag.roots.length,
-      leaves: dag.leaves.length,
+      nodes: plan.nodes.size,
+      roots: plan.roots.length,
+      leaves: plan.leaves.length,
     });
     
-    return dag;
+    return plan;
   }
   
   /**
-   * Create a simple single-job DAG.
+   * Create a simple single-job plan.
    * Convenience method for backwards compatibility with job-only workflows.
    */
   enqueueJob(jobSpec: {
@@ -243,84 +243,84 @@ export class DagRunner extends EventEmitter {
     instructions?: string;
     baseBranch?: string;
     targetBranch?: string;
-  }): DagInstance {
-    const dag = buildSingleJobDag(jobSpec, {
+  }): PlanInstance {
+    const plan = buildSingleJobPlan(jobSpec, {
       repoPath: this.config.defaultRepoPath,
     });
     
     // Store and setup
-    this.dags.set(dag.id, dag);
-    const sm = new DagStateMachine(dag);
+    this.plans.set(plan.id, plan);
+    const sm = new PlanStateMachine(plan);
     this.setupStateMachineListeners(sm);
-    this.stateMachines.set(dag.id, sm);
+    this.stateMachines.set(plan.id, sm);
     
     // Persist
-    this.persistence.save(dag);
+    this.persistence.save(plan);
     
     // Emit event
-    this.emit('dagCreated', dag);
+    this.emit('planCreated', plan);
     
-    log.info(`Single-job DAG created: ${dag.id}`, { name: jobSpec.name });
+    log.info(`Single-job Plan created: ${plan.id}`, { name: jobSpec.name });
     
-    return dag;
+    return plan;
   }
   
   // ============================================================================
-  // DAG QUERIES
+  // Plan QUERIES
   // ============================================================================
   
   /**
-   * Get a DAG by ID
+   * Get a Plan by ID
    */
-  get(dagId: string): DagInstance | undefined {
-    return this.dags.get(dagId);
+  get(planId: string): PlanInstance | undefined {
+    return this.plans.get(planId);
   }
   
   /**
-   * Get all DAGs
+   * Get all Plans
    */
-  getAll(): DagInstance[] {
-    return Array.from(this.dags.values());
+  getAll(): PlanInstance[] {
+    return Array.from(this.plans.values());
   }
   
   /**
-   * Get DAGs by status
+   * Get Plans by status
    */
-  getByStatus(status: DagStatus): DagInstance[] {
-    return Array.from(this.dags.values()).filter(dag => {
-      const sm = this.stateMachines.get(dag.id);
-      return sm?.computeDagStatus() === status;
+  getByStatus(status: PlanStatus): PlanInstance[] {
+    return Array.from(this.plans.values()).filter(plan => {
+      const sm = this.stateMachines.get(plan.id);
+      return sm?.computePlanStatus() === status;
     });
   }
   
   /**
-   * Get the state machine for a DAG
+   * Get the state machine for a Plan
    */
-  getStateMachine(dagId: string): DagStateMachine | undefined {
-    return this.stateMachines.get(dagId);
+  getStateMachine(planId: string): PlanStateMachine | undefined {
+    return this.stateMachines.get(planId);
   }
   
   /**
-   * Get DAG status with computed fields
+   * Get Plan status with computed fields
    */
-  getStatus(dagId: string): {
-    dag: DagInstance;
-    status: DagStatus;
+  getStatus(planId: string): {
+    plan: PlanInstance;
+    status: PlanStatus;
     counts: Record<NodeStatus, number>;
     progress: number;
   } | undefined {
-    const dag = this.dags.get(dagId);
-    const sm = this.stateMachines.get(dagId);
-    if (!dag || !sm) return undefined;
+    const plan = this.plans.get(planId);
+    const sm = this.stateMachines.get(planId);
+    if (!plan || !sm) return undefined;
     
     const counts = sm.getStatusCounts();
-    const total = dag.nodes.size;
+    const total = plan.nodes.size;
     const completed = counts.succeeded + counts.failed + counts.blocked + counts.canceled;
     const progress = total > 0 ? completed / total : 0;
     
     return {
-      dag,
-      status: sm.computeDagStatus(),
+      plan,
+      status: sm.computePlanStatus(),
       counts,
       progress,
     };
@@ -329,15 +329,15 @@ export class DagRunner extends EventEmitter {
   /**
    * Get execution logs for a node
    */
-  getNodeLogs(dagId: string, nodeId: string, phase?: 'all' | ExecutionPhase): string {
+  getNodeLogs(planId: string, nodeId: string, phase?: 'all' | ExecutionPhase): string {
     if (!this.executor) return 'No executor available.';
     
     // First try memory logs
     let logs: LogEntry[] = [];
     if (phase && phase !== 'all' && this.executor.getLogsForPhase) {
-      logs = this.executor.getLogsForPhase(dagId, nodeId, phase);
+      logs = this.executor.getLogsForPhase(planId, nodeId, phase);
     } else if (this.executor.getLogs) {
-      logs = this.executor.getLogs(dagId, nodeId);
+      logs = this.executor.getLogs(planId, nodeId);
     }
     
     if (logs.length > 0) {
@@ -356,7 +356,7 @@ export class DagRunner extends EventEmitter {
     
     // Try reading from log file
     if ('readLogsFromFile' in this.executor && typeof (this.executor as any).readLogsFromFile === 'function') {
-      const fileContent = (this.executor as any).readLogsFromFile(dagId, nodeId);
+      const fileContent = (this.executor as any).readLogsFromFile(planId, nodeId);
       if (fileContent && !fileContent.startsWith('No log file')) {
         // Filter by phase if requested
         if (phase && phase !== 'all') {
@@ -374,7 +374,7 @@ export class DagRunner extends EventEmitter {
   /**
    * Get process stats for a running node
    */
-  async getProcessStats(dagId: string, nodeId: string): Promise<{
+  async getProcessStats(planId: string, nodeId: string): Promise<{
     pid: number | null;
     running: boolean;
     tree: any[];
@@ -385,31 +385,31 @@ export class DagRunner extends EventEmitter {
     }
     
     if ('getProcessStats' in this.executor && typeof (this.executor as any).getProcessStats === 'function') {
-      return (this.executor as any).getProcessStats(dagId, nodeId);
+      return (this.executor as any).getProcessStats(planId, nodeId);
     }
     
     return { pid: null, running: false, tree: [], duration: null };
   }
   
   /**
-   * Get process stats for all running nodes in a DAG (including sub-DAGs).
-   * Returns a hierarchical structure: DAG → Jobs → Processes
+   * Get process stats for all running nodes in a Plan (including sub-plans).
+   * Returns a hierarchical structure: Plan → Jobs → Processes
    * Uses batch method for efficiency - single process snapshot for all nodes.
    */
-  async getAllProcessStats(dagId: string): Promise<{
+  async getAllProcessStats(planId: string): Promise<{
     flat: Array<{
       nodeId: string;
       nodeName: string;
-      dagId?: string;
-      dagName?: string;
+      planId?: string;
+      planName?: string;
       pid: number | null;
       running: boolean;
       tree: any[];
       duration: number | null;
     }>;
     hierarchy: Array<{
-      dagId: string;
-      dagName: string;
+      planId: string;
+      planName: string;
       status: string;
       jobs: Array<{
         nodeId: string;
@@ -420,21 +420,21 @@ export class DagRunner extends EventEmitter {
         tree: any[];
         duration: number | null;
       }>;
-      children: any[]; // Nested sub-DAGs
+      children: any[]; // Nested sub-plans
     }>;
   }> {
-    const dag = this.dags.get(dagId);
-    if (!dag || !this.executor) return { flat: [], hierarchy: [] };
+    const plan = this.plans.get(planId);
+    if (!plan || !this.executor) return { flat: [], hierarchy: [] };
     
     // Collect all running/scheduled job node keys for batch process fetch
-    const nodeKeys: Array<{ dagId: string; nodeId: string; nodeName: string; dagName?: string }> = [];
+    const nodeKeys: Array<{ planId: string; nodeId: string; nodeName: string; planName?: string }> = [];
     
     // Build hierarchical structure recursively
-    const buildHierarchy = (d: DagInstance, parentPath?: string): any => {
+    const buildHierarchy = (d: PlanInstance, parentPath?: string): any => {
       const sm = this.stateMachines.get(d.id);
-      const dagStatus = sm?.computeDagStatus() || 'pending';
+      const planStatus = sm?.computePlanStatus() || 'pending';
       
-      const dagPath = parentPath ? `${parentPath} → ${d.spec.name}` : d.spec.name;
+      const planPath = parentPath ? `${parentPath} → ${d.spec.name}` : d.spec.name;
       
       const jobs: any[] = [];
       const children: any[] = [];
@@ -446,10 +446,10 @@ export class DagRunner extends EventEmitter {
         // For job nodes that are running/scheduled
         if (node.type === 'job' && (state.status === 'running' || state.status === 'scheduled')) {
           nodeKeys.push({
-            dagId: d.id,
+            planId: d.id,
             nodeId,
             nodeName: node.name || nodeId.slice(0, 8),
-            dagName: parentPath ? dagPath : undefined
+            planName: parentPath ? planPath : undefined
           });
           
           jobs.push({
@@ -463,11 +463,11 @@ export class DagRunner extends EventEmitter {
           });
         }
         
-        // For subdag nodes, recurse into child DAG
-        if (node.type === 'subdag' && state.childDagId) {
-          const childDag = this.dags.get(state.childDagId);
-          if (childDag) {
-            const childHierarchy = buildHierarchy(childDag, dagPath);
+        // For subPlan nodes, recurse into child Plan
+        if (node.type === 'subPlan' && state.childPlanId) {
+          const childPlan = this.plans.get(state.childPlanId);
+          if (childPlan) {
+            const childHierarchy = buildHierarchy(childPlan, planPath);
             if (childHierarchy) {
               children.push(childHierarchy);
             }
@@ -481,30 +481,30 @@ export class DagRunner extends EventEmitter {
       }
       
       return {
-        dagId: d.id,
-        dagName: d.spec.name,
+        planId: d.id,
+        planName: d.spec.name,
         parentPath: parentPath, // Include parent path for context
-        status: dagStatus,
+        status: planStatus,
         jobs,
         children
       };
     };
     
-    // Build hierarchy starting from root DAG (but only include sub-DAGs in the output)
+    // Build hierarchy starting from root Plan (but only include sub-plans in the output)
     const rootHierarchy: any[] = [];
     
-    // For root DAG, collect jobs directly (not wrapped in a sub-DAG node)
+    // For root Plan, collect jobs directly (not wrapped in a sub-plan node)
     const rootJobs: any[] = [];
-    for (const [nodeId, state] of dag.nodeStates) {
-      const node = dag.nodes.get(nodeId);
+    for (const [nodeId, state] of plan.nodeStates) {
+      const node = plan.nodes.get(nodeId);
       if (!node) continue;
       
       if (node.type === 'job' && (state.status === 'running' || state.status === 'scheduled')) {
         nodeKeys.push({
-          dagId: dag.id,
+          planId: plan.id,
           nodeId,
           nodeName: node.name || nodeId.slice(0, 8),
-          dagName: undefined
+          planName: undefined
         });
         
         rootJobs.push({
@@ -518,11 +518,11 @@ export class DagRunner extends EventEmitter {
         });
       }
       
-      // For subdag nodes, recurse
-      if (node.type === 'subdag' && state.childDagId) {
-        const childDag = this.dags.get(state.childDagId);
-        if (childDag) {
-          const childHierarchy = buildHierarchy(childDag, undefined);
+      // For subPlan nodes, recurse
+      if (node.type === 'subPlan' && state.childPlanId) {
+        const childPlan = this.plans.get(state.childPlanId);
+        if (childPlan) {
+          const childHierarchy = buildHierarchy(childPlan, undefined);
           if (childHierarchy) {
             rootHierarchy.push(childHierarchy);
           }
@@ -536,7 +536,7 @@ export class DagRunner extends EventEmitter {
       try {
         const stats = await (this.executor as any).getAllProcessStats(nodeKeys);
         for (let i = 0; i < stats.length; i++) {
-          const key = `${nodeKeys[i].dagId}:${nodeKeys[i].nodeId}`;
+          const key = `${nodeKeys[i].planId}:${nodeKeys[i].nodeId}`;
           processStats.set(key, stats[i]);
         }
       } catch {
@@ -546,7 +546,7 @@ export class DagRunner extends EventEmitter {
     
     // Fill in process stats for root jobs
     for (const job of rootJobs) {
-      const key = `${dag.id}:${job.nodeId}`;
+      const key = `${plan.id}:${job.nodeId}`;
       const stats = processStats.get(key);
       if (stats) {
         job.pid = stats.pid;
@@ -559,7 +559,7 @@ export class DagRunner extends EventEmitter {
     // Fill in process stats for hierarchy (recursive)
     const fillStats = (h: any) => {
       for (const job of h.jobs) {
-        const key = `${h.dagId}:${job.nodeId}`;
+        const key = `${h.planId}:${job.nodeId}`;
         const stats = processStats.get(key);
         if (stats) {
           job.pid = stats.pid;
@@ -584,8 +584,8 @@ export class DagRunner extends EventEmitter {
         flat.push({
           nodeId: job.nodeId,
           nodeName: job.nodeName,
-          dagId: dag.id,
-          dagName: undefined,
+          planId: plan.id,
+          planName: undefined,
           pid: job.pid,
           running: job.running,
           tree: job.tree,
@@ -595,14 +595,14 @@ export class DagRunner extends EventEmitter {
     }
     
     const collectFlat = (h: any, path?: string) => {
-      const dagPath = path ? `${path} → ${h.dagName}` : h.dagName;
+      const planPath = path ? `${path} → ${h.planName}` : h.planName;
       for (const job of h.jobs) {
         if (job.running || job.pid) {
           flat.push({
             nodeId: job.nodeId,
             nodeName: job.nodeName,
-            dagId: h.dagId,
-            dagName: dagPath,
+            planId: h.planId,
+            planName: planPath,
             pid: job.pid,
             running: job.running,
             tree: job.tree,
@@ -611,7 +611,7 @@ export class DagRunner extends EventEmitter {
         }
       }
       for (const child of h.children) {
-        collectFlat(child, dagPath);
+        collectFlat(child, planPath);
       }
     };
     
@@ -628,23 +628,23 @@ export class DagRunner extends EventEmitter {
   }
   
   // ============================================================================
-  // DAG CONTROL
+  // Plan CONTROL
   // ============================================================================
   
   /**
-   * Cancel a DAG
+   * Cancel a Plan
    */
-  cancel(dagId: string): boolean {
-    const dag = this.dags.get(dagId);
-    const sm = this.stateMachines.get(dagId);
-    if (!dag || !sm) return false;
+  cancel(planId: string): boolean {
+    const plan = this.plans.get(planId);
+    const sm = this.stateMachines.get(planId);
+    if (!plan || !sm) return false;
     
-    log.info(`Canceling DAG: ${dagId}`);
+    log.info(`Canceling Plan: ${planId}`);
     
     // Cancel all running jobs in executor
-    for (const [nodeId, state] of dag.nodeStates) {
+    for (const [nodeId, state] of plan.nodeStates) {
       if (state.status === 'running' || state.status === 'scheduled') {
-        this.executor?.cancel(dagId, nodeId);
+        this.executor?.cancel(planId, nodeId);
       }
     }
     
@@ -652,62 +652,62 @@ export class DagRunner extends EventEmitter {
     sm.cancelAll();
     
     // Persist
-    this.persistence.save(dag);
+    this.persistence.save(plan);
     
     return true;
   }
   
   /**
-   * Delete a DAG
+   * Delete a Plan
    */
-  delete(dagId: string): boolean {
-    const dag = this.dags.get(dagId);
-    if (!dag) return false;
+  delete(planId: string): boolean {
+    const plan = this.plans.get(planId);
+    if (!plan) return false;
     
-    log.info(`Deleting DAG: ${dagId}`);
+    log.info(`Deleting Plan: ${planId}`);
     
     // Cancel if running
-    this.cancel(dagId);
+    this.cancel(planId);
     
     // Clean up worktrees and branches in background
-    this.cleanupDagResources(dag).catch(err => {
-      log.error(`Failed to cleanup DAG resources`, { dagId, error: err.message });
+    this.cleanupPlanResources(plan).catch(err => {
+      log.error(`Failed to cleanup Plan resources`, { planId, error: err.message });
     });
     
     // Remove from memory
-    this.dags.delete(dagId);
-    this.stateMachines.delete(dagId);
+    this.plans.delete(planId);
+    this.stateMachines.delete(planId);
     
     // Remove from persistence
-    this.persistence.delete(dagId);
+    this.persistence.delete(planId);
     
     // Notify listeners
-    this.emit('dagDeleted', dagId);
+    this.emit('planDeleted', planId);
     
     return true;
   }
   
   /**
-   * Clean up all resources associated with a DAG (worktrees, logs)
+   * Clean up all resources associated with a Plan (worktrees, logs)
    * 
    * NOTE: With detached HEAD worktrees, there are no branches to clean up.
    * We only remove worktrees and log files.
    */
-  private async cleanupDagResources(dag: DagInstance): Promise<void> {
-    const repoPath = dag.repoPath;
+  private async cleanupPlanResources(plan: PlanInstance): Promise<void> {
+    const repoPath = plan.repoPath;
     const cleanupErrors: string[] = [];
     
     // Collect all worktree paths from node states
     const worktreePaths: string[] = [];
     
-    for (const [nodeId, state] of dag.nodeStates) {
+    for (const [nodeId, state] of plan.nodeStates) {
       if (state.worktreePath) {
         worktreePaths.push(state.worktreePath);
       }
     }
     
-    log.info(`Cleaning up DAG resources`, {
-      dagId: dag.id,
+    log.info(`Cleaning up Plan resources`, {
+      planId: plan.id,
       worktrees: worktreePaths.length,
     });
     
@@ -722,13 +722,13 @@ export class DagRunner extends EventEmitter {
     }
     
     // Try to clean up the worktree root directory if it exists and is empty
-    if (dag.worktreeRoot) {
+    if (plan.worktreeRoot) {
       try {
         const fs = require('fs');
-        const entries = fs.readdirSync(dag.worktreeRoot);
+        const entries = fs.readdirSync(plan.worktreeRoot);
         if (entries.length === 0) {
-          fs.rmdirSync(dag.worktreeRoot);
-          log.debug(`Removed empty worktree root: ${dag.worktreeRoot}`);
+          fs.rmdirSync(plan.worktreeRoot);
+          log.debug(`Removed empty worktree root: ${plan.worktreeRoot}`);
         }
       } catch (error: any) {
         // Directory might not exist or not be empty - that's fine
@@ -742,10 +742,10 @@ export class DagRunner extends EventEmitter {
         const path = require('path');
         const storagePath = (this.executor as any).storagePath;
         if (storagePath) {
-          const dagLogsDir = path.join(storagePath, dag.id);
-          if (fs.existsSync(dagLogsDir)) {
-            fs.rmSync(dagLogsDir, { recursive: true, force: true });
-            log.debug(`Removed log directory: ${dagLogsDir}`);
+          const planLogsDir = path.join(storagePath, plan.id);
+          if (fs.existsSync(planLogsDir)) {
+            fs.rmSync(planLogsDir, { recursive: true, force: true });
+            log.debug(`Removed log directory: ${planLogsDir}`);
           }
         }
       } catch (error: any) {
@@ -756,34 +756,34 @@ export class DagRunner extends EventEmitter {
     if (cleanupErrors.length > 0) {
       log.warn(`Some cleanup operations failed`, { errors: cleanupErrors });
     } else {
-      log.info(`DAG cleanup completed successfully`, { dagId: dag.id });
+      log.info(`Plan cleanup completed successfully`, { planId: plan.id });
     }
   }
   
   /**
-   * Resume a DAG that may have been paused or completed with failures.
+   * Resume a Plan that may have been paused or completed with failures.
    * This ensures the pump is running to process any ready nodes.
    */
-  resume(dagId: string): boolean {
-    const dag = this.dags.get(dagId);
-    if (!dag) return false;
+  resume(planId: string): boolean {
+    const plan = this.plans.get(planId);
+    if (!plan) return false;
     
-    log.info(`Resuming DAG: ${dagId}`);
+    log.info(`Resuming Plan: ${planId}`);
     
     // Ensure pump is running
     this.startPump();
     
     // Persist the current state
-    this.persistence.save(dag);
+    this.persistence.save(plan);
     
     return true;
   }
   
   /**
-   * Get a DAG by ID (for external access)
+   * Get a Plan by ID (for external access)
    */
-  getDag(dagId: string): DagInstance | undefined {
-    return this.dags.get(dagId);
+  getPlan(planId: string): PlanInstance | undefined {
+    return this.plans.get(planId);
   }
   
   // ============================================================================
@@ -813,96 +813,96 @@ export class DagRunner extends EventEmitter {
   }
   
   /**
-   * Main pump loop - called periodically to advance DAG execution
+   * Main pump loop - called periodically to advance Plan execution
    */
   private async pump(): Promise<void> {
     if (!this.executor) {
       return; // Can't do anything without an executor
     }
     
-    // Count total running jobs across all DAGs (only count actual job nodes, not sub-DAG coordination nodes)
+    // Count total running jobs across all Plans (only count actual job nodes, not sub-plan coordination nodes)
     let globalRunning = 0;
-    let globalSubDagsRunning = 0;
-    for (const [dagId, dag] of this.dags) {
-      const sm = this.stateMachines.get(dagId);
+    let globalsubPlansRunning = 0;
+    for (const [planId, plan] of this.plans) {
+      const sm = this.stateMachines.get(planId);
       if (!sm) continue;
       
-      for (const [nodeId, state] of dag.nodeStates) {
+      for (const [nodeId, state] of plan.nodeStates) {
         if (state.status === 'running' || state.status === 'scheduled') {
-          const node = dag.nodes.get(nodeId);
+          const node = plan.nodes.get(nodeId);
           if (node && nodePerformsWork(node)) {
             globalRunning++;
           } else {
-            globalSubDagsRunning++;
+            globalsubPlansRunning++;
           }
         }
       }
     }
     
-    // Log overall status periodically (only if there are active DAGs)
-    const totalDags = this.dags.size;
-    if (totalDags > 0) {
-      log.debug(`Pump: ${totalDags} DAGs, ${globalRunning} jobs running, ${globalSubDagsRunning} sub-DAGs coordinating`);
+    // Log overall status periodically (only if there are active Plans)
+    const totalPlans = this.plans.size;
+    if (totalPlans > 0) {
+      log.debug(`Pump: ${totalPlans} Plans, ${globalRunning} jobs running, ${globalsubPlansRunning} sub-plans coordinating`);
     }
     
-    // Process each DAG
-    for (const [dagId, dag] of this.dags) {
-      const sm = this.stateMachines.get(dagId);
+    // Process each Plan
+    for (const [planId, plan] of this.plans) {
+      const sm = this.stateMachines.get(planId);
       if (!sm) continue;
       
-      const status = sm.computeDagStatus();
+      const status = sm.computePlanStatus();
       
-      // Skip completed DAGs
+      // Skip completed Plans
       if (status !== 'pending' && status !== 'running') {
         continue;
       }
       
-      // Mark DAG as started if not already
-      if (!dag.startedAt && status === 'running') {
-        dag.startedAt = Date.now();
-        this.emit('dagStarted', dag);
+      // Mark Plan as started if not already
+      if (!plan.startedAt && status === 'running') {
+        plan.startedAt = Date.now();
+        this.emit('planStarted', plan);
       }
       
-      // Get nodes to schedule - pass only actual job running count (sub-DAGs don't consume job slots)
-      const nodesToSchedule = this.scheduler.selectNodes(dag, sm, globalRunning);
+      // Get nodes to schedule - pass only actual job running count (sub-plans don't consume job slots)
+      const nodesToSchedule = this.scheduler.selectNodes(plan, sm, globalRunning);
       
       // Log if there are ready nodes but none scheduled (potential bottleneck)
       const readyNodes = sm.getReadyNodes();
       if (readyNodes.length > 0 && nodesToSchedule.length === 0) {
         const counts = sm.getStatusCounts();
-        log.debug(`DAG ${dag.spec.name} (${dagId.slice(0, 8)}): ${readyNodes.length} ready but 0 scheduled`, {
+        log.debug(`Plan ${plan.spec.name} (${planId.slice(0, 8)}): ${readyNodes.length} ready but 0 scheduled`, {
           globalRunning,
-          dagRunning: counts.running + counts.scheduled,
-          dagMaxParallel: dag.maxParallel,
+          planRunning: counts.running + counts.scheduled,
+          planMaxParallel: plan.maxParallel,
         });
       }
       
       // Schedule each node
       for (const nodeId of nodesToSchedule) {
-        const node = dag.nodes.get(nodeId);
+        const node = plan.nodes.get(nodeId);
         if (!node) continue;
         
         // Mark as scheduled
         sm.transition(nodeId, 'scheduled');
         
-        // Only count nodes with work against global limit (sub-DAGs are coordination nodes)
+        // Only count nodes with work against global limit (sub-plans are coordination nodes)
         if (nodePerformsWork(node)) {
           globalRunning++;
         } else {
-          globalSubDagsRunning++;
+          globalsubPlansRunning++;
         }
         
         // Execute based on node type
         if (node.type === 'job') {
-          this.executeJobNode(dag, sm, node as JobNode);
-        } else if (node.type === 'subdag') {
-          this.executeSubDagNode(dag, sm, node as SubDagNode);
+          this.executeJobNode(plan, sm, node as JobNode);
+        } else if (node.type === 'subPlan') {
+          this.executeSubPlanNode(plan, sm, node as SubPlanNode);
         }
       }
       
       // Persist after scheduling
       if (nodesToSchedule.length > 0) {
-        this.persistence.save(dag);
+        this.persistence.save(plan);
       }
     }
   }
@@ -911,15 +911,15 @@ export class DagRunner extends EventEmitter {
    * Execute a job node
    */
   private async executeJobNode(
-    dag: DagInstance,
-    sm: DagStateMachine,
+    plan: PlanInstance,
+    sm: PlanStateMachine,
     node: JobNode
   ): Promise<void> {
-    const nodeState = dag.nodeStates.get(node.id);
+    const nodeState = plan.nodeStates.get(node.id);
     if (!nodeState) return;
     
     log.info(`Executing job node: ${node.name}`, {
-      dagId: dag.id,
+      planId: plan.id,
       nodeId: node.id,
     });
     
@@ -927,16 +927,16 @@ export class DagRunner extends EventEmitter {
       // Transition to running
       sm.transition(node.id, 'running');
       nodeState.attempts++;
-      this.emit('nodeStarted', dag.id, node.id);
+      this.emit('nodeStarted', plan.id, node.id);
       
       // Determine base commits from dependencies (RI/FI model)
       // First commit is the base, additional commits are merged in
       const baseCommits = sm.getBaseCommitsForNode(node.id);
-      const baseCommitish = baseCommits.length > 0 ? baseCommits[0] : dag.baseBranch;
+      const baseCommitish = baseCommits.length > 0 ? baseCommits[0] : plan.baseBranch;
       const additionalSources = baseCommits.slice(1);
       
       // Create worktree path (use path.join for cross-platform compatibility)
-      const worktreePath = path.join(dag.worktreeRoot, node.producerId);
+      const worktreePath = path.join(plan.worktreeRoot, node.producerId);
       
       // Store in state (no branchName since we use detached HEAD)
       nodeState.worktreePath = worktreePath;
@@ -944,7 +944,7 @@ export class DagRunner extends EventEmitter {
       // Setup detached worktree
       log.debug(`Creating detached worktree for job ${node.name} at ${worktreePath} from ${baseCommitish}`);
       const timing = await git.worktrees.createDetachedWithTiming(
-        dag.repoPath,
+        plan.repoPath,
         worktreePath,
         baseCommitish,
         s => log.debug(s)
@@ -960,27 +960,27 @@ export class DagRunner extends EventEmitter {
       // If job has multiple dependencies, merge the additional commits into the worktree (Forward Integration)
       if (additionalSources.length > 0) {
         log.info(`Merging ${additionalSources.length} additional source commits for job ${node.name}`);
-        this.execLog(dag.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE START ==========');
-        this.execLog(dag.id, node.id, 'merge-fi', 'info', `Merging ${additionalSources.length} source commit(s) into worktree`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE START ==========');
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging ${additionalSources.length} source commit(s) into worktree`);
         
-        const mergeSuccess = await this.mergeSourcesIntoWorktree(dag, node, worktreePath, additionalSources);
+        const mergeSuccess = await this.mergeSourcesIntoWorktree(plan, node, worktreePath, additionalSources);
         
         if (!mergeSuccess) {
-          this.execLog(dag.id, node.id, 'merge-fi', 'error', 'Forward integration merge FAILED');
-          this.execLog(dag.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========');
+          this.execLog(plan.id, node.id, 'merge-fi', 'error', 'Forward integration merge FAILED');
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========');
           nodeState.error = 'Failed to merge sources from dependencies';
           sm.transition(node.id, 'failed');
-          this.emit('nodeCompleted', dag.id, node.id, false);
+          this.emit('nodeCompleted', plan.id, node.id, false);
           return;
         }
         
-        this.execLog(dag.id, node.id, 'merge-fi', 'info', 'Forward integration merge succeeded');
-        this.execLog(dag.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========');
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Forward integration merge succeeded');
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========');
       }
       
       // Build execution context
       const context: ExecutionContext = {
-        dag,
+        plan,
         node,
         baseCommit: timing.baseCommit,
         worktreePath,
@@ -1009,35 +1009,35 @@ export class DagRunner extends EventEmitter {
           nodeState.completedCommit = result.completedCommit;
         }
         
-        // Store work summary on node state and aggregate to DAG
+        // Store work summary on node state and aggregate to Plan
         if (result.workSummary) {
           nodeState.workSummary = result.workSummary;
-          this.appendWorkSummary(dag, result.workSummary);
+          this.appendWorkSummary(plan, result.workSummary);
         }
         
         // Handle leaf node merge to target branch (Reverse Integration)
-        const isLeaf = dag.leaves.includes(node.id);
-        log.debug(`Merge check: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${dag.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
+        const isLeaf = plan.leaves.includes(node.id);
+        log.debug(`Merge check: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${plan.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
         
-        if (isLeaf && dag.targetBranch && nodeState.completedCommit) {
-          log.info(`Initiating merge to target: ${node.name} -> ${dag.targetBranch}`);
-          this.execLog(dag.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========');
-          this.execLog(dag.id, node.id, 'merge-ri', 'info', `Merging completed commit ${nodeState.completedCommit.slice(0, 8)} to ${dag.targetBranch}`);
+        if (isLeaf && plan.targetBranch && nodeState.completedCommit) {
+          log.info(`Initiating merge to target: ${node.name} -> ${plan.targetBranch}`);
+          this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========');
+          this.execLog(plan.id, node.id, 'merge-ri', 'info', `Merging completed commit ${nodeState.completedCommit.slice(0, 8)} to ${plan.targetBranch}`);
           
-          const mergeSuccess = await this.mergeLeafToTarget(dag, node, nodeState.completedCommit);
+          const mergeSuccess = await this.mergeLeafToTarget(plan, node, nodeState.completedCommit);
           nodeState.mergedToTarget = mergeSuccess;
           
           if (mergeSuccess) {
-            this.execLog(dag.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`);
+            this.execLog(plan.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`);
           } else {
-            this.execLog(dag.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED - worktree preserved for manual retry`);
-            log.warn(`Leaf ${node.name} succeeded but merge to ${dag.targetBranch} failed - worktree preserved for manual retry`);
+            this.execLog(plan.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED - worktree preserved for manual retry`);
+            log.warn(`Leaf ${node.name} succeeded but merge to ${plan.targetBranch} failed - worktree preserved for manual retry`);
           }
-          this.execLog(dag.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
+          this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
           
           log.info(`Merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
         } else if (isLeaf) {
-          log.debug(`Skipping merge: isLeaf=${isLeaf}, hasTargetBranch=${!!dag.targetBranch}, hasCompletedCommit=${!!nodeState.completedCommit}`);
+          log.debug(`Skipping merge: isLeaf=${isLeaf}, hasTargetBranch=${!!plan.targetBranch}, hasCompletedCommit=${!!nodeState.completedCommit}`);
         }
         
         // Record successful attempt in history
@@ -1052,15 +1052,15 @@ export class DagRunner extends EventEmitter {
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
         
         sm.transition(node.id, 'succeeded');
-        this.emit('nodeCompleted', dag.id, node.id, true);
+        this.emit('nodeCompleted', plan.id, node.id, true);
         
         // Try to cleanup eligible worktrees (this node and any ancestors that are now safe)
-        if (dag.cleanUpSuccessfulWork) {
-          await this.cleanupEligibleWorktrees(dag, sm);
+        if (plan.cleanUpSuccessfulWork) {
+          await this.cleanupEligibleWorktrees(plan, sm);
         }
         
         log.info(`Job succeeded: ${node.name}`, {
-          dagId: dag.id,
+          planId: plan.id,
           nodeId: node.id,
           commit: nodeState.completedCommit?.slice(0, 8),
         });
@@ -1091,10 +1091,10 @@ export class DagRunner extends EventEmitter {
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), failedAttempt];
         
         sm.transition(node.id, 'failed');
-        this.emit('nodeCompleted', dag.id, node.id, false);
+        this.emit('nodeCompleted', plan.id, node.id, false);
         
         log.error(`Job failed: ${node.name}`, {
-          dagId: dag.id,
+          planId: plan.id,
           nodeId: node.id,
           error: result.error,
           failedPhase: result.failedPhase,
@@ -1125,132 +1125,132 @@ export class DagRunner extends EventEmitter {
       nodeState.attemptHistory = [...(nodeState.attemptHistory || []), errorAttempt];
       
       sm.transition(node.id, 'failed');
-      this.emit('nodeCompleted', dag.id, node.id, false);
+      this.emit('nodeCompleted', plan.id, node.id, false);
       
       log.error(`Job execution error: ${node.name}`, {
-        dagId: dag.id,
+        planId: plan.id,
         nodeId: node.id,
         error: error.message,
       });
     }
     
     // Persist after execution
-    this.persistence.save(dag);
+    this.persistence.save(plan);
   }
   
   /**
-   * Execute a sub-DAG node
+   * Execute a sub-plan node
    */
-  private async executeSubDagNode(
-    parentDag: DagInstance,
-    sm: DagStateMachine,
-    node: SubDagNode
+  private async executeSubPlanNode(
+    parentPlan: PlanInstance,
+    sm: PlanStateMachine,
+    node: SubPlanNode
   ): Promise<void> {
-    log.info(`Executing sub-DAG node: ${node.name}`, {
-      dagId: parentDag.id,
+    log.info(`Executing sub-plan node: ${node.name}`, {
+      planId: parentPlan.id,
       nodeId: node.id,
     });
     
     try {
       // Transition to running
       sm.transition(node.id, 'running');
-      this.emit('nodeStarted', parentDag.id, node.id);
+      this.emit('nodeStarted', parentPlan.id, node.id);
       
-      // Determine base branch for sub-DAG (from parent's dependencies)
+      // Determine base branch for sub-plan (from parent's dependencies)
       const baseCommit = sm.getBaseCommitForNode(node.id);
       
-      // Build the child DAG
+      // Build the child Plan
       const childSpec = {
         ...node.childSpec,
-        baseBranch: baseCommit || parentDag.baseBranch,
-        repoPath: parentDag.repoPath,
+        baseBranch: baseCommit || parentPlan.baseBranch,
+        repoPath: parentPlan.repoPath,
       };
       
-      const childDag = buildDag(childSpec, {
-        parentDagId: parentDag.id,
+      const childPlan = buildPlan(childSpec, {
+        parentPlanId: parentPlan.id,
         parentNodeId: node.id,
-        repoPath: parentDag.repoPath,
-        worktreeRoot: `${parentDag.worktreeRoot}/${node.producerId}`,
+        repoPath: parentPlan.repoPath,
+        worktreeRoot: `${parentPlan.worktreeRoot}/${node.producerId}`,
       });
       
-      // Store child DAG reference
-      node.childDagId = childDag.id;
-      const nodeState = parentDag.nodeStates.get(node.id);
+      // Store child Plan reference
+      node.childPlanId = childPlan.id;
+      const nodeState = parentPlan.nodeStates.get(node.id);
       if (nodeState) {
-        nodeState.childDagId = childDag.id;
+        nodeState.childPlanId = childPlan.id;
       }
       
-      // Register the child DAG
-      this.dags.set(childDag.id, childDag);
-      const childSm = new DagStateMachine(childDag);
+      // Register the child Plan
+      this.plans.set(childPlan.id, childPlan);
+      const childSm = new PlanStateMachine(childPlan);
       this.setupStateMachineListeners(childSm);
-      this.stateMachines.set(childDag.id, childSm);
+      this.stateMachines.set(childPlan.id, childSm);
       
       // Listen for child completion
-      childSm.on('dagComplete', (event: DagCompletionEvent) => {
-        this.handleChildDagComplete(parentDag, sm, node, event).catch(err => {
-          log.error(`Error in child DAG completion handler: ${err.message}`);
+      childSm.on('planComplete', (event: PlanCompletionEvent) => {
+        this.handlechildPlanComplete(parentPlan, sm, node, event).catch(err => {
+          log.error(`Error in child Plan completion handler: ${err.message}`);
         });
       });
       
       // Persist both
-      this.persistence.save(parentDag);
-      this.persistence.save(childDag);
+      this.persistence.save(parentPlan);
+      this.persistence.save(childPlan);
       
-      log.info(`Sub-DAG created: ${childDag.id}`, {
-        parentDagId: parentDag.id,
+      log.info(`sub-plan created: ${childPlan.id}`, {
+        parentPlanId: parentPlan.id,
         parentNodeId: node.id,
-        childNodes: childDag.nodes.size,
+        childNodes: childPlan.nodes.size,
       });
       
     } catch (error: any) {
-      const nodeState = parentDag.nodeStates.get(node.id);
+      const nodeState = parentPlan.nodeStates.get(node.id);
       if (nodeState) {
         nodeState.error = error.message;
       }
       sm.transition(node.id, 'failed');
-      this.emit('nodeCompleted', parentDag.id, node.id, false);
+      this.emit('nodeCompleted', parentPlan.id, node.id, false);
       
-      log.error(`Sub-DAG creation failed: ${node.name}`, {
-        dagId: parentDag.id,
+      log.error(`sub-plan creation failed: ${node.name}`, {
+        planId: parentPlan.id,
         nodeId: node.id,
         error: error.message,
       });
       
-      this.persistence.save(parentDag);
+      this.persistence.save(parentPlan);
     }
   }
   
   /**
-   * Handle child DAG completion
+   * Handle child Plan completion
    */
-  private async handleChildDagComplete(
-    parentDag: DagInstance,
-    parentSm: DagStateMachine,
-    node: SubDagNode,
-    event: DagCompletionEvent
+  private async handlechildPlanComplete(
+    parentPlan: PlanInstance,
+    parentSm: PlanStateMachine,
+    node: SubPlanNode,
+    event: PlanCompletionEvent
   ): Promise<void> {
-    log.info(`Child DAG completed: ${event.dagId}`, {
-      parentDagId: parentDag.id,
+    log.info(`Child Plan completed: ${event.planId}`, {
+      parentPlanId: parentPlan.id,
       parentNodeId: node.id,
       status: event.status,
     });
     
-    const nodeState = parentDag.nodeStates.get(node.id);
-    const childDag = this.dags.get(event.dagId);
+    const nodeState = parentPlan.nodeStates.get(node.id);
+    const childPlan = this.plans.get(event.planId);
     
-    // Log child DAG completion details to the parent's subdag node
-    this.execLog(parentDag.id, node.id, 'work', 'info', '========== SUB-DAG EXECUTION COMPLETE ==========');
-    this.execLog(parentDag.id, node.id, 'work', 'info', `Child DAG: ${event.dagId}`);
-    this.execLog(parentDag.id, node.id, 'work', 'info', `Status: ${event.status.toUpperCase()}`);
+    // Log child Plan completion details to the parent's subPlan node
+    this.execLog(parentPlan.id, node.id, 'work', 'info', '========== sub-plan EXECUTION COMPLETE ==========');
+    this.execLog(parentPlan.id, node.id, 'work', 'info', `child Plan: ${event.planId}`);
+    this.execLog(parentPlan.id, node.id, 'work', 'info', `Status: ${event.status.toUpperCase()}`);
     
-    if (childDag) {
-      // Log summary of child DAG jobs
-      const jobCount = childDag.nodes.size;
+    if (childPlan) {
+      // Log summary of child Plan jobs
+      const jobCount = childPlan.nodes.size;
       let succeeded = 0, failed = 0, blocked = 0;
       
-      for (const [nodeId, childState] of childDag.nodeStates) {
-        const childNode = childDag.nodes.get(nodeId);
+      for (const [nodeId, childState] of childPlan.nodeStates) {
+        const childNode = childPlan.nodes.get(nodeId);
         if (childState.status === 'succeeded') succeeded++;
         else if (childState.status === 'failed') failed++;
         else if (childState.status === 'blocked') blocked++;
@@ -1259,77 +1259,77 @@ export class DagRunner extends EventEmitter {
         const statusIcon = childState.status === 'succeeded' ? '✓' : 
                           childState.status === 'failed' ? '✗' : 
                           childState.status === 'blocked' ? '⊘' : '?';
-        this.execLog(parentDag.id, node.id, 'work', 'info', 
+        this.execLog(parentPlan.id, node.id, 'work', 'info', 
           `  ${statusIcon} ${childNode?.name || nodeId}: ${childState.status}`);
         
         if (childState.error) {
-          this.execLog(parentDag.id, node.id, 'work', 'error', `    Error: ${childState.error}`);
+          this.execLog(parentPlan.id, node.id, 'work', 'error', `    Error: ${childState.error}`);
         }
         if (childState.completedCommit) {
-          this.execLog(parentDag.id, node.id, 'work', 'info', `    Commit: ${childState.completedCommit.slice(0, 8)}`);
+          this.execLog(parentPlan.id, node.id, 'work', 'info', `    Commit: ${childState.completedCommit.slice(0, 8)}`);
         }
       }
       
-      this.execLog(parentDag.id, node.id, 'work', 'info', '');
-      this.execLog(parentDag.id, node.id, 'work', 'info', `Summary: ${succeeded}/${jobCount} succeeded, ${failed} failed, ${blocked} blocked`);
+      this.execLog(parentPlan.id, node.id, 'work', 'info', '');
+      this.execLog(parentPlan.id, node.id, 'work', 'info', `Summary: ${succeeded}/${jobCount} succeeded, ${failed} failed, ${blocked} blocked`);
       
       // Log work summary if available
-      if (childDag.workSummary) {
-        const ws = childDag.workSummary;
-        this.execLog(parentDag.id, node.id, 'work', 'info', 
+      if (childPlan.workSummary) {
+        const ws = childPlan.workSummary;
+        this.execLog(parentPlan.id, node.id, 'work', 'info', 
           `Work: ${ws.totalCommits} commits, +${ws.totalFilesAdded} ~${ws.totalFilesModified} -${ws.totalFilesDeleted} files`);
       }
     }
     
-    this.execLog(parentDag.id, node.id, 'work', 'info', '========== SUB-DAG EXECUTION COMPLETE ==========');
+    this.execLog(parentPlan.id, node.id, 'work', 'info', '========== sub-plan EXECUTION COMPLETE ==========');
     
     if (event.status === 'succeeded') {
-      // Get the final commit from the child DAG's leaf nodes
-      if (childDag && nodeState) {
+      // Get the final commit from the child Plan's leaf nodes
+      if (childPlan && nodeState) {
         // Find a completed commit from leaf nodes
-        for (const leafId of childDag.leaves) {
-          const leafState = childDag.nodeStates.get(leafId);
+        for (const leafId of childPlan.leaves) {
+          const leafState = childPlan.nodeStates.get(leafId);
           if (leafState?.completedCommit) {
             nodeState.completedCommit = leafState.completedCommit;
             break;
           }
         }
         
-        // Handle leaf node merge to target branch (Reverse Integration) for sub-DAG nodes
-        const isLeaf = parentDag.leaves.includes(node.id);
-        log.debug(`Sub-DAG merge check: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${parentDag.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
+        // Handle leaf node merge to target branch (Reverse Integration) for sub-plan nodes
+        const isLeaf = parentPlan.leaves.includes(node.id);
+        log.debug(`sub-plan merge check: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${parentPlan.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
         
-        if (isLeaf && parentDag.targetBranch && nodeState.completedCommit) {
-          log.info(`Initiating merge to target for sub-DAG: ${node.name} -> ${parentDag.targetBranch}`);
-          this.execLog(parentDag.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========');
-          this.execLog(parentDag.id, node.id, 'merge-ri', 'info', `Merging sub-DAG completed commit ${nodeState.completedCommit.slice(0, 8)} to ${parentDag.targetBranch}`);
+        if (isLeaf && parentPlan.targetBranch && nodeState.completedCommit) {
+          log.info(`Initiating merge to target for sub-plan: ${node.name} -> ${parentPlan.targetBranch}`);
+          this.execLog(parentPlan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========');
+          this.execLog(parentPlan.id, node.id, 'merge-ri', 'info', `Merging sub-plan completed commit ${nodeState.completedCommit.slice(0, 8)} to ${parentPlan.targetBranch}`);
           
-          const mergeSuccess = await this.mergeLeafToTarget(parentDag, node, nodeState.completedCommit);
+          const mergeSuccess = await this.mergeLeafToTarget(parentPlan, node, nodeState.completedCommit);
           nodeState.mergedToTarget = mergeSuccess;
           
           if (mergeSuccess) {
-            this.execLog(parentDag.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`);
+            this.execLog(parentPlan.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`);
           } else {
-            this.execLog(parentDag.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED`);
-            log.warn(`Sub-DAG leaf ${node.name} succeeded but merge to ${parentDag.targetBranch} failed`);
+            this.execLog(parentPlan.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED`);
+            log.warn(`sub-plan leaf ${node.name} succeeded but merge to ${parentPlan.targetBranch} failed`);
           }
-          this.execLog(parentDag.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
+          this.execLog(parentPlan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
           
-          log.info(`Sub-DAG merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
+          log.info(`sub-plan merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
         }
       }
       
       parentSm.transition(node.id, 'succeeded');
-      this.emit('nodeCompleted', parentDag.id, node.id, true);
+      this.emit('nodeCompleted', parentPlan.id, node.id, true);
     } else {
       if (nodeState) {
-        nodeState.error = `Child DAG ${event.status}`;
+        nodeState.error = `Child Plan ${event.status}`;
       }
       parentSm.transition(node.id, 'failed');
-      this.emit('nodeCompleted', parentDag.id, node.id, false);
+      this.emit('nodeCompleted', parentPlan.id, node.id, false);
     }
     
-    this.persistence.save(parentDag);
+    this.persistence.save(parentPlan);
   }
   
   // ============================================================================
@@ -1349,24 +1349,24 @@ export class DagRunner extends EventEmitter {
    * @returns true if merge succeeded, false if it failed
    */
   private async mergeLeafToTarget(
-    dag: DagInstance,
-    node: DagNode,
+    plan: PlanInstance,
+    node: PlanNode,
     completedCommit: string
   ): Promise<boolean> {
-    if (!dag.targetBranch) return true; // No target = nothing to merge = success
+    if (!plan.targetBranch) return true; // No target = nothing to merge = success
     
-    log.info(`Merging leaf to target: ${node.name} -> ${dag.targetBranch}`, {
+    log.info(`Merging leaf to target: ${node.name} -> ${plan.targetBranch}`, {
       commit: completedCommit.slice(0, 8),
     });
     
-    const repoPath = dag.repoPath;
-    const targetBranch = dag.targetBranch;
+    const repoPath = plan.repoPath;
+    const targetBranch = plan.targetBranch;
     
     try {
       // =========================================================================
       // FAST PATH: Use git merge-tree (no checkout needed, no worktree conflicts)
       // =========================================================================
-      this.execLog(dag.id, node.id, 'merge-ri', 'info', `Using git merge-tree for conflict-free merge...`);
+      this.execLog(plan.id, node.id, 'merge-ri', 'info', `Using git merge-tree for conflict-free merge...`);
       
       const mergeTreeResult = await git.merge.mergeWithoutCheckout({
         source: completedCommit,
@@ -1374,17 +1374,17 @@ export class DagRunner extends EventEmitter {
         repoPath,
         log: s => {
           log.debug(s);
-          this.execLog(dag.id, node.id, 'merge-ri', 'stdout', s);
+          this.execLog(plan.id, node.id, 'merge-ri', 'stdout', s);
         }
       });
       
       if (mergeTreeResult.success && mergeTreeResult.treeSha) {
         log.info(`Fast path: conflict-free merge via merge-tree`);
-        this.execLog(dag.id, node.id, 'merge-ri', 'info', `✓ No conflicts detected`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ No conflicts detected`);
         
         // Create the merge commit from the tree
         const targetSha = await git.repository.resolveRef(targetBranch, repoPath);
-        const commitMessage = `DAG ${dag.spec.name}: merge ${node.name} (commit ${completedCommit.slice(0, 8)})`;
+        const commitMessage = `Plan ${plan.spec.name}: merge ${node.name} (commit ${completedCommit.slice(0, 8)})`;
         
         const newCommit = await git.merge.commitTree(
           mergeTreeResult.treeSha,
@@ -1395,12 +1395,12 @@ export class DagRunner extends EventEmitter {
         );
         
         log.debug(`Created merge commit: ${newCommit.slice(0, 8)}`);
-        this.execLog(dag.id, node.id, 'merge-ri', 'info', `Created merge commit: ${newCommit.slice(0, 8)}`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Created merge commit: ${newCommit.slice(0, 8)}`);
         
         // Update the target branch to point to the new commit
         // We need to handle the case where target branch is checked out elsewhere
         await this.updateBranchRef(repoPath, targetBranch, newCommit);
-        this.execLog(dag.id, node.id, 'merge-ri', 'info', `Updated ${targetBranch} to ${newCommit.slice(0, 8)}`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Updated ${targetBranch} to ${newCommit.slice(0, 8)}`);
         
         log.info(`Merged leaf ${node.name} to ${targetBranch}`, {
           commit: completedCommit.slice(0, 8),
@@ -1413,13 +1413,13 @@ export class DagRunner extends EventEmitter {
         
         if (pushOnSuccess) {
           try {
-            this.execLog(dag.id, node.id, 'merge-ri', 'info', `Pushing ${targetBranch} to origin...`);
+            this.execLog(plan.id, node.id, 'merge-ri', 'info', `Pushing ${targetBranch} to origin...`);
             await git.repository.push(repoPath, { branch: targetBranch, log: s => log.debug(s) });
             log.info(`Pushed ${targetBranch} to origin`);
-            this.execLog(dag.id, node.id, 'merge-ri', 'info', `✓ Pushed to origin`);
+            this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ Pushed to origin`);
           } catch (pushError: any) {
             log.warn(`Push failed: ${pushError.message}`);
-            this.execLog(dag.id, node.id, 'merge-ri', 'error', `Push failed: ${pushError.message}`);
+            this.execLog(plan.id, node.id, 'merge-ri', 'error', `Push failed: ${pushError.message}`);
             // Push failure doesn't mean merge failed - the commit is local
           }
         }
@@ -1434,29 +1434,29 @@ export class DagRunner extends EventEmitter {
         log.info(`Merge has conflicts, using Copilot CLI to resolve`, {
           conflictFiles: mergeTreeResult.conflictFiles,
         });
-        this.execLog(dag.id, node.id, 'merge-ri', 'info', `⚠ Merge has conflicts`);
-        this.execLog(dag.id, node.id, 'merge-ri', 'info', `  Conflicts: ${mergeTreeResult.conflictFiles?.join(', ')}`);
-        this.execLog(dag.id, node.id, 'merge-ri', 'info', `  Invoking Copilot CLI to resolve...`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `⚠ Merge has conflicts`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `  Conflicts: ${mergeTreeResult.conflictFiles?.join(', ')}`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `  Invoking Copilot CLI to resolve...`);
         
         // Fall back to main repo merge with Copilot CLI resolution
         const resolved = await this.mergeWithConflictResolution(
           repoPath,
           completedCommit,
           targetBranch,
-          `DAG ${dag.spec.name}: merge ${node.name} (commit ${completedCommit.slice(0, 8)})`
+          `Plan ${plan.spec.name}: merge ${node.name} (commit ${completedCommit.slice(0, 8)})`
         );
         
         if (resolved) {
-          this.execLog(dag.id, node.id, 'merge-ri', 'info', `✓ Conflict resolved by Copilot CLI`);
+          this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ Conflict resolved by Copilot CLI`);
         } else {
-          this.execLog(dag.id, node.id, 'merge-ri', 'error', `✗ Copilot CLI failed to resolve conflict`);
+          this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Copilot CLI failed to resolve conflict`);
         }
         
         return resolved;
       }
       
       log.error(`Merge-tree failed: ${mergeTreeResult.error}`);
-      this.execLog(dag.id, node.id, 'merge-ri', 'error', `✗ Merge-tree failed: ${mergeTreeResult.error}`);
+      this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Merge-tree failed: ${mergeTreeResult.error}`);
       return false;
       
     } catch (error: any) {
@@ -1464,7 +1464,7 @@ export class DagRunner extends EventEmitter {
         node: node.name,
         error: error.message,
       });
-      this.execLog(dag.id, node.id, 'merge-ri', 'error', `✗ Exception: ${error.message}`);
+      this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Exception: ${error.message}`);
       return false;
     }
   }
@@ -1520,7 +1520,7 @@ export class DagRunner extends EventEmitter {
    * Uses full merge (not squash) to preserve history for downstream jobs.
    */
   private async mergeSourcesIntoWorktree(
-    dag: DagInstance,
+    plan: PlanInstance,
     node: JobNode,
     worktreePath: string,
     additionalSources: string[]
@@ -1534,7 +1534,7 @@ export class DagRunner extends EventEmitter {
     for (const sourceCommit of additionalSources) {
       const shortSha = sourceCommit.slice(0, 8);
       log.debug(`Merging commit ${shortSha} into worktree at ${worktreePath}`);
-      this.execLog(dag.id, node.id, 'merge-fi', 'info', `Merging source commit ${shortSha}...`);
+      this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging source commit ${shortSha}...`);
       
       try {
         // Merge by commit SHA directly (no branch needed)
@@ -1548,14 +1548,14 @@ export class DagRunner extends EventEmitter {
         
         if (mergeResult.success) {
           log.debug(`Merge of commit ${shortSha} succeeded`);
-          this.execLog(dag.id, node.id, 'merge-fi', 'info', `✓ Merged commit ${shortSha} successfully`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `✓ Merged commit ${shortSha} successfully`);
         } else if (mergeResult.hasConflicts) {
           log.info(`Merge conflict for commit ${shortSha}, using Copilot CLI to resolve`, {
             conflicts: mergeResult.conflictFiles,
           });
-          this.execLog(dag.id, node.id, 'merge-fi', 'info', `⚠ Merge conflict for commit ${shortSha}`);
-          this.execLog(dag.id, node.id, 'merge-fi', 'info', `  Conflicts: ${mergeResult.conflictFiles?.join(', ')}`);
-          this.execLog(dag.id, node.id, 'merge-fi', 'info', `  Invoking Copilot CLI to resolve...`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `⚠ Merge conflict for commit ${shortSha}`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Conflicts: ${mergeResult.conflictFiles?.join(', ')}`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Invoking Copilot CLI to resolve...`);
           
           // Use Copilot CLI to resolve conflicts
           const resolved = await this.resolveMergeConflictWithCopilot(
@@ -1567,21 +1567,21 @@ export class DagRunner extends EventEmitter {
           
           if (!resolved) {
             log.error(`Copilot CLI failed to resolve merge conflict for commit ${shortSha}`);
-            this.execLog(dag.id, node.id, 'merge-fi', 'error', `✗ Copilot CLI failed to resolve conflict`);
+            this.execLog(plan.id, node.id, 'merge-fi', 'error', `✗ Copilot CLI failed to resolve conflict`);
             await git.merge.abort(worktreePath, s => log.debug(s));
             return false;
           }
           
           log.info(`Merge conflict resolved by Copilot CLI for commit ${shortSha}`);
-          this.execLog(dag.id, node.id, 'merge-fi', 'info', `✓ Conflict resolved by Copilot CLI`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `✓ Conflict resolved by Copilot CLI`);
         } else {
           log.error(`Merge failed for commit ${shortSha}: ${mergeResult.error}`);
-          this.execLog(dag.id, node.id, 'merge-fi', 'error', `✗ Merge failed: ${mergeResult.error}`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'error', `✗ Merge failed: ${mergeResult.error}`);
           return false;
         }
       } catch (error: any) {
         log.error(`Exception merging commit ${shortSha}: ${error.message}`);
-        this.execLog(dag.id, node.id, 'merge-fi', 'error', `✗ Exception: ${error.message}`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'error', `✗ Exception: ${error.message}`);
         return false;
       }
     }
@@ -1795,12 +1795,12 @@ export class DagRunner extends EventEmitter {
    * For intermediate nodes, we wait until all children have completed.
    */
   private async cleanupEligibleWorktrees(
-    dag: DagInstance,
-    sm: DagStateMachine
+    plan: PlanInstance,
+    sm: PlanStateMachine
   ): Promise<void> {
     const eligibleNodes: string[] = [];
     
-    for (const [nodeId, state] of dag.nodeStates) {
+    for (const [nodeId, state] of plan.nodeStates) {
       // Skip if not succeeded or no worktree or already cleaned
       if (state.status !== 'succeeded' || !state.worktreePath) {
         continue;
@@ -1812,14 +1812,14 @@ export class DagRunner extends EventEmitter {
         continue; // Already cleaned up
       }
       
-      const node = dag.nodes.get(nodeId);
+      const node = plan.nodes.get(nodeId);
       if (!node) continue;
       
       // Leaf nodes (no dependents) - can only be cleaned up after successful merge to target
       if (node.dependents.length === 0) {
         // If there's a targetBranch, we need mergedToTarget to be true
         // If no targetBranch, there's nothing to merge so it's safe to clean up
-        if (dag.targetBranch) {
+        if (plan.targetBranch) {
           if (state.mergedToTarget === true) {
             eligibleNodes.push(nodeId);
           }
@@ -1835,7 +1835,7 @@ export class DagRunner extends EventEmitter {
       // This means they've all had a chance to consume our commit
       let allDependentsSucceeded = true;
       for (const depId of node.dependents) {
-        const depState = dag.nodeStates.get(depId);
+        const depState = plan.nodeStates.get(depId);
         if (!depState || depState.status !== 'succeeded') {
           allDependentsSucceeded = false;
           break;
@@ -1850,20 +1850,20 @@ export class DagRunner extends EventEmitter {
     // Clean up eligible worktrees
     if (eligibleNodes.length > 0) {
       log.debug(`Cleaning up ${eligibleNodes.length} eligible worktrees`, {
-        dagId: dag.id,
-        nodes: eligibleNodes.map(id => dag.nodes.get(id)?.name || id),
+        planId: plan.id,
+        nodes: eligibleNodes.map(id => plan.nodes.get(id)?.name || id),
       });
       
       for (const nodeId of eligibleNodes) {
-        const state = dag.nodeStates.get(nodeId);
+        const state = plan.nodeStates.get(nodeId);
         if (state?.worktreePath) {
-          await this.cleanupWorktree(state.worktreePath, dag.repoPath);
+          await this.cleanupWorktree(state.worktreePath, plan.repoPath);
           state.worktreeCleanedUp = true;
         }
       }
       
       // Persist the updated state with worktreeCleanedUp flags
-      this.persistence.save(dag);
+      this.persistence.save(plan);
     }
   }
   
@@ -1875,23 +1875,23 @@ export class DagRunner extends EventEmitter {
    * Retry a failed node.
    * Resets the node state and re-queues it for execution.
    * 
-   * @param dagId - DAG ID
+   * @param planId - Plan ID
    * @param nodeId - Node ID to retry
    * @param options - Retry options
    * @returns true if retry was initiated, error message otherwise
    */
-  retryNode(dagId: string, nodeId: string, options?: RetryNodeOptions): { success: boolean; error?: string } {
-    const dag = this.dags.get(dagId);
-    if (!dag) {
-      return { success: false, error: `DAG not found: ${dagId}` };
+  retryNode(planId: string, nodeId: string, options?: RetryNodeOptions): { success: boolean; error?: string } {
+    const plan = this.plans.get(planId);
+    if (!plan) {
+      return { success: false, error: `Plan not found: ${planId}` };
     }
     
-    const node = dag.nodes.get(nodeId);
+    const node = plan.nodes.get(nodeId);
     if (!node) {
       return { success: false, error: `Node not found: ${nodeId}` };
     }
     
-    const nodeState = dag.nodeStates.get(nodeId);
+    const nodeState = plan.nodeStates.get(nodeId);
     if (!nodeState) {
       return { success: false, error: `Node state not found: ${nodeId}` };
     }
@@ -1900,13 +1900,13 @@ export class DagRunner extends EventEmitter {
       return { success: false, error: `Node is not in failed state: ${nodeState.status}` };
     }
     
-    const sm = this.stateMachines.get(dagId);
+    const sm = this.stateMachines.get(planId);
     if (!sm) {
-      return { success: false, error: `State machine not found for DAG: ${dagId}` };
+      return { success: false, error: `State machine not found for Plan: ${planId}` };
     }
     
     log.info(`Retrying failed node: ${node.name}`, {
-      dagId,
+      planId,
       nodeId,
       resumeSession: options?.resumeSession ?? true,
       clearWorktree: options?.clearWorktree ?? false,
@@ -1955,7 +1955,7 @@ export class DagRunner extends EventEmitter {
     }
     
     // Persist the reset state
-    this.persistence.save(dag);
+    this.persistence.save(plan);
     
     // Check if ready to run (all dependencies succeeded)
     const readyNodes = sm.getReadyNodes();
@@ -1967,7 +1967,7 @@ export class DagRunner extends EventEmitter {
     // Ensure pump is running to process the node
     this.startPump();
     
-    this.emit('nodeRetry', dagId, nodeId);
+    this.emit('nodeRetry', planId, nodeId);
     
     return { success: true };
   }
@@ -1975,7 +1975,7 @@ export class DagRunner extends EventEmitter {
   /**
    * Get failure context for a node (for AI analysis before retry)
    */
-  getNodeFailureContext(dagId: string, nodeId: string): {
+  getNodeFailureContext(planId: string, nodeId: string): {
     logs: string;
     phase: string;
     errorMessage: string;
@@ -1983,23 +1983,23 @@ export class DagRunner extends EventEmitter {
     lastAttempt?: NodeExecutionState['lastAttempt'];
     worktreePath?: string;
   } | { error: string } {
-    const dag = this.dags.get(dagId);
-    if (!dag) {
-      return { error: `DAG not found: ${dagId}` };
+    const plan = this.plans.get(planId);
+    if (!plan) {
+      return { error: `Plan not found: ${planId}` };
     }
     
-    const node = dag.nodes.get(nodeId);
+    const node = plan.nodes.get(nodeId);
     if (!node) {
       return { error: `Node not found: ${nodeId}` };
     }
     
-    const nodeState = dag.nodeStates.get(nodeId);
+    const nodeState = plan.nodeStates.get(nodeId);
     if (!nodeState) {
       return { error: `Node state not found: ${nodeId}` };
     }
     
     // Get logs for this node
-    const logsText = this.getNodeLogs(dagId, nodeId);
+    const logsText = this.getNodeLogs(planId, nodeId);
     
     return {
       logs: logsText,
@@ -2016,11 +2016,11 @@ export class DagRunner extends EventEmitter {
   // ============================================================================
   
   /**
-   * Append a job's work summary to the DAG's aggregated summary
+   * Append a job's work summary to the Plan's aggregated summary
    */
-  private appendWorkSummary(dag: DagInstance, jobSummary: JobWorkSummary): void {
-    if (!dag.workSummary) {
-      dag.workSummary = {
+  private appendWorkSummary(plan: PlanInstance, jobSummary: JobWorkSummary): void {
+    if (!plan.workSummary) {
+      plan.workSummary = {
         totalCommits: 0,
         totalFilesAdded: 0,
         totalFilesModified: 0,
@@ -2029,11 +2029,11 @@ export class DagRunner extends EventEmitter {
       };
     }
     
-    dag.workSummary.totalCommits += jobSummary.commits;
-    dag.workSummary.totalFilesAdded += jobSummary.filesAdded;
-    dag.workSummary.totalFilesModified += jobSummary.filesModified;
-    dag.workSummary.totalFilesDeleted += jobSummary.filesDeleted;
-    dag.workSummary.jobSummaries.push(jobSummary);
+    plan.workSummary.totalCommits += jobSummary.commits;
+    plan.workSummary.totalFilesAdded += jobSummary.filesAdded;
+    plan.workSummary.totalFilesModified += jobSummary.filesModified;
+    plan.workSummary.totalFilesDeleted += jobSummary.filesDeleted;
+    plan.workSummary.jobSummaries.push(jobSummary);
   }
   
   // ============================================================================
@@ -2043,15 +2043,15 @@ export class DagRunner extends EventEmitter {
   /**
    * Setup listeners on a state machine
    */
-  private setupStateMachineListeners(sm: DagStateMachine): void {
+  private setupStateMachineListeners(sm: PlanStateMachine): void {
     sm.on('transition', (event: NodeTransitionEvent) => {
       this.emit('nodeTransition', event);
     });
     
-    sm.on('dagComplete', (event: DagCompletionEvent) => {
-      const dag = this.dags.get(event.dagId);
-      if (dag) {
-        this.emit('dagCompleted', dag, event.status);
+    sm.on('planComplete', (event: PlanCompletionEvent) => {
+      const plan = this.plans.get(event.planId);
+      if (plan) {
+        this.emit('planCompleted', plan, event.status);
       }
     });
   }

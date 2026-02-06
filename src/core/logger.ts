@@ -35,7 +35,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 /**
  * Components that can have logging enabled
  */
-export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler' | 'dag' | 'dag-runner' | 'dag-state' | 'dag-persistence' | 'job-executor' | 'init';
+export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler' | 'plan' | 'plan-runner' | 'plan-state' | 'plan-persistence' | 'job-executor' | 'init';
 
 /**
  * Debug configuration per component
@@ -49,10 +49,10 @@ interface DebugConfig {
   ui: boolean;
   extension: boolean;
   scheduler: boolean;
-  dag: boolean;
-  'dag-runner': boolean;
-  'dag-state': boolean;
-  'dag-persistence': boolean;
+  plan: boolean;
+  'plan-runner': boolean;
+  'plan-state': boolean;
+  'plan-persistence': boolean;
   'job-executor': boolean;
   init: boolean;
 }
@@ -75,10 +75,10 @@ export class Logger {
     ui: false,
     extension: false,
     scheduler: false,
-    dag: false,
-    'dag-runner': false,
-    'dag-state': false,
-    'dag-persistence': false,
+    plan: false,
+    'plan-runner': false,
+    'plan-state': false,
+    'plan-persistence': false,
     'job-executor': false,
     init: false
   };
@@ -151,10 +151,10 @@ export class Logger {
       ui: config.get<boolean>('debug.ui', false),
       extension: config.get<boolean>('debug.extension', false),
       scheduler: config.get<boolean>('debug.scheduler', false),
-      dag: config.get<boolean>('debug.dag', false),
-      'dag-runner': config.get<boolean>('debug.dag-runner', false),
-      'dag-state': config.get<boolean>('debug.dag-state', false),
-      'dag-persistence': config.get<boolean>('debug.dag-persistence', false),
+      plan: config.get<boolean>('debug.plan', false),
+      'plan-runner': config.get<boolean>('debug.plan-runner', false),
+      'plan-state': config.get<boolean>('debug.plan-state', false),
+      'plan-persistence': config.get<boolean>('debug.plan-persistence', false),
       'job-executor': config.get<boolean>('debug.job-executor', false),
       init: config.get<boolean>('debug.init', false),
     };

@@ -2,9 +2,9 @@
  * @fileoverview VS Code Copilot Orchestrator Extension - Main Entry Point
  * 
  * This file is the composition root for the extension. It orchestrates
- * the initialization of all components using the DAG-based system.
+ * the initialization of all components using the Plan-based system.
  * 
- * Everything is a DAG - even a single job.
+ * Everything is a Plan - even a single job.
  * 
  * @module extension
  */
@@ -12,15 +12,15 @@
 import * as vscode from 'vscode';
 import {
   loadConfiguration,
-  initializeDagRunner,
+  initializePlanRunner,
   initializeHttpServer,
   initializeMcpServer,
-  initializeDagsView,
-  registerDagCommands,
-} from './core/dagInitialization';
+  initializeplansView,
+  registerPlanCommands,
+} from './core/planInitialization';
 import { McpServerManager } from './mcp/mcpServerManager';
 import { ProcessMonitor } from './process/processMonitor';
-import { DagRunner } from './dag';
+import { PlanRunner } from './plan';
 import { Logger } from './core/logger';
 
 // ============================================================================
@@ -33,8 +33,8 @@ let mcpManager: McpServerManager | undefined;
 /** Process Monitor - retained for cleanup */
 let processMonitor: ProcessMonitor | undefined;
 
-/** DAG Runner - retained for shutdown persistence */
-let dagRunner: DagRunner | undefined;
+/** Plan Runner - retained for shutdown persistence */
+let planRunner: PlanRunner | undefined;
 
 // ============================================================================
 // ACTIVATION
@@ -45,7 +45,7 @@ let dagRunner: DagRunner | undefined;
  * 
  * Initializes all components in order:
  * 1. Load configuration
- * 2. DAG runner (replaces JobRunner + PlanRunner)
+ * 2. Plan Runner (replaces JobRunner + PlanRunner)
  * 3. HTTP API server with MCP endpoint
  * 4. MCP registration with VS Code
  * 5. UI components
@@ -63,26 +63,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const config = loadConfiguration();
   extLog.debug('Configuration loaded', config);
 
-  // ── DAG Runner ─────────────────────────────────────────────────────────
-  const { dagRunner: runner, processMonitor: pm } = initializeDagRunner(context);
+  // ── Plan Runner ─────────────────────────────────────────────────────────
+  const { planRunner: runner, processMonitor: pm } = initializePlanRunner(context);
   processMonitor = pm;
-  dagRunner = runner;
+  planRunner = runner;
 
   // ── HTTP Server ────────────────────────────────────────────────────────
-  await initializeHttpServer(context, dagRunner, config.http);
+  await initializeHttpServer(context, planRunner, config.http);
 
   // ── MCP Server ─────────────────────────────────────────────────────────
   mcpManager = initializeMcpServer(context, config.http, config.mcp);
 
-  // ── DAGs View ──────────────────────────────────────────────────────────
-  initializeDagsView(context, dagRunner);
+  // ── Plans view ──────────────────────────────────────────────────────────
+  initializeplansView(context, planRunner);
 
   // ── Commands ───────────────────────────────────────────────────────────
-  registerDagCommands(context, dagRunner);
+  registerPlanCommands(context, planRunner);
 
   // ── Complete ───────────────────────────────────────────────────────────
   extLog.info('Extension activated successfully');
-  vscode.window.showInformationMessage('Copilot Orchestrator is ready! (DAG Mode)');
+  vscode.window.showInformationMessage('Copilot Orchestrator is ready! (Plan Mode)');
 }
 
 // ============================================================================
@@ -96,12 +96,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 export function deactivate(): void {
   // Persist state synchronously before shutdown
   try {
-    dagRunner?.persistSync();
+    planRunner?.persistSync();
   } catch (e) {
     console.error('Failed to persist state on deactivate:', e);
   }
   
   mcpManager?.stop();
   processMonitor = undefined;
-  dagRunner = undefined;
+  planRunner = undefined;
 }

@@ -1,40 +1,40 @@
 /**
- * @fileoverview DAGs View Provider
+ * @fileoverview Plans view Provider
  * 
- * Displays a list of DAGs with their execution status in the sidebar.
- * Supports clicking to open detailed DAG view.
+ * Displays a list of Plans with their execution status in the sidebar.
+ * Supports clicking to open detailed Plan view.
  * 
- * @module ui/dagsViewProvider
+ * @module ui/plansViewProvider
  */
 
 import * as vscode from 'vscode';
-import { DagRunner, DagInstance, DagStatus, NodeStatus } from '../dag';
-import { DagDetailPanel } from './panels/dagDetailPanel';
+import { PlanRunner, PlanInstance, PlanStatus, NodeStatus } from '\.\./plan';
+import { planDetailPanel } from './panels/planDetailPanel';
 import { NodeDetailPanel } from './panels/nodeDetailPanel';
 
 /**
- * DAGs View Provider - webview in the sidebar showing DAGs list
+ * Plans view Provider - webview in the sidebar showing Plans list
  */
-export class DagsViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = 'orchestrator.dagsView';
+export class plansViewProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = 'orchestrator.plansView';
   
   private _view?: vscode.WebviewView;
   private _refreshTimer?: NodeJS.Timeout;
   
   constructor(
     private readonly _context: vscode.ExtensionContext,
-    private readonly _dagRunner: DagRunner
+    private readonly _planRunner: PlanRunner
   ) {
-    // Listen for DAG events to refresh
-    _dagRunner.on('dagCreated', () => this.refresh());
-    _dagRunner.on('dagCompleted', () => this.refresh());
-    _dagRunner.on('dagDeleted', (dagId) => {
-      // Close any open panels for this DAG
-      DagDetailPanel.closeForDag(dagId);
-      NodeDetailPanel.closeForDag(dagId);
+    // Listen for Plan events to refresh
+    _planRunner.on('planCreated', () => this.refresh());
+    _planRunner.on('planCompleted', () => this.refresh());
+    _planRunner.on('planDeleted', (planId) => {
+      // Close any open panels for this Plan
+      planDetailPanel.closeForPlan(planId);
+      NodeDetailPanel.closeForPlan(planId);
       this.refresh();
     });
-    _dagRunner.on('nodeTransition', () => this.scheduleRefresh());
+    _planRunner.on('nodeTransition', () => this.scheduleRefresh());
   }
   
   resolveWebviewView(
@@ -54,14 +54,14 @@ export class DagsViewProvider implements vscode.WebviewViewProvider {
     // Handle messages from webview
     webviewView.webview.onDidReceiveMessage(message => {
       switch (message.type) {
-        case 'openDag':
-          vscode.commands.executeCommand('orchestrator.showDagDetails', message.dagId);
+        case 'openPlan':
+          vscode.commands.executeCommand('orchestrator.showPlanDetails', message.planId);
           break;
-        case 'cancelDag':
-          vscode.commands.executeCommand('orchestrator.cancelDag', message.dagId);
+        case 'cancelPlan':
+          vscode.commands.executeCommand('orchestrator.cancelPlan', message.planId);
           break;
-        case 'deleteDag':
-          vscode.commands.executeCommand('orchestrator.deleteDag', message.dagId);
+        case 'deletePlan':
+          vscode.commands.executeCommand('orchestrator.deletePlan', message.planId);
           break;
         case 'refresh':
           this.refresh();
@@ -72,11 +72,11 @@ export class DagsViewProvider implements vscode.WebviewViewProvider {
     // Send initial data
     setTimeout(() => this.refresh(), 100);
     
-    // Setup periodic refresh for running DAGs
+    // Setup periodic refresh for running Plans
     this._refreshTimer = setInterval(() => {
-      const hasRunning = this._dagRunner.getAll().some(dag => {
-        const sm = this._dagRunner.getStateMachine(dag.id);
-        const status = sm?.computeDagStatus();
+      const hasRunning = this._planRunner.getAll().some(plan => {
+        const sm = this._planRunner.getStateMachine(plan.id);
+        const status = sm?.computePlanStatus();
         return status === 'running' || status === 'pending';
       });
       
@@ -102,15 +102,15 @@ export class DagsViewProvider implements vscode.WebviewViewProvider {
   }
   
   /**
-   * Refresh the view with current DAG data
+   * Refresh the view with current Plan data
    */
   refresh() {
     if (!this._view) return;
     
-    const dags = this._dagRunner.getAll();
+    const Plans = this._planRunner.getAll();
     
     // Sort by creation time (newest first)
-    dags.sort((a, b) => b.createdAt - a.createdAt);
+    Plans.sort((a, b) => b.createdAt - a.createdAt);
     
     // Default counts when state machine is not available
     const defaultCounts: Record<NodeStatus, number> = {
@@ -118,21 +118,21 @@ export class DagsViewProvider implements vscode.WebviewViewProvider {
       succeeded: 0, failed: 0, blocked: 0, canceled: 0
     };
     
-    // Build DAG data for webview
-    const dagData = dags.map(dag => {
-      const sm = this._dagRunner.getStateMachine(dag.id);
-      const status = sm?.computeDagStatus() || 'pending';
+    // Build Plan data for webview
+    const planData = Plans.map(plan => {
+      const sm = this._planRunner.getStateMachine(plan.id);
+      const status = sm?.computePlanStatus() || 'pending';
       const counts = sm?.getStatusCounts() || defaultCounts;
       
-      const total = dag.nodes.size;
+      const total = plan.nodes.size;
       const completed = counts.succeeded + counts.failed + counts.blocked;
       const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
       
       return {
-        id: dag.id,
-        name: dag.spec.name,
+        id: plan.id,
+        name: plan.spec.name,
         status,
-        nodes: dag.nodes.size,
+        nodes: plan.nodes.size,
         progress,
         counts: {
           succeeded: counts.succeeded,
@@ -140,21 +140,21 @@ export class DagsViewProvider implements vscode.WebviewViewProvider {
           running: counts.running,
           pending: counts.pending + counts.ready,
         },
-        createdAt: dag.createdAt,
-        startedAt: dag.startedAt,
-        endedAt: dag.endedAt,
-        isSubDag: !!dag.parentDagId,
+        createdAt: plan.createdAt,
+        startedAt: plan.startedAt,
+        endedAt: plan.endedAt,
+        issubPlan: !!plan.parentPlanId,
       };
     });
     
-    // Filter out sub-DAGs (they're shown under their parent)
-    const topLevelDags = dagData.filter(d => !d.isSubDag);
+    // Filter out sub-plans (they're shown under their parent)
+    const topLevelPlans = planData.filter(d => !d.issubPlan);
     
     this._view.webview.postMessage({
       type: 'update',
-      dags: topLevelDags,
-      total: topLevelDags.length,
-      running: topLevelDags.filter(d => d.status === 'running').length,
+      Plans: topLevelPlans,
+      total: topLevelPlans.length,
+      running: topLevelPlans.filter(d => d.status === 'running').length,
     });
   }
   
@@ -184,7 +184,7 @@ export class DagsViewProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-badge-background); 
       color: var(--vscode-badge-foreground); 
     }
-    .dag-item {
+    .plan-item {
       padding: 8px;
       margin-bottom: 8px;
       border-radius: 4px;
@@ -192,56 +192,56 @@ export class DagsViewProvider implements vscode.WebviewViewProvider {
       cursor: pointer;
       border-left: 3px solid transparent;
     }
-    .dag-item:hover {
+    .plan-item:hover {
       background: var(--vscode-list-activeSelectionBackground);
     }
-    .dag-item.running { border-left-color: var(--vscode-progressBar-background); }
-    .dag-item.succeeded { border-left-color: var(--vscode-testing-iconPassed); }
-    .dag-item.failed { border-left-color: var(--vscode-testing-iconFailed); }
-    .dag-item.partial { border-left-color: var(--vscode-editorWarning-foreground); }
-    .dag-item.canceled { border-left-color: var(--vscode-descriptionForeground); }
+    .plan-item.running { border-left-color: var(--vscode-progressBar-background); }
+    .plan-item.succeeded { border-left-color: var(--vscode-testing-iconPassed); }
+    .plan-item.failed { border-left-color: var(--vscode-testing-iconFailed); }
+    .plan-item.partial { border-left-color: var(--vscode-editorWarning-foreground); }
+    .plan-item.canceled { border-left-color: var(--vscode-descriptionForeground); }
     
-    .dag-name { 
+    .plan-name { 
       font-weight: 600; 
       margin-bottom: 4px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
-    .dag-status {
+    .plan-status {
       font-size: 10px;
       padding: 2px 6px;
       border-radius: 8px;
       text-transform: uppercase;
     }
-    .dag-status.running { background: rgba(0, 122, 204, 0.2); color: var(--vscode-progressBar-background); }
-    .dag-status.succeeded { background: rgba(78, 201, 176, 0.2); color: var(--vscode-testing-iconPassed); }
-    .dag-status.failed { background: rgba(244, 135, 113, 0.2); color: var(--vscode-testing-iconFailed); }
-    .dag-status.partial { background: rgba(255, 204, 0, 0.2); color: var(--vscode-editorWarning-foreground); }
-    .dag-status.pending { background: rgba(133, 133, 133, 0.2); color: var(--vscode-descriptionForeground); }
+    .plan-status.running { background: rgba(0, 122, 204, 0.2); color: var(--vscode-progressBar-background); }
+    .plan-status.succeeded { background: rgba(78, 201, 176, 0.2); color: var(--vscode-testing-iconPassed); }
+    .plan-status.failed { background: rgba(244, 135, 113, 0.2); color: var(--vscode-testing-iconFailed); }
+    .plan-status.partial { background: rgba(255, 204, 0, 0.2); color: var(--vscode-editorWarning-foreground); }
+    .plan-status.pending { background: rgba(133, 133, 133, 0.2); color: var(--vscode-descriptionForeground); }
     
-    .dag-details {
+    .plan-details {
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
       display: flex;
       gap: 12px;
       margin-top: 4px;
     }
-    .dag-progress {
+    .plan-progress {
       height: 3px;
       background: var(--vscode-progressBar-background);
       opacity: 0.3;
       border-radius: 2px;
       margin-top: 6px;
     }
-    .dag-progress-bar {
+    .plan-progress-bar {
       height: 100%;
       background: var(--vscode-progressBar-background);
       border-radius: 2px;
       transition: width 0.3s ease;
     }
-    .dag-progress-bar.succeeded { background: var(--vscode-testing-iconPassed); }
-    .dag-progress-bar.failed { background: var(--vscode-testing-iconFailed); }
+    .plan-progress-bar.succeeded { background: var(--vscode-testing-iconPassed); }
+    .plan-progress-bar.failed { background: var(--vscode-testing-iconFailed); }
     
     .empty { 
       padding: 20px; 
@@ -269,10 +269,10 @@ export class DagsViewProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
   <div class="header">
-    <h3>DAGs</h3>
+    <h3>Plans</h3>
     <span class="pill" id="badge">0 total</span>
   </div>
-  <div id="dags"><div class="empty">No DAGs yet</div></div>
+  <div id="plans"><div class="empty">No plans yet</div></div>
   
   <script>
     const vscode = acquireVsCodeApi();
@@ -296,44 +296,44 @@ export class DagsViewProvider implements vscode.WebviewViewProvider {
     window.addEventListener('message', ev => {
       if (ev.data.type !== 'update') return;
       
-      const dags = ev.data.dags || [];
-      document.getElementById('badge').textContent = dags.length + ' total';
+      const Plans = ev.data.plans || [];
+      document.getElementById('badge').textContent = Plans.length + ' total';
       
-      const container = document.getElementById('dags');
+      const container = document.getElementById('plans');
       
-      if (dags.length === 0) {
-        container.innerHTML = '<div class="empty">No DAGs yet. Create one via MCP tools.</div>';
+      if (Plans.length === 0) {
+        container.innerHTML = '<div class="empty">No plans yet. Create one via MCP tools.</div>';
         return;
       }
       
-      container.innerHTML = dags.map(dag => {
-        const progressClass = dag.status === 'failed' ? 'failed' : 
-                             dag.status === 'succeeded' ? 'succeeded' : '';
+      container.innerHTML = Plans.map(plan => {
+        const progressClass = plan.status === 'failed' ? 'failed' : 
+                             plan.status === 'succeeded' ? 'succeeded' : '';
         
         return \`
-          <div class="dag-item \${dag.status}" data-id="\${dag.id}">
-            <div class="dag-name">
-              <span>\${dag.name}</span>
-              <span class="dag-status \${dag.status}">\${dag.status}</span>
+          <div class="plan-item \${plan.status}" data-id="\${plan.id}">
+            <div class="plan-name">
+              <span>\${plan.name}</span>
+              <span class="plan-status \${plan.status}">\${plan.status}</span>
             </div>
-            <div class="dag-details">
-              <span>\${dag.nodes} nodes</span>
-              <span>✓ \${dag.counts.succeeded}</span>
-              <span>✗ \${dag.counts.failed}</span>
-              <span>⏳ \${dag.counts.running}</span>
-              \${dag.startedAt ? '<span>' + formatDuration(dag.startedAt, dag.endedAt) + '</span>' : ''}
+            <div class="plan-details">
+              <span>\${plan.nodes} nodes</span>
+              <span>✓ \${plan.counts.succeeded}</span>
+              <span>✗ \${plan.counts.failed}</span>
+              <span>⏳ \${plan.counts.running}</span>
+              \${plan.startedAt ? '<span>' + formatDuration(plan.startedAt, plan.endedAt) + '</span>' : ''}
             </div>
-            <div class="dag-progress">
-              <div class="dag-progress-bar \${progressClass}" style="width: \${dag.progress}%"></div>
+            <div class="plan-progress">
+              <div class="plan-progress-bar \${progressClass}" style="width: \${plan.progress}%"></div>
             </div>
           </div>
         \`;
       }).join('');
       
       // Add click handlers
-      document.querySelectorAll('.dag-item').forEach(el => {
+      document.querySelectorAll('.plan-item').forEach(el => {
         el.addEventListener('click', () => {
-          vscode.postMessage({ type: 'openDag', dagId: el.dataset.id });
+          vscode.postMessage({ type: 'openPlan', planId: el.dataset.id });
         });
       });
     });

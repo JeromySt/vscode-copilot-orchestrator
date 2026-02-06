@@ -43,7 +43,7 @@ export interface JsonRpcResponse {
  * Tool handler context - dependencies passed to tool handlers
  * 
  * NOTE: runner and plans are kept for type compatibility but are null.
- * All handlers now use dagRunner from the extended context.
+ * All handlers now use PlanRunner from the extended context.
  */
 export interface ToolHandlerContext {
   runner: any;  // Legacy: null

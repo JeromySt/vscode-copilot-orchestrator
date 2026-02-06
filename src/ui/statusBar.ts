@@ -1,44 +1,44 @@
 /**
  * @fileoverview Status Bar Integration
  * 
- * Shows DAG execution status in the VS Code status bar.
+ * Shows Plan execution status in the VS Code status bar.
  * 
  * @module ui/statusBar
  */
 
 import * as vscode from 'vscode';
-import { DagRunner } from '../dag';
+import { PlanRunner } from '\.\./plan';
 
 /**
- * Attach status bar item that shows DAG execution status.
+ * Attach status bar item that shows Plan execution status.
  */
-export function attachStatusBar(context: vscode.ExtensionContext, dagRunner: DagRunner) {
+export function attachStatusBar(context: vscode.ExtensionContext, planRunner: PlanRunner) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   item.text = 'Orchestrator: idle';
-  item.tooltip = 'Copilot Orchestrator (DAG Mode)';
-  item.command = 'orchestrator.refreshDags';
+  item.tooltip = 'Copilot Orchestrator (Plan Mode)';
+  item.command = 'orchestrator.refreshPlans';
   item.show();
   
   const iv = setInterval(() => {
-    const dags = dagRunner.getAll();
-    const runningDags = dags.filter(dag => {
-      const sm = dagRunner.getStateMachine(dag.id);
-      const status = sm?.computeDagStatus();
+    const plans = planRunner.getAll();
+    const runningPlans = plans.filter(plan => {
+      const sm = planRunner.getStateMachine(plan.id);
+      const status = sm?.computePlanStatus();
       return status === 'running';
     });
     
-    if (runningDags.length > 0) {
-      // Count running nodes across all DAGs
+    if (runningPlans.length > 0) {
+      // Count running nodes across all Plans
       let runningNodes = 0;
-      for (const dag of runningDags) {
-        for (const state of dag.nodeStates.values()) {
+      for (const plan of runningPlans) {
+        for (const state of plan.nodeStates.values()) {
           if (state.status === 'running') runningNodes++;
         }
       }
-      item.text = `Orchestrator: ${runningDags.length} DAG${runningDags.length > 1 ? 's' : ''} (${runningNodes} jobs)`;
+      item.text = `Orchestrator: ${runningPlans.length} Plan${runningPlans.length > 1 ? 's' : ''} (${runningNodes} jobs)`;
     } else {
-      const total = dags.length;
-      item.text = total > 0 ? `Orchestrator: ${total} DAG${total > 1 ? 's' : ''}` : 'Orchestrator: idle';
+      const total = plans.length;
+      item.text = total > 0 ? `Orchestrator: ${total} Plan${total > 1 ? 's' : ''}` : 'Orchestrator: idle';
     }
   }, 1000);
   

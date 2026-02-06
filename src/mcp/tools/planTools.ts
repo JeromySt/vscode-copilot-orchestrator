@@ -1,10 +1,10 @@
 /**
- * @fileoverview DAG MCP Tool Definitions
+ * @fileoverview Plan MCP Tool Definitions
  * 
- * Defines the schema for all DAG-related tools exposed via MCP.
- * All work is now a DAG - even single jobs.
+ * Defines the schema for all Plan-related tools exposed via MCP.
+ * All work is now a Plan - even single jobs.
  * 
- * @module mcp/tools/dagTools
+ * @module mcp/tools/planTools
  */
 
 import { McpTool } from '../types';
@@ -13,16 +13,16 @@ import { McpTool } from '../types';
 export const PRODUCER_ID_PATTERN = /^[a-z0-9-]{3,64}$/;
 
 /**
- * Get all DAG-related tool definitions.
+ * Get all Plan-related tool definitions.
  */
-export function getDagToolDefinitions(): McpTool[] {
+export function getPlanToolDefinitions(): McpTool[] {
   return [
     // =========================================================================
-    // DAG CREATION
+    // Plan CREATION
     // =========================================================================
     {
-      name: 'create_copilot_dag',
-      description: `Create a DAG (Directed Acyclic Graph) of work units. Everything is a DAG - even a single job.
+      name: 'create_copilot_plan',
+      description: `Create a Plan (Directed Acyclic Graph) of work units. Everything is a Plan - even a single job.
 
 PRODUCER_ID IS REQUIRED:
 - Every job MUST have a 'producer_id' field
@@ -30,13 +30,13 @@ PRODUCER_ID IS REQUIRED:
 - Used in 'dependencies' arrays to establish execution order
 - Jobs with dependencies: [] are root jobs that start immediately
 
-NESTED SUB-DAGS ("OUT AND BACK" PATTERN):
-- Sub-DAGs can contain nested sub-DAGs for hierarchical work decomposition
-- Pattern: init → sub-dag → finish (work fans out, then converges back)
+NESTED sub-planS ("OUT AND BACK" PATTERN):
+- sub-plans can contain nested sub-plans for hierarchical work decomposition
+- Pattern: init → sub-plan → finish (work fans out, then converges back)
 - Each nesting level has its own scope for dependencies
-- Example 3-level nesting: main-init → Sub-DAG A → main-finish
-                            └→ a-init → Sub-DAG B → a-finish
-                                └→ b-init → Sub-DAG C → b-finish
+- Example 3-level nesting: main-init → sub-plan A → main-finish
+                            └→ a-init → sub-plan B → a-finish
+                                └→ b-init → sub-plan C → b-finish
 
 EXECUTION CONTEXT:
 - Each job gets its own git worktree for isolated work
@@ -67,7 +67,7 @@ EXAMPLES:
         properties: {
           name: { 
             type: 'string', 
-            description: 'Human-readable name for the DAG' 
+            description: 'Human-readable name for the Plan' 
           },
           baseBranch: { 
             type: 'string', 
@@ -133,15 +133,15 @@ For shell type, shell can be: cmd, powershell, pwsh, bash, sh`,
               required: ['producer_id', 'task', 'dependencies']
             }
           },
-          subDags: {
+          subPlans: {
             type: 'array',
-            description: 'Optional nested DAGs that run as a unit. Supports recursive nesting for "out and back" patterns.',
+            description: 'Optional nested Plans that run as a unit. Supports recursive nesting for "out and back" patterns.',
             items: {
               type: 'object',
               properties: {
                 producer_id: { 
                   type: 'string', 
-                  description: 'Unique identifier for the sub-DAG',
+                  description: 'Unique identifier for the sub-plan',
                   pattern: '^[a-z0-9-]{3,64}$'
                 },
                 name: { 
@@ -151,20 +151,20 @@ For shell type, shell can be: cmd, powershell, pwsh, bash, sh`,
                 dependencies: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'Producer IDs this sub-DAG depends on (parent scope jobs or sibling sub-DAGs)'
+                  description: 'Producer IDs this sub-plan depends on (parent scope jobs or sibling sub-plans)'
                 },
                 maxParallel: { 
                   type: 'number', 
-                  description: 'Max concurrent jobs in this sub-DAG' 
+                  description: 'Max concurrent jobs in this sub-plan' 
                 },
                 jobs: {
                   type: 'array',
-                  description: 'Jobs within this sub-DAG (same schema as top-level jobs). Dependencies reference other jobs/sub-DAGs in this scope.',
+                  description: 'Jobs within this sub-plan (same schema as top-level jobs). Dependencies reference other jobs/sub-plans in this scope.',
                   items: { type: 'object' }
                 },
-                subDags: {
+                subPlans: {
                   type: 'array',
-                  description: 'Nested sub-DAGs within this sub-DAG (recursive). Forms "out and back" pattern: init → sub-DAG → finish',
+                  description: 'Nested sub-plans within this sub-plan (recursive). Forms "out and back" pattern: init → sub-plan → finish',
                   items: { type: 'object' }
                 }
               },
@@ -181,8 +181,8 @@ For shell type, shell can be: cmd, powershell, pwsh, bash, sh`,
     // =========================================================================
     {
       name: 'create_copilot_job',
-      description: `Create a single job (internally becomes a DAG with one node). 
-Use this for simple one-off tasks. For multiple related tasks, use create_copilot_dag instead.
+      description: `Create a single job (internally becomes a Plan with one node). 
+Use this for simple one-off tasks. For multiple related tasks, use create_copilot_plan instead.
 
 EXECUTION CONTEXT:
 - Commands run in a shell (cmd.exe on Windows, /bin/sh on Unix)
@@ -236,14 +236,14 @@ EXAMPLES:
     // STATUS & QUERIES
     // =========================================================================
     {
-      name: 'get_copilot_dag_status',
-      description: 'Get status of a DAG including progress and node states.',
+      name: 'get_copilot_plan_status',
+      description: 'Get status of a Plan including progress and node states.',
       inputSchema: {
         type: 'object',
         properties: {
           id: { 
             type: 'string', 
-            description: 'DAG ID (UUID returned from create_copilot_dag)' 
+            description: 'Plan ID (UUID returned from create_copilot_plan)' 
           }
         },
         required: ['id']
@@ -251,8 +251,8 @@ EXAMPLES:
     },
     
     {
-      name: 'list_copilot_dags',
-      description: 'List all DAGs with their status.',
+      name: 'list_copilot_plans',
+      description: 'List all Plans with their status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -267,20 +267,20 @@ EXAMPLES:
     
     {
       name: 'get_copilot_node_details',
-      description: 'Get detailed information about a specific node in a DAG.',
+      description: 'Get detailed information about a specific node in a Plan.',
       inputSchema: {
         type: 'object',
         properties: {
-          dagId: { 
+          planId: { 
             type: 'string', 
-            description: 'DAG ID' 
+            description: 'Plan ID' 
           },
           nodeId: { 
             type: 'string', 
             description: 'Node ID (UUID) or producer_id' 
           }
         },
-        required: ['dagId', 'nodeId']
+        required: ['planId', 'nodeId']
       }
     },
     
@@ -290,9 +290,9 @@ EXAMPLES:
       inputSchema: {
         type: 'object',
         properties: {
-          dagId: { 
+          planId: { 
             type: 'string', 
-            description: 'DAG ID' 
+            description: 'Plan ID' 
           },
           nodeId: { 
             type: 'string', 
@@ -304,7 +304,7 @@ EXAMPLES:
             description: 'Filter by execution phase (default: all)'
           }
         },
-        required: ['dagId', 'nodeId']
+        required: ['planId', 'nodeId']
       }
     },
     
@@ -312,14 +312,14 @@ EXAMPLES:
     // CONTROL
     // =========================================================================
     {
-      name: 'cancel_copilot_dag',
-      description: 'Cancel a running DAG and all its jobs.',
+      name: 'cancel_copilot_plan',
+      description: 'Cancel a running Plan and all its jobs.',
       inputSchema: {
         type: 'object',
         properties: {
           id: { 
             type: 'string', 
-            description: 'DAG ID to cancel' 
+            description: 'Plan ID to cancel' 
           }
         },
         required: ['id']
@@ -327,14 +327,14 @@ EXAMPLES:
     },
     
     {
-      name: 'delete_copilot_dag',
-      description: 'Delete a DAG and its history.',
+      name: 'delete_copilot_plan',
+      description: 'Delete a Plan and its history.',
       inputSchema: {
         type: 'object',
         properties: {
           id: { 
             type: 'string', 
-            description: 'DAG ID to delete' 
+            description: 'Plan ID to delete' 
           }
         },
         required: ['id']
@@ -342,8 +342,8 @@ EXAMPLES:
     },
     
     {
-      name: 'retry_copilot_dag',
-      description: `Retry failed nodes in a DAG. 
+      name: 'retry_copilot_plan',
+      description: `Retry failed nodes in a Plan. 
 
 This resets failed nodes back to 'ready' state and resumes execution.
 Use after fixing issues that caused the failures.
@@ -356,7 +356,7 @@ SESSION RESUMPTION:
 RETRY WORKFLOW:
 1. Use get_node_failure_context to analyze why the node failed
 2. Optionally provide newInstructions to guide the retry
-3. Call retry_copilot_dag with the node ID
+3. Call retry_copilot_plan with the node ID
 
 Options:
 - Retry all failed nodes (default)
@@ -368,7 +368,7 @@ Options:
         properties: {
           id: { 
             type: 'string', 
-            description: 'DAG ID to retry' 
+            description: 'Plan ID to retry' 
           },
           nodeIds: {
             type: 'array',
@@ -407,16 +407,16 @@ Use this to analyze failures before deciding how to retry.`,
       inputSchema: {
         type: 'object',
         properties: {
-          dagId: { 
+          planId: { 
             type: 'string', 
-            description: 'DAG ID' 
+            description: 'Plan ID' 
           },
           nodeId: { 
             type: 'string', 
             description: 'Node ID to get failure context for' 
           }
         },
-        required: ['dagId', 'nodeId']
+        required: ['planId', 'nodeId']
       }
     },
   ];

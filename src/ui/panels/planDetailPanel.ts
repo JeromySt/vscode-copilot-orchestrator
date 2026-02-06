@@ -1,37 +1,37 @@
 /**
- * @fileoverview DAG Detail Panel
+ * @fileoverview Plan Detail Panel
  * 
- * Shows detailed view of a DAG with:
- * - Mermaid diagram of the DAG structure
+ * Shows detailed view of a Plan with:
+ * - Mermaid diagram of the Plan structure
  * - Node status with real-time updates
  * - Progress tracking
  * - Actions (cancel, etc.)
  * 
- * @module ui/panels/dagDetailPanel
+ * @module ui/panels/planDetailPanel
  */
 
 import * as vscode from 'vscode';
-import { DagRunner, DagInstance, DagNode, JobNode, SubDagNode, NodeStatus, NodeExecutionState } from '../../dag';
+import { PlanRunner, PlanInstance, PlanNode, JobNode, SubPlanNode, NodeStatus, NodeExecutionState } from '../../plan';
 
 /**
- * DAG Detail Panel - shows DAG execution flow
+ * Plan Detail Panel - shows Plan execution flow
  */
-export class DagDetailPanel {
-  private static panels = new Map<string, DagDetailPanel>();
+export class planDetailPanel {
+  private static panels = new Map<string, planDetailPanel>();
   
   private readonly _panel: vscode.WebviewPanel;
-  private _dagId: string;
+  private _planId: string;
   private _disposables: vscode.Disposable[] = [];
   private _updateInterval?: NodeJS.Timeout;
   private _lastStateHash: string = '';
   
   private constructor(
     panel: vscode.WebviewPanel,
-    dagId: string,
-    private _dagRunner: DagRunner
+    planId: string,
+    private _planRunner: PlanRunner
   ) {
     this._panel = panel;
-    this._dagId = dagId;
+    this._planId = planId;
     
     // Initial render
     this._update();
@@ -52,22 +52,22 @@ export class DagDetailPanel {
   
   public static createOrShow(
     extensionUri: vscode.Uri,
-    dagId: string,
-    dagRunner: DagRunner
+    planId: string,
+    planRunner: PlanRunner
   ) {
     // Check if panel already exists
-    const existing = DagDetailPanel.panels.get(dagId);
+    const existing = planDetailPanel.panels.get(planId);
     if (existing) {
       existing._panel.reveal();
       return;
     }
     
-    const dag = dagRunner.get(dagId);
-    const title = dag ? `DAG: ${dag.spec.name}` : `DAG: ${dagId.slice(0, 8)}`;
+    const plan = planRunner.get(planId);
+    const title = plan ? `Plan: ${plan.spec.name}` : `Plan: ${planId.slice(0, 8)}`;
     
     // Create new panel
     const panel = vscode.window.createWebviewPanel(
-      'dagDetail',
+      'planDetail',
       title,
       vscode.ViewColumn.One,
       {
@@ -76,22 +76,22 @@ export class DagDetailPanel {
       }
     );
     
-    const dagPanel = new DagDetailPanel(panel, dagId, dagRunner);
-    DagDetailPanel.panels.set(dagId, dagPanel);
+    const planPanel = new planDetailPanel(panel, planId, planRunner);
+    planDetailPanel.panels.set(planId, planPanel);
   }
   
   /**
-   * Close all panels associated with a DAG (used when DAG is deleted)
+   * Close all panels associated with a Plan (used when Plan is deleted)
    */
-  public static closeForDag(dagId: string): void {
-    const panel = DagDetailPanel.panels.get(dagId);
+  public static closeForPlan(planId: string): void {
+    const panel = planDetailPanel.panels.get(planId);
     if (panel) {
       panel.dispose();
     }
   }
   
   public dispose() {
-    DagDetailPanel.panels.delete(this._dagId);
+    planDetailPanel.panels.delete(this._planId);
     
     if (this._updateInterval) {
       clearInterval(this._updateInterval);
@@ -108,18 +108,18 @@ export class DagDetailPanel {
   private _handleMessage(message: any) {
     switch (message.type) {
       case 'cancel':
-        vscode.commands.executeCommand('orchestrator.cancelDag', this._dagId);
+        vscode.commands.executeCommand('orchestrator.cancelPlan', this._planId);
         break;
       case 'openNode':
-        // Use the dagId from the message if provided (for nodes in child DAGs), otherwise use the main DAG ID
-        const dagIdForNode = message.dagId || this._dagId;
-        vscode.commands.executeCommand('orchestrator.showNodeDetails', dagIdForNode, message.nodeId);
+        // Use the planId from the message if provided (for nodes in child Plans), otherwise use the main Plan ID
+        const planIdForNode = message.planId || this._planId;
+        vscode.commands.executeCommand('orchestrator.showNodeDetails', planIdForNode, message.nodeId);
         break;
-      case 'openSubDag':
-        DagDetailPanel.createOrShow(
+      case 'opensubPlan':
+        planDetailPanel.createOrShow(
           this._panel.webview.cspSource as any,
-          message.dagId,
-          this._dagRunner
+          message.planId,
+          this._planRunner
         );
         break;
       case 'refresh':
@@ -136,7 +136,7 @@ export class DagDetailPanel {
   }
   
   private async _sendAllProcessStats() {
-    const stats = await this._dagRunner.getAllProcessStats(this._dagId);
+    const stats = await this._planRunner.getAllProcessStats(this._planId);
     this._panel.webview.postMessage({
       type: 'allProcessStats',
       flat: (stats as any).flat || [],
@@ -149,13 +149,13 @@ export class DagDetailPanel {
    * Show the work summary in a styled webview panel
    */
   private async _showWorkSummaryDocument(): Promise<void> {
-    const dag = this._dagRunner.get(this._dagId);
-    if (!dag || !dag.workSummary) {
+    const plan = this._planRunner.get(this._planId);
+    if (!plan || !plan.workSummary) {
       vscode.window.showInformationMessage('No work summary available');
       return;
     }
     
-    const summary = dag.workSummary;
+    const summary = plan.workSummary;
     
     // Build job details HTML
     let jobDetailsHtml = '';
@@ -207,7 +207,7 @@ export class DagDetailPanel {
     // Create the webview panel
     const panel = vscode.window.createWebviewPanel(
       'workSummary',
-      `Work Summary: ${dag.spec.name}`,
+      `Work Summary: ${plan.spec.name}`,
       vscode.ViewColumn.Beside,
       { enableScripts: false }
     );
@@ -334,7 +334,7 @@ export class DagDetailPanel {
   </style>
 </head>
 <body>
-  <h1>📊 Work Summary: ${this._escapeHtml(dag.spec.name)}</h1>
+  <h1>📊 Work Summary: ${this._escapeHtml(plan.spec.name)}</h1>
   
   <div class="overview-grid">
     <div class="overview-stat">
@@ -364,14 +364,14 @@ export class DagDetailPanel {
   }
 
   private _update() {
-    const dag = this._dagRunner.get(this._dagId);
-    if (!dag) {
-      this._panel.webview.html = this._getErrorHtml('DAG not found');
+    const plan = this._planRunner.get(this._planId);
+    if (!plan) {
+      this._panel.webview.html = this._getErrorHtml('Plan not found');
       return;
     }
     
-    const sm = this._dagRunner.getStateMachine(this._dagId);
-    const status = sm?.computeDagStatus() || 'pending';
+    const sm = this._planRunner.getStateMachine(this._planId);
+    const status = sm?.computePlanStatus() || 'pending';
     const defaultCounts: Record<NodeStatus, number> = {
       pending: 0, ready: 0, scheduled: 0, running: 0,
       succeeded: 0, failed: 0, blocked: 0, canceled: 0
@@ -382,7 +382,7 @@ export class DagDetailPanel {
     const stateHash = JSON.stringify({
       status,
       counts,
-      nodeStates: Array.from(dag.nodeStates.entries()).map(([id, s]) => [id, s.status])
+      nodeStates: Array.from(plan.nodeStates.entries()).map(([id, s]) => [id, s.status])
     });
     
     if (stateHash === this._lastStateHash) {
@@ -391,7 +391,7 @@ export class DagDetailPanel {
     }
     this._lastStateHash = stateHash;
     
-    this._panel.webview.html = this._getHtml(dag, status, counts);
+    this._panel.webview.html = this._getHtml(plan, status, counts);
   }
   
   private _getErrorHtml(message: string): string {
@@ -406,22 +406,22 @@ export class DagDetailPanel {
   }
   
   private _getHtml(
-    dag: DagInstance,
+    plan: PlanInstance,
     status: string,
     counts: Record<NodeStatus, number>
   ): string {
-    const total = dag.nodes.size;
+    const total = plan.nodes.size;
     const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0);
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
     // Build Mermaid diagram
-    const { diagram: mermaidDef, subgraphData } = this._buildMermaidDiagram(dag);
+    const { diagram: mermaidDef, subgraphData } = this._buildMermaidDiagram(plan);
     
     // Build node data for click handling - recursively include all nested nodes
-    const nodeData: Record<string, { nodeId: string; dagId: string; type: string; childDagId?: string }> = {};
+    const nodeData: Record<string, { nodeId: string; planId: string; type: string; childPlanId?: string }> = {};
     
     // Recursive function to collect all node data with prefixes matching Mermaid IDs
-    const collectNodeData = (d: DagInstance, prefix: string, subgraphCounterStart: number): number => {
+    const collectNodeData = (d: PlanInstance, prefix: string, subgraphCounterStart: number): number => {
       let subgraphCounter = subgraphCounterStart;
       
       for (const [nodeId, node] of d.nodes) {
@@ -430,20 +430,20 @@ export class DagDetailPanel {
         
         nodeData[sanitizedId] = {
           nodeId,
-          dagId: d.id,
+          planId: d.id,
           type: node.type,
-          childDagId: node.type === 'subdag' ? (state?.childDagId || (node as SubDagNode).childDagId) : undefined,
+          childPlanId: node.type === 'subPlan' ? (state?.childPlanId || (node as SubPlanNode).childPlanId) : undefined,
         };
         
-        // If this is a subdag with an instantiated child, recurse into it
-        if (node.type === 'subdag') {
+        // If this is a subPlan with an instantiated child, recurse into it
+        if (node.type === 'subPlan') {
           subgraphCounter++;
-          const childDagId = state?.childDagId || (node as SubDagNode).childDagId;
+          const childPlanId = state?.childPlanId || (node as SubPlanNode).childPlanId;
           
-          if (childDagId) {
-            const childDag = this._dagRunner.get(childDagId);
-            if (childDag) {
-              subgraphCounter = collectNodeData(childDag, prefix + 'c' + subgraphCounter + '_', subgraphCounter);
+          if (childPlanId) {
+            const childPlan = this._planRunner.get(childPlanId);
+            if (childPlan) {
+              subgraphCounter = collectNodeData(childPlan, prefix + 'c' + subgraphCounter + '_', subgraphCounter);
             }
           }
         }
@@ -452,15 +452,15 @@ export class DagDetailPanel {
       return subgraphCounter;
     };
     
-    collectNodeData(dag, '', 0);
+    collectNodeData(plan, '', 0);
     
     // Get branch info
-    const baseBranch = dag.spec.baseBranch || 'main';
-    const targetBranch = dag.targetBranch || baseBranch;
-    const showBranchFlow = baseBranch !== targetBranch || dag.targetBranch;
+    const baseBranch = plan.spec.baseBranch || 'main';
+    const targetBranch = plan.targetBranch || baseBranch;
+    const showBranchFlow = baseBranch !== targetBranch || plan.targetBranch;
     
     // Build work summary from node states
-    const workSummaryHtml = this._buildWorkSummaryHtml(dag);
+    const workSummaryHtml = this._buildWorkSummaryHtml(plan);
     
     return `<!DOCTYPE html>
 <html>
@@ -710,7 +710,7 @@ export class DagDetailPanel {
       flex: 1;
       gap: 1px;
     }
-    .node-dag-path {
+    .node-plan-path {
       font-size: 10px;
       color: var(--vscode-descriptionForeground);
       font-weight: normal;
@@ -732,17 +732,17 @@ export class DagDetailPanel {
     .proc-pid { color: var(--vscode-descriptionForeground); font-size: 11px; }
     .proc-stats { color: var(--vscode-descriptionForeground); font-size: 11px; }
     
-    /* Sub-DAG hierarchy styles */
-    .subdag-node {
+    /* sub-plan hierarchy styles */
+    .subPlan-node {
       margin-bottom: 8px;
       background: var(--vscode-sideBar-background);
       border-radius: 6px;
       overflow: hidden;
       border-left: 3px solid var(--vscode-charts-blue);
     }
-    .subdag-node.collapsed .subdag-children { display: none; }
-    .subdag-node.collapsed .node-chevron { transform: rotate(-90deg); }
-    .subdag-header {
+    .subPlan-node.collapsed .subPlan-children { display: none; }
+    .subPlan-node.collapsed .node-chevron { transform: rotate(-90deg); }
+    .subPlan-header {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -751,15 +751,15 @@ export class DagDetailPanel {
       font-weight: 500;
       background: rgba(0, 100, 200, 0.1);
     }
-    .subdag-header:hover {
+    .subPlan-header:hover {
       background: rgba(0, 100, 200, 0.15);
     }
-    .subdag-icon { font-size: 14px; }
-    .subdag-name { flex: 1; font-weight: 600; }
-    .subdag-children {
+    .subPlan-icon { font-size: 14px; }
+    .subPlan-name { flex: 1; font-weight: 600; }
+    .subPlan-children {
       padding: 8px 8px 8px 12px;
     }
-    .subdag-waiting {
+    .subPlan-waiting {
       font-style: italic;
       opacity: 0.7;
     }
@@ -872,7 +872,7 @@ export class DagDetailPanel {
 </head>
 <body>
   <div class="header">
-    <h2>${this._escapeHtml(dag.spec.name)}</h2>
+    <h2>${this._escapeHtml(plan.spec.name)}</h2>
     <span class="status-badge ${status}">${status}</span>
   </div>
   
@@ -960,7 +960,7 @@ ${mermaidDef}
   
   <div class="actions">
     ${status === 'running' || status === 'pending' ? 
-      '<button class="action-btn secondary" onclick="cancelDag()">Cancel</button>' : ''}
+      '<button class="action-btn secondary" onclick="cancelPlan()">Cancel</button>' : ''}
     <button class="action-btn secondary" onclick="refresh()">Refresh</button>
     ${status === 'succeeded' ? 
       '<button class="action-btn primary" onclick="showWorkSummary()">View Work Summary</button>' : ''}
@@ -1013,12 +1013,12 @@ ${mermaidDef}
           const subgraphId = 'sg' + sgMatch[1];
           console.log('Looking for subgraphId:', subgraphId, 'in', Object.keys(subgraphData));
           const data = subgraphData[subgraphId];
-          if (data && data.childDagId) {
+          if (data && data.childPlanId) {
             // Only open if we clicked on the label area (top part of cluster), not on nodes inside
             const clickedOnNode = el.closest('.node');
             if (!clickedOnNode || el.closest('.cluster-label')) {
-              console.log('Opening sub-DAG:', data.childDagId);
-              vscode.postMessage({ type: 'openSubDag', dagId: data.childDagId });
+              console.log('Opening sub-plan:', data.childPlanId);
+              vscode.postMessage({ type: 'opensubPlan', planId: data.childPlanId });
               e.stopPropagation();
               e.preventDefault();
               return;
@@ -1037,10 +1037,10 @@ ${mermaidDef}
               const sanitizedId = match[1];
               const data = nodeData[sanitizedId];
               if (data) {
-                if (data.type === 'subdag' && data.childDagId) {
-                  vscode.postMessage({ type: 'openSubDag', dagId: data.childDagId });
+                if (data.type === 'subPlan' && data.childPlanId) {
+                  vscode.postMessage({ type: 'opensubPlan', planId: data.childPlanId });
                 } else {
-                  vscode.postMessage({ type: 'openNode', nodeId: data.nodeId, dagId: data.dagId });
+                  vscode.postMessage({ type: 'openNode', nodeId: data.nodeId, planId: data.planId });
                 }
               }
             }
@@ -1073,7 +1073,7 @@ ${mermaidDef}
       });
     });
     
-    function cancelDag() {
+    function cancelPlan() {
       vscode.postMessage({ type: 'cancel' });
     }
     
@@ -1085,7 +1085,7 @@ ${mermaidDef}
       vscode.postMessage({ type: 'showWorkSummary' });
     }
     
-    // Process tree handling for DAG-level view
+    // Process tree handling for plan-level view
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.type === 'allProcessStats') {
@@ -1098,34 +1098,34 @@ ${mermaidDef}
       if (!container) return;
       
       const hasRootJobs = rootJobs && rootJobs.length > 0;
-      const hasSubDags = hierarchy && hierarchy.length > 0;
+      const hassubPlans = hierarchy && hierarchy.length > 0;
       
-      if (!hasRootJobs && !hasSubDags) {
+      if (!hasRootJobs && !hassubPlans) {
         container.innerHTML = '<div class="processes-loading">No active processes</div>';
         return;
       }
       
       let html = '';
       
-      // Render root-level jobs first (jobs directly in main DAG)
+      // Render root-level jobs first (jobs directly in main Plan)
       for (const job of (rootJobs || [])) {
         html += renderJobNode(job, 0);
       }
       
-      // Render sub-DAG hierarchy
-      for (const subDag of (hierarchy || [])) {
-        html += renderSubDag(subDag, 0);
+      // Render sub-plan hierarchy
+      for (const subPlan of (hierarchy || [])) {
+        html += rendersubPlan(subPlan, 0);
       }
       
       container.innerHTML = html;
     }
     
-    // Render a sub-DAG as a collapsible section
-    function renderSubDag(subDag, depth) {
+    // Render a sub-plan as a collapsible section
+    function rendersubPlan(subPlan, depth) {
       const indent = depth * 16;
-      const hasChildren = (subDag.children && subDag.children.length > 0) || (subDag.jobs && subDag.jobs.length > 0);
+      const hasChildren = (subPlan.children && subPlan.children.length > 0) || (subPlan.jobs && subPlan.jobs.length > 0);
       
-      // Count total processes in this sub-DAG
+      // Count total processes in this sub-plan
       let totalProcs = 0;
       let totalCpu = 0;
       let totalMem = 0;
@@ -1155,7 +1155,7 @@ ${mermaidDef}
         return { count, cpu, memory };
       }
       
-      for (const job of (subDag.jobs || [])) {
+      for (const job of (subPlan.jobs || [])) {
         sumJobStats(job);
       }
       
@@ -1168,32 +1168,32 @@ ${mermaidDef}
           sumChildren(child.children);
         }
       }
-      sumChildren(subDag.children);
+      sumChildren(subPlan.children);
       
       const memMB = (totalMem / 1024 / 1024).toFixed(1);
-      const statusClass = 'subdag-' + subDag.status;
+      const statusClass = 'subPlan-' + subplan.status;
       
-      let html = '<div class="subdag-node ' + statusClass + '" style="margin-left: ' + indent + 'px;">';
-      html += '<div class="subdag-header" onclick="this.parentElement.classList.toggle(\\'collapsed\\')">';
+      let html = '<div class="subPlan-node ' + statusClass + '" style="margin-left: ' + indent + 'px;">';
+      html += '<div class="subPlan-header" onclick="this.parentElement.classList.toggle(\\'collapsed\\')">';
       html += '<span class="node-chevron">▼</span>';
-      html += '<span class="subdag-icon">📦</span>';
-      html += '<span class="subdag-name">' + escapeHtml(subDag.dagName) + '</span>';
+      html += '<span class="subPlan-icon">📦</span>';
+      html += '<span class="subPlan-name">' + escapeHtml(subPlan.planName) + '</span>';
       if (totalProcs > 0) {
         html += '<span class="node-stats">(' + totalProcs + ' proc • ' + totalCpu.toFixed(0) + '% CPU • ' + memMB + ' MB)</span>';
       } else {
-        html += '<span class="node-stats subdag-waiting">(waiting)</span>';
+        html += '<span class="node-stats subPlan-waiting">(waiting)</span>';
       }
       html += '</div>';
-      html += '<div class="subdag-children">';
+      html += '<div class="subPlan-children">';
       
-      // Render jobs in this sub-DAG
-      for (const job of (subDag.jobs || [])) {
+      // Render jobs in this sub-plan
+      for (const job of (subPlan.jobs || [])) {
         html += renderJobNode(job, 1);
       }
       
-      // Render nested sub-DAGs
-      for (const child of (subDag.children || [])) {
-        html += renderSubDag(child, depth + 1);
+      // Render nested sub-plans
+      for (const child of (subPlan.children || [])) {
+        html += rendersubPlan(child, depth + 1);
       }
       
       html += '</div></div>';
@@ -1298,7 +1298,7 @@ ${mermaidDef}
   /**
    * Build work summary HTML from node execution states
    */
-  private _buildWorkSummaryHtml(dag: DagInstance): string {
+  private _buildWorkSummaryHtml(plan: PlanInstance): string {
     // Count totals across all nodes
     let totalCommits = 0;
     let totalAdded = 0;
@@ -1314,10 +1314,10 @@ ${mermaidDef}
       deleted: number;
     }> = [];
     
-    for (const [nodeId, node] of dag.nodes) {
+    for (const [nodeId, node] of plan.nodes) {
       if (node.type !== 'job') continue;
       
-      const state = dag.nodeStates.get(nodeId);
+      const state = plan.nodeStates.get(nodeId);
       if (!state || state.status !== 'succeeded') continue;
       
       const ws = state.workSummary;
@@ -1392,17 +1392,17 @@ ${mermaidDef}
     `;
   }
   
-  private _buildMermaidDiagram(dag: DagInstance): { diagram: string; subgraphData: Record<string, { childDagId: string; name: string }> } {
+  private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; subgraphData: Record<string, { childPlanId: string; name: string }> } {
     const lines: string[] = ['flowchart LR'];
     
     // Track subgraph data for click handling
-    const subgraphData: Record<string, { childDagId: string; name: string }> = {};
+    const subgraphData: Record<string, { childPlanId: string; name: string }> = {};
     
     // Get branch names
-    const baseBranchName = dag.baseBranch || 'main';
-    const targetBranchName = dag.targetBranch || baseBranchName;
+    const baseBranchName = plan.baseBranch || 'main';
+    const targetBranchName = plan.targetBranch || baseBranchName;
     const showBaseBranch = baseBranchName !== targetBranchName;
-    const showTargetBranch = !!dag.targetBranch;
+    const showTargetBranch = !!plan.targetBranch;
     
     // Add style definitions
     lines.push('  classDef pending fill:#3c3c3c,stroke:#858585');
@@ -1443,7 +1443,7 @@ ${mermaidDef}
     const nodeEntryExitMap = new Map<string, { entryIds: string[], exitIds: string[] }>();
     
     // Track leaf node states for mergedToTarget status
-    const leafNodeStates = new Map<string, NodeExecutionState | undefined>();
+    const leafnodeStates = new Map<string, NodeExecutionState | undefined>();
     
     // Counter for unique subgraph IDs
     let subgraphCounter = 0;
@@ -1451,13 +1451,13 @@ ${mermaidDef}
     // Track all edges to add at the end
     const edgesToAdd: Array<{ from: string; to: string; status?: string }> = [];
     
-    // Recursive function to render DAG structure
-    const renderDagInstance = (d: DagInstance, prefix: string, depth: number): { roots: string[], leaves: string[] } => {
+    // Recursive function to render Plan structure
+    const renderPlanInstance = (d: PlanInstance, prefix: string, depth: number): { roots: string[], leaves: string[] } => {
       const indent = '  '.repeat(depth + 1);
       const localRoots: string[] = [];
       const localLeaves: string[] = [];
       
-      // First pass: determine which nodes are roots and leaves in this DAG
+      // First pass: determine which nodes are roots and leaves in this Plan
       const nodeHasDependents = new Set<string>();
       for (const [nodeId, node] of d.nodes) {
         for (const depId of node.dependencies) {
@@ -1474,15 +1474,15 @@ ${mermaidDef}
         const isRoot = node.dependencies.length === 0;
         const isLeaf = !nodeHasDependents.has(nodeId);
         
-        if (node.type === 'subdag') {
-          const subDagNode = node as SubDagNode;
+        if (node.type === 'subPlan') {
+          const subPlanNode = node as SubPlanNode;
           const label = this._escapeForMermaid(node.name);
           const subgraphId = `sg${subgraphCounter++}`;
           
           // Track subgraph data for click handling
-          const childDagId = state?.childDagId || subDagNode.childDagId;
-          if (childDagId) {
-            subgraphData[subgraphId] = { childDagId, name: node.name };
+          const childPlanId = state?.childPlanId || subPlanNode.childPlanId;
+          if (childPlanId) {
+            subgraphData[subgraphId] = { childPlanId, name: node.name };
           }
           
           lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(status)} ${label}"]`);
@@ -1491,17 +1491,17 @@ ${mermaidDef}
           let innerRoots: string[] = [];
           let innerLeaves: string[] = [];
           
-          // Try to get instantiated child DAG first
-          const childDag = state?.childDagId ? this._dagRunner.get(state.childDagId) : undefined;
+          // Try to get instantiated child Plan first
+          const childPlan = state?.childPlanId ? this._planRunner.get(state.childPlanId) : undefined;
           
-          if (childDag) {
-            // Use instantiated child DAG
-            const result = renderDagInstance(childDag, prefix + 'c' + subgraphCounter + '_', depth + 1);
+          if (childPlan) {
+            // Use instantiated child Plan
+            const result = renderPlanInstance(childPlan, prefix + 'c' + subgraphCounter + '_', depth + 1);
             innerRoots = result.roots;
             innerLeaves = result.leaves;
-          } else if (subDagNode.childSpec) {
-            // Fall back to spec (child DAG not yet created or already cleaned up)
-            const result = renderFromSpec(subDagNode.childSpec, prefix + 'c' + subgraphCounter + '_', depth + 1, status);
+          } else if (subPlanNode.childSpec) {
+            // Fall back to spec (child Plan not yet created or already cleaned up)
+            const result = renderFromSpec(subPlanNode.childSpec, prefix + 'c' + subgraphCounter + '_', depth + 1, status);
             innerRoots = result.roots;
             innerLeaves = result.leaves;
           }
@@ -1513,7 +1513,7 @@ ${mermaidDef}
           const borderColor = status === 'running' ? '#3794ff' : status === 'succeeded' ? '#4ec9b0' : '#4a4a6a';
           lines.push(`${indent}style ${subgraphId} fill:${boxColor},stroke:${borderColor},stroke-width:2px`);
           
-          // Store entry/exit for this subdag node
+          // Store entry/exit for this subPlan node
           nodeEntryExitMap.set(sanitizedId, {
             entryIds: innerRoots.length > 0 ? innerRoots : [sanitizedId],
             exitIds: innerLeaves.length > 0 ? innerLeaves : [sanitizedId]
@@ -1542,7 +1542,7 @@ ${mermaidDef}
           if (isLeaf) {
             localLeaves.push(sanitizedId);
             // Track state for leaf nodes to check mergedToTarget later
-            leafNodeStates.set(sanitizedId, state);
+            leafnodeStates.set(sanitizedId, state);
           }
           
           // Add edges from dependencies
@@ -1556,9 +1556,9 @@ ${mermaidDef}
       return { roots: localRoots, leaves: localLeaves };
     };
     
-    // Render from spec (for sub-DAGs not yet instantiated)
+    // Render from spec (for sub-plans not yet instantiated)
     const renderFromSpec = (
-      spec: import('../../dag/types').DagSpec, 
+      spec: import('../../plan/types').PlanSpec, 
       prefix: string, 
       depth: number, 
       inheritedStatus: string
@@ -1579,10 +1579,10 @@ ${mermaidDef}
           nodeHasDependents.add(dep);
         }
       }
-      for (const subDagSpec of spec.subDags || []) {
-        const sanitizedId = prefix + this._sanitizeId(subDagSpec.producerId);
-        producerToSanitized.set(subDagSpec.producerId, sanitizedId);
-        for (const dep of subDagSpec.dependencies || []) {
+      for (const subPlanSpec of spec.subPlans || []) {
+        const sanitizedId = prefix + this._sanitizeId(subPlanSpec.producerId);
+        producerToSanitized.set(subPlanSpec.producerId, sanitizedId);
+        for (const dep of subPlanSpec.dependencies || []) {
           nodeHasDependents.add(dep);
         }
       }
@@ -1612,22 +1612,22 @@ ${mermaidDef}
         }
       }
       
-      // Render nested sub-DAGs
-      for (const subDagSpec of spec.subDags || []) {
-        const sanitizedId = producerToSanitized.get(subDagSpec.producerId)!;
-        const label = this._escapeForMermaid(subDagSpec.name || subDagSpec.producerId);
+      // Render nested sub-plans
+      for (const subPlanSpec of spec.subPlans || []) {
+        const sanitizedId = producerToSanitized.get(subPlanSpec.producerId)!;
+        const label = this._escapeForMermaid(subPlanSpec.name || subPlanSpec.producerId);
         const subgraphId = `sg${subgraphCounter++}`;
-        const isRoot = (subDagSpec.dependencies || []).length === 0;
-        const isLeaf = !nodeHasDependents.has(subDagSpec.producerId);
+        const isRoot = (subPlanSpec.dependencies || []).length === 0;
+        const isLeaf = !nodeHasDependents.has(subPlanSpec.producerId);
         
         lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(inheritedStatus)} ${label}"]`);
         // Don't set direction inside subgraphs - let them inherit from parent
         
         // Build nested spec and render
-        const nestedSpec: import('../../dag/types').DagSpec = {
-          name: subDagSpec.name || subDagSpec.producerId,
-          jobs: subDagSpec.jobs,
-          subDags: subDagSpec.subDags,
+        const nestedSpec: import('../../plan/types').PlanSpec = {
+          name: subPlanSpec.name || subPlanSpec.producerId,
+          jobs: subPlanSpec.jobs,
+          subPlans: subPlanSpec.subPlans,
         };
         
         const result = renderFromSpec(nestedSpec, prefix + 'n' + subgraphCounter + '_', depth + 1, inheritedStatus);
@@ -1644,7 +1644,7 @@ ${mermaidDef}
         if (isLeaf) localLeaves.push(...(result.leaves.length > 0 ? result.leaves : [sanitizedId]));
         
         // Add edges
-        for (const dep of subDagSpec.dependencies || []) {
+        for (const dep of subPlanSpec.dependencies || []) {
           const depSanitizedId = producerToSanitized.get(dep);
           if (depSanitizedId) {
             edgesToAdd.push({ from: depSanitizedId, to: sanitizedId });
@@ -1655,8 +1655,8 @@ ${mermaidDef}
       return { roots: localRoots, leaves: localLeaves };
     };
     
-    // Render the main DAG
-    const mainResult = renderDagInstance(dag, '', 0);
+    // Render the main Plan
+    const mainResult = renderPlanInstance(plan, '', 0);
     
     lines.push('');
     
@@ -1704,7 +1704,7 @@ ${mermaidDef}
         const exitIds = mapping ? mapping.exitIds : [leafId];
         for (const exitId of exitIds) {
           // Check if this leaf has been successfully merged to target
-          const leafState = leafNodeStates.get(exitId);
+          const leafState = leafnodeStates.get(exitId);
           const isMerged = leafState?.mergedToTarget === true;
           
           if (isMerged) {

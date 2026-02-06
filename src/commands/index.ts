@@ -2,7 +2,7 @@
  * @fileoverview Commands module exports.
  * 
  * Centralized exports for all VS Code command handlers.
- * DAG commands are registered via dagInitialization.ts.
+ * Plan commands are registered via planInitialization.ts.
  * 
  * @module commands
  */

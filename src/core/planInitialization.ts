@@ -1,16 +1,16 @@
 /**
- * @fileoverview DAG-based Extension Initialization
+ * @fileoverview Plan-based Extension Initialization
  * 
- * Replaces the old initialization with the new DAG-based system.
- * Everything is now a DAG - even single jobs.
+ * Replaces the old initialization with the new Plan-based system.
+ * Everything is now a Plan - even single jobs.
  * 
- * @module core/dagInitialization
+ * @module core/planInitialization
  */
 
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { DagRunner, DagRunnerConfig, DefaultJobExecutor } from '../dag';
+import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '\.\./plan';
 import { ProcessMonitor } from '../process/processMonitor';
 import { McpServerManager } from '../mcp/mcpServerManager';
 import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
@@ -223,28 +223,28 @@ function createAgentDelegatorAdapter(log: any) {
 // ============================================================================
 
 /**
- * Initialize the DAG runner and executor
+ * Initialize the Plan Runner and executor
  */
-export function initializeDagRunner(
+export function initializePlanRunner(
   context: vscode.ExtensionContext
-): { dagRunner: DagRunner; executor: DefaultJobExecutor; processMonitor: ProcessMonitor } {
-  log.info('Initializing DAG runner...');
+): { planRunner: PlanRunner; executor: DefaultJobExecutor; processMonitor: ProcessMonitor } {
+  log.info('Initializing Plan Runner...');
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
   
   // Store everything in workspace .orchestrator folder (or fallback to globalStorage)
   const storagePath = workspacePath 
-    ? path.join(workspacePath, '.orchestrator', 'dags')
-    : path.join(context.globalStorageUri.fsPath, 'dags');
+    ? path.join(workspacePath, '.orchestrator', 'plans')
+    : path.join(context.globalStorageUri.fsPath, 'plans');
   
-  const config: DagRunnerConfig = {
+  const config: PlanRunnerConfig = {
     storagePath,
     defaultRepoPath: workspacePath,
     maxParallel: loadConfiguration().maxParallel,
     pumpInterval: 1000,
   };
   
-  const dagRunner = new DagRunner(config);
+  const planRunner = new PlanRunner(config);
   const executor = new DefaultJobExecutor();
   const processMonitor = new ProcessMonitor();
   
@@ -258,28 +258,28 @@ export function initializeDagRunner(
   const agentDelegator = createAgentDelegatorAdapter(log);
   executor.setAgentDelegator(agentDelegator);
   
-  dagRunner.setExecutor(executor);
+  planRunner.setExecutor(executor);
   
   // Ensure .orchestrator and .worktrees are in .gitignore
   if (workspacePath) {
     ensureGitignoreEntries(workspacePath, ['.orchestrator/', '.worktrees/']);
   }
   
-  // Initialize (load persisted DAGs)
-  dagRunner.initialize().catch(err => {
-    log.error('Failed to initialize DAG runner', { error: err.message });
+  // Initialize (load persisted Plans)
+  planRunner.initialize().catch(err => {
+    log.error('Failed to initialize Plan Runner', { error: err.message });
   });
   
   // Register cleanup
   context.subscriptions.push({
     dispose: () => {
-      dagRunner.shutdown();
+      planRunner.shutdown();
     }
   });
   
-  log.info('DAG runner initialized', { storagePath, workspacePath });
+  log.info('Plan Runner initialized', { storagePath, workspacePath });
   
-  return { dagRunner, executor, processMonitor };
+  return { planRunner, executor, processMonitor };
 }
 
 // ============================================================================
@@ -291,7 +291,7 @@ export function initializeDagRunner(
  */
 export async function initializeHttpServer(
   context: vscode.ExtensionContext,
-  dagRunner: DagRunner,
+  planRunner: PlanRunner,
   config: HttpConfig
 ): Promise<void> {
   if (!config.enabled) {
@@ -307,7 +307,7 @@ export async function initializeHttpServer(
   const http = require('http');
   const { McpHandler } = require('../mcp/handler');
   
-  const mcpHandler = new McpHandler(dagRunner, workspacePath);
+  const mcpHandler = new McpHandler(PlanRunner, workspacePath);
   
   const server = http.createServer(async (req: any, res: any) => {
     // CORS headers
@@ -346,16 +346,16 @@ export async function initializeHttpServer(
       return;
     }
     
-    // DAG status endpoint
-    if (req.url?.startsWith('/api/dags')) {
+    // Plan status endpoint
+    if (req.url?.startsWith('/api/plans')) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      const dags = dagRunner.getAll().map(dag => ({
-        id: dag.id,
-        name: dag.spec.name,
-        status: dagRunner.getStateMachine(dag.id)?.computeDagStatus(),
-        nodes: dag.nodes.size,
+      const Plans = planRunner.getAll().map(plan => ({
+        id: plan.id,
+        name: plan.spec.name,
+        status: planRunner.getStateMachine(plan.id)?.computePlanStatus(),
+        nodes: plan.nodes.size,
       }));
-      res.end(JSON.stringify({ dags }));
+      res.end(JSON.stringify({ Plans }));
       return;
     }
     
@@ -434,101 +434,101 @@ export function initializeMcpServer(
 // ============================================================================
 
 /**
- * Initialize the DAGs view in the sidebar
+ * Initialize the Plans view in the sidebar
  */
-export function initializeDagsView(
+export function initializeplansView(
   context: vscode.ExtensionContext,
-  dagRunner: DagRunner
+  planRunner: PlanRunner
 ): void {
-  log.info('Initializing DAGs view...');
+  log.info('Initializing Plans view...');
   
   // Import the view provider
-  const { DagsViewProvider } = require('../ui/dagsViewProvider');
+  const { plansViewProvider } = require('../ui/plansViewProvider');
   
-  const dagsView = new DagsViewProvider(context, dagRunner);
+  const plansView = new plansViewProvider(context, PlanRunner);
   
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('orchestrator.dagsView', dagsView)
+    vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
   );
   
-  log.info('DAGs view initialized');
+  log.info('Plans view initialized');
 }
 
 /**
- * Register commands for the DAG system
+ * Register commands for the Plan system
  */
-export function registerDagCommands(
+export function registerPlanCommands(
   context: vscode.ExtensionContext,
-  dagRunner: DagRunner
+  planRunner: PlanRunner
 ): void {
-  log.info('Registering DAG commands...');
+  log.info('Registering Plan commands...');
   
-  // Show DAG details
+  // Show Plan details
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.showDagDetails', (dagId: string) => {
-      const { DagDetailPanel } = require('../ui/panels/dagDetailPanel');
-      DagDetailPanel.createOrShow(context.extensionUri, dagId, dagRunner);
+    vscode.commands.registerCommand('orchestrator.showPlanDetails', (planId: string) => {
+      const { planDetailPanel } = require('../ui/panels/planDetailPanel');
+      planDetailPanel.createOrShow(context.extensionUri, planId, PlanRunner);
     })
   );
   
   // Show node details
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.showNodeDetails', (dagId: string, nodeId: string) => {
+    vscode.commands.registerCommand('orchestrator.showNodeDetails', (planId: string, nodeId: string) => {
       const { NodeDetailPanel } = require('../ui/panels/nodeDetailPanel');
-      NodeDetailPanel.createOrShow(context.extensionUri, dagId, nodeId, dagRunner);
+      NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, PlanRunner);
     })
   );
   
-  // Cancel DAG
+  // Cancel Plan
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.cancelDag', async (dagId: string) => {
-      const dag = dagRunner.get(dagId);
-      if (!dag) {
-        vscode.window.showErrorMessage(`DAG not found: ${dagId}`);
+    vscode.commands.registerCommand('orchestrator.cancelPlan', async (planId: string) => {
+      const plan = planRunner.get(planId);
+      if (!plan) {
+        vscode.window.showErrorMessage(`Plan not found: ${planId}`);
         return;
       }
       
       const confirm = await vscode.window.showWarningMessage(
-        `Cancel DAG "${dag.spec.name}"?`,
+        `Cancel Plan "${plan.spec.name}"?`,
         { modal: true },
-        'Cancel DAG'
+        'Cancel Plan'
       );
       
-      if (confirm === 'Cancel DAG') {
-        dagRunner.cancel(dagId);
-        vscode.window.showInformationMessage(`DAG "${dag.spec.name}" canceled`);
+      if (confirm === 'Cancel Plan') {
+        planRunner.cancel(planId);
+        vscode.window.showInformationMessage(`Plan "${plan.spec.name}" canceled`);
       }
     })
   );
   
-  // Delete DAG
+  // Delete Plan
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.deleteDag', async (dagId: string) => {
-      const dag = dagRunner.get(dagId);
-      if (!dag) {
-        vscode.window.showErrorMessage(`DAG not found: ${dagId}`);
+    vscode.commands.registerCommand('orchestrator.deletePlan', async (planId: string) => {
+      const plan = planRunner.get(planId);
+      if (!plan) {
+        vscode.window.showErrorMessage(`Plan not found: ${planId}`);
         return;
       }
       
       const confirm = await vscode.window.showWarningMessage(
-        `Delete DAG "${dag.spec.name}"? This cannot be undone.`,
+        `Delete Plan "${plan.spec.name}"? This cannot be undone.`,
         { modal: true },
         'Delete'
       );
       
       if (confirm === 'Delete') {
-        dagRunner.delete(dagId);
-        vscode.window.showInformationMessage(`DAG "${dag.spec.name}" deleted`);
+        planRunner.delete(planId);
+        vscode.window.showInformationMessage(`Plan "${plan.spec.name}" deleted`);
       }
     })
   );
   
   // Refresh view
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.refreshDags', () => {
-      vscode.commands.executeCommand('orchestrator.dagsView.refresh');
+    vscode.commands.registerCommand('orchestrator.refreshPlans', () => {
+      vscode.commands.executeCommand('orchestrator.plansView.refresh');
     })
   );
   
-  log.info('DAG commands registered');
+  log.info('Plan commands registered');
 }
