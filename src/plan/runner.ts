@@ -983,12 +983,19 @@ export class PlanRunner extends EventEmitter {
       
       if (timing.reused) {
         log.info(`Reusing existing worktree for ${node.name} (retry)`);
-      } else if (timing.totalMs > 500) {
-        log.warn(`Slow worktree creation for ${node.name} took ${timing.totalMs}ms`);
+        // On retry, preserve the original base commit for validation
+        // Don't overwrite with current HEAD which includes prior work
+        // But if baseCommit is somehow missing, fall back to timing.baseCommit
+        if (!nodeState.baseCommit) {
+          nodeState.baseCommit = timing.baseCommit;
+        }
+      } else {
+        // Only set baseCommit on fresh worktree creation
+        nodeState.baseCommit = timing.baseCommit;
+        if (timing.totalMs > 500) {
+          log.warn(`Slow worktree creation for ${node.name} took ${timing.totalMs}ms`);
+        }
       }
-      
-      // Store the base commit SHA for tracking
-      nodeState.baseCommit = timing.baseCommit;
       
       // If job has multiple dependencies, merge the additional commits into the worktree (Forward Integration)
       if (additionalSources.length > 0) {
@@ -1012,10 +1019,11 @@ export class PlanRunner extends EventEmitter {
       }
       
       // Build execution context
+      // Use nodeState.baseCommit which is preserved across retries
       const context: ExecutionContext = {
         plan,
         node,
-        baseCommit: timing.baseCommit,
+        baseCommit: nodeState.baseCommit!,
         worktreePath,
         copilotSessionId: nodeState.copilotSessionId, // Pass existing session for resumption
         onProgress: (step) => {
