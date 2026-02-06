@@ -2023,11 +2023,12 @@ export class PlanRunner extends EventEmitter {
     }
     
     // Reset node state for retry
+    // Note: We do NOT increment nodeState.attempts here - that happens in executeJobNode
+    // when the job actually starts running. Incrementing here would cause double-counting.
     nodeState.status = 'pending';
     nodeState.error = undefined;
     nodeState.endedAt = undefined;
     nodeState.startedAt = undefined;
-    nodeState.attempts = (nodeState.attempts || 0) + 1;
     nodeState.stepStatuses = undefined;
     
     // Note: We preserve worktreePath and baseCommit so the work can continue in the same worktree
