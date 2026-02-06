@@ -740,8 +740,7 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   
   // Build retry options from args
   const retryOptions = {
-    resumeSession: args.resumeSession !== false, // Default true
-    newInstructions: args.newInstructions,
+    newWork: args.newWork,
     clearWorktree: args.clearWorktree || false,
   };
   
@@ -839,8 +838,7 @@ export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): P
   
   // Build retry options from args
   const retryOptions = {
-    resumeSession: args.resumeSession !== false, // Default true
-    newInstructions: args.newInstructions,
+    newWork: args.newWork,
     clearWorktree: args.clearWorktree || false,
   };
   
@@ -859,7 +857,7 @@ export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): P
     planId: args.planId,
     nodeId: args.nodeId,
     nodeName: node.name,
-    resumeSession: retryOptions.resumeSession,
+    hasNewWork: !!args.newWork,
     clearWorktree: retryOptions.clearWorktree,
   };
 }

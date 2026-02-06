@@ -36,6 +36,7 @@ import {
   NodeExecutionState,
   nodePerformsWork,
   AttemptRecord,
+  WorkSpec,
 } from './types';
 import { buildPlan, buildSingleJobPlan, PlanValidationError } from './builder';
 import { PlanStateMachine } from './stateMachine';
@@ -92,10 +93,8 @@ export interface PlanRunnerConfig {
  * Options for retrying a failed node
  */
 export interface RetryNodeOptions {
-  /** Resume existing Copilot session (default: true if session exists) */
-  resumeSession?: boolean;
-  /** New instructions to append/override original task */
-  newInstructions?: string;
+  /** New work spec to replace/augment original. Can be string, process, shell, or agent spec */
+  newWork?: WorkSpec;
   /** Reset worktree to base commit (default: false) */
   clearWorktree?: boolean;
 }
@@ -1918,23 +1917,39 @@ export class PlanRunner extends EventEmitter {
     log.info(`Retrying failed node: ${node.name}`, {
       planId,
       nodeId,
-      resumeSession: options?.resumeSession ?? true,
+      hasNewWork: !!options?.newWork,
       clearWorktree: options?.clearWorktree ?? false,
     });
     
-    // Clear session if not resuming
-    if (options?.resumeSession === false) {
-      nodeState.copilotSessionId = undefined;
-    }
-    
-    // Update instructions if provided
-    if (options?.newInstructions && node.type === 'job') {
+    // Handle new work spec if provided
+    if (options?.newWork && node.type === 'job') {
       const jobNode = node as JobNode;
-      // Append new instructions to existing instructions
-      if (jobNode.instructions) {
-        jobNode.instructions = `${jobNode.instructions}\n\n--- RETRY INSTRUCTIONS ---\n${options.newInstructions}`;
+      const newWork = options.newWork;
+      
+      if (typeof newWork === 'string') {
+        // String work spec - could be shell command or @agent
+        if (newWork.startsWith('@agent')) {
+          // Agent work - preserve existing session by default
+          jobNode.work = newWork;
+        } else {
+          // Shell command
+          jobNode.work = newWork;
+          // Clear session since this is not agent work
+          nodeState.copilotSessionId = undefined;
+        }
+      } else if (newWork.type === 'agent') {
+        // Agent spec with explicit options
+        // If instructions are empty, this is a "session control only" spec - don't replace work
+        if (newWork.instructions) {
+          jobNode.work = newWork;
+        }
+        if (newWork.resumeSession === false) {
+          nodeState.copilotSessionId = undefined;
+        }
       } else {
-        jobNode.instructions = options.newInstructions;
+        // Process or shell spec - not agent work
+        jobNode.work = newWork;
+        nodeState.copilotSessionId = undefined;
       }
     }
     

@@ -147,6 +147,9 @@ export interface AgentSpec {
   
   /** Additional environment context to provide */
   context?: string;
+  
+  /** Resume existing Copilot session if available (default: true) */
+  resumeSession?: boolean;
 }
 
 /**

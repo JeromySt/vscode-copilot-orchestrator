@@ -207,8 +207,11 @@ export class NodeDetailPanel {
   }
   
   private _retryNode(planId: string, nodeId: string, resumeSession: boolean) {
+    // If resumeSession is false, provide an agent spec that clears the session
+    const newWork = resumeSession ? undefined : { type: 'agent' as const, instructions: '', resumeSession: false };
+    
     const result = this._planRunner.retryNode(planId, nodeId, {
-      resumeSession,
+      newWork,
       clearWorktree: false,
     });
     

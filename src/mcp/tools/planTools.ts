@@ -348,21 +348,24 @@ EXAMPLES:
 This resets failed nodes back to 'ready' state and resumes execution.
 Use after fixing issues that caused the failures.
 
-SESSION RESUMPTION:
-- By default, retries resume the existing Copilot session if one exists
-- Set resumeSession: false to start a fresh session
-- Existing session context is preserved for debugging context
-
 RETRY WORKFLOW:
 1. Use get_copilot_plan_node_failure_context to analyze why the node failed
-2. Optionally provide newInstructions to guide the retry
+2. Optionally provide newWork to replace or augment the original work
 3. Call retry_copilot_plan with the node ID
+
+NEW WORK OPTIONS:
+- String: Shell command like "npm run build" or "@agent Do something"
+- Process: { type: "process", executable: "node", args: ["script.js"] }
+- Shell: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
+- Agent: { type: "agent", instructions: "Fix the issue", resumeSession: true }
+
+For agent work, resumeSession (default: true) controls whether to continue
+the existing Copilot session or start fresh.
 
 Options:
 - Retry all failed nodes (default)
 - Retry specific nodes by ID
-- Resume or reset Copilot session
-- Provide new instructions for the retry`,
+- Provide replacement work spec`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -375,13 +378,14 @@ Options:
             items: { type: 'string' },
             description: 'Optional: specific node IDs to retry. If omitted, retries all failed nodes.'
           },
-          resumeSession: {
-            type: 'boolean',
-            description: 'Resume existing Copilot session for agent work (default: true)'
-          },
-          newInstructions: {
-            type: 'string',
-            description: 'New/additional instructions to append for the retry attempt'
+          newWork: {
+            description: `Optional replacement work for the retry. Can be:
+1. STRING: Shell command like "npm run build" or "@agent Do something"
+2. PROCESS: { "type": "process", "executable": "node", "args": ["script.js"] }
+3. SHELL: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
+4. AGENT: { "type": "agent", "instructions": "Fix X", "resumeSession": true }
+
+For agent type, resumeSession (default: true) continues existing Copilot session.`
           },
           clearWorktree: {
             type: 'boolean',
@@ -429,14 +433,18 @@ nodes at once, use retry_copilot_plan with nodeIds array.
 
 The node must be in 'failed' state to be retried.
 
-SESSION RESUMPTION:
-- By default, retries resume the existing Copilot session if one exists
-- Set resumeSession: false to start a fresh session
-- Existing session context is preserved for debugging context
+NEW WORK OPTIONS:
+- String: Shell command like "npm run build" or "@agent Do something"
+- Process: { type: "process", executable: "node", args: ["script.js"] }
+- Shell: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
+- Agent: { type: "agent", instructions: "Fix the issue", resumeSession: true }
+
+For agent work, resumeSession (default: true) controls whether to continue
+the existing Copilot session or start fresh.
 
 WORKFLOW:
 1. Use get_copilot_plan_node_failure_context to analyze why the node failed
-2. Call retry_copilot_plan_node with optional newInstructions
+2. Call retry_copilot_plan_node with optional newWork
 3. Monitor with get_copilot_plan_status`,
       inputSchema: {
         type: 'object',
@@ -449,13 +457,14 @@ WORKFLOW:
             type: 'string', 
             description: 'Node ID to retry' 
           },
-          resumeSession: {
-            type: 'boolean',
-            description: 'Resume existing Copilot session for agent work (default: true)'
-          },
-          newInstructions: {
-            type: 'string',
-            description: 'New/additional instructions to append for the retry attempt'
+          newWork: {
+            description: `Optional replacement work for the retry. Can be:
+1. STRING: Shell command like "npm run build" or "@agent Do something"
+2. PROCESS: { "type": "process", "executable": "node", "args": ["script.js"] }
+3. SHELL: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
+4. AGENT: { "type": "agent", "instructions": "Fix X", "resumeSession": true }
+
+For agent type, resumeSession (default: true) continues existing Copilot session.`
           },
           clearWorktree: {
             type: 'boolean',
