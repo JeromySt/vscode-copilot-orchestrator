@@ -484,7 +484,7 @@ export function registerPlanCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.showPlanDetails', (planId: string) => {
       const { planDetailPanel } = require('../ui/panels/planDetailPanel');
-      planDetailPanel.createOrShow(context.extensionUri, planId, PlanRunner);
+      planDetailPanel.createOrShow(context.extensionUri, planId, planRunner);
     })
   );
   
@@ -492,7 +492,7 @@ export function registerPlanCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.showNodeDetails', (planId: string, nodeId: string) => {
       const { NodeDetailPanel } = require('../ui/panels/nodeDetailPanel');
-      NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, PlanRunner);
+      NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, planRunner);
     })
   );
   
