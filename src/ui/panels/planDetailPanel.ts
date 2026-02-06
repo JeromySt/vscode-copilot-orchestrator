@@ -627,10 +627,7 @@ export class planDetailPanel {
       border-radius: 6px;
       border: 1px solid var(--vscode-panel-border);
       align-items: center;
-      position: absolute;
-      top: 8px;
-      left: 8px;
-      z-index: 100;
+      margin-bottom: 12px;
       font-size: 11px;
     }
     .legend-title {
