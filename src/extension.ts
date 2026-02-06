@@ -82,7 +82,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Complete ───────────────────────────────────────────────────────────
   extLog.info('Extension activated successfully');
-  vscode.window.showInformationMessage('Copilot Orchestrator is ready! (Plan Mode)');
+  vscode.window.showInformationMessage('Copilot Orchestrator is ready!');
 }
 
 // ============================================================================
