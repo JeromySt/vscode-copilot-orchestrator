@@ -60,10 +60,10 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
       return `<div class="work-type-badge shell">${escapeHtml(shellLabel)}</div><code class="work-command">${escapeHtml(spec.command)}</code>`;
     }
     case 'agent': {
-      // Format agent instructions with proper line breaks and list detection
+      // Render agent instructions as Markdown
       const instructions = spec.instructions || '';
-      const formatted = formatAgentInstructions(instructions, escapeHtml);
-      return `<div class="work-type-badge agent">agent</div><div class="work-instructions">${formatted}</div>`;
+      const rendered = renderMarkdown(instructions, escapeHtml);
+      return `<div class="work-type-badge agent">AGENT</div><div class="work-instructions">${rendered}</div>`;
     }
     default:
       return `<code>${escapeHtml(JSON.stringify(spec))}</code>`;
@@ -71,55 +71,114 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
 }
 
 /**
- * Format agent instructions with proper structure
+ * Simple Markdown to HTML renderer for agent instructions.
+ * Handles: headers, lists, code blocks, inline code, bold, italic, links.
  */
-function formatAgentInstructions(instructions: string, escapeHtml: (s: string) => string): string {
-  // Split on numbered items (1. 2. 3. etc) or bullet points
-  const lines = instructions.split(/(?=\d+\.\s|^-\s)/gm);
-  
-  if (lines.length <= 1) {
-    // No numbered list detected, just format with line breaks
-    return escapeHtml(instructions).replace(/\n/g, '<br>');
-  }
-  
-  // Build a structured list
+function renderMarkdown(md: string, escapeHtml: (s: string) => string): string {
+  const lines = md.split('\n');
   let html = '';
-  let inList = false;
+  let inCodeBlock = false;
+  let codeBlockContent = '';
+  let inOrderedList = false;
+  let inUnorderedList = false;
   
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
     
-    const numberedMatch = trimmed.match(/^(\d+)\.\s*(.*)/);
-    const bulletMatch = trimmed.match(/^-\s*(.*)/);
-    
-    if (numberedMatch) {
-      if (!inList) {
-        html += '<ol class="work-list">';
-        inList = true;
+    // Code blocks (```)
+    if (line.trim().startsWith('```')) {
+      if (inCodeBlock) {
+        html += `<pre class="md-code-block"><code>${escapeHtml(codeBlockContent.trim())}</code></pre>`;
+        codeBlockContent = '';
+        inCodeBlock = false;
+      } else {
+        closeLists();
+        inCodeBlock = true;
       }
-      const [, num, content] = numberedMatch;
-      html += `<li>${escapeHtml(content)}</li>`;
-    } else if (bulletMatch) {
-      if (inList) {
-        html += '</ol>';
-        inList = false;
-      }
-      html += `<div class="work-bullet">• ${escapeHtml(bulletMatch[1])}</div>`;
-    } else {
-      if (inList) {
-        html += '</ol>';
-        inList = false;
-      }
-      html += `<p>${escapeHtml(trimmed)}</p>`;
+      continue;
     }
+    
+    if (inCodeBlock) {
+      codeBlockContent += line + '\n';
+      continue;
+    }
+    
+    const trimmed = line.trim();
+    
+    // Empty line - close lists
+    if (!trimmed) {
+      closeLists();
+      continue;
+    }
+    
+    // Headers
+    const headerMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+    if (headerMatch) {
+      closeLists();
+      const level = headerMatch[1].length;
+      const text = formatInline(headerMatch[2], escapeHtml);
+      html += `<h${level + 2} class="md-header">${text}</h${level + 2}>`;
+      continue;
+    }
+    
+    // Ordered list (1. 2. 3.)
+    const orderedMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
+    if (orderedMatch) {
+      if (inUnorderedList) { html += '</ul>'; inUnorderedList = false; }
+      if (!inOrderedList) { html += '<ol class="md-list">'; inOrderedList = true; }
+      html += `<li>${formatInline(orderedMatch[2], escapeHtml)}</li>`;
+      continue;
+    }
+    
+    // Unordered list (- or *)
+    const unorderedMatch = trimmed.match(/^[-*]\s+(.*)$/);
+    if (unorderedMatch) {
+      if (inOrderedList) { html += '</ol>'; inOrderedList = false; }
+      if (!inUnorderedList) { html += '<ul class="md-list">'; inUnorderedList = true; }
+      html += `<li>${formatInline(unorderedMatch[1], escapeHtml)}</li>`;
+      continue;
+    }
+    
+    // Regular paragraph
+    closeLists();
+    html += `<p class="md-para">${formatInline(trimmed, escapeHtml)}</p>`;
   }
   
-  if (inList) {
-    html += '</ol>';
+  closeLists();
+  if (inCodeBlock) {
+    html += `<pre class="md-code-block"><code>${escapeHtml(codeBlockContent.trim())}</code></pre>`;
   }
   
   return html;
+  
+  function closeLists() {
+    if (inOrderedList) { html += '</ol>'; inOrderedList = false; }
+    if (inUnorderedList) { html += '</ul>'; inUnorderedList = false; }
+  }
+}
+
+/**
+ * Format inline markdown elements: bold, italic, code, links
+ */
+function formatInline(text: string, escapeHtml: (s: string) => string): string {
+  // First escape HTML
+  let result = escapeHtml(text);
+  
+  // Inline code (`code`) - do this first to protect code from other formatting
+  result = result.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
+  
+  // Bold (**text** or __text__) - do before italic
+  result = result.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  result = result.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+  
+  // Italic (*text* or _text_) - since bold is already replaced, single * or _ won't conflict
+  result = result.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  result = result.replace(/\b_([^_]+)_\b/g, '<em>$1</em>');
+  
+  // Links [text](url)
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="md-link">$1</a>');
+  
+  return result;
 }
 
 /**
@@ -1503,11 +1562,59 @@ export class NodeDetailPanel {
       font-size: 13px;
       line-height: 1.6;
     }
-    .work-instructions p {
+    .work-instructions p, .work-instructions .md-para {
       margin: 0 0 8px 0;
     }
-    .work-instructions p:last-child {
+    .work-instructions p:last-child, .work-instructions .md-para:last-child {
       margin-bottom: 0;
+    }
+    
+    /* Markdown rendering styles */
+    .md-list {
+      margin: 8px 0;
+      padding-left: 24px;
+    }
+    .md-list li {
+      margin-bottom: 6px;
+      line-height: 1.5;
+    }
+    .md-list li:last-child {
+      margin-bottom: 0;
+    }
+    .md-header {
+      margin: 12px 0 8px 0;
+      font-weight: 600;
+      color: var(--vscode-foreground);
+    }
+    h3.md-header { font-size: 15px; }
+    h4.md-header { font-size: 14px; }
+    h5.md-header { font-size: 13px; }
+    .md-code-block {
+      background: var(--vscode-editor-background);
+      padding: 10px 12px;
+      border-radius: 4px;
+      margin: 8px 0;
+      overflow-x: auto;
+      font-family: var(--vscode-editor-font-family), monospace;
+      font-size: 12px;
+    }
+    .md-code-block code {
+      background: none;
+      padding: 0;
+    }
+    .md-inline-code {
+      background: var(--vscode-editor-background);
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-family: var(--vscode-editor-font-family), monospace;
+      font-size: 12px;
+    }
+    .md-link {
+      color: var(--vscode-textLink-foreground);
+      text-decoration: none;
+    }
+    .md-link:hover {
+      text-decoration: underline;
     }
     .work-list {
       margin: 8px 0;
