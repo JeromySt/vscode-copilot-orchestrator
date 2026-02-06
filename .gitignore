@@ -46,3 +46,7 @@ yarn-error.log*
 
 # Optional: local config overrides (uncomment if needed)
 # .orchestrator/
+
+# Copilot Orchestrator
+.orchestrator/
+.worktrees/

@@ -44,8 +44,12 @@ export function attachStatusBar(context: vscode.ExtensionContext, planRunner: Pl
   
   context.subscriptions.push({
     dispose() {
-      clearInterval(iv);
-      item.dispose();
+      try {
+        clearInterval(iv);
+        item.dispose();
+      } catch (e) {
+        // Item may already be disposed
+      }
     }
   });
 }

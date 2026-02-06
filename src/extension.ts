@@ -101,7 +101,14 @@ export function deactivate(): void {
     console.error('Failed to persist state on deactivate:', e);
   }
   
-  mcpManager?.stop();
+  // Note: mcpManager.stop() is also called by subscriptions.dispose(),
+  // but it's idempotent so calling it here for safety is fine
+  try {
+    mcpManager?.stop();
+  } catch (e) {
+    console.error('Failed to stop MCP manager:', e);
+  }
+  
   processMonitor = undefined;
   planRunner = undefined;
 }

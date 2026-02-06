@@ -286,7 +286,12 @@ export function initializePlanRunner(
   // Register cleanup
   context.subscriptions.push({
     dispose: () => {
-      planRunner.shutdown();
+      try {
+        // Use sync persist since dispose must be sync
+        planRunner.persistSync();
+      } catch (e) {
+        console.error('Failed to persist plans on dispose:', e);
+      }
     }
   });
   
@@ -384,7 +389,11 @@ export async function initializeHttpServer(
       
       context.subscriptions.push({
         dispose: () => {
-          server.close();
+          try {
+            server.close();
+          } catch (e) {
+            // Server may already be closed
+          }
         }
       });
       
@@ -425,7 +434,13 @@ export function initializeMcpServer(
   });
   
   manager.start();
-  context.subscriptions.push({ dispose: () => manager.stop() });
+  context.subscriptions.push({ dispose: () => {
+    try {
+      manager.stop();
+    } catch (e) {
+      // Already stopped
+    }
+  }});
   
   // Register with VS Code
   const providerDisposable = registerMcpDefinitionProvider(context, {

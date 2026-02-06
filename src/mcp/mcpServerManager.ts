@@ -83,7 +83,13 @@ export class McpServerManager implements IMcpManager {
     this.statusBarItem.show();
     
     context.subscriptions.push(this.statusBarItem);
-    context.subscriptions.push({ dispose: () => this.stop() });
+    context.subscriptions.push({ dispose: () => {
+      try {
+        this.stop();
+      } catch (e) {
+        // Already stopped or other error
+      }
+    }});
   }
   
   /**

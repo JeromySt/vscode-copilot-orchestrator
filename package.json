@@ -324,6 +324,7 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
-    "micromatch": "^4.0.5"
+    "micromatch": "^4.0.5",
+    "uuid": "^9.0.0"
   }
 }
