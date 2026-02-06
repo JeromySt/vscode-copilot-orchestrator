@@ -1212,10 +1212,11 @@ export class PlanRunner extends EventEmitter {
       // Determine base branch for sub-plan (from parent's dependencies)
       const baseCommit = sm.getBaseCommitForNode(node.id);
       
-      // Build the child Plan
+      // Build the child Plan - inherit targetBranch so leaf jobs can RI directly
       const childSpec = {
         ...node.childSpec,
         baseBranch: baseCommit || parentPlan.baseBranch,
+        targetBranch: parentPlan.targetBranch, // Inherit target so leaf jobs merge directly
         repoPath: parentPlan.repoPath,
       };
       
@@ -1337,9 +1338,10 @@ export class PlanRunner extends EventEmitter {
     this.execLog(parentPlan.id, node.id, 'work', 'info', '========== sub-plan EXECUTION COMPLETE ==========');
     
     if (event.status === 'succeeded') {
-      // Get the final commit from the child Plan's leaf nodes
+      // SubPlan succeeded - leaf jobs within already merged to targetBranch
+      // Just record a representative completed commit for downstream consumers
       if (childPlan && nodeState) {
-        // Find a completed commit from leaf nodes
+        // Find any completed commit from leaf nodes (for dependency tracking)
         for (const leafId of childPlan.leaves) {
           const leafState = childPlan.nodeStates.get(leafId);
           if (leafState?.completedCommit) {
@@ -1347,29 +1349,7 @@ export class PlanRunner extends EventEmitter {
             break;
           }
         }
-        
-        // Handle leaf node merge to target branch (Reverse Integration) for sub-plan nodes
-        const isLeaf = parentPlan.leaves.includes(node.id);
-        log.debug(`sub-plan merge check: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${parentPlan.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
-        
-        if (isLeaf && parentPlan.targetBranch && nodeState.completedCommit) {
-          log.info(`Initiating merge to target for sub-plan: ${node.name} -> ${parentPlan.targetBranch}`);
-          this.execLog(parentPlan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========');
-          this.execLog(parentPlan.id, node.id, 'merge-ri', 'info', `Merging sub-plan completed commit ${nodeState.completedCommit.slice(0, 8)} to ${parentPlan.targetBranch}`);
-          
-          const mergeSuccess = await this.mergeLeafToTarget(parentPlan, node, nodeState.completedCommit);
-          nodeState.mergedToTarget = mergeSuccess;
-          
-          if (mergeSuccess) {
-            this.execLog(parentPlan.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`);
-          } else {
-            this.execLog(parentPlan.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED`);
-            log.warn(`sub-plan leaf ${node.name} succeeded but merge to ${parentPlan.targetBranch} failed`);
-          }
-          this.execLog(parentPlan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
-          
-          log.info(`sub-plan merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
-        }
+        // Note: No subPlan-level merge needed - each leaf job handles its own RI to targetBranch
       }
       
       parentSm.transition(node.id, 'succeeded');

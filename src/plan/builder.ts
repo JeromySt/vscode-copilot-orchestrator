@@ -106,13 +106,14 @@ export function buildPlan(
     const nodeId = uuidv4();
     
     // Build the child PlanSpec from the SubPlanNodeSpec
+    // Note: targetBranch is set at instantiation time in runner.ts to inherit from parent
     const childSpec: PlanSpec = {
       name: subPlanSpec.name || subPlanSpec.producerId,
       jobs: subPlanSpec.jobs,
       subPlans: subPlanSpec.subPlans,
       maxParallel: subPlanSpec.maxParallel,
       baseBranch: spec.baseBranch,
-      targetBranch: undefined, // sub-plans don't have their own target branch
+      targetBranch: spec.targetBranch, // Inherit from parent - leaf jobs merge directly
       cleanUpSuccessfulWork: spec.cleanUpSuccessfulWork,
     };
     
