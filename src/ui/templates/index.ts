@@ -6,9 +6,5 @@
  * @module ui/templates
  */
 
-export { getJobDetailsCss } from './jobDetailsCss';
-export { getJobDetailsJs } from './jobDetailsJs';
-export { getJobDetailsHtml, getJobDetailsLoadingHtml } from './jobDetailsHtml';
-
-// Plan detail templates
-export * from './planDetail';
+// All templates are now embedded directly in panel components.
+// This file is kept for potential future template extraction.

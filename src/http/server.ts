@@ -16,8 +16,6 @@ import * as http from 'http';
 import { McpHandler } from '../mcp/handler';
 import { Logger } from '../core/logger';
 import { RouteContext, ParsedRequest, RouteHandler, sendJson, sendError } from './types';
-import { jobRoutes } from './routes/jobs';
-import { planRoutes } from './routes/plans';
 import { mcpRoutes } from './routes/mcp';
 import { DagRunner } from '../dag';
 
@@ -25,11 +23,10 @@ const log = Logger.for('http');
 
 /**
  * All registered route handlers.
+ * NOTE: Legacy job/plan routes removed - only MCP endpoint remains.
  */
 const allRoutes: RouteHandler[] = [
   ...mcpRoutes,
-  ...jobRoutes,
-  ...planRoutes
 ];
 
 /**

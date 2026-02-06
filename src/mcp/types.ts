@@ -41,10 +41,13 @@ export interface JsonRpcResponse {
 
 /**
  * Tool handler context - dependencies passed to tool handlers
+ * 
+ * NOTE: runner and plans are kept for type compatibility but are null.
+ * All handlers now use dagRunner from the extended context.
  */
 export interface ToolHandlerContext {
-  runner: import('../core/jobRunner').JobRunner;
-  plans: import('../core/planRunner').PlanRunner;
+  runner: any;  // Legacy: null
+  plans: any;   // Legacy: null
   workspacePath: string;
 }
 

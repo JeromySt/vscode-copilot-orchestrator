@@ -14,8 +14,6 @@
 
 import * as vscode from 'vscode';
 import { DagRunner, DagInstance, JobNode, SubDagNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord } from '../../dag';
-import { getJobDetailsCss } from '../templates/jobDetailsCss';
-import { getJobDetailsJs } from '../templates/jobDetailsJs';
 
 /**
  * Format a WorkSpec for display

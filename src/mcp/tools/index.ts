@@ -4,19 +4,14 @@
  * @module mcp/tools
  */
 
-export { getJobToolDefinitions } from './jobTools';
-export { getPlanToolDefinitions } from './planTools';
+export { getDagToolDefinitions, PRODUCER_ID_PATTERN } from './dagTools';
 
 import { McpTool } from '../types';
-import { getJobToolDefinitions } from './jobTools';
-import { getPlanToolDefinitions } from './planTools';
+import { getDagToolDefinitions } from './dagTools';
 
 /**
  * Get all MCP tool definitions.
  */
 export function getAllToolDefinitions(): McpTool[] {
-  return [
-    ...getJobToolDefinitions(),
-    ...getPlanToolDefinitions()
-  ];
+  return getDagToolDefinitions();
 }

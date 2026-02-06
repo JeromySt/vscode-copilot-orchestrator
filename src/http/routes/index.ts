@@ -6,6 +6,4 @@
  * @module http/routes
  */
 
-export { jobRoutes } from './jobs';
-export { planRoutes } from './plans';
 export { mcpRoutes } from './mcp';
