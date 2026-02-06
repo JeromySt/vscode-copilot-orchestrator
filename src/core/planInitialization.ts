@@ -307,7 +307,7 @@ export async function initializeHttpServer(
   const http = require('http');
   const { McpHandler } = require('../mcp/handler');
   
-  const mcpHandler = new McpHandler(PlanRunner, workspacePath);
+  const mcpHandler = new McpHandler(planRunner, workspacePath);
   
   const server = http.createServer(async (req: any, res: any) => {
     // CORS headers
