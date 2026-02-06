@@ -165,21 +165,21 @@
         "icon": "$(debug-stop)"
       },
       {
-        "command": "orchestrator.deleteDag",
-        "title": "Copilot Orchestrator: Delete DAG",
+        "command": "orchestrator.deletePlan",
+        "title": "Copilot Orchestrator: Delete Plan",
         "icon": "$(trash)"
       },
       {
-        "command": "orchestrator.refreshDags",
-        "title": "Copilot Orchestrator: Refresh DAGs",
+        "command": "orchestrator.refreshPlans",
+        "title": "Copilot Orchestrator: Refresh Plans",
         "icon": "$(refresh)"
       }
     ],
     "views": {
       "copilot-orchestrator": [
         {
-          "id": "orchestrator.dagsView",
-          "name": "DAGs",
+          "id": "orchestrator.plansView",
+          "name": "Plans",
           "type": "webview"
         }
       ]

@@ -15,7 +15,7 @@ import {
   initializePlanRunner,
   initializeHttpServer,
   initializeMcpServer,
-  initializeplansView,
+  initializePlansView,
   registerPlanCommands,
 } from './core/planInitialization';
 import { McpServerManager } from './mcp/mcpServerManager';
@@ -75,7 +75,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   mcpManager = initializeMcpServer(context, config.http, config.mcp);
 
   // ── Plans view ──────────────────────────────────────────────────────────
-  initializeplansView(context, planRunner);
+  initializePlansView(context, planRunner);
 
   // ── Commands ───────────────────────────────────────────────────────────
   registerPlanCommands(context, planRunner);

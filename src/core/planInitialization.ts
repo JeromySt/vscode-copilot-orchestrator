@@ -436,7 +436,7 @@ export function initializeMcpServer(
 /**
  * Initialize the Plans view in the sidebar
  */
-export function initializeplansView(
+export function initializePlansView(
   context: vscode.ExtensionContext,
   planRunner: PlanRunner
 ): void {
@@ -445,7 +445,7 @@ export function initializeplansView(
   // Import the view provider
   const { plansViewProvider } = require('../ui/plansViewProvider');
   
-  const plansView = new plansViewProvider(context, PlanRunner);
+  const plansView = new plansViewProvider(context, planRunner);
   
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
