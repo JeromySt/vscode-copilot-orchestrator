@@ -249,6 +249,13 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       text-align: center; 
       opacity: 0.6; 
     }
+    .empty code {
+      background: var(--vscode-textCodeBlock-background);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: var(--vscode-editor-font-family);
+      font-size: 11px;
+    }
     .actions {
       margin-top: 8px;
       display: flex;
@@ -273,7 +280,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     <h3>Plans</h3>
     <span class="pill" id="badge">0 total</span>
   </div>
-  <div id="plans"><div class="empty">No plans yet</div></div>
+  <div id="plans"><div class="empty">No plans yet. Use <code>create_copilot_plan</code> or <code>create_copilot_job</code> MCP tool.</div></div>
   
   <script>
     const vscode = acquireVsCodeApi();
@@ -303,7 +310,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       const container = document.getElementById('plans');
       
       if (Plans.length === 0) {
-        container.innerHTML = '<div class="empty">No plans yet. Create one via MCP tools.</div>';
+        container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> or <code>create_copilot_job</code> MCP tool.</div>';
         return;
       }
       
