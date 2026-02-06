@@ -608,17 +608,31 @@ export class NodeDetailPanel {
       });
     });
     
-    // Attempt logs toggle handlers
-    document.querySelectorAll('.attempt-logs-header').forEach(header => {
-      header.addEventListener('click', (e) => {
+    // Attempt phase tab click handlers
+    document.querySelectorAll('.attempt-phase-tab').forEach(tab => {
+      tab.addEventListener('click', (e) => {
         e.stopPropagation();
-        const section = header.closest('.attempt-logs-section');
-        const logs = section.querySelector('.attempt-logs');
-        const chevron = header.querySelector('.logs-chevron');
-        const isShown = logs.style.display !== 'none';
+        const phase = tab.getAttribute('data-phase');
+        const attemptNum = tab.getAttribute('data-attempt');
+        const phasesContainer = tab.closest('.attempt-phases');
         
-        logs.style.display = isShown ? 'none' : 'block';
-        chevron.textContent = isShown ? '▶' : '▼';
+        // Update active tab
+        phasesContainer.querySelectorAll('.attempt-phase-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        // Get logs data from the JSON script element
+        const dataEl = phasesContainer.querySelector('.attempt-logs-data[data-attempt="' + attemptNum + '"]');
+        if (dataEl) {
+          try {
+            const logsData = JSON.parse(dataEl.textContent);
+            const viewer = phasesContainer.querySelector('.attempt-log-viewer[data-attempt="' + attemptNum + '"]');
+            if (viewer && logsData[phase]) {
+              viewer.textContent = logsData[phase];
+            }
+          } catch (err) {
+            console.error('Failed to parse attempt logs data:', err);
+          }
+        }
       });
     });
     
@@ -1086,16 +1100,8 @@ export class NodeDetailPanel {
            </div>`
         : '';
       
-      // Logs section (collapsible)
-      const logsHtml = attempt.logs
-        ? `<div class="attempt-logs-section">
-            <div class="attempt-logs-header" data-attempt="${attempt.attemptNumber}">
-              <span>📋 Logs</span>
-              <span class="logs-chevron">▶</span>
-            </div>
-            <pre class="attempt-logs" style="display: none;">${this._escapeHtml(attempt.logs)}</pre>
-           </div>`
-        : '';
+      // Build phase tabs for this attempt
+      const phaseTabsHtml = attempt.logs ? this._buildAttemptPhaseTabs(attempt) : '';
       
       return `
         <div class="attempt-card ${isLatest ? 'active' : ''}" data-attempt="${attempt.attemptNumber}">
@@ -1115,7 +1121,7 @@ export class NodeDetailPanel {
             </div>
             ${contextHtml}
             ${errorHtml}
-            ${logsHtml}
+            ${phaseTabsHtml}
           </div>
         </div>
       `;
@@ -1126,6 +1132,97 @@ export class NodeDetailPanel {
       <h3>Attempt History (${attempts.length})</h3>
       ${cards}
     </div>
+    `;
+  }
+  
+  /**
+   * Build phase tabs for a specific attempt
+   */
+  private _buildAttemptPhaseTabs(attempt: AttemptRecord): string {
+    if (!attempt.logs) return '';
+    
+    // Parse logs to extract phase sections
+    const logs = attempt.logs;
+    const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
+    
+    const phaseLabels: Record<string, string> = {
+      'all': '📄 Full Log',
+      'merge-fi': '↙↘ Merge FI',
+      'prechecks': '✓ Prechecks',
+      'work': '⚙ Work',
+      'commit': '💾 Commit',
+      'postchecks': '✓ Postchecks',
+      'merge-ri': '↗↙ Merge RI',
+    };
+    
+    const getPhaseStatus = (phase: string): string => {
+      if (phase === 'all') return '';
+      const status = (attempt.stepStatuses as any)?.[phase];
+      if (status === 'success') return 'success';
+      if (status === 'failed') return 'failed';
+      if (status === 'skipped') return 'skipped';
+      return '';
+    };
+    
+    const tabs = phases.map(phase => {
+      const status = getPhaseStatus(phase);
+      const statusIcon = status === 'success' ? '✓' : status === 'failed' ? '✗' : status === 'skipped' ? '○' : '';
+      return `<button class="attempt-phase-tab ${phase === 'all' ? 'active' : ''} ${status}" 
+                      data-phase="${phase}" data-attempt="${attempt.attemptNumber}">
+                ${statusIcon} ${phaseLabels[phase]}
+              </button>`;
+    }).join('');
+    
+    // Pre-extract logs for each phase
+    const extractPhaseLogs = (phase: string): string => {
+      if (phase === 'all') return logs;
+      
+      const phaseMarkers: Record<string, string> = {
+        'merge-fi': 'FORWARD INTEGRATION',
+        'prechecks': 'PRECHECKS',
+        'work': 'WORK',
+        'commit': 'COMMIT',
+        'postchecks': 'POSTCHECKS',
+        'merge-ri': 'REVERSE INTEGRATION',
+      };
+      
+      const marker = phaseMarkers[phase];
+      if (!marker) return '';
+      
+      // Find section between START and END markers
+      const startPattern = new RegExp(`=+ ${marker}.*START =+`, 'i');
+      const endPattern = new RegExp(`=+ ${marker}.*END =+`, 'i');
+      
+      const startMatch = logs.match(startPattern);
+      const endMatch = logs.match(endPattern);
+      
+      if (startMatch && endMatch) {
+        const startIdx = logs.indexOf(startMatch[0]);
+        const endIdx = logs.indexOf(endMatch[0]) + endMatch[0].length;
+        return logs.slice(startIdx, endIdx);
+      }
+      
+      // Fallback: filter lines containing section markers
+      const lines = logs.split('\n');
+      const filtered = lines.filter(line => {
+        const upper = line.toUpperCase();
+        return upper.includes(`[${phase.toUpperCase()}]`) || upper.includes(marker);
+      });
+      return filtered.length > 0 ? filtered.join('\n') : `No logs for ${phase} phase.`;
+    };
+    
+    // Store logs data as escaped JSON in hidden element
+    const phaseLogsData: Record<string, string> = {};
+    phases.forEach(p => phaseLogsData[p] = extractPhaseLogs(p));
+    
+    return `
+      <div class="attempt-phases" data-attempt="${attempt.attemptNumber}">
+        <div class="attempt-phase-tabs">${tabs}</div>
+        <pre class="attempt-log-viewer" data-attempt="${attempt.attemptNumber}">${this._escapeHtml(phaseLogsData['all'])}</pre>
+        <script type="application/json" class="attempt-logs-data" data-attempt="${attempt.attemptNumber}">
+          ${JSON.stringify(phaseLogsData)}
+        </script>
+      </div>
     `;
   }
   
@@ -1625,29 +1722,55 @@ export class NodeDetailPanel {
       font-family: var(--vscode-editor-font-family);
       font-size: 10px;
     }
-    .attempt-logs-section {
+    /* Attempt phase tabs */
+    .attempt-phases {
       margin-top: 8px;
       border: 1px solid var(--vscode-panel-border);
       border-radius: 4px;
       overflow: hidden;
     }
-    .attempt-logs-header {
+    .attempt-phase-tabs {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 6px 8px;
+      flex-wrap: wrap;
+      gap: 2px;
+      padding: 4px;
       background: var(--vscode-sideBar-background);
-      cursor: pointer;
-      font-size: 11px;
+      border-bottom: 1px solid var(--vscode-panel-border);
     }
-    .attempt-logs-header:hover {
-      background: var(--vscode-list-hoverBackground);
-    }
-    .logs-chevron {
+    .attempt-phase-tab {
+      padding: 4px 8px;
       font-size: 10px;
-      opacity: 0.6;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      opacity: 0.7;
     }
-    .attempt-logs {
+    .attempt-phase-tab:hover {
+      background: var(--vscode-list-hoverBackground);
+      opacity: 1;
+    }
+    .attempt-phase-tab.active {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      opacity: 1;
+    }
+    .attempt-phase-tab.success {
+      color: #3fb950;
+    }
+    .attempt-phase-tab.failed {
+      color: #f85149;
+    }
+    .attempt-phase-tab.skipped {
+      opacity: 0.5;
+    }
+    .attempt-phase-tab.active.success,
+    .attempt-phase-tab.active.failed,
+    .attempt-phase-tab.active.skipped {
+      color: var(--vscode-button-foreground);
+    }
+    .attempt-log-viewer {
       margin: 0;
       padding: 8px;
       background: var(--vscode-editor-background);

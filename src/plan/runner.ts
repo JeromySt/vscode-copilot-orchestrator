@@ -1488,7 +1488,8 @@ export class PlanRunner extends EventEmitter {
           repoPath,
           completedCommit,
           targetBranch,
-          `Plan ${plan.spec.name}: merge ${node.name} (commit ${completedCommit.slice(0, 8)})`
+          `Plan ${plan.spec.name}: merge ${node.name} (commit ${completedCommit.slice(0, 8)})`,
+          { planId: plan.id, nodeId: node.id, phase: 'merge-ri' }
         );
         
         if (resolved) {
@@ -1607,7 +1608,8 @@ export class PlanRunner extends EventEmitter {
             worktreePath,
             sourceCommit,
             'HEAD',
-            `Merge parent commit ${shortSha} for job ${node.name}`
+            `Merge parent commit ${shortSha} for job ${node.name}`,
+            { planId: plan.id, nodeId: node.id, phase: 'merge-fi' }
           );
           
           if (!resolved) {
@@ -1663,7 +1665,8 @@ export class PlanRunner extends EventEmitter {
     cwd: string,
     sourceBranch: string,
     targetBranch: string,
-    commitMessage: string
+    commitMessage: string,
+    logContext?: { planId: string; nodeId: string; phase: ExecutionPhase }
   ): Promise<boolean> {
     const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
     const prefer = mergeCfg.get<string>('prefer', 'theirs');
@@ -1678,11 +1681,36 @@ export class PlanRunner extends EventEmitter {
     
     log.info(`Running Copilot CLI to resolve conflicts...`, { cwd });
     
+    // Helper to log CLI output to execution logs
+    const logOutput = (line: string) => {
+      if (logContext && line.trim()) {
+        this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  [copilot] ${line.trim()}`);
+      }
+    };
+    
     const result = await new Promise<{ status: number | null }>((resolve) => {
       const child = spawn(copilotCmd, [], {
         cwd,
         shell: true,
         timeout: 300000, // 5 minute timeout
+      });
+      
+      // Capture stdout
+      child.stdout?.on('data', (data: Buffer) => {
+        const lines = data.toString().split('\n');
+        lines.forEach(line => {
+          log.debug(`[copilot] ${line}`);
+          logOutput(line);
+        });
+      });
+      
+      // Capture stderr
+      child.stderr?.on('data', (data: Buffer) => {
+        const lines = data.toString().split('\n');
+        lines.forEach(line => {
+          log.debug(`[copilot] ${line}`);
+          logOutput(line);
+        });
       });
       
       child.on('close', (code) => {
@@ -1691,6 +1719,9 @@ export class PlanRunner extends EventEmitter {
       
       child.on('error', (err) => {
         log.error('Copilot CLI spawn error', { error: err.message });
+        if (logContext) {
+          this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'error', `  [copilot] Error: ${err.message}`);
+        }
         resolve({ status: 1 });
       });
     });
@@ -1712,7 +1743,8 @@ export class PlanRunner extends EventEmitter {
     repoPath: string,
     sourceCommit: string,
     targetBranch: string,
-    commitMessage: string
+    commitMessage: string,
+    logContext?: { planId: string; nodeId: string; phase: ExecutionPhase }
   ): Promise<boolean> {
     // Capture user's current state
     const originalBranch = await git.branches.currentOrNull(repoPath);
@@ -1747,7 +1779,8 @@ export class PlanRunner extends EventEmitter {
         repoPath,
         sourceCommit,
         targetBranch,
-        commitMessage
+        commitMessage,
+        logContext
       );
       
       if (!resolved) {

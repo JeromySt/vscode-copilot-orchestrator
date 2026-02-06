@@ -130,13 +130,14 @@ function createAgentDelegatorAdapter(log: any) {
       contextFiles?: string[];
       maxTurns?: number;
       sessionId?: string;
+      logOutput?: (line: string) => void;
     }): Promise<{
       success: boolean;
       sessionId?: string;
       error?: string;
       exitCode?: number;
     }> {
-      const { task, instructions, worktreePath, sessionId } = options;
+      const { task, instructions, worktreePath, sessionId, logOutput } = options;
       
       // Check if Copilot CLI is available
       if (!isCopilotCliAvailable()) {
@@ -178,13 +179,25 @@ function createAgentDelegatorAdapter(log: any) {
         
         proc.stdout?.on('data', (data: Buffer) => {
           const text = data.toString();
-          log.debug(`[agent] ${text.trim()}`);
+          const lines = text.split('\n');
+          lines.forEach(line => {
+            if (line.trim()) {
+              log.debug(`[agent] ${line.trim()}`);
+              logOutput?.(`[copilot] ${line.trim()}`);
+            }
+          });
           extractSession(text);
         });
         
         proc.stderr?.on('data', (data: Buffer) => {
           const text = data.toString();
-          log.debug(`[agent] ${text.trim()}`);
+          const lines = text.split('\n');
+          lines.forEach(line => {
+            if (line.trim()) {
+              log.debug(`[agent] ${line.trim()}`);
+              logOutput?.(`[copilot] ${line.trim()}`);
+            }
+          });
           extractSession(text);
         });
         

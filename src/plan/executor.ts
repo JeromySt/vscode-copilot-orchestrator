@@ -756,6 +756,7 @@ export class DefaultJobExecutor implements JobExecutor {
         contextFiles: spec.contextFiles,
         maxTurns: spec.maxTurns,
         sessionId, // Pass session ID for resumption
+        logOutput: (line: string) => this.logInfo(executionKey, 'work', line),
       });
       
       if (result.success) {
