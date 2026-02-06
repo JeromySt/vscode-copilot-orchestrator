@@ -48,6 +48,12 @@ WORK OPTIONS (work/prechecks/postchecks accept):
 3. Shell spec: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
 4. Agent spec: { type: "agent", instructions: "Implement the feature", maxTurns: 10 }
 
+IMPORTANT: Agent instructions MUST be in Markdown format for proper rendering:
+- Use # headers for sections (# Main Task, ## Steps)
+- Use numbered lists (1. First step, 2. Second step)
+- Use bullet lists (- item, - another item)
+- Use **bold** and *italic* for emphasis
+
 SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"
 
 EXAMPLES:
@@ -109,10 +115,12 @@ EXAMPLES:
 1. STRING: Shell command like "npm run build" or "@agent Do something" for AI
 2. PROCESS OBJECT: { "type": "process", "executable": "node", "args": ["script.js"] }
 3. SHELL OBJECT: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT OBJECT: { "type": "agent", "instructions": "Implement feature X" }
+4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one\\n2. Step two" }
 
 For process type, args is an array - no shell quoting needed.
-For shell type, shell can be: cmd, powershell, pwsh, bash, sh`,
+For shell type, shell can be: cmd, powershell, pwsh, bash, sh
+
+Agent instructions MUST be in Markdown format with headers, numbered lists, bullet lists.`,
                 },
                 dependencies: {
                   type: 'array',
@@ -127,7 +135,7 @@ For shell type, shell can be: cmd, powershell, pwsh, bash, sh`,
                 },
                 instructions: { 
                   type: 'string', 
-                  description: 'Additional context for @agent tasks' 
+                  description: 'Additional context for @agent tasks. MUST be in Markdown format (# headers, 1. numbered lists, - bullet lists).' 
                 }
               },
               required: ['producer_id', 'task', 'dependencies']
@@ -217,7 +225,7 @@ EXAMPLES:
           },
           instructions: { 
             type: 'string', 
-            description: 'Additional context for @agent' 
+            description: 'Additional context for @agent. MUST be in Markdown format (# headers, 1. numbered lists, - bullet lists).' 
           },
           baseBranch: { 
             type: 'string', 
@@ -396,10 +404,12 @@ NEW WORK OPTIONS:
 - String: Shell command like "npm run build" or "@agent Do something"
 - Process: { type: "process", executable: "node", args: ["script.js"] }
 - Shell: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
-- Agent: { type: "agent", instructions: "Fix the issue", resumeSession: true }
+- Agent: { type: "agent", instructions: "# Fix Issue\\n\\n1. Analyze error\\n2. Apply fix", resumeSession: true }
 
 For agent work, resumeSession (default: true) controls whether to continue
 the existing Copilot session or start fresh.
+
+IMPORTANT: Agent instructions MUST be in Markdown format (# headers, 1. numbered lists, - bullet lists).
 
 Options:
 - Retry all failed nodes (default)
@@ -422,9 +432,10 @@ Options:
 1. STRING: Shell command like "npm run build" or "@agent Do something"
 2. PROCESS: { "type": "process", "executable": "node", "args": ["script.js"] }
 3. SHELL: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT: { "type": "agent", "instructions": "Fix X", "resumeSession": true }
+4. AGENT: { "type": "agent", "instructions": "# Fix X\\n\\n1. Analyze\\n2. Fix", "resumeSession": true }
 
-For agent type, resumeSession (default: true) continues existing Copilot session.`
+For agent type, resumeSession (default: true) continues existing Copilot session.
+Agent instructions MUST be in Markdown format.`
           },
           clearWorktree: {
             type: 'boolean',
@@ -476,10 +487,12 @@ NEW WORK OPTIONS:
 - String: Shell command like "npm run build" or "@agent Do something"
 - Process: { type: "process", executable: "node", args: ["script.js"] }
 - Shell: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
-- Agent: { type: "agent", instructions: "Fix the issue", resumeSession: true }
+- Agent: { type: "agent", instructions: "# Fix Issue\\n\\n1. Analyze\\n2. Fix", resumeSession: true }
 
 For agent work, resumeSession (default: true) controls whether to continue
 the existing Copilot session or start fresh.
+
+IMPORTANT: Agent instructions MUST be in Markdown format.
 
 WORKFLOW:
 1. Use get_copilot_plan_node_failure_context to analyze why the node failed
@@ -501,9 +514,10 @@ WORKFLOW:
 1. STRING: Shell command like "npm run build" or "@agent Do something"
 2. PROCESS: { "type": "process", "executable": "node", "args": ["script.js"] }
 3. SHELL: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT: { "type": "agent", "instructions": "Fix X", "resumeSession": true }
+4. AGENT: { "type": "agent", "instructions": "# Fix X\\n\\n1. Analyze\\n2. Fix", "resumeSession": true }
 
-For agent type, resumeSession (default: true) continues existing Copilot session.`
+For agent type, resumeSession (default: true) continues existing Copilot session.
+Agent instructions MUST be in Markdown format.`
           },
           clearWorktree: {
             type: 'boolean',

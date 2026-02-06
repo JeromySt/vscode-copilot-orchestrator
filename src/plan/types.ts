@@ -129,11 +129,56 @@ export interface ShellSpec {
 /**
  * AI Agent delegation.
  * Work is performed by Copilot agent.
+ * 
+ * @example
+ * ```typescript
+ * const agentWork: AgentSpec = {
+ *   type: 'agent',
+ *   instructions: `# Task: Implement Feature X
+ * 
+ * ## Requirements
+ * 1. Create new component in src/components/
+ * 2. Add unit tests
+ * 3. Update documentation
+ * 
+ * ## Notes
+ * - Follow existing code patterns
+ * - Use TypeScript strict mode`,
+ *   contextFiles: ['src/components/', 'README.md']
+ * };
+ * ```
  */
 export interface AgentSpec {
   type: 'agent';
   
-  /** Instructions for the agent (what to do) */
+  /**
+   * Instructions for the agent (what to do).
+   * 
+   * **MUST be in Markdown format** for proper rendering in the UI.
+   * 
+   * Supports:
+   * - `# Headers` (h1-h6)
+   * - `1. Numbered lists`
+   * - `- Bullet lists` (with nested items)
+   * - `` `code` `` inline and ``` code blocks ```
+   * - `**bold**` and `*italic*` text
+   * - `[links](url)`
+   * 
+   * @example
+   * ```markdown
+   * # Main Task
+   * 
+   * ## Steps
+   * 1. First step
+   * 2. Second step
+   *    - Sub-item A
+   *    - Sub-item B
+   * 
+   * ## Notes
+   * - Use `existingHelper()` function
+   * - See [docs](./README.md) for details
+   * ```
+   */
   instructions: string;
   
   /** Optional model preference */
@@ -229,7 +274,11 @@ export interface JobNodeSpec {
    */
   postchecks?: WorkSpec;
   
-  /** Additional instructions for agent tasks (legacy, use AgentSpec.instructions) */
+  /** 
+   * Additional instructions for agent tasks.
+   * @deprecated Use AgentSpec.instructions instead.
+   * **Must be in Markdown format** if provided.
+   */
   instructions?: string;
   
   /** IDs of nodes this job depends on (consumesFrom) */
@@ -342,7 +391,10 @@ export interface JobNode extends BaseNode {
   /** Postchecks specification */
   postchecks?: WorkSpec;
   
-  /** Agent instructions (legacy support) */
+  /** 
+   * Agent instructions (legacy support).
+   * **Must be in Markdown format** if provided.
+   */
   instructions?: string;
   
   /** Override base branch */
