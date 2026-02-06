@@ -801,6 +801,12 @@ export class PlanRunner extends EventEmitter {
     
     log.info(`Resuming Plan: ${planId}`);
     
+    // Clear endedAt so it gets recalculated when the plan completes
+    // This handles the case where the plan was previously marked complete
+    if (plan.endedAt) {
+      plan.endedAt = undefined;
+    }
+    
     // Ensure pump is running
     this.startPump();
     
@@ -2044,6 +2050,12 @@ export class PlanRunner extends EventEmitter {
         }
       };
       resetWorktree(); // Fire and forget
+    }
+    
+    // Clear plan.endedAt so it gets recalculated when the plan completes
+    // This handles the case where the plan was previously marked complete
+    if (plan.endedAt) {
+      plan.endedAt = undefined;
     }
     
     // Persist the reset state
