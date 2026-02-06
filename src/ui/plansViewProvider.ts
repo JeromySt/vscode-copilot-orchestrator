@@ -304,7 +304,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     window.addEventListener('message', ev => {
       if (ev.data.type !== 'update') return;
       
-      const Plans = ev.data.plans || [];
+      const Plans = ev.data.Plans || [];
       document.getElementById('badge').textContent = Plans.length + ' total';
       
       const container = document.getElementById('plans');
