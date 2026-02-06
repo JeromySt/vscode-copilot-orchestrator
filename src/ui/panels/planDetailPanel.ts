@@ -502,6 +502,32 @@ export class planDetailPanel {
     .status-badge.partial { background: rgba(255, 204, 0, 0.2); color: #cca700; }
     .status-badge.pending { background: rgba(133, 133, 133, 0.2); color: #858585; }
     
+    /* Duration display in header */
+    .header-duration {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: var(--vscode-descriptionForeground);
+    }
+    .duration-icon {
+      font-size: 16px;
+    }
+    .duration-value {
+      font-family: var(--vscode-editor-font-family);
+      font-weight: 600;
+      color: var(--vscode-foreground);
+    }
+    .duration-value.running {
+      color: #3794ff;
+    }
+    .duration-value.succeeded {
+      color: #4ec9b0;
+    }
+    .duration-value.failed {
+      color: #f48771;
+    }
+    
     /* Branch flow */
     .branch-flow {
       display: flex;
@@ -576,6 +602,49 @@ export class planDetailPanel {
       overflow: auto;
       margin-bottom: 16px;
       position: relative;
+    }
+    
+    /* Zoom controls */
+    .zoom-controls {
+      position: sticky;
+      top: 0;
+      left: 0;
+      z-index: 10;
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+      background: rgba(30, 30, 30, 0.95);
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--vscode-widget-border);
+      width: fit-content;
+    }
+    .zoom-btn {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      border: none;
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      min-width: 32px;
+    }
+    .zoom-btn:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .zoom-level {
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      font-size: 12px;
+      color: var(--vscode-descriptionForeground);
+      min-width: 50px;
+      justify-content: center;
+    }
+    .mermaid-container {
+      transform-origin: top left;
+      transition: transform 0.2s ease;
     }
     
     /* Mermaid node styling */
@@ -885,6 +954,10 @@ export class planDetailPanel {
 <body>
   <div class="header">
     <h2>${this._escapeHtml(plan.spec.name)}</h2>
+    <div class="header-duration">
+      <span class="duration-icon">⏱</span>
+      <span class="duration-value ${status}" id="planDuration" data-started="${plan.startedAt || 0}" data-ended="${plan.endedAt || 0}" data-status="${status}">${this._formatPlanDuration(plan.startedAt, plan.endedAt)}</span>
+    </div>
     <span class="status-badge ${status}">${status}</span>
   </div>
   
@@ -931,6 +1004,13 @@ export class planDetailPanel {
   </div>
   
   <div id="mermaid-diagram">
+    <div class="zoom-controls">
+      <button class="zoom-btn" onclick="zoomOut()" title="Zoom Out">−</button>
+      <span class="zoom-level" id="zoomLevel">100%</span>
+      <button class="zoom-btn" onclick="zoomIn()" title="Zoom In">+</button>
+      <button class="zoom-btn" onclick="zoomReset()" title="Reset Zoom">⟲</button>
+      <button class="zoom-btn" onclick="zoomFit()" title="Fit to View">⊡</button>
+    </div>
     <div class="legend">
       <div class="legend-item">
         <span class="legend-icon pending">○</span>
@@ -953,9 +1033,11 @@ export class planDetailPanel {
         <span>Blocked</span>
       </div>
     </div>
-    <pre class="mermaid">
+    <div class="mermaid-container" id="mermaidContainer">
+      <pre class="mermaid">
 ${mermaidDef}
-    </pre>
+      </pre>
+    </div>
   </div>
   
   ${status === 'running' ? `
@@ -1101,6 +1183,110 @@ ${mermaidDef}
     function showWorkSummary() {
       vscode.postMessage({ type: 'showWorkSummary' });
     }
+    
+    // Zoom functionality
+    let currentZoom = 1;
+    const zoomStep = 0.1;
+    const minZoom = 0.25;
+    const maxZoom = 3;
+    
+    function updateZoom() {
+      const container = document.getElementById('mermaidContainer');
+      const zoomLabel = document.getElementById('zoomLevel');
+      if (container) {
+        container.style.transform = 'scale(' + currentZoom + ')';
+      }
+      if (zoomLabel) {
+        zoomLabel.textContent = Math.round(currentZoom * 100) + '%';
+      }
+    }
+    
+    function zoomIn() {
+      currentZoom = Math.min(maxZoom, currentZoom + zoomStep);
+      updateZoom();
+    }
+    
+    function zoomOut() {
+      currentZoom = Math.max(minZoom, currentZoom - zoomStep);
+      updateZoom();
+    }
+    
+    function zoomReset() {
+      currentZoom = 1;
+      updateZoom();
+    }
+    
+    function zoomFit() {
+      const diagram = document.getElementById('mermaid-diagram');
+      const container = document.getElementById('mermaidContainer');
+      if (!diagram || !container) return;
+      
+      const svg = container.querySelector('svg');
+      if (!svg) return;
+      
+      // Reset to 1 to measure natural size
+      currentZoom = 1;
+      container.style.transform = 'scale(1)';
+      
+      const diagramWidth = diagram.clientWidth - 32; // Account for padding
+      const svgWidth = svg.getBoundingClientRect().width;
+      
+      if (svgWidth > diagramWidth) {
+        currentZoom = diagramWidth / svgWidth;
+      }
+      updateZoom();
+    }
+    
+    // Mouse wheel zoom
+    document.getElementById('mermaid-diagram')?.addEventListener('wheel', (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        if (e.deltaY < 0) {
+          zoomIn();
+        } else {
+          zoomOut();
+        }
+      }
+    });
+    
+    // Live duration counter
+    function formatDurationLive(ms) {
+      if (ms < 1000) return '< 1s';
+      const secs = Math.floor(ms / 1000);
+      if (secs < 60) return secs + 's';
+      const mins = Math.floor(secs / 60);
+      const remSecs = secs % 60;
+      if (mins < 60) return mins + 'm ' + remSecs + 's';
+      const hours = Math.floor(mins / 60);
+      const remMins = mins % 60;
+      return hours + 'h ' + remMins + 'm';
+    }
+    
+    function updateDurationCounter() {
+      const el = document.getElementById('planDuration');
+      if (!el) return;
+      
+      const started = parseInt(el.dataset.started) || 0;
+      const ended = parseInt(el.dataset.ended) || 0;
+      const status = el.dataset.status;
+      
+      if (!started) {
+        el.textContent = '--';
+        return;
+      }
+      
+      if (status === 'running' || status === 'pending') {
+        const duration = Date.now() - started;
+        el.textContent = formatDurationLive(duration);
+      } else if (ended) {
+        const duration = ended - started;
+        el.textContent = formatDurationLive(duration);
+      }
+    }
+    
+    // Update duration every second if running
+    updateDurationCounter();
+    setInterval(updateDurationCounter, 1000);
     
     // Process tree handling for plan-level view
     window.addEventListener('message', event => {
@@ -1496,13 +1682,21 @@ ${mermaidDef}
           const label = this._escapeForMermaid(node.name);
           const subgraphId = `sg${subgraphCounter++}`;
           
+          // Calculate duration for subPlan
+          let durationLabel = '';
+          if (state?.startedAt) {
+            const endTime = state.endedAt || Date.now();
+            const duration = endTime - state.startedAt;
+            durationLabel = ' | ' + this._formatNodeDuration(duration);
+          }
+          
           // Track subgraph data for click handling
           const childPlanId = state?.childPlanId || subPlanNode.childPlanId;
           if (childPlanId) {
             subgraphData[subgraphId] = { childPlanId, name: node.name };
           }
           
-          lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(status)} ${label}"]`);
+          lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(status)} ${label}${durationLabel}"]`);
           // Don't set direction inside subgraphs - let them inherit from parent
           
           let innerRoots: string[] = [];
@@ -1547,10 +1741,19 @@ ${mermaidDef}
           }
           
         } else {
-          // Regular job node - add status icon to label
+          // Regular job node - add status icon and duration to label
           const label = this._escapeForMermaid(node.name);
           const icon = this._getStatusIcon(status);
-          lines.push(`${indent}${sanitizedId}["${icon} ${label}"]`);
+          
+          // Calculate duration for completed or running nodes
+          let durationLabel = '';
+          if (state?.startedAt) {
+            const endTime = state.endedAt || Date.now();
+            const duration = endTime - state.startedAt;
+            durationLabel = ' | ' + this._formatNodeDuration(duration);
+          }
+          
+          lines.push(`${indent}${sanitizedId}["${icon} ${label}${durationLabel}"]`);
           lines.push(`${indent}class ${sanitizedId} ${status}`);
           
           nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
@@ -1768,6 +1971,32 @@ ${mermaidDef}
       .replace(/[<>{}|:#]/g, '')
       .replace(/\[/g, '(')
       .replace(/\]/g, ')');
+  }
+  
+  private _formatPlanDuration(startedAt?: number, endedAt?: number): string {
+    if (!startedAt) return '--';
+    const duration = (endedAt || Date.now()) - startedAt;
+    if (duration < 1000) return '< 1s';
+    const secs = Math.floor(duration / 1000);
+    if (secs < 60) return secs + 's';
+    const mins = Math.floor(secs / 60);
+    const remSecs = secs % 60;
+    if (mins < 60) return mins + 'm ' + remSecs + 's';
+    const hours = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return hours + 'h ' + remMins + 'm';
+  }
+  
+  private _formatNodeDuration(ms: number): string {
+    if (ms < 1000) return '< 1s';
+    const secs = Math.floor(ms / 1000);
+    if (secs < 60) return secs + 's';
+    const mins = Math.floor(secs / 60);
+    const remSecs = secs % 60;
+    if (mins < 60) return mins + 'm ' + remSecs + 's';
+    const hours = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return hours + 'h ' + remMins + 'm';
   }
   
   private _escapeHtml(str: string): string {

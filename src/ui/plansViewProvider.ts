@@ -20,6 +20,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   
   private _view?: vscode.WebviewView;
   private _refreshTimer?: NodeJS.Timeout;
+  private _debounceTimer?: NodeJS.Timeout;
   
   constructor(
     private readonly _context: vscode.ExtensionContext,
@@ -89,6 +90,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (this._refreshTimer) {
         clearInterval(this._refreshTimer);
       }
+      if (this._debounceTimer) {
+        clearTimeout(this._debounceTimer);
+      }
     });
   }
   
@@ -97,8 +101,11 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
    */
   private scheduleRefresh() {
     // Debounce rapid updates
-    if (this._refreshTimer) return;
-    setTimeout(() => this.refresh(), 100);
+    if (this._debounceTimer) return;
+    this._debounceTimer = setTimeout(() => {
+      this._debounceTimer = undefined;
+      this.refresh();
+    }, 100);
   }
   
   /**
