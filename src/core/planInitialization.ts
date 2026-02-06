@@ -131,13 +131,14 @@ function createAgentDelegatorAdapter(log: any) {
       maxTurns?: number;
       sessionId?: string;
       logOutput?: (line: string) => void;
+      onProcess?: (proc: any) => void; // Callback to expose process for tracking
     }): Promise<{
       success: boolean;
       sessionId?: string;
       error?: string;
       exitCode?: number;
     }> {
-      const { task, instructions, worktreePath, sessionId, logOutput } = options;
+      const { task, instructions, worktreePath, sessionId, logOutput, onProcess } = options;
       
       // Check if Copilot CLI is available
       if (!isCopilotCliAvailable()) {
@@ -164,6 +165,12 @@ function createAgentDelegatorAdapter(log: any) {
           cwd: worktreePath,
           shell: true,
         });
+        
+        // Expose process for tracking (PID, CPU, memory)
+        if (proc.pid) {
+          log.info(`Copilot CLI started with PID: ${proc.pid}`);
+          onProcess?.(proc);
+        }
         
         // Extract session ID from output
         const extractSession = (text: string) => {

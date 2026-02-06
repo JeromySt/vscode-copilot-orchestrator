@@ -46,6 +46,7 @@ interface ActiveExecution {
   process?: ChildProcess;
   aborted: boolean;
   startTime?: number;
+  isAgentWork?: boolean; // true when running @agent work
 }
 
 /**
@@ -328,17 +329,28 @@ export class DefaultJobExecutor implements JobExecutor {
     running: boolean;
     tree: ProcessNode[];
     duration: number | null;
+    isAgentWork?: boolean;
   }> {
     const executionKey = `${planId}:${nodeId}`;
     const execution = this.activeExecutions.get(executionKey);
     
-    if (!execution || !execution.process?.pid) {
+    if (!execution) {
+      return { pid: null, running: false, tree: [], duration: null };
+    }
+    
+    const duration = execution.startTime ? Date.now() - execution.startTime : null;
+    
+    // Agent work without a process yet
+    if (execution.isAgentWork && !execution.process?.pid) {
+      return { pid: null, running: true, tree: [], duration, isAgentWork: true };
+    }
+    
+    if (!execution.process?.pid) {
       return { pid: null, running: false, tree: [], duration: null };
     }
     
     const pid = execution.process.pid;
     const running = this.processMonitor.isRunning(pid);
-    const duration = execution.startTime ? Date.now() - execution.startTime : null;
     
     // Build process tree
     let tree: ProcessNode[] = [];
@@ -349,7 +361,7 @@ export class DefaultJobExecutor implements JobExecutor {
       // Ignore process tree errors
     }
     
-    return { pid, running, tree, duration };
+    return { pid, running, tree, duration, isAgentWork: execution.isAgentWork };
   }
   
   /**
@@ -363,6 +375,7 @@ export class DefaultJobExecutor implements JobExecutor {
     running: boolean;
     tree: ProcessNode[];
     duration: number | null;
+    isAgentWork?: boolean;
   }>> {
     if (nodeKeys.length === 0) return [];
     
@@ -381,19 +394,31 @@ export class DefaultJobExecutor implements JobExecutor {
       running: boolean;
       tree: ProcessNode[];
       duration: number | null;
+      isAgentWork?: boolean;
     }> = [];
     
     for (const { planId, nodeId, nodeName } of nodeKeys) {
       const executionKey = `${planId}:${nodeId}`;
       const execution = this.activeExecutions.get(executionKey);
       
-      if (!execution || !execution.process?.pid) {
+      if (!execution) {
+        continue;
+      }
+      
+      const duration = execution.startTime ? Date.now() - execution.startTime : null;
+      
+      // Handle agent work without a process yet
+      if (execution.isAgentWork && !execution.process?.pid) {
+        results.push({ nodeId, nodeName, pid: null, running: true, tree: [], duration, isAgentWork: true });
+        continue;
+      }
+      
+      if (!execution.process?.pid) {
         continue;
       }
       
       const pid = execution.process.pid;
       const running = this.processMonitor.isRunning(pid);
-      const duration = execution.startTime ? Date.now() - execution.startTime : null;
       
       // Build process tree from shared snapshot
       let tree: ProcessNode[] = [];
@@ -406,7 +431,8 @@ export class DefaultJobExecutor implements JobExecutor {
       }
       
       if (running || pid) {
-        results.push({ nodeId, nodeName, pid, running, tree, duration });
+        // Include isAgentWork flag for UI display hints
+        results.push({ nodeId, nodeName, pid, running, tree, duration, isAgentWork: execution.isAgentWork });
       }
     }
     
@@ -735,6 +761,10 @@ export class DefaultJobExecutor implements JobExecutor {
       };
     }
     
+    // Track agent work for process stats
+    execution.isAgentWork = true;
+    execution.startTime = Date.now();
+    
     this.logInfo(executionKey, 'work', `Agent instructions: ${spec.instructions}`);
     if (spec.model) {
       this.logInfo(executionKey, 'work', `Agent model: ${spec.model}`);
@@ -762,6 +792,11 @@ export class DefaultJobExecutor implements JobExecutor {
         maxTurns: spec.maxTurns,
         sessionId, // Pass session ID for resumption
         logOutput: (line: string) => this.logInfo(executionKey, 'work', line),
+        onProcess: (proc: any) => {
+          // Track the Copilot CLI process for monitoring (CPU/memory/tree)
+          execution.process = proc;
+          execution.isAgentWork = true; // Keep both flags for UI hints
+        },
       });
       
       if (result.success) {

@@ -784,6 +784,14 @@ export class NodeDetailPanel {
       const titleEl = document.getElementById('processTreeTitle');
       if (!treeEl || !titleEl) return;
       
+      // Handle agent work without a process (waiting for CLI to start)
+      if (stats.isAgentWork && !stats.pid && stats.running) {
+        const duration = stats.duration ? formatDuration(stats.duration) : '';
+        treeEl.innerHTML = '<div class="agent-work-indicator"><span class="agent-icon">🤖</span> Copilot Agent starting...' + (duration ? ' <span class="agent-duration">(' + duration + ')</span>' : '') + '</div>';
+        titleEl.innerHTML = 'Agent Work <span style="opacity: 0.7; font-weight: normal;">(starting)</span>';
+        return;
+      }
+      
       if (!stats.pid || !stats.running) {
         if (lastKnownTree.length === 0) {
           treeEl.innerHTML = '<div class="process-loading">No active process</div>';
@@ -795,9 +803,12 @@ export class NodeDetailPanel {
       const tree = stats.tree || [];
       lastKnownTree = tree;
       
+      // Add agent indicator to title if this is agent work
+      const agentPrefix = stats.isAgentWork ? '🤖 ' : '';
+      
       if (tree.length === 0) {
-        treeEl.innerHTML = '<div class="process-loading">Process running (PID ' + stats.pid + ')</div>';
-        titleEl.innerHTML = 'Processes <span style="opacity: 0.7; font-weight: normal;">PID ' + stats.pid + '</span>';
+        treeEl.innerHTML = '<div class="process-loading">' + agentPrefix + 'Process running (PID ' + stats.pid + ')</div>';
+        titleEl.innerHTML = (stats.isAgentWork ? 'Copilot Agent' : 'Processes') + ' <span style="opacity: 0.7; font-weight: normal;">PID ' + stats.pid + '</span>';
         return;
       }
       
@@ -823,7 +834,8 @@ export class NodeDetailPanel {
       }, { count: 0, cpu: 0, memory: 0 });
       
       const memMB = (totals.memory / 1024 / 1024).toFixed(1);
-      titleEl.innerHTML = 'Processes <span style="opacity: 0.7; font-weight: normal;">(' + totals.count + ' • ' + totals.cpu.toFixed(0) + '% CPU • ' + memMB + ' MB)</span>';
+      const titleLabel = stats.isAgentWork ? 'Copilot Agent' : 'Processes';
+      titleEl.innerHTML = titleLabel + ' <span style="opacity: 0.7; font-weight: normal;">(' + totals.count + ' • ' + totals.cpu.toFixed(0) + '% CPU • ' + memMB + ' MB)</span>';
       
       // Render process nodes
       function renderNode(proc, depth) {
@@ -859,13 +871,21 @@ export class NodeDetailPanel {
       treeEl.innerHTML = tree.map(p => renderNode(p, 0)).join('');
     }
     
+    function formatDuration(ms) {
+      const sec = Math.floor(ms / 1000);
+      if (sec < 60) return sec + 's';
+      const min = Math.floor(sec / 60);
+      const remSec = sec % 60;
+      return min + 'm ' + remSec + 's';
+    }
+    
     // Poll for process stats if running
     const processTreeSection = document.getElementById('processTreeSection');
     if (processTreeSection) {
       vscode.postMessage({ type: 'getProcessStats' });
       setInterval(() => {
         vscode.postMessage({ type: 'getProcessStats' });
-      }, 2000);
+      }, 1000);
     }
 
     function escapeHtml(text) {
@@ -1709,6 +1729,28 @@ export class NodeDetailPanel {
       text-align: center;
       color: var(--vscode-descriptionForeground);
       font-style: italic;
+    }
+    .agent-work-indicator {
+      padding: 12px 16px;
+      background: rgba(99, 179, 237, 0.1);
+      border: 1px solid rgba(99, 179, 237, 0.3);
+      border-radius: 6px;
+      color: #63b3ed;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .agent-icon {
+      font-size: 18px;
+    }
+    .agent-duration {
+      opacity: 0.7;
+      font-size: 12px;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
     }
     .process-node {
       background: var(--vscode-editor-background);
