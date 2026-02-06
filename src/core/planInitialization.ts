@@ -426,6 +426,23 @@ export function initializeMcpServer(
   
   log.info(`MCP registered at http://${httpConfig.host}:${httpConfig.port}/mcp`);
   
+  // Show one-time reminder to enable MCP server if not previously acknowledged
+  const MCP_ENABLED_KEY = 'mcpServerEnabledAcknowledged';
+  if (!context.globalState.get<boolean>(MCP_ENABLED_KEY)) {
+    vscode.window.showInformationMessage(
+      'Copilot Orchestrator MCP server is registered. Enable it in the MCP Servers panel to use plan/job tools with GitHub Copilot.',
+      'Got it',
+      'Show MCP Servers'
+    ).then(choice => {
+      if (choice === 'Got it' || choice === 'Show MCP Servers') {
+        context.globalState.update(MCP_ENABLED_KEY, true);
+      }
+      if (choice === 'Show MCP Servers') {
+        vscode.commands.executeCommand('workbench.action.chat.listMcpServers');
+      }
+    });
+  }
+  
   return manager;
 }
 
