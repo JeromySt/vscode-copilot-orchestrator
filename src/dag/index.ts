@@ -23,7 +23,7 @@ export { DagScheduler, SchedulerOptions } from './scheduler';
 export { DagPersistence } from './persistence';
 
 // Runner
-export { DagRunner, DagRunnerConfig, DagRunnerEvents, JobExecutor } from './runner';
+export { DagRunner, DagRunnerConfig, DagRunnerEvents, JobExecutor, RetryNodeOptions } from './runner';
 
 // Executor
 export { DefaultJobExecutor } from './executor';

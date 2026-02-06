@@ -348,9 +348,21 @@ EXAMPLES:
 This resets failed nodes back to 'ready' state and resumes execution.
 Use after fixing issues that caused the failures.
 
+SESSION RESUMPTION:
+- By default, retries resume the existing Copilot session if one exists
+- Set resumeSession: false to start a fresh session
+- Existing session context is preserved for debugging context
+
+RETRY WORKFLOW:
+1. Use get_node_failure_context to analyze why the node failed
+2. Optionally provide newInstructions to guide the retry
+3. Call retry_copilot_dag with the node ID
+
 Options:
 - Retry all failed nodes (default)
-- Retry specific nodes by ID`,
+- Retry specific nodes by ID
+- Resume or reset Copilot session
+- Provide new instructions for the retry`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -362,9 +374,49 @@ Options:
             type: 'array',
             items: { type: 'string' },
             description: 'Optional: specific node IDs to retry. If omitted, retries all failed nodes.'
+          },
+          resumeSession: {
+            type: 'boolean',
+            description: 'Resume existing Copilot session for agent work (default: true)'
+          },
+          newInstructions: {
+            type: 'string',
+            description: 'New/additional instructions to append for the retry attempt'
+          },
+          clearWorktree: {
+            type: 'boolean',
+            description: 'Reset worktree to base commit before retry (default: false)'
           }
         },
         required: ['id']
+      }
+    },
+    
+    {
+      name: 'get_node_failure_context',
+      description: `Get detailed failure context for a failed node.
+
+Returns:
+- Execution logs from the failed attempt
+- Which phase failed (prechecks, work, commit, postchecks, merge-fi, merge-ri)
+- Error message
+- Copilot session ID (if agent work was involved)
+- Worktree path (for manual inspection)
+
+Use this to analyze failures before deciding how to retry.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          dagId: { 
+            type: 'string', 
+            description: 'DAG ID' 
+          },
+          nodeId: { 
+            type: 'string', 
+            description: 'Node ID to get failure context for' 
+          }
+        },
+        required: ['dagId', 'nodeId']
       }
     },
   ];

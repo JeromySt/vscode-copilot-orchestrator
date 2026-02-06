@@ -9,11 +9,13 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import { DagRunner, DagRunnerConfig, DefaultJobExecutor } from '../dag';
 import { ProcessMonitor } from '../process/processMonitor';
 import { McpServerManager } from '../mcp/mcpServerManager';
 import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
 import { Logger } from './logger';
+import { isCopilotCliAvailable } from '../agent/cliCheckCore';
 
 const log = Logger.for('init');
 
@@ -109,6 +111,114 @@ function ensureGitignoreEntries(workspacePath: string, entries: string[]): void 
 }
 
 // ============================================================================
+// AGENT DELEGATOR ADAPTER
+// ============================================================================
+
+/**
+ * Create an agent delegator adapter for the executor.
+ * 
+ * This bridges the executor's expected interface to the Copilot CLI.
+ * It handles session resumption and session ID capture.
+ */
+function createAgentDelegatorAdapter(log: any) {
+  return {
+    async delegate(options: {
+      task: string;
+      instructions?: string;
+      worktreePath: string;
+      model?: string;
+      contextFiles?: string[];
+      maxTurns?: number;
+      sessionId?: string;
+    }): Promise<{
+      success: boolean;
+      sessionId?: string;
+      error?: string;
+      exitCode?: number;
+    }> {
+      const { task, instructions, worktreePath, sessionId } = options;
+      
+      // Check if Copilot CLI is available
+      if (!isCopilotCliAvailable()) {
+        log.warn('Copilot CLI not available, skipping agent delegation');
+        return { success: true }; // Silent success - work can be done manually
+      }
+      
+      // Build the prompt
+      const prompt = instructions ? `${task}\n\nAdditional context:\n${instructions}` : task;
+      
+      // Build Copilot CLI command
+      let copilotCmd = `copilot -p ${JSON.stringify(prompt)} --allow-all-paths --allow-all-tools`;
+      
+      // Add session resumption if available
+      if (sessionId) {
+        copilotCmd += ` --resume ${sessionId}`;
+        log.info(`Resuming Copilot session: ${sessionId}`);
+      }
+      
+      return new Promise((resolve) => {
+        let capturedSessionId: string | undefined = sessionId;
+        
+        const proc = spawn(copilotCmd, [], {
+          cwd: worktreePath,
+          shell: true,
+        });
+        
+        // Extract session ID from output
+        const extractSession = (text: string) => {
+          if (capturedSessionId) return;
+          const match = text.match(/Session ID[:\\s]+([a-f0-9-]{36})/i) ||
+                       text.match(/session[:\\s]+([a-f0-9-]{36})/i) ||
+                       text.match(/Starting session[:\\s]+([a-f0-9-]{36})/i);
+          if (match) {
+            capturedSessionId = match[1];
+            log.info(`Captured Copilot session ID: ${capturedSessionId}`);
+          }
+        };
+        
+        proc.stdout?.on('data', (data: Buffer) => {
+          const text = data.toString();
+          log.debug(`[agent] ${text.trim()}`);
+          extractSession(text);
+        });
+        
+        proc.stderr?.on('data', (data: Buffer) => {
+          const text = data.toString();
+          log.debug(`[agent] ${text.trim()}`);
+          extractSession(text);
+        });
+        
+        proc.on('exit', (code) => {
+          if (code !== 0) {
+            log.error(`Copilot CLI exited with code ${code}`);
+            resolve({
+              success: false,
+              sessionId: capturedSessionId,
+              error: `Copilot CLI exited with code ${code}`,
+              exitCode: code ?? undefined,
+            });
+          } else {
+            log.info('Copilot CLI completed successfully');
+            resolve({
+              success: true,
+              sessionId: capturedSessionId,
+            });
+          }
+        });
+        
+        proc.on('error', (err) => {
+          log.error(`Copilot CLI error: ${err.message}`);
+          resolve({
+            success: false,
+            error: err.message,
+          });
+        });
+      });
+    }
+  };
+}
+
+// ============================================================================
 // CORE SERVICES
 // ============================================================================
 
@@ -143,6 +253,11 @@ export function initializeDagRunner(
     ? path.join(workspacePath, '.orchestrator')
     : path.join(context.globalStorageUri.fsPath);
   executor.setStoragePath(logsPath);
+  
+  // Create agent delegator adapter for the executor
+  const agentDelegator = createAgentDelegatorAdapter(log);
+  executor.setAgentDelegator(agentDelegator);
+  
   dagRunner.setExecutor(executor);
   
   // Ensure .orchestrator and .worktrees are in .gitignore

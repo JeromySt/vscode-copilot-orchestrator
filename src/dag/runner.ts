@@ -33,7 +33,9 @@ import {
   JobWorkSummary,
   LogEntry,
   ExecutionPhase,
+  NodeExecutionState,
   nodePerformsWork,
+  AttemptRecord,
 } from './types';
 import { buildDag, buildSingleJobDag, DagValidationError } from './builder';
 import { DagStateMachine } from './stateMachine';
@@ -55,6 +57,7 @@ export interface DagRunnerEvents {
   'nodeTransition': (event: NodeTransitionEvent) => void;
   'nodeStarted': (dagId: string, nodeId: string) => void;
   'nodeCompleted': (dagId: string, nodeId: string, success: boolean) => void;
+  'nodeRetry': (dagId: string, nodeId: string) => void;
 }
 
 /**
@@ -83,6 +86,18 @@ export interface DagRunnerConfig {
   
   /** Pump interval in ms */
   pumpInterval?: number;
+}
+
+/**
+ * Options for retrying a failed node
+ */
+export interface RetryNodeOptions {
+  /** Resume existing Copilot session (default: true if session exists) */
+  resumeSession?: boolean;
+  /** New instructions to append/override original task */
+  newInstructions?: string;
+  /** Reset worktree to base commit (default: false) */
+  clearWorktree?: boolean;
 }
 
 /**
@@ -969,6 +984,7 @@ export class DagRunner extends EventEmitter {
         node,
         baseCommit: timing.baseCommit,
         worktreePath,
+        copilotSessionId: nodeState.copilotSessionId, // Pass existing session for resumption
         onProgress: (step) => {
           log.debug(`Job progress: ${node.name} - ${step}`);
         },
@@ -980,6 +996,11 @@ export class DagRunner extends EventEmitter {
       // Store step statuses for UI display
       if (result.stepStatuses) {
         nodeState.stepStatuses = result.stepStatuses;
+      }
+      
+      // Store captured Copilot session ID for future resumption
+      if (result.copilotSessionId) {
+        nodeState.copilotSessionId = result.copilotSessionId;
       }
       
       if (result.success) {
@@ -1019,6 +1040,17 @@ export class DagRunner extends EventEmitter {
           log.debug(`Skipping merge: isLeaf=${isLeaf}, hasTargetBranch=${!!dag.targetBranch}, hasCompletedCommit=${!!nodeState.completedCommit}`);
         }
         
+        // Record successful attempt in history
+        const successAttempt: AttemptRecord = {
+          attemptNumber: nodeState.attempts,
+          status: 'succeeded',
+          startedAt: nodeState.startedAt || Date.now(),
+          endedAt: Date.now(),
+          copilotSessionId: nodeState.copilotSessionId,
+          stepStatuses: nodeState.stepStatuses,
+        };
+        nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
+        
         sm.transition(node.id, 'succeeded');
         this.emit('nodeCompleted', dag.id, node.id, true);
         
@@ -1034,6 +1066,30 @@ export class DagRunner extends EventEmitter {
         });
       } else {
         nodeState.error = result.error;
+        
+        // Store lastAttempt for retry context
+        nodeState.lastAttempt = {
+          phase: result.failedPhase || 'work',
+          startTime: nodeState.startedAt || Date.now(),
+          endTime: Date.now(),
+          error: result.error,
+          exitCode: result.exitCode,
+        };
+        
+        // Record failed attempt in history
+        const failedAttempt: AttemptRecord = {
+          attemptNumber: nodeState.attempts,
+          status: 'failed',
+          startedAt: nodeState.startedAt || Date.now(),
+          endedAt: Date.now(),
+          failedPhase: result.failedPhase || 'work',
+          error: result.error,
+          exitCode: result.exitCode,
+          copilotSessionId: nodeState.copilotSessionId,
+          stepStatuses: nodeState.stepStatuses,
+        };
+        nodeState.attemptHistory = [...(nodeState.attemptHistory || []), failedAttempt];
+        
         sm.transition(node.id, 'failed');
         this.emit('nodeCompleted', dag.id, node.id, false);
         
@@ -1041,10 +1097,33 @@ export class DagRunner extends EventEmitter {
           dagId: dag.id,
           nodeId: node.id,
           error: result.error,
+          failedPhase: result.failedPhase,
         });
       }
     } catch (error: any) {
       nodeState.error = error.message;
+      
+      // Store lastAttempt for retry context
+      nodeState.lastAttempt = {
+        phase: 'work',
+        startTime: nodeState.startedAt || Date.now(),
+        endTime: Date.now(),
+        error: error.message,
+      };
+      
+      // Record failed attempt in history
+      const errorAttempt: AttemptRecord = {
+        attemptNumber: nodeState.attempts,
+        status: 'failed',
+        startedAt: nodeState.startedAt || Date.now(),
+        endedAt: Date.now(),
+        failedPhase: 'work',
+        error: error.message,
+        copilotSessionId: nodeState.copilotSessionId,
+        stepStatuses: nodeState.stepStatuses,
+      };
+      nodeState.attemptHistory = [...(nodeState.attemptHistory || []), errorAttempt];
+      
       sm.transition(node.id, 'failed');
       this.emit('nodeCompleted', dag.id, node.id, false);
       
@@ -1786,6 +1865,150 @@ export class DagRunner extends EventEmitter {
       // Persist the updated state with worktreeCleanedUp flags
       this.persistence.save(dag);
     }
+  }
+  
+  // ============================================================================
+  // RETRY FAILED NODES
+  // ============================================================================
+  
+  /**
+   * Retry a failed node.
+   * Resets the node state and re-queues it for execution.
+   * 
+   * @param dagId - DAG ID
+   * @param nodeId - Node ID to retry
+   * @param options - Retry options
+   * @returns true if retry was initiated, error message otherwise
+   */
+  retryNode(dagId: string, nodeId: string, options?: RetryNodeOptions): { success: boolean; error?: string } {
+    const dag = this.dags.get(dagId);
+    if (!dag) {
+      return { success: false, error: `DAG not found: ${dagId}` };
+    }
+    
+    const node = dag.nodes.get(nodeId);
+    if (!node) {
+      return { success: false, error: `Node not found: ${nodeId}` };
+    }
+    
+    const nodeState = dag.nodeStates.get(nodeId);
+    if (!nodeState) {
+      return { success: false, error: `Node state not found: ${nodeId}` };
+    }
+    
+    if (nodeState.status !== 'failed') {
+      return { success: false, error: `Node is not in failed state: ${nodeState.status}` };
+    }
+    
+    const sm = this.stateMachines.get(dagId);
+    if (!sm) {
+      return { success: false, error: `State machine not found for DAG: ${dagId}` };
+    }
+    
+    log.info(`Retrying failed node: ${node.name}`, {
+      dagId,
+      nodeId,
+      resumeSession: options?.resumeSession ?? true,
+      clearWorktree: options?.clearWorktree ?? false,
+    });
+    
+    // Clear session if not resuming
+    if (options?.resumeSession === false) {
+      nodeState.copilotSessionId = undefined;
+    }
+    
+    // Update instructions if provided
+    if (options?.newInstructions && node.type === 'job') {
+      const jobNode = node as JobNode;
+      // Append new instructions to existing instructions
+      if (jobNode.instructions) {
+        jobNode.instructions = `${jobNode.instructions}\n\n--- RETRY INSTRUCTIONS ---\n${options.newInstructions}`;
+      } else {
+        jobNode.instructions = options.newInstructions;
+      }
+    }
+    
+    // Reset node state for retry
+    nodeState.status = 'pending';
+    nodeState.error = undefined;
+    nodeState.endedAt = undefined;
+    nodeState.startedAt = undefined;
+    nodeState.attempts = (nodeState.attempts || 0) + 1;
+    nodeState.stepStatuses = undefined;
+    
+    // Note: We preserve worktreePath and baseCommit so the work can continue in the same worktree
+    // If clearWorktree is true, we'll need to reset git state
+    if (options?.clearWorktree && nodeState.worktreePath) {
+      // Reset detached HEAD to base commit
+      const resetWorktree = async () => {
+        try {
+          if (nodeState.baseCommit && nodeState.worktreePath) {
+            log.info(`Resetting worktree to base commit: ${nodeState.baseCommit.slice(0, 8)}`);
+            await git.executor.execAsync(['reset', '--hard', nodeState.baseCommit], { cwd: nodeState.worktreePath });
+            await git.executor.execAsync(['clean', '-fd'], { cwd: nodeState.worktreePath });
+          }
+        } catch (e: any) {
+          log.warn(`Failed to reset worktree: ${e.message}`);
+        }
+      };
+      resetWorktree(); // Fire and forget
+    }
+    
+    // Persist the reset state
+    this.persistence.save(dag);
+    
+    // Check if ready to run (all dependencies succeeded)
+    const readyNodes = sm.getReadyNodes();
+    if (!readyNodes.includes(nodeId)) {
+      // Need to manually transition to ready since we reset
+      sm.resetNodeToPending(nodeId);
+    }
+    
+    // Ensure pump is running to process the node
+    this.startPump();
+    
+    this.emit('nodeRetry', dagId, nodeId);
+    
+    return { success: true };
+  }
+  
+  /**
+   * Get failure context for a node (for AI analysis before retry)
+   */
+  getNodeFailureContext(dagId: string, nodeId: string): {
+    logs: string;
+    phase: string;
+    errorMessage: string;
+    sessionId?: string;
+    lastAttempt?: NodeExecutionState['lastAttempt'];
+    worktreePath?: string;
+  } | { error: string } {
+    const dag = this.dags.get(dagId);
+    if (!dag) {
+      return { error: `DAG not found: ${dagId}` };
+    }
+    
+    const node = dag.nodes.get(nodeId);
+    if (!node) {
+      return { error: `Node not found: ${nodeId}` };
+    }
+    
+    const nodeState = dag.nodeStates.get(nodeId);
+    if (!nodeState) {
+      return { error: `Node state not found: ${nodeId}` };
+    }
+    
+    // Get logs for this node
+    const logsText = this.getNodeLogs(dagId, nodeId);
+    
+    return {
+      logs: logsText,
+      phase: nodeState.lastAttempt?.phase || 'unknown',
+      errorMessage: nodeState.error || 'Unknown error',
+      sessionId: nodeState.copilotSessionId,
+      lastAttempt: nodeState.lastAttempt,
+      worktreePath: nodeState.worktreePath,
+    };
   }
   
   // ============================================================================

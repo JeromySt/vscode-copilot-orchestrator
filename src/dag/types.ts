@@ -445,6 +445,72 @@ export interface NodeExecutionState {
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
   };
+  
+  /**
+   * Copilot CLI session ID for session resumption.
+   * Captured from CLI output during agent work execution.
+   * Can be used to resume context on retry or follow-up.
+   */
+  copilotSessionId?: string;
+  
+  /**
+   * Details about the last execution attempt (for retry context).
+   */
+  lastAttempt?: {
+    /** Which phase failed or was running */
+    phase: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri';
+    /** When the attempt started */
+    startTime: number;
+    /** When the attempt ended */
+    endTime?: number;
+    /** Error message if failed */
+    error?: string;
+    /** Exit code from process (if applicable) */
+    exitCode?: number;
+  };
+  
+  /**
+   * History of all execution attempts for this node.
+   * Each attempt captures the state and outcome of an execution try.
+   */
+  attemptHistory?: AttemptRecord[];
+}
+
+/**
+ * Record of a single execution attempt.
+ */
+export interface AttemptRecord {
+  /** Attempt number (1-based) */
+  attemptNumber: number;
+  
+  /** Status of this attempt */
+  status: 'succeeded' | 'failed' | 'canceled';
+  
+  /** When the attempt started */
+  startedAt: number;
+  
+  /** When the attempt ended */
+  endedAt: number;
+  
+  /** Which phase failed (if failed) */
+  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri';
+  
+  /** Error message (if failed) */
+  error?: string;
+  
+  /** Exit code (if applicable) */
+  exitCode?: number;
+  
+  /** Copilot session ID used in this attempt */
+  copilotSessionId?: string;
+  
+  /** Per-phase status at end of attempt */
+  stepStatuses?: {
+    prechecks?: PhaseStatus;
+    work?: PhaseStatus;
+    commit?: PhaseStatus;
+    postchecks?: PhaseStatus;
+  };
 }
 
 /**
@@ -606,6 +672,12 @@ export interface JobExecutionResult {
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
   };
+  /** Copilot session ID captured during agent work (for session resumption) */
+  copilotSessionId?: string;
+  /** Which phase failed (for retry context) */
+  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri';
+  /** Exit code from failed process */
+  exitCode?: number;
 }
 
 /**
@@ -629,6 +701,9 @@ export interface ExecutionContext {
   
   /** Abort signal for cancellation */
   abortSignal?: AbortSignal;
+  
+  /** Existing Copilot session ID to resume (from previous attempt) */
+  copilotSessionId?: string;
 }
 
 // ============================================================================

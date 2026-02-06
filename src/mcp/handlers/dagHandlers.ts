@@ -738,39 +738,25 @@ export async function handleRetryDag(args: any, ctx: DagHandlerContext): Promise
     };
   }
   
-  // Reset the failed nodes
-  const retriedNodes: string[] = [];
-  for (const nodeId of nodeIdsToRetry) {
-    const state = dag.nodeStates.get(nodeId);
-    if (state && (state.status === 'failed' || state.status === 'blocked')) {
-      // Reset state
-      state.status = 'ready';
-      state.error = undefined;
-      state.startedAt = undefined;
-      state.endedAt = undefined;
-      // Keep attempts count for tracking
-      retriedNodes.push(nodeId);
-    }
-  }
+  // Build retry options from args
+  const retryOptions = {
+    resumeSession: args.resumeSession !== false, // Default true
+    newInstructions: args.newInstructions,
+    clearWorktree: args.clearWorktree || false,
+  };
   
-  // Also unblock any nodes that were blocked due to these failures
-  for (const [nodeId, state] of dag.nodeStates) {
-    if (state.status === 'blocked') {
-      const node = dag.nodes.get(nodeId);
-      if (node) {
-        // Check if all dependencies are now non-failed
-        let allDepsOk = true;
-        for (const depId of node.dependencies) {
-          const depState = dag.nodeStates.get(depId);
-          if (depState && depState.status === 'failed') {
-            allDepsOk = false;
-            break;
-          }
-        }
-        if (allDepsOk) {
-          state.status = 'pending';
-        }
-      }
+  // Retry the failed nodes using the DagRunner method
+  const retriedNodes: Array<{ id: string; name: string }> = [];
+  const errors: Array<{ id: string; error: string }> = [];
+  
+  for (const nodeId of nodeIdsToRetry) {
+    const result = ctx.dagRunner.retryNode(args.id, nodeId, retryOptions);
+    const node = dag.nodes.get(nodeId);
+    
+    if (result.success) {
+      retriedNodes.push({ id: nodeId, name: node?.name || nodeId });
+    } else {
+      errors.push({ id: nodeId, error: result.error || 'Unknown error' });
     }
   }
   
@@ -778,12 +764,46 @@ export async function handleRetryDag(args: any, ctx: DagHandlerContext): Promise
   ctx.dagRunner.resume(args.id);
   
   return {
-    success: true,
-    message: `Retrying ${retriedNodes.length} node(s)`,
+    success: retriedNodes.length > 0,
+    message: retriedNodes.length > 0 
+      ? `Retrying ${retriedNodes.length} node(s)` 
+      : 'No nodes were retried',
     dagId: args.id,
-    retriedNodes: retriedNodes.map(id => {
-      const node = dag.nodes.get(id);
-      return { id, name: node?.name || id };
-    }),
+    retriedNodes,
+    errors: errors.length > 0 ? errors : undefined,
+  };
+}
+
+/**
+ * Get failure context for a failed node
+ */
+export async function handleGetNodeFailureContext(args: any, ctx: DagHandlerContext): Promise<any> {
+  if (!args.dagId) {
+    return { success: false, error: 'dagId is required' };
+  }
+  if (!args.nodeId) {
+    return { success: false, error: 'nodeId is required' };
+  }
+  
+  const result = ctx.dagRunner.getNodeFailureContext(args.dagId, args.nodeId);
+  
+  if ('error' in result) {
+    return { success: false, error: result.error };
+  }
+  
+  const dag = ctx.dagRunner.getDag(args.dagId);
+  const node = dag?.nodes.get(args.nodeId);
+  
+  return {
+    success: true,
+    dagId: args.dagId,
+    nodeId: args.nodeId,
+    nodeName: node?.name || args.nodeId,
+    phase: result.phase,
+    errorMessage: result.errorMessage,
+    sessionId: result.sessionId,
+    worktreePath: result.worktreePath,
+    lastAttempt: result.lastAttempt,
+    logs: result.logs,
   };
 }

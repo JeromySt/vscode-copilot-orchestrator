@@ -25,6 +25,7 @@ import {
   handleCancelDag,
   handleDeleteDag,
   handleRetryDag,
+  handleGetNodeFailureContext,
 } from './handlers/dagHandlers';
 
 /** MCP component logger */
@@ -188,6 +189,10 @@ export class McpHandler {
         
       case 'retry_copilot_dag':
         result = await handleRetryDag(args || {}, this.context);
+        break;
+        
+      case 'get_node_failure_context':
+        result = await handleGetNodeFailureContext(args || {}, this.context);
         break;
         
       default:

@@ -94,8 +94,9 @@ export class DefaultJobExecutor implements JobExecutor {
     this.activeExecutions.set(executionKey, execution);
     this.executionLogs.set(executionKey, []);
     
-    // Track per-phase statuses
+    // Track per-phase statuses and captured session ID
     const stepStatuses: JobExecutionResult['stepStatuses'] = {};
+    let capturedSessionId: string | undefined = context.copilotSessionId;
     
     try {
       // Ensure worktree exists
@@ -104,6 +105,7 @@ export class DefaultJobExecutor implements JobExecutor {
           success: false,
           error: `Worktree does not exist: ${worktreePath}`,
           stepStatuses,
+          failedPhase: 'prechecks',
         };
       }
       
@@ -129,6 +131,8 @@ export class DefaultJobExecutor implements JobExecutor {
             success: false,
             error: `Prechecks failed: ${precheckResult.error}`,
             stepStatuses,
+            failedPhase: 'prechecks',
+            exitCode: precheckResult.exitCode,
           };
         }
         stepStatuses.prechecks = 'success';
@@ -152,8 +156,14 @@ export class DefaultJobExecutor implements JobExecutor {
           execution,
           executionKey,
           'work',
-          node
+          node,
+          capturedSessionId // Pass existing session ID for resumption
         );
+        
+        // Capture session ID from agent work
+        if (workResult.copilotSessionId) {
+          capturedSessionId = workResult.copilotSessionId;
+        }
         
         this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
         
@@ -163,6 +173,9 @@ export class DefaultJobExecutor implements JobExecutor {
             success: false,
             error: `Work failed: ${workResult.error}`,
             stepStatuses,
+            copilotSessionId: capturedSessionId,
+            failedPhase: 'work',
+            exitCode: workResult.exitCode,
           };
         }
         stepStatuses.work = 'success';
@@ -177,7 +190,7 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Check if aborted
       if (execution.aborted) {
-        return { success: false, error: 'Execution canceled', stepStatuses };
+        return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
       }
       
       // Run postchecks
@@ -202,6 +215,9 @@ export class DefaultJobExecutor implements JobExecutor {
             success: false,
             error: `Postchecks failed: ${postcheckResult.error}`,
             stepStatuses,
+            copilotSessionId: capturedSessionId,
+            failedPhase: 'postchecks',
+            exitCode: postcheckResult.exitCode,
           };
         }
         stepStatuses.postchecks = 'success';
@@ -211,7 +227,7 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Check if aborted
       if (execution.aborted) {
-        return { success: false, error: 'Execution canceled', stepStatuses };
+        return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
       }
       
       // Commit changes
@@ -231,6 +247,8 @@ export class DefaultJobExecutor implements JobExecutor {
           success: false,
           error: `Commit failed: ${commitResult.error}`,
           stepStatuses,
+          copilotSessionId: capturedSessionId,
+          failedPhase: 'commit',
         };
       }
       stepStatuses.commit = 'success';
@@ -247,6 +265,7 @@ export class DefaultJobExecutor implements JobExecutor {
         completedCommit: commitResult.commit,
         workSummary,
         stepStatuses,
+        copilotSessionId: capturedSessionId,
       };
       
     } catch (error: any) {
@@ -255,6 +274,7 @@ export class DefaultJobExecutor implements JobExecutor {
         success: false,
         error: error.message,
         stepStatuses,
+        copilotSessionId: capturedSessionId,
       };
     } finally {
       this.activeExecutions.delete(executionKey);
@@ -440,8 +460,9 @@ export class DefaultJobExecutor implements JobExecutor {
     execution: ActiveExecution,
     executionKey: string,
     phase: ExecutionPhase,
-    node: JobNode
-  ): Promise<{ success: boolean; error?: string; isAgent?: boolean }> {
+    node: JobNode,
+    sessionId?: string
+  ): Promise<{ success: boolean; error?: string; isAgent?: boolean; copilotSessionId?: string; exitCode?: number }> {
     const normalized = normalizeWorkSpec(spec);
     
     if (!normalized) {
@@ -458,7 +479,7 @@ export class DefaultJobExecutor implements JobExecutor {
         return this.runShell(normalized, worktreePath, execution, executionKey, phase);
       
       case 'agent':
-        const result = await this.runAgent(normalized, worktreePath, execution, executionKey, node);
+        const result = await this.runAgent(normalized, worktreePath, execution, executionKey, node, sessionId);
         return { ...result, isAgent: true };
       
       default:
@@ -699,8 +720,9 @@ export class DefaultJobExecutor implements JobExecutor {
     worktreePath: string,
     execution: ActiveExecution,
     executionKey: string,
-    node: JobNode
-  ): Promise<{ success: boolean; error?: string }> {
+    node: JobNode,
+    sessionId?: string
+  ): Promise<{ success: boolean; error?: string; copilotSessionId?: string; exitCode?: number }> {
     if (!this.agentDelegator) {
       return {
         success: false,
@@ -721,6 +743,9 @@ export class DefaultJobExecutor implements JobExecutor {
     if (spec.context) {
       this.logInfo(executionKey, 'work', `Agent context: ${spec.context}`);
     }
+    if (sessionId) {
+      this.logInfo(executionKey, 'work', `Resuming Copilot session: ${sessionId}`);
+    }
     
     try {
       const result = await this.agentDelegator.delegate({
@@ -730,14 +755,23 @@ export class DefaultJobExecutor implements JobExecutor {
         model: spec.model,
         contextFiles: spec.contextFiles,
         maxTurns: spec.maxTurns,
+        sessionId, // Pass session ID for resumption
       });
       
       if (result.success) {
         this.logInfo(executionKey, 'work', 'Agent completed successfully');
-        return { success: true };
+        if (result.sessionId) {
+          this.logInfo(executionKey, 'work', `Captured session ID: ${result.sessionId}`);
+        }
+        return { success: true, copilotSessionId: result.sessionId };
       } else {
         this.logError(executionKey, 'work', `Agent failed: ${result.error}`);
-        return { success: false, error: result.error };
+        return { 
+          success: false, 
+          error: result.error, 
+          copilotSessionId: result.sessionId,
+          exitCode: result.exitCode 
+        };
       }
     } catch (error: any) {
       this.logError(executionKey, 'work', `Agent error: ${error.message}`);

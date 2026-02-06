@@ -367,6 +367,83 @@ export class DagStateMachine extends EventEmitter {
   }
   
   /**
+   * Reset a node to pending/ready state for retry.
+   * This bypasses normal transition validation since it's a retry scenario.
+   * Also unblocks any downstream nodes that were blocked due to this node's failure.
+   * 
+   * @param nodeId - The node to reset
+   * @returns true if reset succeeded
+   */
+  resetNodeToPending(nodeId: string): boolean {
+    const state = this.dag.nodeStates.get(nodeId);
+    if (!state) {
+      log.error(`Cannot reset unknown node: ${nodeId}`);
+      return false;
+    }
+    
+    const oldStatus = state.status;
+    
+    // Check if dependencies are met to determine if we go to 'pending' or 'ready'
+    const newStatus = this.areDependenciesMet(nodeId) ? 'ready' : 'pending';
+    
+    state.status = newStatus;
+    
+    log.info(`Node reset for retry: ${nodeId} ${oldStatus} -> ${newStatus}`, {
+      dagId: this.dag.id,
+      nodeName: this.dag.nodes.get(nodeId)?.name,
+    });
+    
+    // Emit transition event
+    const event: NodeTransitionEvent = {
+      dagId: this.dag.id,
+      nodeId,
+      from: oldStatus,
+      to: newStatus,
+      timestamp: Date.now(),
+    };
+    this.emit('transition', event);
+    
+    // If we're ready, emit nodeReady
+    if (newStatus === 'ready') {
+      this.emit('nodeReady', this.dag.id, nodeId);
+    }
+    
+    // Unblock any downstream nodes that were blocked due to this node
+    this.unblockDownstream(nodeId);
+    
+    return true;
+  }
+  
+  /**
+   * Unblock downstream nodes that were blocked due to a node's failure.
+   * Called when a failed node is being retried.
+   */
+  private unblockDownstream(nodeId: string): void {
+    const node = this.dag.nodes.get(nodeId);
+    if (!node) return;
+    
+    for (const dependentId of node.dependents) {
+      const dependentState = this.dag.nodeStates.get(dependentId);
+      if (dependentState?.status === 'blocked') {
+        // Check if this is the only failed/blocked dependency
+        if (!this.hasDependencyFailed(dependentId)) {
+          // Reset to pending (it will become ready when this node succeeds)
+          dependentState.status = 'pending';
+          dependentState.error = undefined;
+          
+          log.debug(`Unblocked downstream node: ${dependentId}`, {
+            dagId: this.dag.id,
+            nodeName: this.dag.nodes.get(dependentId)?.name,
+          });
+          
+          // Recursively unblock further downstream
+          this.unblockDownstream(dependentId);
+        }
+      }
+    }
+  }
+  
+  /**
    * Get count of nodes in each status (for progress tracking)
    */
   getStatusCounts(): Record<NodeStatus, number> {

@@ -13,7 +13,7 @@
  */
 
 import * as vscode from 'vscode';
-import { DagRunner, DagInstance, JobNode, SubDagNode, NodeExecutionState, JobWorkSummary, WorkSpec } from '../../dag';
+import { DagRunner, DagInstance, JobNode, SubDagNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord } from '../../dag';
 import { getJobDetailsCss } from '../templates/jobDetailsCss';
 import { getJobDetailsJs } from '../templates/jobDetailsJs';
 
@@ -199,8 +199,26 @@ export class NodeDetailPanel {
       case 'copyToClipboard':
         if (message.text) {
           vscode.env.clipboard.writeText(message.text);
+          vscode.window.showInformationMessage('Copied to clipboard');
         }
         break;
+      case 'retryNode':
+        this._retryNode(message.dagId, message.nodeId, message.resumeSession);
+        break;
+    }
+  }
+  
+  private _retryNode(dagId: string, nodeId: string, resumeSession: boolean) {
+    const result = this._dagRunner.retryNode(dagId, nodeId, {
+      resumeSession,
+      clearWorktree: false,
+    });
+    
+    if (result.success) {
+      vscode.window.showInformationMessage(`Node retry initiated${resumeSession ? ' (resuming session)' : ' (fresh session)'}`);
+      this._update();
+    } else {
+      vscode.window.showErrorMessage(`Retry failed: ${result.error}`);
     }
   }
   
@@ -321,6 +339,11 @@ export class NodeDetailPanel {
     const childDagSummaryHtml = subDagNode?.childDagId
       ? this._buildChildDagSummaryHtml(subDagNode.childDagId)
       : '';
+    
+    // Build attempt history HTML (only if multiple attempts)
+    const attemptHistoryHtml = (state.attemptHistory && state.attemptHistory.length > 0)
+      ? this._buildAttemptHistoryHtml(state)
+      : '';
 
     return `<!DOCTYPE html>
 <html>
@@ -350,7 +373,7 @@ export class NodeDetailPanel {
       </div>
       <div class="meta-item">
         <div class="meta-label">Attempts</div>
-        <div class="meta-value">${state.attempts}</div>
+        <div class="meta-value">${state.attempts}${state.attempts > 1 ? ' ⟳' : ''}</div>
       </div>
       ${state.startedAt ? `
       <div class="meta-item">
@@ -364,10 +387,30 @@ export class NodeDetailPanel {
         <div class="meta-value">${duration}</div>
       </div>
       ` : ''}
+      ${state.copilotSessionId ? `
+      <div class="meta-item full-width">
+        <div class="meta-label">Copilot Session</div>
+        <div class="meta-value session-id" data-session="${state.copilotSessionId}" title="Click to copy">
+          ${state.copilotSessionId.substring(0, 12)}... 📋
+        </div>
+      </div>
+      ` : ''}
     </div>
     ${state.error ? `
     <div class="error-box">
       <strong>Error:</strong> ${this._escapeHtml(state.error)}
+      ${state.lastAttempt?.phase ? `<div class="error-phase">Failed in phase: <strong>${state.lastAttempt.phase}</strong></div>` : ''}
+      ${state.lastAttempt?.exitCode !== undefined ? `<div class="error-phase">Exit code: <strong>${state.lastAttempt.exitCode}</strong></div>` : ''}
+    </div>
+    ` : ''}
+    ${state.status === 'failed' ? `
+    <div class="retry-section">
+      <button class="retry-btn" data-action="retry-node" data-dag-id="${dag.id}" data-node-id="${node.id}">
+        🔄 Retry Node
+      </button>
+      <button class="retry-btn secondary" data-action="retry-node-fresh" data-dag-id="${dag.id}" data-node-id="${node.id}">
+        🆕 Retry (Fresh Session)
+      </button>
     </div>
     ` : ''}
   </div>
@@ -457,6 +500,9 @@ export class NodeDetailPanel {
     ` : '<div class="config-value">No dependencies (root node)</div>'}
   </div>
   
+  <!-- Attempt History -->
+  ${attemptHistoryHtml}
+  
   <!-- Git Information -->
   ${state.worktreePath || state.baseCommit || state.completedCommit ? `
   <div class="section">
@@ -510,6 +556,51 @@ export class NodeDetailPanel {
     function refresh() {
       vscode.postMessage({ type: 'refresh' });
     }
+    
+    // Session ID copy handler
+    document.querySelectorAll('.session-id').forEach(el => {
+      el.addEventListener('click', () => {
+        const sessionId = el.getAttribute('data-session');
+        vscode.postMessage({ type: 'copyToClipboard', text: sessionId });
+      });
+    });
+    
+    // Retry button handlers
+    document.querySelectorAll('.retry-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.getAttribute('data-action');
+        const dagId = btn.getAttribute('data-dag-id');
+        const nodeId = btn.getAttribute('data-node-id');
+        
+        if (action === 'retry-node') {
+          vscode.postMessage({ type: 'retryNode', dagId, nodeId, resumeSession: true });
+        } else if (action === 'retry-node-fresh') {
+          vscode.postMessage({ type: 'retryNode', dagId, nodeId, resumeSession: false });
+        }
+      });
+    });
+    
+    // Attempt card toggle handlers
+    document.querySelectorAll('.attempt-header').forEach(header => {
+      header.addEventListener('click', () => {
+        const card = header.closest('.attempt-card');
+        const body = card.querySelector('.attempt-body');
+        const chevron = header.querySelector('.chevron');
+        const isExpanded = header.getAttribute('data-expanded') === 'true';
+        
+        if (isExpanded) {
+          body.style.display = 'none';
+          chevron.classList.remove('expanded');
+          chevron.textContent = '▶';
+          header.setAttribute('data-expanded', 'false');
+        } else {
+          body.style.display = 'block';
+          chevron.classList.add('expanded');
+          chevron.textContent = '▼';
+          header.setAttribute('data-expanded', 'true');
+        }
+      });
+    });
     
     function selectPhase(phase) {
       currentPhase = phase;
@@ -921,6 +1012,81 @@ export class NodeDetailPanel {
     `;
   }
   
+  /**
+   * Build attempt history HTML with collapsible cards
+   */
+  private _buildAttemptHistoryHtml(state: NodeExecutionState): string {
+    const attempts = state.attemptHistory;
+    if (!attempts || attempts.length === 0) {
+      return '';
+    }
+    
+    // Build cards in reverse order (latest first)
+    const cards = attempts.slice().reverse().map((attempt, reverseIdx) => {
+      const isLatest = reverseIdx === 0;
+      const duration = this._formatDuration(Math.round((attempt.endedAt - attempt.startedAt) / 1000));
+      const timestamp = new Date(attempt.startedAt).toLocaleString();
+      
+      // Step indicators
+      const stepDot = (status?: string): string => {
+        const map: Record<string, string> = {
+          'success': '<span class="step-dot success">●</span>',
+          'failed': '<span class="step-dot failed">●</span>',
+          'running': '<span class="step-dot running">●</span>',
+          'skipped': '<span class="step-dot skipped">○</span>',
+        };
+        return map[status || ''] || '<span class="step-dot pending">○</span>';
+      };
+      
+      const stepIndicators = `
+        ${stepDot(attempt.stepStatuses?.prechecks)}
+        ${stepDot(attempt.stepStatuses?.work)}
+        ${stepDot(attempt.stepStatuses?.commit)}
+        ${stepDot(attempt.stepStatuses?.postchecks)}
+      `;
+      
+      const sessionHtml = attempt.copilotSessionId
+        ? `<div class="attempt-meta-row"><strong>Session:</strong> <span class="session-id" data-session="${attempt.copilotSessionId}" title="Click to copy">${attempt.copilotSessionId.substring(0, 12)}... 📋</span></div>`
+        : '';
+      
+      const errorHtml = attempt.error
+        ? `<div class="attempt-error">
+            <strong>Error:</strong> ${this._escapeHtml(attempt.error)}
+            ${attempt.failedPhase ? `<div style="margin-top: 4px;">Failed in phase: <strong>${attempt.failedPhase}</strong></div>` : ''}
+            ${attempt.exitCode !== undefined ? `<div>Exit code: <strong>${attempt.exitCode}</strong></div>` : ''}
+           </div>`
+        : '';
+      
+      return `
+        <div class="attempt-card ${isLatest ? 'active' : ''}" data-attempt="${attempt.attemptNumber}">
+          <div class="attempt-header" data-expanded="${isLatest}">
+            <div class="attempt-header-left">
+              <span class="attempt-badge">#${attempt.attemptNumber}</span>
+              <span class="step-indicators">${stepIndicators}</span>
+              <span class="attempt-time">${timestamp}</span>
+              <span class="attempt-duration">(${duration})</span>
+            </div>
+            <span class="chevron ${isLatest ? 'expanded' : ''}">${isLatest ? '▼' : '▶'}</span>
+          </div>
+          <div class="attempt-body" style="display: ${isLatest ? 'block' : 'none'};">
+            <div class="attempt-meta">
+              <div class="attempt-meta-row"><strong>Status:</strong> <span class="status-${attempt.status}">${attempt.status}</span></div>
+              ${sessionHtml}
+            </div>
+            ${errorHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    return `
+    <div class="section">
+      <h3>Attempt History (${attempts.length})</h3>
+      ${cards}
+    </div>
+    `;
+  }
+  
   private _getStyles(): string {
     return `
     * { box-sizing: border-box; }
@@ -1021,6 +1187,53 @@ export class NodeDetailPanel {
       padding: 10px;
       margin-top: 12px;
       color: #f48771;
+    }
+    .error-phase {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--vscode-descriptionForeground);
+    }
+    
+    /* Session ID */
+    .session-id {
+      cursor: pointer;
+      font-family: var(--vscode-editor-font-family), monospace;
+      background: var(--vscode-textCodeBlock-background);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .session-id:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .meta-item.full-width {
+      grid-column: 1 / -1;
+    }
+    
+    /* Retry Buttons */
+    .retry-section {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    .retry-btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+    }
+    .retry-btn:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+    .retry-btn.secondary {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+    .retry-btn.secondary:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
     }
     
     /* Phase Tabs */
@@ -1267,6 +1480,94 @@ export class NodeDetailPanel {
     }
     .action-btn:hover {
       background: var(--vscode-button-secondaryHoverBackground);
+    }
+    
+    /* Attempt History Cards */
+    .attempt-card {
+      background: var(--vscode-sideBar-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 6px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .attempt-card.active {
+      border-color: var(--vscode-progressBar-background);
+      border-width: 2px;
+    }
+    .attempt-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .attempt-header:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .attempt-header-left {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex: 1;
+    }
+    .attempt-badge {
+      font-weight: 700;
+      padding: 3px 8px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      border-radius: 4px;
+      font-size: 10px;
+      min-width: 20px;
+      text-align: center;
+    }
+    .step-indicators {
+      display: flex;
+      gap: 4px;
+    }
+    .step-dot { font-size: 14px; }
+    .step-dot.success { color: var(--vscode-testing-iconPassed); }
+    .step-dot.failed { color: var(--vscode-errorForeground); }
+    .step-dot.skipped { color: #808080; }
+    .step-dot.pending { color: var(--vscode-descriptionForeground); opacity: 0.5; }
+    .step-dot.running { color: #7DD3FC; animation: pulse-dot 1.5s ease-in-out infinite; }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 0.4; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+    .attempt-time { font-size: 10px; opacity: 0.7; }
+    .attempt-duration { font-size: 10px; opacity: 0.7; }
+    .chevron {
+      font-size: 12px;
+      transition: transform 0.2s;
+    }
+    .chevron.expanded {
+      transform: rotate(90deg);
+    }
+    .attempt-body {
+      padding: 14px;
+      border-top: 1px solid var(--vscode-panel-border);
+      background: var(--vscode-editor-background);
+    }
+    .attempt-meta {
+      font-size: 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .attempt-meta-row { line-height: 1.6; }
+    .attempt-meta-row strong { opacity: 0.7; }
+    .status-succeeded { color: #4ec9b0; }
+    .status-failed { color: #f48771; }
+    .status-canceled { color: #858585; }
+    .attempt-error {
+      margin-top: 8px;
+      padding: 8px;
+      background: rgba(244, 135, 113, 0.1);
+      border: 1px solid rgba(244, 135, 113, 0.3);
+      border-radius: 4px;
+      color: #f48771;
+      font-size: 11px;
     }
     `;
   }
