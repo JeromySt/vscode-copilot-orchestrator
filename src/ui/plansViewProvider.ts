@@ -305,7 +305,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (secs < 60) return secs + 's';
       const mins = Math.floor(secs / 60);
       const remSecs = secs % 60;
-      return mins + 'm ' + remSecs + 's';
+      if (mins < 60) return mins + 'm ' + remSecs + 's';
+      const hours = Math.floor(mins / 60);
+      const remMins = mins % 60;
+      return hours + 'h ' + remMins + 'm';
     }
     
     window.addEventListener('message', ev => {
