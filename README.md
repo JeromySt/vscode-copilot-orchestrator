@@ -128,29 +128,20 @@ The sidebar includes two views:
 
 The orchestrator exposes a full MCP server that integrates directly with GitHub Copilot Chat:
 
-**Job Tools:**
-| Tool | Description |
-|------|-------------|
-| `create_copilot_job` | Create a new orchestrator job |
-| `get_copilot_job_status` | Get job progress and status |
-| `get_copilot_job_details` | Get full job configuration |
-| `get_copilot_job_log_section` | Retrieve specific log sections |
-| `get_copilot_jobs_batch_status` | Monitor multiple jobs at once |
-| `continue_copilot_job_work` | Add more work to existing job |
-| `retry_copilot_job` | Retry with AI-guided analysis |
-| `cancel_copilot_job` | Cancel a running job |
-| `delete_copilot_job` | Delete a job |
-| `delete_copilot_jobs` | Delete multiple jobs by ID |
-| `list_copilot_jobs` | List all jobs |
-
 **Plan Tools (Multi-Job Workflows):**
 | Tool | Description |
 |------|-------------|
 | `create_copilot_plan` | Create a plan with multiple dependent jobs |
+| `create_copilot_job` | Create a single job (wrapped in a plan) |
 | `get_copilot_plan_status` | Get plan progress and job statuses |
 | `list_copilot_plans` | List all plans |
 | `cancel_copilot_plan` | Cancel a plan and all its jobs |
-| `delete_copilot_plan` | Delete a plan and optionally its jobs |
+| `delete_copilot_plan` | Delete a plan and all its state |
+| `retry_copilot_plan` | Retry failed nodes in a plan |
+| `retry_copilot_plan_node` | Retry a specific failed node |
+| `get_copilot_plan_node_failure_context` | Get failure details for a node |
+| `get_copilot_node_details` | Get details for a specific node |
+| `get_copilot_node_logs` | Get execution logs for a node |
 
 **Example Copilot Chat interaction:**
 ```

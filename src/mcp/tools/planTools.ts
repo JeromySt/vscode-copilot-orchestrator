@@ -354,7 +354,7 @@ SESSION RESUMPTION:
 - Existing session context is preserved for debugging context
 
 RETRY WORKFLOW:
-1. Use get_node_failure_context to analyze why the node failed
+1. Use get_copilot_plan_node_failure_context to analyze why the node failed
 2. Optionally provide newInstructions to guide the retry
 3. Call retry_copilot_plan with the node ID
 
@@ -393,8 +393,8 @@ Options:
     },
     
     {
-      name: 'get_node_failure_context',
-      description: `Get detailed failure context for a failed node.
+      name: 'get_copilot_plan_node_failure_context',
+      description: `Get detailed failure context for a failed node in a Plan.
 
 Returns:
 - Execution logs from the failed attempt
@@ -414,6 +414,52 @@ Use this to analyze failures before deciding how to retry.`,
           nodeId: { 
             type: 'string', 
             description: 'Node ID to get failure context for' 
+          }
+        },
+        required: ['planId', 'nodeId']
+      }
+    },
+    
+    {
+      name: 'retry_copilot_plan_node',
+      description: `Retry a specific failed node in a Plan.
+
+This is a convenience tool for retrying a single node. For retrying multiple
+nodes at once, use retry_copilot_plan with nodeIds array.
+
+The node must be in 'failed' state to be retried.
+
+SESSION RESUMPTION:
+- By default, retries resume the existing Copilot session if one exists
+- Set resumeSession: false to start a fresh session
+- Existing session context is preserved for debugging context
+
+WORKFLOW:
+1. Use get_copilot_plan_node_failure_context to analyze why the node failed
+2. Call retry_copilot_plan_node with optional newInstructions
+3. Monitor with get_copilot_plan_status`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: { 
+            type: 'string', 
+            description: 'Plan ID containing the node' 
+          },
+          nodeId: { 
+            type: 'string', 
+            description: 'Node ID to retry' 
+          },
+          resumeSession: {
+            type: 'boolean',
+            description: 'Resume existing Copilot session for agent work (default: true)'
+          },
+          newInstructions: {
+            type: 'string',
+            description: 'New/additional instructions to append for the retry attempt'
+          },
+          clearWorktree: {
+            type: 'boolean',
+            description: 'Reset worktree to base commit before retry (default: false)'
           }
         },
         required: ['planId', 'nodeId']

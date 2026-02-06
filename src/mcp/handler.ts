@@ -26,6 +26,7 @@ import {
   handleDeletePlan,
   handleRetryPlan,
   handleGetNodeFailureContext,
+  handleRetryPlanNode,
 } from './handlers/planHandlers';
 
 /** MCP component logger */
@@ -191,8 +192,12 @@ export class McpHandler {
         result = await handleRetryPlan(args || {}, this.context);
         break;
         
-      case 'get_node_failure_context':
+      case 'get_copilot_plan_node_failure_context':
         result = await handleGetNodeFailureContext(args || {}, this.context);
+        break;
+        
+      case 'retry_copilot_plan_node':
+        result = await handleRetryPlanNode(args || {}, this.context);
         break;
         
       default:

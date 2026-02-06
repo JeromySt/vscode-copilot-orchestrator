@@ -807,3 +807,59 @@ export async function handleGetNodeFailureContext(args: any, ctx: PlanHandlerCon
     logs: result.logs,
   };
 }
+
+/**
+ * Retry a specific node in a Plan
+ */
+export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): Promise<any> {
+  if (!args.planId) {
+    return { success: false, error: 'planId is required' };
+  }
+  if (!args.nodeId) {
+    return { success: false, error: 'nodeId is required' };
+  }
+  
+  const plan = ctx.PlanRunner.getPlan(args.planId);
+  if (!plan) {
+    return { success: false, error: `Plan ${args.planId} not found` };
+  }
+  
+  const node = plan.nodes.get(args.nodeId);
+  if (!node) {
+    return { success: false, error: `Node ${args.nodeId} not found in Plan ${args.planId}` };
+  }
+  
+  const state = plan.nodeStates.get(args.nodeId);
+  if (!state || state.status !== 'failed') {
+    return { 
+      success: false, 
+      error: `Node ${args.nodeId} is not in failed state (current: ${state?.status || 'unknown'})` 
+    };
+  }
+  
+  // Build retry options from args
+  const retryOptions = {
+    resumeSession: args.resumeSession !== false, // Default true
+    newInstructions: args.newInstructions,
+    clearWorktree: args.clearWorktree || false,
+  };
+  
+  const result = ctx.PlanRunner.retryNode(args.planId, args.nodeId, retryOptions);
+  
+  if (!result.success) {
+    return { success: false, error: result.error };
+  }
+  
+  // Resume the Plan if it was stopped
+  ctx.PlanRunner.resume(args.planId);
+  
+  return {
+    success: true,
+    message: `Retrying node "${node.name}"`,
+    planId: args.planId,
+    nodeId: args.nodeId,
+    nodeName: node.name,
+    resumeSession: retryOptions.resumeSession,
+    clearWorktree: retryOptions.clearWorktree,
+  };
+}
