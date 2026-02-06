@@ -516,9 +516,8 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
     });
   }
   
-  // Get effective endedAt from state machine (computed from node data)
-  const sm = ctx.PlanRunner.getStateMachine(plan.id);
-  const effectiveEndedAt = sm?.getEffectiveEndedAt() || plan.endedAt;
+  // Get effective endedAt recursively including child plans
+  const effectiveEndedAt = ctx.PlanRunner.getEffectiveEndedAt(plan.id) || plan.endedAt;
   
   return {
     success: true,
@@ -567,7 +566,7 @@ export async function handleListPlans(args: any, ctx: PlanHandlerContext): Promi
         counts,
         createdAt: plan.createdAt,
         startedAt: plan.startedAt,
-        endedAt: sm?.getEffectiveEndedAt() || plan.endedAt,
+        endedAt: ctx.PlanRunner.getEffectiveEndedAt(plan.id) || plan.endedAt,
       };
     }),
   };

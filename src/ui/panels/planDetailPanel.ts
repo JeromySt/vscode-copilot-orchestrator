@@ -395,8 +395,8 @@ export class planDetailPanel {
     }
     this._lastStateHash = stateHash;
     
-    // Compute effective endedAt from node data for accurate duration
-    const effectiveEndedAt = sm?.getEffectiveEndedAt() || plan.endedAt;
+    // Compute effective endedAt from node data for accurate duration (recursively includes child plans)
+    const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
     
     this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt);
   }

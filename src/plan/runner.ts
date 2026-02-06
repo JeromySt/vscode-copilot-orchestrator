@@ -326,6 +326,46 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
+   * Get the effective endedAt for a plan, recursively including child plans.
+   * This is more accurate than plan.endedAt when subPlans ran asynchronously.
+   * 
+   * @param planId - The plan ID
+   * @returns The maximum endedAt across all nodes and child plans
+   */
+  getEffectiveEndedAt(planId: string): number | undefined {
+    return this.computeEffectiveEndedAtRecursive(planId);
+  }
+  
+  /**
+   * Recursively compute the effective endedAt across a plan and all child plans.
+   */
+  private computeEffectiveEndedAtRecursive(planId: string): number | undefined {
+    const plan = this.plans.get(planId);
+    if (!plan) return undefined;
+    
+    let maxEndedAt: number | undefined;
+    
+    for (const [nodeId, state] of plan.nodeStates) {
+      const node = plan.nodes.get(nodeId);
+      
+      // For subPlan nodes, recursively check the child plan
+      if (node?.type === 'subPlan' && state.childPlanId) {
+        const childEndedAt = this.computeEffectiveEndedAtRecursive(state.childPlanId);
+        if (childEndedAt && (!maxEndedAt || childEndedAt > maxEndedAt)) {
+          maxEndedAt = childEndedAt;
+        }
+      }
+      
+      // Also check this node's own endedAt
+      if (state.endedAt && (!maxEndedAt || state.endedAt > maxEndedAt)) {
+        maxEndedAt = state.endedAt;
+      }
+    }
+    
+    return maxEndedAt;
+  }
+  
+  /**
    * Get execution logs for a node
    */
   getNodeLogs(planId: string, nodeId: string, phase?: 'all' | ExecutionPhase): string {
@@ -1298,11 +1338,10 @@ export class PlanRunner extends EventEmitter {
     
     const nodeState = parentPlan.nodeStates.get(node.id);
     const childPlan = this.plans.get(event.planId);
-    const childSm = childPlan ? this.stateMachines.get(event.planId) : undefined;
     
     // Ensure the subPlan node's endedAt reflects the child plan's actual completion time
-    if (nodeState && childSm) {
-      const childEndedAt = childSm.getEffectiveEndedAt();
+    if (nodeState) {
+      const childEndedAt = this.getEffectiveEndedAt(event.planId);
       if (childEndedAt) {
         nodeState.endedAt = childEndedAt;
       }
