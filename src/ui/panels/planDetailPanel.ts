@@ -111,7 +111,7 @@ export class planDetailPanel {
         vscode.commands.executeCommand('orchestrator.cancelPlan', this._planId);
         break;
       case 'delete':
-        this._confirmAndDeletePlan();
+        vscode.commands.executeCommand('orchestrator.deletePlan', this._planId);
         break;
       case 'openNode':
         // Use the planId from the message if provided (for nodes in child Plans), otherwise use the main Plan ID
@@ -146,25 +146,6 @@ export class planDetailPanel {
       hierarchy: (stats as any).hierarchy || [],
       rootJobs: (stats as any).rootJobs || []
     });
-  }
-  
-  /**
-   * Confirm and delete the plan
-   */
-  private async _confirmAndDeletePlan(): Promise<void> {
-    const plan = this._planRunner.get(this._planId);
-    const planName = plan?.spec.name || this._planId.slice(0, 8);
-    
-    const result = await vscode.window.showWarningMessage(
-      `Delete plan "${planName}"? This will cancel any running jobs and remove all worktrees, logs, and state.`,
-      { modal: true },
-      'Delete'
-    );
-    
-    if (result === 'Delete') {
-      vscode.commands.executeCommand('orchestrator.deletePlan', this._planId);
-      // Panel will be closed by the delete command via closeForPlan
-    }
   }
   
   /**

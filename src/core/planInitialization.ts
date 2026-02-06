@@ -528,7 +528,7 @@ export function registerPlanCommands(
       }
       
       const confirm = await vscode.window.showWarningMessage(
-        `Delete Plan "${plan.spec.name}"? This cannot be undone.`,
+        `Delete Plan "${plan.spec.name}"? This will cancel any running jobs and remove all worktrees, logs, and state.`,
         { modal: true },
         'Delete'
       );
