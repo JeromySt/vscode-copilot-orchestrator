@@ -266,6 +266,7 @@ export class NodeDetailPanel {
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
   <style>
     body { 
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -304,7 +305,10 @@ export class NodeDetailPanel {
   private _getErrorHtml(message: string): string {
     return `<!DOCTYPE html>
 <html>
-<head><meta charset="UTF-8"></head>
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+</head>
 <body style="padding: 20px; color: var(--vscode-errorForeground);">
   <h2>Error</h2>
   <p>${message}</p>
@@ -347,6 +351,7 @@ export class NodeDetailPanel {
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
   <style>
     ${this._getStyles()}
   </style>
