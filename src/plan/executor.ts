@@ -625,9 +625,14 @@ export class DefaultJobExecutor implements JobExecutor {
           shellArgs = ['-c', spec.command];
           break;
         default:
-          // Platform default
-          shell = isWindows ? 'cmd.exe' : '/bin/sh';
-          shellArgs = isWindows ? ['/c', spec.command] : ['-c', spec.command];
+          // Platform default - use PowerShell on Windows for better compatibility
+          if (isWindows) {
+            shell = 'powershell.exe';
+            shellArgs = ['-NoProfile', '-NonInteractive', '-Command', spec.command];
+          } else {
+            shell = '/bin/sh';
+            shellArgs = ['-c', spec.command];
+          }
       }
       
       // Log the shell command being spawned
