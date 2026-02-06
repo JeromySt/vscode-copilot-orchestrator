@@ -670,6 +670,58 @@ export async function handleGetNodeLogs(args: any, ctx: PlanHandlerContext): Pro
 }
 
 /**
+ * Get node attempts (with optional logs)
+ */
+export async function handleGetNodeAttempts(args: any, ctx: PlanHandlerContext): Promise<any> {
+  if (!args.planId || !args.nodeId) {
+    return { success: false, error: 'planId and nodeId are required' };
+  }
+  
+  const plan = ctx.PlanRunner.get(args.planId);
+  if (!plan) {
+    return { success: false, error: `Plan not found: ${args.planId}` };
+  }
+  
+  const node = plan.nodes.get(args.nodeId);
+  if (!node) {
+    return { success: false, error: `Node not found: ${args.nodeId}` };
+  }
+  
+  // Get specific attempt or all attempts
+  if (args.attemptNumber) {
+    const attempt = ctx.PlanRunner.getNodeAttempt(args.planId, args.nodeId, args.attemptNumber);
+    if (!attempt) {
+      return { success: false, error: `Attempt ${args.attemptNumber} not found` };
+    }
+    
+    return {
+      success: true,
+      planId: args.planId,
+      nodeId: args.nodeId,
+      nodeName: node.name,
+      attempt: args.includeLogs ? attempt : { ...attempt, logs: undefined },
+    };
+  }
+  
+  // Return all attempts
+  const attempts = ctx.PlanRunner.getNodeAttempts(args.planId, args.nodeId);
+  
+  // Optionally strip logs for compact response
+  const formattedAttempts = args.includeLogs 
+    ? attempts 
+    : attempts.map(a => ({ ...a, logs: a.logs ? `[${a.logs.length} chars - use includeLogs: true to retrieve]` : undefined }));
+  
+  return {
+    success: true,
+    planId: args.planId,
+    nodeId: args.nodeId,
+    nodeName: node.name,
+    totalAttempts: attempts.length,
+    attempts: formattedAttempts,
+  };
+}
+
+/**
  * Cancel a Plan
  */
 export async function handleCancelPlan(args: any, ctx: PlanHandlerContext): Promise<any> {

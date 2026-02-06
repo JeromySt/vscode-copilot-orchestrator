@@ -308,6 +308,45 @@ EXAMPLES:
       }
     },
     
+    {
+      name: 'get_copilot_node_attempts',
+      description: `Get all execution attempts for a node with their logs.
+
+Returns a list of all attempts for the node, including:
+- Attempt number and status
+- Start/end timestamps  
+- Which phase failed (if applicable)
+- Error message and exit code
+- Copilot session ID used
+- Per-phase step statuses
+- Work spec used for that attempt
+- Full execution logs for that attempt
+
+Use this to analyze the history of retries and their outcomes.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: { 
+            type: 'string', 
+            description: 'Plan ID' 
+          },
+          nodeId: { 
+            type: 'string', 
+            description: 'Node ID or producer_id' 
+          },
+          attemptNumber: { 
+            type: 'number', 
+            description: 'Optional: specific attempt number (1-based). If omitted, returns all attempts.' 
+          },
+          includeLogs: {
+            type: 'boolean',
+            description: 'Include full logs in response (default: false to keep response compact)'
+          }
+        },
+        required: ['planId', 'nodeId']
+      }
+    },
+    
     // =========================================================================
     // CONTROL
     // =========================================================================

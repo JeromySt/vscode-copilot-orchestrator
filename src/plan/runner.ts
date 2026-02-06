@@ -371,6 +371,30 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
+   * Get details for a specific attempt
+   */
+  getNodeAttempt(planId: string, nodeId: string, attemptNumber: number): AttemptRecord | null {
+    const plan = this.plans.get(planId);
+    if (!plan) return null;
+    
+    const state = plan.nodeStates.get(nodeId);
+    if (!state || !state.attemptHistory) return null;
+    
+    return state.attemptHistory.find(a => a.attemptNumber === attemptNumber) || null;
+  }
+  
+  /**
+   * Get all attempts for a node
+   */
+  getNodeAttempts(planId: string, nodeId: string): AttemptRecord[] {
+    const plan = this.plans.get(planId);
+    if (!plan) return [];
+    
+    const state = plan.nodeStates.get(nodeId);
+    return state?.attemptHistory || [];
+  }
+  
+  /**
    * Get process stats for a running node
    */
   async getProcessStats(planId: string, nodeId: string): Promise<{
@@ -1057,6 +1081,10 @@ export class PlanRunner extends EventEmitter {
           endedAt: Date.now(),
           copilotSessionId: nodeState.copilotSessionId,
           stepStatuses: nodeState.stepStatuses,
+          worktreePath: nodeState.worktreePath,
+          baseCommit: nodeState.baseCommit,
+          logs: this.getNodeLogs(plan.id, node.id),
+          workUsed: node.work,
         };
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
         
@@ -1096,6 +1124,10 @@ export class PlanRunner extends EventEmitter {
           exitCode: result.exitCode,
           copilotSessionId: nodeState.copilotSessionId,
           stepStatuses: nodeState.stepStatuses,
+          worktreePath: nodeState.worktreePath,
+          baseCommit: nodeState.baseCommit,
+          logs: this.getNodeLogs(plan.id, node.id),
+          workUsed: node.work,
         };
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), failedAttempt];
         
@@ -1130,6 +1162,10 @@ export class PlanRunner extends EventEmitter {
         error: error.message,
         copilotSessionId: nodeState.copilotSessionId,
         stepStatuses: nodeState.stepStatuses,
+        worktreePath: nodeState.worktreePath,
+        baseCommit: nodeState.baseCommit,
+        logs: this.getNodeLogs(plan.id, node.id),
+        workUsed: node.work,
       };
       nodeState.attemptHistory = [...(nodeState.attemptHistory || []), errorAttempt];
       

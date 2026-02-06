@@ -514,6 +514,18 @@ export interface AttemptRecord {
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
   };
+  
+  /** Worktree path used in this attempt */
+  worktreePath?: string;
+  
+  /** Base commit SHA this attempt started from */
+  baseCommit?: string;
+  
+  /** Logs captured during this attempt (stored as string to reduce memory) */
+  logs?: string;
+  
+  /** Work spec used for this attempt (for reference) */
+  workUsed?: WorkSpec;
 }
 
 /**

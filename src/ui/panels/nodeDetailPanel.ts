@@ -608,6 +608,20 @@ export class NodeDetailPanel {
       });
     });
     
+    // Attempt logs toggle handlers
+    document.querySelectorAll('.attempt-logs-header').forEach(header => {
+      header.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const section = header.closest('.attempt-logs-section');
+        const logs = section.querySelector('.attempt-logs');
+        const chevron = header.querySelector('.logs-chevron');
+        const isShown = logs.style.display !== 'none';
+        
+        logs.style.display = isShown ? 'none' : 'block';
+        chevron.textContent = isShown ? '▶' : '▼';
+      });
+    });
+    
     function selectPhase(phase) {
       currentPhase = phase;
       
@@ -1063,6 +1077,26 @@ export class NodeDetailPanel {
            </div>`
         : '';
       
+      // Context details (worktree, base commit, work used)
+      const contextHtml = (attempt.worktreePath || attempt.baseCommit || attempt.workUsed) 
+        ? `<div class="attempt-context">
+            ${attempt.baseCommit ? `<div class="attempt-meta-row"><strong>Base:</strong> <code>${attempt.baseCommit.slice(0, 8)}</code></div>` : ''}
+            ${attempt.worktreePath ? `<div class="attempt-meta-row"><strong>Worktree:</strong> <code>${this._escapeHtml(attempt.worktreePath)}</code></div>` : ''}
+            ${attempt.workUsed ? `<div class="attempt-meta-row"><strong>Work:</strong> <code>${this._escapeHtml(formatWorkSpec(attempt.workUsed))}</code></div>` : ''}
+           </div>`
+        : '';
+      
+      // Logs section (collapsible)
+      const logsHtml = attempt.logs
+        ? `<div class="attempt-logs-section">
+            <div class="attempt-logs-header" data-attempt="${attempt.attemptNumber}">
+              <span>📋 Logs</span>
+              <span class="logs-chevron">▶</span>
+            </div>
+            <pre class="attempt-logs" style="display: none;">${this._escapeHtml(attempt.logs)}</pre>
+           </div>`
+        : '';
+      
       return `
         <div class="attempt-card ${isLatest ? 'active' : ''}" data-attempt="${attempt.attemptNumber}">
           <div class="attempt-header" data-expanded="${isLatest}">
@@ -1079,7 +1113,9 @@ export class NodeDetailPanel {
               <div class="attempt-meta-row"><strong>Status:</strong> <span class="status-${attempt.status}">${attempt.status}</span></div>
               ${sessionHtml}
             </div>
+            ${contextHtml}
             ${errorHtml}
+            ${logsHtml}
           </div>
         </div>
       `;
@@ -1574,6 +1610,53 @@ export class NodeDetailPanel {
       border-radius: 4px;
       color: #f48771;
       font-size: 11px;
+    }
+    .attempt-context {
+      margin-top: 8px;
+      padding: 8px;
+      background: var(--vscode-sideBar-background);
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    .attempt-context code {
+      background: rgba(255, 255, 255, 0.05);
+      padding: 1px 4px;
+      border-radius: 2px;
+      font-family: var(--vscode-editor-font-family);
+      font-size: 10px;
+    }
+    .attempt-logs-section {
+      margin-top: 8px;
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .attempt-logs-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 8px;
+      background: var(--vscode-sideBar-background);
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .attempt-logs-header:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .logs-chevron {
+      font-size: 10px;
+      opacity: 0.6;
+    }
+    .attempt-logs {
+      margin: 0;
+      padding: 8px;
+      background: var(--vscode-editor-background);
+      font-family: var(--vscode-editor-font-family);
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 300px;
+      overflow: auto;
     }
     `;
   }

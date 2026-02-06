@@ -22,6 +22,7 @@ import {
   handleListPlans,
   handleGetNodeDetails,
   handleGetNodeLogs,
+  handleGetNodeAttempts,
   handleCancelPlan,
   handleDeletePlan,
   handleRetryPlan,
@@ -178,6 +179,10 @@ export class McpHandler {
         
       case 'get_copilot_node_logs':
         result = await handleGetNodeLogs(args || {}, this.context);
+        break;
+        
+      case 'get_copilot_node_attempts':
+        result = await handleGetNodeAttempts(args || {}, this.context);
         break;
         
       case 'cancel_copilot_plan':

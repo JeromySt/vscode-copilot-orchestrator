@@ -142,6 +142,7 @@ The orchestrator exposes a full MCP server that integrates directly with GitHub 
 | `get_copilot_plan_node_failure_context` | Get failure details for a node |
 | `get_copilot_node_details` | Get details for a specific node |
 | `get_copilot_node_logs` | Get execution logs for a node |
+| `get_copilot_node_attempts` | Get all attempts with logs for a node |
 
 **Example Copilot Chat interaction:**
 ```
