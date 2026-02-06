@@ -429,7 +429,7 @@ export class planDetailPanel {
     const { diagram: mermaidDef, subgraphData } = this._buildMermaidDiagram(plan);
     
     // Build node data for click handling - recursively include all nested nodes
-    const nodeData: Record<string, { nodeId: string; planId: string; type: string; childPlanId?: string }> = {};
+    const nodeData: Record<string, { nodeId: string; planId: string; type: string; childPlanId?: string; name: string; startedAt?: number; endedAt?: number; status: string }> = {};
     
     // Recursive function to collect all node data with prefixes matching Mermaid IDs
     const collectNodeData = (d: PlanInstance, prefix: string, subgraphCounterStart: number): number => {
@@ -439,11 +439,21 @@ export class planDetailPanel {
         const sanitizedId = prefix + this._sanitizeId(nodeId);
         const state = d.nodeStates.get(nodeId);
         
+        // For subPlan nodes, get effective endedAt recursively
+        let effectiveEndedAt = state?.endedAt;
+        if (node.type === 'subPlan' && state?.childPlanId) {
+          effectiveEndedAt = this._planRunner.getEffectiveEndedAt(state.childPlanId) || state?.endedAt;
+        }
+        
         nodeData[sanitizedId] = {
           nodeId,
           planId: d.id,
           type: node.type,
           childPlanId: node.type === 'subPlan' ? (state?.childPlanId || (node as SubPlanNode).childPlanId) : undefined,
+          name: node.name,
+          startedAt: state?.startedAt,
+          endedAt: effectiveEndedAt,
+          status: state?.status || 'pending',
         };
         
         // If this is a subPlan with an instantiated child, recurse into it
@@ -1090,6 +1100,8 @@ ${mermaidDef}
         const element = document.querySelector('.mermaid');
         const { svg } = await mermaid.render('mermaid-graph', mermaidDef);
         element.innerHTML = svg;
+        // Immediately update durations for running nodes after render
+        setTimeout(updateNodeDurations, 100);
       } catch (err) {
         console.error('Mermaid error:', err);
         console.log('Mermaid definition:', mermaidDef);
@@ -1291,6 +1303,43 @@ ${mermaidDef}
     // Update duration every second if running
     updateDurationCounter();
     setInterval(updateDurationCounter, 1000);
+    
+    // Update node durations in SVG for running nodes
+    function updateNodeDurations() {
+      const svgElement = document.querySelector('.mermaid svg');
+      if (!svgElement) return;
+      
+      // Find all text elements in the SVG
+      const textElements = svgElement.querySelectorAll('text, tspan');
+      
+      for (const [sanitizedId, data] of Object.entries(nodeData)) {
+        if (!data.startedAt) continue;
+        
+        // Only update running/scheduled nodes (not completed ones)
+        const isRunning = data.status === 'running' || data.status === 'scheduled';
+        if (!isRunning) continue;
+        
+        const duration = Date.now() - data.startedAt;
+        const durationStr = formatDurationLive(duration);
+        
+        // Find text element containing this node's name and update duration
+        for (const textEl of textElements) {
+          const text = textEl.textContent || '';
+          // Check if this text contains the node name (with checkmark or other status icon)
+          if (text.includes(data.name)) {
+            // Replace duration pattern: " | Xm Ys" or " | Xh Ym" or " | Xs" or " | < 1s"
+            const newText = text.replace(/\s*\|\s*(<\s*1s|\d+s|\d+m\s*\d+s|\d+h\s*\d+m)/, ' | ' + durationStr);
+            if (newText !== text) {
+              textEl.textContent = newText;
+            }
+            break;
+          }
+        }
+      }
+    }
+    
+    // Update node durations every second
+    setInterval(updateNodeDurations, 1000);
     
     // Process tree handling for plan-level view
     window.addEventListener('message', event => {
