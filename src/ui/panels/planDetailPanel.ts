@@ -1686,10 +1686,14 @@ ${mermaidDef}
           const label = this._escapeForMermaid(node.name);
           const subgraphId = `sg${subgraphCounter++}`;
           
-          // Calculate duration for subPlan
+          // Calculate duration for subPlan - use recursive effective endedAt for child plan
           let durationLabel = '';
           if (state?.startedAt) {
-            const endTime = state.endedAt || Date.now();
+            const childPlanId = state?.childPlanId || subPlanNode.childPlanId;
+            // For subPlan nodes, get the effective endedAt recursively from child plan
+            const endTime = childPlanId 
+              ? (this._planRunner.getEffectiveEndedAt(childPlanId) || state.endedAt || Date.now())
+              : (state.endedAt || Date.now());
             const duration = endTime - state.startedAt;
             durationLabel = ' | ' + this._formatNodeDuration(duration);
           }
