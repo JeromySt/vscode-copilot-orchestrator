@@ -395,7 +395,10 @@ export class planDetailPanel {
     }
     this._lastStateHash = stateHash;
     
-    this._panel.webview.html = this._getHtml(plan, status, counts);
+    // Compute effective endedAt from node data for accurate duration
+    const effectiveEndedAt = sm?.getEffectiveEndedAt() || plan.endedAt;
+    
+    this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt);
   }
   
   private _getErrorHtml(message: string): string {
@@ -415,7 +418,8 @@ export class planDetailPanel {
   private _getHtml(
     plan: PlanInstance,
     status: string,
-    counts: Record<NodeStatus, number>
+    counts: Record<NodeStatus, number>,
+    effectiveEndedAt?: number
   ): string {
     const total = plan.nodes.size;
     const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0);
@@ -956,7 +960,7 @@ export class planDetailPanel {
     <h2>${this._escapeHtml(plan.spec.name)}</h2>
     <div class="header-duration">
       <span class="duration-icon">⏱</span>
-      <span class="duration-value ${status}" id="planDuration" data-started="${plan.startedAt || 0}" data-ended="${plan.endedAt || 0}" data-status="${status}">${this._formatPlanDuration(plan.startedAt, plan.endedAt)}</span>
+      <span class="duration-value ${status}" id="planDuration" data-started="${plan.startedAt || 0}" data-ended="${effectiveEndedAt || 0}" data-status="${status}">${this._formatPlanDuration(plan.startedAt, effectiveEndedAt)}</span>
     </div>
     <span class="status-badge ${status}">${status}</span>
   </div>

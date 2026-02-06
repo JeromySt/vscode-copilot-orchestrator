@@ -149,7 +149,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         },
         createdAt: plan.createdAt,
         startedAt: plan.startedAt,
-        endedAt: plan.endedAt,
+        endedAt: sm?.getEffectiveEndedAt() || plan.endedAt,
         issubPlan: !!plan.parentPlanId,
       };
     });

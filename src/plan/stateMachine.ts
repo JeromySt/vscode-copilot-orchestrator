@@ -242,9 +242,9 @@ export class PlanStateMachine extends EventEmitter {
     
     // Plan is complete if status is not pending or running
     if (status !== 'pending' && status !== 'running') {
-      // Update Plan end time if not set
+      // Update Plan end time - compute from node endedAt values for accuracy
       if (!this.plan.endedAt) {
-        this.plan.endedAt = Date.now();
+        this.plan.endedAt = this.computeEffectiveEndedAt() || Date.now();
       }
       
       const event: PlanCompletionEvent = {
@@ -261,6 +261,27 @@ export class PlanStateMachine extends EventEmitter {
       
       this.emit('planComplete', event);
     }
+  }
+  
+  /**
+   * Compute the effective endedAt time from node data.
+   * This returns the maximum endedAt across all nodes, which is the true
+   * completion time even if child plans took longer than originally recorded.
+   * 
+   * @returns The computed endedAt timestamp, or undefined if no nodes have ended
+   */
+  computeEffectiveEndedAt(): number | undefined {
+    let maxEndedAt: number | undefined;
+    
+    for (const state of this.plan.nodeStates.values()) {
+      if (state.endedAt) {
+        if (!maxEndedAt || state.endedAt > maxEndedAt) {
+          maxEndedAt = state.endedAt;
+        }
+      }
+    }
+    
+    return maxEndedAt;
   }
   
   /**
@@ -514,5 +535,18 @@ export class PlanStateMachine extends EventEmitter {
   getBaseCommitForNode(nodeId: string): string | undefined {
     const commits = this.getBaseCommitsForNode(nodeId);
     return commits.length > 0 ? commits[0] : undefined;
+  }
+  
+  /**
+   * Get the effective endedAt for the plan, computed from node data.
+   * This is more accurate than plan.endedAt when child plans ran asynchronously.
+   */
+  getEffectiveEndedAt(): number | undefined {
+    // First try the computed value from node data
+    const computed = this.computeEffectiveEndedAt();
+    if (computed) return computed;
+    
+    // Fall back to stored value
+    return this.plan.endedAt;
   }
 }

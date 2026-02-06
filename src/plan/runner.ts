@@ -1292,6 +1292,15 @@ export class PlanRunner extends EventEmitter {
     
     const nodeState = parentPlan.nodeStates.get(node.id);
     const childPlan = this.plans.get(event.planId);
+    const childSm = childPlan ? this.stateMachines.get(event.planId) : undefined;
+    
+    // Ensure the subPlan node's endedAt reflects the child plan's actual completion time
+    if (nodeState && childSm) {
+      const childEndedAt = childSm.getEffectiveEndedAt();
+      if (childEndedAt) {
+        nodeState.endedAt = childEndedAt;
+      }
+    }
     
     // Log child Plan completion details to the parent's subPlan node
     this.execLog(parentPlan.id, node.id, 'work', 'info', '========== sub-plan EXECUTION COMPLETE ==========');
