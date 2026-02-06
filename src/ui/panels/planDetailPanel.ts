@@ -110,6 +110,9 @@ export class planDetailPanel {
       case 'cancel':
         vscode.commands.executeCommand('orchestrator.cancelPlan', this._planId);
         break;
+      case 'delete':
+        this._confirmAndDeletePlan();
+        break;
       case 'openNode':
         // Use the planId from the message if provided (for nodes in child Plans), otherwise use the main Plan ID
         const planIdForNode = message.planId || this._planId;
@@ -143,6 +146,25 @@ export class planDetailPanel {
       hierarchy: (stats as any).hierarchy || [],
       rootJobs: (stats as any).rootJobs || []
     });
+  }
+  
+  /**
+   * Confirm and delete the plan
+   */
+  private async _confirmAndDeletePlan(): Promise<void> {
+    const plan = this._planRunner.get(this._planId);
+    const planName = plan?.spec.name || this._planId.slice(0, 8);
+    
+    const result = await vscode.window.showWarningMessage(
+      `Delete plan "${planName}"? This will cancel any running jobs and remove all worktrees, logs, and state.`,
+      { modal: true },
+      'Delete'
+    );
+    
+    if (result === 'Delete') {
+      vscode.commands.executeCommand('orchestrator.deletePlan', this._planId);
+      // Panel will be closed by the delete command via closeForPlan
+    }
   }
   
   /**
@@ -864,6 +886,13 @@ export class planDetailPanel {
       background: var(--vscode-button-secondaryBackground);
       color: var(--vscode-button-secondaryForeground);
     }
+    .action-btn.danger {
+      background: #cc3333;
+      color: white;
+    }
+    .action-btn.danger:hover {
+      background: #aa2222;
+    }
     .action-btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
@@ -964,6 +993,7 @@ ${mermaidDef}
     <button class="action-btn secondary" onclick="refresh()">Refresh</button>
     ${status === 'succeeded' ? 
       '<button class="action-btn primary" onclick="showWorkSummary()">View Work Summary</button>' : ''}
+    <button class="action-btn danger" onclick="deletePlan()">Delete</button>
   </div>
   
   <script>
@@ -1075,6 +1105,10 @@ ${mermaidDef}
     
     function cancelPlan() {
       vscode.postMessage({ type: 'cancel' });
+    }
+    
+    function deletePlan() {
+      vscode.postMessage({ type: 'delete' });
     }
     
     function refresh() {

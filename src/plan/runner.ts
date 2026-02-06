@@ -666,6 +666,14 @@ export class PlanRunner extends EventEmitter {
     
     log.info(`Deleting Plan: ${planId}`);
     
+    // First, recursively delete any child sub-plans
+    for (const [nodeId, state] of plan.nodeStates) {
+      if (state.childPlanId) {
+        log.debug(`Deleting child plan: ${state.childPlanId}`);
+        this.delete(state.childPlanId);
+      }
+    }
+    
     // Cancel if running
     this.cancel(planId);
     
