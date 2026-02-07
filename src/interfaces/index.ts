@@ -14,3 +14,5 @@ export * from './IMcpManager';
 export * from './ILogger';
 export * from './IGitOperations';
 export * from './IFileSystem';
+export * from './INodeRunner';
+export * from './IEvidenceValidator';

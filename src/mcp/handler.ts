@@ -14,7 +14,9 @@
 import { PlanRunner } from '../plan/runner';
 import { Logger, ComponentLogger } from '../core/logger';
 import { JsonRpcRequest, JsonRpcResponse } from './types';
+import { IMcpRequestRouter } from '../interfaces/IMcpManager';
 import { getPlanToolDefinitions } from './tools/planTools';
+import { getNodeToolDefinitions } from './tools/nodeTools';
 import {
   PlanHandlerContext,
   handleCreatePlan,
@@ -29,6 +31,16 @@ import {
   handleRetryPlan,
   handleGetNodeFailureContext,
   handleRetryPlanNode,
+  handleCreateNode,
+  handleGetNode,
+  handleListNodes,
+  handleGetGroupStatus,
+  handleListGroups,
+  handleCancelGroup,
+  handleDeleteGroup,
+  handleRetryGroup,
+  handleRetryNode,
+  handleNodeFailureContext,
 } from './handlers';
 
 /** MCP component logger */
@@ -78,7 +90,7 @@ const SERVER_INFO = {
  * // response.result.tools => McpTool[]
  * ```
  */
-export class McpHandler {
+export class McpHandler implements IMcpRequestRouter {
   private readonly context: PlanHandlerContext;
 
   /**
@@ -175,7 +187,10 @@ export class McpHandler {
    * {@link getPlanToolDefinitions}.
    */
   private handleToolsList(request: JsonRpcRequest): JsonRpcResponse {
-    const tools = getPlanToolDefinitions();
+    const tools = [
+      ...getPlanToolDefinitions(),
+      ...getNodeToolDefinitions(),
+    ];
     log.info('Tools list requested', { toolCount: tools.length });
     log.debug('Tools list - tool names', { tools: tools.map(t => t.name) });
     
@@ -244,6 +259,47 @@ export class McpHandler {
         
       case 'retry_copilot_plan_node':
         result = await handleRetryPlanNode(args || {}, this.context);
+        break;
+        
+      // --- New node-centric tools ---
+      case 'create_copilot_node':
+        result = await handleCreateNode(args || {}, this.context);
+        break;
+        
+      case 'get_copilot_node':
+        result = await handleGetNode(args || {}, this.context);
+        break;
+        
+      case 'list_copilot_nodes':
+        result = await handleListNodes(args || {}, this.context);
+        break;
+        
+      case 'get_copilot_group_status':
+        result = await handleGetGroupStatus(args || {}, this.context);
+        break;
+        
+      case 'list_copilot_groups':
+        result = await handleListGroups(args || {}, this.context);
+        break;
+        
+      case 'cancel_copilot_group':
+        result = await handleCancelGroup(args || {}, this.context);
+        break;
+        
+      case 'delete_copilot_group':
+        result = await handleDeleteGroup(args || {}, this.context);
+        break;
+        
+      case 'retry_copilot_group':
+        result = await handleRetryGroup(args || {}, this.context);
+        break;
+        
+      case 'retry_copilot_node':
+        result = await handleRetryNode(args || {}, this.context);
+        break;
+        
+      case 'get_copilot_node_failure_context':
+        result = await handleNodeFailureContext(args || {}, this.context);
         break;
         
       default:

@@ -12,10 +12,11 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '\.\./plan';
 import { ProcessMonitor } from '../process/processMonitor';
-import { McpServerManager } from '../mcp/mcpServerManager';
+import { McpServerManager, StdioMcpServerManager } from '../mcp/mcpServerManager';
 import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
 import { Logger } from './logger';
 import { isCopilotCliAvailable } from '../agent/cliCheckCore';
+import { IMcpManager, McpTransportKind } from '../interfaces/IMcpManager';
 
 const log = Logger.for('init');
 
@@ -31,6 +32,7 @@ export interface HttpConfig {
 
 export interface McpServerConfig {
   enabled: boolean;
+  transport: McpTransportKind;
   host: string;
   port: number;
 }
@@ -57,6 +59,7 @@ export function loadConfiguration(): ExtensionConfig {
     },
     mcp: {
       enabled: mcpCfg.get<boolean>('enabled', true),
+      transport: mcpCfg.get<McpTransportKind>('transport', 'http'),
       host: httpCfg.get<string>('host', 'localhost'),
       port: httpCfg.get<number>('port', 39219)
     },
@@ -433,26 +436,34 @@ export async function initializeHttpServer(
 // ============================================================================
 
 /**
- * Initialize MCP server registration with VS Code
+ * Initialize MCP server registration with VS Code.
+ *
+ * When `mcpConfig.transport` is `'stdio'`, a {@link StdioMcpServerManager}
+ * is used and the definition provider registers a `McpStdioServerDefinition`.
+ * Otherwise falls back to the HTTP-based {@link McpServerManager}.
  */
 export function initializeMcpServer(
   context: vscode.ExtensionContext,
   httpConfig: HttpConfig,
   mcpConfig: McpServerConfig
-): McpServerManager | undefined {
+): IMcpManager | undefined {
   if (!mcpConfig.enabled) {
     log.info('MCP registration disabled');
     return undefined;
   }
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-  
-  const manager = new McpServerManager(context, {
-    enabled: true,
-    host: httpConfig.host,
-    port: httpConfig.port,
-    workspacePath
-  });
+  const useStdio = mcpConfig.transport === 'stdio';
+
+  // Create the appropriate manager
+  const manager: IMcpManager = useStdio
+    ? new StdioMcpServerManager(context)
+    : new McpServerManager(context, {
+        enabled: true,
+        host: httpConfig.host,
+        port: httpConfig.port,
+        workspacePath,
+      });
   
   manager.start();
   context.subscriptions.push({ dispose: () => {
@@ -465,15 +476,18 @@ export function initializeMcpServer(
   
   // Register with VS Code
   const providerDisposable = registerMcpDefinitionProvider(context, {
+    transport: mcpConfig.transport,
     host: httpConfig.host,
     port: httpConfig.port,
-    workspacePath
+    workspacePath,
   });
   context.subscriptions.push(providerDisposable);
   
-  manager.setRegisteredWithVSCode(true);
-  
-  log.info(`MCP registered at http://${httpConfig.host}:${httpConfig.port}/mcp`);
+  if (useStdio) {
+    log.info('MCP registered with stdio transport');
+  } else {
+    log.info(`MCP registered at http://${httpConfig.host}:${httpConfig.port}/mcp`);
+  }
   
   // Show one-time reminder to enable MCP server if not previously acknowledged
   const MCP_ENABLED_KEY = 'mcpServerEnabledAcknowledged';

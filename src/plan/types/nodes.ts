@@ -8,7 +8,7 @@
  */
 
 import type { WorkSpec } from './specs';
-import type { PlanSpec } from './plan';
+import type { PlanSpec, PhaseStatus, JobWorkSummary, AttemptRecord, GroupInfo } from './plan';
 
 // ============================================================================
 // NODE STATUS
@@ -123,6 +123,13 @@ export interface JobNodeSpec {
   
   /** Override base branch (only for root nodes) */
   baseBranch?: string;
+
+  /**
+   * When true, this node is expected to produce no file changes.
+   * The commit phase will succeed without a commit instead of failing.
+   * Use for validation-only nodes, external-system updates, or analysis tasks.
+   */
+  expectsNoChanges?: boolean;
 }
 
 /**
@@ -207,6 +214,12 @@ export interface JobNode extends BaseNode {
   
   /** Override base branch */
   baseBranch?: string;
+
+  /**
+   * When true, this node is expected to produce no file changes.
+   * The commit phase will succeed without a commit instead of failing.
+   */
+  expectsNoChanges?: boolean;
 }
 
 /**
@@ -241,4 +254,145 @@ export type PlanNode = JobNode | SubPlanNode;
  */
 export function nodePerformsWork(node: PlanNode): boolean {
   return 'work' in node && node.work !== undefined;
+}
+
+// ============================================================================
+// SIMPLIFIED NODE TYPES (Node-Centric Model)
+// ============================================================================
+
+/**
+ * Specification for creating a node (user input).
+ * Replaces both JobNodeSpec (for individual nodes) and
+ * PlanSpec (when used with group).
+ */
+export interface NodeSpec {
+  /** User-controlled identifier for dependency references */
+  producerId: string;
+
+  /** Human-friendly display name (defaults to producerId) */
+  name?: string;
+
+  /** Task description (what this node does) */
+  task: string;
+
+  /** Work to perform (shell command, process, or agent) */
+  work?: WorkSpec;
+
+  /** Validation before work */
+  prechecks?: WorkSpec;
+
+  /** Validation after work */
+  postchecks?: WorkSpec;
+
+  /** Additional agent instructions (Markdown) */
+  instructions?: string;
+
+  /** Producer IDs this node depends on */
+  dependencies: string[];
+
+  /** Override base branch (root nodes only) */
+  baseBranch?: string;
+}
+
+/**
+ * Attempt context from the last execution attempt.
+ */
+export interface AttemptContext {
+  /** Which phase failed or was running */
+  phase: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri';
+  /** When the attempt started */
+  startTime: number;
+  /** When the attempt ended */
+  endTime?: number;
+  /** Error message if failed */
+  error?: string;
+  /** Exit code from process (if applicable) */
+  exitCode?: number;
+}
+
+/**
+ * Runtime node instance.
+ * Combines what was previously split across PlanNode and NodeExecutionState.
+ */
+export interface NodeInstance {
+  /** UUID */
+  id: string;
+
+  /** User-controlled reference key */
+  producerId: string;
+
+  /** Display name */
+  name: string;
+
+  /** Task description */
+  task: string;
+
+  /** Work specification */
+  work?: WorkSpec;
+
+  /** Pre/post validation */
+  prechecks?: WorkSpec;
+  postchecks?: WorkSpec;
+
+  /** Agent instructions */
+  instructions?: string;
+
+  /** Resolved dependency node IDs */
+  dependencies: string[];
+
+  /** Computed reverse edges */
+  dependents: string[];
+
+  /** Override base branch */
+  baseBranch?: string;
+
+  /** Optional group membership */
+  group?: GroupInfo;
+
+  // --- Execution state ---
+
+  /** Current status */
+  status: NodeStatus;
+
+  /** Timestamps */
+  scheduledAt?: number;
+  startedAt?: number;
+  endedAt?: number;
+
+  /** Error message if failed */
+  error?: string;
+
+  /** Git context */
+  baseCommit?: string;
+  completedCommit?: string;
+  worktreePath?: string;
+
+  /** Repository path */
+  repoPath: string;
+
+  /** Retry tracking */
+  attempts: number;
+  attemptHistory?: AttemptRecord[];
+
+  /** Merge tracking */
+  mergedToTarget?: boolean;
+  consumedByDependents?: string[];
+  worktreeCleanedUp?: boolean;
+
+  /** Phase-level status */
+  stepStatuses?: {
+    prechecks?: PhaseStatus;
+    work?: PhaseStatus;
+    commit?: PhaseStatus;
+    postchecks?: PhaseStatus;
+  };
+
+  /** Session resumption */
+  copilotSessionId?: string;
+
+  /** Last attempt context */
+  lastAttempt?: AttemptContext;
+
+  /** Work summary on success */
+  workSummary?: JobWorkSummary;
 }

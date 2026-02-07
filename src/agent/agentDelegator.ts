@@ -189,6 +189,21 @@ This task requires AI agent intervention. The agent should:
 3. Commit the changes with a descriptive message
 4. The orchestrator will handle merging back to the main branch
 
+## Work Evidence
+Your changes must result in at least one modified, added, or deleted file.
+If your task does not require file changes (e.g., analysis, validation),
+create an evidence file:
+
+Path: .orchestrator/evidence/${jobId}.json
+Format:
+{
+  "version": 1,
+  "nodeId": "${jobId}",
+  "timestamp": "<ISO 8601>",
+  "summary": "<what you did>",
+  "type": "analysis" | "validation" | "external_effect"
+}
+
 ## Status
 ⏳ Waiting for AI agent to complete this task...
 

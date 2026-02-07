@@ -169,6 +169,10 @@ Agent instructions MUST be in Markdown format with headers, numbered lists, bull
                 instructions: { 
                   type: 'string', 
                   description: 'Additional context for @agent tasks. MUST be in Markdown format (# headers, 1. numbered lists, - bullet lists).' 
+                },
+                expects_no_changes: {
+                  type: 'boolean',
+                  description: 'When true, this node is expected to produce no file changes. The commit phase will succeed without a commit instead of failing. Use for validation-only nodes, external-system updates, or analysis tasks.'
                 }
               },
               required: ['producer_id', 'task', 'dependencies']

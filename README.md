@@ -162,7 +162,21 @@ Jobs support multiple work types:
 
 The orchestrator exposes a full MCP server that integrates directly with GitHub Copilot Chat:
 
-**Plan Tools (Multi-Job Workflows):**
+**Node Tools (Direct Node Management):**
+| Tool | Description |
+|------|-------------|
+| `create_copilot_node` | Create standalone or grouped nodes |
+| `get_copilot_node` | Get node details by ID |
+| `list_copilot_nodes` | List nodes with filtering (group, status, name) |
+| `get_copilot_group_status` | Get group progress and node states |
+| `list_copilot_groups` | List all groups with status |
+| `cancel_copilot_group` | Cancel a group and all its nodes |
+| `delete_copilot_group` | Delete a group and all its state |
+| `retry_copilot_group` | Retry failed nodes in a group |
+| `retry_copilot_node` | Retry a specific failed node |
+| `get_copilot_node_failure_context` | Get failure details for a node |
+
+**Legacy Plan Tools (Backward Compatible):**
 | Tool | Description |
 |------|-------------|
 | `create_copilot_plan` | Create a plan with multiple dependent jobs |
@@ -467,12 +481,26 @@ When the job completes:
 The extension automatically registers the MCP server with VS Code:
 - **Status Bar**: Shows MCP connection state
 - **Copilot Chat**: Tools appear automatically in tool selection
-- **HTTP Transport**: MCP endpoint at `http://localhost:39219/mcp`
+- **Transport options**: stdio (process-based, no port needed) or HTTP (`http://localhost:39219/mcp`)
 
 ### Manual Configuration
 
 If needed, add to your VS Code settings or `mcp.json`:
 
+**Stdio transport (recommended):**
+```json
+{
+  "mcpServers": {
+    "copilot-orchestrator": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${extensionPath}/out/mcp/stdio/server.js"]
+    }
+  }
+}
+```
+
+**HTTP transport:**
 ```json
 {
   "mcpServers": {
@@ -493,6 +521,7 @@ If needed, add to your VS Code settings or `mcp.json`:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `copilotOrchestrator.mcp.enabled` | `true` | Enable MCP server |
+| `copilotOrchestrator.mcp.transport` | `http` | Transport type: `stdio` (no port needed) or `http` |
 | `copilotOrchestrator.worktreeRoot` | `.worktrees` | Worktree directory |
 | `copilotOrchestrator.maxConcurrentJobs` | `0` (auto) | Max concurrent jobs (0 = CPU count - 1) |
 | `copilotOrchestrator.merge.mode` | `squash` | Merge strategy: `squash`, `merge`, or `rebase` |
@@ -521,13 +550,14 @@ Enable granular logging for troubleshooting:
 │                      GitHub Copilot Chat                        │
 │                    (MCP Tool Integration)                       │
 └────────────────────────────┬────────────────────────────────────┘
-                             │ MCP (HTTP POST)
+                             │ MCP (stdio or HTTP)
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                  VS Code Extension Host                         │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │              HTTP Server (port 39219)                     │  │
-│  │              • /mcp - JSON-RPC endpoint                   │  │
+│  │    MCP Server (stdio or HTTP transport)                   │  │
+│  │    • stdio: JSON-RPC over stdin/stdout (no port needed)   │  │
+│  │    • HTTP: /mcp JSON-RPC endpoint (port 39219)            │  │
 │  └────────────────────────────┬──────────────────────────────┘  │
 │                               │                                  │
 │  ┌────────────────────────────▼──────────────────────────────┐  │

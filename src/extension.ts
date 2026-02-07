@@ -18,7 +18,7 @@ import {
   initializePlansView,
   registerPlanCommands,
 } from './core/planInitialization';
-import { McpServerManager } from './mcp/mcpServerManager';
+import { IMcpManager } from './interfaces/IMcpManager';
 import { ProcessMonitor } from './process/processMonitor';
 import { PlanRunner } from './plan';
 import { Logger } from './core/logger';
@@ -28,7 +28,7 @@ import { Logger } from './core/logger';
 // ============================================================================
 
 /** MCP Server Manager - retained for cleanup */
-let mcpManager: McpServerManager | undefined;
+let mcpManager: IMcpManager | undefined;
 
 /** Process Monitor - retained for cleanup */
 let processMonitor: ProcessMonitor | undefined;

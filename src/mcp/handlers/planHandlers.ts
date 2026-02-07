@@ -56,6 +56,7 @@ function mapsubPlansRecursively(subPlans: any[] | undefined): SubPlanNodeSpec[] 
       prechecks: j.prechecks,
       postchecks: j.postchecks,
       instructions: j.instructions,
+      expectsNoChanges: j.expects_no_changes,
     })),
     subPlans: mapsubPlansRecursively(s.subPlans),  // Recursive!
   }));
@@ -351,6 +352,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
       postchecks: j.postchecks,
       instructions: j.instructions,
       baseBranch: j.baseBranch,
+      expectsNoChanges: j.expects_no_changes,
     })),
     subPlans: mapsubPlansRecursively(args.subPlans),  // Recursive mapping!
   };

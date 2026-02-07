@@ -397,6 +397,57 @@ export interface ExecutionContext {
 }
 
 // ============================================================================
+// EVIDENCE TYPES
+// ============================================================================
+
+/**
+ * Evidence file format for nodes that produce non-file-change work.
+ * Agents or scripts drop this file to prove work was done.
+ */
+export interface EvidenceFile {
+  /** Schema version for forward compatibility */
+  version: 1;
+
+  /** Node ID that produced this evidence */
+  nodeId: string;
+
+  /** ISO 8601 timestamp of evidence creation */
+  timestamp: string;
+
+  /** What the node did — required, shown in work summary */
+  summary: string;
+
+  /** Structured outcome data (node-type-specific) */
+  outcome?: Record<string, unknown>;
+
+  /**
+   * Evidence type classification.
+   * - "file_changes": Normal code changes (default, no evidence file needed)
+   * - "external_effect": Work affected an external system
+   * - "analysis": Work produced analysis/report but no code changes
+   * - "validation": Work validated state without modifying it
+   */
+  type?: 'file_changes' | 'external_effect' | 'analysis' | 'validation';
+}
+
+/**
+ * Result of evidence validation during the commit phase.
+ */
+export interface EvidenceValidationResult {
+  /** Whether evidence validation passed */
+  valid: boolean;
+
+  /** Why validation passed or failed */
+  reason: string;
+
+  /** The evidence file contents, if one was found */
+  evidence?: EvidenceFile;
+
+  /** How the node satisfied evidence requirements */
+  method?: 'file_changes' | 'evidence_file' | 'expects_no_changes' | 'none';
+}
+
+// ============================================================================
 // LOG TYPES
 // ============================================================================
 
@@ -413,4 +464,120 @@ export interface LogEntry {
   phase: ExecutionPhase;
   type: 'stdout' | 'stderr' | 'info' | 'error';
   message: string;
+}
+
+// ============================================================================
+// GROUP TYPES (Node-Centric Model)
+// ============================================================================
+
+/**
+ * Grouping replaces PlanInstance as the organizational unit.
+ * Nodes sharing the same group.id are scheduled together
+ * and share branch/merge semantics.
+ */
+export interface GroupInfo {
+  /** Group ID (auto-generated UUID) */
+  id: string;
+
+  /** Human-readable name */
+  name: string;
+
+  /** Base branch for all nodes in this group */
+  baseBranch: string;
+
+  /** Target branch to merge leaf nodes into */
+  targetBranch?: string;
+
+  /** Max parallel nodes in this group */
+  maxParallel: number;
+
+  /** Whether to clean up worktrees after merge */
+  cleanUpSuccessfulWork: boolean;
+
+  /** Worktree root directory */
+  worktreeRoot: string;
+
+  /** Parent group ID (for sub-groups replacing SubPlanNode) */
+  parentGroupId?: string;
+
+  /** Timestamps */
+  createdAt: number;
+  startedAt?: number;
+  endedAt?: number;
+}
+
+/**
+ * Specification for creating a group of nodes.
+ * This is the new equivalent of PlanSpec.
+ */
+export interface GroupSpec {
+  /** Human-readable group name */
+  name: string;
+
+  /** Repository path (defaults to workspace) */
+  repoPath?: string;
+
+  /** Base branch (default: main) */
+  baseBranch?: string;
+
+  /** Target branch for final merge */
+  targetBranch?: string;
+
+  /** Max concurrent nodes (default: 4) */
+  maxParallel?: number;
+
+  /** Clean up worktrees after merge (default: true) */
+  cleanUpSuccessfulWork?: boolean;
+
+  /** Nodes in this group */
+  nodes: import('./nodes').NodeSpec[];
+
+  /**
+   * Sub-groups (replaces subPlans).
+   * Each sub-group becomes a child group with its own scheduling.
+   */
+  subGroups?: SubGroupSpec[];
+}
+
+/**
+ * Sub-group specification (replaces SubPlanNodeSpec).
+ * Flattened into the node registry at build time.
+ */
+export interface SubGroupSpec {
+  /** Producer ID for this sub-group (used as dependency target) */
+  producerId: string;
+
+  /** Display name */
+  name?: string;
+
+  /** Nodes within this sub-group */
+  nodes: import('./nodes').NodeSpec[];
+
+  /** Nested sub-groups */
+  subGroups?: SubGroupSpec[];
+
+  /** Dependencies on nodes in the parent group */
+  dependencies: string[];
+
+  /** Max parallel within this sub-group */
+  maxParallel?: number;
+}
+
+/** Same values as current PlanStatus, now derived from grouped nodes */
+export type GroupStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'partial' | 'canceled';
+
+/**
+ * Computed group status snapshot (not stored — derived on demand).
+ */
+export interface GroupStatusSnapshot {
+  groupId: string;
+  name: string;
+  status: GroupStatus;
+  progress: number;
+  counts: Record<NodeStatus, number>;
+  nodes: import('./nodes').NodeInstance[];
+  createdAt: number;
+  startedAt?: number;
+  endedAt?: number;
+  workSummary?: WorkSummary;
 }

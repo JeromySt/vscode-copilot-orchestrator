@@ -5,6 +5,31 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-02-XX
+
+### Added
+- **Stdio MCP transport**: New process-based transport using newline-delimited JSON-RPC 2.0 over stdin/stdout — no port configuration needed. Configurable via `copilotOrchestrator.mcp.transport` setting (`stdio` or `http`)
+- **Node-centric MCP tools**: New tools for direct node manipulation without requiring group/plan context:
+  - `create_copilot_node` – Create standalone or grouped nodes
+  - `get_copilot_node` – Get node details by ID (global lookup)
+  - `list_copilot_nodes` – Filter nodes by group, status, or name
+  - `get_copilot_group_status` – Group progress and node states
+  - `list_copilot_groups` – List all groups with status
+  - `cancel_copilot_group` / `retry_copilot_group` / `delete_copilot_group` – Group-level operations
+  - `retry_copilot_node` – Retry a specific failed node
+  - `get_copilot_node_failure_context` – Detailed failure diagnostics
+- **Work evidence validation**: Nodes can prove work completion via evidence files (`.orchestrator/evidence/{nodeId}.json`) for tasks that don't produce file changes (external API calls, analysis, validation). Supports `expectsNoChanges` flag for validation-only nodes
+- **Node builder**: New `buildNodes()` function that creates `NodeInstance[]` directly with DAG validation and dependency resolution
+- **Legacy MCP adapters**: Backward-compatible wrappers that translate old plan-based tool calls to the new node-centric API
+
+### Changed
+- **Commands cleanup**: Removed 14 unimplemented commands from `package.json`, keeping only actually registered commands (MCP connection, plan/node details, cancel/delete/refresh)
+- **Simplified node interface**: `NodeInstance` now combines node definition and runtime state into a single type (ID, task, status, attempts, dependencies, git context, step statuses)
+- **Plan-to-group terminology**: Internal transition from plan-centric to group-centric node management
+
+### Removed
+- Unregistered commands: `createJob`, `cancelJob`, `startJob`, `inspectStatus`, `showJobDetails`, `showJobSection`, `retryJob`, `deleteJob`, `openJobWorktree`, `mergeCompletedJob`, `resolveConflicts`, `generateTests`, `produceDocs`, `showLogs`, `cleanupOrphans`, `showDagDetails`, `cancelDag`
+
 ## [0.5.0] - 2025-01-XX
 
 ### Added

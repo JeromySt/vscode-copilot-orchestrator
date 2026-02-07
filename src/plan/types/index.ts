@@ -30,6 +30,9 @@ export {
   SubPlanNode,
   PlanNode,
   nodePerformsWork,
+  NodeSpec,
+  NodeInstance,
+  AttemptContext,
 } from './nodes';
 
 // Plan types, execution state, events, and executor types
@@ -47,6 +50,13 @@ export {
   PlanCompletionEvent,
   JobExecutionResult,
   ExecutionContext,
+  EvidenceFile,
+  EvidenceValidationResult,
   ExecutionPhase,
   LogEntry,
+  GroupInfo,
+  GroupSpec,
+  SubGroupSpec,
+  GroupStatus,
+  GroupStatusSnapshot,
 } from './plan';

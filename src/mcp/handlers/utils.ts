@@ -128,6 +128,13 @@ export function lookupNode(plan: PlanInstance, nodeId: string): { node: any; sta
 }
 
 /**
+ * Context alias for node-centric handlers.
+ * Currently the same as PlanHandlerContext since the new handlers
+ * still use PlanRunner internally.
+ */
+export type NodeHandlerContext = PlanHandlerContext;
+
+/**
  * Resolve the base branch for a plan.
  *
  * Falls back to the repository's current branch, then to `'main'`
