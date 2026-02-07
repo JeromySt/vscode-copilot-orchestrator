@@ -24,6 +24,7 @@ import {
   isValidTransition,
   isTerminal,
   TERMINAL_STATES,
+  GroupExecutionState,
 } from './types';
 import { Logger } from '../core/logger';
 import {
@@ -165,6 +166,9 @@ export class PlanStateMachine extends EventEmitter {
     from: NodeStatus,
     to: NodeStatus
   ): void {
+    // Update parent group state when a job transitions
+    this.updateGroupState(nodeId, from, to);
+    
     // When a node succeeds, check if dependents are now ready
     if (to === 'succeeded') {
       this.checkDependentsReady(nodeId);
@@ -178,6 +182,165 @@ export class PlanStateMachine extends EventEmitter {
     // Check if Plan is complete after any terminal transition
     if (isTerminal(to)) {
       this.checkPlanCompletion();
+    }
+  }
+  
+  /**
+   * Update group state when a job transitions.
+   * Jobs push their state changes to their parent group.
+   */
+  private updateGroupState(nodeId: string, from: NodeStatus, to: NodeStatus): void {
+    const node = this.plan.nodes.get(nodeId);
+    if (!node || !node.groupId) return;
+    
+    const groupState = this.plan.groupStates.get(node.groupId);
+    if (!groupState) return;
+    
+    const now = Date.now();
+    
+    // Track running count
+    if (to === 'running' && from !== 'running') {
+      groupState.runningCount++;
+      // First job to start sets group startedAt
+      if (!groupState.startedAt) {
+        groupState.startedAt = now;
+      }
+    } else if (from === 'running' && to !== 'running') {
+      groupState.runningCount = Math.max(0, groupState.runningCount - 1);
+    }
+    
+    // Track terminal state counts
+    if (isTerminal(to) && !isTerminal(from)) {
+      switch (to) {
+        case 'succeeded':
+          groupState.succeededCount++;
+          break;
+        case 'failed':
+          groupState.failedCount++;
+          break;
+        case 'blocked':
+          groupState.blockedCount++;
+          break;
+        case 'canceled':
+          groupState.canceledCount++;
+          break;
+      }
+    }
+    
+    // Compute derived group status
+    const group = this.plan.groups.get(node.groupId);
+    if (!group) return;
+    
+    const totalNodes = group.totalNodes;
+    const completedCount = groupState.succeededCount + groupState.failedCount + 
+                           groupState.blockedCount + groupState.canceledCount;
+    
+    // Determine group status (uses same status values as nodes)
+    let newStatus: NodeStatus;
+    if (completedCount === 0) {
+      // No terminal nodes yet
+      if (groupState.runningCount > 0) {
+        newStatus = 'running';
+      } else if (groupState.startedAt) {
+        newStatus = 'running'; // Started but waiting
+      } else {
+        newStatus = 'pending';
+      }
+    } else if (completedCount < totalNodes) {
+      // Some completed, some still running/pending
+      newStatus = 'running';
+    } else {
+      // All nodes completed
+      if (groupState.succeededCount === totalNodes) {
+        newStatus = 'succeeded';
+      } else if (groupState.failedCount + groupState.blockedCount === totalNodes) {
+        newStatus = 'failed';
+      } else if (groupState.canceledCount === totalNodes) {
+        newStatus = 'canceled';
+      } else {
+        // Mixed results
+        newStatus = 'failed'; // Use 'failed' for partial (groups use NodeStatus)
+      }
+      
+      // Set group endedAt when all nodes complete
+      if (!groupState.endedAt) {
+        groupState.endedAt = now;
+      }
+    }
+    
+    groupState.status = newStatus;
+    
+    // Propagate to parent groups
+    const parentGroup = group.parentGroupId ? this.plan.groups.get(group.parentGroupId) : undefined;
+    if (parentGroup) {
+      // Parent groups compute their status from child group states
+      this.recomputeParentGroupStatus(parentGroup.id);
+    }
+  }
+  
+  /**
+   * Recompute parent group status from child groups.
+   */
+  private recomputeParentGroupStatus(groupId: string): void {
+    const group = this.plan.groups.get(groupId);
+    const groupState = this.plan.groupStates.get(groupId);
+    if (!group || !groupState) return;
+    
+    const now = Date.now();
+    
+    // Count statuses from all nodes in this group (including subgroups)
+    let running = 0;
+    let succeeded = 0;
+    let failed = 0;
+    let blocked = 0;
+    let canceled = 0;
+    let started = false;
+    
+    for (const nodeId of group.allNodeIds) {
+      const nodeState = this.plan.nodeStates.get(nodeId);
+      if (!nodeState) continue;
+      
+      if (nodeState.startedAt) started = true;
+      if (nodeState.status === 'running') running++;
+      else if (nodeState.status === 'succeeded') succeeded++;
+      else if (nodeState.status === 'failed') failed++;
+      else if (nodeState.status === 'blocked') blocked++;
+      else if (nodeState.status === 'canceled') canceled++;
+    }
+    
+    groupState.runningCount = running;
+    groupState.succeededCount = succeeded;
+    groupState.failedCount = failed;
+    groupState.blockedCount = blocked;
+    groupState.canceledCount = canceled;
+    
+    const totalNodes = group.totalNodes;
+    const completedCount = succeeded + failed + blocked + canceled;
+    
+    // Determine status
+    let newStatus: NodeStatus;
+    if (completedCount === 0) {
+      newStatus = running > 0 || started ? 'running' : 'pending';
+    } else if (completedCount < totalNodes) {
+      newStatus = 'running';
+    } else {
+      if (succeeded === totalNodes) newStatus = 'succeeded';
+      else if (failed + blocked === totalNodes) newStatus = 'failed';
+      else if (canceled === totalNodes) newStatus = 'canceled';
+      else newStatus = 'failed';
+      
+      if (!groupState.endedAt) groupState.endedAt = now;
+    }
+    
+    if (!groupState.startedAt && started) {
+      groupState.startedAt = now;
+    }
+    
+    groupState.status = newStatus;
+    
+    // Propagate up the chain
+    if (group.parentGroupId) {
+      this.recomputeParentGroupStatus(group.parentGroupId);
     }
   }
   

@@ -210,6 +210,75 @@ export interface AttemptRecord {
   workUsed?: WorkSpec;
 }
 
+// ============================================================================
+// GROUP INSTANCE (Visual Hierarchy with State)
+// ============================================================================
+
+/**
+ * Group instance (internal representation with UUID).
+ * Groups are visual hierarchy containers for organizing jobs.
+ * Jobs push their state changes to their parent group.
+ */
+export interface GroupInstance {
+  /** Unique group ID (UUID) */
+  id: string;
+  
+  /** Group name (from spec) */
+  name: string;
+  
+  /** Full path (e.g., "tier1/processor") */
+  path: string;
+  
+  /** Parent group ID (if nested) */
+  parentGroupId?: string;
+  
+  /** Child group IDs */
+  childGroupIds: string[];
+  
+  /** Node IDs directly contained in this group (not in subgroups) */
+  nodeIds: string[];
+  
+  /** All node IDs in this group and all subgroups (computed at build time) */
+  allNodeIds: string[];
+  
+  /** Total node count (for progress calculation) */
+  totalNodes: number;
+}
+
+/**
+ * Execution state for a group.
+ * Updated via push from jobs - jobs notify the group when they transition.
+ * Uses same status values as nodes for consistent rendering.
+ */
+export interface GroupExecutionState {
+  /** 
+   * Current status - uses NodeStatus for consistency.
+   * Derived from counts: running > 0 → 'running', all succeeded → 'succeeded', etc.
+   */
+  status: import('./nodes').NodeStatus;
+  
+  /** When the first job in this group started (set by first job to start) */
+  startedAt?: number;
+  
+  /** When the last job in this group ended (set when all jobs complete) */
+  endedAt?: number;
+  
+  /** Count of currently running jobs (increment on start, decrement on finish) */
+  runningCount: number;
+  
+  /** Count of succeeded jobs */
+  succeededCount: number;
+  
+  /** Count of failed jobs */
+  failedCount: number;
+  
+  /** Count of blocked jobs */
+  blockedCount: number;
+  
+  /** Count of canceled jobs */
+  canceledCount: number;
+}
+
 /**
  * Overall Plan status (derived from node states)
  */
@@ -245,6 +314,15 @@ export interface PlanInstance {
   
   /** Map of node ID to execution state */
   nodeStates: Map<string, NodeExecutionState>;
+  
+  /** Map of group ID to group instance */
+  groups: Map<string, GroupInstance>;
+  
+  /** Map of group ID to execution state (computed from nodes) */
+  groupStates: Map<string, GroupExecutionState>;
+  
+  /** Map of group path to group ID (for resolving references) */
+  groupPathToId: Map<string, string>;
   
   /** Parent Plan ID (if this is a sub-plan) */
   parentPlanId?: string;

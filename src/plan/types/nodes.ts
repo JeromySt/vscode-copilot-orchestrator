@@ -229,6 +229,12 @@ export interface JobNode extends BaseNode {
  * Nested groups use "/" separator: "backend/api/auth"
  */
  group?: string;
+ 
+ /** 
+  * Resolved group ID (UUID). Set by the builder when creating the Plan.
+  * Used to push state updates from jobs to their parent group.
+  */
+ groupId?: string;
 }
 
 /**

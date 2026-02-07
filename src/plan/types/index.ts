@@ -56,4 +56,6 @@ export {
   GroupInfo,
   GroupStatus,
   GroupStatusSnapshot,
+  GroupInstance,
+  GroupExecutionState,
 } from './plan';

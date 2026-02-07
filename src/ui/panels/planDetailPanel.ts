@@ -454,6 +454,16 @@ export class planDetailPanel {
       };
     }
     
+    // Add group statuses (groups use same sanitized ID pattern as nodes)
+    for (const [groupId, state] of plan.groupStates) {
+      const sanitizedId = this._sanitizeId(groupId);
+      nodeStatuses[sanitizedId] = {
+        status: state.status,
+        startedAt: state.startedAt,
+        endedAt: state.endedAt
+      };
+    }
+    
     // Structure hash: nodes and their dependencies (doesn't change during execution)
     const structureHash = JSON.stringify({
       nodes: Array.from(plan.nodes.entries()).map(([id, n]) => [id, n.name, (n as JobNode).dependencies]),
@@ -1493,8 +1503,19 @@ ${mermaidDef}
         
         if (svgElement) {
           for (const [sanitizedId, data] of Object.entries(nodeStatuses)) {
+            // Status colors for groups/subgraphs (dimmer than nodes)
+            const groupColors = {
+              pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
+              ready: { fill: '#1a2a4e', stroke: '#3794ff' },
+              running: { fill: '#1a2a4e', stroke: '#3794ff' },
+              succeeded: { fill: '#1a3a2e', stroke: '#4ec9b0' },
+              failed: { fill: '#3a1a1e', stroke: '#f48771' },
+              blocked: { fill: '#3a1a1e', stroke: '#f48771' },
+              canceled: { fill: '#1a1a2e', stroke: '#6a6a8a' },
+            };
+            
+            // Try to find as a node first
             // Mermaid generates IDs like "flowchart-nabc123...-0" where nabc123... is our sanitizedId
-            // Use prefix match to find the exact node group
             const nodeGroup = svgElement.querySelector('g[id^="flowchart-' + sanitizedId + '-"]');
             
             if (nodeGroup) {
@@ -1517,7 +1538,52 @@ ${mermaidDef}
                   rect.style.strokeWidth = '';
                 }
               }
+              
+              // Update icon in node label
+              const foreignObject = nodeEl.querySelector('foreignObject');
+              const textSpan = foreignObject ? foreignObject.querySelector('span') : nodeEl.querySelector('text tspan, text');
+              if (textSpan) {
+                const icons = { succeeded: '✓', failed: '✗', running: '▶', blocked: '⊘', pending: '○', ready: '○', scheduled: '▶', canceled: '⊘' };
+                const newIcon = icons[data.status] || '○';
+                const currentText = textSpan.textContent || '';
+                // Replace first character (icon) with new icon
+                if (currentText.length > 0 && ['✓', '✗', '▶', '⊘', '○'].includes(currentText[0])) {
+                  textSpan.textContent = newIcon + currentText.substring(1);
+                }
+              }
+            } else {
+              // Try to find as a subgraph (group)
+              // Mermaid generates subgraph clusters with ID patterns we can match
+              const subgraphEl = svgElement.querySelector('g.cluster[id*="' + sanitizedId + '"], g[id*="' + sanitizedId + '"].cluster');
+              if (!subgraphEl) {
+                // Also try matching the rect inside a cluster by finding clusters and checking their content
+                const allClusters = svgElement.querySelectorAll('g.cluster');
+                for (const cluster of allClusters) {
+                  // Check if the cluster's rect or label contains our ID
+                  const clusterId = cluster.getAttribute('id') || '';
+                  if (clusterId.includes(sanitizedId)) {
+                    const clusterRect = cluster.querySelector('rect');
+                    if (clusterRect && groupColors[data.status]) {
+                      clusterRect.style.fill = groupColors[data.status].fill;
+                      clusterRect.style.stroke = groupColors[data.status].stroke;
+                    }
+                    // Update icon in subgraph label
+                    const labelText = cluster.querySelector('.nodeLabel, text');
+                    if (labelText) {
+                      const icons = { succeeded: '✓', failed: '✗', running: '▶', blocked: '⊘', pending: '○', ready: '○', scheduled: '▶', canceled: '⊘' };
+                      const newIcon = icons[data.status] || '○';
+                      const currentText = labelText.textContent || '';
+                      if (currentText.length > 0 && ['✓', '✗', '▶', '⊘', '○', '📦'].includes(currentText[0])) {
+                        labelText.textContent = newIcon + currentText.substring(1);
+                      }
+                    }
+                    nodesUpdated++;
+                    break;
+                  }
+                }
+              }
             }
+            
             // Update nodeData for duration tracking
             if (nodeData[sanitizedId]) {
               nodeData[sanitizedId].status = data.status;
@@ -2019,58 +2085,32 @@ ${mermaidDef}
         groupPath: string,
         currentIndent: string
       ): void => {
-        // Get all nodes in this subtree for status calculation
-        const collectAllNodes = (node: GroupTreeNode): { nodeId: string; node: PlanNode }[] => {
-          const result = [...node.nodes];
-          for (const child of node.children.values()) {
-            result.push(...collectAllNodes(child));
-          }
-          return result;
-        };
+        // Look up the group UUID from the path
+        const groupUuid = d.groupPathToId.get(groupPath);
+        const groupState = groupUuid ? d.groupStates.get(groupUuid) : undefined;
+        const groupStatus = groupState?.status || 'pending';
         
-        const allNodesInSubtree = collectAllNodes(treeNode);
+        // Use sanitized group UUID as the subgraph ID (same pattern as nodes)
+        const sanitizedGroupId = groupUuid ? this._sanitizeId(groupUuid) : `grp${groupSubgraphCounter++}`;
         
-        // Compute group status from all contained nodes
-        let groupSucceeded = 0;
-        let groupFailed = 0;
-        let groupRunning = 0;
-        const groupTotal = allNodesInSubtree.length;
+        // Get icon for group status (same as nodes)
+        const icon = this._getStatusIcon(groupStatus);
         
-        for (const { nodeId } of allNodesInSubtree) {
-          const state = d.nodeStates.get(nodeId);
-          if (state?.status === 'succeeded') groupSucceeded++;
-          else if (state?.status === 'failed' || state?.status === 'blocked') groupFailed++;
-          else if (state?.status === 'running' || state?.status === 'scheduled') groupRunning++;
-        }
-        
-        // Determine group status
-        let groupStatus: string;
-        if (groupTotal === 0) {
-          groupStatus = 'pending';
-        } else if (groupFailed > 0) {
-          groupStatus = groupSucceeded > 0 ? 'partial' : 'failed';
-        } else if (groupRunning > 0) {
-          groupStatus = 'running';
-        } else if (groupSucceeded === groupTotal) {
-          groupStatus = 'succeeded';
-        } else {
-          groupStatus = 'pending';
-        }
-        
-        // Status-specific styling for groups
+        // Status-specific styling for groups (same colors as nodes)
         const groupColors: Record<string, { fill: string; stroke: string }> = {
           pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
+          ready: { fill: '#1a2a4e', stroke: '#3794ff' },
           running: { fill: '#1a2a4e', stroke: '#3794ff' },
           succeeded: { fill: '#1a3a2e', stroke: '#4ec9b0' },
           failed: { fill: '#3a1a1e', stroke: '#f48771' },
-          partial: { fill: '#3a2a1e', stroke: '#dcdcaa' },
+          blocked: { fill: '#3a1a1e', stroke: '#f48771' },
+          canceled: { fill: '#1a1a2e', stroke: '#6a6a8a' },
         };
         const colors = groupColors[groupStatus] || groupColors.pending;
         
-        const groupId = `grp${groupSubgraphCounter++}`;
         const displayName = treeNode.name || groupPath;
         
-        lines.push(`${currentIndent}subgraph ${groupId}["📦 ${this._escapeForMermaid(displayName)}"]`);
+        lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${this._escapeForMermaid(displayName)}"]`);
         
         const childIndent = currentIndent + '  ';
         
@@ -2086,7 +2126,7 @@ ${mermaidDef}
         }
         
         lines.push(`${currentIndent}end`);
-        lines.push(`${currentIndent}style ${groupId} fill:${colors.fill},stroke:${colors.stroke},stroke-width:2px,stroke-dasharray:5`);
+        lines.push(`${currentIndent}style ${sanitizedGroupId} fill:${colors.fill},stroke:${colors.stroke},stroke-width:2px,stroke-dasharray:5`);
       };
       
       // Render ungrouped nodes first

@@ -21,6 +21,9 @@ import {
   JobNode,
   JobNodeSpec,
   NodeExecutionState,
+  GroupSpec,
+  GroupInstance,
+  GroupExecutionState,
 } from './types';
 
 /**
@@ -94,6 +97,63 @@ export function buildPlan(
   const nodes = new Map<string, PlanNode>();
   const producerIdToNodeId = new Map<string, string>();
   
+  // Maps for building groups
+  const groups = new Map<string, GroupInstance>();
+  const groupStates = new Map<string, GroupExecutionState>();
+  const groupPathToId = new Map<string, string>();
+  
+  // Helper: recursively build groups from spec
+  function buildGroups(
+    groupSpecs: GroupSpec[] | undefined,
+    parentPath: string,
+    parentGroupId: string | undefined
+  ): void {
+    if (!groupSpecs) return;
+    
+    for (const groupSpec of groupSpecs) {
+      const groupId = uuidv4();
+      const groupPath = parentPath ? `${parentPath}/${groupSpec.name}` : groupSpec.name;
+      
+      const group: GroupInstance = {
+        id: groupId,
+        name: groupSpec.name,
+        path: groupPath,
+        parentGroupId,
+        childGroupIds: [],
+        nodeIds: [],
+        allNodeIds: [],
+        totalNodes: 0,
+      };
+      
+      groups.set(groupId, group);
+      groupPathToId.set(groupPath, groupId);
+      
+      // Link to parent
+      if (parentGroupId) {
+        const parent = groups.get(parentGroupId);
+        if (parent) {
+          parent.childGroupIds.push(groupId);
+        }
+      }
+      
+      // Initialize group state
+      groupStates.set(groupId, {
+        status: 'pending',
+        runningCount: 0,
+        succeededCount: 0,
+        failedCount: 0,
+        blockedCount: 0,
+        canceledCount: 0,
+      });
+      
+      // Recurse into nested groups
+      buildGroups(groupSpec.groups, groupPath, groupId);
+    }
+  }
+  
+  // Build groups from spec
+  buildGroups(spec.groups, '', undefined);
+  
   // First pass: Create all nodes and build producerId map
   for (const jobSpec of spec.jobs) {
     if (!jobSpec.producerId) {
@@ -107,6 +167,39 @@ export function buildPlan(
     }
     
     const nodeId = uuidv4();
+    
+    // Resolve group path to group ID
+    let resolvedGroupId: string | undefined;
+    if (jobSpec.group) {
+      resolvedGroupId = groupPathToId.get(jobSpec.group);
+      // If no exact match, try creating a group for it on the fly
+      if (!resolvedGroupId) {
+        // Auto-create group for nodes that reference a group path not defined in spec.groups
+        const groupId = uuidv4();
+        const group: GroupInstance = {
+          id: groupId,
+          name: jobSpec.group,
+          path: jobSpec.group,
+          parentGroupId: undefined,
+          childGroupIds: [],
+          nodeIds: [],
+          allNodeIds: [],
+          totalNodes: 0,
+        };
+        groups.set(groupId, group);
+        groupPathToId.set(jobSpec.group, groupId);
+        groupStates.set(groupId, {
+          status: 'pending',
+          runningCount: 0,
+          succeededCount: 0,
+          failedCount: 0,
+          blockedCount: 0,
+          canceledCount: 0,
+        });
+        resolvedGroupId = groupId;
+      }
+    }
+    
     const node: JobNode = {
       id: nodeId,
       producerId: jobSpec.producerId,
@@ -120,9 +213,33 @@ export function buildPlan(
       baseBranch: jobSpec.baseBranch,
       expectsNoChanges: jobSpec.expectsNoChanges,
       group: jobSpec.group,
+      groupId: resolvedGroupId,
       dependencies: [], // Will be resolved in second pass
       dependents: [],
     };
+    
+    // Add node to its group
+    if (resolvedGroupId) {
+      const group =groups.get(resolvedGroupId);
+      if (group) {
+        group.nodeIds.push(nodeId);
+        group.allNodeIds.push(nodeId);
+        group.totalNodes++;
+        
+        // Also add to all ancestor groups' allNodeIds
+        let parentId = group.parentGroupId;
+        while (parentId) {
+          const parent = groups.get(parentId);
+          if (parent) {
+            parent.allNodeIds.push(nodeId);
+            parent.totalNodes++;
+            parentId = parent.parentGroupId;
+          } else {
+            break;
+          }
+        }
+      }
+    }
     
     nodes.set(nodeId, node);
     producerIdToNodeId.set(jobSpec.producerId, nodeId);
@@ -219,6 +336,9 @@ export function buildPlan(
     roots,
     leaves,
     nodeStates,
+    groups,
+    groupStates,
+    groupPathToId,
     parentPlanId: options.parentPlanId,
     parentNodeId: options.parentNodeId,
     repoPath,
