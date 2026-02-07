@@ -25,11 +25,42 @@ import { StdioTransport } from './transport';
 import { McpHandler } from '../handler';
 import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '../../plan';
 
+/**
+ * Parse command-line arguments.
+ * Supports: --workspace <path> --storage <path>
+ */
+function parseArgs(): { workspace?: string; storage?: string } {
+  const args = process.argv.slice(2);
+  const result: { workspace?: string; storage?: string } = {};
+  
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--workspace' && args[i + 1]) {
+      result.workspace = args[++i];
+    } else if (args[i] === '--storage' && args[i + 1]) {
+      result.storage = args[++i];
+    }
+  }
+  
+  return result;
+}
+
 async function main(): Promise<void> {
 
-  const workspacePath = process.env.ORCHESTRATOR_WORKSPACE || process.cwd();
-  const storagePath = process.env.ORCHESTRATOR_STORAGE
+  const cliArgs = parseArgs();
+  
+  // Priority: CLI args > env vars > defaults
+  const workspacePath = cliArgs.workspace 
+    || process.env.ORCHESTRATOR_WORKSPACE 
+    || process.cwd();
+  const storagePath = cliArgs.storage
+    || process.env.ORCHESTRATOR_STORAGE
     || path.join(workspacePath, '.orchestrator', 'plans');
+
+  // Log the paths for debugging
+  console.error('[mcp-stdio] Storage configuration:');
+  console.error('[mcp-stdio]   CLI args:', JSON.stringify(cliArgs));
+  console.error('[mcp-stdio]   Resolved workspacePath:', workspacePath);
+  console.error('[mcp-stdio]   Resolved storagePath:', storagePath);
 
   // Bootstrap PlanRunner
   const config: PlanRunnerConfig = {

@@ -88,17 +88,14 @@ export function registerMcpDefinitionProvider(
       // Storage is always workspace-relative
       const storagePath = path.join(currentWorkspacePath, '.orchestrator', 'plans');
 
+      // Pass paths as command-line arguments since VS Code doesn't pass env to child process
       // McpStdioServerDefinition constructor: (label, command, args?, options?)
       const server = new (vscode as any).McpStdioServerDefinition(
         'Copilot Orchestrator',  // label
         'node',                  // command
-        [serverScript],          // args
+        [serverScript, '--workspace', currentWorkspacePath, '--storage', storagePath],  // args
         {
           cwd: vscode.Uri.file(currentWorkspacePath),
-          env: {
-            ORCHESTRATOR_WORKSPACE: currentWorkspacePath,
-            ORCHESTRATOR_STORAGE: storagePath,
-          },
           version: context.extension.packageJSON.version,
         }
       );
