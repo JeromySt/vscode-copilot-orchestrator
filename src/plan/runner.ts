@@ -1301,6 +1301,14 @@ export class PlanRunner extends EventEmitter {
         // FI succeeded - acknowledge consumption to all dependencies
         // This allows dependency worktrees to be cleaned up as soon as all consumers have FI'd
         await this.acknowledgeConsumption(plan, sm, node);
+      } else if (node.dependencies.length > 0) {
+        // Has dependencies but none produced commits (all expectsNoChanges)
+        // Still need to acknowledge consumption so those worktrees can be cleaned up
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========');
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${plan.baseBranch} (dependencies have no commits to merge)`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '===========================================');
+        
+        await this.acknowledgeConsumption(plan, sm, node);
       } else {
         // Root node - no dependencies
         this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========');
