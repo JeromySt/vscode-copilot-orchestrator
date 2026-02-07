@@ -5,124 +5,158 @@
 </p>
 
 <p align="center">
-  <strong>🚀 Orchestrate parallel GitHub Copilot agents in isolated git worktrees</strong>
+  <strong>🚀 Scale your GitHub Copilot usage with parallel AI agents in isolated git worktrees</strong>
 </p>
 
 <p align="center">
   <a href="#features">Features</a> •
+  <a href="#see-it-in-action">See It In Action</a> •
   <a href="#installation">Installation</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#mcp-integration">MCP Integration</a> •
-  <a href="#configuration">Configuration</a> •
-  <a href="#api-reference">API Reference</a>
+  <a href="#configuration">Configuration</a>
 </p>
 
 ---
 
-## Overview
+## Why Copilot Orchestrator?
 
-**Copilot Orchestrator** supercharges your GitHub Copilot workflow by enabling **parallel AI-powered development**. Delegate complex tasks to multiple AI agents running simultaneously in isolated git worktrees, while maintaining clean git history with automated workflows.
+**Turn GitHub Copilot into a parallel development powerhouse.** Instead of working on one task at a time, orchestrate multiple AI agents simultaneously—each working in its own isolated git worktree, automatically merging changes when complete.
 
-### Why Copilot Orchestrator?
+<p align="center">
+  <img src="media/screenshots/plan-dag-overview.png" alt="Plan DAG Overview" width="900">
+</p>
 
-| Feature | Benefit |
-|---------|---------|
-| 🚀 **Parallel Execution** | Run multiple Copilot agents on different tasks simultaneously |
-| 🔀 **Git Worktree Isolation** | Each job works in its own isolated branch—no conflicts |
-| ⚡ **Automated Pipelines** | Pre-checks → AI Work → Post-checks → Auto-merge |
-| 🤖 **Native Copilot Integration** | Works seamlessly with GitHub Copilot Chat via MCP |
-| 📊 **Real-time Monitoring** | Track all jobs in a dedicated sidebar with live progress |
-| 🔄 **Smart Retries** | AI-guided retry with automatic failure analysis |
+### The Problem
+
+You have Copilot. It's great at coding tasks. But it works sequentially—one task at a time. Your feature branch sits waiting while Copilot finishes task A before starting task B.
+
+### The Solution
+
+**Copilot Orchestrator** unlocks **concurrent Copilot execution**:
+
+| Capability | What It Means |
+|------------|---------------|
+| 🚀 **Parallel Agents** | Run 4, 8, or more Copilot agents simultaneously on different tasks |
+| 🔀 **Git Worktree Isolation** | Each agent works in its own branch—zero conflicts, clean history |
+| 📊 **Visual DAG Execution** | See your entire plan as an interactive dependency graph |
+| ⚡ **Automated Pipelines** | Pre-checks → AI Work → Post-checks → Auto-merge → Cleanup |
+| 🤖 **Native MCP Integration** | Create and monitor jobs directly from GitHub Copilot Chat |
+| 🔄 **Smart Retry** | Failed jobs include AI-analyzed failure context for intelligent retry |
+
+---
+
+## See It In Action
+
+### Plan Execution Dashboard
+
+Monitor complex multi-job plans with an interactive Mermaid-based DAG visualization:
+
+<p align="center">
+  <img src="media/screenshots/plan-dag-overview.png" alt="Plan DAG Visualization" width="800">
+</p>
+
+**What you see:**
+- 📊 **Live DAG diagram** showing job dependencies and parallel execution paths
+- 🎨 **Color-coded status**: Green (succeeded), Blue (running), Red (failed), Gray (pending/blocked)
+- ⏱️ **Duration tracking** on each node showing actual execution time
+- 📈 **Progress stats**: Total nodes, succeeded, failed, running, pending at a glance
+
+### Node Detail Panel
+
+Click any node to see comprehensive execution details:
+
+<p align="center">
+  <img src="media/screenshots/node-detail-work-summary.png" alt="Node Detail with Work Summary" width="800">
+</p>
+
+**Includes:**
+- **Execution State**: Status, attempts, start time, duration
+- **Work Summary**: Commits made, files added/modified/deleted
+- **Job Configuration**: Task description and work specification
+- **Agent Instructions**: Full Markdown-rendered instructions for AI jobs
+
+### Agent Instructions View
+
+See exactly what the AI agent is being asked to do:
+
+<p align="center">
+  <img src="media/screenshots/node-agent-instructions.png" alt="Agent Instructions" width="800">
+</p>
+
+**Agent work specs support:**
+- Markdown formatting with headers, lists, code blocks
+- Context files for focused AI attention
+- Max turns configuration for complex tasks
 
 ---
 
 ## Features
 
-### 🎯 Job-Based Workflow
+### 🎯 Automated Job Lifecycle
 
-Create jobs that encapsulate complete development tasks:
+Every job follows a complete automated pipeline:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        JOB LIFECYCLE                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  📥 CREATE    Create worktree from base branch              │
-│      ↓                                                      │
-│  ✅ PRECHECKS  Run tests/linting before changes             │
-│      ↓                                                      │
-│  🤖 WORK       AI agent implements the task                 │
-│      ↓                                                      │
-│  ✅ POSTCHECKS Verify changes (tests, lint, coverage)       │
-│      ↓                                                      │
-│  🔀 MERGE      Squash/merge back to base branch             │
-│      ↓                                                      │
-│  🧹 CLEANUP    Remove worktree                              │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+📥 CREATE WORKTREE    →    ✅ PRECHECKS    →    🤖 AI WORK    →    ✅ POSTCHECKS    →    🔀 MERGE    →    🧹 CLEANUP
+   Fork from base           Run tests first      Agent coding        Verify changes       Squash back       Remove worktree
 ```
 
-### 🤖 AI Agent Delegation
+**Why this matters:**
+- ✅ **Prechecks** ensure you start from a working state
+- 🤖 **Isolated work** means AI changes can't break your main branch
+- ✅ **Postchecks** validate the AI's work before merging
+- 🔀 **Auto-merge** with squash keeps your git history clean
 
-Delegate work using natural language with the `@agent` prefix:
+### 🤖 Flexible Work Specifications
 
+Jobs support multiple work types:
+
+**AI Agent Work** (recommended):
 ```json
 {
-  "work": "@agent Implement user authentication with OAuth2 support"
+  "work": {
+    "type": "agent",
+    "instructions": "# Add Input Validation\n\n## Task\nAdd client-side validation to the registration form...",
+    "contextFiles": ["src/components/RegisterForm.tsx"],
+    "maxTurns": 15
+  }
 }
 ```
 
-The orchestrator:
-1. Creates an isolated git worktree
-2. Runs your prechecks (tests must pass first!)
-3. Creates a task file and invokes the Copilot CLI
-4. Monitors progress and captures detailed logs
-5. Runs postchecks to verify the implementation
-6. Merges changes back when everything passes
-
-**Examples:**
-```bash
-# Simple implementation
-work: "@agent Add validation to the user registration form"
-
-# Feature with context
-work: "@agent Implement dark mode support using CSS variables"
-
-# Bug fix
-work: "@agent Fix the memory leak in the WebSocket connection handler"
-
-# Traditional shell command (still supported)
-work: "npm run build && npm run deploy"
+**Shell Commands** (for build/test tasks):
+```json
+{
+  "work": {
+    "type": "shell",
+    "command": "npm run build && npm run test:integration"
+  }
+}
 ```
 
-### 📊 Rich Job Details View
+**Simple String** (legacy support):
+```json
+{
+  "work": "@agent Fix the memory leak in WebSocket handler"
+}
+```
 
-Each job includes:
-- **Work Summary**: Commits, files added/modified/deleted with expandable details
-- **Execution Attempts**: Track retries with individual logs per attempt
-- **Live Process Tree**: See running processes during execution
-- **Phase Navigation**: Filter logs by Prechecks, Work, Postchecks, Mergeback, or Cleanup
-- **Work History**: Timeline of task iterations for retried jobs
+### 📊 Real-Time Monitoring
 
-### 📋 Plans UI
+<p align="center">
+  <img src="media/screenshots/node-execution-state.png" alt="Node Execution State" width="700">
+</p>
 
-The sidebar includes two views:
+**The sidebar shows:**
+- All plans with completion progress
+- Node counts by status (succeeded/running/failed)
+- Total duration and timing
 
-**Jobs View** - Shows individual job status:
-- Quick status overview with progress indicators
-- Click any job to open detailed logs and information
-- Real-time updates as jobs progress
-
-**Plans View** - Shows multi-job plan status:
-- Visual progress bars showing completion percentage
-- Job counts by status (completed/running/failed)
-- Click to open the **Plan Detail Panel**
-
-**Plan Detail Panel** - Visual execution pipeline:
-- Stage-based layout showing job dependencies
-- Color-coded status indicators (✓ completed, ◐ running, ✗ failed)
-- Click individual job cards to view their detailed logs
-- Real-time updates as plan executes
+**The Node Detail panel shows:**
+- Execution state with attempt tracking
+- Phase tabs (Prechecks, Work, Postchecks, Mergeback, Cleanup)
+- Live logs during execution
+- Work summary with commit details
 
 ### 🔌 MCP (Model Context Protocol) Integration
 
@@ -325,6 +359,43 @@ This pattern enables:
 
 ---
 
+## Real-World Example
+
+Here's an actual plan that was executed on this very repository—the Copilot Orchestrator improving itself:
+
+**"Orchestrator Self-Improvement: Full Maintainability & Tests v4"**
+
+```json
+{
+  "name": "Orchestrator Self-Improvement: Full Maintainability & Tests v4",
+  "maxParallel": 4,
+  "jobs": [
+    { "id": "setup-test-infra", "task": "Setup Test Infrastructure", "work": { "type": "agent", "..." } },
+    { "id": "extract-interfaces", "task": "Extract DI Interfaces", "work": { "type": "agent", "..." } }
+  ],
+  "subPlans": [
+    {
+      "id": "refactor-plan-module",
+      "name": "Refactor Plan Module",
+      "dependsOn": ["extract-interfaces"],
+      "jobs": [
+        { "id": "plan-split-types", "task": "Split Plan Types" },
+        { "id": "plan-extract-helpers", "task": "Extract Plan Helpers" },
+        { "id": "plan-add-jsdoc", "task": "Add Plan JSDoc", "dependsOn": ["plan-split-types", "plan-extract-helpers"] }
+      ]
+    },
+    { "id": "refactor-ui-module", "name": "Refactor UI Module", "..." },
+    { "id": "refactor-mcp-module", "name": "Refactor MCP Module", "..." },
+    { "id": "add-unit-tests", "name": "Add Unit Tests", "dependsOn": ["refactor-plan-module", "..."] },
+    { "id": "add-git-module-tests", "name": "Add Git Module Tests", "..." }
+  ]
+}
+```
+
+**Result:** 7 nodes, all succeeded, 32 minutes total execution time, producing clean refactored code with JSDoc documentation and test coverage.
+
+---
+
 ## Installation
 
 ### From VS Code Marketplace
@@ -345,13 +416,10 @@ This pattern enables:
 
 - **VS Code** 1.85.0 or later
 - **GitHub Copilot** extension installed and authenticated
-- **GitHub Copilot CLI** (optional but recommended):
+- **GitHub Copilot CLI**:
   ```bash
-  # Install via GitHub CLI
+  # Install via GitHub CLI (recommended)
   gh extension install github/gh-copilot
-  
-  # Or via npm
-  npm install -g @githubnext/github-copilot-cli
   ```
 - **Git** 2.20+ (for worktree support)
 
@@ -426,155 +494,82 @@ If needed, add to your VS Code settings or `mcp.json`:
 |---------|---------|-------------|
 | `copilotOrchestrator.mcp.enabled` | `true` | Enable MCP server |
 | `copilotOrchestrator.worktreeRoot` | `.worktrees` | Worktree directory |
-| `copilotOrchestrator.maxWorkers` | `0` (auto) | Max concurrent jobs |
-| `copilotOrchestrator.merge.mode` | `squash` | Merge strategy |
-| `copilotOrchestrator.merge.prefer` | `theirs` | Conflict resolution preference |
-| `copilotOrchestrator.merge.pushOnSuccess` | `false` | Auto-push after merge |
-| `copilotOrchestrator.copilotCli.required` | `true` | Require Copilot CLI |
-| `copilotOrchestrator.copilotCli.preferredInstall` | `auto` | Install method (gh/npm/auto) |
-| `copilotOrchestrator.copilotCli.enforceInJobs` | `true` | Fail fast without CLI |
+| `copilotOrchestrator.maxConcurrentJobs` | `0` (auto) | Max concurrent jobs (0 = CPU count - 1) |
+| `copilotOrchestrator.merge.mode` | `squash` | Merge strategy: `squash`, `merge`, or `rebase` |
+| `copilotOrchestrator.merge.prefer` | `theirs` | Conflict resolution: `ours` or `theirs` |
+| `copilotOrchestrator.merge.pushOnSuccess` | `false` | Auto-push after successful merge |
 
-### Merge Strategies
+### Debug Logging
 
-| Mode | Description |
-|------|-------------|
-| `squash` | Combines all commits into one (default) |
-| `merge` | Standard merge commit |
-| `rebase` | Rebase onto base branch |
+Enable granular logging for troubleshooting:
 
----
-
-## API Reference
-
-### Job Specification
-
-```typescript
-interface JobSpec {
-  id?: string;              // Auto-generated if not provided
-  name?: string;            // Display name
-  task: string;             // Task description
-  inputs: {
-    repoPath: string;       // Repository path
-    baseBranch: string;     // Branch to fork from
-    targetBranch?: string;  // Branch to create
-    worktreeRoot?: string;  // Worktree directory
-    instructions?: string;  // Additional AI instructions
-  };
-  policy: {
-    steps: {
-      prechecks?: string;   // Pre-check command
-      work: string;         // Work command (@agent for AI)
-      postchecks?: string;  // Post-check command
-    };
-  };
-}
-```
-
-### Job Status Response
-
-```typescript
-interface JobStatus {
-  id: string;
-  name: string;
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
-  isComplete: boolean;
-  progress: number;         // 0-100%
-  currentStep: string;
-  stepStatuses: Record<string, 'success' | 'failed' | 'skipped'>;
-  workSummary?: {
-    commits: number;
-    filesAdded: number;
-    filesModified: number;
-    filesDeleted: number;
-    description: string;
-  };
-}
-```
-
----
-
-## Troubleshooting
-
-### MCP Server Not Appearing
-1. Check status bar for "MCP: registered"
-2. Reload VS Code (`Ctrl+Shift+P` → "Developer: Reload Window")
-3. Verify extension is enabled in Tools configuration
-
-### Jobs Stuck in "Running"
-1. Check Copilot CLI: `gh copilot --version`
-2. View job logs for errors
-3. Cancel and retry the job
-
-### Git Worktree Errors
-1. Ensure Git 2.20+: `git --version`
-2. Check `.worktrees` directory permissions
-3. Clean stale worktrees: `git worktree prune`
-
----
-
-## Development
-
-### Building from Source
-
-```bash
-git clone https://github.com/JeromySt/vscode-copilot-orchestrator.git
-cd vscode-copilot-orchestrator
-npm install
-npm run compile
-npm run package
-```
-
-### Project Structure
-
-```
-vscode-copilot-orchestrator/
-├── src/
-│   ├── extension.ts          # Extension entry point
-│   ├── httpServer.ts         # HTTP server with MCP endpoint
-│   ├── core/                  # Core logic (JobRunner, PlanRunner)
-│   ├── agent/                 # AI agent delegation
-│   ├── commands/              # VS Code commands
-│   ├── git/                   # Git operations & worktrees
-│   ├── mcp/                   # MCP protocol handler & registration
-│   ├── process/               # Process monitoring
-│   ├── types/                 # TypeScript types
-│   └── ui/                    # UI components (sidebar, webview)
-└── out/                       # Compiled JavaScript
-```
+| Setting | Description |
+|---------|-------------|
+| `copilotOrchestrator.logging.debug.mcp` | MCP protocol and server operations |
+| `copilotOrchestrator.logging.debug.http` | HTTP server requests and responses |
+| `copilotOrchestrator.logging.debug.jobs` | Job runner operations |
+| `copilotOrchestrator.logging.debug.plans` | Plan runner operations |
+| `copilotOrchestrator.logging.debug.git` | Git and worktree operations |
+| `copilotOrchestrator.logging.debug.ui` | UI and webview operations |
 
 ---
 
 ## Architecture
 
-The extension runs an **HTTP-based MCP server**:
-
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    GitHub Copilot Chat                      │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ MCP (HTTP POST)
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                VS Code Extension (TypeScript)               │
-│                                                             │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │              HTTP Server (:39219)                    │   │
-│  │  • /mcp - MCP JSON-RPC endpoint                     │   │
-│  │  • REST API for direct integration                   │   │
-│  └───────────────────────────┬─────────────────────────┘   │
-│                              │                              │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  JobRunner / PlanRunner                              │   │
-│  │  • Job lifecycle management                          │   │
-│  │  • Git worktree operations                           │   │
-│  │  • Copilot CLI execution                             │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                             │
-│  UI: Sidebar views, webview panels, status bar              │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      GitHub Copilot Chat                        │
+│                    (MCP Tool Integration)                       │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ MCP (HTTP POST)
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  VS Code Extension Host                         │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │              HTTP Server (port 39219)                     │  │
+│  │              • /mcp - JSON-RPC endpoint                   │  │
+│  └────────────────────────────┬──────────────────────────────┘  │
+│                               │                                  │
+│  ┌────────────────────────────▼──────────────────────────────┐  │
+│  │                     PlanRunner                            │  │
+│  │  • DAG-based execution engine                             │  │
+│  │  • Parallel job scheduling (respects maxParallel)         │  │
+│  │  • Forward/Reverse integration merges                     │  │
+│  │  • Retry with failure context                             │  │
+│  └────────────────────────────┬──────────────────────────────┘  │
+│                               │                                  │
+│  ┌──────────────┐  ┌──────────▼────────┐  ┌────────────────┐   │
+│  │ Git Worktree │  │  Copilot CLI      │  │  UI Panels     │   │
+│  │  Operations  │  │  Agent Execution  │  │  (Webviews)    │   │
+│  └──────────────┘  └───────────────────┘  └────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-No Node.js runtime dependency - everything runs inside the extension!
+**Key design principles:**
+- **No external runtime** - Everything runs inside the VS Code extension
+- **Isolated execution** - Each job gets its own git worktree
+- **Automatic cleanup** - Worktrees are removed after successful merge
+- **Event-driven UI** - Real-time updates via VS Code webview messaging
+
+---
+
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+```bash
+# Development setup
+git clone https://github.com/JeromySt/vscode-copilot-orchestrator.git
+cd vscode-copilot-orchestrator
+npm install
+npm run compile
+
+# Run extension in development mode
+# Press F5 in VS Code to launch Extension Development Host
+
+# Package for distribution
+npm run package
+```
 
 ---
 
@@ -585,5 +580,12 @@ MIT License - see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  Made with ❤️ for the GitHub Copilot community
+  <strong>🚀 Stop waiting. Start orchestrating.</strong><br>
+  Scale your GitHub Copilot workflow with parallel AI agents.
+</p>
+
+<p align="center">
+  <a href="https://github.com/JeromySt/vscode-copilot-orchestrator/issues">Report Bug</a> •
+  <a href="https://github.com/JeromySt/vscode-copilot-orchestrator/issues">Request Feature</a> •
+  <a href="https://github.com/JeromySt/vscode-copilot-orchestrator/stargazers">⭐ Star on GitHub</a>
 </p>
