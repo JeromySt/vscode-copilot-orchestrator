@@ -13,9 +13,10 @@
 
 import { PlanRunner } from '../plan/runner';
 import { Logger, ComponentLogger } from '../core/logger';
-import { JsonRpcRequest, JsonRpcResponse, ToolHandlerContext } from './types';
+import { JsonRpcRequest, JsonRpcResponse } from './types';
 import { getPlanToolDefinitions } from './tools/planTools';
 import {
+  PlanHandlerContext,
   handleCreatePlan,
   handleCreateJob,
   handleGetPlanStatus,
@@ -28,41 +29,63 @@ import {
   handleRetryPlan,
   handleGetNodeFailureContext,
   handleRetryPlanNode,
-} from './handlers/planHandlers';
+} from './handlers';
 
 /** MCP component logger */
 const log: ComponentLogger = Logger.for('mcp');
 
-/** MCP protocol version */
+/**
+ * MCP protocol version advertised during the `initialize` handshake.
+ *
+ * @see {@link https://modelcontextprotocol.io/specification | MCP Specification}
+ */
 const PROTOCOL_VERSION = '2024-11-05';
 
-/** Server info for initialize response */
+/**
+ * Server identity included in the `initialize` response.
+ *
+ * The `version` field is bumped for major internal rewrites (e.g. the Plan
+ * rewrite) so that clients can detect capability changes.
+ */
 const SERVER_INFO = {
   name: 'copilot-orchestrator',
   version: '0.6.0'  // Bumped for Plan rewrite
 };
 
 /**
- * Extended context for Plan handlers
- */
-interface PlanHandlerContext extends ToolHandlerContext {
-  PlanRunner: PlanRunner;
-}
-
-/**
- * MCP Handler class for processing MCP HTTP requests.
- * 
- * Handles the JSON-RPC protocol layer and delegates tool execution
- * to specialized handlers.
+ * MCP protocol handler for the HTTP transport layer.
+ *
+ * Receives JSON-RPC 2.0 requests (typically from `POST /mcp`), performs
+ * protocol-level routing, and delegates tool execution to specialised
+ * handlers in `handlers/planHandlers.ts`.
+ *
+ * Supported JSON-RPC methods:
+ * | Method                      | Description                              |
+ * |-----------------------------|------------------------------------------|
+ * | `initialize`                | MCP handshake; returns capabilities      |
+ * | `notifications/initialized` | Client acknowledgement (no-op response)  |
+ * | `tools/list`                | Returns all registered tool definitions  |
+ * | `tools/call`                | Executes a tool and returns its result   |
+ *
+ * @example
+ * ```ts
+ * const handler = new McpHandler(planRunner, '/workspace');
+ * const response = await handler.handleRequest({
+ *   jsonrpc: '2.0',
+ *   id: 1,
+ *   method: 'tools/list',
+ * });
+ * // response.result.tools => McpTool[]
+ * ```
  */
 export class McpHandler {
   private readonly context: PlanHandlerContext;
 
   /**
    * Create a new MCP handler.
-   * 
-   * @param PlanRunner - Plan Runner instance
-   * @param workspacePath - Workspace root path
+   *
+   * @param PlanRunner    - Singleton {@link PlanRunner} that manages plan lifecycle.
+   * @param workspacePath - Absolute path to the workspace root (git repository).
    */
   constructor(PlanRunner: PlanRunner, workspacePath: string) {
     this.context = { 
@@ -76,10 +99,15 @@ export class McpHandler {
   }
 
   /**
-   * Handle an MCP JSON-RPC request.
-   * 
-   * @param request - JSON-RPC request
-   * @returns JSON-RPC response
+   * Process an incoming MCP JSON-RPC request and return a response.
+   *
+   * Routes the request to the appropriate protocol handler based on
+   * {@link JsonRpcRequest.method}.  Unknown methods receive a `-32601`
+   * (Method not found) error.  Unhandled exceptions are caught and
+   * returned as `-32603` (Internal error) responses.
+   *
+   * @param request - Parsed JSON-RPC 2.0 request.
+   * @returns JSON-RPC 2.0 response (never throws).
    */
   async handleRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> {
     log.debug('Request received', { method: request.method, id: request.id });
@@ -113,7 +141,10 @@ export class McpHandler {
   }
 
   /**
-   * Handle initialize request.
+   * Handle the `initialize` JSON-RPC method.
+   *
+   * Returns the server's protocol version, capabilities (currently just
+   * `tools`), and server identity.
    */
   private handleInitialize(request: JsonRpcRequest): JsonRpcResponse {
     log.info('Initialize request received');
@@ -127,7 +158,10 @@ export class McpHandler {
   }
 
   /**
-   * Handle initialized notification.
+   * Handle the `notifications/initialized` JSON-RPC method.
+   *
+   * Acknowledgement from the client that initialisation is complete.
+   * No server-side action is required.
    */
   private handleInitializedNotification(request: JsonRpcRequest): JsonRpcResponse {
     log.info('Client initialized notification received');
@@ -135,7 +169,10 @@ export class McpHandler {
   }
 
   /**
-   * Handle tools/list request.
+   * Handle the `tools/list` JSON-RPC method.
+   *
+   * Returns all registered MCP tool definitions from
+   * {@link getPlanToolDefinitions}.
    */
   private handleToolsList(request: JsonRpcRequest): JsonRpcResponse {
     const tools = getPlanToolDefinitions();
@@ -146,7 +183,11 @@ export class McpHandler {
   }
 
   /**
-   * Handle tools/call request.
+   * Handle the `tools/call` JSON-RPC method.
+   *
+   * Routes the call to the matching plan handler based on the tool `name`.
+   * The handler result is wrapped in an MCP `content` array with a single
+   * `text` item containing the JSON-serialised result.
    */
   private async handleToolsCall(request: JsonRpcRequest): Promise<JsonRpcResponse> {
     const { name, arguments: args } = request.params || {};
@@ -215,14 +256,21 @@ export class McpHandler {
   }
 
   /**
-   * Create a success response.
+   * Build a JSON-RPC 2.0 success response.
+   *
+   * @param id     - Request identifier to echo.
+   * @param result - Payload to include in the response.
    */
   private successResponse(id: string | number, result: any): JsonRpcResponse {
     return { jsonrpc: '2.0', id, result };
   }
 
   /**
-   * Create an error response.
+   * Build a JSON-RPC 2.0 error response.
+   *
+   * @param id      - Request identifier to echo (may be `null` for parse errors).
+   * @param code    - JSON-RPC error code (e.g. `-32601` for Method not found).
+   * @param message - Human-readable error description.
    */
   private errorResponse(id: string | number | null, code: number, message: string): JsonRpcResponse {
     return { jsonrpc: '2.0', id, error: { code, message } };

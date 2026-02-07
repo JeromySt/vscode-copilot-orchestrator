@@ -9,11 +9,44 @@
 
 import { McpTool } from '../types';
 
-/** Regex pattern for valid producer_id values */
+/**
+ * Regex pattern for valid `producer_id` values.
+ *
+ * Enforces lowercase alphanumeric characters and hyphens, 3–64 characters long.
+ * Used both for schema validation in tool definitions and server-side input validation
+ * in {@link handleCreatePlan}.
+ *
+ * @example
+ * ```ts
+ * PRODUCER_ID_PATTERN.test('build-step');   // true
+ * PRODUCER_ID_PATTERN.test('AB');           // false – uppercase / too short
+ * ```
+ */
 export const PRODUCER_ID_PATTERN = /^[a-z0-9-]{3,64}$/;
 
 /**
- * Get all Plan-related tool definitions.
+ * Return all Plan-related MCP tool definitions.
+ *
+ * Each tool definition follows the MCP `tools/list` response schema:
+ * `{ name, description, inputSchema }`.  The descriptions are intentionally
+ * verbose because they are surfaced directly to LLM clients as tool
+ * documentation.
+ *
+ * Tools are grouped into three categories:
+ * 1. **Creation** – `create_copilot_plan`, `create_copilot_job`
+ * 2. **Status & Queries** – `get_copilot_plan_status`, `list_copilot_plans`,
+ *    `get_copilot_node_details`, `get_copilot_node_logs`, `get_copilot_node_attempts`
+ * 3. **Control** – `cancel_copilot_plan`, `delete_copilot_plan`,
+ *    `retry_copilot_plan`, `retry_copilot_plan_node`,
+ *    `get_copilot_plan_node_failure_context`
+ *
+ * @returns Array of {@link McpTool} definitions registered with the MCP server.
+ *
+ * @example
+ * ```ts
+ * const tools = getPlanToolDefinitions();
+ * // tools[0].name === 'create_copilot_plan'
+ * ```
  */
 export function getPlanToolDefinitions(): McpTool[] {
   return [

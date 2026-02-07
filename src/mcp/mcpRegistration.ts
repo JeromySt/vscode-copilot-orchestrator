@@ -11,19 +11,23 @@ import * as vscode from 'vscode';
 
 /**
  * State key for tracking whether user has been prompted.
+ * Stored in {@link vscode.ExtensionContext.globalState}.
  */
 const PROMPTED_STATE_KEY = 'mcpServerPrompted';
 
 /**
- * Prompt user to register the MCP server with GitHub Copilot.
- * 
- * Shows a one-time prompt with options to:
- * - Add to Copilot (copies config to clipboard)
- * - Copy instructions
- * - Dismiss temporarily
- * - Dismiss permanently
- * 
- * @param context - VS Code extension context
+ * Prompt the user to register the MCP server with GitHub Copilot Chat.
+ *
+ * Shows a one-time information message with four options:
+ * 1. **Add to Copilot** — copies the MCP server JSON config to the clipboard.
+ * 2. **Copy Instructions** — copies detailed setup instructions.
+ * 3. **Not Now** — dismisses without recording (will re-prompt next session).
+ * 4. **Don't Show Again** — permanently dismisses the prompt.
+ *
+ * The prompt is skipped if MCP is disabled in settings or if the user has
+ * already been prompted (tracked via `globalState`).
+ *
+ * @param context - VS Code extension context for state persistence.
  */
 export async function promptMcpServerRegistration(
   context: vscode.ExtensionContext
@@ -60,8 +64,14 @@ export async function promptMcpServerRegistration(
 }
 
 /**
- * Handle "Add to Copilot" action.
- * Copies MCP configuration JSON to clipboard.
+ * Handle the "Add to Copilot" action.
+ *
+ * Builds the MCP server JSON configuration and copies it to the system
+ * clipboard, then offers to open VS Code settings or show instructions.
+ *
+ * @param context - VS Code extension context (for extension URI).
+ * @param host    - MCP server host.
+ * @param port    - MCP server port.
  */
 async function handleAddToCopilot(
   context: vscode.ExtensionContext,
@@ -109,8 +119,14 @@ async function handleAddToCopilot(
 }
 
 /**
- * Handle "Copy Instructions" action.
- * Copies detailed setup instructions to clipboard.
+ * Handle the "Copy Instructions" action.
+ *
+ * Copies a multi-line Markdown guide explaining how to manually configure
+ * the MCP server in the user's Copilot configuration file.
+ *
+ * @param context - VS Code extension context (unused, kept for API consistency).
+ * @param host    - MCP server host.
+ * @param port    - MCP server port.
  */
 async function handleCopyInstructions(
   context: vscode.ExtensionContext,
@@ -147,7 +163,14 @@ HTTP API is also available at: http://${host}:${port}
 }
 
 /**
- * Show instructions in a webview or output channel.
+ * Display inline setup instructions in an output channel.
+ *
+ * Used as a fallback when the `docs/COPILOT_INTEGRATION.md` file cannot
+ * be found in the extension bundle.
+ *
+ * @param context - VS Code extension context (unused).
+ * @param host    - MCP server host.
+ * @param port    - MCP server port.
  */
 function showInlineInstructions(
   context: vscode.ExtensionContext,
@@ -171,8 +194,12 @@ function showInlineInstructions(
 }
 
 /**
- * Reset the registration prompt state.
- * Useful for testing or if user wants to see the prompt again.
+ * Reset the registration prompt state so it will be shown again.
+ *
+ * Primarily useful for development/testing or when the user wants to
+ * re-configure the MCP integration.
+ *
+ * @param context - VS Code extension context for state persistence.
  */
 export async function resetMcpRegistrationPrompt(
   context: vscode.ExtensionContext

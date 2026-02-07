@@ -6,32 +6,36 @@
  * @module mcp/handlers/planHandlers
  */
 
-import { ToolHandlerContext } from '../types';
 import { 
   PlanSpec, 
-  PlanInstance, 
   JobNodeSpec, 
   SubPlanNodeSpec,
-  NodeStatus,
-  PlanStatus,
 } from '../../plan/types';
-import { PlanRunner } from '../../plan/runner';
 import { PRODUCER_ID_PATTERN } from '../tools/planTools';
-import * as git from '../../git';
-
-/**
- * Extended context with Plan Runner
- */
-interface PlanHandlerContext extends ToolHandlerContext {
-  PlanRunner: PlanRunner;
-}
+import {
+  PlanHandlerContext,
+  errorResult,
+  validateRequired,
+  lookupPlan,
+  lookupNode,
+  isError,
+  resolveBaseBranch,
+  resolveTargetBranch,
+} from './utils';
 
 // ============================================================================
 // VALIDATION
 // ============================================================================
 
 /**
- * Recursively map sub-plans from input to SubPlanNodeSpec
+ * Recursively map raw sub-plan input objects to typed {@link SubPlanNodeSpec} arrays.
+ *
+ * Transforms the snake_case `producer_id` field from JSON input to the
+ * camelCase `producerId` used internally, and recursively processes any
+ * nested `subPlans` to support the "out-and-back" pattern.
+ *
+ * @param subPlans - Raw sub-plan objects from the MCP `create_copilot_plan` tool call.
+ * @returns Typed sub-plan specs, or `undefined` if the input is empty/absent.
  */
 function mapsubPlansRecursively(subPlans: any[] | undefined): SubPlanNodeSpec[] | undefined {
   if (!subPlans || !Array.isArray(subPlans) || subPlans.length === 0) {
@@ -201,7 +205,29 @@ function validatesubPlansRecursively(
 }
 
 /**
- * Validate and transform Plan input
+ * Validate and transform raw `create_copilot_plan` input into a {@link PlanSpec}.
+ *
+ * Performs comprehensive validation:
+ * 1. Ensures required fields (`name`, `jobs`) are present.
+ * 2. Validates every `producer_id` against {@link PRODUCER_ID_PATTERN}.
+ * 3. Checks for duplicate `producer_id` values within each scope.
+ * 4. Verifies dependency references resolve to known sibling producer IDs.
+ * 5. Detects self-referential dependencies.
+ * 6. Recursively validates nested sub-plans with isolated scopes.
+ *
+ * @param args - Raw arguments from the `tools/call` request.
+ * @returns `{ valid: true, spec }` on success, or `{ valid: false, error }` on failure.
+ *
+ * @example
+ * ```ts
+ * const result = validatePlanInput({
+ *   name: 'My Plan',
+ *   jobs: [{ producer_id: 'build', task: 'Build app', dependencies: [] }],
+ * });
+ * if (result.valid) {
+ *   // result.spec is a PlanSpec ready for PlanRunner.enqueue()
+ * }
+ * ```
  */
 function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: PlanSpec } {
   // Name is required
@@ -337,47 +363,49 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
 // ============================================================================
 
 /**
- * Create a Plan
+ * Handle the `create_copilot_plan` MCP tool call.
+ *
+ * Validates input via {@link validatePlanInput}, resolves base/target branches
+ * using the workspace git repository, then enqueues the plan via
+ * {@link PlanRunner.enqueue}.
+ *
+ * @param args - Raw tool arguments matching the `create_copilot_plan` input schema.
+ * @param ctx  - Handler context providing {@link PlanRunner} and workspace path.
+ * @returns On success: `{ success: true, planId, name, nodeMapping, status, ... }`.
+ *          On failure: `{ success: false, error }`.
+ *
+ * @example
+ * ```jsonc
+ * // MCP tools/call request
+ * {
+ *   "name": "create_copilot_plan",
+ *   "arguments": {
+ *     "name": "Build & Test",
+ *     "jobs": [
+ *       { "producer_id": "build", "task": "Build", "work": "npm run build", "dependencies": [] },
+ *       { "producer_id": "test",  "task": "Test",  "work": "npm test",      "dependencies": ["build"] }
+ *     ]
+ *   }
+ * }
+ * ```
  */
 export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   // Validate input
   const validation = validatePlanInput(args);
   if (!validation.valid || !validation.spec) {
-    return {
-      success: false,
-      error: validation.error,
-    };
+    return errorResult(validation.error || 'Invalid input');
   }
   
   try {
-    // Set repo path
     validation.spec.repoPath = ctx.workspacePath;
     const repoPath = ctx.workspacePath;
     
-    // Resolve base branch - default to current or 'main'
-    const currentBranch = await git.branches.currentOrNull(repoPath);
-    const baseBranch = validation.spec.baseBranch || currentBranch || 'main';
+    const baseBranch = await resolveBaseBranch(repoPath, validation.spec.baseBranch);
     validation.spec.baseBranch = baseBranch;
     
-    // Resolve target branch
-    // If baseBranch is a default branch (main/master), create a feature branch
-    // Never merge work directly back to a default branch
-    if (!validation.spec.targetBranch) {
-      const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
-        baseBranch,
-        repoPath,
-        'copilot_plan'
-      );
-      validation.spec.targetBranch = targetBranchRoot;
-      
-      // If a new feature branch is needed, create it
-      if (needsCreation) {
-        const exists = await git.branches.exists(targetBranchRoot, repoPath);
-        if (!exists) {
-          await git.branches.create(repoPath, targetBranchRoot, baseBranch);
-        }
-      }
-    }
+    validation.spec.targetBranch = await resolveTargetBranch(
+      baseBranch, repoPath, validation.spec.targetBranch
+    );
     
     // Create the Plan
     const plan = ctx.PlanRunner.enqueue(validation.spec);
@@ -406,49 +434,44 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
       },
     };
   } catch (error: any) {
-    return {
-      success: false,
-      error: error.message,
-    };
+    return errorResult(error.message);
   }
 }
 
 /**
- * Create a single job (becomes a Plan with one node)
+ * Handle the `create_copilot_job` MCP tool call.
+ *
+ * Convenience wrapper that creates a Plan containing a single job node.
+ * Resolves base/target branches and delegates to {@link PlanRunner.enqueueJob}.
+ *
+ * @param args - Raw tool arguments matching the `create_copilot_job` input schema.
+ *               Must include `name` and `task`; other fields are optional.
+ * @param ctx  - Handler context providing {@link PlanRunner} and workspace path.
+ * @returns On success: `{ success: true, planId, nodeId, baseBranch, targetBranch, message }`.
+ *          On failure: `{ success: false, error }`.
+ *
+ * @example
+ * ```jsonc
+ * // MCP tools/call request
+ * {
+ *   "name": "create_copilot_job",
+ *   "arguments": { "name": "Lint", "task": "Run linter", "work": "npm run lint" }
+ * }
+ * ```
  */
 export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promise<any> {
   if (!args.name) {
-    return { success: false, error: 'Job must have a name' };
+    return errorResult('Job must have a name');
   }
   
   if (!args.task) {
-    return { success: false, error: 'Job must have a task' };
+    return errorResult('Job must have a task');
   }
   
   try {
     const repoPath = ctx.workspacePath;
-    
-    // Resolve base branch
-    const currentBranch = await git.branches.currentOrNull(repoPath);
-    const baseBranch = args.baseBranch || currentBranch || 'main';
-    
-    // Resolve target branch - create feature branch if starting from default
-    let targetBranch = args.targetBranch;
-    if (!targetBranch) {
-      const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
-        baseBranch,
-        repoPath,
-        'copilot_plan'
-      );
-      targetBranch = targetBranchRoot;
-      
-      if (needsCreation) {
-        const exists = await git.branches.exists(targetBranch, repoPath);
-        if (!exists) {
-          await git.branches.create(repoPath, targetBranch, baseBranch);
-        }
-      }
-    }
+    const baseBranch = await resolveBaseBranch(repoPath, args.baseBranch);
+    const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.targetBranch);
     
     const plan = ctx.PlanRunner.enqueueJob({
       name: args.name,
@@ -473,24 +496,27 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
       message: `Job '${args.name}' created. Base: ${plan.baseBranch}, Target: ${plan.targetBranch}. Use planId '${plan.id}' to monitor progress.`,
     };
   } catch (error: any) {
-    return {
-      success: false,
-      error: error.message,
-    };
+    return errorResult(error.message);
   }
 }
 
 /**
- * Get Plan status
+ * Handle the `get_copilot_plan_status` MCP tool call.
+ *
+ * Returns the overall plan status, per-node states, progress percentage,
+ * and timing information.
+ *
+ * @param args - Must contain `id` (Plan UUID).
+ * @param ctx  - Handler context.
+ * @returns Plan status object including `{ planId, status, progress, counts, nodes, ... }`.
  */
 export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): Promise<any> {
-  if (!args.id) {
-    return { success: false, error: 'Plan id is required' };
-  }
+  const fieldError = validateRequired(args, ['id']);
+  if (fieldError) return fieldError;
   
   const status = ctx.PlanRunner.getStatus(args.id);
   if (!status) {
-    return { success: false, error: `Plan not found: ${args.id}` };
+    return errorResult(`Plan not found: ${args.id}`);
   }
   
   const { plan, status: planStatus, counts, progress } = status;
@@ -535,7 +561,14 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
 }
 
 /**
- * List all Plans
+ * Handle the `list_copilot_plans` MCP tool call.
+ *
+ * Returns all plans, optionally filtered by status. Results are sorted
+ * newest-first by creation timestamp.
+ *
+ * @param args - Optional `status` filter (`pending | running | succeeded | failed | partial | canceled`).
+ * @param ctx  - Handler context.
+ * @returns `{ success: true, count, Plans: [...] }`.
  */
 export async function handleListPlans(args: any, ctx: PlanHandlerContext): Promise<any> {
   let Plans = ctx.PlanRunner.getAll();
@@ -573,21 +606,23 @@ export async function handleListPlans(args: any, ctx: PlanHandlerContext): Promi
 }
 
 /**
- * Get node details
+ * Handle the `get_copilot_node_details` MCP tool call.
+ *
+ * Returns detailed information about a single node including its
+ * dependencies, dependents, work specification, and execution state.
+ * The node can be looked up by UUID or by `producer_id`.
+ *
+ * @param args - Must contain `planId` and `nodeId` (UUID or producer_id).
+ * @param ctx  - Handler context.
+ * @returns Node details with `{ node, state }` sub-objects.
  */
 export async function handleGetNodeDetails(args: any, ctx: PlanHandlerContext): Promise<any> {
-  if (!args.planId) {
-    return { success: false, error: 'planId is required' };
-  }
+  const fieldError = validateRequired(args, ['planId', 'nodeId']);
+  if (fieldError) return fieldError;
   
-  if (!args.nodeId) {
-    return { success: false, error: 'nodeId is required' };
-  }
-  
-  const plan = ctx.PlanRunner.get(args.planId);
-  if (!plan) {
-    return { success: false, error: `Plan not found: ${args.planId}` };
-  }
+  const planResult = lookupPlan(ctx, args.planId);
+  if (isError(planResult)) return planResult;
+  const plan = planResult;
   
   // Try to find node by ID or producer_id
   let nodeId = args.nodeId;
@@ -600,7 +635,7 @@ export async function handleGetNodeDetails(args: any, ctx: PlanHandlerContext): 
   const state = plan.nodeStates.get(nodeId);
   
   if (!node || !state) {
-    return { success: false, error: `Node not found: ${args.nodeId}` };
+    return errorResult(`Node not found: ${args.nodeId}`);
   }
   
   return {
@@ -642,22 +677,26 @@ export async function handleGetNodeDetails(args: any, ctx: PlanHandlerContext): 
 }
 
 /**
- * Get node logs
+ * Handle the `get_copilot_node_logs` MCP tool call.
+ *
+ * Returns execution logs for a node, optionally filtered by execution
+ * phase (`prechecks`, `work`, `postchecks`, `commit`, or `all`).
+ *
+ * @param args - Must contain `planId` and `nodeId`. Optional `phase` filter.
+ * @param ctx  - Handler context.
+ * @returns `{ success, planId, nodeId, nodeName, phase, logs }`.
  */
 export async function handleGetNodeLogs(args: any, ctx: PlanHandlerContext): Promise<any> {
-  if (!args.planId || !args.nodeId) {
-    return { success: false, error: 'planId and nodeId are required' };
-  }
+  const fieldError = validateRequired(args, ['planId', 'nodeId']);
+  if (fieldError) return fieldError;
   
-  const plan = ctx.PlanRunner.get(args.planId);
-  if (!plan) {
-    return { success: false, error: `Plan not found: ${args.planId}` };
-  }
+  const planResult = lookupPlan(ctx, args.planId);
+  if (isError(planResult)) return planResult;
+  const plan = planResult;
   
-  const node = plan.nodes.get(args.nodeId);
-  if (!node) {
-    return { success: false, error: `Node not found: ${args.nodeId}` };
-  }
+  const nodeResult = lookupNode(plan, args.nodeId);
+  if (isError(nodeResult)) return nodeResult;
+  const { node } = nodeResult;
   
   const phase = args.phase || 'all';
   const logs = ctx.PlanRunner.getNodeLogs(args.planId, args.nodeId, phase);
@@ -673,28 +712,35 @@ export async function handleGetNodeLogs(args: any, ctx: PlanHandlerContext): Pro
 }
 
 /**
- * Get node attempts (with optional logs)
+ * Handle the `get_copilot_node_attempts` MCP tool call.
+ *
+ * Returns the execution attempt history for a node. Each attempt records
+ * status, timestamps, phase information, error details, and optionally
+ * the full execution logs.
+ *
+ * @param args - Must contain `planId` and `nodeId`. Optional `attemptNumber`
+ *               (1-based) to retrieve a single attempt, and `includeLogs`
+ *               to include raw log content.
+ * @param ctx  - Handler context.
+ * @returns `{ success, totalAttempts, attempts: [...] }`.
  */
 export async function handleGetNodeAttempts(args: any, ctx: PlanHandlerContext): Promise<any> {
-  if (!args.planId || !args.nodeId) {
-    return { success: false, error: 'planId and nodeId are required' };
-  }
+  const fieldError = validateRequired(args, ['planId', 'nodeId']);
+  if (fieldError) return fieldError;
   
-  const plan = ctx.PlanRunner.get(args.planId);
-  if (!plan) {
-    return { success: false, error: `Plan not found: ${args.planId}` };
-  }
+  const planResult = lookupPlan(ctx, args.planId);
+  if (isError(planResult)) return planResult;
+  const plan = planResult;
   
-  const node = plan.nodes.get(args.nodeId);
-  if (!node) {
-    return { success: false, error: `Node not found: ${args.nodeId}` };
-  }
+  const nodeResult = lookupNode(plan, args.nodeId);
+  if (isError(nodeResult)) return nodeResult;
+  const { node } = nodeResult;
   
   // Get specific attempt or all attempts
   if (args.attemptNumber) {
     const attempt = ctx.PlanRunner.getNodeAttempt(args.planId, args.nodeId, args.attemptNumber);
     if (!attempt) {
-      return { success: false, error: `Attempt ${args.attemptNumber} not found` };
+      return errorResult(`Attempt ${args.attemptNumber} not found`);
     }
     
     return {
@@ -725,12 +771,17 @@ export async function handleGetNodeAttempts(args: any, ctx: PlanHandlerContext):
 }
 
 /**
- * Cancel a Plan
+ * Handle the `cancel_copilot_plan` MCP tool call.
+ *
+ * Cancels a running plan and all of its in-progress or pending jobs.
+ *
+ * @param args - Must contain `id` (Plan UUID).
+ * @param ctx  - Handler context.
+ * @returns `{ success, message }`.
  */
 export async function handleCancelPlan(args: any, ctx: PlanHandlerContext): Promise<any> {
-  if (!args.id) {
-    return { success: false, error: 'Plan id is required' };
-  }
+  const fieldError = validateRequired(args, ['id']);
+  if (fieldError) return fieldError;
   
   const success = ctx.PlanRunner.cancel(args.id);
   
@@ -743,12 +794,17 @@ export async function handleCancelPlan(args: any, ctx: PlanHandlerContext): Prom
 }
 
 /**
- * Delete a Plan
+ * Handle the `delete_copilot_plan` MCP tool call.
+ *
+ * Permanently deletes a plan and its execution history.
+ *
+ * @param args - Must contain `id` (Plan UUID).
+ * @param ctx  - Handler context.
+ * @returns `{ success, message }`.
  */
 export async function handleDeletePlan(args: any, ctx: PlanHandlerContext): Promise<any> {
-  if (!args.id) {
-    return { success: false, error: 'Plan id is required' };
-  }
+  const fieldError = validateRequired(args, ['id']);
+  if (fieldError) return fieldError;
   
   const success = ctx.PlanRunner.delete(args.id);
   
@@ -761,17 +817,36 @@ export async function handleDeletePlan(args: any, ctx: PlanHandlerContext): Prom
 }
 
 /**
- * Retry failed nodes in a Plan
+ * Handle the `retry_copilot_plan` MCP tool call.
+ *
+ * Resets failed nodes back to `ready` state and resumes plan execution.
+ * Can retry all failed nodes (default) or a specific subset identified
+ * by `nodeIds`.  An optional `newWork` spec replaces the original work
+ * for the retried nodes.
+ *
+ * @param args - Must contain `id`. Optional `nodeIds`, `newWork`, `clearWorktree`.
+ * @param ctx  - Handler context.
+ * @returns `{ success, retriedNodes, errors }`.
+ *
+ * @example
+ * ```jsonc
+ * // Retry all failed nodes with replacement work
+ * {
+ *   "name": "retry_copilot_plan",
+ *   "arguments": {
+ *     "id": "plan-uuid",
+ *     "newWork": "@agent Fix the build errors"
+ *   }
+ * }
+ * ```
  */
 export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promise<any> {
-  if (!args.id) {
-    return { success: false, error: 'Plan id is required' };
-  }
+  const fieldError = validateRequired(args, ['id']);
+  if (fieldError) return fieldError;
   
-  const plan = ctx.PlanRunner.getPlan(args.id);
-  if (!plan) {
-    return { success: false, error: `Plan ${args.id} not found` };
-  }
+  const planResult = lookupPlan(ctx, args.id, 'getPlan');
+  if (isError(planResult)) return planResult;
+  const plan = planResult;
   
   // Determine which nodes to retry
   let nodeIdsToRetry: string[] = args.nodeIds || [];
@@ -787,8 +862,7 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   
   if (nodeIdsToRetry.length === 0) {
     return { 
-      success: false, 
-      error: 'No failed nodes to retry',
+      ...errorResult('No failed nodes to retry'),
       planId: args.id,
     };
   }
@@ -829,20 +903,24 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
 }
 
 /**
- * Get failure context for a failed node
+ * Handle the `get_copilot_plan_node_failure_context` MCP tool call.
+ *
+ * Returns diagnostic information for a failed node: the failed execution
+ * phase, error message, Copilot session ID (for agent work), worktree
+ * path, and execution logs from the last attempt.
+ *
+ * @param args - Must contain `planId` and `nodeId`.
+ * @param ctx  - Handler context.
+ * @returns Failure context object or `{ success: false, error }`.
  */
 export async function handleGetNodeFailureContext(args: any, ctx: PlanHandlerContext): Promise<any> {
-  if (!args.planId) {
-    return { success: false, error: 'planId is required' };
-  }
-  if (!args.nodeId) {
-    return { success: false, error: 'nodeId is required' };
-  }
+  const fieldError = validateRequired(args, ['planId', 'nodeId']);
+  if (fieldError) return fieldError;
   
   const result = ctx.PlanRunner.getNodeFailureContext(args.planId, args.nodeId);
   
   if ('error' in result) {
-    return { success: false, error: result.error };
+    return errorResult(result.error);
   }
   
   const plan = ctx.PlanRunner.getPlan(args.planId);
@@ -863,44 +941,47 @@ export async function handleGetNodeFailureContext(args: any, ctx: PlanHandlerCon
 }
 
 /**
- * Retry a specific node in a Plan
+ * Handle the `retry_copilot_plan_node` MCP tool call.
+ *
+ * Retries a single failed node in a plan. This is a convenience wrapper
+ * around the multi-node retry logic. The node must be in `failed` state.
+ *
+ * Recommended workflow:
+ * 1. Call `get_copilot_plan_node_failure_context` to analyse the failure.
+ * 2. Call this handler with optional `newWork` to replace the original work.
+ * 3. Monitor progress with `get_copilot_plan_status`.
+ *
+ * @param args - Must contain `planId` and `nodeId`. Optional `newWork`, `clearWorktree`.
+ * @param ctx  - Handler context.
+ * @returns `{ success, message, planId, nodeId, nodeName, hasNewWork, clearWorktree }`.
  */
 export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): Promise<any> {
-  if (!args.planId) {
-    return { success: false, error: 'planId is required' };
-  }
-  if (!args.nodeId) {
-    return { success: false, error: 'nodeId is required' };
-  }
+  const fieldError = validateRequired(args, ['planId', 'nodeId']);
+  if (fieldError) return fieldError;
   
-  const plan = ctx.PlanRunner.getPlan(args.planId);
-  if (!plan) {
-    return { success: false, error: `Plan ${args.planId} not found` };
-  }
+  const planResult = lookupPlan(ctx, args.planId, 'getPlan');
+  if (isError(planResult)) return planResult;
+  const plan = planResult;
   
-  const node = plan.nodes.get(args.nodeId);
-  if (!node) {
-    return { success: false, error: `Node ${args.nodeId} not found in Plan ${args.planId}` };
-  }
+  const nodeResult = lookupNode(plan, args.nodeId);
+  if (isError(nodeResult)) return nodeResult;
+  const { node, state } = nodeResult;
   
-  const state = plan.nodeStates.get(args.nodeId);
   if (!state || state.status !== 'failed') {
-    return { 
-      success: false, 
-      error: `Node ${args.nodeId} is not in failed state (current: ${state?.status || 'unknown'})` 
-    };
+    return errorResult(
+      `Node ${args.nodeId} is not in failed state (current: ${state?.status || 'unknown'})`
+    );
   }
   
   // Build retry options from args
-  const retryOptions = {
-    newWork: args.newWork,
+  const retryOptions = {    newWork: args.newWork,
     clearWorktree: args.clearWorktree || false,
   };
   
   const result = ctx.PlanRunner.retryNode(args.planId, args.nodeId, retryOptions);
   
   if (!result.success) {
-    return { success: false, error: result.error };
+    return errorResult(result.error || 'Retry failed');
   }
   
   // Resume the Plan if it was stopped

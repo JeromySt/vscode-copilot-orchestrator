@@ -13,40 +13,52 @@ import * as vscode from 'vscode';
 
 /**
  * Configuration for the MCP Definition Provider.
+ *
+ * Mirrors the relevant subset of the extension's `copilotOrchestrator.mcp.*`
+ * settings.
  */
 export interface McpDefinitionProviderConfig {
-  /** Host the MCP server runs on */
+  /** Hostname the HTTP/MCP server binds to (e.g. `"localhost"`). */
   host: string;
-  /** Port the MCP server listens on */
+  /** TCP port the HTTP/MCP server listens on (default `39219`). */
   port: number;
-  /** Workspace path for the MCP server */
+  /** Absolute path to the workspace root, used for display purposes. */
   workspacePath?: string;
 }
 
 /**
- * Event emitter for server definition changes.
+ * Event emitter fired when the MCP server definition changes
+ * (e.g. settings update, server start/stop).
+ *
+ * VS Code listens to this event to re-query
+ * {@link vscode.McpServerDefinitionProvider.provideMcpServerDefinitions}.
  */
 const serverChangedEmitter = new vscode.EventEmitter<void>();
 
-/**
- * Current configuration - updated when settings change.
- */
+/** Current provider configuration, updated on settings changes. */
 let currentConfig: McpDefinitionProviderConfig | undefined;
 
-/**
- * Flag indicating if the MCP server is enabled.
- */
+/** Whether the MCP server feature is enabled in user settings. */
 let isEnabled = true;
 
 /**
- * Creates and registers the MCP Server Definition Provider.
- * 
- * This enables VS Code to automatically discover and use the
- * Copilot Orchestrator MCP server without manual configuration.
- * 
- * @param context - VS Code extension context
- * @param config - Initial MCP server configuration
- * @returns Disposable to unregister the provider
+ * Create and register the MCP Server Definition Provider with VS Code.
+ *
+ * This enables VS Code (1.99+) to automatically discover the Copilot
+ * Orchestrator's MCP server and make it available to GitHub Copilot Chat
+ * without manual configuration in `.vscode/mcp.json`.
+ *
+ * The provider uses the **HTTP transport** — the extension serves the MCP
+ * endpoint directly at `http://<host>:<port>/mcp`.
+ *
+ * The registration also watches for `copilotOrchestrator.mcp.*` settings
+ * changes and fires {@link serverChangedEmitter} to notify VS Code.
+ *
+ * @param context - VS Code extension context (for subscriptions & extension info).
+ * @param config  - Initial MCP server configuration.
+ * @returns A composite {@link vscode.Disposable} that unregisters the provider
+ *          and stops watching settings.  Returns a no-op disposable if the
+ *          VS Code API is not available.
  */
 export function registerMcpDefinitionProvider(
   context: vscode.ExtensionContext,
@@ -141,16 +153,22 @@ export function registerMcpDefinitionProvider(
 }
 
 /**
- * Notifies VS Code that the MCP server availability has changed.
- * Call this when the server starts or stops.
+ * Notify VS Code that the MCP server availability has changed.
+ *
+ * Call this whenever the server starts, stops, or changes configuration
+ * so that VS Code re-queries the provider for updated definitions.
  */
 export function notifyServerChanged(): void {
   serverChangedEmitter.fire();
 }
 
 /**
- * Updates the enabled state of the MCP server.
- * @param enabled - Whether the server should be available
+ * Programmatically update the enabled state of the MCP server definition.
+ *
+ * Fires a change notification only if the state actually changes, causing
+ * VS Code to re-query the provider.
+ *
+ * @param enabled - `true` to advertise the server, `false` to hide it.
  */
 export function setMcpServerEnabled(enabled: boolean): void {
   if (isEnabled !== enabled) {
