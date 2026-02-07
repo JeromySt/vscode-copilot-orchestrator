@@ -1220,8 +1220,9 @@ export class PlanRunner extends EventEmitter {
         }
       }
       
-      // Create worktree path (use path.join for cross-platform compatibility)
-      const worktreePath = path.join(plan.worktreeRoot, node.producerId);
+      // Create worktree path using node UUID (flat structure, no nesting)
+      // This avoids nested directories from group paths and simplifies cleanup
+      const worktreePath = path.join(plan.worktreeRoot, node.id);
       
       // Store in state (no branchName since we use detached HEAD)
       nodeState.worktreePath = worktreePath;
