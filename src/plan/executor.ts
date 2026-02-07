@@ -116,8 +116,21 @@ export class DefaultJobExecutor implements JobExecutor {
     this.executionLogs.set(executionKey, []);
     
     // Track per-phase statuses and captured session ID
-    const stepStatuses: JobExecutionResult['stepStatuses'] = {};
+    // Start with previous statuses if resuming from a failed phase
+    const stepStatuses: JobExecutionResult['stepStatuses'] = context.previousStepStatuses 
+      ? { ...context.previousStepStatuses } 
+      : {};
     let capturedSessionId: string | undefined = context.copilotSessionId;
+    
+    // Determine which phases to skip based on resumeFromPhase
+    const phaseOrder = ['prechecks', 'work', 'postchecks', 'commit'] as const;
+    const resumeIndex = context.resumeFromPhase 
+      ? phaseOrder.indexOf(context.resumeFromPhase as any)
+      : 0;
+    const shouldSkipPhase = (phase: typeof phaseOrder[number]) => {
+      const phaseIndex = phaseOrder.indexOf(phase);
+      return phaseIndex < resumeIndex;
+    };
     
     try {
       // Ensure worktree exists
@@ -130,8 +143,11 @@ export class DefaultJobExecutor implements JobExecutor {
         };
       }
       
-      // Run prechecks
-      if (node.prechecks) {
+      // Run prechecks (skip if resuming from later phase)
+      if (shouldSkipPhase('prechecks')) {
+        this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION (SKIPPED - RESUMING) ==========');
+        // stepStatuses.prechecks already preserved from previousStepStatuses
+      } else if (node.prechecks) {
         context.onProgress?.('Running prechecks');
         this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION START ==========');
         
@@ -166,8 +182,11 @@ export class DefaultJobExecutor implements JobExecutor {
         return { success: false, error: 'Execution canceled', stepStatuses };
       }
       
-      // Run main work
-      if (node.work) {
+      // Run main work (skip if resuming from later phase)
+      if (shouldSkipPhase('work')) {
+        this.logInfo(executionKey, 'work', '========== WORK SECTION (SKIPPED - RESUMING) ==========');
+        // stepStatuses.work already preserved from previousStepStatuses
+      } else if (node.work) {
         context.onProgress?.('Running work');
         this.logInfo(executionKey, 'work', '========== WORK SECTION START ==========');
         
@@ -214,8 +233,11 @@ export class DefaultJobExecutor implements JobExecutor {
         return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
       }
       
-      // Run postchecks
-      if (node.postchecks) {
+      // Run postchecks (skip if resuming from later phase)
+      if (shouldSkipPhase('postchecks')) {
+        this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION (SKIPPED - RESUMING) ==========');
+        // stepStatuses.postchecks already preserved from previousStepStatuses
+      } else if (node.postchecks) {
         context.onProgress?.('Running postchecks');
         this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION START ==========');
         

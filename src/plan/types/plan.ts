@@ -129,6 +129,13 @@ export interface NodeExecutionState {
   copilotSessionId?: string;
   
   /**
+   * Phase to resume from on retry.
+   * Set when a node fails and is retried - allows skipping already-completed phases.
+   * Cleared when new work is provided or worktree is reset.
+   */
+  resumeFromPhase?: 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
+  
+  /**
    * Details about the last execution attempt (for retry context).
    */
   lastAttempt?: {
@@ -394,6 +401,17 @@ export interface ExecutionContext {
   
   /** Existing Copilot session ID to resume (from previous attempt) */
   copilotSessionId?: string;
+  
+  /** Phase to resume from on retry (skip phases before this) */
+  resumeFromPhase?: 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
+  
+  /** Previous step statuses to preserve (from failed attempt) */
+  previousStepStatuses?: {
+    prechecks?: PhaseStatus;
+    work?: PhaseStatus;
+    commit?: PhaseStatus;
+    postchecks?: PhaseStatus;
+  };
 }
 
 // ============================================================================
