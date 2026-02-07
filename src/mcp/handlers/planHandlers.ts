@@ -112,6 +112,14 @@ function validateGroupsRecursively(
       continue;
     }
     
+    // Reject unknown properties on groups (especially 'dependencies')
+    const allowedGroupProps = new Set(['name', 'jobs', 'groups']);
+    for (const key of Object.keys(group)) {
+      if (!allowedGroupProps.has(key)) {
+        errors.push(`Group '${currentPath}' has unknown property '${key}'. Groups only support: name, jobs, groups. Dependencies must be specified on individual jobs.`);
+      }
+    }
+    
     // Validate jobs in this group
     for (let j = 0; j < (group.jobs || []).length; j++) {
       const job = group.jobs[j];
