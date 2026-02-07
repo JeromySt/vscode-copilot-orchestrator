@@ -121,10 +121,10 @@ export class McpHandler {
           return this.handleInitializedNotification(request);
 
         case 'tools/list':
-          return this.handleToolsList(request);
+          return await this.handleToolsList(request);
 
         case 'tools/call':
-          return this.handleToolsCall(request);
+          return await this.handleToolsCall(request);
 
         default:
           log.warn('Unknown method', { method: request.method });

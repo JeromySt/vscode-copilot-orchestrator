@@ -108,7 +108,7 @@ export function lookupPlan(
  * @returns `true` if the value is `{ success: false, error: string }`.
  */
 export function isError(value: any): value is ErrorResult {
-  return value && value.success === false && typeof value.error === 'string';
+  return !!(value && value.success === false && typeof value.error === 'string');
 }
 
 /**

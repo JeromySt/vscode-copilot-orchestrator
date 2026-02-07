@@ -18,6 +18,28 @@ import { EventEmitter } from 'events';
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Check if cp.spawn can be stubbed by sinon.
+ * In some Node.js environments, spawn is non-configurable and cannot be stubbed.
+ * We try to stub it once to check.
+ */
+function canStubSpawn(): boolean {
+  try {
+    const stub = sinon.stub(cp, 'spawn');
+    stub.restore();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Flag indicating if spawn can be stubbed in this environment */
+const spawnStubbable = canStubSpawn();
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 /** Suppress Logger console output to avoid hanging test workers. */
 function silenceConsole(): { restore: () => void } {
   const origLog = console.log;
@@ -82,14 +104,18 @@ function fakeErrorProc(err: Error = new Error('spawn ENOENT')): cp.ChildProcess 
 // cliCheckCore tests
 // ---------------------------------------------------------------------------
 
-suite('Agent CLI Check Core', () => {
+suite('Agent CLI Check Core', function() {
   let spawnStub: sinon.SinonStub;
   let quiet: { restore: () => void };
 
   // We need fresh module state for each test because cliCheckCore caches results
   let cliCheckCore: typeof import('../../../agent/cliCheckCore');
 
-  setup(() => {
+  setup(function() {
+    if (!spawnStubbable) {
+      this.skip();
+      return;
+    }
     quiet = silenceConsole();
     spawnStub = sinon.stub(cp, 'spawn');
 
@@ -101,7 +127,7 @@ suite('Agent CLI Check Core', () => {
 
   teardown(() => {
     sinon.restore();
-    quiet.restore();
+    if (quiet) quiet.restore();
   });
 
   // =========================================================================
@@ -672,10 +698,14 @@ suite('AgentDelegator', () => {
   // delegateViaCopilot (when CLI is available)
   // =========================================================================
 
-  suite('delegateViaCopilot()', () => {
+  suite('delegateViaCopilot()', function() {
     let spawnStub: sinon.SinonStub;
 
-    setup(() => {
+    setup(function() {
+      if (!spawnStubbable) {
+        this.skip();
+        return;
+      }
       const fs = require('fs');
       sinon.stub(fs, 'writeFileSync');
       sinon.stub(fs, 'mkdirSync');

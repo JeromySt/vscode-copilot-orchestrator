@@ -456,8 +456,12 @@ suite('HTTP Server - URL Parsing Edge Cases', () => {
   });
 
   test('should handle empty path segments', () => {
+    // When path starts with //, the URL parser treats it as a protocol-relative URL
+    // where the part after // becomes the host. So //api///path means host=api, path=///path
     const url = new URL('//api///path', 'http://localhost:3000');
-    assert.strictEqual(url.pathname, '//api///path');
+    // The actual behavior: api becomes the host, ///path is the pathname
+    assert.strictEqual(url.host, 'api');
+    assert.strictEqual(url.pathname, '///path');
   });
 
   test('should handle URL with port in host header', () => {

@@ -181,7 +181,13 @@ suite('McpHandler', () => {
 
       const res = await h.handleRequest(makeRequest('tools/call', {
         name: 'create_copilot_job',
-        arguments: { name: 'Test Job', task: 'Do something', work: 'echo ok' },
+        arguments: { 
+          name: 'Test Job', 
+          task: 'Do something', 
+          work: 'echo ok',
+          baseBranch: 'main',       // Provide explicit branch to skip git resolution
+          targetBranch: 'feature/test',  // Provide explicit branch to skip git resolution
+        },
       }));
 
       assert.ok(res.result);
