@@ -11,7 +11,6 @@ import {
   JobNodeSpec, 
   GroupSpec,
 } from '../../plan/types';
-import { PRODUCER_ID_PATTERN } from '../tools/planTools';
 import {
   PlanHandlerContext,
   errorResult,
@@ -88,7 +87,13 @@ function flattenGroupsToJobs(
 }
 
 /**
- * Validate groups recursively for structure and references.
+ * Validate groups recursively for dependency references.
+ * 
+ * Note: Schema validation (required fields, unknown properties, patterns)
+ * is handled by Ajv in the MCP handler layer. This function only validates
+ * business logic that requires semantic understanding:
+ * - Dependency references resolve to valid producer_ids
+ * - No self-referential dependencies
  * 
  * @param groups - Array of groups to validate
  * @param groupPath - Current group path for error messages
@@ -105,72 +110,16 @@ function validateGroupsRecursively(
   
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i];
-    const currentPath = groupPath ? `${groupPath}/${group.name || `group[${i}]`}` : (group.name || `group[${i}]`);
+    if (!group.name) continue; // Schema validation catches this
     
-    if (!group.name) {
-      errors.push(`Group at index ${i}${groupPath ? ` in ${groupPath}` : ''} is missing required 'name' field`);
-      continue;
-    }
+    const currentPath = groupPath ? `${groupPath}/${group.name}` : group.name;
     
-    // Reject unknown properties on groups (especially 'dependencies')
-    const allowedGroupProps = new Set(['name', 'jobs', 'groups']);
-    for (const key of Object.keys(group)) {
-      if (!allowedGroupProps.has(key)) {
-        errors.push(`Group '${currentPath}' has unknown property '${key}'. Groups only support: name, jobs, groups. Dependencies must be specified on individual jobs.`);
-      }
-    }
-    
-    // Validate jobs in this group
-    const allowedJobProps = new Set([
-      'producer_id', 'name', 'task', 'work', 'dependencies',
-      'prechecks', 'postchecks', 'instructions', 'baseBranch',
-      'expects_no_changes', 'group'
-    ]);
-    
+    // Validate job dependencies in this group
     for (let j = 0; j < (group.jobs || []).length; j++) {
       const job = group.jobs[j];
-      const qualifiedId = `${currentPath}/${job.producer_id || `job[${j}]`}`;
+      if (!job.producer_id) continue; // Schema validation catches this
       
-      // Check for group-like structures in jobs array (common mistake)
-      if (job.type === 'group') {
-        errors.push(
-          `Item '${qualifiedId}' has type: "group" but is in a 'jobs' array. ` +
-          `Use nested 'groups' array for subgroups, not 'jobs' with type: "group".`
-        );
-        continue;
-      }
-      
-      if (Array.isArray(job.jobs)) {
-        errors.push(
-          `Job '${qualifiedId}' has a nested 'jobs' array. ` +
-          `Jobs cannot contain other jobs. Use 'groups' for hierarchical organization.`
-        );
-        continue;
-      }
-      
-      // Check for unknown properties on jobs
-      for (const key of Object.keys(job)) {
-        if (!allowedJobProps.has(key)) {
-          errors.push(
-            `Job '${qualifiedId}' has unknown property '${key}'. ` +
-            `Allowed: ${[...allowedJobProps].join(', ')}`
-          );
-        }
-      }
-      
-      if (!job.producer_id) {
-        errors.push(`Job at index ${j} in group '${currentPath}' is missing required 'producer_id' field`);
-        continue;
-      }
-      
-      if (!PRODUCER_ID_PATTERN.test(job.producer_id)) {
-        errors.push(`Job '${job.producer_id}' in '${currentPath}' has invalid producer_id format`);
-        continue;
-      }
-      
-      if (!job.task) {
-        errors.push(`Job '${job.producer_id}' in '${currentPath}' is missing required 'task' field`);
-      }
+      const qualifiedId = `${currentPath}/${job.producer_id}`;
       
       // Check dependencies resolve
       if (Array.isArray(job.dependencies)) {
@@ -217,108 +166,28 @@ function collectGroupProducerIds(groups: any[] | undefined, groupPath: string, i
 /**
  * Validate and transform raw `create_copilot_plan` input into a {@link PlanSpec}.
  *
- * Performs comprehensive validation:
- * 1. Ensures required fields (`name`, `jobs`) are present.
- * 2. Validates every `producer_id` against {@link PRODUCER_ID_PATTERN}.
- * 3. Checks for duplicate `producer_id` values (globally qualified).
- * 4. Verifies dependency references resolve to known producer IDs.
- * 5. Detects self-referential dependencies.
- * 6. Flattens groups into qualified jobs.
+ * Note: Schema validation (required fields, allowed properties, patterns) is
+ * handled by Ajv in the MCP handler layer. This function performs:
+ * 1. Semantic validation (dependency resolution, duplicate detection)
+ * 2. Transformation to internal PlanSpec format
+ * 3. Group flattening
  *
- * @param args - Raw arguments from the `tools/call` request.
+ * @param args - Raw arguments from the `tools/call` request (already schema-validated).
  * @returns `{ valid: true, spec }` on success, or `{ valid: false, error }` on failure.
  */
 function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: PlanSpec } {
-  // Name is required
-  if (!args.name || typeof args.name !== 'string') {
-    return { valid: false, error: 'Plan must have a name' };
-  }
-  
-  // Jobs array is required (can be empty if groups provide jobs)
-  const hasRootJobs = args.jobs && Array.isArray(args.jobs) && args.jobs.length > 0;
-  const hasGroups = args.groups && Array.isArray(args.groups) && args.groups.length > 0;
-  
-  if (!hasRootJobs && !hasGroups) {
-    return { valid: false, error: 'Plan must have at least one job (in jobs array or groups)' };
-  }
-  
   // Collect all producer_ids for reference validation
   const allProducerIds = new Set<string>();
   const errors: string[] = [];
   
-  // Allowed properties for job items
-  const allowedJobProps = new Set([
-    'producer_id', 'name', 'task', 'work', 'dependencies',
-    'prechecks', 'postchecks', 'instructions', 'baseBranch',
-    'expects_no_changes', 'group'
-  ]);
-  
-  // Validate each job at root level
-  for (let i = 0; i < (args.jobs || []).length; i++) {
-    const job = args.jobs[i];
-    
-    // Check for group-like structures in jobs array (common mistake)
-    if (job.type === 'group') {
-      errors.push(
-        `Item at jobs[${i}] has type: "group" but is in the 'jobs' array. ` +
-        `Groups must be in the 'groups' array, not 'jobs'. ` +
-        `Move this item to "groups" instead.`
-      );
-      continue;
-    }
-    
-    if (Array.isArray(job.jobs)) {
-      errors.push(
-        `Item at jobs[${i}] (producer_id: '${job.producer_id || 'unset'}') has a nested 'jobs' array. ` +
-        `Jobs cannot contain other jobs - this looks like a group structure. ` +
-        `Use the 'groups' array for hierarchical organization, not 'jobs'.`
-      );
-      continue;
-    }
-    
-    if (Array.isArray(job.groups)) {
-      errors.push(
-        `Item at jobs[${i}] (producer_id: '${job.producer_id || 'unset'}') has a 'groups' array. ` +
-        `Jobs cannot contain groups. Move this structure to the root 'groups' array.`
-      );
-      continue;
-    }
-    
-    // Check for unknown properties on jobs
-    for (const key of Object.keys(job)) {
-      if (!allowedJobProps.has(key)) {
-        errors.push(
-          `Job '${job.producer_id || `jobs[${i}]`}' has unknown property '${key}'. ` +
-          `Allowed job properties: ${[...allowedJobProps].join(', ')}`
-        );
-      }
-    }
-    
-    if (!job.producer_id) {
-      errors.push(`Job at index ${i} is missing required 'producer_id' field`);
-      continue;
-    }
-    
-    if (!PRODUCER_ID_PATTERN.test(job.producer_id)) {
-      errors.push(
-        `Job '${job.producer_id}' has invalid producer_id format. ` +
-        `Must be 3-64 characters, lowercase letters, numbers, and hyphens only.`
-      );
-      continue;
-    }
+  // Collect root job producer_ids and check for duplicates
+  for (const job of args.jobs || []) {
+    if (!job.producer_id) continue; // Schema validation catches this
     
     if (allProducerIds.has(job.producer_id)) {
       errors.push(`Duplicate producer_id: '${job.producer_id}'`);
-      continue;
-    }
-    allProducerIds.add(job.producer_id);
-    
-    if (!job.task) {
-      errors.push(`Job '${job.producer_id}' is missing required 'task' field`);
-    }
-    
-    if (!Array.isArray(job.dependencies)) {
-      errors.push(`Job '${job.producer_id}' must have a 'dependencies' array (use [] for root jobs)`);
+    } else {
+      allProducerIds.add(job.producer_id);
     }
   }
   
@@ -327,7 +196,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
   
   // Validate root-level job dependencies
   for (const job of args.jobs || []) {
-    if (!Array.isArray(job.dependencies)) continue;
+    if (!job.producer_id || !Array.isArray(job.dependencies)) continue;
     
     for (const dep of job.dependencies) {
       if (!allProducerIds.has(dep)) {
@@ -342,7 +211,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
     }
   }
   
-  // Validate groups structure and references
+  // Validate group job dependencies
   validateGroupsRecursively(args.groups, '', allProducerIds, errors);
   
   if (errors.length > 0) {

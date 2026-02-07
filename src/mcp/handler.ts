@@ -17,6 +17,7 @@ import { JsonRpcRequest, JsonRpcResponse } from './types';
 import { IMcpRequestRouter } from '../interfaces/IMcpManager';
 import { getPlanToolDefinitions } from './tools/planTools';
 import { getNodeToolDefinitions } from './tools/nodeTools';
+import { validateInput, hasSchema } from './validation';
 import {
   PlanHandlerContext,
   handleCreatePlan,
@@ -198,11 +199,27 @@ export class McpHandler implements IMcpRequestRouter {
    * Routes the call to the matching plan handler based on the tool `name`.
    * The handler result is wrapped in an MCP `content` array with a single
    * `text` item containing the JSON-serialised result.
+   * 
+   * All input is validated against JSON schemas before processing.
    */
   private async handleToolsCall(request: JsonRpcRequest): Promise<JsonRpcResponse> {
     const { name, arguments: args } = request.params || {};
     log.info('Tool call', { tool: name });
     log.debug('Tool call arguments', { tool: name, args });
+    
+    // Validate input against JSON schema before processing
+    if (hasSchema(name)) {
+      const validation = validateInput(name, args || {});
+      if (!validation.valid) {
+        log.warn('Schema validation failed', { tool: name, error: validation.error });
+        return this.successResponse(request.id, {
+          content: [{ type: 'text', text: JSON.stringify({ 
+            success: false, 
+            error: validation.error 
+          }) }]
+        });
+      }
+    }
     
     let result: any;
     

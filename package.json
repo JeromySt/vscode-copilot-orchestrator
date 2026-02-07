@@ -125,7 +125,10 @@
         },
         "copilotOrchestrator.mcp.transport": {
           "type": "string",
-          "enum": ["stdio", "http"],
+          "enum": [
+            "stdio",
+            "http"
+          ],
           "default": "http",
           "description": "Transport for MCP communication. 'stdio' uses a child process managed by VS Code (no port needed). 'http' uses the built-in HTTP server."
         },
@@ -253,6 +256,7 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
+    "ajv": "^8.17.1",
     "micromatch": "^4.0.5",
     "uuid": "^9.0.0"
   }
