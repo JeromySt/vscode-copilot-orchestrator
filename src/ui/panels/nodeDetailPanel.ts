@@ -1220,27 +1220,26 @@ export class NodeDetailPanel {
     }
     
     // Build cards in reverse order (latest first)
-    const cards = attempts.slice().reverse().map((attempt, reverseIdx) => {
-      const isLatest = reverseIdx === 0;
+    const cards = attempts.slice().reverse().map((attempt, _reverseIdx) => {
+      // All attempt cards start collapsed
       const duration = formatDuration(Math.round((attempt.endedAt - attempt.startedAt) / 1000));
       const timestamp = new Date(attempt.startedAt).toLocaleString();
       
-      // Step indicators
-      const stepDot = (status?: string): string => {
-        const map: Record<string, string> = {
-          'success': '<span class="step-dot success">●</span>',
-          'failed': '<span class="step-dot failed">●</span>',
-          'running': '<span class="step-dot running">●</span>',
-          'skipped': '<span class="step-dot skipped">○</span>',
-        };
-        return map[status || ''] || '<span class="step-dot pending">○</span>';
+      // Step indicators - use same icons as main execution section
+      const stepIcon = (status?: string): string => {
+        const icon = status === 'success' ? '✓' 
+          : status === 'failed' ? '✗'
+          : status === 'running' ? '⟳'
+          : status === 'skipped' ? '⊘'
+          : '○';
+        return `<span class="step-icon ${status || 'pending'}">${icon}</span>`;
       };
       
       const stepIndicators = `
-        ${stepDot(attempt.stepStatuses?.prechecks)}
-        ${stepDot(attempt.stepStatuses?.work)}
-        ${stepDot(attempt.stepStatuses?.commit)}
-        ${stepDot(attempt.stepStatuses?.postchecks)}
+        ${stepIcon(attempt.stepStatuses?.prechecks)}
+        ${stepIcon(attempt.stepStatuses?.work)}
+        ${stepIcon(attempt.stepStatuses?.commit)}
+        ${stepIcon(attempt.stepStatuses?.postchecks)}
       `;
       
       const sessionHtml = attempt.copilotSessionId
@@ -1268,17 +1267,17 @@ export class NodeDetailPanel {
       const phaseTabsHtml = attempt.logs ? this._buildAttemptPhaseTabs(attempt) : '';
       
       return `
-        <div class="attempt-card ${isLatest ? 'active' : ''}" data-attempt="${attempt.attemptNumber}">
-          <div class="attempt-header" data-expanded="${isLatest}">
+        <div class="attempt-card" data-attempt="${attempt.attemptNumber}">
+          <div class="attempt-header" data-expanded="false">
             <div class="attempt-header-left">
               <span class="attempt-badge">#${attempt.attemptNumber}</span>
               <span class="step-indicators">${stepIndicators}</span>
               <span class="attempt-time">${timestamp}</span>
               <span class="attempt-duration">(${duration})</span>
             </div>
-            <span class="chevron ${isLatest ? 'expanded' : ''}">${isLatest ? '▼' : '▶'}</span>
+            <span class="chevron">▶</span>
           </div>
-          <div class="attempt-body" style="display: ${isLatest ? 'block' : 'none'};">
+          <div class="attempt-body" style="display: none;">
             <div class="attempt-meta">
               <div class="attempt-meta-row"><strong>Status:</strong> <span class="status-${attempt.status}">${attempt.status}</span></div>
               ${sessionHtml}
@@ -1981,12 +1980,12 @@ export class NodeDetailPanel {
       display: flex;
       gap: 4px;
     }
-    .step-dot { font-size: 14px; }
-    .step-dot.success { color: var(--vscode-testing-iconPassed); }
-    .step-dot.failed { color: var(--vscode-errorForeground); }
-    .step-dot.skipped { color: #808080; }
-    .step-dot.pending { color: var(--vscode-descriptionForeground); opacity: 0.5; }
-    .step-dot.running { color: #7DD3FC; animation: pulse-dot 1.5s ease-in-out infinite; }
+    .step-dot, .step-icon { font-size: 14px; }
+    .step-dot.success, .step-icon.success { color: var(--vscode-testing-iconPassed); }
+    .step-dot.failed, .step-icon.failed { color: var(--vscode-errorForeground); }
+    .step-dot.skipped, .step-icon.skipped { color: #808080; }
+    .step-dot.pending, .step-icon.pending { color: var(--vscode-descriptionForeground); opacity: 0.5; }
+    .step-dot.running, .step-icon.running { color: #7DD3FC; animation: pulse-dot 1.5s ease-in-out infinite; }
     @keyframes pulse-dot {
       0%, 100% { opacity: 0.4; transform: scale(1); }
       50% { opacity: 1; transform: scale(1.2); }

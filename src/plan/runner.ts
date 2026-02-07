@@ -1433,6 +1433,14 @@ export class PlanRunner extends EventEmitter {
         this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
         
         log.info(`Merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
+      } else if (isLeaf && plan.targetBranch && !nodeState.completedCommit) {
+        // Leaf node with no commit (e.g., expectsNoChanges) - nothing to merge to target
+        // Mark as "merged" so worktree cleanup can proceed
+        log.debug(`Leaf node ${node.name} has no commit to merge to ${plan.targetBranch} - marking as merged`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION ==========');
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', 'No commit to merge (expectsNoChanges or validation-only node)');
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '==========================================');
+        nodeState.mergedToTarget = true;
       } else if (isLeaf) {
         log.debug(`Skipping merge: isLeaf=${isLeaf}, hasTargetBranch=${!!plan.targetBranch}, hasCompletedCommit=${!!nodeState.completedCommit}`);
       }
