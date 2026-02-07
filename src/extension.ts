@@ -78,6 +78,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     : config.http;
   mcpManager = initializeMcpServer(context, httpConfigWithActualPort, config.mcp);
 
+  // ── Port change detection ──────────────────────────────────────────────
+  // If port changed from last startup, prompt user to enable MCP server
+  if (actualPort !== undefined) {
+    const LAST_PORT_KEY = 'mcpServerLastPort';
+    const lastPort = context.globalState.get<number>(LAST_PORT_KEY);
+    
+    if (lastPort !== undefined && lastPort !== actualPort) {
+      extLog.info(`MCP port changed: ${lastPort} → ${actualPort}`);
+      vscode.window.showWarningMessage(
+        `MCP server port changed to ${actualPort} (was ${lastPort}). You may need to re-enable the server in the MCP Servers panel.`,
+        'Open MCP Servers'
+      ).then(choice => {
+        if (choice === 'Open MCP Servers') {
+          vscode.commands.executeCommand('workbench.action.chat.listMcpServers');
+        }
+      });
+    }
+    
+    context.globalState.update(LAST_PORT_KEY, actualPort);
+  }
+
   // ── Plans view ──────────────────────────────────────────────────────────
   initializePlansView(context, planRunner);
 
