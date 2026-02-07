@@ -7,4 +7,4 @@
  * @module commands
  */
 
-export { registerMcpCommands, promptMcpServerRegistration } from './mcpCommands';
+export { registerMcpCommands } from './mcpCommands';

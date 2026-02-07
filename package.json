@@ -123,15 +123,6 @@
           "default": true,
           "description": "Enable the MCP server for GitHub Copilot integration"
         },
-        "copilotOrchestrator.mcp.transport": {
-          "type": "string",
-          "enum": [
-            "stdio",
-            "http"
-          ],
-          "default": "http",
-          "description": "Transport for MCP communication. 'stdio' uses a child process managed by VS Code (no port needed). 'http' uses the built-in HTTP server."
-        },
         "copilotOrchestrator.worktreeRoot": {
           "type": "string",
           "default": ".worktrees",
@@ -190,11 +181,6 @@
           "type": "boolean",
           "default": false,
           "description": "Enable debug logging for MCP protocol and server operations"
-        },
-        "copilotOrchestrator.logging.debug.http": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable debug logging for HTTP server requests and responses"
         },
         "copilotOrchestrator.logging.debug.jobs": {
           "type": "boolean",

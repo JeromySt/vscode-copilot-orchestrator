@@ -1,8 +1,8 @@
 /**
- * @fileoverview MCP server registration prompts for GitHub Copilot.
+ * @fileoverview MCP server registration utilities.
  * 
- * Handles the user flow for registering the MCP server with
- * GitHub Copilot Chat for agent-based job creation.
+ * The MCP server auto-registers with VS Code via McpServerDefinitionProvider.
+ * This module provides utilities for programmatically starting/checking the server.
  * 
  * @module mcp/mcpRegistration
  */
@@ -10,26 +10,20 @@
 import * as vscode from 'vscode';
 
 /**
- * State key for tracking whether user has been prompted.
+ * State key for tracking whether user has seen the MCP intro message.
  * Stored in {@link vscode.ExtensionContext.globalState}.
  */
 const PROMPTED_STATE_KEY = 'mcpServerPrompted';
 
 /**
- * Prompt the user to register the MCP server with GitHub Copilot Chat.
- *
- * Shows a one-time information message with four options:
- * 1. **Add to Copilot** — copies the MCP server JSON config to the clipboard.
- * 2. **Copy Instructions** — copies detailed setup instructions.
- * 3. **Not Now** — dismisses without recording (will re-prompt next session).
- * 4. **Don't Show Again** — permanently dismisses the prompt.
- *
- * The prompt is skipped if MCP is disabled in settings or if the user has
- * already been prompted (tracked via `globalState`).
+ * Show a one-time prompt explaining how to use the MCP server.
+ * 
+ * The MCP server auto-registers with VS Code via McpServerDefinitionProvider,
+ * but users may need guidance on how to start it.
  *
  * @param context - VS Code extension context for state persistence.
  */
-export async function promptMcpServerRegistration(
+export async function promptMcpServerStart(
   context: vscode.ExtensionContext
 ): Promise<void> {
   // Check if already prompted
@@ -40,168 +34,73 @@ export async function promptMcpServerRegistration(
   const mcpConfig = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
   if (!mcpConfig.get<boolean>('enabled', true)) return;
   
-  const host = mcpConfig.get<string>('host', 'localhost');
-  const port = mcpConfig.get<number>('port', 39219);
-  
   const choice = await vscode.window.showInformationMessage(
-    'Copilot Orchestrator MCP server is running. Would you like to add it to GitHub Copilot Chat for agent-based job creation?',
-    'Add to Copilot',
-    'Copy Instructions',
-    'Not Now',
+    'Copilot Orchestrator MCP server is available! Start it from "MCP: List Servers" to use orchestrator tools in Copilot Chat.',
+    'Start Server',
+    'List Servers',
     "Don't Show Again"
   );
   
-  if (choice === 'Add to Copilot') {
-    await handleAddToCopilot(context, host, port);
+  if (choice === 'Start Server') {
+    try {
+      await vscode.commands.executeCommand(
+        'workbench.action.chat.startMcpServer', 
+        'copilot-orchestrator.mcp-server'
+      );
+      vscode.window.showInformationMessage(
+        'Copilot Orchestrator MCP server started! You can now use orchestrator tools in Copilot Chat.'
+      );
+    } catch (error: any) {
+      // If direct start fails, fall back to opening the MCP list
+      console.warn('Direct MCP start failed, falling back to list:', error);
+      await vscode.commands.executeCommand('workbench.action.chat.listMcpServers');
+    }
     await context.globalState.update(PROMPTED_STATE_KEY, true);
-  } else if (choice === 'Copy Instructions') {
-    await handleCopyInstructions(context, host, port);
+  } else if (choice === 'List Servers') {
+    await vscode.commands.executeCommand('workbench.action.chat.listMcpServers');
     await context.globalState.update(PROMPTED_STATE_KEY, true);
   } else if (choice === "Don't Show Again") {
     await context.globalState.update(PROMPTED_STATE_KEY, true);
   }
-  // 'Not Now' - don't update state, will prompt again next time
+  // Default (dismissed) - don't update state, will prompt again next time
 }
 
 /**
- * Handle the "Add to Copilot" action.
- *
- * Builds the MCP server JSON configuration and copies it to the system
- * clipboard, then offers to open VS Code settings or show instructions.
- *
- * @param context - VS Code extension context (for extension URI).
- * @param host    - MCP server host.
- * @param port    - MCP server port.
+ * Attempt to start the MCP server programmatically.
+ * 
+ * Uses VS Code's `workbench.action.chat.startMcpServer` command.
+ * Falls back to opening the MCP server list if the command fails.
+ * 
+ * @returns true if the server start command was executed successfully
  */
-async function handleAddToCopilot(
-  context: vscode.ExtensionContext,
-  host: string,
-  port: number
-): Promise<void> {
-  const config = {
-    mcpServers: {
-      'copilot-orchestrator': {
-        type: 'http',
-        url: `http://${host}:${port}/mcp`
-      }
-    }
-  };
-  
-  const configJson = JSON.stringify(config, null, 2);
-  await vscode.env.clipboard.writeText(configJson);
-  
-  const openSettings = await vscode.window.showInformationMessage(
-    'MCP server configuration copied to clipboard! Add this to your GitHub Copilot settings (usually in ~/.copilot/config.json or VS Code settings).',
-    'Open Settings',
-    'Show Instructions'
-  );
-  
-  if (openSettings === 'Open Settings') {
+export async function startMcpServer(): Promise<boolean> {
+  try {
     await vscode.commands.executeCommand(
-      'workbench.action.openSettings', 
-      'github.copilot'
+      'workbench.action.chat.startMcpServer', 
+      'copilot-orchestrator.mcp-server'
     );
-  } else if (openSettings === 'Show Instructions') {
-    const docPath = vscode.Uri.joinPath(
-      context.extensionUri, 
-      'docs', 
-      'COPILOT_INTEGRATION.md'
-    );
-    
-    try {
-      const doc = await vscode.workspace.openTextDocument(docPath);
-      await vscode.window.showTextDocument(doc);
-    } catch {
-      // Doc may not exist, show inline instructions
-      showInlineInstructions(context, host, port);
-    }
+    return true;
+  } catch (error: any) {
+    console.warn('Failed to start MCP server:', error);
+    return false;
   }
 }
 
 /**
- * Handle the "Copy Instructions" action.
- *
- * Copies a multi-line Markdown guide explaining how to manually configure
- * the MCP server in the user's Copilot configuration file.
- *
- * @param context - VS Code extension context (unused, kept for API consistency).
- * @param host    - MCP server host.
- * @param port    - MCP server port.
+ * Open the MCP server list in VS Code.
  */
-async function handleCopyInstructions(
-  context: vscode.ExtensionContext,
-  host: string,
-  port: number
-): Promise<void> {
-  const instructions = `# Add Copilot Orchestrator to GitHub Copilot Chat
-
-1. Locate your Copilot configuration file:
-   - Windows: %USERPROFILE%\\.copilot\\config.json
-   - Mac/Linux: ~/.copilot/config.json
-   - Or in VS Code settings (search for "github.copilot.mcpServers")
-
-2. Add this configuration:
-
-{
-  "mcpServers": {
-    "copilot-orchestrator": {
-      "type": "http",
-      "url": "http://${host}:${port}/mcp"
-    }
-  }
-}
-
-3. Reload VS Code or restart Copilot Chat
-
-4. Test by asking: "Use the Copilot Orchestrator to create a job for [task]"
-
-HTTP API is also available at: http://${host}:${port}
-`;
-  
-  await vscode.env.clipboard.writeText(instructions);
-  vscode.window.showInformationMessage('Instructions copied to clipboard!');
-}
-
-/**
- * Display inline setup instructions in an output channel.
- *
- * Used as a fallback when the `docs/COPILOT_INTEGRATION.md` file cannot
- * be found in the extension bundle.
- *
- * @param context - VS Code extension context (unused).
- * @param host    - MCP server host.
- * @param port    - MCP server port.
- */
-function showInlineInstructions(
-  context: vscode.ExtensionContext,
-  host: string,
-  port: number
-): void {
-  const outputChannel = vscode.window.createOutputChannel('Copilot Orchestrator Setup');
-  outputChannel.appendLine('=== Copilot Orchestrator MCP Setup ===\n');
-  outputChannel.appendLine('Add this to your GitHub Copilot configuration:\n');
-  outputChannel.appendLine(JSON.stringify({
-    mcpServers: {
-      'copilot-orchestrator': {
-        type: 'http',
-        url: `http://${host}:${port}/mcp`
-      }
-    }
-  }, null, 2));
-  outputChannel.appendLine('\n\nHTTP API available at: http://' + host + ':' + port);
-  outputChannel.appendLine('MCP endpoint: http://' + host + ':' + port + '/mcp');
-  outputChannel.show();
+export async function openMcpServerList(): Promise<void> {
+  await vscode.commands.executeCommand('workbench.action.chat.listMcpServers');
 }
 
 /**
  * Reset the registration prompt state so it will be shown again.
  *
- * Primarily useful for development/testing or when the user wants to
- * re-configure the MCP integration.
+ * Primarily useful for development/testing.
  *
  * @param context - VS Code extension context for state persistence.
  */
-export async function resetMcpRegistrationPrompt(
+export async function resetMcpPromptState(
   context: vscode.ExtensionContext
 ): Promise<void> {
   await context.globalState.update(PROMPTED_STATE_KEY, false);
