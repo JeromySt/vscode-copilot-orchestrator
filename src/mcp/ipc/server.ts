@@ -7,6 +7,12 @@
  * Uses named pipes (Windows) or Unix sockets (Linux/Mac) for IPC.
  * Each VS Code instance gets a unique pipe based on a generated session ID.
  * 
+ * Security measures:
+ * - Random auth nonce passed via environment variable (not command line)
+ * - Only accepts one authenticated connection
+ * - First message must contain the auth nonce
+ * - Auth timeout of 5 seconds
+ * 
  * @module mcp/ipc/server
  */
 
@@ -17,6 +23,15 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { McpHandler } from '../handler';
 
+/** Auth message sent by client on connect */
+interface AuthMessage {
+  type: 'auth';
+  nonce: string;
+}
+
+/** How long to wait for auth before closing connection */
+const AUTH_TIMEOUT_MS = 5000;
+
 /**
  * Generate a unique session ID for this VS Code instance.
  * Uses crypto for uniqueness across multiple windows.
@@ -26,17 +41,31 @@ function generateSessionId(): string {
 }
 
 /**
+ * Generate a cryptographically random auth nonce.
+ */
+function generateNonce(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+/**
  * IPC Server that bridges the stdio MCP server to the extension's McpHandler.
  * 
  * Each VS Code instance creates its own IPC server with a unique session ID.
  * The stdio child process connects to this server using the path passed via CLI.
+ * 
+ * Security:
+ * - Only accepts ONE connection that provides the correct auth nonce
+ * - Auth nonce is passed to the child via environment variable
+ * - Connection is rejected if auth fails or times out
  */
 export class McpIpcServer {
   private server: net.Server | null = null;
   private readonly pipePath: string;
   private readonly sessionId: string;
-  private clients: Set<net.Socket> = new Set();
+  private readonly authNonce: string;
+  private authenticatedClient: net.Socket | null = null;
   private handler: McpHandler | null = null;
+  private hasAcceptedConnection: boolean = false;
 
   /**
    * Create an IPC server for this extension instance.
@@ -44,6 +73,7 @@ export class McpIpcServer {
    */
   constructor(sessionId?: string) {
     this.sessionId = sessionId || generateSessionId();
+    this.authNonce = generateNonce();
     
     // Create a unique pipe path for this VS Code instance
     // Format: orchestrator-mcp-{sessionId}
@@ -71,6 +101,14 @@ export class McpIpcServer {
    */
   getPipePath(): string {
     return this.pipePath;
+  }
+
+  /**
+   * Get the auth nonce that clients must provide to authenticate.
+   * This should be passed to the child process via environment variable.
+   */
+  getAuthNonce(): string {
+    return this.authNonce;
   }
 
   /**
@@ -116,14 +154,34 @@ export class McpIpcServer {
 
   /**
    * Handle a new client connection.
+   * 
+   * Security:
+   * - Only one connection is ever accepted
+   * - First message must be auth with correct nonce
+   * - Auth must occur within AUTH_TIMEOUT_MS
    */
   private handleConnection(socket: net.Socket): void {
-    console.log('[MCP IPC Server] Client connected');
-    this.clients.add(socket);
+    // Security: Only accept one connection ever
+    if (this.hasAcceptedConnection) {
+      console.warn('[MCP IPC Server] Rejecting additional connection attempt (already have authenticated client)');
+      socket.destroy();
+      return;
+    }
 
+    console.log('[MCP IPC Server] Client connecting, awaiting auth...');
+    
     let buffer = '';
+    let authenticated = false;
 
-    socket.on('data', async (data) => {
+    // Set up auth timeout
+    const authTimeout = setTimeout(() => {
+      if (!authenticated) {
+        console.error('[MCP IPC Server] Auth timeout - closing connection');
+        socket.destroy();
+      }
+    }, AUTH_TIMEOUT_MS);
+
+    const handleData = async (data: Buffer) => {
       buffer += data.toString();
       
       // Process complete lines (newline-delimited JSON)
@@ -131,25 +189,69 @@ export class McpIpcServer {
       buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
       for (const line of lines) {
-        if (line.trim()) {
+        if (!line.trim()) continue;
+
+        if (!authenticated) {
+          // First message must be auth
+          try {
+            const authMsg = JSON.parse(line) as AuthMessage;
+            if (authMsg.type === 'auth' && authMsg.nonce === this.authNonce) {
+              authenticated = true;
+              this.hasAcceptedConnection = true;
+              this.authenticatedClient = socket;
+              clearTimeout(authTimeout);
+              console.log('[MCP IPC Server] Client authenticated successfully');
+              
+              // Send auth success response
+              socket.write(JSON.stringify({ type: 'auth_success' }) + '\n');
+            } else {
+              console.error('[MCP IPC Server] Auth failed - invalid nonce');
+              clearTimeout(authTimeout);
+              socket.destroy();
+              return;
+            }
+          } catch {
+            console.error('[MCP IPC Server] Auth failed - invalid auth message');
+            clearTimeout(authTimeout);
+            socket.destroy();
+            return;
+          }
+        } else {
+          // Process MCP message
           await this.processMessage(socket, line);
         }
       }
-    });
+    };
+
+    socket.on('data', handleData);
 
     socket.on('close', () => {
-      console.log('[MCP IPC Server] Client disconnected');
-      this.clients.delete(socket);
+      clearTimeout(authTimeout);
+      if (this.authenticatedClient === socket) {
+        this.authenticatedClient = null;
+        // Allow reconnection: VS Code may restart the MCP server process
+        // The new process will have the same auth nonce from its environment
+        this.hasAcceptedConnection = false;
+        console.log('[MCP IPC Server] Authenticated client disconnected - accepting new connections');
+      } else {
+        console.log('[MCP IPC Server] Unauthenticated client disconnected');
+      }
     });
 
     socket.on('error', (err) => {
       console.error('[MCP IPC Server] Socket error:', err);
-      this.clients.delete(socket);
+      clearTimeout(authTimeout);
+      if (this.authenticatedClient === socket) {
+        this.authenticatedClient = null;
+        // Allow reconnection on error as well
+        this.hasAcceptedConnection = false;
+        console.log('[MCP IPC Server] Authenticated client error - accepting new connections');
+      }
     });
   }
 
   /**
-   * Process a JSON-RPC message from the client.
+   * Process a JSON-RPC message from the authenticated client.
    */
   private async processMessage(socket: net.Socket, message: string): Promise<void> {
     if (!this.handler) {
@@ -184,11 +286,12 @@ export class McpIpcServer {
    * Stop the IPC server and close all connections.
    */
   stop(): void {
-    // Close all client connections
-    for (const client of this.clients) {
-      client.destroy();
+    // Close authenticated client connection
+    if (this.authenticatedClient) {
+      this.authenticatedClient.destroy();
+      this.authenticatedClient = null;
     }
-    this.clients.clear();
+    this.hasAcceptedConnection = false;
 
     // Close the server
     if (this.server) {
@@ -213,5 +316,12 @@ export class McpIpcServer {
    */
   isRunning(): boolean {
     return this.server !== null;
+  }
+
+  /**
+   * Check if a client is currently connected and authenticated.
+   */
+  hasClient(): boolean {
+    return this.authenticatedClient !== null;
   }
 }

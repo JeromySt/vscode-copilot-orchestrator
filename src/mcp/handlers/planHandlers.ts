@@ -57,6 +57,7 @@ function mapsubPlansRecursively(subPlans: any[] | undefined): SubPlanNodeSpec[] 
       postchecks: j.postchecks,
       instructions: j.instructions,
       expectsNoChanges: j.expects_no_changes,
+      group: j.group,
     })),
     subPlans: mapsubPlansRecursively(s.subPlans),  // Recursive!
   }));
@@ -353,6 +354,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
       instructions: j.instructions,
       baseBranch: j.baseBranch,
       expectsNoChanges: j.expects_no_changes,
+      group: j.group,
     })),
     subPlans: mapsubPlansRecursively(args.subPlans),  // Recursive mapping!
   };
@@ -523,16 +525,37 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
   
   const { plan, status: planStatus, counts, progress } = status;
   
+  // Track group statuses
+  const groupStatusMap = new Map<string, { nodes: number; succeeded: number; failed: number; running: number; pending: number }>();
+  
   // Build node status list
   const nodes: any[] = [];
   for (const [nodeId, state] of plan.nodeStates) {
     const node = plan.nodes.get(nodeId);
     const isLeaf = plan.leaves.includes(nodeId);
+    
+    // Get group from JobNode
+    const nodeGroup = node?.type === 'job' ? (node as import('../../plan/types').JobNode).group : undefined;
+    
+    // Track group status
+    if (nodeGroup) {
+      if (!groupStatusMap.has(nodeGroup)) {
+        groupStatusMap.set(nodeGroup, { nodes: 0, succeeded: 0, failed: 0, running: 0, pending: 0 });
+      }
+      const grp = groupStatusMap.get(nodeGroup)!;
+      grp.nodes++;
+      if (state.status === 'succeeded') grp.succeeded++;
+      else if (state.status === 'failed' || state.status === 'blocked') grp.failed++;
+      else if (state.status === 'running' || state.status === 'scheduled') grp.running++;
+      else grp.pending++;
+    }
+    
     nodes.push({
       id: nodeId,
       producerId: node?.producerId,
       name: node?.name,
       type: node?.type,
+      group: nodeGroup,
       status: state.status,
       error: state.error,
       attempts: state.attempts,
@@ -542,6 +565,22 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
       mergedToTarget: isLeaf ? state.mergedToTarget : undefined,
       worktreePath: state.worktreePath,
     });
+  }
+  
+  // Build groups summary
+  const groups: Record<string, { status: string; nodes: number }> = {};
+  for (const [groupName, stats] of groupStatusMap) {
+    let groupStatus: string;
+    if (stats.failed > 0) {
+      groupStatus = stats.succeeded > 0 ? 'partial' : 'failed';
+    } else if (stats.running > 0) {
+      groupStatus = 'running';
+    } else if (stats.succeeded === stats.nodes) {
+      groupStatus = 'succeeded';
+    } else {
+      groupStatus = 'pending';
+    }
+    groups[groupName] = { status: groupStatus, nodes: stats.nodes };
   }
   
   // Get effective endedAt recursively including child plans
@@ -555,6 +594,7 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
     progress: Math.round(progress * 100),
     counts,
     nodes,
+    groups: Object.keys(groups).length > 0 ? groups : undefined,
     createdAt: plan.createdAt,
     startedAt: plan.startedAt,
     endedAt: effectiveEndedAt,

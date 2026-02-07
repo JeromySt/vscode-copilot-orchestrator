@@ -5,7 +5,6 @@
  * - NodeSpec type structure
  * - NodeInstance type structure
  * - GroupInfo type structure
- * - GroupSpec type structure
  * - GroupStatus type
  * - GroupStatusSnapshot type
  * - Type exports from plan/types barrel
@@ -16,8 +15,6 @@ import type {
   NodeSpec,
   NodeInstance,
   GroupInfo,
-  GroupSpec,
-  SubGroupSpec,
   GroupStatus,
   GroupStatusSnapshot,
   AttemptContext,
@@ -199,45 +196,6 @@ suite('Simplified Node Types', () => {
         createdAt: Date.now(),
       };
       assert.strictEqual(group.parentGroupId, 'parent-group-1');
-    });
-  });
-
-  // =========================================================================
-  // GroupSpec
-  // =========================================================================
-  suite('GroupSpec', () => {
-    test('can create a minimal GroupSpec', () => {
-      const spec: GroupSpec = {
-        name: 'My Feature',
-        nodes: [
-          { producerId: 'build', task: 'Build', dependencies: [] },
-        ],
-      };
-      assert.strictEqual(spec.name, 'My Feature');
-      assert.strictEqual(spec.nodes.length, 1);
-    });
-
-    test('can include sub-groups', () => {
-      const spec: GroupSpec = {
-        name: 'Complex Feature',
-        baseBranch: 'main',
-        targetBranch: 'feature/complex',
-        maxParallel: 8,
-        cleanUpSuccessfulWork: false,
-        nodes: [
-          { producerId: 'init', task: 'Initialize', dependencies: [] },
-        ],
-        subGroups: [{
-          producerId: 'sub-work',
-          name: 'Sub Work',
-          dependencies: ['init'],
-          nodes: [
-            { producerId: 'sub-task', task: 'Sub task', dependencies: [] },
-          ],
-        }],
-      };
-      assert.strictEqual(spec.subGroups?.length, 1);
-      assert.strictEqual(spec.subGroups![0].producerId, 'sub-work');
     });
   });
 

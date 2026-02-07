@@ -1875,8 +1875,63 @@ ${mermaidDef}
     // Counter for unique subgraph IDs
     let subgraphCounter = 0;
     
+    // Counter for unique group subgraph IDs
+    let groupSubgraphCounter = 0;
+    
     // Track all edges to add at the end
     const edgesToAdd: Array<{ from: string; to: string; status?: string }> = [];
+    
+    // Helper function to render a single job node
+    const renderJobNode = (
+      node: JobNode,
+      nodeId: string,
+      d: PlanInstance,
+      prefix: string,
+      indent: string,
+      nodeHasDependents: Set<string>,
+      localRoots: string[],
+      localLeaves: string[]
+    ) => {
+      const state = d.nodeStates.get(nodeId);
+      const status = state?.status || 'pending';
+      const sanitizedId = prefix + this._sanitizeId(nodeId);
+      
+      const isRoot = node.dependencies.length === 0;
+      const isLeaf = !nodeHasDependents.has(nodeId);
+      
+      const label = this._escapeForMermaid(node.name);
+      const icon = this._getStatusIcon(status);
+      
+      // Calculate duration for completed or running nodes
+      let durationLabel = '';
+      if (state?.startedAt) {
+        const endTime = state.endedAt || Date.now();
+        const duration = endTime - state.startedAt;
+        durationLabel = ' | ' + formatDurationMs(duration);
+      }
+      
+      const displayLabel = this._truncateNodeLabel(label, durationLabel);
+      if (displayLabel !== label) {
+        nodeTooltips[sanitizedId] = label;
+      }
+      
+      lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);
+      lines.push(`${indent}class ${sanitizedId} ${status}`);
+      
+      nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
+      
+      if (isRoot) localRoots.push(sanitizedId);
+      if (isLeaf) {
+        localLeaves.push(sanitizedId);
+        leafnodeStates.set(sanitizedId, state);
+      }
+      
+      // Add edges from dependencies
+      for (const depId of node.dependencies) {
+        const depSanitizedId = prefix + this._sanitizeId(depId);
+        edgesToAdd.push({ from: depSanitizedId, to: sanitizedId, status: d.nodeStates.get(depId)?.status });
+      }
+    };
     
     // Recursive function to render Plan structure
     const renderPlanInstance = (d: PlanInstance, prefix: string, depth: number): { roots: string[], leaves: string[] } => {
@@ -1892,8 +1947,24 @@ ${mermaidDef}
         }
       }
       
-      // Render each node
+      // Organize nodes by group tag
+      const groupedNodes = new Map<string, { nodeId: string; node: PlanNode }[]>();
+      const ungroupedNodes: { nodeId: string; node: PlanNode }[] = [];
+      
       for (const [nodeId, node] of d.nodes) {
+        const groupTag = node.type === 'job' ? (node as JobNode).group : undefined;
+        if (groupTag) {
+          if (!groupedNodes.has(groupTag)) {
+            groupedNodes.set(groupTag, []);
+          }
+          groupedNodes.get(groupTag)!.push({ nodeId, node });
+        } else {
+          ungroupedNodes.push({ nodeId, node });
+        }
+      }
+      
+      // Helper to render a subPlan node
+      const renderSubPlanNode = (nodeId: string, node: SubPlanNode, nodeIndent: string) => {
         const state = d.nodeStates.get(nodeId);
         const status = state?.status || 'pending';
         const sanitizedId = prefix + this._sanitizeId(nodeId);
@@ -1901,119 +1972,131 @@ ${mermaidDef}
         const isRoot = node.dependencies.length === 0;
         const isLeaf = !nodeHasDependents.has(nodeId);
         
+        const label = this._escapeForMermaid(node.name);
+        const subgraphId = `sg${subgraphCounter++}`;
+        
+        // Calculate duration for subPlan
+        let durationLabel = '';
+        const childPlanId = state?.childPlanId || node.childPlanId;
+        if (childPlanId) {
+          const effectiveStartedAt = this._planRunner.getEffectiveStartedAt(childPlanId) || state?.startedAt;
+          const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(childPlanId) || state?.endedAt || Date.now();
+          
+          if (effectiveStartedAt) {
+            const duration = effectiveEndedAt - effectiveStartedAt;
+            durationLabel = ' | ' + formatDurationMs(duration);
+          }
+          
+          subgraphData[subgraphId] = { childPlanId, name: node.name };
+        } else if (state?.startedAt) {
+          const endTime = state.endedAt || Date.now();
+          const duration = endTime - state.startedAt;
+          durationLabel = ' | ' + formatDurationMs(duration);
+        }
+        
+        const displayLabel = this._truncateNodeLabel(label, durationLabel);
+        if (displayLabel !== label) {
+          nodeTooltips[subgraphId] = label;
+        }
+        
+        lines.push(`${nodeIndent}subgraph ${subgraphId}["${this._getStatusIcon(status)} ${displayLabel}${durationLabel}"]`);
+        
+        let innerRoots: string[] = [];
+        let innerLeaves: string[] = [];
+        
+        const childPlan = state?.childPlanId ? this._planRunner.get(state.childPlanId) : undefined;
+        
+        if (childPlan) {
+          const result = renderPlanInstance(childPlan, prefix + 'c' + subgraphCounter + '_', depth + 1);
+          innerRoots = result.roots;
+          innerLeaves = result.leaves;
+        } else if (node.childSpec) {
+          const result = renderFromSpec(node.childSpec, prefix + 'c' + subgraphCounter + '_', depth + 1, status);
+          innerRoots = result.roots;
+          innerLeaves = result.leaves;
+        }
+        
+        lines.push(`${nodeIndent}end`);
+        
+        const boxColor = status === 'running' ? '#1a2a4e' : status === 'succeeded' ? '#1a3a2e' : '#1a1a2e';
+        const borderColor = status === 'running' ? '#3794ff' : status === 'succeeded' ? '#4ec9b0' : '#4a4a6a';
+        lines.push(`${nodeIndent}style ${subgraphId} fill:${boxColor},stroke:${borderColor},stroke-width:2px`);
+        
+        nodeEntryExitMap.set(sanitizedId, {
+          entryIds: innerRoots.length > 0 ? innerRoots : [sanitizedId],
+          exitIds: innerLeaves.length > 0 ? innerLeaves : [sanitizedId]
+        });
+        
+        if (isRoot) localRoots.push(...(innerRoots.length > 0 ? innerRoots : [sanitizedId]));
+        if (isLeaf) localLeaves.push(...(innerLeaves.length > 0 ? innerLeaves : [sanitizedId]));
+        
+        for (const depId of node.dependencies) {
+          const depSanitizedId = prefix + this._sanitizeId(depId);
+          edgesToAdd.push({ from: depSanitizedId, to: sanitizedId, status: d.nodeStates.get(depId)?.status });
+        }
+      };
+      
+      // Render ungrouped nodes first
+      for (const { nodeId, node } of ungroupedNodes) {
         if (node.type === 'subPlan') {
-          const subPlanNode = node as SubPlanNode;
-          const label = this._escapeForMermaid(node.name);
-          const subgraphId = `sg${subgraphCounter++}`;
-          
-          // Calculate duration for subPlan - use child plan's actual start/end times
-          let durationLabel = '';
-          const childPlanId = state?.childPlanId || subPlanNode.childPlanId;
-          if (childPlanId) {
-            // Get the effective start time (when first child actually started)
-            const effectiveStartedAt = this._planRunner.getEffectiveStartedAt(childPlanId) || state?.startedAt;
-            // Get the effective end time (when last child finished)
-            const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(childPlanId) || state?.endedAt || Date.now();
-            
-            if (effectiveStartedAt) {
-              const duration = effectiveEndedAt - effectiveStartedAt;
-              durationLabel = ' | ' + formatDurationMs(duration);
-            }
-            
-            // Track subgraph data for click handling
-            subgraphData[subgraphId] = { childPlanId, name: node.name };
-          } else if (state?.startedAt) {
-            // Fallback for not-yet-started subPlans
-            const endTime = state.endedAt || Date.now();
-            const duration = endTime - state.startedAt;
-            durationLabel = ' | ' + formatDurationMs(duration);
-          }
-          
-          const displayLabel = this._truncateNodeLabel(label, durationLabel);
-          if (displayLabel !== label) {
-            nodeTooltips[subgraphId] = label;
-          }
-          
-          lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(status)} ${displayLabel}${durationLabel}"]`);
-          // Don't set direction inside subgraphs - let them inherit from parent
-          
-          let innerRoots: string[] = [];
-          let innerLeaves: string[] = [];
-          
-          // Try to get instantiated child Plan first
-          const childPlan = state?.childPlanId ? this._planRunner.get(state.childPlanId) : undefined;
-          
-          if (childPlan) {
-            // Use instantiated child Plan
-            const result = renderPlanInstance(childPlan, prefix + 'c' + subgraphCounter + '_', depth + 1);
-            innerRoots = result.roots;
-            innerLeaves = result.leaves;
-          } else if (subPlanNode.childSpec) {
-            // Fall back to spec (child Plan not yet created or already cleaned up)
-            const result = renderFromSpec(subPlanNode.childSpec, prefix + 'c' + subgraphCounter + '_', depth + 1, status);
-            innerRoots = result.roots;
-            innerLeaves = result.leaves;
-          }
-          
-          lines.push(`${indent}end`);
-          
-          // Style the subgraph based on status
-          const boxColor = status === 'running' ? '#1a2a4e' : status === 'succeeded' ? '#1a3a2e' : '#1a1a2e';
-          const borderColor = status === 'running' ? '#3794ff' : status === 'succeeded' ? '#4ec9b0' : '#4a4a6a';
-          lines.push(`${indent}style ${subgraphId} fill:${boxColor},stroke:${borderColor},stroke-width:2px`);
-          
-          // Store entry/exit for this subPlan node
-          nodeEntryExitMap.set(sanitizedId, {
-            entryIds: innerRoots.length > 0 ? innerRoots : [sanitizedId],
-            exitIds: innerLeaves.length > 0 ? innerLeaves : [sanitizedId]
-          });
-          
-          // Track roots/leaves
-          if (isRoot) localRoots.push(...(innerRoots.length > 0 ? innerRoots : [sanitizedId]));
-          if (isLeaf) localLeaves.push(...(innerLeaves.length > 0 ? innerLeaves : [sanitizedId]));
-          
-          // Add edges from dependencies to this node's entry points
-          for (const depId of node.dependencies) {
-            const depSanitizedId = prefix + this._sanitizeId(depId);
-            edgesToAdd.push({ from: depSanitizedId, to: sanitizedId, status: d.nodeStates.get(depId)?.status });
-          }
-          
+          renderSubPlanNode(nodeId, node as SubPlanNode, indent);
         } else {
-          // Regular job node - add status icon and duration to label
-          const label = this._escapeForMermaid(node.name);
-          const icon = this._getStatusIcon(status);
-          
-          // Calculate duration for completed or running nodes
-          let durationLabel = '';
-          if (state?.startedAt) {
-            const endTime = state.endedAt || Date.now();
-            const duration = endTime - state.startedAt;
-            durationLabel = ' | ' + formatDurationMs(duration);
-          }
-          
-          const displayLabel = this._truncateNodeLabel(label, durationLabel);
-          if (displayLabel !== label) {
-            nodeTooltips[sanitizedId] = label;
-          }
-          
-          lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);
-          lines.push(`${indent}class ${sanitizedId} ${status}`);
-          
-          nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
-          
-          if (isRoot) localRoots.push(sanitizedId);
-          if (isLeaf) {
-            localLeaves.push(sanitizedId);
-            // Track state for leaf nodes to check mergedToTarget later
-            leafnodeStates.set(sanitizedId, state);
-          }
-          
-          // Add edges from dependencies
-          for (const depId of node.dependencies) {
-            const depSanitizedId = prefix + this._sanitizeId(depId);
-            edgesToAdd.push({ from: depSanitizedId, to: sanitizedId, status: d.nodeStates.get(depId)?.status });
+          renderJobNode(node as JobNode, nodeId, d, prefix, indent, nodeHasDependents, localRoots, localLeaves);
+        }
+      }
+      
+      // Render each visual group as a subgraph with computed status styling
+      for (const [groupTag, groupNodes] of groupedNodes) {
+        const groupId = `grp${groupSubgraphCounter++}`;
+        
+        // Compute group status from contained nodes
+        let groupSucceeded = 0;
+        let groupFailed = 0;
+        let groupRunning = 0;
+        let groupTotal = groupNodes.length;
+        
+        for (const { nodeId } of groupNodes) {
+          const state = d.nodeStates.get(nodeId);
+          if (state?.status === 'succeeded') groupSucceeded++;
+          else if (state?.status === 'failed' || state?.status === 'blocked') groupFailed++;
+          else if (state?.status === 'running' || state?.status === 'scheduled') groupRunning++;
+        }
+        
+        // Determine group status
+        let groupStatus: string;
+        if (groupFailed > 0) {
+          groupStatus = groupSucceeded > 0 ? 'partial' : 'failed';
+        } else if (groupRunning > 0) {
+          groupStatus = 'running';
+        } else if (groupSucceeded === groupTotal) {
+          groupStatus = 'succeeded';
+        } else {
+          groupStatus = 'pending';
+        }
+        
+        // Status-specific styling for groups
+        const groupColors: Record<string, { fill: string; stroke: string }> = {
+          pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
+          running: { fill: '#1a2a4e', stroke: '#3794ff' },
+          succeeded: { fill: '#1a3a2e', stroke: '#4ec9b0' },
+          failed: { fill: '#3a1a1e', stroke: '#f48771' },
+          partial: { fill: '#3a2a1e', stroke: '#dcdcaa' },
+        };
+        const colors = groupColors[groupStatus] || groupColors.pending;
+        
+        lines.push(`${indent}subgraph ${groupId}["📦 ${this._escapeForMermaid(groupTag)}"]`);
+        
+        const groupIndent = indent + '  ';
+        for (const { nodeId, node } of groupNodes) {
+          if (node.type === 'subPlan') {
+            renderSubPlanNode(nodeId, node as SubPlanNode, groupIndent);
+          } else {
+            renderJobNode(node as JobNode, nodeId, d, prefix, groupIndent, nodeHasDependents, localRoots, localLeaves);
           }
         }
+        
+        lines.push(`${indent}end`);
+        lines.push(`${indent}style ${groupId} fill:${colors.fill},stroke:${colors.stroke},stroke-width:2px,stroke-dasharray:5`);
       }
       
       return { roots: localRoots, leaves: localLeaves };

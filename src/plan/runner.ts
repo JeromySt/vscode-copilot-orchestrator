@@ -356,6 +356,7 @@ export class PlanRunner extends EventEmitter {
     instructions?: string;
     baseBranch?: string;
     targetBranch?: string;
+    expectsNoChanges?: boolean;
   }): PlanInstance {
     const plan = buildSingleJobPlan(jobSpec, {
       repoPath: this.config.defaultRepoPath,

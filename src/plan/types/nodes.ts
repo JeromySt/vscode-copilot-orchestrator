@@ -130,6 +130,12 @@ export interface JobNodeSpec {
    * Use for validation-only nodes, external-system updates, or analysis tasks.
    */
   expectsNoChanges?: boolean;
+
+  /**
+   * Visual grouping tag. Nodes with the same group tag are
+   * rendered together in a Mermaid subgraph. Optional.
+   */
+  group?: string;
 }
 
 /**
@@ -220,6 +226,12 @@ export interface JobNode extends BaseNode {
    * The commit phase will succeed without a commit instead of failing.
    */
   expectsNoChanges?: boolean;
+
+  /**
+   * Visual grouping tag. Nodes with the same group tag are
+   * rendered together in a Mermaid subgraph.
+   */
+  group?: string;
 }
 
 /**
@@ -292,6 +304,16 @@ export interface NodeSpec {
 
   /** Override base branch (root nodes only) */
   baseBranch?: string;
+
+  /**
+   * When true, this node is expected to produce no file changes.
+   * The commit phase will succeed without a commit instead of failing.
+   * Use for validation-only nodes, external-system updates, or analysis tasks.
+   */
+  expectsNoChanges?: boolean;
+
+  /** Visual group tag for Mermaid rendering - nodes with same group render in a subgraph */
+  group?: string;
 }
 
 /**

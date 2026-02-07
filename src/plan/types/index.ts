@@ -55,8 +55,6 @@ export {
   ExecutionPhase,
   LogEntry,
   GroupInfo,
-  GroupSpec,
-  SubGroupSpec,
   GroupStatus,
   GroupStatusSnapshot,
 } from './plan';

@@ -13,7 +13,6 @@ import type {
   NodeStatus,
   WorkSpec,
   GroupInfo,
-  GroupSpec,
   GroupStatus,
   GroupStatusSnapshot,
   JobExecutionResult,
@@ -64,11 +63,8 @@ export interface INodeRegistry {
  * Replaces PlanRunner with a node-centric API.
  */
 export interface INodeRunner {
-  /** Create nodes (optionally grouped) */
-  createNodes(specs: NodeSpec[], group?: GroupSpec): Promise<NodeInstance[]>;
-
-  /** Create a group of nodes from a GroupSpec */
-  createGroup(spec: GroupSpec): Promise<{ groupId: string; nodes: NodeInstance[] }>;
+  /** Create nodes */
+  createNodes(specs: NodeSpec[]): Promise<NodeInstance[]>;
 
   /** Get a node by ID */
   getNode(nodeId: string): NodeInstance | undefined;

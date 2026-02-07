@@ -34,11 +34,6 @@ import {
   handleCreateNode,
   handleGetNode,
   handleListNodes,
-  handleGetGroupStatus,
-  handleListGroups,
-  handleCancelGroup,
-  handleDeleteGroup,
-  handleRetryGroup,
   handleRetryNode,
   handleNodeFailureContext,
 } from './handlers';
@@ -272,26 +267,6 @@ export class McpHandler implements IMcpRequestRouter {
         
       case 'list_copilot_nodes':
         result = await handleListNodes(args || {}, this.context);
-        break;
-        
-      case 'get_copilot_group_status':
-        result = await handleGetGroupStatus(args || {}, this.context);
-        break;
-        
-      case 'list_copilot_groups':
-        result = await handleListGroups(args || {}, this.context);
-        break;
-        
-      case 'cancel_copilot_group':
-        result = await handleCancelGroup(args || {}, this.context);
-        break;
-        
-      case 'delete_copilot_group':
-        result = await handleDeleteGroup(args || {}, this.context);
-        break;
-        
-      case 'retry_copilot_group':
-        result = await handleRetryGroup(args || {}, this.context);
         break;
         
       case 'retry_copilot_node':

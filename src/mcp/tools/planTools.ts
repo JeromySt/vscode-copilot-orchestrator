@@ -173,6 +173,10 @@ Agent instructions MUST be in Markdown format with headers, numbered lists, bull
                 expects_no_changes: {
                   type: 'boolean',
                   description: 'When true, this node is expected to produce no file changes. The commit phase will succeed without a commit instead of failing. Use for validation-only nodes, external-system updates, or analysis tasks.'
+                },
+                group: {
+                  type: 'string',
+                  description: 'Visual grouping tag. Jobs with the same group are rendered together in a box. Use / for nested groups (e.g., "backend/api" nests inside "backend"). Groups are purely visual and do not affect execution order.'
                 }
               },
               required: ['producer_id', 'task', 'dependencies']

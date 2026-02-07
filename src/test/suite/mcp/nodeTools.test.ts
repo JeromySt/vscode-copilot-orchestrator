@@ -87,11 +87,6 @@ suite('MCP Node Tool Definitions', () => {
       'create_copilot_node',
       'get_copilot_node',
       'list_copilot_nodes',
-      'get_copilot_group_status',
-      'list_copilot_groups',
-      'cancel_copilot_group',
-      'delete_copilot_group',
-      'retry_copilot_group',
       'retry_copilot_node',
       'get_copilot_node_failure_context',
     ];
@@ -125,12 +120,14 @@ suite('MCP Node Tool Definitions', () => {
       assert.ok(nodesSchema.items?.required?.includes('dependencies'));
     });
 
-    test('has optional group property', () => {
+    test('has optional group property on nodes', () => {
       const tools = getNodeToolDefinitions();
       const tool = tools.find(t => t.name === 'create_copilot_node')!;
-      assert.ok(tool.inputSchema.properties?.group);
-      // group is not in required
-      assert.ok(!tool.inputSchema.required?.includes('group'));
+      const nodesSchema = tool.inputSchema.properties?.nodes as any;
+      // group is optional per-node for visual grouping in Mermaid
+      assert.ok(nodesSchema.items?.properties?.group);
+      // group is NOT in required
+      assert.ok(!nodesSchema.items?.required?.includes('group'));
     });
   });
 

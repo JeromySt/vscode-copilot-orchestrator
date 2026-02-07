@@ -1,8 +1,10 @@
 /**
  * @fileoverview Entry-point for the stdio MCP child process.
  *
- * VS Code spawns this as:
- *   node mcp-stdio-server.js --ipc <pipe-path>
+ * VS Code spawns this via McpStdioServerDefinition.
+ * Configuration is passed via environment variables:
+ *   - MCP_IPC_PATH: Named pipe/Unix socket path for IPC to extension host
+ *   - MCP_AUTH_NONCE: Authentication nonce for secure IPC connection
  *
  * This process acts as a bridge between:
  * - stdin/stdout (JSON-RPC to VS Code's Copilot)
@@ -26,36 +28,20 @@ console.warn = (...args: any[]) => console.error('[mcp-stdio:warn]', ...args);
 import { StdioTransport } from './transport';
 import { McpIpcClient } from '../ipc/client';
 
-/**
- * Parse command-line arguments.
- * Supports: --ipc <pipe-path>
- */
-function parseArgs(): { ipc?: string } {
-  const args = process.argv.slice(2);
-  const result: { ipc?: string } = {};
-  
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--ipc' && args[i + 1]) {
-      result.ipc = args[++i];
-    }
-  }
-  
-  return result;
-}
-
 async function main(): Promise<void> {
-  const cliArgs = parseArgs();
+  // Read configuration from environment variables (set by McpStdioServerDefinition)
+  const ipcPath = process.env.MCP_IPC_PATH;
   
-  if (!cliArgs.ipc) {
-    console.error('[mcp-stdio] ERROR: --ipc argument required');
+  if (!ipcPath) {
+    console.error('[mcp-stdio] ERROR: MCP_IPC_PATH environment variable required');
     process.exit(1);
   }
 
   console.error('[mcp-stdio] Starting stdio server');
-  console.error('[mcp-stdio]   IPC path:', cliArgs.ipc);
+  console.error('[mcp-stdio]   IPC path:', ipcPath);
 
   // Connect to the extension's IPC server
-  const ipcClient = new McpIpcClient(cliArgs.ipc);
+  const ipcClient = new McpIpcClient(ipcPath);
   
   try {
     await ipcClient.connect();

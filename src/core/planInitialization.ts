@@ -349,11 +349,13 @@ export async function initializeMcpServer(
     }
   }});
   
-  // Register with VS Code, passing the IPC path for the child process
+  // Register with VS Code, passing the IPC path and auth nonce for security
+  // Auth nonce is passed via environment variable, not command line, for security
   const providerDisposable = registerMcpDefinitionProvider(
     context, 
     workspacePath,
-    ipcServer.getPipePath()
+    ipcServer.getPipePath(),
+    ipcServer.getAuthNonce()
   );
   context.subscriptions.push(providerDisposable);
   

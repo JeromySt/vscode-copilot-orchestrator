@@ -121,6 +121,7 @@ export function buildPlan(
       instructions: jobSpec.instructions,
       baseBranch: jobSpec.baseBranch,
       expectsNoChanges: jobSpec.expectsNoChanges,
+      group: jobSpec.group,
       dependencies: [], // Will be resolved in second pass
       dependents: [],
     };
@@ -348,6 +349,7 @@ export function buildSingleJobPlan(
     baseBranch?: string;
     targetBranch?: string;
     repoPath?: string;
+    expectsNoChanges?: boolean;
   },
   options?: {
     repoPath?: string;
@@ -370,6 +372,7 @@ export function buildSingleJobPlan(
       postchecks: jobSpec.postchecks,
       instructions: jobSpec.instructions,
       dependencies: [],
+      expectsNoChanges: jobSpec.expectsNoChanges,
     }],
   };
   

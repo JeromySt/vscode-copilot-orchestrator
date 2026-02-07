@@ -98,6 +98,8 @@ function validateNodeSpecs(nodes: any[]): { valid: boolean; error?: string; spec
     instructions: n.instructions,
     dependencies: n.dependencies || [],
     baseBranch: n.base_branch,
+    expectsNoChanges: n.expects_no_changes,
+    group: n.group,
   }));
 
   return { valid: true, specs };
@@ -110,8 +112,7 @@ function validateNodeSpecs(nodes: any[]): { valid: boolean; error?: string; spec
 /**
  * Handle the `create_copilot_node` MCP tool call.
  *
- * Creates nodes optionally grouped together. Internally delegates to
- * PlanRunner by converting to PlanSpec format.
+ * Creates nodes. Internally delegates to PlanRunner by converting to PlanSpec format.
  */
 export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Promise<any> {
   const validation = validateNodeSpecs(args.nodes);
@@ -121,56 +122,12 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
 
   try {
     const repoPath = ctx.workspacePath;
-    const groupArgs = args.group;
 
-    if (groupArgs) {
-      // Grouped nodes → create as a plan
-      const baseBranch = await resolveBaseBranch(repoPath, groupArgs.base_branch);
-      const targetBranch = await resolveTargetBranch(baseBranch, repoPath, groupArgs.target_branch);
-
-      const spec: PlanSpec = {
-        name: groupArgs.name || 'Unnamed Group',
-        repoPath,
-        baseBranch,
-        targetBranch,
-        maxParallel: groupArgs.max_parallel,
-        cleanUpSuccessfulWork: groupArgs.clean_up_successful_work,
-        jobs: validation.specs.map((n): JobNodeSpec => ({
-          producerId: n.producerId,
-          name: n.name,
-          task: n.task,
-          work: n.work,
-          prechecks: n.prechecks,
-          postchecks: n.postchecks,
-          instructions: n.instructions,
-          dependencies: n.dependencies,
-          baseBranch: n.baseBranch,
-        })),
-      };
-
-      const plan = ctx.PlanRunner.enqueue(spec);
-
-      const nodeMapping: Record<string, string> = {};
-      for (const [producerId, nodeId] of plan.producerIdToNodeId) {
-        nodeMapping[producerId] = nodeId;
-      }
-
-      return {
-        success: true,
-        groupId: plan.id,
-        name: plan.spec.name,
-        baseBranch: plan.baseBranch,
-        targetBranch: plan.targetBranch,
-        nodeCount: plan.nodes.size,
-        nodeMapping,
-        message: `Group '${plan.spec.name}' created with ${plan.nodes.size} nodes. ` +
-                 `Use groupId '${plan.id}' to monitor progress.`,
-      };
-    } else if (validation.specs.length === 1) {
-      // Single ungrouped node → create as a single job plan
+    if (validation.specs.length === 1) {
+      // Single node → create as a single job plan
       const nodeSpec = validation.specs[0];
-      const baseBranch = await resolveBaseBranch(repoPath, nodeSpec.baseBranch);
-      const targetBranch = await resolveTargetBranch(baseBranch, repoPath);
+      const baseBranch = await resolveBaseBranch(repoPath, args.base_branch || nodeSpec.baseBranch);
+      const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.target_branch);
 
       const plan = ctx.PlanRunner.enqueueJob({
         name: nodeSpec.name || nodeSpec.producerId,
@@ -181,6 +138,7 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
         instructions: nodeSpec.instructions,
         baseBranch,
         targetBranch,
+        expectsNoChanges: nodeSpec.expectsNoChanges,
       });
 
       const nodeId = plan.roots[0];
@@ -195,15 +153,17 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
                  `Use nodeId '${nodeId}' or groupId '${plan.id}' to monitor progress.`,
       };
     } else {
-      // Multiple ungrouped nodes → create as a plan with auto-generated name
-      const baseBranch = await resolveBaseBranch(repoPath);
-      const targetBranch = await resolveTargetBranch(baseBranch, repoPath);
+      // Multiple nodes → create as a plan
+      const baseBranch = await resolveBaseBranch(repoPath, args.base_branch);
+      const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.target_branch);
 
       const spec: PlanSpec = {
         name: `Batch (${validation.specs.length} nodes)`,
         repoPath,
         baseBranch,
         targetBranch,
+        maxParallel: args.max_parallel,
+        cleanUpSuccessfulWork: args.clean_up_successful_work,
         jobs: validation.specs.map((n): JobNodeSpec => ({
           producerId: n.producerId,
           name: n.name,
@@ -214,6 +174,8 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
           instructions: n.instructions,
           dependencies: n.dependencies,
           baseBranch: n.baseBranch,
+          expectsNoChanges: n.expectsNoChanges,
+          group: n.group,
         })),
       };
 

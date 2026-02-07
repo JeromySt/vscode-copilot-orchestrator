@@ -61,6 +61,8 @@ interface SerializedNode {
   postchecks?: WorkSpec;
   instructions?: string;
   baseBranch?: string;
+  expectsNoChanges?: boolean;
+  group?: string;
   // subPlan-specific
   childSpec?: any;
   maxParallel?: number;
@@ -258,6 +260,8 @@ export class PlanPersistence {
         serializedNode.postchecks = jobNode.postchecks;
         serializedNode.instructions = jobNode.instructions;
         serializedNode.baseBranch = jobNode.baseBranch;
+        serializedNode.expectsNoChanges = jobNode.expectsNoChanges;
+        serializedNode.group = jobNode.group;
       } else if (node.type === 'subPlan') {
         const subPlanNode = node as SubPlanNode;
         serializedNode.childSpec = subPlanNode.childSpec;
@@ -323,6 +327,8 @@ export class PlanPersistence {
           postchecks: serializedNode.postchecks,
           instructions: serializedNode.instructions,
           baseBranch: serializedNode.baseBranch,
+          expectsNoChanges: serializedNode.expectsNoChanges,
+          group: serializedNode.group,
           dependencies: serializedNode.dependencies,
           dependents: serializedNode.dependents,
         };

@@ -26,6 +26,9 @@ let currentWorkspacePath: string | undefined;
 /** Current IPC server path (named pipe or Unix socket). */
 let currentIpcPath: string | undefined;
 
+/** Auth nonce for the IPC connection. */
+let currentAuthNonce: string | undefined;
+
 /** Whether the MCP server feature is enabled in user settings. */
 let isEnabled = true;
 
@@ -39,15 +42,18 @@ let isEnabled = true;
  * @param context - VS Code extension context.
  * @param workspacePath - Absolute path to the workspace root.
  * @param ipcPath - Path to the IPC server (named pipe or Unix socket).
+ * @param authNonce - Auth nonce for the IPC connection (passed via env, not command line).
  * @returns A composite {@link vscode.Disposable}.
  */
 export function registerMcpDefinitionProvider(
   context: vscode.ExtensionContext,
   workspacePath: string,
-  ipcPath: string
+  ipcPath: string,
+  authNonce: string
 ): vscode.Disposable {
   currentWorkspacePath = workspacePath;
   currentIpcPath = ipcPath;
+  currentAuthNonce = authNonce;
   
   // Check if MCP is enabled
   const mcpConfig = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
@@ -99,17 +105,21 @@ export function registerMcpDefinitionProvider(
       const serverScript = path.join(extensionPath, 'out', 'mcp', 'stdio', 'server.js');
 
       // The stdio server connects back to the extension via IPC
-      // It no longer needs workspace/storage paths since the PlanRunner is in the extension
-      // McpStdioServerDefinition constructor: (label, command, args?, options?)
+      // All config passed via environment variables to keep server "shape" stable
+      // McpStdioServerDefinition constructor: (label, command, args?, env?, version?)
+      // Note: cwd is a property that can be set after construction
       const server = new (vscode as any).McpStdioServerDefinition(
         'Copilot Orchestrator',  // label
         'node',                  // command
-        [serverScript, '--ipc', currentIpcPath],  // args - IPC path to connect back
+        [serverScript],          // args - no variable args, keeps shape stable
         {
-          cwd: vscode.Uri.file(currentWorkspacePath),
-          version: context.extension.packageJSON.version,
-        }
+          MCP_IPC_PATH: currentIpcPath,        // IPC connection path
+          MCP_AUTH_NONCE: currentAuthNonce,    // Security: auth nonce for IPC
+        },
+        context.extension.packageJSON.version  // version
       );
+      // Set cwd separately (it's a property, not a constructor param)
+      server.cwd = vscode.Uri.file(currentWorkspacePath);
 
       console.log(`[MCP Provider] Returning stdio server: ${server.label}, ipc: ${currentIpcPath}`);
       return [server];
