@@ -381,7 +381,7 @@ async function setupSubmoduleSymlinks(repoPath: string, worktreePath: string, lo
   
   const lines = listResult.stdout.trim().split(/\r?\n/).filter(Boolean);
   let symlinksCreated = 0;
-  let symlinksFailed = 0;
+  const failedSubmodules: string[] = [];
   
   for (const line of lines) {
     const match = line.match(/^submodule\.(.*?)\.path\s+(.*)$/);
@@ -398,7 +398,7 @@ async function setupSubmoduleSymlinks(repoPath: string, worktreePath: string, lo
       const sourceStats = await fs.promises.stat(sourceInRepo);
       if (!sourceStats.isDirectory()) {
         log?.(`[worktree] ⚠ Submodule '${submoduleName}' at '${sourceInRepo}' is not a directory`);
-        symlinksFailed++;
+        failedSubmodules.push(submodulePath);
         continue;
       }
       
@@ -425,8 +425,30 @@ async function setupSubmoduleSymlinks(repoPath: string, worktreePath: string, lo
       log?.(`[worktree] ✓ Symlinked submodule '${submoduleName}': ${destInWorktree} -> ${sourceInRepo}`);
       
     } catch (err: any) {
-      symlinksFailed++;
+      failedSubmodules.push(submodulePath);
       log?.(`[worktree] ⚠ Failed to symlink submodule '${submoduleName}': ${err.message}`);
+    }
+  }
+  
+  // If any symlinks failed, fall back to git submodule init for those
+  if (failedSubmodules.length > 0) {
+    log?.(`[worktree] Falling back to git submodule init for ${failedSubmodules.length} submodule(s)...`);
+    
+    for (const submodulePath of failedSubmodules) {
+      try {
+        const initResult = await execAsync(
+          ['submodule', 'update', '--init', '--', submodulePath],
+          { cwd: worktreePath }
+        );
+        
+        if (initResult.success) {
+          log?.(`[worktree] ✓ Initialized submodule '${submodulePath}' via git`);
+        } else {
+          log?.(`[worktree] ⚠ Failed to init submodule '${submodulePath}': ${initResult.stderr}`);
+        }
+      } catch (err: any) {
+        log?.(`[worktree] ⚠ Exception initializing submodule '${submodulePath}': ${err.message}`);
+      }
     }
   }
   
@@ -436,11 +458,7 @@ async function setupSubmoduleSymlinks(repoPath: string, worktreePath: string, lo
     log?.(`[worktree] ✓ Created ${symlinksCreated} submodule symlink(s) in ${submodTime}ms`);
   }
   
-  if (symlinksFailed > 0) {
-    log?.(`[worktree] ⚠ ${symlinksFailed} submodule symlink(s) failed - run 'git submodule update --init' in worktree if needed`);
-  }
-  
-  // Configure submodule.recurse for git operations (in case user does init later)
+  // Configure submodule.recurse for git operations
   await execAsync(['config', 'submodule.recurse', 'true'], { cwd: worktreePath });
   
   return submodTime;
