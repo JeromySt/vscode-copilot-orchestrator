@@ -47,6 +47,8 @@ export class planDetailPanel {
   private _disposables: vscode.Disposable[] = [];
   private _updateInterval?: NodeJS.Timeout;
   private _lastStateHash: string = '';
+  private _lastStructureHash: string = '';
+  private _isFirstRender: boolean = true;
   
   /**
    * @param panel - The VS Code webview panel instance.
@@ -417,7 +419,24 @@ export class planDetailPanel {
     const counts = recursiveCounts.counts;
     const totalNodes = recursiveCounts.totalNodes;
     
-    // Create a state hash to detect changes - only re-render if something changed
+    // Build node status map for incremental updates
+    const nodeStatuses: Record<string, { status: string; startedAt?: number; endedAt?: number }> = {};
+    for (const [nodeId, state] of plan.nodeStates) {
+      const sanitizedId = this._sanitizeId(nodeId);
+      nodeStatuses[sanitizedId] = {
+        status: state.status,
+        startedAt: state.startedAt,
+        endedAt: state.endedAt
+      };
+    }
+    
+    // Structure hash: nodes and their dependencies (doesn't change during execution)
+    const structureHash = JSON.stringify({
+      nodes: Array.from(plan.nodes.entries()).map(([id, n]) => [id, n.name, (n as JobNode).dependencies]),
+      spec: plan.spec.name
+    });
+    
+    // State hash: statuses, progress, counts (changes during execution)
     const stateHash = JSON.stringify({
       status,
       counts,
@@ -425,16 +444,41 @@ export class planDetailPanel {
       nodeStates: Array.from(plan.nodeStates.entries()).map(([id, s]) => [id, s.status])
     });
     
+    // If nothing changed, skip entirely
     if (stateHash === this._lastStateHash) {
-      // No change, skip re-render
       return;
     }
-    this._lastStateHash = stateHash;
     
-    // Compute effective endedAt from node data for accurate duration (recursively includes child plans)
+    const structureChanged = structureHash !== this._lastStructureHash;
+    this._lastStateHash = stateHash;
+    this._lastStructureHash = structureHash;
+    
+    // If structure changed or first render, do full HTML render
+    if (structureChanged || this._isFirstRender) {
+      this._isFirstRender = false;
+      // Compute effective endedAt from node data for accurate duration
+      const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
+      this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt, totalNodes);
+      return;
+    }
+    
+    // Otherwise, send incremental status update (preserves zoom/scroll)
+    const total = totalNodes ?? plan.nodes.size;
+    const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
+    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
     
-    this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt, totalNodes);
+    this._panel.webview.postMessage({
+      type: 'statusUpdate',
+      planStatus: status,
+      nodeStatuses,
+      counts,
+      progress,
+      total,
+      completed,
+      startedAt: plan.startedAt,
+      endedAt: effectiveEndedAt
+    });
   }
   
   /**
@@ -1329,13 +1373,108 @@ ${mermaidDef}
     // Update node durations every second
     setInterval(updateNodeDurations, 1000);
     
-    // Process tree handling for plan-level view
+    // Handle messages from extension (incremental updates, process stats)
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.type === 'allProcessStats') {
         renderAllProcesses(msg.rootJobs);
+      } else if (msg.type === 'statusUpdate') {
+        handleStatusUpdate(msg);
       }
     });
+    
+    // Handle incremental status updates without full re-render (preserves zoom/scroll)
+    function handleStatusUpdate(msg) {
+      const { planStatus, nodeStatuses, counts, progress, total, completed, startedAt, endedAt } = msg;
+      
+      // Update plan status badge
+      const statusBadge = document.querySelector('.status-badge');
+      if (statusBadge) {
+        statusBadge.className = 'status-badge ' + planStatus;
+        statusBadge.textContent = planStatus.charAt(0).toUpperCase() + planStatus.slice(1);
+      }
+      
+      // Update progress bar
+      const progressFill = document.querySelector('.progress-fill');
+      const progressText = document.querySelector('.progress-text');
+      if (progressFill) {
+        progressFill.style.width = progress + '%';
+      }
+      if (progressText) {
+        progressText.textContent = completed + ' / ' + total + ' (' + progress + '%)';
+      }
+      
+      // Update legend counts
+      const legendItems = document.querySelectorAll('.legend-item');
+      legendItems.forEach(item => {
+        const icon = item.querySelector('.legend-icon');
+        if (!icon) return;
+        const statusClass = Array.from(icon.classList).find(c => c !== 'legend-icon');
+        if (statusClass && counts[statusClass] !== undefined) {
+          const span = item.querySelector('span:last-child');
+          if (span) {
+            span.textContent = statusClass.charAt(0).toUpperCase() + statusClass.slice(1) + ' (' + counts[statusClass] + ')';
+          }
+        }
+      });
+      
+      // Update Mermaid node classes in SVG (changes color)
+      const svgElement = document.querySelector('.mermaid svg');
+      if (svgElement) {
+        for (const [sanitizedId, data] of Object.entries(nodeStatuses)) {
+          const nodeGroup = svgElement.querySelector('g[id*="flowchart-' + sanitizedId + '-"]');
+          if (nodeGroup) {
+            const nodeEl = nodeGroup.querySelector('.node');
+            if (nodeEl) {
+              // Remove old status classes and add new one
+              nodeEl.classList.remove('pending', 'ready', 'running', 'succeeded', 'failed', 'blocked', 'canceled', 'scheduled');
+              nodeEl.classList.add(data.status);
+            }
+          }
+          // Update nodeData for duration tracking
+          if (nodeData[sanitizedId]) {
+            nodeData[sanitizedId].status = data.status;
+            nodeData[sanitizedId].startedAt = data.startedAt;
+            nodeData[sanitizedId].endedAt = data.endedAt;
+          }
+        }
+      }
+      
+      // Update plan duration counter data attributes
+      const durationEl = document.getElementById('planDuration');
+      if (durationEl) {
+        durationEl.dataset.status = planStatus;
+        if (startedAt) durationEl.dataset.started = startedAt.toString();
+        if (endedAt) durationEl.dataset.ended = endedAt.toString();
+      }
+      
+      // Update action buttons visibility based on new status
+      const actionsDiv = document.querySelector('.actions');
+      if (actionsDiv) {
+        const cancelBtn = actionsDiv.querySelector('button[onclick="cancelPlan()"]');
+        const workSummaryBtn = actionsDiv.querySelector('button[onclick="showWorkSummary()"]');
+        
+        if (cancelBtn) {
+          cancelBtn.style.display = (planStatus === 'running' || planStatus === 'pending') ? '' : 'none';
+        }
+        if (workSummaryBtn) {
+          workSummaryBtn.style.display = planStatus === 'succeeded' ? '' : 'none';
+        } else if (planStatus === 'succeeded') {
+          // Add work summary button if it doesn't exist
+          const deleteBtn = actionsDiv.querySelector('button[onclick="deletePlan()"]');
+          if (deleteBtn) {
+            const newBtn = document.createElement('button');
+            newBtn.className = 'action-btn primary';
+            newBtn.onclick = showWorkSummary;
+            newBtn.textContent = 'View Work Summary';
+            actionsDiv.insertBefore(newBtn, deleteBtn);
+          }
+        }
+      }
+      
+      // Trigger duration update
+      updateNodeDurations();
+    }
     
     function formatMemory(bytes) {
       const mb = bytes / 1024 / 1024;
