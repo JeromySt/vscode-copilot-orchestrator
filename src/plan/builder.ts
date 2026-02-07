@@ -207,9 +207,9 @@ export function buildPlan(
     });
   }
   
-  // Determine worktree root
+  // Determine worktree root (flat structure under .worktrees)
   const repoPath = options.repoPath || spec.repoPath || process.cwd();
-  const worktreeRoot = options.worktreeRoot || path.join(repoPath, '.worktrees', planId.slice(0, 8));
+  const worktreeRoot = options.worktreeRoot || path.join(repoPath, '.worktrees');
   
   return {
     id: planId,

@@ -988,19 +988,7 @@ export class PlanRunner extends EventEmitter {
       }
     }
     
-    // Try to clean up the worktree root directory if it exists and is empty
-    if (plan.worktreeRoot) {
-      try {
-        const fs = require('fs');
-        const entries = fs.readdirSync(plan.worktreeRoot);
-        if (entries.length === 0) {
-          fs.rmdirSync(plan.worktreeRoot);
-          log.debug(`Removed empty worktree root: ${plan.worktreeRoot}`);
-        }
-      } catch (error: any) {
-        // Directory might not exist or not be empty - that's fine
-      }
-    }
+    // Note: worktreeRoot (.worktrees) is shared across plans, so we don't try to remove it
     
     // Clean up log files
     if (this.executor) {
@@ -1220,9 +1208,9 @@ export class PlanRunner extends EventEmitter {
         }
       }
       
-      // Create worktree path using node UUID (flat structure, no nesting)
-      // This avoids nested directories from group paths and simplifies cleanup
-      const worktreePath = path.join(plan.worktreeRoot, node.id);
+      // Create worktree path using first 8 chars of node UUID (flat structure)
+      // All worktrees are directly under .worktrees/<shortId> for simplicity
+      const worktreePath = path.join(plan.worktreeRoot, node.id.slice(0, 8));
       
       // Store in state (no branchName since we use detached HEAD)
       nodeState.worktreePath = worktreePath;
