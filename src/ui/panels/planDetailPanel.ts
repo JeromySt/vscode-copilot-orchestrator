@@ -673,6 +673,16 @@ export class planDetailPanel {
     .mermaid .node { cursor: pointer; }
     .mermaid .node.branchNode { cursor: default; }  /* Branch nodes are not clickable */
     
+    /* Prevent node label truncation */
+    .mermaid .node foreignObject {
+      overflow: visible !important;
+    }
+    .mermaid .node .nodeLabel {
+      white-space: nowrap !important;
+      overflow: visible !important;
+      text-overflow: unset !important;
+    }
+    
     /* Subgraph/cluster styling */
     .mermaid .cluster rect { rx: 8px; ry: 8px; }
     .mermaid .cluster-label,
