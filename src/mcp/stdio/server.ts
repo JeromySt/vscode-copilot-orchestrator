@@ -11,15 +11,21 @@
  * @module mcp/stdio/server
  */
 
+// CRITICAL: Redirect console.log to stderr BEFORE any imports
+// that might log during module initialization.
+// stdout is reserved for JSON-RPC messages only.
+const origLog = console.log;
+console.log = (...args: any[]) => console.error('[mcp-stdio]', ...args);
+console.debug = (...args: any[]) => console.error('[mcp-stdio:debug]', ...args);
+console.info = (...args: any[]) => console.error('[mcp-stdio:info]', ...args);
+console.warn = (...args: any[]) => console.error('[mcp-stdio:warn]', ...args);
+
 import * as path from 'path';
 import { StdioTransport } from './transport';
 import { McpHandler } from '../handler';
 import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '../../plan';
 
 async function main(): Promise<void> {
-  // Redirect console.log to stderr so it doesn't corrupt the JSON-RPC stream
-  const origLog = console.log;
-  console.log = (...args: any[]) => console.error('[mcp-stdio]', ...args);
 
   const workspacePath = process.env.ORCHESTRATOR_WORKSPACE || process.cwd();
   const storagePath = process.env.ORCHESTRATOR_STORAGE

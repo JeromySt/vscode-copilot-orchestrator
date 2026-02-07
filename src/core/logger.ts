@@ -229,11 +229,19 @@ export class Logger {
     }
 
     // Also log to console for development or standalone mode
-    const consoleFn = level === 'error' ? console.error :
-                      level === 'warn' ? console.warn :
-                      level === 'debug' ? console.debug :
-                      console.log;
-    consoleFn(`[Orchestrator:${component}] ${message}`, data ?? '');
+    // In standalone mode (stdio server), ALL output must go to stderr
+    // since stdout is reserved for JSON-RPC messages
+    if (!this.outputChannel) {
+      // Standalone mode: always use stderr
+      console.error(`[Orchestrator:${component}] ${message}`, data ?? '');
+    } else {
+      // VS Code mode: use appropriate console method
+      const consoleFn = level === 'error' ? console.error :
+                        level === 'warn' ? console.warn :
+                        level === 'debug' ? console.debug :
+                        console.log;
+      consoleFn(`[Orchestrator:${component}] ${message}`, data ?? '');
+    }
   }
 
   /**
