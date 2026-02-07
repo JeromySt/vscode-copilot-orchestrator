@@ -68,11 +68,24 @@ interface SerializedNode {
 }
 
 /**
- * Plan Persistence Manager
+ * Manages reading and writing Plan state as JSON files on disk.
+ *
+ * Each plan is stored as `plan-{id}.json` alongside a `plans-index.json`
+ * index file that enables fast listing without parsing every plan file.
+ *
+ * @example
+ * ```typescript
+ * const persistence = new PlanPersistence('/data/plans');
+ * persistence.save(plan);
+ * const loaded = persistence.load(plan.id);
+ * ```
  */
 export class PlanPersistence {
   private storagePath: string;
   
+  /**
+   * @param storagePath - Directory where plan JSON files are stored. Created if it doesn't exist.
+   */
   constructor(storagePath: string) {
     this.storagePath = storagePath;
     this.ensureStorageDir();
@@ -93,7 +106,10 @@ export class PlanPersistence {
   }
   
   /**
-   * Save a Plan to disk
+   * Persist a Plan to disk as JSON and update the plans index.
+   *
+   * @param plan - The plan instance to save.
+   * @throws If the file system write fails.
    */
   save(plan: PlanInstance): void {
     try {
@@ -112,14 +128,20 @@ export class PlanPersistence {
   }
   
   /**
-   * Save a Plan synchronously (for shutdown)
+   * Synchronous save — delegates to {@link save}.
+   * Provided as a named entry point for shutdown paths where the intent is explicit.
+   *
+   * @param plan - The plan instance to save.
    */
   saveSync(plan: PlanInstance): void {
     this.save(plan);
   }
   
   /**
-   * Load a Plan from disk
+   * Load a Plan from disk by its ID.
+   *
+   * @param planId - The plan identifier (used to derive the filename).
+   * @returns The deserialized plan instance, or `undefined` if the file is missing or corrupt.
    */
   load(planId: string): PlanInstance | undefined {
     try {
@@ -138,7 +160,11 @@ export class PlanPersistence {
   }
   
   /**
-   * Load all Plans from disk
+   * Load all persisted Plans from the storage directory.
+   *
+   * Corrupt files are logged and skipped rather than throwing.
+   *
+   * @returns Array of successfully loaded plan instances.
    */
   loadAll(): PlanInstance[] {
     const plans: PlanInstance[] = [];
@@ -166,7 +192,10 @@ export class PlanPersistence {
   }
   
   /**
-   * Delete a Plan from disk
+   * Delete a Plan's JSON file from disk and remove it from the index.
+   *
+   * @param planId - The plan identifier.
+   * @returns `true` if the file existed and was deleted, `false` otherwise.
    */
   delete(planId: string): boolean {
     try {
@@ -185,7 +214,9 @@ export class PlanPersistence {
   }
   
   /**
-   * Get list of all Plan IDs
+   * List all known Plan IDs from the index file.
+   *
+   * @returns Array of plan ID strings; empty if the index is missing or corrupt.
    */
   listplanIds(): string[] {
     try {

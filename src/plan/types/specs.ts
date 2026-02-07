@@ -1,0 +1,185 @@
+/**
+ * @fileoverview Work Specification Types
+ *
+ * Defines the types for specifying what work a job node should execute:
+ * direct process spawning, shell commands, or AI agent delegation.
+ *
+ * @module plan/types/specs
+ */
+
+/**
+ * Direct process spawn (no shell interpretation).
+ * Arguments are passed directly - no quoting issues.
+ */
+export interface ProcessSpec {
+  type: 'process';
+  
+  /** Executable to run (e.g., "node", "dotnet", "powershell.exe") */
+  executable: string;
+  
+  /** Arguments as array - no shell quoting needed */
+  args?: string[];
+  
+  /** Additional environment variables */
+  env?: Record<string, string>;
+  
+  /** Override working directory (relative to worktree or absolute) */
+  cwd?: string;
+  
+  /** Process timeout in milliseconds */
+  timeout?: number;
+}
+
+/**
+ * Shell command execution.
+ * Command is interpreted by the shell.
+ */
+export interface ShellSpec {
+  type: 'shell';
+  
+  /** Shell command string */
+  command: string;
+  
+  /** 
+   * Specific shell to use:
+   * - 'cmd' - Windows cmd.exe
+   * - 'powershell' - Windows PowerShell
+   * - 'pwsh' - PowerShell Core (cross-platform)
+   * - 'bash' - Bash shell
+   * - 'sh' - Default POSIX shell
+   * - undefined - Platform default (cmd on Windows, sh on Unix)
+   */
+  shell?: 'cmd' | 'powershell' | 'pwsh' | 'bash' | 'sh';
+  
+  /** Additional environment variables */
+  env?: Record<string, string>;
+  
+  /** Override working directory */
+  cwd?: string;
+  
+  /** Process timeout in milliseconds */
+  timeout?: number;
+}
+
+/**
+ * AI Agent delegation.
+ * Work is performed by Copilot agent.
+ * 
+ * @example
+ * ```typescript
+ * const agentWork: AgentSpec = {
+ *   type: 'agent',
+ *   instructions: `# Task: Implement Feature X
+ * 
+ * ## Requirements
+ * 1. Create new component in src/components/
+ * 2. Add unit tests
+ * 3. Update documentation
+ * 
+ * ## Notes
+ * - Follow existing code patterns
+ * - Use TypeScript strict mode`,
+ *   contextFiles: ['src/components/', 'README.md']
+ * };
+ * ```
+ */
+export interface AgentSpec {
+  type: 'agent';
+  
+  /**
+   * Instructions for the agent (what to do).
+   * 
+   * **MUST be in Markdown format** for proper rendering in the UI.
+   * 
+   * Supports:
+   * - `# Headers` (h1-h6)
+   * - `1. Numbered lists`
+   * - `- Bullet lists` (with nested items)
+   * - `` `code` `` inline and ``` code blocks ```
+   * - `**bold**` and `*italic*` text
+   * - `[links](url)`
+   * 
+   * @example
+   * ```markdown
+   * # Main Task
+   * 
+   * ## Steps
+   * 1. First step
+   * 2. Second step
+   *    - Sub-item A
+   *    - Sub-item B
+   * 
+   * ## Notes
+   * - Use `existingHelper()` function
+   * - See [docs](./README.md) for details
+   * ```
+   */
+  instructions: string;
+  
+  /** Optional model preference */
+  model?: string;
+  
+  /** Files to include in agent context (relative to worktree) */
+  contextFiles?: string[];
+  
+  /** Maximum agent turns/iterations */
+  maxTurns?: number;
+  
+  /** Additional environment context to provide */
+  context?: string;
+  
+  /** Resume existing Copilot session if available (default: true) */
+  resumeSession?: boolean;
+}
+
+/**
+ * Work specification - what to execute.
+ * Can be:
+ * - string: Legacy format, interpreted as shell command or "@agent ..." 
+ * - ProcessSpec: Direct process spawn
+ * - ShellSpec: Shell command with explicit shell choice
+ * - AgentSpec: AI agent delegation
+ */
+export type WorkSpec = string | ProcessSpec | ShellSpec | AgentSpec;
+
+/**
+ * Normalize a {@link WorkSpec} to its structured form.
+ *
+ * Handles backwards compatibility with the legacy string format:
+ * - Strings starting with `@agent` become an {@link AgentSpec}.
+ * - Other strings become a {@link ShellSpec}.
+ * - Structured specs pass through unchanged.
+ *
+ * @param spec - The work spec to normalize, or `undefined`.
+ * @returns The structured spec, or `undefined` if input was `undefined`.
+ *
+ * @example
+ * ```typescript
+ * normalizeWorkSpec('npm test');           // → { type: 'shell', command: 'npm test' }
+ * normalizeWorkSpec('@agent fix the bug'); // → { type: 'agent', instructions: 'fix the bug' }
+ * normalizeWorkSpec(undefined);            // → undefined
+ * ```
+ */
+export function normalizeWorkSpec(spec: WorkSpec | undefined): ProcessSpec | ShellSpec | AgentSpec | undefined {
+  if (spec === undefined) {
+    return undefined;
+  }
+  
+  if (typeof spec === 'string') {
+    // Legacy string format
+    if (spec.startsWith('@agent')) {
+      const instructions = spec.replace(/^@agent\s*/i, '').trim();
+      return {
+        type: 'agent',
+        instructions: instructions || 'Complete the task as specified',
+      };
+    }
+    // Default to shell command
+    return {
+      type: 'shell',
+      command: spec,
+    };
+  }
+  
+  return spec;
+}

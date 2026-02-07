@@ -26,9 +26,24 @@ import {
 } from './types';
 
 /**
- * Validation error for Plan building
+ * Validation error thrown when a {@link PlanSpec} is invalid.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   buildPlan(spec);
+ * } catch (e) {
+ *   if (e instanceof PlanValidationError) {
+ *     console.error(e.details); // ['Duplicate producerId: "a"', ...]
+ *   }
+ * }
+ * ```
  */
 export class PlanValidationError extends Error {
+  /**
+   * @param message - Summary error message.
+   * @param details - Individual validation errors (one per issue).
+   */
   constructor(message: string, public details?: string[]) {
     super(message);
     this.name = 'PlanValidationError';
@@ -36,12 +51,34 @@ export class PlanValidationError extends Error {
 }
 
 /**
- * Build a PlanInstance from a PlanSpec.
- * 
- * @param spec - The Plan specification
- * @param options - Optional build options
- * @returns A fully constructed PlanInstance
- * @throws PlanValidationError if the spec is invalid
+ * Build a {@link PlanInstance} from a {@link PlanSpec}.
+ *
+ * Performs three passes:
+ * 1. Creates nodes and maps `producerId` → `nodeId`.
+ * 2. Resolves dependency references from producer IDs to node UUIDs.
+ * 3. Computes reverse edges (dependents), identifies roots/leaves, and
+ *    validates the DAG for cycles.
+ *
+ * Root nodes (no dependencies) start in `'ready'` status; all others start
+ * as `'pending'`.
+ *
+ * @param spec    - The plan specification describing jobs and sub-plans.
+ * @param options - Optional overrides for parent plan context, repo path, or worktree root.
+ * @returns A fully constructed, validated plan instance.
+ * @throws {PlanValidationError} If the spec contains duplicate IDs, unknown references,
+ *         cycles, or has no nodes.
+ *
+ * @example
+ * ```typescript
+ * const plan = buildPlan({
+ *   name: 'My Plan',
+ *   baseBranch: 'main',
+ *   jobs: [
+ *     { producerId: 'a', task: 'Build', dependencies: [] },
+ *     { producerId: 'b', task: 'Test', dependencies: ['a'] },
+ *   ],
+ * });
+ * ```
  */
 export function buildPlan(
   spec: PlanSpec,
@@ -237,8 +274,10 @@ export function buildPlan(
 }
 
 /**
- * Detect cycles in the Plan using DFS.
- * Returns an error message if a cycle is found, null otherwise.
+ * Detect cycles in the dependency DAG using iterative DFS.
+ *
+ * @param nodes - Map of node ID → node definition.
+ * @returns A human-readable error message describing the cycle, or `null` if acyclic.
  */
 function detectCycles(nodes: Map<string, PlanNode>): string | null {
   const visited = new Set<string>();
@@ -288,8 +327,14 @@ function detectCycles(nodes: Map<string, PlanNode>): string | null {
 }
 
 /**
- * Create a simple single-job Plan from minimal input.
- * Convenience function for creating a Plan with just one job.
+ * Create a Plan with a single job node from minimal input.
+ *
+ * Generates a `producerId` from the job name and delegates to {@link buildPlan}.
+ *
+ * @param jobSpec - Minimal job definition (name, task, optional work/checks/branches).
+ * @param options - Optional overrides for repo path and worktree root.
+ * @returns A single-node plan instance.
+ * @throws {PlanValidationError} If the generated spec is somehow invalid.
  */
 export function buildSingleJobPlan(
   jobSpec: {

@@ -50,7 +50,16 @@ interface ActiveExecution {
 }
 
 /**
- * Default Job Executor implementation
+ * Default {@link JobExecutor} implementation.
+ *
+ * Handles:
+ * - Running prechecks, work, and postchecks as process/shell/agent specs
+ * - Tracking child process trees for monitoring
+ * - Committing changes and computing work summaries
+ * - Persisting execution logs to disk
+ *
+ * Processes are killed on cancellation, and logs are stored both in memory
+ * and on disk (under `{storagePath}/logs/`).
  */
 export class DefaultJobExecutor implements JobExecutor {
   private activeExecutions = new Map<string, ActiveExecution>();
@@ -61,7 +70,10 @@ export class DefaultJobExecutor implements JobExecutor {
   private processMonitor = new ProcessMonitor();
   
   /**
-   * Set storage path for log files
+   * Configure the directory for persisted log files.
+   * Creates the `logs/` subdirectory if it doesn't exist.
+   *
+   * @param storagePath - Root storage directory.
    */
   setStoragePath(storagePath: string): void {
     this.storagePath = storagePath;
@@ -73,14 +85,22 @@ export class DefaultJobExecutor implements JobExecutor {
   }
   
   /**
-   * Set the agent delegator for @agent tasks
+   * Set the agent delegator used for `@agent` / {@link AgentSpec} tasks.
+   *
+   * @param delegator - Agent delegator implementing `delegate()`.
    */
   setAgentDelegator(delegator: any): void {
     this.agentDelegator = delegator;
   }
   
   /**
-   * Execute a job
+   * Execute a job node: runs prechecks → work → postchecks → commit.
+   *
+   * Each phase is logged with section markers. If any phase fails, the
+   * remaining phases are skipped and the failure phase is recorded.
+   *
+   * @param context - Execution context (plan, node, worktree path, abort signal).
+   * @returns Result with success/failure, optional commit SHA, and per-phase statuses.
    */
   async execute(context: ExecutionContext): Promise<JobExecutionResult> {
     const { plan, node, worktreePath } = context;
@@ -283,7 +303,10 @@ export class DefaultJobExecutor implements JobExecutor {
   }
   
   /**
-   * Cancel an execution
+   * Cancel a running execution by killing its process tree.
+   *
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
    */
   cancel(planId: string, nodeId: string): void {
     const executionKey = `${planId}:${nodeId}`;
@@ -307,7 +330,11 @@ export class DefaultJobExecutor implements JobExecutor {
   }
   
   /**
-   * Get execution logs for a job
+   * Get all in-memory log entries for a job execution.
+   *
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
+   * @returns Array of log entries, empty if no logs exist.
    */
   getLogs(planId: string, nodeId: string): LogEntry[] {
     const executionKey = `${planId}:${nodeId}`;
@@ -315,14 +342,23 @@ export class DefaultJobExecutor implements JobExecutor {
   }
   
   /**
-   * Get logs for a specific phase
+   * Get log entries filtered to a specific execution phase.
+   *
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
+   * @param phase  - The execution phase to filter by.
+   * @returns Filtered log entries.
    */
   getLogsForPhase(planId: string, nodeId: string, phase: ExecutionPhase): LogEntry[] {
     return this.getLogs(planId, nodeId).filter(entry => entry.phase === phase);
   }
   
   /**
-   * Get process stats for a running execution
+   * Get OS-level process stats for a running execution.
+   *
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
+   * @returns Process info; fields are `null` when the process is not tracked.
    */
   async getProcessStats(planId: string, nodeId: string): Promise<{
     pid: number | null;
@@ -365,8 +401,13 @@ export class DefaultJobExecutor implements JobExecutor {
   }
   
   /**
-   * Get process stats for multiple running executions (more efficient than calling getProcessStats multiple times)
-   * Fetches snapshot once and builds trees for all.
+   * Get process stats for multiple executions in a single OS process snapshot.
+   *
+   * More efficient than individual {@link getProcessStats} calls when monitoring
+   * many nodes simultaneously.
+   *
+   * @param nodeKeys - Array of plan/node/name tuples to query.
+   * @returns Array of process stats in the same order as input (missing entries omitted).
    */
   async getAllProcessStats(nodeKeys: Array<{ planId: string; nodeId: string; nodeName: string }>): Promise<Array<{
     nodeId: string;
@@ -440,7 +481,11 @@ export class DefaultJobExecutor implements JobExecutor {
   }
 
   /**
-   * Check if an execution is active
+   * Check whether a job execution is currently active.
+   *
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
+   * @returns `true` if the execution is tracked and not yet finished.
    */
   isActive(planId: string, nodeId: string): boolean {
     const executionKey = `${planId}:${nodeId}`;
@@ -448,7 +493,14 @@ export class DefaultJobExecutor implements JobExecutor {
   }
   
   /**
-   * Log a message for a node execution (public API for runner to log merge operations)
+   * Append a log entry for a node execution.
+   * Logs are stored both in memory and persisted to disk.
+   *
+   * @param planId  - Plan identifier.
+   * @param nodeId  - Node identifier.
+   * @param phase   - Current execution phase.
+   * @param type    - Log level.
+   * @param message - Log message text.
    */
   log(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void {
     const executionKey = `${planId}:${nodeId}`;

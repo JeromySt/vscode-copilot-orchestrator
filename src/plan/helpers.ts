@@ -1,0 +1,256 @@
+/**
+ * @fileoverview Plan Helper Functions
+ * 
+ * Pure utility functions extracted from runner.ts and stateMachine.ts.
+ * These functions have no side effects and operate solely on their inputs.
+ * 
+ * @module plan/helpers
+ */
+
+import {
+  NodeStatus,
+  NodeExecutionState,
+  PlanStatus,
+  LogEntry,
+  JobWorkSummary,
+  WorkSummary,
+} from './types';
+
+// ============================================================================
+// LOG FORMATTING
+// ============================================================================
+
+/**
+ * Format a single {@link LogEntry} into a human-readable string.
+ *
+ * - `stdout` entries are returned as raw message text (no prefix).
+ * - All other types get a `[time] [TYPE]` prefix.
+ *
+ * @param entry - The log entry to format.
+ * @returns Formatted log line.
+ */
+export function formatLogEntry(entry: LogEntry): string {
+  const time = new Date(entry.timestamp).toLocaleTimeString();
+  const prefix = entry.type === 'stderr' ? '[ERR]' :
+                 entry.type === 'error'  ? '[ERROR]' :
+                 entry.type === 'info'   ? '[INFO]' : '';
+
+  if (entry.type === 'stdout') {
+    return entry.message;
+  }
+  return `[${time}] ${prefix} ${entry.message}`;
+}
+
+/**
+ * Format an array of log entries into a single newline-separated string.
+ *
+ * @param entries - Log entries to format.
+ * @returns Concatenated formatted output.
+ */
+export function formatLogEntries(entries: LogEntry[]): string {
+  return entries.map(formatLogEntry).join('\n');
+}
+
+// ============================================================================
+// STATUS AGGREGATION
+// ============================================================================
+
+/**
+ * Count how many nodes are in each {@link NodeStatus}.
+ *
+ * @param nodeStates - Iterable of node execution states.
+ * @returns Record keyed by status with integer counts.
+ */
+export function computeStatusCounts(
+  nodeStates: Iterable<NodeExecutionState>
+): Record<NodeStatus, number> {
+  const counts: Record<NodeStatus, number> = {
+    pending: 0,
+    ready: 0,
+    scheduled: 0,
+    running: 0,
+    succeeded: 0,
+    failed: 0,
+    blocked: 0,
+    canceled: 0,
+  };
+
+  for (const state of nodeStates) {
+    counts[state.status]++;
+  }
+
+  return counts;
+}
+
+/**
+ * Compute a 0–1 progress ratio from status counts.
+ * Terminal states (succeeded, failed, blocked, canceled) count as "completed".
+ *
+ * @param counts - Status counts as returned by {@link computeStatusCounts}.
+ * @param total  - Total number of nodes in the plan.
+ * @returns Progress ratio between 0 and 1; returns 0 when `total ≤ 0`.
+ */
+export function computeProgress(
+  counts: Record<NodeStatus, number>,
+  total: number
+): number {
+  if (total <= 0) return 0;
+  const completed = counts.succeeded + counts.failed + counts.blocked + counts.canceled;
+  return completed / total;
+}
+
+/**
+ * Derive the overall PlanStatus from node execution states.
+ * 
+ * @param nodeStates - Iterable of every node's execution state
+ * @param hasStarted - Whether the plan has been started (plan.startedAt is set)
+ */
+export function computePlanStatus(
+  nodeStates: Iterable<NodeExecutionState>,
+  hasStarted: boolean
+): PlanStatus {
+  let hasRunning = false;
+  let hasPending = false;
+  let hasReady = false;
+  let hasScheduled = false;
+  let hasFailed = false;
+  let hasSucceeded = false;
+  let hasCanceled = false;
+  let activeNonTerminal = 0;
+
+  for (const state of nodeStates) {
+    switch (state.status) {
+      case 'running':
+        hasRunning = true;
+        break;
+      case 'pending':
+        hasPending = true;
+        activeNonTerminal++;
+        break;
+      case 'ready':
+        hasReady = true;
+        activeNonTerminal++;
+        break;
+      case 'scheduled':
+        hasScheduled = true;
+        break;
+      case 'failed':
+        hasFailed = true;
+        break;
+      case 'succeeded':
+        hasSucceeded = true;
+        break;
+      case 'canceled':
+        hasCanceled = true;
+        break;
+      case 'blocked':
+        // Blocked nodes don't affect status directly
+        break;
+    }
+  }
+
+  // If anything is still in progress
+  if (hasRunning || hasScheduled) {
+    return 'running';
+  }
+
+  // If there are ready or pending nodes (and no running), we're still going
+  if (hasReady || hasPending) {
+    if (activeNonTerminal > 0) {
+      if (hasStarted) {
+        return 'running';
+      }
+      return 'pending';
+    }
+  }
+
+  // All nodes are terminal - determine final status
+  if (hasCanceled) {
+    return 'canceled';
+  }
+
+  if (hasFailed && hasSucceeded) {
+    return 'partial';
+  }
+
+  if (hasFailed) {
+    return 'failed';
+  }
+
+  if (hasSucceeded) {
+    return 'succeeded';
+  }
+
+  // Edge case: all blocked (no successes or failures directly)
+  return 'failed';
+}
+
+// ============================================================================
+// DURATION / TIMESTAMP HELPERS
+// ============================================================================
+
+/**
+ * Compute the effective endedAt timestamp from node states.
+ * Returns the maximum `endedAt` across all nodes, which is the true
+ * completion time even if child plans took longer than originally recorded.
+ *
+ * @param nodeStates - Iterable of node execution states.
+ * @returns The latest endedAt timestamp in ms, or `undefined` if no nodes have ended.
+ */
+export function computeEffectiveEndedAt(
+  nodeStates: Iterable<NodeExecutionState>
+): number | undefined {
+  let maxEndedAt: number | undefined;
+
+  for (const state of nodeStates) {
+    if (state.endedAt) {
+      if (!maxEndedAt || state.endedAt > maxEndedAt) {
+        maxEndedAt = state.endedAt;
+      }
+    }
+  }
+
+  return maxEndedAt;
+}
+
+// ============================================================================
+// WORK SUMMARY
+// ============================================================================
+
+/**
+ * Create a new empty {@link WorkSummary} with all counters at zero.
+ *
+ * @returns A fresh work summary object.
+ */
+export function createEmptyWorkSummary(): WorkSummary {
+  return {
+    totalCommits: 0,
+    totalFilesAdded: 0,
+    totalFilesModified: 0,
+    totalFilesDeleted: 0,
+    jobSummaries: [],
+  };
+}
+
+/**
+ * Append a job's work summary to an aggregated {@link WorkSummary}, mutating it in place.
+ * If `summary` is `undefined`, a new one is created and returned.
+ *
+ * @param summary    - Existing aggregated summary, or `undefined` to create a new one.
+ * @param jobSummary - The individual job summary to add.
+ * @returns The mutated (or newly created) aggregated summary.
+ */
+export function appendWorkSummary(
+  summary: WorkSummary | undefined,
+  jobSummary: JobWorkSummary
+): WorkSummary {
+  const ws = summary ?? createEmptyWorkSummary();
+
+  ws.totalCommits += jobSummary.commits;
+  ws.totalFilesAdded += jobSummary.filesAdded;
+  ws.totalFilesModified += jobSummary.filesModified;
+  ws.totalFilesDeleted += jobSummary.filesDeleted;
+  ws.jobSummaries.push(jobSummary);
+
+  return ws;
+}

@@ -43,12 +43,26 @@ import { PlanStateMachine } from './stateMachine';
 import { PlanScheduler } from './scheduler';
 import { PlanPersistence } from './persistence';
 import { Logger } from '../core/logger';
+import {
+  formatLogEntries,
+  appendWorkSummary as appendWorkSummaryHelper,
+  computeProgress,
+} from './helpers';
 import * as git from '../git';
 
 const log = Logger.for('plan-runner');
 
 /**
- * Events emitted by the Plan Runner
+ * Events emitted by the {@link PlanRunner}.
+ *
+ * Subscribe with `runner.on('planCreated', handler)`.
+ *
+ * @example
+ * ```typescript
+ * runner.on('planCompleted', (plan, status) => {
+ *   console.log(`Plan ${plan.spec.name} finished with status ${status}`);
+ * });
+ * ```
  */
 export interface PlanRunnerEvents {
   'planCreated': (plan: PlanInstance) => void;
@@ -62,13 +76,56 @@ export interface PlanRunnerEvents {
 }
 
 /**
- * Job executor interface - implemented separately for actual execution
+ * Strategy interface for executing individual job nodes.
+ *
+ * Implement this to control *how* jobs run (e.g. local process, remote CI,
+ * container). The default implementation is {@link DefaultJobExecutor}.
  */
 export interface JobExecutor {
+  /**
+   * Execute a job within the given context.
+   *
+   * @param context - Execution context including plan, node, worktree, and abort signal.
+   * @returns Result indicating success/failure, optional commit SHA, and work summary.
+   */
   execute(context: ExecutionContext): Promise<JobExecutionResult>;
+
+  /**
+   * Request cancellation of a running job.
+   *
+   * @param planId - The plan the job belongs to.
+   * @param nodeId - The node to cancel.
+   */
   cancel(planId: string, nodeId: string): void;
+
+  /**
+   * Retrieve in-memory logs for a job execution.
+   *
+   * @param planId - Plan ID.
+   * @param nodeId - Node ID.
+   * @returns Array of log entries, or empty if unavailable.
+   */
   getLogs?(planId: string, nodeId: string): LogEntry[];
+
+  /**
+   * Retrieve logs filtered to a specific execution phase.
+   *
+   * @param planId - Plan ID.
+   * @param nodeId - Node ID.
+   * @param phase  - The execution phase to filter by.
+   * @returns Filtered log entries.
+   */
   getLogsForPhase?(planId: string, nodeId: string, phase: ExecutionPhase): LogEntry[];
+
+  /**
+   * Append a log entry to a job's execution log.
+   *
+   * @param planId  - Plan ID.
+   * @param nodeId  - Node ID.
+   * @param phase   - Current execution phase.
+   * @param type    - Log level.
+   * @param message - Log message text.
+   */
   log?(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void;
 }
 
@@ -100,7 +157,22 @@ export interface RetryNodeOptions {
 }
 
 /**
- * Plan Runner - orchestrates Plan execution
+ * Central orchestrator for Plan execution.
+ *
+ * Combines plan building, state-machine management, scheduling, executor
+ * delegation, persistence, and git merge operations (FI / RI).
+ *
+ * Lifecycle: {@link initialize} → {@link enqueue} → pump loop → {@link shutdown}.
+ *
+ * @example
+ * ```typescript
+ * const runner = new PlanRunner({ storagePath: '/tmp/plans' });
+ * runner.setExecutor(new DefaultJobExecutor());
+ * await runner.initialize();
+ *
+ * const plan = runner.enqueue(mySpec);
+ * runner.on('planCompleted', (p, status) => console.log(status));
+ * ```
  */
 export class PlanRunner extends EventEmitter {
   private plans = new Map<string, PlanInstance>();
@@ -122,7 +194,10 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Set the job executor (injected dependency)
+   * Inject the job executor strategy.
+   * Must be called before {@link initialize} or the pump loop will be inert.
+   *
+   * @param executor - The executor implementation to use for running jobs.
    */
   setExecutor(executor: JobExecutor): void {
     this.executor = executor;
@@ -138,7 +213,10 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Initialize the runner - load persisted Plans and start pump
+   * Initialize the runner — loads persisted Plans from disk and starts
+   * the periodic pump loop that advances execution.
+   *
+   * @throws If persistence storage is inaccessible.
    */
   async initialize(): Promise<void> {
     log.info('Initializing Plan Runner');
@@ -160,7 +238,8 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Shutdown the runner - persist state and stop pump
+   * Gracefully shut down the runner — stops the pump loop and
+   * persists all in-flight Plan state to disk.
    */
   async shutdown(): Promise<void> {
     log.info('Shutting down Plan Runner');
@@ -175,7 +254,8 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Persist all Plans synchronously (for emergency shutdown)
+   * Persist all Plan state synchronously.
+   * Intended for emergency / process-exit scenarios where async I/O is unsafe.
    */
   persistSync(): void {
     for (const plan of this.plans.values()) {
@@ -232,6 +312,9 @@ export class PlanRunner extends EventEmitter {
   /**
    * Create a simple single-job plan.
    * Convenience method for backwards compatibility with job-only workflows.
+   *
+   * @param jobSpec - Minimal job definition (name, task, optional work/checks).
+   * @returns The created single-node {@link PlanInstance}.
    */
   enqueueJob(jobSpec: {
     name: string;
@@ -269,21 +352,29 @@ export class PlanRunner extends EventEmitter {
   // ============================================================================
   
   /**
-   * Get a Plan by ID
+   * Get a Plan by ID.
+   *
+   * @param planId - Unique plan identifier (UUID).
+   * @returns The plan instance, or `undefined` if not found.
    */
   get(planId: string): PlanInstance | undefined {
     return this.plans.get(planId);
   }
   
   /**
-   * Get all Plans
+   * Get all registered Plans (active and completed).
+   *
+   * @returns Array of every known plan instance.
    */
   getAll(): PlanInstance[] {
     return Array.from(this.plans.values());
   }
   
   /**
-   * Get Plans by status
+   * Filter Plans by their computed status.
+   *
+   * @param status - The plan status to filter on.
+   * @returns Plans whose current computed status matches.
    */
   getByStatus(status: PlanStatus): PlanInstance[] {
     return Array.from(this.plans.values()).filter(plan => {
@@ -293,14 +384,20 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Get the state machine for a Plan
+   * Get the state machine for a Plan.
+   *
+   * @param planId - Plan identifier.
+   * @returns The state machine, or `undefined` if the plan is unknown.
    */
   getStateMachine(planId: string): PlanStateMachine | undefined {
     return this.stateMachines.get(planId);
   }
   
   /**
-   * Get Plan status with computed fields
+   * Get Plan status along with node counts and a 0–1 progress ratio.
+   *
+   * @param planId - Plan identifier.
+   * @returns Status snapshot, or `undefined` if the plan is unknown.
    */
   getStatus(planId: string): {
     plan: PlanInstance;
@@ -313,9 +410,7 @@ export class PlanRunner extends EventEmitter {
     if (!plan || !sm) return undefined;
     
     const counts = sm.getStatusCounts();
-    const total = plan.nodes.size;
-    const completed = counts.succeeded + counts.failed + counts.blocked + counts.canceled;
-    const progress = total > 0 ? completed / total : 0;
+    const progress = computeProgress(counts, plan.nodes.size);
     
     return {
       plan,
@@ -366,7 +461,14 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Get execution logs for a node
+   * Get execution logs for a node, optionally filtered to a single phase.
+   *
+   * Falls back to on-disk log files when in-memory logs have been evicted.
+   *
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
+   * @param phase  - Phase to filter by, or `'all'` / `undefined` for everything.
+   * @returns Formatted log text.
    */
   getNodeLogs(planId: string, nodeId: string, phase?: 'all' | ExecutionPhase): string {
     if (!this.executor) return 'No executor available.';
@@ -380,17 +482,7 @@ export class PlanRunner extends EventEmitter {
     }
     
     if (logs.length > 0) {
-      return logs.map((entry: LogEntry) => {
-        const time = new Date(entry.timestamp).toLocaleTimeString();
-        const prefix = entry.type === 'stderr' ? '[ERR]' : 
-                       entry.type === 'error' ? '[ERROR]' :
-                       entry.type === 'info' ? '[INFO]' : '';
-        // For stdout, just show the raw output without prefix
-        if (entry.type === 'stdout') {
-          return entry.message;
-        }
-        return `[${time}] ${prefix} ${entry.message}`;
-      }).join('\n');
+      return formatLogEntries(logs);
     }
     
     // Try reading from log file
@@ -411,7 +503,12 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Get details for a specific attempt
+   * Get details for a specific execution attempt of a node.
+   *
+   * @param planId        - Plan identifier.
+   * @param nodeId        - Node identifier.
+   * @param attemptNumber - 1-based attempt number.
+   * @returns The attempt record, or `null` if not found.
    */
   getNodeAttempt(planId: string, nodeId: string, attemptNumber: number): AttemptRecord | null {
     const plan = this.plans.get(planId);
@@ -424,7 +521,11 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Get all attempts for a node
+   * Get the full attempt history for a node.
+   *
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
+   * @returns Array of attempt records, empty if the node has no history.
    */
   getNodeAttempts(planId: string, nodeId: string): AttemptRecord[] {
     const plan = this.plans.get(planId);
@@ -435,7 +536,11 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Get process stats for a running node
+   * Get OS-level process stats (PID, tree, duration) for a running node.
+   *
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
+   * @returns Process information; fields are `null` when the process is not tracked.
    */
   async getProcessStats(planId: string, nodeId: string): Promise<{
     pid: number | null;
@@ -455,9 +560,12 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Get process stats for all running nodes in a Plan (including sub-plans).
-   * Returns a hierarchical structure: Plan → Jobs → Processes
-   * Uses batch method for efficiency - single process snapshot for all nodes.
+   * Get process stats for all running nodes in a Plan, including sub-plans.
+   *
+   * Uses a single OS process snapshot for efficiency instead of per-node queries.
+   *
+   * @param planId - Root plan identifier.
+   * @returns Flat list and hierarchical structure of running process information.
    */
   async getAllProcessStats(planId: string): Promise<{
     flat: Array<{
@@ -695,7 +803,10 @@ export class PlanRunner extends EventEmitter {
   // ============================================================================
   
   /**
-   * Cancel a Plan
+   * Cancel all non-terminal nodes in a Plan and signal running executors to abort.
+   *
+   * @param planId - Plan identifier.
+   * @returns `true` if the plan was found and cancellation initiated.
    */
   cancel(planId: string): boolean {
     const plan = this.plans.get(planId);
@@ -721,7 +832,12 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Delete a Plan
+   * Delete a Plan and clean up all associated resources (worktrees, logs, child plans).
+   *
+   * Running nodes are canceled before deletion. Resource cleanup runs in the background.
+   *
+   * @param planId - Plan identifier.
+   * @returns `true` if the plan existed and was deleted.
    */
   delete(planId: string): boolean {
     const plan = this.plans.get(planId);
@@ -832,8 +948,13 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Resume a Plan that may have been paused or completed with failures.
-   * This ensures the pump is running to process any ready nodes.
+   * Resume a paused or previously-completed-with-failures Plan.
+   *
+   * Clears `endedAt` so completion is recalculated and ensures the pump
+   * loop is active to process any ready nodes.
+   *
+   * @param planId - Plan identifier.
+   * @returns `true` if the plan was found and resumed.
    */
   resume(planId: string): boolean {
     const plan = this.plans.get(planId);
@@ -857,7 +978,10 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Get a Plan by ID (for external access)
+   * Get a Plan by ID (alias exposed for external callers).
+   *
+   * @param planId - Plan identifier.
+   * @returns The plan instance, or `undefined` if not found.
    */
   getPlan(planId: string): PlanInstance | undefined {
     return this.plans.get(planId);
@@ -1993,12 +2117,15 @@ export class PlanRunner extends EventEmitter {
   
   /**
    * Retry a failed node.
-   * Resets the node state and re-queues it for execution.
-   * 
-   * @param planId - Plan ID
-   * @param nodeId - Node ID to retry
-   * @param options - Retry options
-   * @returns true if retry was initiated, error message otherwise
+   *
+   * Resets the node's execution state, optionally replaces its work spec,
+   * and re-queues it for scheduling on the next pump cycle. The existing
+   * worktree is reused unless `options.clearWorktree` is `true`.
+   *
+   * @param planId  - Plan ID.
+   * @param nodeId  - Node ID to retry.
+   * @param options - Optional overrides (new work spec, worktree reset).
+   * @returns `{ success: true }` if retry was initiated, or `{ success: false, error }`.
    */
   retryNode(planId: string, nodeId: string, options?: RetryNodeOptions): { success: boolean; error?: string } {
     const plan = this.plans.get(planId);
@@ -2116,7 +2243,11 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Get failure context for a node (for AI analysis before retry)
+   * Get failure context for a node — useful for AI-assisted retry analysis.
+   *
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
+   * @returns Logs, phase, error details, and worktree path; or `{ error }` if not found.
    */
   getNodeFailureContext(planId: string, nodeId: string): {
     logs: string;
@@ -2162,21 +2293,7 @@ export class PlanRunner extends EventEmitter {
    * Append a job's work summary to the Plan's aggregated summary
    */
   private appendWorkSummary(plan: PlanInstance, jobSummary: JobWorkSummary): void {
-    if (!plan.workSummary) {
-      plan.workSummary = {
-        totalCommits: 0,
-        totalFilesAdded: 0,
-        totalFilesModified: 0,
-        totalFilesDeleted: 0,
-        jobSummaries: [],
-      };
-    }
-    
-    plan.workSummary.totalCommits += jobSummary.commits;
-    plan.workSummary.totalFilesAdded += jobSummary.filesAdded;
-    plan.workSummary.totalFilesModified += jobSummary.filesModified;
-    plan.workSummary.totalFilesDeleted += jobSummary.filesDeleted;
-    plan.workSummary.jobSummaries.push(jobSummary);
+    plan.workSummary = appendWorkSummaryHelper(plan.workSummary, jobSummary);
   }
   
   // ============================================================================

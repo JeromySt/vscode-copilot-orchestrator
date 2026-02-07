@@ -23,22 +23,30 @@ export interface SchedulerOptions {
 }
 
 /**
- * Plan Scheduler - picks which nodes to execute
+ * Stateless scheduler that decides which ready nodes to execute.
+ *
+ * Takes current capacity (plan-level and global), and returns up to
+ * `available` node IDs sorted by priority (most dependents first).
+ *
+ * Sub-plan coordination nodes do not consume execution slots.
  */
 export class PlanScheduler {
   private globalMaxParallel: number;
   
+  /**
+   * @param options - Scheduler configuration.
+   */
   constructor(options: SchedulerOptions = {}) {
     this.globalMaxParallel = options.globalMaxParallel || 8;
   }
   
   /**
-   * Select nodes to schedule from a Plan.
-   * 
-   * @param Plan - The Plan instance
-   * @param stateMachine - The state machine for the Plan
-   * @param currentGlobalRunning - Current number of globally running jobs (excluding sub-plan coordination nodes)
-   * @returns Array of node IDs to schedule
+   * Select ready nodes to schedule, respecting plan-level and global capacity.
+   *
+   * @param plan                 - The plan instance to schedule from.
+   * @param stateMachine         - State machine for querying node readiness.
+   * @param currentGlobalRunning - Count of globally running job nodes (excludes sub-plan coordinators).
+   * @returns Array of node IDs to schedule, sorted by priority (most dependents first).
    */
   selectNodes(
     plan: PlanInstance,
@@ -100,14 +108,18 @@ export class PlanScheduler {
   }
   
   /**
-   * Update global max parallel setting
+   * Update the global maximum number of parallel jobs.
+   *
+   * @param max - New limit.
    */
   setGlobalMaxParallel(max: number): void {
     this.globalMaxParallel = max;
   }
   
   /**
-   * Get current global max parallel setting
+   * Get the current global maximum parallel jobs setting.
+   *
+   * @returns The current limit.
    */
   getGlobalMaxParallel(): number {
     return this.globalMaxParallel;

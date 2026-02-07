@@ -25,5 +25,17 @@ export { PlanPersistence } from './persistence';
 // Runner
 export { PlanRunner, PlanRunnerConfig, PlanRunnerEvents, JobExecutor, RetryNodeOptions } from './runner';
 
+// Helpers
+export {
+  formatLogEntry,
+  formatLogEntries,
+  computeStatusCounts,
+  computeProgress,
+  computePlanStatus,
+  computeEffectiveEndedAt,
+  createEmptyWorkSummary,
+  appendWorkSummary,
+} from './helpers';
+
 // Executor
 export { DefaultJobExecutor } from './executor';

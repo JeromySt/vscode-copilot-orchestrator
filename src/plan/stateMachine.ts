@@ -26,6 +26,11 @@ import {
   TERMINAL_STATES,
 } from './types';
 import { Logger } from '../core/logger';
+import {
+  computeStatusCounts,
+  computePlanStatus as computePlanStatusHelper,
+  computeEffectiveEndedAt as computeEffectiveEndedAtHelper,
+} from './helpers';
 
 const log = Logger.for('plan-state');
 
@@ -39,22 +44,43 @@ export interface StateMachineEvents {
 }
 
 /**
- * Plan State Machine - manages execution state for a Plan
+ * Plan State Machine — manages execution state for a single Plan.
+ *
+ * Every node status change must flow through {@link transition}, which
+ * validates the transition, sets timestamps, and emits events.
+ * Side effects (blocking downstream, checking completion) are handled
+ * automatically.
+ *
+ * @example
+ * ```typescript
+ * const sm = new PlanStateMachine(plan);
+ * sm.on('transition', (evt) => console.log(`${evt.nodeId}: ${evt.from} → ${evt.to}`));
+ * sm.transition(nodeId, 'running');
+ * ```
  */
 export class PlanStateMachine extends EventEmitter {
+  /**
+   * @param plan - The plan instance whose state this machine manages.
+   */
   constructor(private plan: PlanInstance) {
     super();
   }
   
   /**
-   * Get the current status of a node
+   * Get the current status of a node.
+   *
+   * @param nodeId - The node identifier.
+   * @returns The node's current status, or `undefined` if the node is unknown.
    */
   getNodeStatus(nodeId: string): NodeStatus | undefined {
     return this.plan.nodeStates.get(nodeId)?.status;
   }
   
   /**
-   * Get the full execution state of a node
+   * Get the full execution state of a node.
+   *
+   * @param nodeId - The node identifier.
+   * @returns The mutable execution state, or `undefined` if the node is unknown.
    */
   getNodeState(nodeId: string): NodeExecutionState | undefined {
     return this.plan.nodeStates.get(nodeId);
@@ -201,7 +227,10 @@ export class PlanStateMachine extends EventEmitter {
   }
   
   /**
-   * Check if all dependencies of a node are satisfied
+   * Check if all dependencies of a node have succeeded.
+   *
+   * @param nodeId - The node to check.
+   * @returns `true` if every dependency is in `'succeeded'` status, `false` otherwise.
    */
   areDependenciesMet(nodeId: string): boolean {
     const node = this.plan.nodes.get(nodeId);
@@ -218,7 +247,10 @@ export class PlanStateMachine extends EventEmitter {
   }
   
   /**
-   * Check if any dependency has failed
+   * Check if any dependency of a node has failed or been blocked.
+   *
+   * @param nodeId - The node to check.
+   * @returns `true` if at least one dependency is in `'failed'` or `'blocked'` status.
    */
   hasDependencyFailed(nodeId: string): boolean {
     const node = this.plan.nodes.get(nodeId);
@@ -271,104 +303,23 @@ export class PlanStateMachine extends EventEmitter {
    * @returns The computed endedAt timestamp, or undefined if no nodes have ended
    */
   computeEffectiveEndedAt(): number | undefined {
-    let maxEndedAt: number | undefined;
-    
-    for (const state of this.plan.nodeStates.values()) {
-      if (state.endedAt) {
-        if (!maxEndedAt || state.endedAt > maxEndedAt) {
-          maxEndedAt = state.endedAt;
-        }
-      }
-    }
-    
-    return maxEndedAt;
+    return computeEffectiveEndedAtHelper(this.plan.nodeStates.values());
   }
   
   /**
-   * Compute the overall Plan status from node states
+   * Compute the overall Plan status from all node states.
+   *
+   * @returns Derived {@link PlanStatus} (`'pending'`, `'running'`, `'succeeded'`, etc.).
    */
   computePlanStatus(): PlanStatus {
-    let hasRunning = false;
-    let hasPending = false;
-    let hasReady = false;
-    let hasScheduled = false;
-    let hasFailed = false;
-    let hasSucceeded = false;
-    let hasCanceled = false;
-    
-    for (const state of this.plan.nodeStates.values()) {
-      switch (state.status) {
-        case 'running':
-          hasRunning = true;
-          break;
-        case 'pending':
-          hasPending = true;
-          break;
-        case 'ready':
-          hasReady = true;
-          break;
-        case 'scheduled':
-          hasScheduled = true;
-          break;
-        case 'failed':
-          hasFailed = true;
-          break;
-        case 'succeeded':
-          hasSucceeded = true;
-          break;
-        case 'canceled':
-          hasCanceled = true;
-          break;
-        case 'blocked':
-          // Blocked nodes don't affect status directly
-          break;
-      }
-    }
-    
-    // If anything is still in progress
-    if (hasRunning || hasScheduled) {
-      return 'running';
-    }
-    
-    // If there are ready or pending nodes (and no running), we're still going
-    if (hasReady || hasPending) {
-      // Check if all pending/ready nodes are actually blocked
-      const activeNonTerminal = Array.from(this.plan.nodeStates.values())
-        .filter(s => s.status === 'pending' || s.status === 'ready')
-        .length;
-      
-      if (activeNonTerminal > 0) {
-        // If we have the start time, we're running
-        if (this.plan.startedAt) {
-          return 'running';
-        }
-        return 'pending';
-      }
-    }
-    
-    // All nodes are terminal - determine final status
-    if (hasCanceled) {
-      return 'canceled';
-    }
-    
-    if (hasFailed && hasSucceeded) {
-      return 'partial';
-    }
-    
-    if (hasFailed) {
-      return 'failed';
-    }
-    
-    if (hasSucceeded) {
-      return 'succeeded';
-    }
-    
-    // Edge case: all blocked (no successes or failures directly)
-    return 'failed';
+    return computePlanStatusHelper(this.plan.nodeStates.values(), !!this.plan.startedAt);
   }
   
   /**
-   * Get all nodes in a specific status
+   * Get all node IDs currently in the given status.
+   *
+   * @param status - The status to filter by.
+   * @returns Array of matching node IDs.
    */
   getNodesByStatus(status: NodeStatus): string[] {
     const result: string[] = [];
@@ -381,7 +332,9 @@ export class PlanStateMachine extends EventEmitter {
   }
   
   /**
-   * Get all nodes that are ready to be scheduled
+   * Get all node IDs that are ready to be scheduled (dependencies met).
+   *
+   * @returns Array of `'ready'` node IDs.
    */
   getReadyNodes(): string[] {
     return this.getNodesByStatus('ready');
@@ -465,29 +418,16 @@ export class PlanStateMachine extends EventEmitter {
   }
   
   /**
-   * Get count of nodes in each status (for progress tracking)
+   * Get count of nodes in each status (for progress tracking).
+   *
+   * @returns Record keyed by {@link NodeStatus} with integer counts.
    */
   getStatusCounts(): Record<NodeStatus, number> {
-    const counts: Record<NodeStatus, number> = {
-      pending: 0,
-      ready: 0,
-      scheduled: 0,
-      running: 0,
-      succeeded: 0,
-      failed: 0,
-      blocked: 0,
-      canceled: 0,
-    };
-    
-    for (const state of this.plan.nodeStates.values()) {
-      counts[state.status]++;
-    }
-    
-    return counts;
+    return computeStatusCounts(this.plan.nodeStates.values());
   }
   
   /**
-   * Cancel all non-terminal nodes
+   * Cancel all non-terminal nodes by transitioning them to `'canceled'`.
    */
   cancelAll(): void {
     for (const [nodeId, state] of this.plan.nodeStates) {
@@ -538,8 +478,11 @@ export class PlanStateMachine extends EventEmitter {
   }
   
   /**
-   * Get the effective endedAt for the plan, computed from node data.
-   * This is more accurate than plan.endedAt when child plans ran asynchronously.
+   * Get the effective plan end time, falling back to the stored value.
+   *
+   * More accurate than `plan.endedAt` when child plans ran asynchronously.
+   *
+   * @returns Timestamp in ms, or `undefined` if the plan hasn't ended.
    */
   getEffectiveEndedAt(): number | undefined {
     // First try the computed value from node data
