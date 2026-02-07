@@ -69,18 +69,24 @@ export function registerMcpDefinitionProvider(
     provideMcpServerDefinitions(
       _token: vscode.CancellationToken
     ): vscode.ProviderResult<vscode.McpServerDefinition[]> {
-      console.log(`[MCP Provider] provideMcpServerDefinitions called, enabled=${isEnabled}`);
+      console.log(`[MCP Provider] provideMcpServerDefinitions called, enabled=${isEnabled}, workspace=${currentWorkspacePath || '<none>'}`);
       
       if (!isEnabled) {
         console.log('[MCP Provider] Returning empty list (disabled)');
         return [];
       }
 
+      // Require a workspace to be open - plans are workspace-relative
+      if (!currentWorkspacePath) {
+        console.log('[MCP Provider] Returning empty list (no workspace open)');
+        return [];
+      }
+
       const extensionPath = context.extensionPath;
       const serverScript = path.join(extensionPath, 'out', 'mcp', 'stdio', 'server.js');
-      const storagePath = currentWorkspacePath
-        ? path.join(currentWorkspacePath, '.orchestrator', 'plans')
-        : path.join(context.globalStorageUri.fsPath, 'plans');
+      
+      // Storage is always workspace-relative
+      const storagePath = path.join(currentWorkspacePath, '.orchestrator', 'plans');
 
       // McpStdioServerDefinition constructor: (label, command, args?, options?)
       const server = new (vscode as any).McpStdioServerDefinition(
@@ -88,9 +94,9 @@ export function registerMcpDefinitionProvider(
         'node',                  // command
         [serverScript],          // args
         {
-          cwd: currentWorkspacePath ? vscode.Uri.file(currentWorkspacePath) : undefined,
+          cwd: vscode.Uri.file(currentWorkspacePath),
           env: {
-            ORCHESTRATOR_WORKSPACE: currentWorkspacePath || '',
+            ORCHESTRATOR_WORKSPACE: currentWorkspacePath,
             ORCHESTRATOR_STORAGE: storagePath,
           },
           version: context.extension.packageJSON.version,
