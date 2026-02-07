@@ -4,6 +4,10 @@
  * Single responsibility: Create, remove, and query git worktrees.
  * All operations are async to avoid blocking the event loop.
  * 
+ * IMPORTANT: Git worktree operations have a race condition when run in parallel.
+ * We use a per-repository mutex to serialize worktree add/remove operations.
+ * See: https://lore.kernel.org/git/... (git worktree commondir race)
+ * 
  * @module git/core/worktrees
  */
 
@@ -11,6 +15,44 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execAsync, execAsyncOrThrow, execAsyncOrNull, GitLogger } from './executor';
 import * as branches from './branches';
+
+// ============================================================================
+// MUTEX FOR WORKTREE OPERATIONS
+// ============================================================================
+
+/**
+ * Per-repository mutex to prevent git worktree race conditions.
+ * Git's `worktree add` and `worktree remove` commands can race when
+ * multiple operations happen simultaneously on the same repository,
+ * causing "failed to read .git/worktrees/<id>/commondir: No error" errors.
+ */
+const repoMutexes = new Map<string, Promise<void>>();
+
+/**
+ * Acquire a mutex for the given repository path.
+ * Returns a release function that must be called when done.
+ */
+async function acquireRepoMutex(repoPath: string): Promise<() => void> {
+  const normalizedPath = path.resolve(repoPath).toLowerCase();
+  
+  // Wait for any existing operation to complete
+  while (repoMutexes.has(normalizedPath)) {
+    await repoMutexes.get(normalizedPath);
+  }
+  
+  // Create a new promise that will resolve when we release
+  let release: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  
+  repoMutexes.set(normalizedPath, promise);
+  
+  return () => {
+    repoMutexes.delete(normalizedPath);
+    release!();
+  };
+}
 
 /**
  * Worktree creation options.
@@ -63,30 +105,38 @@ export async function create(options: CreateOptions): Promise<void> {
  */
 export async function createWithTiming(options: CreateOptions): Promise<CreateTiming> {
   const { repoPath, worktreePath, branchName, fromRef, log } = options;
-  const totalStart = Date.now();
   
-  // Ensure parent directory exists
-  const parentDir = path.dirname(worktreePath);
+  // Acquire mutex to prevent race condition with parallel worktree operations
+  const releaseMutex = await acquireRepoMutex(repoPath);
+  
   try {
-    await fs.promises.access(parentDir);
-  } catch {
-    await fs.promises.mkdir(parentDir, { recursive: true });
+    const totalStart = Date.now();
+    
+    // Ensure parent directory exists
+    const parentDir = path.dirname(worktreePath);
+    try {
+      await fs.promises.access(parentDir);
+    } catch {
+      await fs.promises.mkdir(parentDir, { recursive: true });
+    }
+    
+    log?.(`[worktree] Creating worktree at '${worktreePath}' on branch '${branchName}' from '${fromRef}'`);
+    
+    // Use -B to create or reset the branch to fromRef's HEAD
+    const wtAddStart = Date.now();
+    await execAsyncOrThrow(['worktree', 'add', '-B', branchName, worktreePath, fromRef], repoPath);
+    const worktreeMs = Date.now() - wtAddStart;
+    
+    log?.(`[worktree] ✓ Created worktree (${worktreeMs}ms)`);
+    
+    // Setup submodules via symlinks (much faster than full checkout)
+    const submoduleMs = await setupSubmoduleSymlinks(repoPath, worktreePath, log);
+    
+    const totalMs = Date.now() - totalStart;
+    return { worktreeMs, submoduleMs, totalMs };
+  } finally {
+    releaseMutex();
   }
-  
-  log?.(`[worktree] Creating worktree at '${worktreePath}' on branch '${branchName}' from '${fromRef}'`);
-  
-  // Use -B to create or reset the branch to fromRef's HEAD
-  const wtAddStart = Date.now();
-  await execAsyncOrThrow(['worktree', 'add', '-B', branchName, worktreePath, fromRef], repoPath);
-  const worktreeMs = Date.now() - wtAddStart;
-  
-  log?.(`[worktree] ✓ Created worktree (${worktreeMs}ms)`);
-  
-  // Setup submodules via symlinks (much faster than full checkout)
-  const submoduleMs = await setupSubmoduleSymlinks(repoPath, worktreePath, log);
-  
-  const totalMs = Date.now() - totalStart;
-  return { worktreeMs, submoduleMs, totalMs };
 }
 
 /**
@@ -97,18 +147,25 @@ export async function createWithTiming(options: CreateOptions): Promise<CreateTi
  * @param log - Optional logger
  */
 export async function remove(worktreePath: string, repoPath: string, log?: GitLogger): Promise<void> {
-  log?.(`[worktree] Removing worktree at '${worktreePath}'`);
-  await execAsyncOrThrow(['worktree', 'remove', worktreePath, '--force'], repoPath);
-  await execAsync(['worktree', 'prune'], { cwd: repoPath });
-  log?.(`[worktree] ✓ Removed worktree`);
+  // Acquire mutex to prevent race condition with parallel worktree operations
+  const releaseMutex = await acquireRepoMutex(repoPath);
   
-  // Git worktree remove sometimes leaves empty directories behind
   try {
-    await fs.promises.access(worktreePath);
-    await fs.promises.rm(worktreePath, { recursive: true, force: true });
-    log?.(`[worktree] ✓ Removed leftover directory`);
-  } catch {
-    // Ignore - directory doesn't exist or cleanup failed
+    log?.(`[worktree] Removing worktree at '${worktreePath}'`);
+    await execAsyncOrThrow(['worktree', 'remove', worktreePath, '--force'], repoPath);
+    await execAsync(['worktree', 'prune'], { cwd: repoPath });
+    log?.(`[worktree] ✓ Removed worktree`);
+    
+    // Git worktree remove sometimes leaves empty directories behind
+    try {
+      await fs.promises.access(worktreePath);
+      await fs.promises.rm(worktreePath, { recursive: true, force: true });
+      log?.(`[worktree] ✓ Removed leftover directory`);
+    } catch {
+      // Ignore - directory doesn't exist or cleanup failed
+    }
+  } finally {
+    releaseMutex();
   }
 }
 
@@ -125,33 +182,41 @@ export async function removeSafe(
   options: { force?: boolean; log?: GitLogger } = {}
 ): Promise<boolean> {
   const { force = true, log } = options;
-  log?.(`[worktree] Removing worktree at '${worktreePath}'`);
-  const args = ['worktree', 'remove', worktreePath];
-  if (force) args.push('--force');
-  const result = await execAsync(args, { cwd: repoPath });
   
-  if (!result.success) {
-    log?.(`[worktree] ⚠ git worktree remove failed: ${result.stderr}`);
-  }
+  // Acquire mutex to prevent race condition with parallel worktree operations
+  const releaseMutex = await acquireRepoMutex(repoPath);
   
-  // Always prune to clean up stale worktree references
-  await execAsync(['worktree', 'prune'], { cwd: repoPath });
-  
-  if (result.success) {
-    log?.(`[worktree] ✓ Removed worktree`);
-  }
-  
-  // Git worktree remove sometimes leaves empty directories behind
-  // Clean up any remaining directory
   try {
-    await fs.promises.access(worktreePath);
-    await fs.promises.rm(worktreePath, { recursive: true, force: true });
-    log?.(`[worktree] ✓ Removed leftover directory`);
-  } catch {
-    // Ignore - directory doesn't exist or cleanup failed
+    log?.(`[worktree] Removing worktree at '${worktreePath}'`);
+    const args = ['worktree', 'remove', worktreePath];
+    if (force) args.push('--force');
+    const result = await execAsync(args, { cwd: repoPath });
+    
+    if (!result.success) {
+      log?.(`[worktree] ⚠ git worktree remove failed: ${result.stderr}`);
+    }
+    
+    // Always prune to clean up stale worktree references
+    await execAsync(['worktree', 'prune'], { cwd: repoPath });
+    
+    if (result.success) {
+      log?.(`[worktree] ✓ Removed worktree`);
+    }
+    
+    // Git worktree remove sometimes leaves empty directories behind
+    // Clean up any remaining directory
+    try {
+      await fs.promises.access(worktreePath);
+      await fs.promises.rm(worktreePath, { recursive: true, force: true });
+      log?.(`[worktree] ✓ Removed leftover directory`);
+    } catch {
+      // Ignore - directory doesn't exist or cleanup failed
+    }
+    
+    return result.success;
+  } finally {
+    releaseMutex();
   }
-  
-  return result.success;
 }
 
 /**
@@ -195,34 +260,41 @@ export async function createDetachedWithTiming(
   commitish: string,
   log?: GitLogger
 ): Promise<CreateTiming & { baseCommit: string }> {
-  const totalStart = Date.now();
+  // Acquire mutex to prevent race condition with parallel worktree operations
+  const releaseMutex = await acquireRepoMutex(repoPath);
   
-  // Ensure parent directory exists
-  const parentDir = path.dirname(worktreePath);
   try {
-    await fs.promises.access(parentDir);
-  } catch {
-    await fs.promises.mkdir(parentDir, { recursive: true });
+    const totalStart = Date.now();
+    
+    // Ensure parent directory exists
+    const parentDir = path.dirname(worktreePath);
+    try {
+      await fs.promises.access(parentDir);
+    } catch {
+      await fs.promises.mkdir(parentDir, { recursive: true });
+    }
+    
+    // Resolve the commitish to a SHA first (for tracking)
+    const resolveResult = await execAsync(['rev-parse', commitish], { cwd: repoPath });
+    const baseCommit = resolveResult.success ? resolveResult.stdout.trim() : commitish;
+    
+    log?.(`[worktree] Creating detached worktree at '${worktreePath}' from '${commitish}' (${baseCommit.slice(0, 8)})`);
+    
+    // Use --detach to create worktree in detached HEAD mode
+    const wtAddStart = Date.now();
+    await execAsyncOrThrow(['worktree', 'add', '--detach', worktreePath, commitish], repoPath);
+    const worktreeMs = Date.now() - wtAddStart;
+    
+    log?.(`[worktree] ✓ Created detached worktree (${worktreeMs}ms)`);
+    
+    // Setup submodules via symlinks
+    const submoduleMs = await setupSubmoduleSymlinks(repoPath, worktreePath, log);
+    
+    const totalMs = Date.now() - totalStart;
+    return { worktreeMs, submoduleMs, totalMs, baseCommit };
+  } finally {
+    releaseMutex();
   }
-  
-  // Resolve the commitish to a SHA first (for tracking)
-  const resolveResult = await execAsync(['rev-parse', commitish], { cwd: repoPath });
-  const baseCommit = resolveResult.success ? resolveResult.stdout.trim() : commitish;
-  
-  log?.(`[worktree] Creating detached worktree at '${worktreePath}' from '${commitish}' (${baseCommit.slice(0, 8)})`);
-  
-  // Use --detach to create worktree in detached HEAD mode
-  const wtAddStart = Date.now();
-  await execAsyncOrThrow(['worktree', 'add', '--detach', worktreePath, commitish], repoPath);
-  const worktreeMs = Date.now() - wtAddStart;
-  
-  log?.(`[worktree] ✓ Created detached worktree (${worktreeMs}ms)`);
-  
-  // Setup submodules via symlinks
-  const submoduleMs = await setupSubmoduleSymlinks(repoPath, worktreePath, log);
-  
-  const totalMs = Date.now() - totalStart;
-  return { worktreeMs, submoduleMs, totalMs, baseCommit };
 }
 
 /**
