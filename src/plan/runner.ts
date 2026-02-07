@@ -1366,6 +1366,10 @@ export class PlanRunner extends EventEmitter {
           this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Single dependency - no additional merges needed');
         }
         this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========');
+        
+        // FI succeeded - acknowledge consumption to all dependencies
+        // This allows dependency worktrees to be cleaned up as soon as all consumers have FI'd
+        await this.acknowledgeConsumption(plan, sm, node);
       } else {
         // Root node - no dependencies
         this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========');
@@ -1567,6 +1571,10 @@ export class PlanRunner extends EventEmitter {
       // Determine base branch for sub-plan (from parent's dependencies)
       const baseCommit = sm.getBaseCommitForNode(node.id);
       
+      // SubPlan consumes its dependencies now - the base commit is captured
+      // and child plan jobs will create worktrees from it. Dependencies are no longer needed.
+      await this.acknowledgeConsumption(parentPlan, sm, node);
+      
       // Build the child Plan - inherit targetBranch so leaf jobs can RI directly
       const childSpec = {
         ...node.childSpec,
@@ -1731,7 +1739,8 @@ export class PlanRunner extends EventEmitter {
       this.emit('nodeCompleted', parentPlan.id, node.id, true);
       
       // Check if any parent plan worktrees are now eligible for cleanup
-      // (e.g., parent jobs whose dependents - including this subPlan - have all succeeded)
+      // (This should mostly be a no-op since subPlan acknowledges consumption at startup,
+      // but serves as a fallback for any edge cases)
       if (parentPlan.cleanUpSuccessfulWork) {
         await this.cleanupEligibleWorktrees(parentPlan, parentSm);
       }
@@ -2322,16 +2331,53 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
+   * Acknowledge that a consumer node has successfully consumed (FI'd from) its dependencies.
+   * 
+   * This is called after FI succeeds, allowing dependency worktrees to be cleaned up
+   * as soon as all consumers have consumed, rather than waiting for consumers to fully succeed.
+   */
+  private async acknowledgeConsumption(
+    plan: PlanInstance,
+    sm: PlanStateMachine,
+    consumerNode: PlanNode
+  ): Promise<void> {
+    // Mark this consumer as having consumed each of its dependencies
+    for (const depId of consumerNode.dependencies) {
+      const depState = plan.nodeStates.get(depId);
+      if (depState) {
+        if (!depState.consumedByDependents) {
+          depState.consumedByDependents = [];
+        }
+        // Only add if not already present
+        if (!depState.consumedByDependents.includes(consumerNode.id)) {
+          depState.consumedByDependents.push(consumerNode.id);
+        }
+        
+        log.debug(`Consumption acknowledged: ${consumerNode.name} consumed ${plan.nodes.get(depId)?.name}`, {
+          depId,
+          consumedCount: depState.consumedByDependents.length,
+          dependentCount: plan.nodes.get(depId)?.dependents.length,
+        });
+      }
+    }
+    
+    // Check if any dependencies are now eligible for cleanup
+    if (plan.cleanUpSuccessfulWork) {
+      await this.cleanupEligibleWorktrees(plan, sm);
+    }
+  }
+  
+  /**
    * Clean up worktrees for nodes that are safe to clean up.
    * 
    * A node's worktree is safe to clean up when:
    * 1. The node itself has succeeded (has a completedCommit)
-   * 2. ALL of its dependents have succeeded (they've consumed our commit)
+   * 2. ALL consumers have consumed (FI'd from) this node's output
    * 3. The worktree hasn't already been cleaned up
    * 
    * A node's worktree is eligible for cleanup once ALL consumers have consumed its output:
    * - For leaf nodes (no DAG dependents): the consumer is the targetBranch merge
-   * - For non-leaf nodes: the consumers are the dependent nodes
+   * - For non-leaf nodes: the consumers are the dependent nodes (via FI acknowledgment)
    */
   private async cleanupEligibleWorktrees(
     plan: PlanInstance,
@@ -2401,15 +2447,10 @@ export class PlanRunner extends EventEmitter {
       return state.mergedToTarget === true;
     }
     
-    // Non-leaf nodes - consumers are the dependent nodes
-    // Check if ALL dependents have succeeded (consumed our commit)
-    for (const depId of node.dependents) {
-      const depState = plan.nodeStates.get(depId);
-      if (!depState || depState.status !== 'succeeded') {
-        return false;
-      }
-    }
-    return true;
+    // Non-leaf nodes - consumers are dependents
+    // Check if all dependents have acknowledged consumption (completed FI)
+    const consumedBy = state.consumedByDependents || [];
+    return node.dependents.every(depId => consumedBy.includes(depId));
   }
   
   // ============================================================================

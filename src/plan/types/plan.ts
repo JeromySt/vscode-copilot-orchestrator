@@ -97,6 +97,14 @@ export interface NodeExecutionState {
   mergedToTarget?: boolean;
   
   /**
+   * List of dependent node IDs that have successfully consumed (FI'd from) this node.
+   * Once all dependents have consumed, this node's worktree is safe to cleanup.
+   * This allows cleanup as soon as FI completes, rather than waiting for 
+   * dependents to fully succeed.
+   */
+  consumedByDependents?: string[];
+  
+  /**
    * Whether the worktree has been cleaned up (removed from disk).
    * Set to true after successful cleanup to prevent "Open Worktree" button.
    */
