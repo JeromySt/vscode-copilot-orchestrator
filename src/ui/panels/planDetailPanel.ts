@@ -479,7 +479,7 @@ export class planDetailPanel {
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
     // Build Mermaid diagram
-    const { diagram: mermaidDef, subgraphData } = this._buildMermaidDiagram(plan);
+    const { diagram: mermaidDef, subgraphData, nodeTooltips } = this._buildMermaidDiagram(plan);
     
     // Build node data for click handling - recursively include all nested nodes
     const nodeData: Record<string, { nodeId: string; planId: string; type: string; childPlanId?: string; name: string; startedAt?: number; endedAt?: number; status: string }> = {};
@@ -728,14 +728,9 @@ export class planDetailPanel {
     .mermaid .node { cursor: pointer; }
     .mermaid .node.branchNode { cursor: default; }  /* Branch nodes are not clickable */
     
-    /* Prevent node label truncation */
-    .mermaid .node foreignObject {
-      overflow: visible !important;
-    }
+    /* Node labels are pre-truncated server-side; let Mermaid size the box */
     .mermaid .node .nodeLabel {
       white-space: nowrap !important;
-      overflow: visible !important;
-      text-overflow: unset !important;
     }
     
     /* Subgraph/cluster styling */
@@ -752,14 +747,9 @@ export class planDetailPanel {
       text-decoration: underline;
       fill: #7DD3FC;
     }
-    /* Prevent subgraph title truncation */
-    .mermaid .cluster foreignObject {
-      overflow: visible !important;
-    }
+    /* Subgraph titles are pre-truncated server-side; let Mermaid size the box */
     .mermaid .cluster .nodeLabel {
       white-space: nowrap !important;
-      overflow: visible !important;
-      text-overflow: unset !important;
     }
     .mermaid svg {
       overflow: visible;
@@ -917,6 +907,28 @@ export class planDetailPanel {
       opacity: 0.7;
     }
     
+    /* Process Aggregation Summary */
+    .processes-summary {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      background: rgba(55, 148, 255, 0.08);
+      border: 1px solid rgba(55, 148, 255, 0.25);
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .processes-summary-label {
+      color: var(--vscode-foreground);
+    }
+    .processes-summary-stat {
+      color: var(--vscode-descriptionForeground);
+      font-weight: 500;
+      font-size: 12px;
+    }
+
     /* Job status indicators */
     .job-scheduled .node-stats.job-scheduled {
       color: var(--vscode-charts-yellow);
@@ -1144,6 +1156,7 @@ ${mermaidDef}
     const vscode = acquireVsCodeApi();
     const nodeData = ${JSON.stringify(nodeData)};
     const subgraphData = ${JSON.stringify(subgraphData)};
+    const nodeTooltips = ${JSON.stringify(nodeTooltips)};
     const mermaidDef = ${JSON.stringify(mermaidDef)};
     
     mermaid.initialize({
@@ -1165,6 +1178,23 @@ ${mermaidDef}
         const element = document.querySelector('.mermaid');
         const { svg } = await mermaid.render('mermaid-graph', mermaidDef);
         element.innerHTML = svg;
+        // Add tooltips for truncated node labels
+        for (const [id, fullName] of Object.entries(nodeTooltips)) {
+          // Regular nodes: Mermaid renders them as g[id*="id"]
+          const nodeEl = element.querySelector('g[id*="' + id + '"]');
+          if (nodeEl) {
+            const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            titleEl.textContent = fullName;
+            nodeEl.prepend(titleEl);
+          }
+          // Subgraph clusters
+          const clusterEl = element.querySelector('g[id*="' + id + '"] .cluster-label');
+          if (clusterEl) {
+            const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            titleEl.textContent = fullName;
+            clusterEl.prepend(titleEl);
+          }
+        }
         // Immediately update durations for running nodes after render
         setTimeout(updateNodeDurations, 100);
       } catch (err) {
@@ -1374,10 +1404,6 @@ ${mermaidDef}
       const svgElement = document.querySelector('.mermaid svg');
       if (!svgElement) return;
       
-      // Find all potential text-containing elements in the SVG
-      // Mermaid uses foreignObject with various nested elements for htmlLabels
-      const allElements = svgElement.querySelectorAll('foreignObject *, text, tspan, .nodeLabel, .label');
-      
       for (const [sanitizedId, data] of Object.entries(nodeData)) {
         if (!data.startedAt) continue;
         
@@ -1388,16 +1414,16 @@ ${mermaidDef}
         const duration = Date.now() - data.startedAt;
         const durationStr = formatDurationLive(duration);
         
-        // Find text element containing this node's name and update duration
-        for (const textEl of allElements) {
-          // Skip elements without direct text content
+        // Find the node group by its Mermaid ID, then locate the text element within it
+        const nodeGroup = svgElement.querySelector('g[id*="' + sanitizedId + '"]');
+        if (!nodeGroup) continue;
+        
+        const textEls = nodeGroup.querySelectorAll('foreignObject *, text, tspan, .nodeLabel, .label');
+        for (const textEl of textEls) {
           if (!textEl.childNodes.length || textEl.children.length > 0) continue;
           
           const text = textEl.textContent || '';
-          // Check if this text contains the node name
-          if (text.includes(data.name) && text.includes('|')) {
-            // Replace the duration part after the pipe
-            // Format: "icon NodeName | Xs" or "icon NodeName | Xm Ys"
+          if (text.includes('|')) {
             const pipeIndex = text.lastIndexOf('|');
             if (pipeIndex > 0) {
               const newText = text.substring(0, pipeIndex + 1) + ' ' + durationStr;
@@ -1420,6 +1446,53 @@ ${mermaidDef}
       }
     });
     
+    function formatMemory(bytes) {
+      const mb = bytes / 1024 / 1024;
+      if (mb >= 1024) {
+        return (mb / 1024).toFixed(2) + ' GB';
+      }
+      return mb.toFixed(1) + ' MB';
+    }
+
+    function sumAllProcessStats(rootJobs, hierarchy) {
+      let totalCount = 0;
+      let totalCpu = 0;
+      let totalMemory = 0;
+
+      function sumProc(proc) {
+        totalCount++;
+        totalCpu += proc.cpu || 0;
+        totalMemory += proc.memory || 0;
+        if (proc.children) {
+          for (const child of proc.children) {
+            sumProc(child);
+          }
+        }
+      }
+
+      function sumJob(job) {
+        for (const proc of (job.tree || [])) {
+          sumProc(proc);
+        }
+      }
+
+      function sumHierarchy(plans) {
+        for (const plan of (plans || [])) {
+          for (const job of (plan.jobs || [])) {
+            sumJob(job);
+          }
+          sumHierarchy(plan.children);
+        }
+      }
+
+      for (const job of (rootJobs || [])) {
+        sumJob(job);
+      }
+      sumHierarchy(hierarchy);
+
+      return { totalCount, totalCpu, totalMemory };
+    }
+
     function renderAllProcesses(rootJobs, hierarchy) {
       const container = document.getElementById('processesContainer');
       if (!container) return;
@@ -1432,7 +1505,14 @@ ${mermaidDef}
         return;
       }
       
-      let html = '';
+      // Aggregation summary
+      const agg = sumAllProcessStats(rootJobs, hierarchy);
+      let html = '<div class="processes-summary">';
+      html += '<span class="processes-summary-label">Total</span>';
+      html += '<span class="processes-summary-stat">' + agg.totalCount + ' processes</span>';
+      html += '<span class="processes-summary-stat">' + agg.totalCpu.toFixed(0) + '% CPU</span>';
+      html += '<span class="processes-summary-stat">' + formatMemory(agg.totalMemory) + '</span>';
+      html += '</div>';
       
       // Render root-level jobs first (jobs directly in main Plan)
       for (const job of (rootJobs || [])) {
@@ -1736,11 +1816,14 @@ ${mermaidDef}
    * @returns An object containing the Mermaid diagram string and a map of
    *   subgraph IDs to their child Plan metadata.
    */
-  private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; subgraphData: Record<string, { childPlanId: string; name: string }> } {
+  private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; subgraphData: Record<string, { childPlanId: string; name: string }>; nodeTooltips: Record<string, string> } {
     const lines: string[] = ['flowchart LR'];
     
     // Track subgraph data for click handling
     const subgraphData: Record<string, { childPlanId: string; name: string }> = {};
+    
+    // Track full names for tooltip display when labels are truncated
+    const nodeTooltips: Record<string, string> = {};
     
     // Get branch names
     const baseBranchName = plan.baseBranch || 'main';
@@ -1846,7 +1929,12 @@ ${mermaidDef}
             durationLabel = ' | ' + formatDurationMs(duration);
           }
           
-          lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(status)} ${label}${durationLabel}"]`);
+          const displayLabel = this._truncateNodeLabel(label, durationLabel);
+          if (displayLabel !== label) {
+            nodeTooltips[subgraphId] = label;
+          }
+          
+          lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(status)} ${displayLabel}${durationLabel}"]`);
           // Don't set direction inside subgraphs - let them inherit from parent
           
           let innerRoots: string[] = [];
@@ -1903,7 +1991,12 @@ ${mermaidDef}
             durationLabel = ' | ' + formatDurationMs(duration);
           }
           
-          lines.push(`${indent}${sanitizedId}["${icon} ${label}${durationLabel}"]`);
+          const displayLabel = this._truncateNodeLabel(label, durationLabel);
+          if (displayLabel !== label) {
+            nodeTooltips[sanitizedId] = label;
+          }
+          
+          lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);
           lines.push(`${indent}class ${sanitizedId} ${status}`);
           
           nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
@@ -1965,7 +2058,12 @@ ${mermaidDef}
         const isRoot = (jobSpec.dependencies || []).length === 0;
         const isLeaf = !nodeHasDependents.has(jobSpec.producerId);
         
-        lines.push(`${indent}${sanitizedId}["${icon} ${label}"]`);
+        const displayLabel = this._truncateNodeLabel(label, '');
+        if (displayLabel !== label) {
+          nodeTooltips[sanitizedId] = label;
+        }
+        
+        lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}"]`);
         lines.push(`${indent}class ${sanitizedId} ${inheritedStatus}`);
         
         nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
@@ -1990,7 +2088,12 @@ ${mermaidDef}
         const isRoot = (subPlanSpec.dependencies || []).length === 0;
         const isLeaf = !nodeHasDependents.has(subPlanSpec.producerId);
         
-        lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(inheritedStatus)} ${label}"]`);
+        const displayLabel = this._truncateNodeLabel(label, '');
+        if (displayLabel !== label) {
+          nodeTooltips[subgraphId] = label;
+        }
+        
+        lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(inheritedStatus)} ${displayLabel}"]`);
         // Don't set direction inside subgraphs - let them inherit from parent
         
         // Build nested spec and render
@@ -2098,7 +2201,7 @@ ${mermaidDef}
       lines.push(`  linkStyle ${failedEdges.join(',')} stroke:#f48771,stroke-width:2px`);
     }
     
-    return { diagram: lines.join('\n'), subgraphData };
+    return { diagram: lines.join('\n'), subgraphData, nodeTooltips };
   }
   
   /**
@@ -2139,6 +2242,35 @@ ${mermaidDef}
       .replace(/[<>{}|:#]/g, '')
       .replace(/\[/g, '(')
       .replace(/\]/g, ')');
+  }
+
+  /**
+   * Maximum character length for a node label (name + duration) before truncation.
+   */
+  private static readonly NODE_LABEL_MAX_LENGTH = 25;
+
+  /**
+   * Truncate a node name so that the combined label (name + duration suffix)
+   * stays within {@link NODE_LABEL_MAX_LENGTH} characters. When truncation
+   * occurs the name is trimmed and an ellipsis ('...') is appended.
+   *
+   * @param name - The escaped node name.
+   * @param durationLabel - The duration suffix (e.g., ' | 2m 34s'), may be empty.
+   * @returns The (possibly truncated) name.
+   */
+  private _truncateNodeLabel(name: string, durationLabel: string): string {
+    const maxLen = planDetailPanel.NODE_LABEL_MAX_LENGTH;
+    // +2 accounts for the status icon + space prefix ("✓ ")
+    const totalLen = 2 + name.length + durationLabel.length;
+    if (totalLen <= maxLen) {
+      return name;
+    }
+    // Reserve space for icon, duration, and ellipsis
+    const available = maxLen - 2 - durationLabel.length - 3; // 3 = '...'
+    if (available <= 0) {
+      return name; // duration alone exceeds limit – don't truncate name to nothing
+    }
+    return name.slice(0, available).trimEnd() + '...';
   }
   
   /**
