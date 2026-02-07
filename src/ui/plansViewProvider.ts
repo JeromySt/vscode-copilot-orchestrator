@@ -264,7 +264,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       outline: none;
     }
     .plan-item:focus {
-      box-shadow: 0 0 0 1px var(--vscode-focusBorder) inset;
+      box-shadow: 0 0 0 2px var(--vscode-focusBorder) inset;
+      border-left-width: 4px;
     }
     .plan-item.running { border-left-color: var(--vscode-progressBar-background); }
     .plan-item.succeeded { border-left-color: var(--vscode-testing-iconPassed); }
@@ -378,6 +379,44 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       return hours + 'h ' + remMins + 'm';
     }
     
+    // Global keyboard handler - works without focus on specific plan item
+    document.addEventListener('keydown', (e) => {
+      // Find the focused plan item or the first one
+      let targetEl = document.activeElement;
+      if (!targetEl || !targetEl.classList.contains('plan-item')) {
+        targetEl = document.querySelector('.plan-item');
+      }
+      if (!targetEl) return;
+      
+      const planId = targetEl.dataset.id;
+      const status = targetEl.dataset.status;
+      
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        vscode.postMessage({ type: 'openPlan', planId });
+      } else if (e.key === 'Delete') {
+        e.preventDefault();
+        vscode.postMessage({ type: 'deletePlan', planId });
+      } else if (e.key === 'Escape' && e.ctrlKey) {
+        e.preventDefault();
+        if (status === 'running' || status === 'pending') {
+          vscode.postMessage({ type: 'cancelPlan', planId });
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = targetEl.nextElementSibling;
+        if (next && next.classList.contains('plan-item')) {
+          next.focus();
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const prev = targetEl.previousElementSibling;
+        if (prev && prev.classList.contains('plan-item')) {
+          prev.focus();
+        }
+      }
+    });
+    
     window.addEventListener('message', ev => {
       if (ev.data.type !== 'update') return;
       
@@ -434,43 +473,13 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         el.addEventListener('click', () => {
           vscode.postMessage({ type: 'openPlan', planId: el.dataset.id });
         });
-        
-        // Add keyboard handlers
-        el.addEventListener('keydown', (e) => {
-          const planId = el.dataset.id;
-          const status = el.dataset.status;
-          
-          if (e.key === 'Enter') {
-            // Open plan details
-            e.preventDefault();
-            vscode.postMessage({ type: 'openPlan', planId });
-          } else if (e.key === 'Delete') {
-            // Delete the plan
-            e.preventDefault();
-            vscode.postMessage({ type: 'deletePlan', planId });
-          } else if (e.key === 'Escape' && e.ctrlKey) {
-            // Cancel if running
-            e.preventDefault();
-            if (status === 'running' || status === 'pending') {
-              vscode.postMessage({ type: 'cancelPlan', planId });
-            }
-          } else if (e.key === 'ArrowDown') {
-            // Navigate to next plan
-            e.preventDefault();
-            const next = el.nextElementSibling;
-            if (next && next.classList.contains('plan-item')) {
-              next.focus();
-            }
-          } else if (e.key === 'ArrowUp') {
-            // Navigate to previous plan
-            e.preventDefault();
-            const prev = el.previousElementSibling;
-            if (prev && prev.classList.contains('plan-item')) {
-              prev.focus();
-            }
-          }
-        });
       });
+      
+      // Auto-focus the first plan item for keyboard navigation
+      const firstPlan = document.querySelector('.plan-item');
+      if (firstPlan) {
+        firstPlan.focus();
+      }
     });
     
     // Request initial data
