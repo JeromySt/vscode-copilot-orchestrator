@@ -37,13 +37,11 @@ import {
  * 
  * @param groups - Array of group specs from MCP input
  * @param groupPath - Current group path prefix (e.g., "backend/api")
- * @param groupDeps - Dependencies inherited from parent groups
  * @returns Flattened array of JobNodeSpec
  */
 function flattenGroupsToJobs(
   groups: any[] | undefined, 
-  groupPath: string, 
-  groupDeps: string[]
+  groupPath: string
 ): JobNodeSpec[] {
   if (!groups || !Array.isArray(groups) || groups.length === 0) {
     return [];
@@ -54,13 +52,12 @@ function flattenGroupsToJobs(
   for (const g of groups) {
     const groupName = g.name;
     const currentPath = groupPath ? `${groupPath}/${groupName}` : groupName;
-    const inheritedDeps = [...groupDeps, ...(g.dependencies || [])];
     
     // Flatten jobs in this group
     for (const j of g.jobs || []) {
       const qualifiedId = `${currentPath}/${j.producer_id}`;
       
-      // Resolve dependencies - local refs stay local, qualified refs pass through
+      // Resolve dependencies - local refs become qualified, already-qualified refs pass through
       const resolvedDeps = (j.dependencies || []).map((dep: string) => {
         // If dep contains '/', it's already qualified
         if (dep.includes('/')) return dep;
@@ -68,16 +65,12 @@ function flattenGroupsToJobs(
         return `${currentPath}/${dep}`;
       });
       
-      // Add inherited group dependencies (for root jobs in this group)
-      const isRootInGroup = (j.dependencies || []).length === 0;
-      const finalDeps = isRootInGroup ? [...inheritedDeps, ...resolvedDeps] : resolvedDeps;
-      
       result.push({
         producerId: qualifiedId,
         name: j.name || j.producer_id,
         task: j.task,
         work: j.work,
-        dependencies: finalDeps,
+        dependencies: resolvedDeps,
         prechecks: j.prechecks,
         postchecks: j.postchecks,
         instructions: j.instructions,
@@ -88,7 +81,7 @@ function flattenGroupsToJobs(
     }
     
     // Recursively flatten nested groups
-    result.push(...flattenGroupsToJobs(g.groups, currentPath, inheritedDeps));
+    result.push(...flattenGroupsToJobs(g.groups, currentPath));
   }
   
   return result;
@@ -148,15 +141,6 @@ function validateGroupsRecursively(
           if (resolvedDep === qualifiedId) {
             errors.push(`Job '${qualifiedId}' cannot depend on itself`);
           }
-        }
-      }
-    }
-    
-    // Validate group dependencies
-    if (Array.isArray(group.dependencies)) {
-      for (const dep of group.dependencies) {
-        if (!validGlobalRefs.has(dep)) {
-          errors.push(`Group '${currentPath}' references unknown dependency '${dep}'`);
         }
       }
     }
@@ -296,7 +280,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
   }));
   
   // Flatten groups into additional jobs
-  const groupJobs = flattenGroupsToJobs(args.groups, '', []);
+  const groupJobs = flattenGroupsToJobs(args.groups, '');
   
   const spec: PlanSpec = {
     name: args.name,

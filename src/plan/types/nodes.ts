@@ -143,6 +143,8 @@ export interface JobNodeSpec {
  * Groups provide namespace isolation for producer_ids and visual hierarchy.
  * Jobs within a group can reference each other by local producer_id.
  * Cross-group references use qualified paths: "group/producer_id".
+ * 
+ * Groups do NOT have dependencies - jobs describe the full dependency graph.
  */
 export interface GroupSpec {
   /** Group name (forms part of qualified path) */
@@ -153,13 +155,6 @@ export interface GroupSpec {
   
   /** Nested groups (recursive - forms path like "parent/child") */
   groups?: GroupSpec[];
-  
-  /** 
-   * Dependencies on nodes outside this group.
-   * These apply to all root nodes within the group.
-   * Uses qualified paths for cross-group refs.
-   */
-  dependencies?: string[];
 }
 
 // ============================================================================
