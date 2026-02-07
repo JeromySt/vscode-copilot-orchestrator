@@ -31,6 +31,7 @@ import {
   PlanCompletionEvent,
   WorkSummary,
   JobWorkSummary,
+  CommitDetail,
   LogEntry,
   ExecutionPhase,
   NodeExecutionState,
@@ -65,6 +66,16 @@ const log = Logger.for('plan-runner');
  * });
  * ```
  */
+/**
+ * Info about a dependency node, used for FI merge logging.
+ */
+interface DependencyInfo {
+  nodeId: string;
+  nodeName: string;
+  commit: string;
+  workSummary?: JobWorkSummary;
+}
+
 export interface PlanRunnerEvents {
   'planCreated': (plan: PlanInstance) => void;
   'planStarted': (plan: PlanInstance) => void;
@@ -1263,6 +1274,21 @@ export class PlanRunner extends EventEmitter {
       const baseCommitish = baseCommits.length > 0 ? baseCommits[0] : plan.baseBranch;
       const additionalSources = baseCommits.slice(1);
       
+      // Build dependency info map for enhanced logging
+      const dependencyInfoMap = new Map<string, DependencyInfo>();
+      for (const depId of node.dependencies) {
+        const depNode = plan.nodes.get(depId);
+        const depState = plan.nodeStates.get(depId);
+        if (depNode && depState?.completedCommit) {
+          dependencyInfoMap.set(depState.completedCommit, {
+            nodeId: depId,
+            nodeName: depNode.name,
+            commit: depState.completedCommit,
+            workSummary: depState.workSummary,
+          });
+        }
+      }
+      
       // Create worktree path (use path.join for cross-platform compatibility)
       const worktreePath = path.join(plan.worktreeRoot, node.producerId);
       
@@ -1299,14 +1325,30 @@ export class PlanRunner extends EventEmitter {
         const baseShort = typeof baseCommitish === 'string' && baseCommitish.length === 40 
           ? baseCommitish.slice(0, 8) 
           : baseCommitish;
+        
         this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE START ==========');
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${baseShort} (from dependency)`);
+        
+        // Log the worktree base dependency with its work summary
+        const baseDep = dependencyInfoMap.get(baseCommits[0]);
+        if (baseDep) {
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', '');
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `[Worktree Base] ${baseDep.nodeName}`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Commit: ${baseShort} (from dependency "${baseDep.nodeName}")`);
+          
+          // Show work summary from the dependency node
+          this.logDependencyWorkSummary(plan.id, node.id, baseDep.workSummary);
+        } else {
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${baseShort} (from dependency)`);
+        }
         
         if (additionalSources.length > 0) {
           log.info(`Merging ${additionalSources.length} additional source commits for job ${node.name}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging ${additionalSources.length} additional source commit(s) into worktree`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', '');
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging ${additionalSources.length} additional source commit(s) into worktree...`);
           
-          const mergeSuccess = await this.mergeSourcesIntoWorktree(plan, node, worktreePath, additionalSources);
+          const mergeSuccess = await this.mergeSourcesIntoWorktree(
+            plan, node, worktreePath, additionalSources, dependencyInfoMap
+          );
           
           if (!mergeSuccess) {
             this.execLog(plan.id, node.id, 'merge-fi', 'error', 'Forward integration merge FAILED');
@@ -1317,8 +1359,10 @@ export class PlanRunner extends EventEmitter {
             return;
           }
           
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', '');
           this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Forward integration merge succeeded');
         } else {
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', '');
           this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Single dependency - no additional merges needed');
         }
         this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========');
@@ -1868,6 +1912,81 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
+   * Log the commits and file changes for a dependency node.
+   * 
+   * Uses the workSummary already stored on the dependency node,
+   * avoiding additional git commands.
+   */
+  private logDependencyWorkSummary(
+    planId: string,
+    nodeId: string,
+    workSummary: JobWorkSummary | undefined
+  ): void {
+    if (!workSummary) {
+      this.execLog(planId, nodeId, 'merge-fi', 'info', '  (No work summary available)');
+      return;
+    }
+    
+    const commitDetails = workSummary.commitDetails || [];
+    if (commitDetails.length === 0) {
+      // Fall back to summary counts if no commit details
+      this.execLog(planId, nodeId, 'merge-fi', 'info', 
+        `  Work: ${workSummary.commits} commit(s), +${workSummary.filesAdded} ~${workSummary.filesModified} -${workSummary.filesDeleted}`);
+      return;
+    }
+    
+    this.execLog(planId, nodeId, 'merge-fi', 'info', `  Commits (${commitDetails.length}):`);
+    
+    for (const commit of commitDetails) {
+      this.execLog(planId, nodeId, 'merge-fi', 'info', `    ${commit.shortHash} ${commit.message}`);
+      
+      // Show file change summary
+      const summary = this.summarizeCommitFiles(commit);
+      if (summary) {
+        this.execLog(planId, nodeId, 'merge-fi', 'info', `           ${summary}`);
+      }
+    }
+  }
+  
+  /**
+   * Summarize file changes from a CommitDetail into a compact string.
+   */
+  private summarizeCommitFiles(commit: CommitDetail): string {
+    const added = commit.filesAdded.length;
+    const modified = commit.filesModified.length;
+    const deleted = commit.filesDeleted.length;
+    
+    if (added === 0 && modified === 0 && deleted === 0) {
+      return '';
+    }
+    
+    const parts: string[] = [];
+    if (added > 0) parts.push(`+${added}`);
+    if (modified > 0) parts.push(`~${modified}`);
+    if (deleted > 0) parts.push(`-${deleted}`);
+    
+    const summary = parts.join(' ');
+    
+    // Show a few example files
+    const allFiles = [
+      ...commit.filesAdded.map(f => ({ path: f, prefix: '+' })),
+      ...commit.filesModified.map(f => ({ path: f, prefix: '~' })),
+      ...commit.filesDeleted.map(f => ({ path: f, prefix: '-' })),
+    ];
+    
+    const examples = allFiles.slice(0, 3).map(f => {
+      const shortPath = f.path.split('/').slice(-2).join('/');
+      return `${f.prefix}${shortPath}`;
+    });
+    
+    if (allFiles.length > 3) {
+      examples.push(`... (+${allFiles.length - 3} more)`);
+    }
+    
+    return `[${summary}] ${examples.join(', ')}`;
+  }
+  
+  /**
    * Merge additional source commits into a worktree.
    * 
    * This is called when a job has multiple dependencies (RI/FI model).
@@ -1875,12 +1994,15 @@ export class PlanRunner extends EventEmitter {
    * and we merge in the remaining dependency commits.
    * 
    * Uses full merge (not squash) to preserve history for downstream jobs.
+   * 
+   * @param dependencyInfoMap - Map from commit SHA to dependency node info for logging
    */
   private async mergeSourcesIntoWorktree(
     plan: PlanInstance,
     node: JobNode,
     worktreePath: string,
-    additionalSources: string[]
+    additionalSources: string[],
+    dependencyInfoMap: Map<string, DependencyInfo>
   ): Promise<boolean> {
     if (additionalSources.length === 0) {
       return true;
@@ -1890,8 +2012,22 @@ export class PlanRunner extends EventEmitter {
     
     for (const sourceCommit of additionalSources) {
       const shortSha = sourceCommit.slice(0, 8);
+      const depInfo = dependencyInfoMap.get(sourceCommit);
+      
       log.debug(`Merging commit ${shortSha} into worktree at ${worktreePath}`);
-      this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging source commit ${shortSha}...`);
+      
+      // Log dependency info before merging
+      this.execLog(plan.id, node.id, 'merge-fi', 'info', '');
+      if (depInfo) {
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `[Merge Source] ${depInfo.nodeName}`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Commit: ${shortSha} (from dependency "${depInfo.nodeName}")`);
+        
+        // Show work summary from the dependency node
+        this.logDependencyWorkSummary(plan.id, node.id, depInfo.workSummary);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '  Merging into worktree...');
+      } else {
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging source commit ${shortSha}...`);
+      }
       
       try {
         // Merge by commit SHA directly (no branch needed)
@@ -1905,14 +2041,14 @@ export class PlanRunner extends EventEmitter {
         
         if (mergeResult.success) {
           log.debug(`Merge of commit ${shortSha} succeeded`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `✓ Merged commit ${shortSha} successfully`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ✓ Merged successfully`);
         } else if (mergeResult.hasConflicts) {
           log.info(`Merge conflict for commit ${shortSha}, using Copilot CLI to resolve`, {
             conflicts: mergeResult.conflictFiles,
           });
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `⚠ Merge conflict for commit ${shortSha}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Conflicts: ${mergeResult.conflictFiles?.join(', ')}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Invoking Copilot CLI to resolve...`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ⚠ Merge conflict detected`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `    Conflicts: ${mergeResult.conflictFiles?.join(', ')}`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `    Invoking Copilot CLI to resolve...`);
           
           // Use Copilot CLI to resolve conflicts
           const resolved = await this.resolveMergeConflictWithCopilot(
@@ -1925,21 +2061,21 @@ export class PlanRunner extends EventEmitter {
           
           if (!resolved) {
             log.error(`Copilot CLI failed to resolve merge conflict for commit ${shortSha}`);
-            this.execLog(plan.id, node.id, 'merge-fi', 'error', `✗ Copilot CLI failed to resolve conflict`);
+            this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Copilot CLI failed to resolve conflict`);
             await git.merge.abort(worktreePath, s => log.debug(s));
             return false;
           }
           
           log.info(`Merge conflict resolved by Copilot CLI for commit ${shortSha}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `✓ Conflict resolved by Copilot CLI`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ✓ Conflict resolved by Copilot CLI`);
         } else {
           log.error(`Merge failed for commit ${shortSha}: ${mergeResult.error}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'error', `✗ Merge failed: ${mergeResult.error}`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Merge failed: ${mergeResult.error}`);
           return false;
         }
       } catch (error: any) {
         log.error(`Exception merging commit ${shortSha}: ${error.message}`);
-        this.execLog(plan.id, node.id, 'merge-fi', 'error', `✗ Exception: ${error.message}`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Exception: ${error.message}`);
         return false;
       }
     }
