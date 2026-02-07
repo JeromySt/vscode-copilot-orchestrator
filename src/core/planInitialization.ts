@@ -10,13 +10,16 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '\.\./plan';
+import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '../plan';
 import { ProcessMonitor } from '../process/processMonitor';
 import { StdioMcpServerManager } from '../mcp/mcpServerManager';
 import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
+import { McpHandler } from '../mcp/handler';
+import { McpIpcServer } from '../mcp/ipc/server';
 import { Logger } from './logger';
 import { isCopilotCliAvailable } from '../agent/cliCheckCore';
 import { IMcpManager } from '../interfaces/IMcpManager';
+
 
 const log = Logger.for('init');
 
@@ -299,20 +302,40 @@ export function initializePlanRunner(
 /**
  * Initialize MCP server registration with VS Code using stdio transport.
  * 
- * VS Code manages the MCP child process lifecycle. The extension just
- * registers the definition provider and tracks status.
+ * The extension runs an IPC server that the stdio child process connects to.
+ * This ensures the same PlanRunner instance serves both the UI and Copilot.
  */
-export function initializeMcpServer(
+export async function initializeMcpServer(
   context: vscode.ExtensionContext,
   planRunner: PlanRunner,
   mcpConfig: McpServerConfig
-): IMcpManager | undefined {
+): Promise<IMcpManager | undefined> {
   if (!mcpConfig.enabled) {
     log.info('MCP registration disabled');
     return undefined;
   }
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+
+  // Create the McpHandler that wraps our PlanRunner
+  const mcpHandler = new McpHandler(planRunner, workspacePath);
+
+  // Create and start the IPC server
+  // The stdio child process will connect to this server
+  const ipcServer = new McpIpcServer();
+  ipcServer.setHandler(mcpHandler);
+  
+  try {
+    await ipcServer.start();
+    log.info('MCP IPC server started', { pipePath: ipcServer.getPipePath() });
+  } catch (err) {
+    log.error('Failed to start MCP IPC server', err);
+    return undefined;
+  }
+
+  context.subscriptions.push({ dispose: () => {
+    ipcServer.stop();
+  }});
 
   // Create stdio manager - VS Code manages the child process
   const manager: IMcpManager = new StdioMcpServerManager(context);
@@ -326,8 +349,12 @@ export function initializeMcpServer(
     }
   }});
   
-  // Register with VS Code
-  const providerDisposable = registerMcpDefinitionProvider(context, workspacePath);
+  // Register with VS Code, passing the IPC path for the child process
+  const providerDisposable = registerMcpDefinitionProvider(
+    context, 
+    workspacePath,
+    ipcServer.getPipePath()
+  );
   context.subscriptions.push(providerDisposable);
   
   log.info('MCP registered with stdio transport');

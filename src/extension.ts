@@ -66,8 +66,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   processMonitor = pm;
   planRunner = runner;
 
-  // ── MCP Server (stdio transport) ───────────────────────────────────────
-  mcpManager = initializeMcpServer(context, planRunner, config.mcp);
+  // ── MCP Server (stdio transport via IPC) ───────────────────────────────
+  mcpManager = await initializeMcpServer(context, planRunner, config.mcp);
 
   // ── Plans view ──────────────────────────────────────────────────────────
   initializePlansView(context, planRunner);

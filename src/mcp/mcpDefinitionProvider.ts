@@ -23,6 +23,9 @@ const serverChangedEmitter = new vscode.EventEmitter<void>();
 /** Current workspace path. */
 let currentWorkspacePath: string | undefined;
 
+/** Current IPC server path (named pipe or Unix socket). */
+let currentIpcPath: string | undefined;
+
 /** Whether the MCP server feature is enabled in user settings. */
 let isEnabled = true;
 
@@ -31,16 +34,20 @@ let isEnabled = true;
  *
  * Uses stdio transport where VS Code spawns a child process that
  * communicates via stdin/stdout using the MCP protocol.
+ * The stdio server connects back to the extension via IPC.
  *
  * @param context - VS Code extension context.
  * @param workspacePath - Absolute path to the workspace root.
+ * @param ipcPath - Path to the IPC server (named pipe or Unix socket).
  * @returns A composite {@link vscode.Disposable}.
  */
 export function registerMcpDefinitionProvider(
   context: vscode.ExtensionContext,
-  workspacePath: string
+  workspacePath: string,
+  ipcPath: string
 ): vscode.Disposable {
   currentWorkspacePath = workspacePath;
+  currentIpcPath = ipcPath;
   
   // Check if MCP is enabled
   const mcpConfig = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
@@ -82,25 +89,29 @@ export function registerMcpDefinitionProvider(
         return [];
       }
 
+      // Require IPC path for the stdio server to connect back
+      if (!currentIpcPath) {
+        console.log('[MCP Provider] Returning empty list (no IPC path)');
+        return [];
+      }
+
       const extensionPath = context.extensionPath;
       const serverScript = path.join(extensionPath, 'out', 'mcp', 'stdio', 'server.js');
-      
-      // Storage is always workspace-relative
-      const storagePath = path.join(currentWorkspacePath, '.orchestrator', 'plans');
 
-      // Pass paths as command-line arguments since VS Code doesn't pass env to child process
+      // The stdio server connects back to the extension via IPC
+      // It no longer needs workspace/storage paths since the PlanRunner is in the extension
       // McpStdioServerDefinition constructor: (label, command, args?, options?)
       const server = new (vscode as any).McpStdioServerDefinition(
         'Copilot Orchestrator',  // label
         'node',                  // command
-        [serverScript, '--workspace', currentWorkspacePath, '--storage', storagePath],  // args
+        [serverScript, '--ipc', currentIpcPath],  // args - IPC path to connect back
         {
           cwd: vscode.Uri.file(currentWorkspacePath),
           version: context.extension.packageJSON.version,
         }
       );
 
-      console.log(`[MCP Provider] Returning stdio server: ${server.label}`);
+      console.log(`[MCP Provider] Returning stdio server: ${server.label}, ipc: ${currentIpcPath}`);
       return [server];
     },
     
