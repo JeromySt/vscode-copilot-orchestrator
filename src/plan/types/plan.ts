@@ -8,7 +8,7 @@
  */
 
 import type { WorkSpec } from './specs';
-import type { NodeStatus, JobNodeSpec, SubPlanNodeSpec, PlanNode, JobNode } from './nodes';
+import type { NodeStatus, JobNodeSpec, GroupSpec, PlanNode, JobNode } from './nodes';
 
 // ============================================================================
 // PLAN SPECIFICATION (User Input)
@@ -36,11 +36,14 @@ export interface PlanSpec {
   /** Whether to clean up worktrees after successful merges (default: true) */
   cleanUpSuccessfulWork?: boolean;
   
-  /** Job nodes in this Plan */
+  /** Job nodes at the top level of this Plan */
   jobs: JobNodeSpec[];
   
-  /** sub-plan nodes */
-  subPlans?: SubPlanNodeSpec[];
+  /** 
+   * Visual groups for organizing jobs.
+   * Groups provide namespace isolation for producer_ids and visual hierarchy.
+   */
+  groups?: GroupSpec[];
 }
 
 // ============================================================================
@@ -58,6 +61,9 @@ export type PhaseStatus = 'pending' | 'running' | 'success' | 'failed' | 'skippe
 export interface NodeExecutionState {
   /** Current status */
   status: NodeStatus;
+  
+  /** Version number - incremented on every state change (for efficient UI updates) */
+  version: number;
   
   /** When the node was scheduled */
   scheduledAt?: number;
@@ -79,9 +85,6 @@ export interface NodeExecutionState {
   
   /** Worktree path (for jobs) - detached HEAD mode, no branch */
   worktreePath?: string;
-  
-  /** Child Plan ID (for subPlans) */
-  childPlanId?: string;
   
   /** Execution attempt count */
   attempts: number;
@@ -127,6 +130,13 @@ export interface NodeExecutionState {
    * Can be used to resume context on retry or follow-up.
    */
   copilotSessionId?: string;
+  
+  /**
+   * Phase to resume from on retry.
+   * Set when a node fails and is retried - allows skipping already-completed phases.
+   * Cleared when new work is provided or worktree is reset.
+   */
+  resumeFromPhase?: 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
   
   /**
    * Details about the last execution attempt (for retry context).
@@ -203,6 +213,78 @@ export interface AttemptRecord {
   workUsed?: WorkSpec;
 }
 
+// ============================================================================
+// GROUP INSTANCE (Visual Hierarchy with State)
+// ============================================================================
+
+/**
+ * Group instance (internal representation with UUID).
+ * Groups are visual hierarchy containers for organizing jobs.
+ * Jobs push their state changes to their parent group.
+ */
+export interface GroupInstance {
+  /** Unique group ID (UUID) */
+  id: string;
+  
+  /** Group name (from spec) */
+  name: string;
+  
+  /** Full path (e.g., "tier1/processor") */
+  path: string;
+  
+  /** Parent group ID (if nested) */
+  parentGroupId?: string;
+  
+  /** Child group IDs */
+  childGroupIds: string[];
+  
+  /** Node IDs directly contained in this group (not in subgroups) */
+  nodeIds: string[];
+  
+  /** All node IDs in this group and all subgroups (computed at build time) */
+  allNodeIds: string[];
+  
+  /** Total node count (for progress calculation) */
+  totalNodes: number;
+}
+
+/**
+ * Execution state for a group.
+ * Updated via push from jobs - jobs notify the group when they transition.
+ * Uses same status values as nodes for consistent rendering.
+ */
+export interface GroupExecutionState {
+  /** 
+   * Current status - uses NodeStatus for consistency.
+   * Derived from counts: running > 0 → 'running', all succeeded → 'succeeded', etc.
+   */
+  status: import('./nodes').NodeStatus;
+  
+  /** Version number - incremented on every state change (for efficient UI updates) */
+  version: number;
+  
+  /** When the first job in this group started (set by first job to start) */
+  startedAt?: number;
+  
+  /** When the last job in this group ended (set when all jobs complete) */
+  endedAt?: number;
+  
+  /** Count of currently running jobs (increment on start, decrement on finish) */
+  runningCount: number;
+  
+  /** Count of succeeded jobs */
+  succeededCount: number;
+  
+  /** Count of failed jobs */
+  failedCount: number;
+  
+  /** Count of blocked jobs */
+  blockedCount: number;
+  
+  /** Count of canceled jobs */
+  canceledCount: number;
+}
+
 /**
  * Overall Plan status (derived from node states)
  */
@@ -239,6 +321,15 @@ export interface PlanInstance {
   /** Map of node ID to execution state */
   nodeStates: Map<string, NodeExecutionState>;
   
+  /** Map of group ID to group instance */
+  groups: Map<string, GroupInstance>;
+  
+  /** Map of group ID to execution state (computed from nodes) */
+  groupStates: Map<string, GroupExecutionState>;
+  
+  /** Map of group path to group ID (for resolving references) */
+  groupPathToId: Map<string, string>;
+  
   /** Parent Plan ID (if this is a sub-plan) */
   parentPlanId?: string;
   
@@ -265,6 +356,9 @@ export interface PlanInstance {
   
   /** When execution ended */
   endedAt?: number;
+  
+  /** Global state version - incremented on any node/group state change (for UI polling) */
+  stateVersion: number;
   
   /** Whether cleanup is enabled */
   cleanUpSuccessfulWork: boolean;
@@ -394,6 +488,68 @@ export interface ExecutionContext {
   
   /** Existing Copilot session ID to resume (from previous attempt) */
   copilotSessionId?: string;
+  
+  /** Phase to resume from on retry (skip phases before this) */
+  resumeFromPhase?: 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
+  
+  /** Previous step statuses to preserve (from failed attempt) */
+  previousStepStatuses?: {
+    prechecks?: PhaseStatus;
+    work?: PhaseStatus;
+    commit?: PhaseStatus;
+    postchecks?: PhaseStatus;
+  };
+}
+
+// ============================================================================
+// EVIDENCE TYPES
+// ============================================================================
+
+/**
+ * Evidence file format for nodes that produce non-file-change work.
+ * Agents or scripts drop this file to prove work was done.
+ */
+export interface EvidenceFile {
+  /** Schema version for forward compatibility */
+  version: 1;
+
+  /** Node ID that produced this evidence */
+  nodeId: string;
+
+  /** ISO 8601 timestamp of evidence creation */
+  timestamp: string;
+
+  /** What the node did — required, shown in work summary */
+  summary: string;
+
+  /** Structured outcome data (node-type-specific) */
+  outcome?: Record<string, unknown>;
+
+  /**
+   * Evidence type classification.
+   * - "file_changes": Normal code changes (default, no evidence file needed)
+   * - "external_effect": Work affected an external system
+   * - "analysis": Work produced analysis/report but no code changes
+   * - "validation": Work validated state without modifying it
+   */
+  type?: 'file_changes' | 'external_effect' | 'analysis' | 'validation';
+}
+
+/**
+ * Result of evidence validation during the commit phase.
+ */
+export interface EvidenceValidationResult {
+  /** Whether evidence validation passed */
+  valid: boolean;
+
+  /** Why validation passed or failed */
+  reason: string;
+
+  /** The evidence file contents, if one was found */
+  evidence?: EvidenceFile;
+
+  /** How the node satisfied evidence requirements */
+  method?: 'file_changes' | 'evidence_file' | 'expects_no_changes' | 'none';
 }
 
 // ============================================================================
@@ -413,4 +569,63 @@ export interface LogEntry {
   phase: ExecutionPhase;
   type: 'stdout' | 'stderr' | 'info' | 'error';
   message: string;
+}
+
+// ============================================================================
+// GROUP TYPES (Node-Centric Model)
+// ============================================================================
+
+/**
+ * Grouping replaces PlanInstance as the organizational unit.
+ * Nodes sharing the same group.id are scheduled together
+ * and share branch/merge semantics.
+ */
+export interface GroupInfo {
+  /** Group ID (auto-generated UUID) */
+  id: string;
+
+  /** Human-readable name */
+  name: string;
+
+  /** Base branch for all nodes in this group */
+  baseBranch: string;
+
+  /** Target branch to merge leaf nodes into */
+  targetBranch?: string;
+
+  /** Max parallel nodes in this group */
+  maxParallel: number;
+
+  /** Whether to clean up worktrees after merge */
+  cleanUpSuccessfulWork: boolean;
+
+  /** Worktree root directory */
+  worktreeRoot: string;
+
+  /** Parent group ID (for sub-groups replacing SubPlanNode) */
+  parentGroupId?: string;
+
+  /** Timestamps */
+  createdAt: number;
+  startedAt?: number;
+  endedAt?: number;
+}
+
+/** Same values as current PlanStatus, now derived from grouped nodes */
+export type GroupStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'partial' | 'canceled';
+
+/**
+ * Computed group status snapshot (not stored — derived on demand).
+ */
+export interface GroupStatusSnapshot {
+  groupId: string;
+  name: string;
+  status: GroupStatus;
+  progress: number;
+  counts: Record<NodeStatus, number>;
+  nodes: import('./nodes').NodeInstance[];
+  createdAt: number;
+  startedAt?: number;
+  endedAt?: number;
+  workSummary?: WorkSummary;
 }

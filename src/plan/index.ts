@@ -11,7 +11,7 @@
 export * from './types';
 
 // Builder
-export { buildPlan, buildSingleJobPlan, PlanValidationError } from './builder';
+export { buildPlan, buildSingleJobPlan, buildNodes, PlanValidationError } from './builder';
 
 // State Machine
 export { PlanStateMachine, StateMachineEvents } from './stateMachine';
@@ -39,3 +39,6 @@ export {
 
 // Executor
 export { DefaultJobExecutor } from './executor';
+
+// Evidence Validator
+export { DefaultEvidenceValidator } from './evidenceValidator';

@@ -9,9 +9,8 @@
 import { 
   PlanSpec, 
   JobNodeSpec, 
-  SubPlanNodeSpec,
+  GroupSpec,
 } from '../../plan/types';
-import { PRODUCER_ID_PATTERN } from '../tools/planTools';
 import {
   PlanHandlerContext,
   errorResult,
@@ -24,283 +23,180 @@ import {
 } from './utils';
 
 // ============================================================================
-// VALIDATION
+// GROUP FLATTENING
 // ============================================================================
 
 /**
- * Recursively map raw sub-plan input objects to typed {@link SubPlanNodeSpec} arrays.
- *
- * Transforms the snake_case `producer_id` field from JSON input to the
- * camelCase `producerId` used internally, and recursively processes any
- * nested `subPlans` to support the "out-and-back" pattern.
- *
- * @param subPlans - Raw sub-plan objects from the MCP `create_copilot_plan` tool call.
- * @returns Typed sub-plan specs, or `undefined` if the input is empty/absent.
+ * Flatten groups recursively into a flat array of JobNodeSpec.
+ * 
+ * Each job gets:
+ * - Qualified producerId: "group/path/local_id"
+ * - group field set to the full group path
+ * - Dependencies resolved with qualified paths
+ * 
+ * @param groups - Array of group specs from MCP input
+ * @param groupPath - Current group path prefix (e.g., "backend/api")
+ * @returns Flattened array of JobNodeSpec
  */
-function mapsubPlansRecursively(subPlans: any[] | undefined): SubPlanNodeSpec[] | undefined {
-  if (!subPlans || !Array.isArray(subPlans) || subPlans.length === 0) {
-    return undefined;
+function flattenGroupsToJobs(
+  groups: any[] | undefined, 
+  groupPath: string
+): JobNodeSpec[] {
+  if (!groups || !Array.isArray(groups) || groups.length === 0) {
+    return [];
   }
   
-  return subPlans.map((s: any): SubPlanNodeSpec => ({
-    producerId: s.producer_id,
-    name: s.name || s.producer_id,
-    dependencies: s.dependencies || [],
-    maxParallel: s.maxParallel,
-    jobs: (s.jobs || []).map((j: any): JobNodeSpec => ({
-      producerId: j.producer_id,
-      name: j.name || j.producer_id,
-      task: j.task,
-      work: j.work,
-      dependencies: j.dependencies || [],
-      prechecks: j.prechecks,
-      postchecks: j.postchecks,
-      instructions: j.instructions,
-    })),
-    subPlans: mapsubPlansRecursively(s.subPlans),  // Recursive!
-  }));
+  const result: JobNodeSpec[] = [];
+  
+  for (const g of groups) {
+    const groupName = g.name;
+    const currentPath = groupPath ? `${groupPath}/${groupName}` : groupName;
+    
+    // Flatten jobs in this group
+    for (const j of g.jobs || []) {
+      const qualifiedId = `${currentPath}/${j.producer_id}`;
+      
+      // Resolve dependencies - local refs become qualified, already-qualified refs pass through
+      const resolvedDeps = (j.dependencies || []).map((dep: string) => {
+        // If dep contains '/', it's already qualified
+        if (dep.includes('/')) return dep;
+        // Otherwise, qualify it with our group path
+        return `${currentPath}/${dep}`;
+      });
+      
+      result.push({
+        producerId: qualifiedId,
+        name: j.name || j.producer_id,
+        task: j.task,
+        work: j.work,
+        dependencies: resolvedDeps,
+        prechecks: j.prechecks,
+        postchecks: j.postchecks,
+        instructions: j.instructions,
+        baseBranch: j.baseBranch,
+        expectsNoChanges: j.expects_no_changes,
+        group: currentPath,
+      });
+    }
+    
+    // Recursively flatten nested groups
+    result.push(...flattenGroupsToJobs(g.groups, currentPath));
+  }
+  
+  return result;
 }
 
 /**
- * Recursively validate sub-plans with proper scope isolation.
+ * Validate groups recursively for dependency references.
  * 
- * SCOPING RULES:
- * - Each sub-plan has its own isolated scope for producer_ids
- * - Jobs within a sub-plan can only reference other jobs/sub-plans in the same sub-plan
- * - Nested sub-plans have their own isolated scope (producer_ids can repeat at different levels)
- * - A sub-plan's external dependencies (its own dependencies array) reference the PARENT scope
+ * Note: Schema validation (required fields, unknown properties, patterns)
+ * is handled by Ajv in the MCP handler layer. This function only validates
+ * business logic that requires semantic understanding:
+ * - Dependency references resolve to valid producer_ids
+ * - No self-referential dependencies
  * 
- * @param subPlans - Array of sub-plans to validate
- * @param siblingProducerIds - Set of producer_ids at this level (for sibling duplicate checking)
- * @param path - Current path for error messages
- * @param errors - Array to add errors to
+ * @param groups - Array of groups to validate
+ * @param groupPath - Current group path for error messages
+ * @param validGlobalRefs - All valid producer_ids for dependency checking
+ * @param errors - Array to accumulate errors
  */
-function validatesubPlansRecursively(
-  subPlans: any[] | undefined,
-  siblingProducerIds: Set<string>,
-  path: string,
+function validateGroupsRecursively(
+  groups: any[] | undefined,
+  groupPath: string,
+  validGlobalRefs: Set<string>,
   errors: string[]
 ): void {
-  if (!subPlans || !Array.isArray(subPlans)) return;
+  if (!groups || !Array.isArray(groups)) return;
   
-  for (let i = 0; i < subPlans.length; i++) {
-    const subPlan = subPlans[i];
-    const subPlanPath = path ? `${path} > ${subPlan.producer_id || `subPlan[${i}]`}` : (subPlan.producer_id || `subPlan[${i}]`);
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    if (!group.name) continue; // Schema validation catches this
     
-    if (!subPlan.producer_id) {
-      errors.push(`sub-plan at index ${i}${path ? ` in ${path}` : ''} is missing required 'producer_id' field`);
-      continue;
-    }
+    const currentPath = groupPath ? `${groupPath}/${group.name}` : group.name;
     
-    if (!PRODUCER_ID_PATTERN.test(subPlan.producer_id)) {
-      errors.push(`sub-plan '${subPlanPath}' has invalid producer_id format`);
-      continue;
-    }
-    
-    // Only check for duplicates among siblings at this level
-    if (siblingProducerIds.has(subPlan.producer_id)) {
-      errors.push(`Duplicate producer_id: '${subPlan.producer_id}' at level ${path || 'root'}`);
-      continue;
-    }
-    siblingProducerIds.add(subPlan.producer_id);
-    
-    if (!subPlan.jobs || !Array.isArray(subPlan.jobs) || subPlan.jobs.length === 0) {
-      errors.push(`sub-plan '${subPlanPath}' must have at least one job`);
-    }
-    
-    if (!Array.isArray(subPlan.dependencies)) {
-      errors.push(`sub-plan '${subPlanPath}' must have a 'dependencies' array`);
-    }
-    
-    // =========================================================================
-    // INTERNAL SCOPE VALIDATION (jobs and nested sub-plans within this sub-plan)
-    // =========================================================================
-    
-    // Validate jobs within this sub-plan (isolated scope)
-    const internalJobIds = new Set<string>();
-    for (let j = 0; j < (subPlan.jobs || []).length; j++) {
-      const job = subPlan.jobs[j];
+    // Validate job dependencies in this group
+    for (let j = 0; j < (group.jobs || []).length; j++) {
+      const job = group.jobs[j];
+      if (!job.producer_id) continue; // Schema validation catches this
       
-      if (!job.producer_id) {
-        errors.push(`Job at index ${j} in '${subPlanPath}' is missing required 'producer_id' field`);
-        continue;
-      }
+      const qualifiedId = `${currentPath}/${job.producer_id}`;
       
-      if (!PRODUCER_ID_PATTERN.test(job.producer_id)) {
-        errors.push(`Job '${job.producer_id}' in '${subPlanPath}' has invalid producer_id format`);
-        continue;
-      }
-      
-      // Check duplicates only within this sub-plan's internal scope
-      if (internalJobIds.has(job.producer_id)) {
-        errors.push(`Duplicate producer_id '${job.producer_id}' within '${subPlanPath}'`);
-        continue;
-      }
-      internalJobIds.add(job.producer_id);
-      
-      if (!job.task) {
-        errors.push(`Job '${job.producer_id}' in '${subPlanPath}' is missing required 'task' field`);
-      }
-      
-      if (!Array.isArray(job.dependencies)) {
-        errors.push(`Job '${job.producer_id}' in '${subPlanPath}' must have a 'dependencies' array`);
-      }
-    }
-    
-    // Collect nested sub-plan producer_ids for internal scope
-    const internalNestedSubplanIds = new Set<string>();
-    if (subPlan.subPlans && Array.isArray(subPlan.subPlans)) {
-      for (const nested of subPlan.subPlans) {
-        if (nested.producer_id) {
-          // Check for duplicates among internal nested sub-plans
-          if (internalNestedSubplanIds.has(nested.producer_id) || internalJobIds.has(nested.producer_id)) {
-            errors.push(`Duplicate producer_id '${nested.producer_id}' within '${subPlanPath}'`);
-          } else {
-            internalNestedSubplanIds.add(nested.producer_id);
+      // Check dependencies resolve
+      if (Array.isArray(job.dependencies)) {
+        for (const dep of job.dependencies) {
+          const resolvedDep = dep.includes('/') ? dep : `${currentPath}/${dep}`;
+          if (!validGlobalRefs.has(resolvedDep)) {
+            errors.push(`Job '${qualifiedId}' references unknown dependency '${dep}'`);
+          }
+          if (resolvedDep === qualifiedId) {
+            errors.push(`Job '${qualifiedId}' cannot depend on itself`);
           }
         }
       }
     }
     
-    // Valid references within this sub-plan's internal scope
-    const validInternalRefs = new Set([...internalJobIds, ...internalNestedSubplanIds]);
+    // Recursively validate nested groups
+    validateGroupsRecursively(group.groups, currentPath, validGlobalRefs, errors);
+  }
+}
+
+/**
+ * Collect all producer_ids from groups recursively (for reference validation).
+ */
+function collectGroupProducerIds(groups: any[] | undefined, groupPath: string, ids: Set<string>): void {
+  if (!groups || !Array.isArray(groups)) return;
+  
+  for (const g of groups) {
+    const currentPath = groupPath ? `${groupPath}/${g.name}` : g.name;
     
-    // Validate job dependencies (must reference other internal jobs/sub-plans)
-    for (const job of subPlan.jobs || []) {
-      if (!Array.isArray(job.dependencies)) continue;
-      
-      for (const dep of job.dependencies) {
-        if (!validInternalRefs.has(dep)) {
-          errors.push(
-            `Job '${job.producer_id}' in '${subPlanPath}' references unknown dependency '${dep}'. ` +
-            `Valid producer_ids in this scope: ${[...validInternalRefs].join(', ') || '(none)'}`
-          );
+    for (const j of g.jobs || []) {
+      if (j.producer_id) {
+        const qualifiedId = `${currentPath}/${j.producer_id}`;
+        if (ids.has(qualifiedId)) {
+          // Duplicate - will be caught in validation
         }
-        if (dep === job.producer_id) {
-          errors.push(`Job '${job.producer_id}' in '${subPlanPath}' cannot depend on itself`);
-        }
+        ids.add(qualifiedId);
       }
     }
     
-    // Validate nested sub-plan dependencies (must reference internal jobs/sub-plans)
-    if (subPlan.subPlans && Array.isArray(subPlan.subPlans)) {
-      for (const nested of subPlan.subPlans) {
-        if (!Array.isArray(nested.dependencies)) continue;
-        
-        for (const dep of nested.dependencies) {
-          if (!validInternalRefs.has(dep)) {
-            errors.push(
-              `sub-plan '${nested.producer_id}' in '${subPlanPath}' references unknown dependency '${dep}'. ` +
-              `Valid producer_ids in this scope: ${[...validInternalRefs].join(', ') || '(none)'}`
-            );
-          }
-        }
-      }
-    }
-    
-    // Recursively validate nested sub-plans with a FRESH scope
-    // Each nested sub-plan has its own isolated internal scope
-    validatesubPlansRecursively(subPlan.subPlans, new Set<string>(), subPlanPath, errors);
+    collectGroupProducerIds(g.groups, currentPath, ids);
   }
 }
 
 /**
  * Validate and transform raw `create_copilot_plan` input into a {@link PlanSpec}.
  *
- * Performs comprehensive validation:
- * 1. Ensures required fields (`name`, `jobs`) are present.
- * 2. Validates every `producer_id` against {@link PRODUCER_ID_PATTERN}.
- * 3. Checks for duplicate `producer_id` values within each scope.
- * 4. Verifies dependency references resolve to known sibling producer IDs.
- * 5. Detects self-referential dependencies.
- * 6. Recursively validates nested sub-plans with isolated scopes.
+ * Note: Schema validation (required fields, allowed properties, patterns) is
+ * handled by Ajv in the MCP handler layer. This function performs:
+ * 1. Semantic validation (dependency resolution, duplicate detection)
+ * 2. Transformation to internal PlanSpec format
+ * 3. Group flattening
  *
- * @param args - Raw arguments from the `tools/call` request.
+ * @param args - Raw arguments from the `tools/call` request (already schema-validated).
  * @returns `{ valid: true, spec }` on success, or `{ valid: false, error }` on failure.
- *
- * @example
- * ```ts
- * const result = validatePlanInput({
- *   name: 'My Plan',
- *   jobs: [{ producer_id: 'build', task: 'Build app', dependencies: [] }],
- * });
- * if (result.valid) {
- *   // result.spec is a PlanSpec ready for PlanRunner.enqueue()
- * }
- * ```
  */
 function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: PlanSpec } {
-  // Name is required
-  if (!args.name || typeof args.name !== 'string') {
-    return { valid: false, error: 'Plan must have a name' };
-  }
-  
-  // Jobs array is required
-  if (!args.jobs || !Array.isArray(args.jobs) || args.jobs.length === 0) {
-    return { valid: false, error: 'Plan must have at least one job in the jobs array' };
-  }
-  
-  // Collect all producer_ids for reference validation at root level
+  // Collect all producer_ids for reference validation
   const allProducerIds = new Set<string>();
   const errors: string[] = [];
   
-  // Validate each job at root level
-  for (let i = 0; i < args.jobs.length; i++) {
-    const job = args.jobs[i];
+  // Collect root job producer_ids and check for duplicates
+  for (const job of args.jobs || []) {
+    if (!job.producer_id) continue; // Schema validation catches this
     
-    // producer_id is required
-    if (!job.producer_id) {
-      errors.push(`Job at index ${i} is missing required 'producer_id' field`);
-      continue;
-    }
-    
-    // Validate producer_id format
-    if (!PRODUCER_ID_PATTERN.test(job.producer_id)) {
-      errors.push(
-        `Job '${job.producer_id}' has invalid producer_id format. ` +
-        `Must be 3-64 characters, lowercase letters, numbers, and hyphens only.`
-      );
-      continue;
-    }
-    
-    // Check for duplicates
     if (allProducerIds.has(job.producer_id)) {
       errors.push(`Duplicate producer_id: '${job.producer_id}'`);
-      continue;
-    }
-    allProducerIds.add(job.producer_id);
-    
-    // task is required
-    if (!job.task) {
-      errors.push(`Job '${job.producer_id}' is missing required 'task' field`);
-    }
-    
-    // dependencies must be an array
-    if (!Array.isArray(job.dependencies)) {
-      errors.push(`Job '${job.producer_id}' must have a 'dependencies' array (use [] for root jobs)`);
+    } else {
+      allProducerIds.add(job.producer_id);
     }
   }
   
-  // Validate sub-plans recursively (they have their own internal scope)
-  // Also collect root-level sub-plan producer_ids
-  if (args.subPlans && Array.isArray(args.subPlans)) {
-    for (const subPlan of args.subPlans) {
-      if (subPlan.producer_id) {
-        if (allProducerIds.has(subPlan.producer_id)) {
-          errors.push(`Duplicate producer_id: '${subPlan.producer_id}'`);
-        } else {
-          allProducerIds.add(subPlan.producer_id);
-        }
-      }
-    }
-    
-    // Validate sub-plans structure recursively
-    validatesubPlansRecursively(args.subPlans, new Set<string>(), '', errors);
-  }
+  // Collect all producer_ids from groups (qualified paths)
+  collectGroupProducerIds(args.groups, '', allProducerIds);
   
-  // Validate root-level job dependency references
-  for (const job of args.jobs) {
-    if (!Array.isArray(job.dependencies)) continue;
+  // Validate root-level job dependencies
+  for (const job of args.jobs || []) {
+    if (!job.producer_id || !Array.isArray(job.dependencies)) continue;
     
     for (const dep of job.dependencies) {
       if (!allProducerIds.has(dep)) {
@@ -315,44 +211,39 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
     }
   }
   
-  // Validate root-level sub-plan dependency references
-  if (args.subPlans) {
-    for (const subPlan of args.subPlans) {
-      if (!Array.isArray(subPlan.dependencies)) continue;
-      
-      for (const dep of subPlan.dependencies) {
-        if (!allProducerIds.has(dep)) {
-          errors.push(
-            `sub-plan '${subPlan.producer_id}' references unknown dependency '${dep}'`
-          );
-        }
-      }
-    }
-  }
+  // Validate group job dependencies
+  validateGroupsRecursively(args.groups, '', allProducerIds, errors);
   
   if (errors.length > 0) {
     return { valid: false, error: errors.join('; ') };
   }
   
-  // Transform to PlanSpec using recursive mapping
+  // Transform to PlanSpec - flatten groups into jobs
+  const rootJobs: JobNodeSpec[] = (args.jobs || []).map((j: any): JobNodeSpec => ({
+    producerId: j.producer_id,
+    name: j.name || j.producer_id,
+    task: j.task,
+    work: j.work,
+    dependencies: j.dependencies || [],
+    prechecks: j.prechecks,
+    postchecks: j.postchecks,
+    instructions: j.instructions,
+    baseBranch: j.baseBranch,
+    expectsNoChanges: j.expects_no_changes,
+    group: j.group,
+  }));
+  
+  // Flatten groups into additional jobs
+  const groupJobs = flattenGroupsToJobs(args.groups, '');
+  
   const spec: PlanSpec = {
     name: args.name,
     baseBranch: args.baseBranch,
     targetBranch: args.targetBranch,
     maxParallel: args.maxParallel,
     cleanUpSuccessfulWork: args.cleanUpSuccessfulWork,
-    jobs: args.jobs.map((j: any): JobNodeSpec => ({
-      producerId: j.producer_id,
-      name: j.name || j.producer_id,
-      task: j.task,
-      work: j.work,
-      dependencies: j.dependencies || [],
-      prechecks: j.prechecks,
-      postchecks: j.postchecks,
-      instructions: j.instructions,
-      baseBranch: j.baseBranch,
-    })),
-    subPlans: mapsubPlansRecursively(args.subPlans),  // Recursive mapping!
+    jobs: [...rootJobs, ...groupJobs],
+    // Note: groups are flattened into jobs, not stored separately
   };
   
   return { valid: true, spec };
@@ -521,16 +412,37 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
   
   const { plan, status: planStatus, counts, progress } = status;
   
+  // Track group statuses
+  const groupStatusMap = new Map<string, { nodes: number; succeeded: number; failed: number; running: number; pending: number }>();
+  
   // Build node status list
   const nodes: any[] = [];
   for (const [nodeId, state] of plan.nodeStates) {
     const node = plan.nodes.get(nodeId);
     const isLeaf = plan.leaves.includes(nodeId);
+    
+    // Get group from JobNode
+    const nodeGroup = node?.type === 'job' ? (node as import('../../plan/types').JobNode).group : undefined;
+    
+    // Track group status
+    if (nodeGroup) {
+      if (!groupStatusMap.has(nodeGroup)) {
+        groupStatusMap.set(nodeGroup, { nodes: 0, succeeded: 0, failed: 0, running: 0, pending: 0 });
+      }
+      const grp = groupStatusMap.get(nodeGroup)!;
+      grp.nodes++;
+      if (state.status === 'succeeded') grp.succeeded++;
+      else if (state.status === 'failed' || state.status === 'blocked') grp.failed++;
+      else if (state.status === 'running' || state.status === 'scheduled') grp.running++;
+      else grp.pending++;
+    }
+    
     nodes.push({
       id: nodeId,
       producerId: node?.producerId,
       name: node?.name,
       type: node?.type,
+      group: nodeGroup,
       status: state.status,
       error: state.error,
       attempts: state.attempts,
@@ -540,6 +452,22 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
       mergedToTarget: isLeaf ? state.mergedToTarget : undefined,
       worktreePath: state.worktreePath,
     });
+  }
+  
+  // Build groups summary
+  const groups: Record<string, { status: string; nodes: number }> = {};
+  for (const [groupName, stats] of groupStatusMap) {
+    let groupStatus: string;
+    if (stats.failed > 0) {
+      groupStatus = stats.succeeded > 0 ? 'partial' : 'failed';
+    } else if (stats.running > 0) {
+      groupStatus = 'running';
+    } else if (stats.succeeded === stats.nodes) {
+      groupStatus = 'succeeded';
+    } else {
+      groupStatus = 'pending';
+    }
+    groups[groupName] = { status: groupStatus, nodes: stats.nodes };
   }
   
   // Get effective endedAt recursively including child plans
@@ -553,6 +481,7 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
     progress: Math.round(progress * 100),
     counts,
     nodes,
+    groups: Object.keys(groups).length > 0 ? groups : undefined,
     createdAt: plan.createdAt,
     startedAt: plan.startedAt,
     endedAt: effectiveEndedAt,

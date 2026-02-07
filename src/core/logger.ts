@@ -4,6 +4,9 @@
  * Provides a VS Code OutputChannel-based logging system that allows
  * debug logging to be enabled/disabled per component via settings.
  * 
+ * When running outside VS Code (e.g., stdio MCP server), falls back to
+ * console-only logging.
+ * 
  * Components:
  * - mcp: MCP protocol handler and server management
  * - http: HTTP server requests and responses
@@ -25,7 +28,14 @@
  * @module core/logger
  */
 
-import * as vscode from 'vscode';
+// Conditionally import vscode - may not be available in standalone processes
+let vscode: typeof import('vscode') | undefined;
+try {
+  vscode = require('vscode');
+} catch {
+  // Running outside VS Code extension host (e.g., stdio server)
+  vscode = undefined;
+}
 
 /**
  * Log levels supported by the logger
@@ -62,10 +72,11 @@ interface DebugConfig {
  * 
  * Uses a VS Code OutputChannel for visibility in the Output panel.
  * Debug logging can be enabled/disabled per component via settings.
+ * Falls back to console-only logging when running outside VS Code.
  */
 export class Logger {
   private static instance: Logger | undefined;
-  private outputChannel: vscode.OutputChannel;
+  private outputChannel: { appendLine: (s: string) => void; show: () => void; dispose: () => void } | undefined;
   private debugConfig: DebugConfig = {
     mcp: false,
     http: false,
@@ -82,28 +93,33 @@ export class Logger {
     'job-executor': false,
     init: false
   };
-  private configListener: vscode.Disposable | undefined;
+  private configListener: { dispose: () => void } | undefined;
 
   private constructor() {
-    this.outputChannel = vscode.window.createOutputChannel('Copilot Orchestrator');
-    this.loadConfig();
-    
-    // Listen for configuration changes
-    this.configListener = vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('copilotOrchestrator.logging')) {
-        this.loadConfig();
-        this.info('extension', 'Logging configuration updated');
-      }
-    });
+    if (vscode) {
+      this.outputChannel = vscode.window.createOutputChannel('Copilot Orchestrator');
+      this.loadConfig();
+      
+      // Listen for configuration changes
+      this.configListener = vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('copilotOrchestrator.logging')) {
+          this.loadConfig();
+          this.info('extension', 'Logging configuration updated');
+        }
+      });
+    }
+    // When vscode is not available, we just use console (outputChannel stays undefined)
   }
 
   /**
    * Initialize the logger. Should be called once during extension activation.
    */
-  static initialize(context: vscode.ExtensionContext): Logger {
+  static initialize(context: { subscriptions: { push: (d: { dispose: () => void }) => void } }): Logger {
     if (!Logger.instance) {
       Logger.instance = new Logger();
-      context.subscriptions.push(Logger.instance.outputChannel);
+      if (Logger.instance.outputChannel) {
+        context.subscriptions.push(Logger.instance.outputChannel);
+      }
       if (Logger.instance.configListener) {
         context.subscriptions.push(Logger.instance.configListener);
       }
@@ -133,13 +149,18 @@ export class Logger {
    * Show the output channel in VS Code.
    */
   static show(): void {
-    Logger.instance?.outputChannel.show();
+    Logger.instance?.outputChannel?.show();
   }
 
   /**
    * Load debug configuration from VS Code settings.
    */
   private loadConfig(): void {
+    if (!vscode) {
+      // Not in VS Code, keep default config (all false)
+      return;
+    }
+    
     const config = vscode.workspace.getConfiguration('copilotOrchestrator.logging');
     
     this.debugConfig = {
@@ -201,14 +222,26 @@ export class Logger {
     }
 
     const formattedMessage = this.formatMessage(level, component, message) + this.formatData(data);
-    this.outputChannel.appendLine(formattedMessage);
+    
+    // Write to output channel if available (VS Code context)
+    if (this.outputChannel) {
+      this.outputChannel.appendLine(formattedMessage);
+    }
 
-    // Also log to console for development
-    const consoleFn = level === 'error' ? console.error :
-                      level === 'warn' ? console.warn :
-                      level === 'debug' ? console.debug :
-                      console.log;
-    consoleFn(`[Orchestrator:${component}] ${message}`, data ?? '');
+    // Also log to console for development or standalone mode
+    // In standalone mode (stdio server), ALL output must go to stderr
+    // since stdout is reserved for JSON-RPC messages
+    if (!this.outputChannel) {
+      // Standalone mode: always use stderr
+      console.error(`[Orchestrator:${component}] ${message}`, data ?? '');
+    } else {
+      // VS Code mode: use appropriate console method
+      const consoleFn = level === 'error' ? console.error :
+                        level === 'warn' ? console.warn :
+                        level === 'debug' ? console.debug :
+                        console.log;
+      consoleFn(`[Orchestrator:${component}] ${message}`, data ?? '');
+    }
   }
 
   /**

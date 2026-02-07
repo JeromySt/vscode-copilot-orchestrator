@@ -13,10 +13,11 @@ import {
   PlanInstance,
   PlanNode,
   JobNode,
-  SubPlanNode,
   NodeExecutionState,
   WorkSummary,
   WorkSpec,
+  GroupInstance,
+  GroupExecutionState,
 } from './types';
 import { Logger } from '../core/logger';
 
@@ -33,6 +34,9 @@ interface SerializedPlan {
   roots: string[];
   leaves: string[];
   nodeStates: Record<string, NodeExecutionState>;
+  groups?: Record<string, GroupInstance>;
+  groupStates?: Record<string, GroupExecutionState>;
+  groupPathToId?: Record<string, string>;
   parentPlanId?: string;
   parentNodeId?: string;
   repoPath: string;
@@ -42,6 +46,7 @@ interface SerializedPlan {
   createdAt: number;
   startedAt?: number;
   endedAt?: number;
+  stateVersion?: number;
   cleanUpSuccessfulWork: boolean;
   maxParallel: number;
   workSummary?: WorkSummary;
@@ -51,7 +56,7 @@ interface SerializedNode {
   id: string;
   producerId: string;
   name: string;
-  type: 'job' | 'subPlan';
+  type: 'job';
   dependencies: string[];
   dependents: string[];
   // Job-specific
@@ -61,10 +66,9 @@ interface SerializedNode {
   postchecks?: WorkSpec;
   instructions?: string;
   baseBranch?: string;
-  // subPlan-specific
-  childSpec?: any;
-  maxParallel?: number;
-  childPlanId?: string;
+  expectsNoChanges?: boolean;
+  group?: string;
+  groupId?: string;
 }
 
 /**
@@ -258,11 +262,9 @@ export class PlanPersistence {
         serializedNode.postchecks = jobNode.postchecks;
         serializedNode.instructions = jobNode.instructions;
         serializedNode.baseBranch = jobNode.baseBranch;
-      } else if (node.type === 'subPlan') {
-        const subPlanNode = node as SubPlanNode;
-        serializedNode.childSpec = subPlanNode.childSpec;
-        serializedNode.maxParallel = subPlanNode.maxParallel;
-        serializedNode.childPlanId = subPlanNode.childPlanId;
+        serializedNode.expectsNoChanges = jobNode.expectsNoChanges;
+        serializedNode.group = jobNode.group;
+        serializedNode.groupId = jobNode.groupId;
       }
       
       nodes.push(serializedNode);
@@ -280,6 +282,24 @@ export class PlanPersistence {
       producerIdToNodeId[producerId] = nodeId;
     }
     
+    // Convert groups Map to object
+    const groups: Record<string, GroupInstance> = {};
+    for (const [groupId, group] of plan.groups) {
+      groups[groupId] = group;
+    }
+    
+    // Convert groupStates Map to object
+    const groupStates: Record<string, GroupExecutionState> = {};
+    for (const [groupId, state] of plan.groupStates) {
+      groupStates[groupId] = state;
+    }
+    
+    // Convert groupPathToId Map to object
+    const groupPathToId: Record<string, string> = {};
+    for (const [path, groupId] of plan.groupPathToId) {
+      groupPathToId[path] = groupId;
+    }
+    
     return {
       id: plan.id,
       spec: plan.spec,
@@ -288,6 +308,9 @@ export class PlanPersistence {
       roots: plan.roots,
       leaves: plan.leaves,
       nodeStates,
+      groups,
+      groupStates,
+      groupPathToId,
       parentPlanId: plan.parentPlanId,
       parentNodeId: plan.parentNodeId,
       repoPath: plan.repoPath,
@@ -297,6 +320,7 @@ export class PlanPersistence {
       createdAt: plan.createdAt,
       startedAt: plan.startedAt,
       endedAt: plan.endedAt,
+      stateVersion: plan.stateVersion,
       cleanUpSuccessfulWork: plan.cleanUpSuccessfulWork,
       maxParallel: plan.maxParallel,
       workSummary: plan.workSummary,
@@ -323,19 +347,9 @@ export class PlanPersistence {
           postchecks: serializedNode.postchecks,
           instructions: serializedNode.instructions,
           baseBranch: serializedNode.baseBranch,
-          dependencies: serializedNode.dependencies,
-          dependents: serializedNode.dependents,
-        };
-        nodes.set(node.id, node);
-      } else if (serializedNode.type === 'subPlan') {
-        const node: SubPlanNode = {
-          id: serializedNode.id,
-          producerId: serializedNode.producerId,
-          name: serializedNode.name,
-          type: 'subPlan',
-          childSpec: serializedNode.childSpec,
-          maxParallel: serializedNode.maxParallel,
-          childPlanId: serializedNode.childPlanId,
+          expectsNoChanges: serializedNode.expectsNoChanges,
+          group: serializedNode.group,
+          groupId: serializedNode.groupId,
           dependencies: serializedNode.dependencies,
           dependents: serializedNode.dependents,
         };
@@ -355,6 +369,30 @@ export class PlanPersistence {
       producerIdToNodeId.set(producerId, nodeId);
     }
     
+    // Rebuild groups Map
+    const groups = new Map<string, GroupInstance>();
+    if (data.groups) {
+      for (const [groupId, group] of Object.entries(data.groups)) {
+        groups.set(groupId, group as GroupInstance);
+      }
+    }
+    
+    // Rebuild groupStates Map
+    const groupStates = new Map<string, GroupExecutionState>();
+    if (data.groupStates) {
+      for (const [groupId, state] of Object.entries(data.groupStates)) {
+        groupStates.set(groupId, state as GroupExecutionState);
+      }
+    }
+    
+    // Rebuild groupPathToId Map
+    const groupPathToId = new Map<string, string>();
+    if (data.groupPathToId) {
+      for (const [path, groupId] of Object.entries(data.groupPathToId)) {
+        groupPathToId.set(path, groupId);
+      }
+    }
+    
     return {
       id: data.id,
       spec: data.spec,
@@ -363,6 +401,9 @@ export class PlanPersistence {
       roots: data.roots,
       leaves: data.leaves,
       nodeStates,
+      groups,
+      groupStates,
+      groupPathToId,
       parentPlanId: data.parentPlanId,
       parentNodeId: data.parentNodeId,
       repoPath: data.repoPath,
@@ -372,6 +413,7 @@ export class PlanPersistence {
       createdAt: data.createdAt,
       startedAt: data.startedAt,
       endedAt: data.endedAt,
+      stateVersion: data.stateVersion || 0,
       cleanUpSuccessfulWork: data.cleanUpSuccessfulWork,
       maxParallel: data.maxParallel,
       workSummary: data.workSummary,

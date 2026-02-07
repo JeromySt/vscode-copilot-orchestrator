@@ -63,7 +63,7 @@ function makePlan(overrides: Partial<PlanInstance> = {}): PlanInstance {
   producerIdToNodeId.set(producerId, nodeId);
 
   const nodeStates = new Map<string, NodeExecutionState>();
-  nodeStates.set(nodeId, { status: 'pending', attempts: 0 });
+  nodeStates.set(nodeId, { status: 'pending', version: 0, attempts: 0 });
 
   return {
     id: 'plan-001',
@@ -73,10 +73,14 @@ function makePlan(overrides: Partial<PlanInstance> = {}): PlanInstance {
     roots: [nodeId],
     leaves: [nodeId],
     nodeStates,
+    groups: new Map(),
+    groupStates: new Map(),
+    groupPathToId: new Map(),
     repoPath: '/repo',
     baseBranch: 'main',
     worktreeRoot: '/worktrees',
     createdAt: Date.now(),
+    stateVersion: 0,
     cleanUpSuccessfulWork: true,
     maxParallel: 4,
     ...overrides,
@@ -141,6 +145,7 @@ suite('PlanPersistence', () => {
       const plan = makePlan();
       plan.nodeStates.set('node-1', {
         status: 'succeeded',
+        version: 0,
         attempts: 2,
         startedAt: 1000,
         endedAt: 2000,
@@ -382,7 +387,7 @@ suite('PlanPersistence', () => {
         };
         plan.nodes.set(nodeId, node);
         plan.producerIdToNodeId.set(`task-${i}`, nodeId);
-        plan.nodeStates.set(nodeId, { status: 'pending', attempts: 0 });
+        plan.nodeStates.set(nodeId, { status: 'pending', version: 0, attempts: 0 });
       }
 
       persistence.save(plan);

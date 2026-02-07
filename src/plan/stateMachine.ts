@@ -24,6 +24,7 @@ import {
   isValidTransition,
   isTerminal,
   TERMINAL_STATES,
+  GroupExecutionState,
 } from './types';
 import { Logger } from '../core/logger';
 import {
@@ -118,6 +119,10 @@ export class PlanStateMachine extends EventEmitter {
     // Apply the transition
     const oldState = { ...state };
     state.status = newStatus;
+    state.version = (state.version || 0) + 1;
+    
+    // Increment global plan state version
+    this.plan.stateVersion = (this.plan.stateVersion || 0) + 1;
     
     // Apply additional updates
     if (updates) {
@@ -165,6 +170,9 @@ export class PlanStateMachine extends EventEmitter {
     from: NodeStatus,
     to: NodeStatus
   ): void {
+    // Update parent group state when a job transitions
+    this.updateGroupState(nodeId, from, to);
+    
     // When a node succeeds, check if dependents are now ready
     if (to === 'succeeded') {
       this.checkDependentsReady(nodeId);
@@ -178,6 +186,150 @@ export class PlanStateMachine extends EventEmitter {
     // Check if Plan is complete after any terminal transition
     if (isTerminal(to)) {
       this.checkPlanCompletion();
+    }
+  }
+  
+  /**
+   * Update group state when a job transitions.
+   * Jobs push their state changes to their parent group.
+   */
+  private updateGroupState(nodeId: string, _from: NodeStatus, _to: NodeStatus): void {
+    const node = this.plan.nodes.get(nodeId);
+    if (!node || !node.groupId) return;
+    
+    // Recompute the group state from its direct children and propagate up
+    this.recomputeGroupState(node.groupId);
+  }
+  
+  /**
+   * Recompute group state from direct children (nodes + child groups).
+   * Propagates up the chain if status changes.
+   * 
+   * Groups aggregate status from:
+   * - Direct nodes (nodeIds) 
+   * - Child groups (childGroupIds) - treated as single entities
+   * 
+   * Status rules (priority order):
+   * - Any running → running
+   * - Any failed/blocked → failed  
+   * - All succeeded → succeeded
+   * - All canceled → canceled
+   * - Otherwise → pending
+   */
+  private recomputeGroupState(groupId: string): void {
+    const group = this.plan.groups.get(groupId);
+    const groupState = this.plan.groupStates.get(groupId);
+    if (!group || !groupState) return;
+    
+    const oldStatus = groupState.status;
+    const now = Date.now();
+    
+    // Count states from direct nodes
+    let running = 0, succeeded = 0, failed = 0, blocked = 0, canceled = 0, pending = 0;
+    let minStartedAt: number | undefined;
+    let maxEndedAt: number | undefined;
+    
+    for (const nodeId of group.nodeIds) {
+      const nodeState = this.plan.nodeStates.get(nodeId);
+      if (!nodeState) continue;
+      
+      if (nodeState.startedAt && (!minStartedAt || nodeState.startedAt < minStartedAt)) {
+        minStartedAt = nodeState.startedAt;
+      }
+      if (nodeState.endedAt && (!maxEndedAt || nodeState.endedAt > maxEndedAt)) {
+        maxEndedAt = nodeState.endedAt;
+      }
+      
+      switch (nodeState.status) {
+        case 'running': case 'scheduled': running++; break;
+        case 'succeeded': succeeded++; break;
+        case 'failed': failed++; break;
+        case 'blocked': blocked++; break;
+        case 'canceled': canceled++; break;
+        default: pending++; break;
+      }
+    }
+    
+    // Also count from child groups (each child group counts as one entity)
+    for (const childGroupId of group.childGroupIds) {
+      const childState = this.plan.groupStates.get(childGroupId);
+      if (!childState) continue;
+      
+      if (childState.startedAt && (!minStartedAt || childState.startedAt < minStartedAt)) {
+        minStartedAt = childState.startedAt;
+      }
+      if (childState.endedAt && (!maxEndedAt || childState.endedAt > maxEndedAt)) {
+        maxEndedAt = childState.endedAt;
+      }
+      
+      switch (childState.status) {
+        case 'running': case 'scheduled': running++; break;
+        case 'succeeded': succeeded++; break;
+        case 'failed': failed++; break;
+        case 'blocked': blocked++; break;
+        case 'canceled': canceled++; break;
+        default: pending++; break;
+      }
+    }
+    
+    // Update counts
+    groupState.runningCount = running;
+    groupState.succeededCount = succeeded;
+    groupState.failedCount = failed;
+    groupState.blockedCount = blocked;
+    groupState.canceledCount = canceled;
+    
+    // Update timestamps
+    if (minStartedAt && !groupState.startedAt) {
+      groupState.startedAt = minStartedAt;
+    }
+    
+    // Determine group status from direct children count
+    const totalChildren = group.nodeIds.length + group.childGroupIds.length;
+    const completed = succeeded + failed + blocked + canceled;
+    
+    let newStatus: NodeStatus;
+    if (running > 0) {
+      // Any child running → group is running
+      newStatus = 'running';
+    } else if (failed > 0 || blocked > 0) {
+      // Any child failed/blocked → group is failed
+      newStatus = 'failed';
+      if (!groupState.endedAt && completed === totalChildren) {
+        groupState.endedAt = maxEndedAt || now;
+      }
+    } else if (completed === totalChildren && totalChildren > 0) {
+      // All children completed
+      if (succeeded === totalChildren) {
+        newStatus = 'succeeded';
+      } else if (canceled === totalChildren) {
+        newStatus = 'canceled';
+      } else {
+        newStatus = 'failed'; // Mixed terminal states
+      }
+      if (!groupState.endedAt) {
+        groupState.endedAt = maxEndedAt || now;
+      }
+    } else if (minStartedAt) {
+      // Some started but not running (waiting between jobs)
+      newStatus = 'running';
+    } else {
+      newStatus = 'pending';
+    }
+    
+    // Only update and propagate if status changed
+    if (oldStatus !== newStatus) {
+      groupState.status = newStatus;
+      groupState.version = (groupState.version || 0) + 1;
+      this.plan.stateVersion = (this.plan.stateVersion || 0) + 1;
+      
+      // Propagate up to parent group
+      if (group.parentGroupId) {
+        this.recomputeGroupState(group.parentGroupId);
+      }
+    } else if (groupState.startedAt !== minStartedAt || groupState.endedAt !== maxEndedAt) {
+      // Timestamps changed but status didn't - still increment version
+      groupState.version = (groupState.version || 0) + 1;
     }
   }
   

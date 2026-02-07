@@ -13,7 +13,7 @@
  */
 
 import * as vscode from 'vscode';
-import { PlanRunner, PlanInstance, JobNode, SubPlanNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord } from '../../plan';
+import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord } from '../../plan';
 import { escapeHtml, formatDuration, errorPageHtml, loadingPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 
 /**
@@ -517,18 +517,15 @@ export class NodeDetailPanel {
    * child Plan summary (for sub-plan nodes), and attempt history.
    *
    * @param plan - The parent Plan instance.
-   * @param node - The node definition (job or sub-plan).
+   * @param node - The node definition (job).
    * @param state - The node's current execution state.
    * @returns Full HTML document string.
    */
   private _getHtml(
     plan: PlanInstance,
-    node: JobNode | SubPlanNode,
+    node: JobNode,
     state: NodeExecutionState
   ): string {
-    const isJob = node.type === 'job';
-    const jobNode = isJob ? node as JobNode : null;
-    const subPlanNode = !isJob ? node as SubPlanNode : null;
     
     const duration = state.startedAt 
       ? formatDuration(Math.round(((state.endedAt || Date.now()) - state.startedAt) / 1000))
@@ -543,11 +540,6 @@ export class NodeDetailPanel {
     // Build work summary HTML
     const workSummaryHtml = state.workSummary 
       ? this._buildWorkSummaryHtml(state.workSummary)
-      : '';
-    
-    // Build child Plan summary HTML if this is a subPlan node
-    const childPlanSummaryHtml = subPlanNode?.childPlanId
-      ? this._buildchildPlanSummaryHtml(subPlanNode.childPlanId)
       : '';
     
     // Build attempt history HTML (only if multiple attempts)
@@ -626,7 +618,7 @@ export class NodeDetailPanel {
     ` : ''}
   </div>
   
-  ${(state.status === 'running' || state.status === 'scheduled') && isJob ? `
+  ${(state.status === 'running' || state.status === 'scheduled') ? `
   <!-- Process Tree (only for running jobs) -->
   <div class="section process-tree-section" id="processTreeSection">
     <div class="process-tree-header" data-expanded="true">
@@ -640,24 +632,23 @@ export class NodeDetailPanel {
   </div>
   ` : ''}
   
-  ${isJob && jobNode ? `
   <!-- Job Configuration -->
   <div class="section">
     <h3>Job Configuration</h3>
     <div class="config-item">
       <div class="config-label">Task</div>
-      <div class="config-value">${escapeHtml(jobNode.task)}</div>
+      <div class="config-value">${escapeHtml(node.task)}</div>
     </div>
-    ${jobNode.work ? `
+    ${node.work ? `
     <div class="config-item work-item">
       <div class="config-label">Work</div>
-      <div class="config-value work-content">${formatWorkSpecHtml(jobNode.work, escapeHtml)}</div>
+      <div class="config-value work-content">${formatWorkSpecHtml(node.work, escapeHtml)}</div>
     </div>
     ` : ''}
-    ${jobNode.instructions ? `
+    ${node.instructions ? `
     <div class="config-item">
       <div class="config-label">Instructions</div>
-      <div class="config-value">${escapeHtml(jobNode.instructions)}</div>
+      <div class="config-value">${escapeHtml(node.instructions)}</div>
     </div>
     ` : ''}
   </div>
@@ -674,28 +665,8 @@ export class NodeDetailPanel {
   </div>
   
   ${workSummaryHtml}
-  ` : ''}
   
-  ${subPlanNode ? `
-  <!-- sub-plan Info -->
-  <div class="section">
-    <h3>sub-plan Configuration</h3>
-    <div class="config-item">
-      <div class="config-label">Jobs</div>
-      <div class="config-value">${subPlanNode.childSpec.jobs.length} jobs defined</div>
-    </div>
-    ${subPlanNode.childPlanId ? `
-    <div class="config-item">
-      <div class="config-label">child Plan</div>
-      <div class="config-value">
-        <a onclick="openPlan('${subPlanNode.childPlanId}')" class="link">${subPlanNode.childPlanId.slice(0, 8)}...</a>
-        <button class="action-btn secondary" style="margin-left: 8px; padding: 2px 8px; font-size: 11px;" onclick="openPlan('${subPlanNode.childPlanId}')">Open Plan</button>
-      </div>
-    </div>
-    ` : ''}
-  </div>
-  ${childPlanSummaryHtml}
-  ` : ''}
+
   
   <!-- Dependencies -->
   <div class="section">
@@ -1234,93 +1205,6 @@ export class NodeDetailPanel {
   }
   
   /**
-   * Build an HTML summary of a child Plan's execution results.
-   *
-   * Renders a card showing per-node status (succeeded/failed/blocked/running/pending)
-   * with a link to open the child Plan's detail view.
-   *
-   * @param childPlanId - The ID of the child Plan to summarize.
-   * @returns HTML fragment string, or empty string if the child Plan is not found.
-   */
-  private _buildchildPlanSummaryHtml(childPlanId: string): string {
-    const childPlan = this._planRunner.get(childPlanId);
-    if (!childPlan) {
-      return '';
-    }
-    
-    // Count job statuses
-    let succeeded = 0, failed = 0, blocked = 0, running = 0, pending = 0;
-    const jobResults: Array<{name: string; status: string; error?: string; commit?: string}> = [];
-    
-    for (const [nodeId, state] of childPlan.nodeStates) {
-      const node = childPlan.nodes.get(nodeId);
-      if (state.status === 'succeeded') succeeded++;
-      else if (state.status === 'failed') failed++;
-      else if (state.status === 'blocked') blocked++;
-      else if (state.status === 'running') running++;
-      else pending++;
-      
-      jobResults.push({
-        name: node?.name || nodeId.slice(0, 8),
-        status: state.status,
-        error: state.error,
-        commit: state.completedCommit?.slice(0, 8),
-      });
-    }
-    
-    const total = childPlan.nodes.size;
-    const ws = childPlan.workSummary;
-    
-    return `
-    <div class="section">
-      <h3>Child Plan Results</h3>
-      <div class="work-summary-stats">
-        <div class="work-stat">
-          <div class="work-stat-value">${total}</div>
-          <div class="work-stat-label">Jobs</div>
-        </div>
-        <div class="work-stat added">
-          <div class="work-stat-value">${succeeded}</div>
-          <div class="work-stat-label">Succeeded</div>
-        </div>
-        <div class="work-stat deleted">
-          <div class="work-stat-value">${failed}</div>
-          <div class="work-stat-label">Failed</div>
-        </div>
-        <div class="work-stat">
-          <div class="work-stat-value">${blocked}</div>
-          <div class="work-stat-label">Blocked</div>
-        </div>
-      </div>
-      ${ws ? `
-      <div class="child-plan-work" style="margin-top: 12px; padding: 8px; background: var(--vscode-sideBar-background); border-radius: 4px;">
-        <span style="color: var(--vscode-descriptionForeground);">Work:</span>
-        <span>${ws.totalCommits} commits</span>
-        <span style="color: #4ec9b0;">+${ws.totalFilesAdded}</span>
-        <span style="color: #dcdcaa;">~${ws.totalFilesModified}</span>
-        <span style="color: #f48771;">-${ws.totalFilesDeleted}</span>
-      </div>
-      ` : ''}
-      <div class="child-plan-jobs" style="margin-top: 12px;">
-        ${jobResults.map(j => `
-          <div class="child-job-row" style="display: flex; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--vscode-widget-border);">
-            <span class="status-icon" style="margin-right: 8px;">${
-              j.status === 'succeeded' ? '✓' : 
-              j.status === 'failed' ? '✗' : 
-              j.status === 'blocked' ? '⊘' :
-              j.status === 'running' ? '◐' : '○'
-            }</span>
-            <span style="flex: 1; ${j.status === 'failed' ? 'color: #f48771;' : ''}">${escapeHtml(j.name)}</span>
-            ${j.commit ? `<span class="mono" style="font-size: 11px; color: var(--vscode-descriptionForeground);">${j.commit}</span>` : ''}
-          </div>
-          ${j.error ? `<div style="font-size: 11px; color: #f48771; padding-left: 24px; margin-bottom: 4px;">${escapeHtml(j.error.slice(0, 100))}${j.error.length > 100 ? '...' : ''}</div>` : ''}
-        `).join('')}
-      </div>
-    </div>
-    `;
-  }
-  
-  /**
    * Build attempt history HTML with collapsible cards.
    *
    * Renders a reverse-chronological list of past execution attempts,
@@ -1336,27 +1220,26 @@ export class NodeDetailPanel {
     }
     
     // Build cards in reverse order (latest first)
-    const cards = attempts.slice().reverse().map((attempt, reverseIdx) => {
-      const isLatest = reverseIdx === 0;
+    const cards = attempts.slice().reverse().map((attempt, _reverseIdx) => {
+      // All attempt cards start collapsed
       const duration = formatDuration(Math.round((attempt.endedAt - attempt.startedAt) / 1000));
       const timestamp = new Date(attempt.startedAt).toLocaleString();
       
-      // Step indicators
-      const stepDot = (status?: string): string => {
-        const map: Record<string, string> = {
-          'success': '<span class="step-dot success">●</span>',
-          'failed': '<span class="step-dot failed">●</span>',
-          'running': '<span class="step-dot running">●</span>',
-          'skipped': '<span class="step-dot skipped">○</span>',
-        };
-        return map[status || ''] || '<span class="step-dot pending">○</span>';
+      // Step indicators - use same icons as main execution section
+      const stepIcon = (status?: string): string => {
+        const icon = status === 'success' ? '✓' 
+          : status === 'failed' ? '✗'
+          : status === 'running' ? '⟳'
+          : status === 'skipped' ? '⊘'
+          : '○';
+        return `<span class="step-icon ${status || 'pending'}">${icon}</span>`;
       };
       
       const stepIndicators = `
-        ${stepDot(attempt.stepStatuses?.prechecks)}
-        ${stepDot(attempt.stepStatuses?.work)}
-        ${stepDot(attempt.stepStatuses?.commit)}
-        ${stepDot(attempt.stepStatuses?.postchecks)}
+        ${stepIcon(attempt.stepStatuses?.prechecks)}
+        ${stepIcon(attempt.stepStatuses?.work)}
+        ${stepIcon(attempt.stepStatuses?.commit)}
+        ${stepIcon(attempt.stepStatuses?.postchecks)}
       `;
       
       const sessionHtml = attempt.copilotSessionId
@@ -1384,17 +1267,17 @@ export class NodeDetailPanel {
       const phaseTabsHtml = attempt.logs ? this._buildAttemptPhaseTabs(attempt) : '';
       
       return `
-        <div class="attempt-card ${isLatest ? 'active' : ''}" data-attempt="${attempt.attemptNumber}">
-          <div class="attempt-header" data-expanded="${isLatest}">
+        <div class="attempt-card" data-attempt="${attempt.attemptNumber}">
+          <div class="attempt-header" data-expanded="false">
             <div class="attempt-header-left">
               <span class="attempt-badge">#${attempt.attemptNumber}</span>
               <span class="step-indicators">${stepIndicators}</span>
               <span class="attempt-time">${timestamp}</span>
               <span class="attempt-duration">(${duration})</span>
             </div>
-            <span class="chevron ${isLatest ? 'expanded' : ''}">${isLatest ? '▼' : '▶'}</span>
+            <span class="chevron">▶</span>
           </div>
-          <div class="attempt-body" style="display: ${isLatest ? 'block' : 'none'};">
+          <div class="attempt-body" style="display: none;">
             <div class="attempt-meta">
               <div class="attempt-meta-row"><strong>Status:</strong> <span class="status-${attempt.status}">${attempt.status}</span></div>
               ${sessionHtml}
@@ -2097,12 +1980,12 @@ export class NodeDetailPanel {
       display: flex;
       gap: 4px;
     }
-    .step-dot { font-size: 14px; }
-    .step-dot.success { color: var(--vscode-testing-iconPassed); }
-    .step-dot.failed { color: var(--vscode-errorForeground); }
-    .step-dot.skipped { color: #808080; }
-    .step-dot.pending { color: var(--vscode-descriptionForeground); opacity: 0.5; }
-    .step-dot.running { color: #7DD3FC; animation: pulse-dot 1.5s ease-in-out infinite; }
+    .step-dot, .step-icon { font-size: 14px; }
+    .step-dot.success, .step-icon.success { color: var(--vscode-testing-iconPassed); }
+    .step-dot.failed, .step-icon.failed { color: var(--vscode-errorForeground); }
+    .step-dot.skipped, .step-icon.skipped { color: #808080; }
+    .step-dot.pending, .step-icon.pending { color: var(--vscode-descriptionForeground); opacity: 0.5; }
+    .step-dot.running, .step-icon.running { color: #7DD3FC; animation: pulse-dot 1.5s ease-in-out infinite; }
     @keyframes pulse-dot {
       0%, 100% { opacity: 0.4; transform: scale(1); }
       50% { opacity: 1; transform: scale(1.2); }

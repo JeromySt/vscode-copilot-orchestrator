@@ -8,7 +8,7 @@
  */
 
 import type { WorkSpec } from './specs';
-import type { PlanSpec } from './plan';
+import type { PlanSpec, PhaseStatus, JobWorkSummary, AttemptRecord, GroupInfo } from './plan';
 
 // ============================================================================
 // NODE STATUS
@@ -123,30 +123,38 @@ export interface JobNodeSpec {
   
   /** Override base branch (only for root nodes) */
   baseBranch?: string;
+
+  /**
+   * When true, this node is expected to produce no file changes.
+   * The commit phase will succeed without a commit instead of failing.
+   * Use for validation-only nodes, external-system updates, or analysis tasks.
+   */
+  expectsNoChanges?: boolean;
+
+  /**
+   * Visual grouping tag. Nodes with the same group tag are
+   * rendered together in a Mermaid subgraph. Optional.
+   */
+  group?: string;
 }
 
 /**
- * Specification for a sub-plan node (user input).
- * sub-plans are nested Plans that run as a unit.
+ * Specification for a group (user input).
+ * Groups provide namespace isolation for producer_ids and visual hierarchy.
+ * Jobs within a group can reference each other by local producer_id.
+ * Cross-group references use qualified paths: "group/producer_id".
+ * 
+ * Groups do NOT have dependencies - jobs describe the full dependency graph.
  */
-export interface SubPlanNodeSpec {
-  /** User-controlled identifier for Plan references */
-  producerId: string;
+export interface GroupSpec {
+  /** Group name (forms part of qualified path) */
+  name: string;
   
-  /** Human-friendly display name */
-  name?: string;
+  /** Jobs within this group */
+  jobs?: JobNodeSpec[];
   
-  /** Jobs within this sub-plan */
-  jobs: JobNodeSpec[];
-  
-  /** Nested sub-plans (recursive) */
-  subPlans?: SubPlanNodeSpec[];
-  
-  /** IDs of nodes this sub-plan depends on */
-  dependencies: string[];
-  
-  /** Max parallel jobs in this sub-plan */
-  maxParallel?: number;
+  /** Nested groups (recursive - forms path like "parent/child") */
+  groups?: GroupSpec[];
 }
 
 // ============================================================================
@@ -154,9 +162,10 @@ export interface SubPlanNodeSpec {
 // ============================================================================
 
 /**
- * Type discriminator for nodes
+ * Type discriminator for nodes.
+ * All nodes are jobs - groups are visual hierarchy only.
  */
-export type NodeType = 'job' | 'subPlan';
+export type NodeType = 'job';
 
 /**
  * Base node properties (shared by all node types)
@@ -207,38 +216,191 @@ export interface JobNode extends BaseNode {
   
   /** Override base branch */
   baseBranch?: string;
+
+  /**
+   * When true, this node is expected to produce no file changes.
+   * The commit phase will succeed without a commit instead of failing.
+   */
+  expectsNoChanges?: boolean;
+
+  /**
+ * Visual group path. Nodes with the same group path are
+ * rendered together in a Mermaid subgraph.
+ * Nested groups use "/" separator: "backend/api/auth"
+ */
+ group?: string;
+ 
+ /** 
+  * Resolved group ID (UUID). Set by the builder when creating the Plan.
+  * Used to push state updates from jobs to their parent group.
+  */
+ groupId?: string;
 }
 
 /**
- * sub-plan node (internal representation)
+ * All nodes are jobs - PlanNode is an alias.
+ * Groups are visual hierarchy only, not a separate node type.
  */
-export interface SubPlanNode extends BaseNode {
-  type: 'subPlan';
-  
-  /** The nested Plan specification */
-  childSpec: PlanSpec;
-  
-  /** Max parallel for the sub-plan */
-  maxParallel?: number;
-  
-  /** Child Plan ID when instantiated (set when node starts running) */
-  childPlanId?: string;
-}
-
-/**
- * Union type for all node types
- */
-export type PlanNode = JobNode | SubPlanNode;
-
+export type PlanNode = JobNode;
 /**
  * Check if a node performs work (has a work specification).
  *
  * Nodes with work consume execution resources and count against parallelism limits.
- * Sub-plan nodes are coordination nodes that don't perform work directly.
  *
  * @param node - The plan node to check.
  * @returns `true` if the node has a `work` property defined.
  */
 export function nodePerformsWork(node: PlanNode): boolean {
-  return 'work' in node && node.work !== undefined;
+  return node.work !== undefined;
+}
+
+// ============================================================================
+// SIMPLIFIED NODE TYPES (Node-Centric Model)
+// ============================================================================
+
+/**
+ * Specification for creating a node (user input).
+ * Replaces both JobNodeSpec (for individual nodes) and
+ * PlanSpec (when used with group).
+ */
+export interface NodeSpec {
+  /** User-controlled identifier for dependency references */
+  producerId: string;
+
+  /** Human-friendly display name (defaults to producerId) */
+  name?: string;
+
+  /** Task description (what this node does) */
+  task: string;
+
+  /** Work to perform (shell command, process, or agent) */
+  work?: WorkSpec;
+
+  /** Validation before work */
+  prechecks?: WorkSpec;
+
+  /** Validation after work */
+  postchecks?: WorkSpec;
+
+  /** Additional agent instructions (Markdown) */
+  instructions?: string;
+
+  /** Producer IDs this node depends on */
+  dependencies: string[];
+
+  /** Override base branch (root nodes only) */
+  baseBranch?: string;
+
+  /**
+   * When true, this node is expected to produce no file changes.
+   * The commit phase will succeed without a commit instead of failing.
+   * Use for validation-only nodes, external-system updates, or analysis tasks.
+   */
+  expectsNoChanges?: boolean;
+
+  /** Visual group tag for Mermaid rendering - nodes with same group render in a subgraph */
+  group?: string;
+}
+
+/**
+ * Attempt context from the last execution attempt.
+ */
+export interface AttemptContext {
+  /** Which phase failed or was running */
+  phase: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri';
+  /** When the attempt started */
+  startTime: number;
+  /** When the attempt ended */
+  endTime?: number;
+  /** Error message if failed */
+  error?: string;
+  /** Exit code from process (if applicable) */
+  exitCode?: number;
+}
+
+/**
+ * Runtime node instance.
+ * Combines what was previously split across PlanNode and NodeExecutionState.
+ */
+export interface NodeInstance {
+  /** UUID */
+  id: string;
+
+  /** User-controlled reference key */
+  producerId: string;
+
+  /** Display name */
+  name: string;
+
+  /** Task description */
+  task: string;
+
+  /** Work specification */
+  work?: WorkSpec;
+
+  /** Pre/post validation */
+  prechecks?: WorkSpec;
+  postchecks?: WorkSpec;
+
+  /** Agent instructions */
+  instructions?: string;
+
+  /** Resolved dependency node IDs */
+  dependencies: string[];
+
+  /** Computed reverse edges */
+  dependents: string[];
+
+  /** Override base branch */
+  baseBranch?: string;
+
+  /** Optional group membership */
+  group?: GroupInfo;
+
+  // --- Execution state ---
+
+  /** Current status */
+  status: NodeStatus;
+
+  /** Timestamps */
+  scheduledAt?: number;
+  startedAt?: number;
+  endedAt?: number;
+
+  /** Error message if failed */
+  error?: string;
+
+  /** Git context */
+  baseCommit?: string;
+  completedCommit?: string;
+  worktreePath?: string;
+
+  /** Repository path */
+  repoPath: string;
+
+  /** Retry tracking */
+  attempts: number;
+  attemptHistory?: AttemptRecord[];
+
+  /** Merge tracking */
+  mergedToTarget?: boolean;
+  consumedByDependents?: string[];
+  worktreeCleanedUp?: boolean;
+
+  /** Phase-level status */
+  stepStatuses?: {
+    prechecks?: PhaseStatus;
+    work?: PhaseStatus;
+    commit?: PhaseStatus;
+    postchecks?: PhaseStatus;
+  };
+
+  /** Session resumption */
+  copilotSessionId?: string;
+
+  /** Last attempt context */
+  lastAttempt?: AttemptContext;
+
+  /** Work summary on success */
+  workSummary?: JobWorkSummary;
 }

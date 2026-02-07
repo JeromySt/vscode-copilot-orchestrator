@@ -26,7 +26,7 @@ Copilot Orchestrator: Start Job
 
 - Jobs appear in the **Copilot: Jobs** panel
 - Monitor status: queued → running → succeeded/failed
-- Status bar shows: `Orchestrator: idle` or `MCP: running @ 127.0.0.1:39217`
+- Status bar shows job/plan count and active work
 
 ### 4. Open the Dashboard
 
@@ -46,22 +46,18 @@ Shows detailed job information with timestamps and logs.
    - Creates isolated git worktrees for each job
    - Handles auto-merging completed work
 
-2. **MCP Handler** (`src/mcp/mcpHandler.ts`)
-   - Model Context Protocol (HTTP transport)
-   - MCP endpoint at `/mcp`
-   - REST API for direct integration
+2. **MCP Server** (`src/mcp/`)
+   - Model Context Protocol (stdio transport)
+   - Auto-registers with VS Code's MCP system
+   - Tools accessible via Copilot Chat
 
-3. **HTTP Server** (`src/httpServer.ts`)
-   - Runs on localhost:39219 by default
-   - Serves both MCP and REST endpoints
-
-4. **Git Worktrees** (`src/git/core/worktrees.ts`)
+3. **Git Worktrees** (`src/git/core/worktrees.ts`)
    - Isolates each job in separate working directory
    - Prevents conflicts between parallel jobs
    - Uses symlinks for submodules (fast setup)
    - Auto-cleanup after merge
 
-5. **Views & UI**
+4. **Views & UI**
    - Activity Bar icon for quick access
    - WebView panel for job monitoring
    - Status bar integration
@@ -87,16 +83,14 @@ Each runs in parallel with isolated worktrees!
 
 ### Scenario 2: MCP Integration
 
-With MCP server running, external agents can:
+With MCP server running via "MCP: List Servers", use Copilot Chat:
 
-```bash
-# Delegate work via HTTP
-POST http://localhost:39217/jobs
-{
-  "task": "Refactor authentication module",
-  "baseBranch": "main",
-  "targetBranch": "refactor/auth"
-}
+```
+@workspace Create a plan called "Refactor Auth" with a job:
+- producer_id: "refactor"
+- task: "Refactor authentication module"
+- baseBranch: "main"
+- targetBranch: "refactor/auth"
 ```
 
 ### Scenario 3: Automated Workflows
@@ -123,12 +117,7 @@ Jobs follow configurable steps:
 ```json
 {
   "maxWorkers": 3,           // Parallel job limit
-  "worktreeRoot": ".worktrees",
-  "http": {
-    "enabled": true,
-    "host": "127.0.0.1",
-    "port": 39217
-  }
+  "worktreeRoot": ".worktrees"
 }
 ```
 
@@ -146,15 +135,15 @@ Jobs follow configurable steps:
 }
 ```
 
-## MCP Server API
+## MCP Tools
 
-When enabled, the MCP server exposes:
+The MCP server provides tools accessible via Copilot Chat:
 
-- `GET /status` - Server health check
-- `GET /jobs` - List all jobs
-- `POST /jobs` - Create new job
-- `GET /jobs/:id` - Get job details
-- `DELETE /jobs/:id` - Cancel job
+- `create_copilot_plan` - Create a multi-job plan
+- `get_copilot_plan_status` - Get plan status
+- `list_copilot_plans` - List all plans
+- `cancel_copilot_plan` - Cancel a running plan
+- `retry_copilot_plan` - Retry failed nodes
 
 ## Tips for Best Demo
 
@@ -162,7 +151,7 @@ When enabled, the MCP server exposes:
 2. **Monitor the panel**: Watch status changes in real-time
 3. **Demonstrate isolation**: Make conflicting changes in different jobs
 4. **Auto-merge**: Show successful merge-back workflow
-5. **MCP integration**: Use curl/Postman to hit the API
+5. **MCP integration**: Use Copilot Chat with MCP tools
 
 ## Publishing to Marketplace
 

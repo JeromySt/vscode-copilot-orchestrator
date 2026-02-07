@@ -1,158 +1,155 @@
 # GitHub Copilot Integration Guide
 
-## Using Copilot Chat to Create Jobs
+## Overview
 
-GitHub Copilot can create orchestrator jobs by making HTTP requests to the MCP server running at `http://localhost:39217`.
+The Copilot Orchestrator integrates with GitHub Copilot via the Model Context Protocol (MCP).
+The MCP server auto-registers with VS Code and provides tools that Copilot can use to create
+and manage parallel work plans.
 
-### API Endpoints
+## Getting Started
 
-#### Create a Job
-```http
-POST http://localhost:39217/job
-Content-Type: application/json
+### 1. Start the MCP Server
 
+The MCP server must be running for Copilot to use orchestrator tools:
+
+1. Open the Command Palette (`Ctrl+Shift+P`)
+2. Run **MCP: List Servers**
+3. Find "Copilot Orchestrator" and click **Start**
+
+Alternatively:
+- Run command **Copilot Orchestrator: MCP – How to Connect**
+- Select **Start Server**
+
+### 2. Verify Connection
+
+Once started, the orchestrator tools appear in Copilot Chat's tool selection.
+Ask Copilot to list plans to verify:
+
+```
+@workspace Use list_copilot_plans to show all plans
+```
+
+## Available MCP Tools
+
+### Plan Creation
+
+| Tool | Description |
+|------|-------------|
+| `create_copilot_plan` | Create a DAG of work nodes with dependencies |
+| `create_copilot_job` | Create a single job (convenience wrapper) |
+
+### Status & Queries
+
+| Tool | Description |
+|------|-------------|
+| `get_copilot_plan_status` | Get plan execution status and progress |
+| `list_copilot_plans` | List all plans with their status |
+| `get_copilot_node_details` | Get details about a specific node |
+| `get_copilot_node_logs` | Get execution logs for a node |
+| `get_copilot_node_attempts` | Get all retry attempts for a node |
+
+### Control
+
+| Tool | Description |
+|------|-------------|
+| `cancel_copilot_plan` | Cancel a running plan |
+| `delete_copilot_plan` | Delete a plan and its history |
+| `retry_copilot_plan` | Retry failed nodes in a plan |
+| `retry_copilot_plan_node` | Retry a specific node |
+| `get_copilot_plan_node_failure_context` | Get failure details for retry |
+
+## Example Usage
+
+### Creating a Simple Plan
+
+Ask Copilot to create a two-step build and test plan:
+
+```
+@workspace Create a plan called "Build & Test" with two jobs:
+1. "build" that runs "npm run build" with no dependencies
+2. "test" that runs "npm test" and depends on "build"
+```
+
+Copilot will call `create_copilot_plan` with:
+```json
 {
-  "id": "unique-job-id",
-  "task": "description of the task",
-  "inputs": {
-    "repoPath": "C:/src/repos/YourProject",
-    "baseBranch": "main",
-    "targetBranch": "feature/branch-name",
-    "worktreeRoot": ".worktrees",
-    "instructions": "Optional detailed instructions"
-  },
-  "policy": {
-    "useJust": true,
-    "steps": {
-      "prechecks": "npm run lint",
-      "work": "echo 'Do the work here' && npm run build",
-      "postchecks": "npm test"
-    }
-  }
+  "name": "Build & Test",
+  "jobs": [
+    { "producer_id": "build", "task": "Build", "work": "npm run build", "dependencies": [] },
+    { "producer_id": "test", "task": "Test", "work": "npm test", "dependencies": ["build"] }
+  ]
 }
 ```
 
-#### Get Job Status
-```http
-GET http://localhost:39217/job/{job-id}
+### Checking Plan Status
+
+```
+@workspace What's the status of the "Build & Test" plan?
 ```
 
-#### Cancel a Job
-```http
-POST http://localhost:39217/job/{job-id}/cancel
+Copilot will call `get_copilot_plan_status` to show progress.
+
+### Handling Failures
+
+When a job fails, ask Copilot to investigate:
+
+```
+@workspace The build job failed. Get the failure context and suggest a fix.
 ```
 
-#### List All Jobs (currently not implemented, would need to add)
-```http
-GET http://localhost:39217/jobs
+Copilot will:
+1. Call `get_copilot_plan_node_failure_context` to get logs
+2. Analyze the error
+3. Suggest a `retry_copilot_plan_node` call with corrected work
+
+## Using Agent Work
+
+Jobs can delegate complex work to Copilot CLI agents:
+
+```
+@workspace Create a job that uses an agent to implement error handling in auth.ts
 ```
 
-### Example: GitHub Copilot Creating a Job
-
-**User Prompt to Copilot:**
-```
-Create a job to add JSON serialization to TrustPlan classes. 
-Branch: feature/trustplan-json
-Base: main
-Repo: C:/src/repos/CoseSignTool3
-```
-
-**Copilot Should Execute (via tool/function calling):**
-```bash
-curl -X POST http://localhost:39217/job \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "trustplan-json-2026-01-24",
-    "task": "Add JSON serialization to TrustPlan",
-    "inputs": {
-      "repoPath": "C:/src/repos/CoseSignTool3",
-      "baseBranch": "main", 
-      "targetBranch": "feature/trustplan-json",
-      "worktreeRoot": ".worktrees"
-    },
-    "policy": {
-      "useJust": true,
-      "steps": {
-        "prechecks": "dotnet build",
-        "work": "echo Work would be done by Copilot CLI or agents",
-        "postchecks": "dotnet test"
-      }
-    }
-  }'
+Copilot creates a job with agent work:
+```json
+{
+  "name": "Add Error Handling",
+  "task": "Implement error handling in auth.ts",
+  "work": "@agent Implement comprehensive error handling in src/auth.ts"
+}
 ```
 
-### For GitHub Copilot to Use This:
+The agent runs in an isolated git worktree and commits its changes.
 
-1. **Copilot needs function/tool calling capability** to make HTTP requests
-2. **User must tell Copilot** about the MCP server: 
-   - "The Copilot Orchestrator MCP server is running on localhost:39217"
-   - "Use the HTTP API to create jobs"
-3. **Copilot must construct the JobSpec** from the user's natural language description
+## Configuration
 
-### MCP Tools Integration
+### Disable MCP Server
 
-GitHub Copilot supports MCP (Model Context Protocol). The extension exposes an HTTP-based MCP server:
-
-**Available Tools:**
-- `create_copilot_job` - Create a new job
-- `get_copilot_job_status` - Get job status
-- `get_copilot_job_details` - Get full job details
-- `list_copilot_jobs` - List all jobs
-- `cancel_copilot_job` - Cancel a running job
-- `create_copilot_plan` - Create a multi-job plan
-- `get_copilot_plan_status` - Get plan status
-- `cancel_copilot_plan` - Cancel a running plan
-
-### Setting Up MCP for Copilot
-
-Add to your VS Code settings (`settings.json`) or workspace `mcp.json`:
+If you don't want the MCP server to auto-register:
 
 ```json
 {
-  "mcpServers": {
-    "copilot-orchestrator": {
-      "type": "http",
-      "url": "http://localhost:39219/mcp"
-    }
-  }
+  "copilotOrchestrator.mcp.enabled": false
 }
 ```
 
-### Testing the MCP Endpoint
+## Troubleshooting
 
-```powershell
-# Test tools/list
-$body = '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-Invoke-RestMethod -Uri "http://localhost:39219/mcp" -Method POST -Body $body -ContentType "application/json"
-```
+### MCP Server Not Appearing
 
-### Testing the REST API
+1. Ensure VS Code 1.99+ is installed
+2. Check that GitHub Copilot extension is enabled
+3. Verify `copilotOrchestrator.mcp.enabled` is `true`
+4. Check the Output panel for errors (select "Copilot Orchestrator")
 
-```powershell
-# Create a test job via REST API
-Invoke-RestMethod -Uri "http://localhost:39219/copilot_job" `
-  -Method POST `
-  -ContentType "application/json" `
-  -Body (@{
-    id = "test-job-1"
-    name = "Test Job"
-    task = "Test task"
-    inputs = @{
-      repoPath = "C:/src/repos/YourProject"
-      baseBranch = "main"
-      targetBranch = "feature/test"
-      worktreeRoot = ".worktrees"
-    }
-    policy = @{
-      useJust = $false
-      steps = @{
-        prechecks = "echo precheck"
-        work = "@agent Implement the test task"
-        postchecks = "echo postcheck"
-      }
-    }
-  } | ConvertTo-Json -Depth 5)
+### Tools Not Available in Copilot
 
-# Check job status
-Invoke-RestMethod -Uri "http://localhost:39217/job/test-job-1"
-```
+1. Verify the MCP server is started (MCP: List Servers)
+2. Restart the MCP server from the list
+3. Check for errors in the Output panel
+
+### Server Start Fails
+
+1. Ensure a workspace folder is open
+2. Check that the folder is a git repository
+3. Look for error messages in the Output panel

@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees. Delegate complex tasks to AI while maintaining clean git history with automated pre-checks, work execution, post-checks, and merge workflows.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "JeromyStatia",
   "license": "MIT",
   "icon": "media/copilot-icon.png",
@@ -57,62 +57,6 @@
     },
     "commands": [
       {
-        "command": "orchestrator.createJob",
-        "title": "Copilot Orchestrator: Create Job"
-      },
-      {
-        "command": "orchestrator.cancelJob",
-        "title": "Copilot Orchestrator: Cancel Job",
-        "icon": "$(debug-stop)"
-      },
-      {
-        "command": "orchestrator.startJob",
-        "title": "Copilot Orchestrator: Start Job"
-      },
-      {
-        "command": "orchestrator.inspectStatus",
-        "title": "Copilot Orchestrator: Inspect Status"
-      },
-      {
-        "command": "orchestrator.showJobDetails",
-        "title": "Copilot Orchestrator: Show Job Details/Logs"
-      },
-      {
-        "command": "orchestrator.showJobSection",
-        "title": "Copilot Orchestrator: Show Job Section (Prechecks/Work/Postchecks)"
-      },
-      {
-        "command": "orchestrator.retryJob",
-        "title": "Retry Job",
-        "icon": "$(debug-restart)"
-      },
-      {
-        "command": "orchestrator.deleteJob",
-        "title": "Delete Job",
-        "icon": "$(trash)"
-      },
-      {
-        "command": "orchestrator.openJobWorktree",
-        "title": "Open Job Worktree",
-        "icon": "$(folder-opened)"
-      },
-      {
-        "command": "orchestrator.mergeCompletedJob",
-        "title": "Copilot Orchestrator: Merge Completed Job"
-      },
-      {
-        "command": "orchestrator.resolveConflicts",
-        "title": "Copilot Orchestrator: Resolve Merge Conflicts"
-      },
-      {
-        "command": "orchestrator.generateTests",
-        "title": "Copilot Orchestrator: Generate Test Suite"
-      },
-      {
-        "command": "orchestrator.produceDocs",
-        "title": "Copilot Orchestrator: Produce Documentation"
-      },
-      {
         "command": "orchestrator.mcp.howToConnect",
         "title": "Copilot Orchestrator: MCP – How to Connect"
       },
@@ -129,39 +73,12 @@
         "title": "Copilot Orchestrator: Show Plan Details"
       },
       {
-        "command": "orchestrator.cancelPlan",
-        "title": "Copilot Orchestrator: Cancel Plan",
-        "icon": "$(debug-stop)"
-      },
-      {
-        "command": "orchestrator.deletePlan",
-        "title": "Copilot Orchestrator: Delete Plan",
-        "icon": "$(trash)"
-      },
-      {
-        "command": "orchestrator.refreshPlans",
-        "title": "Copilot Orchestrator: Refresh Plans",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "orchestrator.showLogs",
-        "title": "Copilot Orchestrator: Show Logs"
-      },
-      {
-        "command": "orchestrator.cleanupOrphans",
-        "title": "Copilot Orchestrator: Clean Up Orphaned Worktrees & Branches"
-      },
-      {
-        "command": "orchestrator.showDagDetails",
-        "title": "Copilot Orchestrator: Show DAG Details"
-      },
-      {
         "command": "orchestrator.showNodeDetails",
         "title": "Copilot Orchestrator: Show Node Details"
       },
       {
-        "command": "orchestrator.cancelDag",
-        "title": "Copilot Orchestrator: Cancel DAG",
+        "command": "orchestrator.cancelPlan",
+        "title": "Copilot Orchestrator: Cancel Plan",
         "icon": "$(debug-stop)"
       },
       {
@@ -265,11 +182,6 @@
           "default": false,
           "description": "Enable debug logging for MCP protocol and server operations"
         },
-        "copilotOrchestrator.logging.debug.http": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable debug logging for HTTP server requests and responses"
-        },
         "copilotOrchestrator.logging.debug.jobs": {
           "type": "boolean",
           "default": false,
@@ -330,6 +242,7 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
+    "ajv": "^8.17.1",
     "micromatch": "^4.0.5",
     "uuid": "^9.0.0"
   }

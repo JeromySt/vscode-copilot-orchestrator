@@ -3,28 +3,13 @@
  * 
  * This module implements VS Code's McpServerDefinitionProvider interface
  * to automatically register the Copilot Orchestrator MCP server with
- * GitHub Copilot Chat. Users no longer need to manually configure
- * .vscode/mcp.json or copy configurations.
+ * GitHub Copilot Chat using stdio transport.
  * 
  * @module mcp/mcpDefinitionProvider
  */
 
 import * as vscode from 'vscode';
-
-/**
- * Configuration for the MCP Definition Provider.
- *
- * Mirrors the relevant subset of the extension's `copilotOrchestrator.mcp.*`
- * settings.
- */
-export interface McpDefinitionProviderConfig {
-  /** Hostname the HTTP/MCP server binds to (e.g. `"localhost"`). */
-  host: string;
-  /** TCP port the HTTP/MCP server listens on (default `39219`). */
-  port: number;
-  /** Absolute path to the workspace root, used for display purposes. */
-  workspacePath?: string;
-}
+import * as path from 'path';
 
 /**
  * Event emitter fired when the MCP server definition changes
@@ -35,8 +20,14 @@ export interface McpDefinitionProviderConfig {
  */
 const serverChangedEmitter = new vscode.EventEmitter<void>();
 
-/** Current provider configuration, updated on settings changes. */
-let currentConfig: McpDefinitionProviderConfig | undefined;
+/** Current workspace path. */
+let currentWorkspacePath: string | undefined;
+
+/** Current IPC server path (named pipe or Unix socket). */
+let currentIpcPath: string | undefined;
+
+/** Auth nonce for the IPC connection. */
+let currentAuthNonce: string | undefined;
 
 /** Whether the MCP server feature is enabled in user settings. */
 let isEnabled = true;
@@ -44,27 +35,25 @@ let isEnabled = true;
 /**
  * Create and register the MCP Server Definition Provider with VS Code.
  *
- * This enables VS Code (1.99+) to automatically discover the Copilot
- * Orchestrator's MCP server and make it available to GitHub Copilot Chat
- * without manual configuration in `.vscode/mcp.json`.
+ * Uses stdio transport where VS Code spawns a child process that
+ * communicates via stdin/stdout using the MCP protocol.
+ * The stdio server connects back to the extension via IPC.
  *
- * The provider uses the **HTTP transport** — the extension serves the MCP
- * endpoint directly at `http://<host>:<port>/mcp`.
- *
- * The registration also watches for `copilotOrchestrator.mcp.*` settings
- * changes and fires {@link serverChangedEmitter} to notify VS Code.
- *
- * @param context - VS Code extension context (for subscriptions & extension info).
- * @param config  - Initial MCP server configuration.
- * @returns A composite {@link vscode.Disposable} that unregisters the provider
- *          and stops watching settings.  Returns a no-op disposable if the
- *          VS Code API is not available.
+ * @param context - VS Code extension context.
+ * @param workspacePath - Absolute path to the workspace root.
+ * @param ipcPath - Path to the IPC server (named pipe or Unix socket).
+ * @param authNonce - Auth nonce for the IPC connection (passed via env, not command line).
+ * @returns A composite {@link vscode.Disposable}.
  */
 export function registerMcpDefinitionProvider(
   context: vscode.ExtensionContext,
-  config: McpDefinitionProviderConfig
+  workspacePath: string,
+  ipcPath: string,
+  authNonce: string
 ): vscode.Disposable {
-  currentConfig = config;
+  currentWorkspacePath = workspacePath;
+  currentIpcPath = ipcPath;
+  currentAuthNonce = authNonce;
   
   // Check if MCP is enabled
   const mcpConfig = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
@@ -76,48 +65,76 @@ export function registerMcpDefinitionProvider(
     return { dispose: () => {} };
   }
 
-  console.log('[MCP Provider] Registering MCP server definition provider...');
-  console.log(`[MCP Provider] HTTP endpoint: http://${config.host}:${config.port}/mcp`);
-  console.log(`[MCP Provider] Workspace: ${config.workspacePath}`);
-  
-  // Create the provider - use HTTP transport
-  const provider: vscode.McpServerDefinitionProvider<vscode.McpHttpServerDefinition> = {
+  // Check if stdio is available at runtime
+  const stdioAvailable = typeof (vscode as any).McpStdioServerDefinition === 'function';
+  if (!stdioAvailable) {
+    console.warn('[MCP Provider] McpStdioServerDefinition not available. Requires VS Code 1.99+.');
+    return { dispose: () => {} };
+  }
+
+  console.log('[MCP Provider] Registering MCP server definition provider (stdio)...');
+  console.log(`[MCP Provider] Workspace: ${workspacePath}`);
+
+  // Create the provider
+  const provider: vscode.McpServerDefinitionProvider<vscode.McpServerDefinition> = {
     onDidChangeMcpServerDefinitions: serverChangedEmitter.event,
     
     provideMcpServerDefinitions(
       _token: vscode.CancellationToken
-    ): vscode.ProviderResult<vscode.McpHttpServerDefinition[]> {
-      console.log(`[MCP Provider] provideMcpServerDefinitions called, enabled=${isEnabled}`);
+    ): vscode.ProviderResult<vscode.McpServerDefinition[]> {
+      console.log(`[MCP Provider] provideMcpServerDefinitions called, enabled=${isEnabled}, workspace=${currentWorkspacePath || '<none>'}`);
       
-      if (!isEnabled || !currentConfig) {
-        console.log('[MCP Provider] Returning empty list (disabled or no config)');
+      if (!isEnabled) {
+        console.log('[MCP Provider] Returning empty list (disabled)');
         return [];
       }
-      
-      // Use HTTP transport - extension serves the MCP endpoint directly
-      const mcpUrl = vscode.Uri.parse(`http://${currentConfig.host}:${currentConfig.port}/mcp`);
-      const server = new vscode.McpHttpServerDefinition(
-        'Copilot Orchestrator',                    // label
-        mcpUrl,                                     // url
-        context.extension.packageJSON.version       // version
+
+      // Require a workspace to be open - plans are workspace-relative
+      if (!currentWorkspacePath) {
+        console.log('[MCP Provider] Returning empty list (no workspace open)');
+        return [];
+      }
+
+      // Require IPC path for the stdio server to connect back
+      if (!currentIpcPath) {
+        console.log('[MCP Provider] Returning empty list (no IPC path)');
+        return [];
+      }
+
+      const extensionPath = context.extensionPath;
+      const serverScript = path.join(extensionPath, 'out', 'mcp', 'stdio', 'server.js');
+
+      // The stdio server connects back to the extension via IPC
+      // All config passed via environment variables to keep server "shape" stable
+      // McpStdioServerDefinition constructor: (label, command, args?, env?, version?)
+      // Note: cwd is a property that can be set after construction
+      const server = new (vscode as any).McpStdioServerDefinition(
+        'Copilot Orchestrator',  // label
+        'node',                  // command
+        [serverScript],          // args - no variable args, keeps shape stable
+        {
+          MCP_IPC_PATH: currentIpcPath,        // IPC connection path
+          MCP_AUTH_NONCE: currentAuthNonce,    // Security: auth nonce for IPC
+        },
+        context.extension.packageJSON.version  // version
       );
-      
-      console.log(`[MCP Provider] Returning server: ${server.label}, url: ${mcpUrl.toString()}`);
+      // Set cwd separately (it's a property, not a constructor param)
+      server.cwd = vscode.Uri.file(currentWorkspacePath);
+
+      console.log(`[MCP Provider] Returning stdio server: ${server.label}, ipc: ${currentIpcPath}`);
       return [server];
     },
     
     resolveMcpServerDefinition(
-      server: vscode.McpHttpServerDefinition,
+      server: vscode.McpServerDefinition,
       _token: vscode.CancellationToken
-    ): vscode.ProviderResult<vscode.McpHttpServerDefinition> {
-      // No additional resolution needed - server config is complete
-      console.log(`[MCP Provider] Resolving server: ${server.label}`);
+    ): vscode.ProviderResult<vscode.McpServerDefinition> {
+      console.log(`[MCP Provider] Resolving server: ${(server as any).label}`);
       return server;
     }
   };
   
   // Register with VS Code
-  // The id must match the one in package.json contributes.mcpServerDefinitionProviders
   try {
     const registration = vscode.lm.registerMcpServerDefinitionProvider(
       'copilot-orchestrator.mcp-server',
@@ -131,13 +148,6 @@ export function registerMcpDefinitionProvider(
         const mcpConfig = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
         isEnabled = mcpConfig.get<boolean>('enabled', true);
         
-        // Update config
-        if (currentConfig) {
-          currentConfig.host = mcpConfig.get<string>('host', 'localhost');
-          currentConfig.port = mcpConfig.get<number>('port', 39219);
-        }
-        
-        // Notify VS Code that servers changed
         serverChangedEmitter.fire();
         console.log('[MCP Provider] Configuration changed, notifying VS Code');
       }

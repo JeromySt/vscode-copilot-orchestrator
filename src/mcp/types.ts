@@ -48,7 +48,7 @@ export interface McpTool {
 }
 
 /**
- * JSON-RPC 2.0 request envelope used by the MCP HTTP transport.
+ * JSON-RPC 2.0 request envelope used by the MCP protocol.
  *
  * The MCP protocol encodes every client→server message as a JSON-RPC 2.0
  * request.  The {@link method} field determines which MCP method is invoked

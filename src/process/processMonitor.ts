@@ -74,6 +74,12 @@ export class ProcessMonitor implements IProcessMonitor {
   private lastSnapshotTime = 0;
   /** Cache TTL in milliseconds */
   private readonly cacheTtlMs: number;
+  /** Track consecutive errors to avoid spam */
+  private consecutiveErrors = 0;
+  /** Timestamp of last error */
+  private lastErrorTime = 0;
+  /** Error throttle cooldown in ms */
+  private readonly errorCooldownMs = 30000;
   
   /**
    * Create a new ProcessMonitor.
@@ -95,15 +101,35 @@ export class ProcessMonitor implements IProcessMonitor {
       return this.snapshotCache;
     }
     
-    // Collect fresh snapshot
-    const snapshot = process.platform === 'win32' 
-      ? await this.getWindowsProcesses()
-      : await this.getUnixProcesses();
+    // If we've had consecutive errors, back off to avoid spam
+    if (this.consecutiveErrors > 0 && now - this.lastErrorTime < this.errorCooldownMs) {
+      return this.snapshotCache; // Return stale cache
+    }
     
-    this.snapshotCache = snapshot;
-    this.lastSnapshotTime = now;
-    
-    return snapshot;
+    try {
+      // Collect fresh snapshot
+      const snapshot = process.platform === 'win32' 
+        ? await this.getWindowsProcesses()
+        : await this.getUnixProcesses();
+      
+      this.snapshotCache = snapshot;
+      this.lastSnapshotTime = now;
+      this.consecutiveErrors = 0; // Reset on success
+      
+      return snapshot;
+    } catch (e) {
+      this.consecutiveErrors++;
+      this.lastErrorTime = now;
+      
+      // Only log first few errors to avoid spam
+      if (this.consecutiveErrors <= 3) {
+        console.error('Failed to get process snapshot:', e);
+      } else if (this.consecutiveErrors === 4) {
+        console.error('Process monitor: suppressing further errors for 30s');
+      }
+      
+      return this.snapshotCache; // Return stale cache
+    }
   }
   
   /**
@@ -213,7 +239,8 @@ export class ProcessMonitor implements IProcessMonitor {
       // Combined CIM query for efficiency - run asynchronously to avoid blocking
       const psCommand = `$procs = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,WorkingSetSize,CreationDate,ThreadCount,HandleCount,Priority,ExecutablePath; $perf = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Select-Object IDProcess,PercentProcessorTime; $cpuMap = @{}; foreach ($p in $perf) { if ($p.IDProcess) { $cpuMap[$p.IDProcess] = $p.PercentProcessorTime } }; $result = @(); foreach ($proc in $procs) { $result += @{ ProcessId = $proc.ProcessId; ParentProcessId = $proc.ParentProcessId; Name = $proc.Name; CommandLine = $proc.CommandLine; WorkingSetSize = $proc.WorkingSetSize; CPU = if ($cpuMap.ContainsKey($proc.ProcessId)) { $cpuMap[$proc.ProcessId] } else { 0 }; CreationDate = if ($proc.CreationDate) { $proc.CreationDate.ToString('o') } else { $null }; ThreadCount = $proc.ThreadCount; HandleCount = $proc.HandleCount; Priority = $proc.Priority; ExecutablePath = $proc.ExecutablePath } }; $result | ConvertTo-Json`;
       
-      const output = await execAsync('powershell', ['-NoProfile', '-Command', psCommand], 5000);
+      // Increased timeout to 15s for high-load scenarios (many parallel jobs)
+      const output = await execAsync('powershell', ['-NoProfile', '-Command', psCommand], 15000);
       
       const data = JSON.parse(output);
       const procs = Array.isArray(data) ? data : [data];

@@ -1,11 +1,13 @@
 /**
  * @fileoverview Handlers module - aggregates all MCP tool handlers.
  * 
- * All MCP tool handlers are now Plan-based. The main McpHandler class
- * routes tool calls directly to planHandlers.
+ * Exports both legacy plan handlers and new node-centric handlers.
+ * Legacy adapters bridge old tool names to new implementations.
  * 
  * @module mcp/handlers
  */
 
 export * from './planHandlers';
+export * from './nodeHandlers';
+export * from './legacyAdapters';
 export * from './utils';

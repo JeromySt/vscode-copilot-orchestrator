@@ -24,12 +24,14 @@ export {
   isTerminal,
   isValidTransition,
   JobNodeSpec,
-  SubPlanNodeSpec,
+  GroupSpec,
   NodeType,
   JobNode,
-  SubPlanNode,
   PlanNode,
   nodePerformsWork,
+  NodeSpec,
+  NodeInstance,
+  AttemptContext,
 } from './nodes';
 
 // Plan types, execution state, events, and executor types
@@ -47,6 +49,13 @@ export {
   PlanCompletionEvent,
   JobExecutionResult,
   ExecutionContext,
+  EvidenceFile,
+  EvidenceValidationResult,
   ExecutionPhase,
   LogEntry,
+  GroupInfo,
+  GroupStatus,
+  GroupStatusSnapshot,
+  GroupInstance,
+  GroupExecutionState,
 } from './plan';

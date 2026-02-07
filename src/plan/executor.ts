@@ -34,6 +34,8 @@ import {
 import { JobExecutor } from './runner';
 import { Logger } from '../core/logger';
 import * as git from '../git';
+import { DefaultEvidenceValidator } from './evidenceValidator';
+import type { IEvidenceValidator } from '../interfaces';
 
 const log = Logger.for('job-executor');
 
@@ -68,6 +70,7 @@ export class DefaultJobExecutor implements JobExecutor {
   private agentDelegator?: any; // IAgentDelegator interface
   private storagePath?: string;
   private processMonitor = new ProcessMonitor();
+  private evidenceValidator: IEvidenceValidator = new DefaultEvidenceValidator();
   
   /**
    * Configure the directory for persisted log files.
@@ -91,6 +94,15 @@ export class DefaultJobExecutor implements JobExecutor {
    */
   setAgentDelegator(delegator: any): void {
     this.agentDelegator = delegator;
+  }
+
+  /**
+   * Set the evidence validator used during the commit phase.
+   *
+   * @param validator - Evidence validator implementing {@link IEvidenceValidator}.
+   */
+  setEvidenceValidator(validator: IEvidenceValidator): void {
+    this.evidenceValidator = validator;
   }
   
   /**
@@ -116,8 +128,21 @@ export class DefaultJobExecutor implements JobExecutor {
     this.executionLogs.set(executionKey, []);
     
     // Track per-phase statuses and captured session ID
-    const stepStatuses: JobExecutionResult['stepStatuses'] = {};
+    // Start with previous statuses if resuming from a failed phase
+    const stepStatuses: JobExecutionResult['stepStatuses'] = context.previousStepStatuses 
+      ? { ...context.previousStepStatuses } 
+      : {};
     let capturedSessionId: string | undefined = context.copilotSessionId;
+    
+    // Determine which phases to skip based on resumeFromPhase
+    const phaseOrder = ['prechecks', 'work', 'postchecks', 'commit'] as const;
+    const resumeIndex = context.resumeFromPhase 
+      ? phaseOrder.indexOf(context.resumeFromPhase as any)
+      : 0;
+    const shouldSkipPhase = (phase: typeof phaseOrder[number]) => {
+      const phaseIndex = phaseOrder.indexOf(phase);
+      return phaseIndex < resumeIndex;
+    };
     
     try {
       // Ensure worktree exists
@@ -130,8 +155,11 @@ export class DefaultJobExecutor implements JobExecutor {
         };
       }
       
-      // Run prechecks
-      if (node.prechecks) {
+      // Run prechecks (skip if resuming from later phase)
+      if (shouldSkipPhase('prechecks')) {
+        this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION (SKIPPED - RESUMING) ==========');
+        // stepStatuses.prechecks already preserved from previousStepStatuses
+      } else if (node.prechecks) {
         context.onProgress?.('Running prechecks');
         this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION START ==========');
         
@@ -166,8 +194,11 @@ export class DefaultJobExecutor implements JobExecutor {
         return { success: false, error: 'Execution canceled', stepStatuses };
       }
       
-      // Run main work
-      if (node.work) {
+      // Run main work (skip if resuming from later phase)
+      if (shouldSkipPhase('work')) {
+        this.logInfo(executionKey, 'work', '========== WORK SECTION (SKIPPED - RESUMING) ==========');
+        // stepStatuses.work already preserved from previousStepStatuses
+      } else if (node.work) {
         context.onProgress?.('Running work');
         this.logInfo(executionKey, 'work', '========== WORK SECTION START ==========');
         
@@ -214,8 +245,11 @@ export class DefaultJobExecutor implements JobExecutor {
         return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
       }
       
-      // Run postchecks
-      if (node.postchecks) {
+      // Run postchecks (skip if resuming from later phase)
+      if (shouldSkipPhase('postchecks')) {
+        this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION (SKIPPED - RESUMING) ==========');
+        // stepStatuses.postchecks already preserved from previousStepStatuses
+      } else if (node.postchecks) {
         context.onProgress?.('Running postchecks');
         this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION START ==========');
         
@@ -916,8 +950,32 @@ export class DefaultJobExecutor implements JobExecutor {
           return { success: true, commit: head };
         }
         
-        // No commits and no uncommitted changes = no work produced
-        const error = 'No commits made and no uncommitted changes found. The job produced no work.';
+        // Check for evidence file
+        const hasEvidence = await this.evidenceValidator.hasEvidenceFile(
+          worktreePath, node.id
+        );
+        if (hasEvidence) {
+          this.logInfo(executionKey, 'commit', 'Evidence file found, staging...');
+          await git.repository.stageAll(worktreePath);
+          const message = `[Plan] ${node.task} (evidence only)`;
+          await git.repository.commit(worktreePath, message);
+          const commit = await git.worktrees.getHeadCommit(worktreePath);
+          return { success: true, commit: commit || undefined };
+        }
+        
+        // Check expectsNoChanges flag
+        if (node.expectsNoChanges) {
+          this.logInfo(executionKey, 'commit',
+            'Node declares expectsNoChanges — succeeding without commit');
+          return { success: true, commit: undefined };
+        }
+        
+        // No evidence — fail
+        const error =
+          'No work evidence produced. The node must either:\n' +
+          '  1. Modify files (results in a commit)\n' +
+          '  2. Create an evidence file at .orchestrator/evidence/<nodeId>.json\n' +
+          '  3. Declare expectsNoChanges: true in the node spec';
         this.logError(executionKey, 'commit', error);
         return { success: false, error };
       }
@@ -993,7 +1051,20 @@ export class DefaultJobExecutor implements JobExecutor {
   ): Promise<JobWorkSummary> {
     try {
       const head = await git.worktrees.getHeadCommit(worktreePath);
-      if (!head) {
+      if (!head || (head === baseCommit && node.expectsNoChanges)) {
+        // expectsNoChanges nodes with no commits get a descriptive summary
+        if (node.expectsNoChanges) {
+          return {
+            nodeId: node.id,
+            nodeName: node.name,
+            commits: 0,
+            filesAdded: 0,
+            filesModified: 0,
+            filesDeleted: 0,
+            description: 'Node declared expectsNoChanges',
+            commitDetails: [],
+          };
+        }
         return this.emptyWorkSummary(node);
       }
       

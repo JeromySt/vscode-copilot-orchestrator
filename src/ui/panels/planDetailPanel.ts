@@ -11,7 +11,7 @@
  */
 
 import * as vscode from 'vscode';
-import { PlanRunner, PlanInstance, PlanNode, JobNode, SubPlanNode, NodeStatus, NodeExecutionState } from '../../plan';
+import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState } from '../../plan';
 import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 
 /**
@@ -28,7 +28,7 @@ import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSum
  * - `{ type: 'cancel' }` — cancel the Plan
  * - `{ type: 'delete' }` — delete the Plan
  * - `{ type: 'openNode', nodeId: string, planId?: string }` — open a {@link NodeDetailPanel}
- * - `{ type: 'opensubPlan', planId: string }` — open a nested Plan's detail panel
+ * - `{ type: 'openNode', nodeId, planId }` — open a node detail panel
  * - `{ type: 'refresh' }` — request a manual data refresh
  * - `{ type: 'showWorkSummary' }` — open work summary in a separate webview panel
  * - `{ type: 'getAllProcessStats' }` — request process tree statistics
@@ -46,7 +46,9 @@ export class planDetailPanel {
   private _planId: string;
   private _disposables: vscode.Disposable[] = [];
   private _updateInterval?: NodeJS.Timeout;
-  private _lastStateHash: string = '';
+  private _lastStateVersion: number = -1;
+  private _lastStructureHash: string = '';
+  private _isFirstRender: boolean = true;
   
   /**
    * @param panel - The VS Code webview panel instance.
@@ -92,23 +94,27 @@ export class planDetailPanel {
   public static createOrShow(
     extensionUri: vscode.Uri,
     planId: string,
-    planRunner: PlanRunner
+    planRunner: PlanRunner,
+    options?: { preserveFocus?: boolean }
   ) {
+    const preserveFocus = options?.preserveFocus ?? false;
+    
     // Check if panel already exists
     const existing = planDetailPanel.panels.get(planId);
     if (existing) {
-      existing._panel.reveal();
+      existing._panel.reveal(undefined, preserveFocus);
       return;
     }
     
     const plan = planRunner.get(planId);
     const title = plan ? `Plan: ${plan.spec.name}` : `Plan: ${planId.slice(0, 8)}`;
     
-    // Create new panel
+    // Create new panel - createWebviewPanel always takes focus, so we need to restore
+    // focus back to tree if preserveFocus is requested
     const panel = vscode.window.createWebviewPanel(
       'planDetail',
       title,
-      vscode.ViewColumn.One,
+      { viewColumn: vscode.ViewColumn.One, preserveFocus },
       {
         enableScripts: true,
         retainContextWhenHidden: true,
@@ -165,15 +171,9 @@ export class planDetailPanel {
         const planIdForNode = message.planId || this._planId;
         vscode.commands.executeCommand('orchestrator.showNodeDetails', planIdForNode, message.nodeId);
         break;
-      case 'opensubPlan':
-        planDetailPanel.createOrShow(
-          this._panel.webview.cspSource as any,
-          message.planId,
-          this._planRunner
-        );
-        break;
+
       case 'refresh':
-        this._update();
+        this._forceFullRefresh();
         break;
       case 'showWorkSummary':
         // Show work summary in a new editor tab as markdown
@@ -405,6 +405,30 @@ export class planDetailPanel {
   }
 
   /**
+   * Force a full HTML re-render, bypassing the state hash check.
+   * Used when the webview requests a refresh (e.g., after an error).
+   */
+  private _forceFullRefresh() {
+    const plan = this._planRunner.get(this._planId);
+    if (!plan) {
+      this._panel.webview.html = this._getErrorHtml('Plan not found');
+      return;
+    }
+    
+    const sm = this._planRunner.getStateMachine(this._planId);
+    const status = sm?.computePlanStatus() || 'pending';
+    const recursiveCounts = this._planRunner.getRecursiveStatusCounts(this._planId);
+    const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
+    
+    // Reset hashes to force next _update to also do full render
+    this._lastStateVersion = -1;
+    this._lastStructureHash = '';
+    this._isFirstRender = true;
+    
+    this._panel.webview.html = this._getHtml(plan, status, recursiveCounts.counts, effectiveEndedAt, recursiveCounts.totalNodes);
+  }
+
+  /**
    * Re-render the panel HTML if the Plan state has changed since the last render.
    * Uses a JSON state hash to skip redundant re-renders.
    */
@@ -423,24 +447,74 @@ export class planDetailPanel {
     const counts = recursiveCounts.counts;
     const totalNodes = recursiveCounts.totalNodes;
     
-    // Create a state hash to detect changes - only re-render if something changed
-    const stateHash = JSON.stringify({
-      status,
-      counts,
-      totalNodes,
-      nodeStates: Array.from(plan.nodeStates.entries()).map(([id, s]) => [id, s.status])
+    // Build node status map for incremental updates (includes version for efficient updates)
+    const nodeStatuses: Record<string, { status: string; version: number; startedAt?: number; endedAt?: number }> = {};
+    for (const [nodeId, state] of plan.nodeStates) {
+      const sanitizedId = this._sanitizeId(nodeId);
+      nodeStatuses[sanitizedId] = {
+        status: state.status,
+        version: state.version || 0,
+        startedAt: state.startedAt,
+        endedAt: state.endedAt
+      };
+    }
+    
+    // Add group statuses (groups use same sanitized ID pattern as nodes)
+    for (const [groupId, state] of plan.groupStates) {
+      const sanitizedId = this._sanitizeId(groupId);
+      nodeStatuses[sanitizedId] = {
+        status: state.status,
+        version: state.version || 0,
+        startedAt: state.startedAt,
+        endedAt: state.endedAt
+      };
+    }
+    
+    // Structure hash: nodes and their dependencies (doesn't change during execution)
+    const structureHash = JSON.stringify({
+      nodes: Array.from(plan.nodes.entries()).map(([id, n]) => [id, n.name, (n as JobNode).dependencies]),
+      spec: plan.spec.name
     });
     
-    if (stateHash === this._lastStateHash) {
-      // No change, skip re-render
+    // Use stateVersion for efficient change detection (incremented on every state change)
+    const currentStateVersion = plan.stateVersion || 0;
+    
+    // If nothing changed, skip entirely
+    if (currentStateVersion === this._lastStateVersion) {
       return;
     }
-    this._lastStateHash = stateHash;
     
-    // Compute effective endedAt from node data for accurate duration (recursively includes child plans)
+    const structureChanged = structureHash !== this._lastStructureHash;
+    this._lastStateVersion = currentStateVersion;
+    this._lastStructureHash = structureHash;
+    
+    // If structure changed or first render, do full HTML render
+    if (structureChanged || this._isFirstRender) {
+      this._isFirstRender = false;
+      // Compute effective endedAt from node data for accurate duration
+      const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
+      this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt, totalNodes);
+      return;
+    }
+    
+    // Otherwise, send incremental status update (preserves zoom/scroll)
+    const total = totalNodes ?? plan.nodes.size;
+    const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
+    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
     
-    this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt, totalNodes);
+    this._panel.webview.postMessage({
+      type: 'statusUpdate',
+      planStatus: status,
+      stateVersion: currentStateVersion,
+      nodeStatuses,
+      counts,
+      progress,
+      total,
+      completed,
+      startedAt: plan.startedAt,
+      endedAt: effectiveEndedAt
+    });
   }
   
   /**
@@ -479,56 +553,43 @@ export class planDetailPanel {
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
     // Build Mermaid diagram
-    const { diagram: mermaidDef, subgraphData } = this._buildMermaidDiagram(plan);
+    const { diagram: mermaidDef, nodeTooltips } = this._buildMermaidDiagram(plan);
     
-    // Build node data for click handling - recursively include all nested nodes
-    const nodeData: Record<string, { nodeId: string; planId: string; type: string; childPlanId?: string; name: string; startedAt?: number; endedAt?: number; status: string }> = {};
+    // Build node data for click handling
+    const nodeData: Record<string, { nodeId: string; planId: string; type: string; name: string; startedAt?: number; endedAt?: number; status: string; version: number }> = {};
     
-    // Recursive function to collect all node data with prefixes matching Mermaid IDs
-    const collectNodeData = (d: PlanInstance, prefix: string, subgraphCounterStart: number): number => {
-      let subgraphCounter = subgraphCounterStart;
+    // Collect all node data with prefixes matching Mermaid IDs
+    for (const [nodeId, node] of plan.nodes) {
+      const sanitizedId = this._sanitizeId(nodeId);
+      const state = plan.nodeStates.get(nodeId);
       
-      for (const [nodeId, node] of d.nodes) {
-        const sanitizedId = prefix + this._sanitizeId(nodeId);
-        const state = d.nodeStates.get(nodeId);
-        
-        // For subPlan nodes, get effective start/end times recursively
-        let effectiveStartedAt = state?.startedAt;
-        let effectiveEndedAt = state?.endedAt;
-        if (node.type === 'subPlan' && state?.childPlanId) {
-          effectiveStartedAt = this._planRunner.getEffectiveStartedAt(state.childPlanId) || state?.startedAt;
-          effectiveEndedAt = this._planRunner.getEffectiveEndedAt(state.childPlanId) || state?.endedAt;
-        }
-        
-        nodeData[sanitizedId] = {
-          nodeId,
-          planId: d.id,
-          type: node.type,
-          childPlanId: node.type === 'subPlan' ? (state?.childPlanId || (node as SubPlanNode).childPlanId) : undefined,
-          name: node.name,
-          startedAt: effectiveStartedAt,
-          endedAt: effectiveEndedAt,
-          status: state?.status || 'pending',
-        };
-        
-        // If this is a subPlan with an instantiated child, recurse into it
-        if (node.type === 'subPlan') {
-          subgraphCounter++;
-          const childPlanId = state?.childPlanId || (node as SubPlanNode).childPlanId;
-          
-          if (childPlanId) {
-            const childPlan = this._planRunner.get(childPlanId);
-            if (childPlan) {
-              subgraphCounter = collectNodeData(childPlan, prefix + 'c' + subgraphCounter + '_', subgraphCounter);
-            }
-          }
-        }
-      }
-      
-      return subgraphCounter;
-    };
+      nodeData[sanitizedId] = {
+        nodeId,
+        planId: plan.id,
+        type: node.type,
+        name: node.name,
+        startedAt: state?.startedAt,
+        endedAt: state?.endedAt,
+        status: state?.status || 'pending',
+        version: state?.version || 0,
+      };
+    }
     
-    collectNodeData(plan, '', 0);
+    // Add group data for duration tracking
+    for (const [groupId, state] of plan.groupStates) {
+      const sanitizedId = this._sanitizeId(groupId);
+      const group = plan.groups.get(groupId);
+      nodeData[sanitizedId] = {
+        nodeId: groupId,
+        planId: plan.id,
+        type: 'group',
+        name: group?.name || groupId,
+        startedAt: state?.startedAt,
+        endedAt: state?.endedAt,
+        status: state?.status || 'pending',
+        version: state?.version || 0,
+      };
+    }
     
     // Get branch info
     const baseBranch = plan.spec.baseBranch || 'main';
@@ -715,6 +776,16 @@ export class planDetailPanel {
       transform-origin: top left;
       transition: transform 0.2s ease;
     }
+    #mermaid-diagram {
+      cursor: grab;
+    }
+    #mermaid-diagram.panning {
+      cursor: grabbing;
+      user-select: none;
+    }
+    #mermaid-diagram.panning .mermaid-container {
+      transition: none;
+    }
     
     /* Mermaid node styling */
     .mermaid .node rect { rx: 8px; ry: 8px; }
@@ -726,16 +797,15 @@ export class planDetailPanel {
     .mermaid .node.blocked rect { fill: #3c3c3c; stroke: #858585; stroke-dasharray: 5,5; }
     
     .mermaid .node { cursor: pointer; }
-    .mermaid .node.branchNode { cursor: default; }  /* Branch nodes are not clickable */
+    .mermaid .node.branchNode,
+    .mermaid .node.baseBranchNode,
+    .mermaid g[id*="BASE_BRANCH"] .node,
+    .mermaid g[id*="TARGET_SOURCE"] .node,
+    .mermaid g[id*="TARGET_MERGED"] .node { cursor: default; }  /* Branch nodes are not clickable */
     
-    /* Prevent node label truncation */
-    .mermaid .node foreignObject {
-      overflow: visible !important;
-    }
+    /* Node labels are pre-truncated server-side; let Mermaid size the box */
     .mermaid .node .nodeLabel {
       white-space: nowrap !important;
-      overflow: visible !important;
-      text-overflow: unset !important;
     }
     
     /* Subgraph/cluster styling */
@@ -752,14 +822,9 @@ export class planDetailPanel {
       text-decoration: underline;
       fill: #7DD3FC;
     }
-    /* Prevent subgraph title truncation */
-    .mermaid .cluster foreignObject {
-      overflow: visible !important;
-    }
+    /* Subgraph titles are pre-truncated server-side; let Mermaid size the box */
     .mermaid .cluster .nodeLabel {
       white-space: nowrap !important;
-      overflow: visible !important;
-      text-overflow: unset !important;
     }
     .mermaid svg {
       overflow: visible;
@@ -885,38 +950,28 @@ export class planDetailPanel {
     .proc-pid { color: var(--vscode-descriptionForeground); font-size: 11px; }
     .proc-stats { color: var(--vscode-descriptionForeground); font-size: 11px; }
     
-    /* sub-plan hierarchy styles */
-    .subPlan-node {
-      margin-bottom: 8px;
-      background: var(--vscode-sideBar-background);
-      border-radius: 6px;
-      overflow: hidden;
-      border-left: 3px solid var(--vscode-charts-blue);
-    }
-    .subPlan-node.collapsed .subPlan-children { display: none; }
-    .subPlan-node.collapsed .node-chevron { transform: rotate(-90deg); }
-    .subPlan-header {
+    /* Process Aggregation Summary */
+    .processes-summary {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      cursor: pointer;
+      gap: 16px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      background: rgba(55, 148, 255, 0.08);
+      border: 1px solid rgba(55, 148, 255, 0.25);
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .processes-summary-label {
+      color: var(--vscode-foreground);
+    }
+    .processes-summary-stat {
+      color: var(--vscode-descriptionForeground);
       font-weight: 500;
-      background: rgba(0, 100, 200, 0.1);
+      font-size: 12px;
     }
-    .subPlan-header:hover {
-      background: rgba(0, 100, 200, 0.15);
-    }
-    .subPlan-icon { font-size: 14px; }
-    .subPlan-name { flex: 1; font-weight: 600; }
-    .subPlan-children {
-      padding: 8px 8px 8px 12px;
-    }
-    .subPlan-waiting {
-      font-style: italic;
-      opacity: 0.7;
-    }
-    
+
     /* Job status indicators */
     .job-scheduled .node-stats.job-scheduled {
       color: var(--vscode-charts-yellow);
@@ -1143,7 +1198,7 @@ ${mermaidDef}
   <script>
     const vscode = acquireVsCodeApi();
     const nodeData = ${JSON.stringify(nodeData)};
-    const subgraphData = ${JSON.stringify(subgraphData)};
+    const nodeTooltips = ${JSON.stringify(nodeTooltips)};
     const mermaidDef = ${JSON.stringify(mermaidDef)};
     
     mermaid.initialize({
@@ -1165,6 +1220,23 @@ ${mermaidDef}
         const element = document.querySelector('.mermaid');
         const { svg } = await mermaid.render('mermaid-graph', mermaidDef);
         element.innerHTML = svg;
+        // Add tooltips for truncated node labels
+        for (const [id, fullName] of Object.entries(nodeTooltips)) {
+          // Regular nodes: Mermaid renders them as g[id*="id"]
+          const nodeEl = element.querySelector('g[id*="' + id + '"]');
+          if (nodeEl) {
+            const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            titleEl.textContent = fullName;
+            nodeEl.prepend(titleEl);
+          }
+          // Subgraph clusters
+          const clusterEl = element.querySelector('g[id*="' + id + '"] .cluster-label');
+          if (clusterEl) {
+            const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            titleEl.textContent = fullName;
+            clusterEl.prepend(titleEl);
+          }
+        }
         // Immediately update durations for running nodes after render
         setTimeout(updateNodeDurations, 100);
       } catch (err) {
@@ -1179,30 +1251,6 @@ ${mermaidDef}
     document.addEventListener('click', (e) => {
       let el = e.target;
       
-      // First check if we clicked on a cluster (subgraph)
-      const clickedCluster = el.closest('g.cluster');
-      if (clickedCluster && clickedCluster.id) {
-        console.log('Cluster clicked, id:', clickedCluster.id);
-        // Mermaid uses various formats: "flowchart-sg0-123", "subGraph0", etc.
-        const sgMatch = clickedCluster.id.match(/sg(\\d+)/i) || clickedCluster.id.match(/subGraph(\\d+)/i);
-        if (sgMatch) {
-          const subgraphId = 'sg' + sgMatch[1];
-          console.log('Looking for subgraphId:', subgraphId, 'in', Object.keys(subgraphData));
-          const data = subgraphData[subgraphId];
-          if (data && data.childPlanId) {
-            // Only open if we clicked on the label area (top part of cluster), not on nodes inside
-            const clickedOnNode = el.closest('.node');
-            if (!clickedOnNode || el.closest('.cluster-label')) {
-              console.log('Opening sub-plan:', data.childPlanId);
-              vscode.postMessage({ type: 'opensubPlan', planId: data.childPlanId });
-              e.stopPropagation();
-              e.preventDefault();
-              return;
-            }
-          }
-        }
-      }
-      
       while (el && el !== document.body) {
         // Check for node click
         if (el.classList && el.classList.contains('node')) {
@@ -1213,11 +1261,7 @@ ${mermaidDef}
               const sanitizedId = match[1];
               const data = nodeData[sanitizedId];
               if (data) {
-                if (data.type === 'subPlan' && data.childPlanId) {
-                  vscode.postMessage({ type: 'opensubPlan', planId: data.childPlanId });
-                } else {
-                  vscode.postMessage({ type: 'openNode', nodeId: data.nodeId, planId: data.planId });
-                }
+                vscode.postMessage({ type: 'openNode', nodeId: data.nodeId, planId: data.planId });
               }
             }
           }
@@ -1226,18 +1270,6 @@ ${mermaidDef}
         el = el.parentElement;
       }
     });
-    
-    // Make subgraph labels look clickable and add click handlers
-    setTimeout(() => {
-      document.querySelectorAll('.cluster-label').forEach(label => {
-        label.style.cursor = 'pointer';
-        label.style.pointerEvents = 'all';
-      });
-      // Also make the cluster rect clickable
-      document.querySelectorAll('g.cluster').forEach(cluster => {
-        cluster.style.cursor = 'pointer';
-      });
-    }, 500);
     
     // Handle job summary clicks
     document.querySelectorAll('.job-summary').forEach(el => {
@@ -1318,15 +1350,77 @@ ${mermaidDef}
       updateZoom();
     }
     
-    // Mouse wheel zoom
-    document.getElementById('mermaid-diagram')?.addEventListener('wheel', (e) => {
-      if (e.ctrlKey) {
+    // Mouse wheel zoom (no modifier needed when over diagram)
+    const diagramEl = document.getElementById('mermaid-diagram');
+    diagramEl?.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (e.deltaY < 0) {
+        zoomIn();
+      } else {
+        zoomOut();
+      }
+    }, { passive: false });
+    
+    // Mouse drag to pan
+    let isPanning = false;
+    let didPan = false;
+    let panStartX = 0;
+    let panStartY = 0;
+    let scrollStartX = 0;
+    let scrollStartY = 0;
+    
+    diagramEl?.addEventListener('mousedown', (e) => {
+      // Only pan on left mouse button, and not on interactive elements
+      if (e.button !== 0) return;
+      const target = e.target;
+      if (target.closest('.zoom-controls, .legend, button, a')) return;
+      
+      isPanning = true;
+      didPan = false;
+      panStartX = e.clientX;
+      panStartY = e.clientY;
+      scrollStartX = diagramEl.scrollLeft;
+      scrollStartY = diagramEl.scrollTop;
+      diagramEl.classList.add('panning');
+      e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+      if (!isPanning || !diagramEl) return;
+      
+      const dx = e.clientX - panStartX;
+      const dy = e.clientY - panStartY;
+      
+      // Mark as panned if moved more than 5px (distinguish from click)
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+        didPan = true;
+      }
+      
+      diagramEl.scrollLeft = scrollStartX - dx;
+      diagramEl.scrollTop = scrollStartY - dy;
+    });
+    
+    document.addEventListener('mouseup', () => {
+      if (isPanning && diagramEl) {
+        isPanning = false;
+        diagramEl.classList.remove('panning');
+      }
+    });
+    
+    // Suppress click after pan
+    document.addEventListener('click', (e) => {
+      if (didPan) {
+        e.stopPropagation();
         e.preventDefault();
-        if (e.deltaY < 0) {
-          zoomIn();
-        } else {
-          zoomOut();
-        }
+        didPan = false;
+      }
+    }, true); // Use capture phase to intercept before other handlers
+    
+    // Also stop panning if mouse leaves the window
+    document.addEventListener('mouseleave', () => {
+      if (isPanning && diagramEl) {
+        isPanning = false;
+        diagramEl.classList.remove('panning');
       }
     });
     
@@ -1374,35 +1468,62 @@ ${mermaidDef}
       const svgElement = document.querySelector('.mermaid svg');
       if (!svgElement) return;
       
-      // Find all potential text-containing elements in the SVG
-      // Mermaid uses foreignObject with various nested elements for htmlLabels
-      const allElements = svgElement.querySelectorAll('foreignObject *, text, tspan, .nodeLabel, .label');
-      
       for (const [sanitizedId, data] of Object.entries(nodeData)) {
         if (!data.startedAt) continue;
         
-        // Only update running/scheduled nodes (not completed ones)
+        // Only update running/scheduled nodes/groups (not completed ones)
         const isRunning = data.status === 'running' || data.status === 'scheduled';
         if (!isRunning) continue;
         
         const duration = Date.now() - data.startedAt;
         const durationStr = formatDurationLive(duration);
         
-        // Find text element containing this node's name and update duration
-        for (const textEl of allElements) {
-          // Skip elements without direct text content
+        // Find the element - either a node or a cluster (group)
+        let targetGroup = svgElement.querySelector('g[id*="' + sanitizedId + '"]');
+        let textEls;
+        
+        // Check if this is a cluster/subgraph
+        if (data.type === 'group') {
+          // Try cluster selectors
+          let cluster = svgElement.querySelector('g.cluster[id*="' + sanitizedId + '"], g[id*="' + sanitizedId + '"].cluster');
+          if (!cluster) {
+            const allClusters = svgElement.querySelectorAll('g.cluster');
+            for (const c of allClusters) {
+              const clusterId = c.getAttribute('id') || '';
+              if (clusterId.includes(sanitizedId)) {
+                cluster = c;
+                break;
+              }
+            }
+          }
+          if (cluster) {
+            targetGroup = cluster;
+            textEls = cluster.querySelectorAll('.cluster-label .nodeLabel, .cluster-label text, .nodeLabel, text');
+          }
+        } else {
+          // Regular node
+          if (targetGroup) {
+            textEls = targetGroup.querySelectorAll('foreignObject *, text, tspan, .nodeLabel, .label');
+          }
+        }
+        
+        if (!targetGroup || !textEls) continue;
+        
+        for (const textEl of textEls) {
           if (!textEl.childNodes.length || textEl.children.length > 0) continue;
           
           const text = textEl.textContent || '';
-          // Check if this text contains the node name
-          if (text.includes(data.name) && text.includes('|')) {
-            // Replace the duration part after the pipe
-            // Format: "icon NodeName | Xs" or "icon NodeName | Xm Ys"
+          if (text.includes('|')) {
+            // Update existing duration
             const pipeIndex = text.lastIndexOf('|');
             if (pipeIndex > 0) {
               const newText = text.substring(0, pipeIndex + 1) + ' ' + durationStr;
               textEl.textContent = newText;
             }
+            break;
+          } else if (text.length > 0) {
+            // No duration yet - add it (node just started running)
+            textEl.textContent = text + ' | ' + durationStr;
             break;
           }
         }
@@ -1412,119 +1533,316 @@ ${mermaidDef}
     // Update node durations every second
     setInterval(updateNodeDurations, 1000);
     
-    // Process tree handling for plan-level view
+    // Handle messages from extension (incremental updates, process stats)
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.type === 'allProcessStats') {
-        renderAllProcesses(msg.rootJobs, msg.hierarchy);
+        renderAllProcesses(msg.rootJobs);
+      } else if (msg.type === 'statusUpdate') {
+        handleStatusUpdate(msg);
       }
     });
     
-    function renderAllProcesses(rootJobs, hierarchy) {
+    // Handle incremental status updates without full re-render (preserves zoom/scroll)
+    function handleStatusUpdate(msg) {
+      try {
+        const { planStatus, nodeStatuses, counts, progress, total, completed, startedAt, endedAt } = msg;
+        
+        // Update plan status badge
+        const statusBadge = document.querySelector('.status-badge');
+        if (statusBadge) {
+          statusBadge.className = 'status-badge ' + planStatus;
+          statusBadge.textContent = planStatus.charAt(0).toUpperCase() + planStatus.slice(1);
+        }
+        
+        // Update progress bar
+        const progressFill = document.querySelector('.progress-fill');
+        const progressText = document.querySelector('.progress-text');
+        if (progressFill) {
+          progressFill.style.width = progress + '%';
+        }
+        if (progressText) {
+          progressText.textContent = completed + ' / ' + total + ' (' + progress + '%)';
+        }
+        
+        // Update stats section
+        const statsContainer = document.querySelector('.stats');
+        if (statsContainer) {
+          const statItems = statsContainer.querySelectorAll('.stat');
+          statItems.forEach(stat => {
+            const label = stat.querySelector('.stat-label');
+            const value = stat.querySelector('.stat-value');
+            if (!label || !value) return;
+            const labelText = label.textContent.trim();
+            if (labelText === 'Total Nodes') {
+              value.textContent = total;
+            } else if (labelText === 'Succeeded') {
+              value.textContent = counts.succeeded || 0;
+            } else if (labelText === 'Failed') {
+              value.textContent = counts.failed || 0;
+            } else if (labelText === 'Running') {
+              value.textContent = (counts.running || 0) + (counts.scheduled || 0);
+            } else if (labelText === 'Pending') {
+              value.textContent = (counts.pending || 0) + (counts.ready || 0);
+            }
+          });
+        }
+        
+        // Update legend counts
+        const legendItems = document.querySelectorAll('.legend-item');
+        legendItems.forEach(item => {
+          const icon = item.querySelector('.legend-icon');
+          if (!icon) return;
+          const statusClass = Array.from(icon.classList).find(c => c !== 'legend-icon');
+          if (statusClass && counts[statusClass] !== undefined) {
+            const span = item.querySelector('span:last-child');
+            if (span) {
+              span.textContent = statusClass.charAt(0).toUpperCase() + statusClass.slice(1) + ' (' + counts[statusClass] + ')';
+            }
+          }
+        });
+        
+        // Status color map (must match classDef in buildMermaidDiagram)
+        const statusColors = {
+          pending: { fill: '#3c3c3c', stroke: '#858585' },
+          ready: { fill: '#2d4a6e', stroke: '#3794ff' },
+          running: { fill: '#2d4a6e', stroke: '#3794ff' },
+          scheduled: { fill: '#2d4a6e', stroke: '#3794ff' },
+          succeeded: { fill: '#1e4d40', stroke: '#4ec9b0' },
+          failed: { fill: '#4d2929', stroke: '#f48771' },
+          blocked: { fill: '#3c3c3c', stroke: '#858585' },
+          canceled: { fill: '#3c3c3c', stroke: '#858585' }
+        };
+        
+        // Update Mermaid node colors in SVG directly (Mermaid uses inline styles)
+        const svgElement = document.querySelector('.mermaid svg');
+        let nodesUpdated = 0;
+        const totalNodes = Object.keys(nodeStatuses).length;
+        
+        if (!svgElement) {
+          console.warn('SVG element not found in handleStatusUpdate');
+        }
+        
+        if (svgElement) {
+          for (const [sanitizedId, data] of Object.entries(nodeStatuses)) {
+            // Skip if version hasn't changed (efficient update)
+            const existingData = nodeData[sanitizedId];
+            if (existingData && existingData.version === data.version) {
+              nodesUpdated++; // Count as success (already up to date)
+              continue;
+            }
+            
+            // Status colors for groups/subgraphs (dimmer than nodes)
+            const groupColors = {
+              pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
+              ready: { fill: '#1a2a4e', stroke: '#3794ff' },
+              running: { fill: '#1a2a4e', stroke: '#3794ff' },
+              succeeded: { fill: '#1a3a2e', stroke: '#4ec9b0' },
+              failed: { fill: '#3a1a1e', stroke: '#f48771' },
+              blocked: { fill: '#3a1a1e', stroke: '#f48771' },
+              canceled: { fill: '#1a1a2e', stroke: '#6a6a8a' },
+            };
+            
+            // Try to find as a node first
+            // Mermaid generates IDs like "flowchart-nabc123...-0" where nabc123... is our sanitizedId
+            const nodeGroup = svgElement.querySelector('g[id^="flowchart-' + sanitizedId + '-"]');
+            
+            if (nodeGroup) {
+              nodesUpdated++;
+              const nodeEl = nodeGroup.querySelector('.node') || nodeGroup;
+              
+              // Update CSS class for additional styling
+              nodeEl.classList.remove('pending', 'ready', 'running', 'succeeded', 'failed', 'blocked', 'canceled', 'scheduled');
+              nodeEl.classList.add(data.status);
+              
+              // Update inline styles on the rect (Mermaid uses inline styles from classDef)
+              const rect = nodeEl.querySelector('rect');
+              if (rect && statusColors[data.status]) {
+                rect.style.fill = statusColors[data.status].fill;
+                rect.style.stroke = statusColors[data.status].stroke;
+                // Add animation for running nodes
+                if (data.status === 'running') {
+                  rect.style.strokeWidth = '2px';
+                } else {
+                  rect.style.strokeWidth = '';
+                }
+              }
+              
+              // Update icon in node label
+              const foreignObject = nodeEl.querySelector('foreignObject');
+              const textSpan = foreignObject ? foreignObject.querySelector('span') : nodeEl.querySelector('text tspan, text');
+              if (textSpan) {
+                const icons = { succeeded: '✓', failed: '✗', running: '▶', blocked: '⊘', pending: '○', ready: '○', scheduled: '▶', canceled: '⊘' };
+                const newIcon = icons[data.status] || '○';
+                const currentText = textSpan.textContent || '';
+                // Replace first character (icon) with new icon
+                if (currentText.length > 0 && ['✓', '✗', '▶', '⊘', '○'].includes(currentText[0])) {
+                  textSpan.textContent = newIcon + currentText.substring(1);
+                }
+              }
+            } else {
+              // Try to find as a subgraph (group)
+              // Mermaid generates subgraph clusters with ID patterns we can match
+              let cluster = svgElement.querySelector('g.cluster[id*="' + sanitizedId + '"], g[id*="' + sanitizedId + '"].cluster');
+              
+              // Fallback: iterate all clusters and check their IDs
+              if (!cluster) {
+                const allClusters = svgElement.querySelectorAll('g.cluster');
+                for (const c of allClusters) {
+                  const clusterId = c.getAttribute('id') || '';
+                  if (clusterId.includes(sanitizedId)) {
+                    cluster = c;
+                    break;
+                  }
+                }
+              }
+              
+              // Update the cluster if found
+              if (cluster) {
+                const clusterRect = cluster.querySelector('rect');
+                if (clusterRect && groupColors[data.status]) {
+                  clusterRect.style.fill = groupColors[data.status].fill;
+                  clusterRect.style.stroke = groupColors[data.status].stroke;
+                }
+                // Update icon in subgraph label - Mermaid uses various label selectors
+                const labelText = cluster.querySelector('.cluster-label .nodeLabel, .cluster-label text, .nodeLabel, text');
+                if (labelText) {
+                  const icons = { succeeded: '✓', failed: '✗', running: '▶', blocked: '⊘', pending: '○', ready: '○', scheduled: '▶', canceled: '⊘' };
+                  const newIcon = icons[data.status] || '○';
+                  const currentText = labelText.textContent || '';
+                  // Check for status icon at start or package icon (📦)
+                  if (currentText.length > 0) {
+                    const firstChar = currentText[0];
+                    if (['✓', '✗', '▶', '⊘', '○', '📦'].includes(firstChar)) {
+                      labelText.textContent = newIcon + currentText.substring(1);
+                    }
+                  }
+                }
+                nodesUpdated++;
+              }
+            }
+            
+            // Update nodeData for duration tracking (and version for next comparison)
+            if (nodeData[sanitizedId]) {
+              nodeData[sanitizedId].status = data.status;
+              nodeData[sanitizedId].version = data.version;
+              nodeData[sanitizedId].startedAt = data.startedAt;
+              nodeData[sanitizedId].endedAt = data.endedAt;
+            }
+          }
+        }
+        
+        // If we couldn't update any nodes and there are nodes to update, force full refresh
+        if (totalNodes > 0 && nodesUpdated === 0) {
+          console.warn('SVG node update failed: updated 0 of ' + totalNodes + ' nodes, requesting full refresh');
+          vscode.postMessage({ type: 'refresh' });
+          return;
+        }
+        
+        // Update plan duration counter data attributes
+        const durationEl = document.getElementById('planDuration');
+        if (durationEl) {
+          durationEl.dataset.status = planStatus;
+          if (startedAt) durationEl.dataset.started = startedAt.toString();
+          if (endedAt) durationEl.dataset.ended = endedAt.toString();
+        }
+        
+        // Update action buttons visibility based on new status
+        const actionsDiv = document.querySelector('.actions');
+        if (actionsDiv) {
+          const cancelBtn = actionsDiv.querySelector('button[onclick="cancelPlan()"]');
+          const workSummaryBtn = actionsDiv.querySelector('button[onclick="showWorkSummary()"]');
+          
+          if (cancelBtn) {
+            cancelBtn.style.display = (planStatus === 'running' || planStatus === 'pending') ? '' : 'none';
+          }
+          if (workSummaryBtn) {
+            workSummaryBtn.style.display = planStatus === 'succeeded' ? '' : 'none';
+          } else if (planStatus === 'succeeded') {
+            // Add work summary button if it doesn't exist
+            const deleteBtn = actionsDiv.querySelector('button[onclick="deletePlan()"]');
+            if (deleteBtn) {
+              const newBtn = document.createElement('button');
+              newBtn.className = 'action-btn primary';
+              newBtn.onclick = showWorkSummary;
+              newBtn.textContent = 'View Work Summary';
+              actionsDiv.insertBefore(newBtn, deleteBtn);
+            }
+          }
+        }
+        
+        // Trigger duration update
+        updateNodeDurations();
+      } catch (err) {
+        console.error('handleStatusUpdate error:', err);
+        // On error, request a full refresh
+        vscode.postMessage({ type: 'refresh' });
+      }
+    }
+    
+    function formatMemory(bytes) {
+      const mb = bytes / 1024 / 1024;
+      if (mb >= 1024) {
+        return (mb / 1024).toFixed(2) + ' GB';
+      }
+      return mb.toFixed(1) + ' MB';
+    }
+
+    function sumAllProcessStats(rootJobs) {
+      let totalCount = 0;
+      let totalCpu = 0;
+      let totalMemory = 0;
+
+      function sumProc(proc) {
+        totalCount++;
+        totalCpu += proc.cpu || 0;
+        totalMemory += proc.memory || 0;
+        if (proc.children) {
+          for (const child of proc.children) {
+            sumProc(child);
+          }
+        }
+      }
+
+      function sumJob(job) {
+        for (const proc of (job.tree || [])) {
+          sumProc(proc);
+        }
+      }
+
+      for (const job of (rootJobs || [])) {
+        sumJob(job);
+      }
+
+      return { totalCount, totalCpu, totalMemory };
+    }
+
+    function renderAllProcesses(rootJobs) {
       const container = document.getElementById('processesContainer');
       if (!container) return;
       
       const hasRootJobs = rootJobs && rootJobs.length > 0;
-      const hassubPlans = hierarchy && hierarchy.length > 0;
       
-      if (!hasRootJobs && !hassubPlans) {
+      if (!hasRootJobs) {
         container.innerHTML = '<div class="processes-loading">No active processes</div>';
         return;
       }
       
-      let html = '';
+      // Aggregation summary
+      const agg = sumAllProcessStats(rootJobs);
+      let html = '<div class="processes-summary">';
+      html += '<span class="processes-summary-label">Total</span>';
+      html += '<span class="processes-summary-stat">' + agg.totalCount + ' processes</span>';
+      html += '<span class="processes-summary-stat">' + agg.totalCpu.toFixed(0) + '% CPU</span>';
+      html += '<span class="processes-summary-stat">' + formatMemory(agg.totalMemory) + '</span>';
+      html += '</div>';
       
-      // Render root-level jobs first (jobs directly in main Plan)
+      // Render all jobs
       for (const job of (rootJobs || [])) {
         html += renderJobNode(job, 0);
       }
       
-      // Render sub-plan hierarchy
-      for (const subPlan of (hierarchy || [])) {
-        html += rendersubPlan(subPlan, 0);
-      }
-      
       container.innerHTML = html;
-    }
-    
-    // Render a sub-plan as a collapsible section
-    function rendersubPlan(subPlan, depth) {
-      const indent = depth * 16;
-      const hasChildren = (subPlan.children && subPlan.children.length > 0) || (subPlan.jobs && subPlan.jobs.length > 0);
-      
-      // Count total processes in this sub-plan
-      let totalProcs = 0;
-      let totalCpu = 0;
-      let totalMem = 0;
-      
-      function sumJobStats(job) {
-        const tree = job.tree || [];
-        for (const proc of tree) {
-          const s = sumProcStats(proc);
-          totalProcs += s.count;
-          totalCpu += s.cpu;
-          totalMem += s.memory;
-        }
-      }
-      
-      function sumProcStats(proc) {
-        let count = 1;
-        let cpu = proc.cpu || 0;
-        let memory = proc.memory || 0;
-        if (proc.children) {
-          for (const child of proc.children) {
-            const s = sumProcStats(child);
-            count += s.count;
-            cpu += s.cpu;
-            memory += s.memory;
-          }
-        }
-        return { count, cpu, memory };
-      }
-      
-      for (const job of (subPlan.jobs || [])) {
-        sumJobStats(job);
-      }
-      
-      // Recursively sum children
-      function sumChildren(children) {
-        for (const child of (children || [])) {
-          for (const job of (child.jobs || [])) {
-            sumJobStats(job);
-          }
-          sumChildren(child.children);
-        }
-      }
-      sumChildren(subPlan.children);
-      
-      const memMB = (totalMem / 1024 / 1024).toFixed(1);
-      const statusClass = 'subPlan-' + subplan.status;
-      
-      let html = '<div class="subPlan-node ' + statusClass + '" style="margin-left: ' + indent + 'px;">';
-      html += '<div class="subPlan-header" onclick="this.parentElement.classList.toggle(\\'collapsed\\')">';
-      html += '<span class="node-chevron">▼</span>';
-      html += '<span class="subPlan-icon">📦</span>';
-      html += '<span class="subPlan-name">' + escapeHtml(subPlan.planName) + '</span>';
-      if (totalProcs > 0) {
-        html += '<span class="node-stats">(' + totalProcs + ' proc • ' + totalCpu.toFixed(0) + '% CPU • ' + memMB + ' MB)</span>';
-      } else {
-        html += '<span class="node-stats subPlan-waiting">(waiting)</span>';
-      }
-      html += '</div>';
-      html += '<div class="subPlan-children">';
-      
-      // Render jobs in this sub-plan
-      for (const job of (subPlan.jobs || [])) {
-        html += renderJobNode(job, 1);
-      }
-      
-      // Render nested sub-plans
-      for (const child of (subPlan.children || [])) {
-        html += rendersubPlan(child, depth + 1);
-      }
-      
-      html += '</div></div>';
-      return html;
     }
     
     // Render a job node with its process tree
@@ -1733,14 +2051,13 @@ ${mermaidDef}
    * edge indices for `linkStyle` coloring.
    *
    * @param plan - The Plan instance whose nodes form the DAG.
-   * @returns An object containing the Mermaid diagram string and a map of
-   *   subgraph IDs to their child Plan metadata.
+   * @returns An object containing the Mermaid diagram string and node tooltips.
    */
-  private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; subgraphData: Record<string, { childPlanId: string; name: string }> } {
+  private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; nodeTooltips: Record<string, string> } {
     const lines: string[] = ['flowchart LR'];
     
-    // Track subgraph data for click handling
-    const subgraphData: Record<string, { childPlanId: string; name: string }> = {};
+    // Track full names for tooltip display when labels are truncated
+    const nodeTooltips: Record<string, string> = {};
     
     // Get branch names
     const baseBranchName = plan.baseBranch || 'main';
@@ -1789,11 +2106,63 @@ ${mermaidDef}
     // Track leaf node states for mergedToTarget status
     const leafnodeStates = new Map<string, NodeExecutionState | undefined>();
     
-    // Counter for unique subgraph IDs
-    let subgraphCounter = 0;
+    // Counter for unique group subgraph IDs
+    let groupSubgraphCounter = 0;
     
     // Track all edges to add at the end
     const edgesToAdd: Array<{ from: string; to: string; status?: string }> = [];
+    
+    // Helper function to render a single job node
+    const renderJobNode = (
+      node: JobNode,
+      nodeId: string,
+      d: PlanInstance,
+      prefix: string,
+      indent: string,
+      nodeHasDependents: Set<string>,
+      localRoots: string[],
+      localLeaves: string[]
+    ) => {
+      const state = d.nodeStates.get(nodeId);
+      const status = state?.status || 'pending';
+      const sanitizedId = prefix + this._sanitizeId(nodeId);
+      
+      const isRoot = node.dependencies.length === 0;
+      const isLeaf = !nodeHasDependents.has(nodeId);
+      
+      const label = this._escapeForMermaid(node.name);
+      const icon = this._getStatusIcon(status);
+      
+      // Calculate duration for completed or running nodes
+      let durationLabel = '';
+      if (state?.startedAt) {
+        const endTime = state.endedAt || Date.now();
+        const duration = endTime - state.startedAt;
+        durationLabel = ' | ' + formatDurationMs(duration);
+      }
+      
+      const displayLabel = this._truncateNodeLabel(label, durationLabel);
+      if (displayLabel !== label) {
+        nodeTooltips[sanitizedId] = label;
+      }
+      
+      lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);
+      lines.push(`${indent}class ${sanitizedId} ${status}`);
+      
+      nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
+      
+      if (isRoot) localRoots.push(sanitizedId);
+      if (isLeaf) {
+        localLeaves.push(sanitizedId);
+        leafnodeStates.set(sanitizedId, state);
+      }
+      
+      // Add edges from dependencies
+      for (const depId of node.dependencies) {
+        const depSanitizedId = prefix + this._sanitizeId(depId);
+        edgesToAdd.push({ from: depSanitizedId, to: sanitizedId, status: d.nodeStates.get(depId)?.status });
+      }
+    };
     
     // Recursive function to render Plan structure
     const renderPlanInstance = (d: PlanInstance, prefix: string, depth: number): { roots: string[], leaves: string[] } => {
@@ -1809,217 +2178,117 @@ ${mermaidDef}
         }
       }
       
-      // Render each node
+      // Organize nodes by group tag
+      const groupedNodes = new Map<string, { nodeId: string; node: PlanNode }[]>();
+      const ungroupedNodes: { nodeId: string; node: PlanNode }[] = [];
+      
       for (const [nodeId, node] of d.nodes) {
-        const state = d.nodeStates.get(nodeId);
-        const status = state?.status || 'pending';
-        const sanitizedId = prefix + this._sanitizeId(nodeId);
-        
-        const isRoot = node.dependencies.length === 0;
-        const isLeaf = !nodeHasDependents.has(nodeId);
-        
-        if (node.type === 'subPlan') {
-          const subPlanNode = node as SubPlanNode;
-          const label = this._escapeForMermaid(node.name);
-          const subgraphId = `sg${subgraphCounter++}`;
-          
-          // Calculate duration for subPlan - use child plan's actual start/end times
-          let durationLabel = '';
-          const childPlanId = state?.childPlanId || subPlanNode.childPlanId;
-          if (childPlanId) {
-            // Get the effective start time (when first child actually started)
-            const effectiveStartedAt = this._planRunner.getEffectiveStartedAt(childPlanId) || state?.startedAt;
-            // Get the effective end time (when last child finished)
-            const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(childPlanId) || state?.endedAt || Date.now();
-            
-            if (effectiveStartedAt) {
-              const duration = effectiveEndedAt - effectiveStartedAt;
-              durationLabel = ' | ' + formatDurationMs(duration);
-            }
-            
-            // Track subgraph data for click handling
-            subgraphData[subgraphId] = { childPlanId, name: node.name };
-          } else if (state?.startedAt) {
-            // Fallback for not-yet-started subPlans
-            const endTime = state.endedAt || Date.now();
-            const duration = endTime - state.startedAt;
-            durationLabel = ' | ' + formatDurationMs(duration);
+        const groupTag = node.group;
+        if (groupTag) {
+          if (!groupedNodes.has(groupTag)) {
+            groupedNodes.set(groupTag, []);
           }
-          
-          lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(status)} ${label}${durationLabel}"]`);
-          // Don't set direction inside subgraphs - let them inherit from parent
-          
-          let innerRoots: string[] = [];
-          let innerLeaves: string[] = [];
-          
-          // Try to get instantiated child Plan first
-          const childPlan = state?.childPlanId ? this._planRunner.get(state.childPlanId) : undefined;
-          
-          if (childPlan) {
-            // Use instantiated child Plan
-            const result = renderPlanInstance(childPlan, prefix + 'c' + subgraphCounter + '_', depth + 1);
-            innerRoots = result.roots;
-            innerLeaves = result.leaves;
-          } else if (subPlanNode.childSpec) {
-            // Fall back to spec (child Plan not yet created or already cleaned up)
-            const result = renderFromSpec(subPlanNode.childSpec, prefix + 'c' + subgraphCounter + '_', depth + 1, status);
-            innerRoots = result.roots;
-            innerLeaves = result.leaves;
-          }
-          
-          lines.push(`${indent}end`);
-          
-          // Style the subgraph based on status
-          const boxColor = status === 'running' ? '#1a2a4e' : status === 'succeeded' ? '#1a3a2e' : '#1a1a2e';
-          const borderColor = status === 'running' ? '#3794ff' : status === 'succeeded' ? '#4ec9b0' : '#4a4a6a';
-          lines.push(`${indent}style ${subgraphId} fill:${boxColor},stroke:${borderColor},stroke-width:2px`);
-          
-          // Store entry/exit for this subPlan node
-          nodeEntryExitMap.set(sanitizedId, {
-            entryIds: innerRoots.length > 0 ? innerRoots : [sanitizedId],
-            exitIds: innerLeaves.length > 0 ? innerLeaves : [sanitizedId]
-          });
-          
-          // Track roots/leaves
-          if (isRoot) localRoots.push(...(innerRoots.length > 0 ? innerRoots : [sanitizedId]));
-          if (isLeaf) localLeaves.push(...(innerLeaves.length > 0 ? innerLeaves : [sanitizedId]));
-          
-          // Add edges from dependencies to this node's entry points
-          for (const depId of node.dependencies) {
-            const depSanitizedId = prefix + this._sanitizeId(depId);
-            edgesToAdd.push({ from: depSanitizedId, to: sanitizedId, status: d.nodeStates.get(depId)?.status });
-          }
-          
+          groupedNodes.get(groupTag)!.push({ nodeId, node });
         } else {
-          // Regular job node - add status icon and duration to label
-          const label = this._escapeForMermaid(node.name);
-          const icon = this._getStatusIcon(status);
-          
-          // Calculate duration for completed or running nodes
-          let durationLabel = '';
-          if (state?.startedAt) {
-            const endTime = state.endedAt || Date.now();
-            const duration = endTime - state.startedAt;
-            durationLabel = ' | ' + formatDurationMs(duration);
-          }
-          
-          lines.push(`${indent}${sanitizedId}["${icon} ${label}${durationLabel}"]`);
-          lines.push(`${indent}class ${sanitizedId} ${status}`);
-          
-          nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
-          
-          if (isRoot) localRoots.push(sanitizedId);
-          if (isLeaf) {
-            localLeaves.push(sanitizedId);
-            // Track state for leaf nodes to check mergedToTarget later
-            leafnodeStates.set(sanitizedId, state);
-          }
-          
-          // Add edges from dependencies
-          for (const depId of node.dependencies) {
-            const depSanitizedId = prefix + this._sanitizeId(depId);
-            edgesToAdd.push({ from: depSanitizedId, to: sanitizedId, status: d.nodeStates.get(depId)?.status });
-          }
+          ungroupedNodes.push({ nodeId, node });
         }
       }
       
-      return { roots: localRoots, leaves: localLeaves };
-    };
-    
-    // Render from spec (for sub-plans not yet instantiated)
-    const renderFromSpec = (
-      spec: import('../../plan/types').PlanSpec, 
-      prefix: string, 
-      depth: number, 
-      inheritedStatus: string
-    ): { roots: string[], leaves: string[] } => {
-      const indent = '  '.repeat(depth + 1);
-      const localRoots: string[] = [];
-      const localLeaves: string[] = [];
-      
-      // Build maps
-      const producerToSanitized = new Map<string, string>();
-      const nodeHasDependents = new Set<string>();
-      
-      // First pass: collect all node IDs and build dependency info
-      for (const jobSpec of spec.jobs || []) {
-        const sanitizedId = prefix + this._sanitizeId(jobSpec.producerId);
-        producerToSanitized.set(jobSpec.producerId, sanitizedId);
-        for (const dep of jobSpec.dependencies || []) {
-          nodeHasDependents.add(dep);
-        }
-      }
-      for (const subPlanSpec of spec.subPlans || []) {
-        const sanitizedId = prefix + this._sanitizeId(subPlanSpec.producerId);
-        producerToSanitized.set(subPlanSpec.producerId, sanitizedId);
-        for (const dep of subPlanSpec.dependencies || []) {
-          nodeHasDependents.add(dep);
-        }
+      // Build a tree structure from group paths
+      interface GroupTreeNode {
+        name: string;
+        children: Map<string, GroupTreeNode>;
+        nodes: { nodeId: string; node: PlanNode }[];
       }
       
-      // Render jobs
-      for (const jobSpec of spec.jobs || []) {
-        const sanitizedId = producerToSanitized.get(jobSpec.producerId)!;
-        const label = this._escapeForMermaid(jobSpec.name || jobSpec.producerId);
-        const icon = this._getStatusIcon(inheritedStatus);
-        const isRoot = (jobSpec.dependencies || []).length === 0;
-        const isLeaf = !nodeHasDependents.has(jobSpec.producerId);
+      const groupTree: GroupTreeNode = { name: '', children: new Map(), nodes: [] };
+      
+      for (const [groupPath, nodes] of groupedNodes) {
+        const parts = groupPath.split('/');
+        let current = groupTree;
         
-        lines.push(`${indent}${sanitizedId}["${icon} ${label}"]`);
-        lines.push(`${indent}class ${sanitizedId} ${inheritedStatus}`);
-        
-        nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
-        
-        if (isRoot) localRoots.push(sanitizedId);
-        if (isLeaf) localLeaves.push(sanitizedId);
-        
-        // Add edges
-        for (const dep of jobSpec.dependencies || []) {
-          const depSanitizedId = producerToSanitized.get(dep);
-          if (depSanitizedId) {
-            edgesToAdd.push({ from: depSanitizedId, to: sanitizedId });
+        for (const part of parts) {
+          if (!current.children.has(part)) {
+            current.children.set(part, { name: part, children: new Map(), nodes: [] });
           }
+          current = current.children.get(part)!;
         }
+        
+        // Nodes belong to the leaf group
+        current.nodes = nodes;
       }
       
-      // Render nested sub-plans
-      for (const subPlanSpec of spec.subPlans || []) {
-        const sanitizedId = producerToSanitized.get(subPlanSpec.producerId)!;
-        const label = this._escapeForMermaid(subPlanSpec.name || subPlanSpec.producerId);
-        const subgraphId = `sg${subgraphCounter++}`;
-        const isRoot = (subPlanSpec.dependencies || []).length === 0;
-        const isLeaf = !nodeHasDependents.has(subPlanSpec.producerId);
+      // Recursively render group tree as nested subgraphs
+      const renderGroupTree = (
+        treeNode: GroupTreeNode,
+        groupPath: string,
+        currentIndent: string
+      ): void => {
+        // Look up the group UUID from the path
+        const groupUuid = d.groupPathToId.get(groupPath);
+        const groupState = groupUuid ? d.groupStates.get(groupUuid) : undefined;
+        const groupStatus = groupState?.status || 'pending';
         
-        lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(inheritedStatus)} ${label}"]`);
-        // Don't set direction inside subgraphs - let them inherit from parent
+        // Use sanitized group UUID as the subgraph ID (same pattern as nodes)
+        const sanitizedGroupId = groupUuid ? this._sanitizeId(groupUuid) : `grp${groupSubgraphCounter++}`;
         
-        // Build nested spec and render
-        const nestedSpec: import('../../plan/types').PlanSpec = {
-          name: subPlanSpec.name || subPlanSpec.producerId,
-          jobs: subPlanSpec.jobs,
-          subPlans: subPlanSpec.subPlans,
+        // Get icon for group status (same as nodes)
+        const icon = this._getStatusIcon(groupStatus);
+        
+        // Calculate duration for groups (same as nodes)
+        let groupDurationLabel = '';
+        if (groupState?.startedAt) {
+          const endTime = groupState.endedAt || Date.now();
+          const duration = endTime - groupState.startedAt;
+          groupDurationLabel = ' | ' + formatDurationMs(duration);
+        }
+        
+        // Status-specific styling for groups (same colors as nodes)
+        const groupColors: Record<string, { fill: string; stroke: string }> = {
+          pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
+          ready: { fill: '#1a2a4e', stroke: '#3794ff' },
+          running: { fill: '#1a2a4e', stroke: '#3794ff' },
+          succeeded: { fill: '#1a3a2e', stroke: '#4ec9b0' },
+          failed: { fill: '#3a1a1e', stroke: '#f48771' },
+          blocked: { fill: '#3a1a1e', stroke: '#f48771' },
+          canceled: { fill: '#1a1a2e', stroke: '#6a6a8a' },
         };
+        const colors = groupColors[groupStatus] || groupColors.pending;
         
-        const result = renderFromSpec(nestedSpec, prefix + 'n' + subgraphCounter + '_', depth + 1, inheritedStatus);
-        
-        lines.push(`${indent}end`);
-        lines.push(`${indent}style ${subgraphId} fill:#1a1a2e,stroke:#4a4a6a,stroke-width:2px`);
-        
-        nodeEntryExitMap.set(sanitizedId, {
-          entryIds: result.roots.length > 0 ? result.roots : [sanitizedId],
-          exitIds: result.leaves.length > 0 ? result.leaves : [sanitizedId]
-        });
-        
-        if (isRoot) localRoots.push(...(result.roots.length > 0 ? result.roots : [sanitizedId]));
-        if (isLeaf) localLeaves.push(...(result.leaves.length > 0 ? result.leaves : [sanitizedId]));
-        
-        // Add edges
-        for (const dep of subPlanSpec.dependencies || []) {
-          const depSanitizedId = producerToSanitized.get(dep);
-          if (depSanitizedId) {
-            edgesToAdd.push({ from: depSanitizedId, to: sanitizedId });
-          }
+        const displayName = treeNode.name || groupPath;
+        const escapedName = this._escapeForMermaid(displayName);
+        const truncatedName = this._truncateNodeLabel(escapedName, groupDurationLabel);
+        if (truncatedName !== escapedName) {
+          nodeTooltips[sanitizedGroupId] = displayName;
         }
+        
+        lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedName}${groupDurationLabel}"]`);
+        
+        const childIndent = currentIndent + '  ';
+        
+        // Render child groups first (nested subgraphs)
+        for (const childGroup of treeNode.children.values()) {
+          const childPath = groupPath ? `${groupPath}/${childGroup.name}` : childGroup.name;
+          renderGroupTree(childGroup, childPath, childIndent);
+        }
+        
+        // Render nodes directly in this group
+        for (const { nodeId, node } of treeNode.nodes) {
+          renderJobNode(node as JobNode, nodeId, d, prefix, childIndent, nodeHasDependents, localRoots, localLeaves);
+        }
+        
+        lines.push(`${currentIndent}end`);
+        lines.push(`${currentIndent}style ${sanitizedGroupId} fill:${colors.fill},stroke:${colors.stroke},stroke-width:2px,stroke-dasharray:5`);
+      };
+      
+      // Render ungrouped nodes first
+      for (const { nodeId, node } of ungroupedNodes) {
+        renderJobNode(node as JobNode, nodeId, d, prefix, indent, nodeHasDependents, localRoots, localLeaves);
+      }
+      
+      // Render group tree (top-level groups)
+      for (const topGroup of groupTree.children.values()) {
+        renderGroupTree(topGroup, topGroup.name, indent);
       }
       
       return { roots: localRoots, leaves: localLeaves };
@@ -2098,7 +2367,7 @@ ${mermaidDef}
       lines.push(`  linkStyle ${failedEdges.join(',')} stroke:#f48771,stroke-width:2px`);
     }
     
-    return { diagram: lines.join('\n'), subgraphData };
+    return { diagram: lines.join('\n'), nodeTooltips };
   }
   
   /**
@@ -2118,13 +2387,15 @@ ${mermaidDef}
   }
   
   /**
-   * Sanitize a node ID for use as a Mermaid node identifier.
-   *
-   * @param id - The raw node ID.
-   * @returns A string safe for Mermaid node references (alphanumeric + underscores).
+   * Convert a node ID (UUID) to a Mermaid-safe identifier.
+   * Simply prefixes with 'n' and strips hyphens from UUID.
+   * 
+   * @param id - The raw node ID (UUID like "abc12345-6789-...").
+   * @returns Mermaid-safe ID like "nabc123456789..."
    */
   private _sanitizeId(id: string): string {
-    return 'node_' + id.replace(/[^a-zA-Z0-9]/g, '_');
+    // UUIDs have hyphens; just remove them and prefix with 'n'
+    return 'n' + id.replace(/-/g, '');
   }
   
   /**
@@ -2139,6 +2410,35 @@ ${mermaidDef}
       .replace(/[<>{}|:#]/g, '')
       .replace(/\[/g, '(')
       .replace(/\]/g, ')');
+  }
+
+  /**
+   * Maximum character length for a node label (name + duration) before truncation.
+   */
+  private static readonly NODE_LABEL_MAX_LENGTH = 25;
+
+  /**
+   * Truncate a node name so that the combined label (name + duration suffix)
+   * stays within {@link NODE_LABEL_MAX_LENGTH} characters. When truncation
+   * occurs the name is trimmed and an ellipsis ('...') is appended.
+   *
+   * @param name - The escaped node name.
+   * @param durationLabel - The duration suffix (e.g., ' | 2m 34s'), may be empty.
+   * @returns The (possibly truncated) name.
+   */
+  private _truncateNodeLabel(name: string, durationLabel: string): string {
+    const maxLen = planDetailPanel.NODE_LABEL_MAX_LENGTH;
+    // +2 accounts for the status icon + space prefix ("✓ ")
+    const totalLen = 2 + name.length + durationLabel.length;
+    if (totalLen <= maxLen) {
+      return name;
+    }
+    // Reserve space for icon, duration, and ellipsis
+    const available = maxLen - 2 - durationLabel.length - 3; // 3 = '...'
+    if (available <= 0) {
+      return name; // duration alone exceeds limit – don't truncate name to nothing
+    }
+    return name.slice(0, available).trimEnd() + '...';
   }
   
   /**

@@ -14,7 +14,10 @@
 import { PlanRunner } from '../plan/runner';
 import { Logger, ComponentLogger } from '../core/logger';
 import { JsonRpcRequest, JsonRpcResponse } from './types';
+import { IMcpRequestRouter } from '../interfaces/IMcpManager';
 import { getPlanToolDefinitions } from './tools/planTools';
+import { getNodeToolDefinitions } from './tools/nodeTools';
+import { validateInput, hasSchema } from './validation';
 import {
   PlanHandlerContext,
   handleCreatePlan,
@@ -29,6 +32,11 @@ import {
   handleRetryPlan,
   handleGetNodeFailureContext,
   handleRetryPlanNode,
+  handleCreateNode,
+  handleGetNode,
+  handleListNodes,
+  handleRetryNode,
+  handleNodeFailureContext,
 } from './handlers';
 
 /** MCP component logger */
@@ -78,7 +86,7 @@ const SERVER_INFO = {
  * // response.result.tools => McpTool[]
  * ```
  */
-export class McpHandler {
+export class McpHandler implements IMcpRequestRouter {
   private readonly context: PlanHandlerContext;
 
   /**
@@ -175,7 +183,10 @@ export class McpHandler {
    * {@link getPlanToolDefinitions}.
    */
   private handleToolsList(request: JsonRpcRequest): JsonRpcResponse {
-    const tools = getPlanToolDefinitions();
+    const tools = [
+      ...getPlanToolDefinitions(),
+      ...getNodeToolDefinitions(),
+    ];
     log.info('Tools list requested', { toolCount: tools.length });
     log.debug('Tools list - tool names', { tools: tools.map(t => t.name) });
     
@@ -188,11 +199,27 @@ export class McpHandler {
    * Routes the call to the matching plan handler based on the tool `name`.
    * The handler result is wrapped in an MCP `content` array with a single
    * `text` item containing the JSON-serialised result.
+   * 
+   * All input is validated against JSON schemas before processing.
    */
   private async handleToolsCall(request: JsonRpcRequest): Promise<JsonRpcResponse> {
     const { name, arguments: args } = request.params || {};
     log.info('Tool call', { tool: name });
     log.debug('Tool call arguments', { tool: name, args });
+    
+    // Validate input against JSON schema before processing
+    if (hasSchema(name)) {
+      const validation = validateInput(name, args || {});
+      if (!validation.valid) {
+        log.warn('Schema validation failed', { tool: name, error: validation.error });
+        return this.successResponse(request.id, {
+          content: [{ type: 'text', text: JSON.stringify({ 
+            success: false, 
+            error: validation.error 
+          }) }]
+        });
+      }
+    }
     
     let result: any;
     
@@ -244,6 +271,27 @@ export class McpHandler {
         
       case 'retry_copilot_plan_node':
         result = await handleRetryPlanNode(args || {}, this.context);
+        break;
+        
+      // --- New node-centric tools ---
+      case 'create_copilot_node':
+        result = await handleCreateNode(args || {}, this.context);
+        break;
+        
+      case 'get_copilot_node':
+        result = await handleGetNode(args || {}, this.context);
+        break;
+        
+      case 'list_copilot_nodes':
+        result = await handleListNodes(args || {}, this.context);
+        break;
+        
+      case 'retry_copilot_node':
+        result = await handleRetryNode(args || {}, this.context);
+        break;
+        
+      case 'get_copilot_node_failure_context':
+        result = await handleNodeFailureContext(args || {}, this.context);
         break;
         
       default:

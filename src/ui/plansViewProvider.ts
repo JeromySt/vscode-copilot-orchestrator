@@ -28,6 +28,12 @@ import { NodeDetailPanel } from './panels/nodeDetailPanel';
  * **Extension → Webview messages:**
  * - `{ type: 'update', Plans: PlanData[], total: number, running: number }` — refreshed Plan list
  *
+ * **Keyboard shortcuts (when a plan item is focused):**
+ * - `Enter` — open plan details panel
+ * - `Delete` — delete the plan
+ * - `Ctrl+Escape` — cancel the plan (if running)
+ * - `Arrow Up/Down` — navigate between plans
+ *
  * @example
  * ```ts
  * const provider = new plansViewProvider(context, planRunner);
@@ -51,7 +57,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     private readonly _planRunner: PlanRunner
   ) {
     // Listen for Plan events to refresh
-    _planRunner.on('planCreated', () => this.refresh());
+    _planRunner.on('planCreated', () => {
+      // Immediate refresh for new plans (user expectation)
+      this.refresh();
+    });
     _planRunner.on('planCompleted', () => this.refresh());
     _planRunner.on('planDeleted', (planId) => {
       // Close any open panels for this Plan
@@ -91,7 +100,12 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.onDidReceiveMessage(message => {
       switch (message.type) {
         case 'openPlan':
-          vscode.commands.executeCommand('orchestrator.showPlanDetails', message.planId);
+          // Open plan and take focus
+          vscode.commands.executeCommand('orchestrator.showPlanDetails', message.planId, false);
+          break;
+        case 'previewPlan':
+          // Preview plan but keep focus in tree
+          vscode.commands.executeCommand('orchestrator.showPlanDetails', message.planId, true);
           break;
         case 'cancelPlan':
           vscode.commands.executeCommand('orchestrator.cancelPlan', message.planId);
@@ -119,7 +133,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (hasRunning) {
         this.refresh();
       }
-    }, 2000);
+    }, 1000);
     
     webviewView.onDidDispose(() => {
       if (this._refreshTimer) {
@@ -252,8 +266,14 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       cursor: pointer;
       border-left: 3px solid transparent;
     }
-    .plan-item:hover {
+    .plan-item:hover,
+    .plan-item:focus {
       background: var(--vscode-list-activeSelectionBackground);
+      outline: none;
+    }
+    .plan-item:focus {
+      box-shadow: 0 0 0 2px var(--vscode-focusBorder) inset;
+      border-left-width: 4px;
     }
     .plan-item.running { border-left-color: var(--vscode-progressBar-background); }
     .plan-item.succeeded { border-left-color: var(--vscode-testing-iconPassed); }
@@ -367,6 +387,44 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       return hours + 'h ' + remMins + 'm';
     }
     
+    // Global keyboard handler - works without focus on specific plan item
+    document.addEventListener('keydown', (e) => {
+      // Find the focused plan item or the first one
+      let targetEl = document.activeElement;
+      if (!targetEl || !targetEl.classList.contains('plan-item')) {
+        targetEl = document.querySelector('.plan-item');
+      }
+      if (!targetEl) return;
+      
+      const planId = targetEl.dataset.id;
+      const status = targetEl.dataset.status;
+      
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        vscode.postMessage({ type: 'openPlan', planId });
+      } else if (e.key === 'Delete') {
+        e.preventDefault();
+        vscode.postMessage({ type: 'deletePlan', planId });
+      } else if (e.key === 'Escape' && e.ctrlKey) {
+        e.preventDefault();
+        if (status === 'running' || status === 'pending') {
+          vscode.postMessage({ type: 'cancelPlan', planId });
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = targetEl.nextElementSibling;
+        if (next && next.classList.contains('plan-item')) {
+          next.focus();
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const prev = targetEl.previousElementSibling;
+        if (prev && prev.classList.contains('plan-item')) {
+          prev.focus();
+        }
+      }
+    });
+    
     window.addEventListener('message', ev => {
       if (ev.data.type !== 'update') return;
       
@@ -399,7 +457,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
                              plan.status === 'succeeded' ? 'succeeded' : '';
         
         return \`
-          <div class="plan-item \${plan.status}" data-id="\${plan.id}">
+          <div class="plan-item \${plan.status}" data-id="\${plan.id}" data-status="\${plan.status}" tabindex="0">
             <div class="plan-name">
               <span>\${plan.name}</span>
               <span class="plan-status \${plan.status}">\${plan.status}</span>
@@ -418,12 +476,23 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         \`;
       }).join('');
       
-      // Add click handlers
+      // Add click handlers - click previews (keeps focus in tree), double-click opens
       document.querySelectorAll('.plan-item').forEach(el => {
         el.addEventListener('click', () => {
+          // Preview: show panel but keep focus in tree for continued navigation
+          vscode.postMessage({ type: 'previewPlan', planId: el.dataset.id });
+        });
+        el.addEventListener('dblclick', () => {
+          // Open: show panel and take focus
           vscode.postMessage({ type: 'openPlan', planId: el.dataset.id });
         });
       });
+      
+      // Auto-focus the first plan item for keyboard navigation
+      const firstPlan = document.querySelector('.plan-item');
+      if (firstPlan) {
+        firstPlan.focus();
+      }
     });
     
     // Request initial data

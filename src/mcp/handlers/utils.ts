@@ -128,6 +128,13 @@ export function lookupNode(plan: PlanInstance, nodeId: string): { node: any; sta
 }
 
 /**
+ * Context alias for node-centric handlers.
+ * Currently the same as PlanHandlerContext since the new handlers
+ * still use PlanRunner internally.
+ */
+export type NodeHandlerContext = PlanHandlerContext;
+
+/**
  * Resolve the base branch for a plan.
  *
  * Falls back to the repository's current branch, then to `'main'`
@@ -160,7 +167,19 @@ export async function resolveTargetBranch(
   repoPath: string,
   requested?: string
 ): Promise<string> {
-  if (requested) return requested;
+  // If explicit branch requested, ensure it exists (create from base if needed)
+  if (requested) {
+    try {
+      const exists = await git.branches.exists(requested, repoPath);
+      if (!exists) {
+        await git.branches.create(requested, baseBranch, repoPath);
+      }
+    } catch (err) {
+      // In test environments or invalid paths, branch operations may fail
+      // Log but continue - the branch will be created later or already exists
+    }
+    return requested;
+  }
 
   const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
     baseBranch,

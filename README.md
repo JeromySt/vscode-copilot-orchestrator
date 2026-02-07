@@ -162,12 +162,21 @@ Jobs support multiple work types:
 
 The orchestrator exposes a full MCP server that integrates directly with GitHub Copilot Chat:
 
-**Plan Tools (Multi-Job Workflows):**
+**Node Tools (Direct Node Management):**
 | Tool | Description |
 |------|-------------|
-| `create_copilot_plan` | Create a plan with multiple dependent jobs |
+| `create_copilot_node` | Create standalone or grouped nodes |
+| `get_copilot_node` | Get node details by ID |
+| `list_copilot_nodes` | List nodes with filtering (group, status, name) |
+| `retry_copilot_node` | Retry a specific failed node |
+| `get_copilot_node_failure_context` | Get failure details for a node |
+
+**Plan Tools:**
+| Tool | Description |
+|------|-------------|
+| `create_copilot_plan` | Create a plan with jobs and visual groups |
 | `create_copilot_job` | Create a single job (wrapped in a plan) |
-| `get_copilot_plan_status` | Get plan progress and job statuses |
+| `get_copilot_plan_status` | Get plan progress, job statuses, and group summary |
 | `list_copilot_plans` | List all plans |
 | `cancel_copilot_plan` | Cancel a plan and all its jobs |
 | `delete_copilot_plan` | Delete a plan and all its state |
@@ -251,73 +260,87 @@ Plans allow you to run multiple jobs with dependencies. Jobs execute in parallel
         └─────────┘
 ```
 
-### 🔗 Nested Plans (Plans within Plans)
+### 🔗 Visual Groups (Organized Workflows)
 
-For complex workflows, a job can itself be a complete plan. This enables hierarchical orchestration where one step triggers an entire sub-pipeline:
+For complex workflows, use **groups** to organize jobs visually and provide namespace isolation. Groups render as nested boxes in the UI with aggregate status:
 
-**Example: Full Release Pipeline with Nested Testing Plan**
+**Example: Full Release Pipeline with Grouped Phases**
 ```json
 {
   "name": "Release Pipeline",
-  "maxParallel": 3,
+  "maxParallel": 4,
   "jobs": [
     {
-      "id": "prepare",
-      "name": "Prepare Release",
+      "producer_id": "prepare",
       "task": "Bump version and update changelog",
+      "dependencies": [],
       "work": "@agent Update version in package.json and add changelog entry"
+    }
+  ],
+  "groups": [
+    {
+      "name": "build",
+      "jobs": [
+        {
+          "producer_id": "api-service",
+          "task": "Implement API changes",
+          "dependencies": ["prepare"],
+          "work": "@agent Implement the new REST endpoints"
+        },
+        {
+          "producer_id": "web-client",
+          "task": "Update web frontend",
+          "dependencies": ["prepare"],
+          "work": "@agent Update React components"
+        },
+        {
+          "producer_id": "mobile-client",
+          "task": "Update mobile app",
+          "dependencies": ["prepare"],
+          "work": "@agent Update React Native screens"
+        },
+        {
+          "producer_id": "docs-update",
+          "task": "Update all documentation",
+          "dependencies": ["prepare"],
+          "work": "@agent Update API docs, README, and user guide"
+        }
+      ]
     },
     {
-      "id": "api-service",
-      "name": "API Service",
-      "task": "Implement API changes",
-      "dependsOn": ["prepare"],
-      "work": "@agent Implement the new REST endpoints per the API spec"
+      "name": "testing",
+      "jobs": [
+        {
+          "producer_id": "unit-tests",
+          "task": "Run unit tests",
+          "dependencies": ["build/api-service", "build/web-client"],
+          "work": "npm run test:unit"
+        },
+        {
+          "producer_id": "integration-tests",
+          "task": "Run integration tests",
+          "dependencies": ["build/api-service"],
+          "work": "npm run test:integration"
+        },
+        {
+          "producer_id": "e2e-tests",
+          "task": "Run E2E tests",
+          "dependencies": ["unit-tests", "integration-tests"],
+          "work": "npm run test:e2e"
+        }
+      ]
     },
     {
-      "id": "web-client",
-      "name": "Web Client",
-      "task": "Update web frontend",
-      "dependsOn": ["prepare"],
-      "work": "@agent Update React components to use new API endpoints"
-    },
-    {
-      "id": "mobile-client",
-      "name": "Mobile Client", 
-      "task": "Update mobile app",
-      "dependsOn": ["prepare"],
-      "work": "@agent Update React Native screens for new features"
-    },
-    {
-      "id": "docs-update",
-      "name": "Documentation",
-      "task": "Update all documentation",
-      "dependsOn": ["prepare"],
-      "work": "@agent Update API docs, README, and user guide"
-    },
-    {
-      "id": "testing-suite",
-      "name": "Comprehensive Testing",
-      "task": "Run full test suite across all components",
-      "dependsOn": ["api-service", "web-client", "mobile-client", "docs-update"],
-      "plan": {
-        "name": "Testing Sub-Plan",
-        "maxParallel": 4,
-        "jobs": [
-          { "id": "unit-tests", "task": "Run unit tests", "work": "npm run test:unit" },
-          { "id": "integration-tests", "task": "Run integration tests", "work": "npm run test:integration" },
-          { "id": "e2e-tests", "task": "Run E2E tests", "work": "npm run test:e2e" },
-          { "id": "perf-tests", "task": "Run performance tests", "work": "npm run test:perf" }
-        ]
-      }
-    },
-    {
-      "id": "deploy",
-      "name": "Deploy Release",
-      "task": "Deploy to production",
-      "dependsOn": ["testing-suite"],
-      "work": "@agent Create release tag and trigger deployment workflow",
-      "postchecks": "npm run smoke-test"
+      "name": "deploy",
+      "jobs": [
+        {
+          "producer_id": "release",
+          "task": "Deploy to production",
+          "dependencies": ["testing/e2e-tests", "build/docs-update"],
+          "work": "@agent Create release tag and trigger deployment",
+          "postchecks": "npm run smoke-test"
+        }
+      ]
     }
   ]
 }
@@ -326,36 +349,37 @@ For complex workflows, a job can itself be a complete plan. This enables hierarc
 **Execution visualization:**
 ```
                               ┌───────────┐
-                              │  prepare  │  ← Stage 1: Single pre-step
+                              │  prepare  │  ← Root job (no group)
                               └─────┬─────┘
             ┌─────────────┬─────────┴────┬───────────┐
             │             │              │           │
       ┌─────▼─────┐ ┌─────▼────┐ ┌───────▼───┐ ┌─────▼──────┐
-      │api-service│ │web-client│ │mobile-cli │ │docs-update │  ← Stage 2: 4 parallel
-      └─────┬─────┘ └─────┬────┘ └─────┬─────┘ └──────┬─────┘
-            │             │            │              │
-            └─────────────┴──────┬─────┴──────────────┘
-                                 │
-                   ┌─────────────▼─────────────┐
-                   │      testing-suite        │  ← Stage 3: Nested plan!
-                   │  ┌─────────────────────┐  │
-                   │  │   Testing Sub-Plan  │  │
-                   │  │  ┌────┐ ┌────┐      │  │
-                   │  │  │unit│ │intg│ ...  │  │   (4 parallel test jobs)
-                   │  │  └────┘ └────┘      │  │
-                   │  └─────────────────────┘  │
-                   └─────────────┬─────────────┘
-                                 │
-                   ┌─────────────▼─────────────┐
-                   │         deploy            │  ← Stage 4: Single post-step
-                   └───────────────────────────┘
+      │api-service│ │web-client│ │mobile-cli │ │docs-update │  ← 📦 build group
+      └─────┬─────┘ └─────┬────┘ └───────────┘ └──────┬─────┘
+            │             │                           │
+            └──────┬──────┘                           │
+                   │                                  │
+      ┌────────────▼────────────┐                     │
+      │  📦 testing group       │                     │
+      │  ┌──────┐ ┌───────────┐ │                     │
+      │  │ unit │ │integration│ │                     │
+      │  └──┬───┘ └─────┬─────┘ │                     │
+      │     └─────┬─────┘       │                     │
+      │     ┌─────▼─────┐       │                     │
+      │     │    e2e    │       │                     │
+      │     └─────┬─────┘       │                     │
+      └───────────┼─────────────┘                     │
+                  └─────────────┬─────────────────────┘
+                          ┌─────▼─────┐
+                          │  release  │  ← 📦 deploy group
+                          └───────────┘
 ```
 
-This pattern enables:
-- **Modular pipelines**: Reuse testing plans across different parent plans
-- **Deep orchestration**: Nest plans to any depth for complex workflows
-- **Parallel efficiency**: Each level runs at its own `maxParallel` setting
-- **Unified monitoring**: Track nested plan progress in the Plan Detail Panel
+Groups enable:
+- **Visual organization**: Related jobs grouped in nested boxes
+- **Namespace isolation**: Same `producer_id` in different groups (e.g., both groups can have a "build" job)
+- **Aggregate status**: Each group shows overall progress (green when all jobs succeed)
+- **Simplified references**: Jobs in same group use local names; cross-group uses paths
 
 ---
 
@@ -370,24 +394,24 @@ Here's an actual plan that was executed on this very repository—the Copilot Or
   "name": "Orchestrator Self-Improvement: Full Maintainability & Tests v4",
   "maxParallel": 4,
   "jobs": [
-    { "id": "setup-test-infra", "task": "Setup Test Infrastructure", "work": { "type": "agent", "..." } },
-    { "id": "extract-interfaces", "task": "Extract DI Interfaces", "work": { "type": "agent", "..." } }
+    { "producer_id": "setup-test-infra", "task": "Setup Test Infrastructure", "dependencies": [], "work": { "type": "agent", "..." } },
+    { "producer_id": "extract-interfaces", "task": "Extract DI Interfaces", "dependencies": [], "work": { "type": "agent", "..." } }
   ],
-  "subPlans": [
+  "groups": [
     {
-      "id": "refactor-plan-module",
-      "name": "Refactor Plan Module",
-      "dependsOn": ["extract-interfaces"],
+      "name": "refactor-plan-module",
       "jobs": [
-        { "id": "plan-split-types", "task": "Split Plan Types" },
-        { "id": "plan-extract-helpers", "task": "Extract Plan Helpers" },
-        { "id": "plan-add-jsdoc", "task": "Add Plan JSDoc", "dependsOn": ["plan-split-types", "plan-extract-helpers"] }
+        { "producer_id": "plan-split-types", "task": "Split Plan Types", "dependencies": ["extract-interfaces"] },
+        { "producer_id": "plan-extract-helpers", "task": "Extract Plan Helpers", "dependencies": ["extract-interfaces"] },
+        { "producer_id": "plan-add-jsdoc", "task": "Add Plan JSDoc", "dependencies": ["plan-split-types", "plan-extract-helpers"] }
       ]
     },
-    { "id": "refactor-ui-module", "name": "Refactor UI Module", "..." },
-    { "id": "refactor-mcp-module", "name": "Refactor MCP Module", "..." },
-    { "id": "add-unit-tests", "name": "Add Unit Tests", "dependsOn": ["refactor-plan-module", "..."] },
-    { "id": "add-git-module-tests", "name": "Add Git Module Tests", "..." }
+    { "name": "refactor-ui-module", "jobs": [{ "producer_id": "ui-cleanup", "task": "...", "dependencies": ["extract-interfaces"] }] },
+    { "name": "refactor-mcp-module", "jobs": [{ "producer_id": "mcp-cleanup", "task": "...", "dependencies": ["extract-interfaces"] }] },
+    { "name": "testing", "jobs": [
+      { "producer_id": "add-unit-tests", "task": "Add Unit Tests", "dependencies": ["refactor-plan-module/plan-add-jsdoc", "refactor-ui-module/ui-cleanup"] },
+      { "producer_id": "add-git-tests", "task": "Add Git Module Tests", "dependencies": ["add-unit-tests"] }
+    ]}
   ]
 }
 ```
@@ -464,25 +488,19 @@ When the job completes:
 
 ### Automatic Registration
 
-The extension automatically registers the MCP server with VS Code:
-- **Status Bar**: Shows MCP connection state
-- **Copilot Chat**: Tools appear automatically in tool selection
-- **HTTP Transport**: MCP endpoint at `http://localhost:39219/mcp`
+The extension automatically registers the MCP server with VS Code using stdio transport:
+- **Auto-discovery**: Appears in "MCP: List Servers" automatically
+- **Copilot Chat**: Tools appear in tool selection when server is running
+- **No configuration needed**: Just start the server from the MCP list
 
-### Manual Configuration
+### Starting the Server
 
-If needed, add to your VS Code settings or `mcp.json`:
+1. Run command: **MCP: List Servers**
+2. Find "Copilot Orchestrator" in the list
+3. Click **Start** to enable orchestrator tools in Copilot Chat
 
-```json
-{
-  "mcpServers": {
-    "copilot-orchestrator": {
-      "type": "http",
-      "url": "http://localhost:39219/mcp"
-    }
-  }
-}
-```
+Alternatively, use the command palette:
+- **Copilot Orchestrator: MCP – How to Connect** for quick start options
 
 ---
 
@@ -492,7 +510,7 @@ If needed, add to your VS Code settings or `mcp.json`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `copilotOrchestrator.mcp.enabled` | `true` | Enable MCP server |
+| `copilotOrchestrator.mcp.enabled` | `true` | Enable MCP server auto-registration |
 | `copilotOrchestrator.worktreeRoot` | `.worktrees` | Worktree directory |
 | `copilotOrchestrator.maxConcurrentJobs` | `0` (auto) | Max concurrent jobs (0 = CPU count - 1) |
 | `copilotOrchestrator.merge.mode` | `squash` | Merge strategy: `squash`, `merge`, or `rebase` |
@@ -506,7 +524,6 @@ Enable granular logging for troubleshooting:
 | Setting | Description |
 |---------|-------------|
 | `copilotOrchestrator.logging.debug.mcp` | MCP protocol and server operations |
-| `copilotOrchestrator.logging.debug.http` | HTTP server requests and responses |
 | `copilotOrchestrator.logging.debug.jobs` | Job runner operations |
 | `copilotOrchestrator.logging.debug.plans` | Plan runner operations |
 | `copilotOrchestrator.logging.debug.git` | Git and worktree operations |
@@ -521,13 +538,14 @@ Enable granular logging for troubleshooting:
 │                      GitHub Copilot Chat                        │
 │                    (MCP Tool Integration)                       │
 └────────────────────────────┬────────────────────────────────────┘
-                             │ MCP (HTTP POST)
+                             │ MCP (stdio transport)
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                  VS Code Extension Host                         │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │              HTTP Server (port 39219)                     │  │
-│  │              • /mcp - JSON-RPC endpoint                   │  │
+│  │    MCP Server (stdio transport)                           │  │
+│  │    • JSON-RPC over stdin/stdout (no port needed)          │  │
+│  │    • Auto-registers via McpServerDefinitionProvider       │  │
 │  └────────────────────────────┬──────────────────────────────┘  │
 │                               │                                  │
 │  ┌────────────────────────────▼──────────────────────────────┐  │

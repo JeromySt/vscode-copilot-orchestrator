@@ -21,7 +21,6 @@ import {
   JobNode,
   NodeExecutionState,
   NodeStatus,
-  SubPlanNode,
   PlanSpec,
 } from '../../../plan/types';
 
@@ -72,24 +71,8 @@ function makeJobNode(
   return node;
 }
 
-function makeSubPlanNode(
-  id: string,
-  deps: string[] = [],
-  dependents: string[] = [],
-): SubPlanNode {
-  return {
-    id,
-    producerId: id,
-    name: id,
-    type: 'subPlan',
-    dependencies: deps,
-    dependents,
-    childSpec: { name: `Sub ${id}`, jobs: [] },
-  };
-}
-
 function makeState(status: NodeStatus = 'pending'): NodeExecutionState {
-  return { status, attempts: 0 };
+  return { status, version: 0, attempts: 0 };
 }
 
 /**
@@ -138,10 +121,14 @@ function buildPlan(
     roots,
     leaves,
     nodeStates,
+    groups: new Map(),
+    groupStates: new Map(),
+    groupPathToId: new Map(),
     repoPath: '/repo',
     baseBranch: 'main',
     worktreeRoot: '/worktrees',
     createdAt: 1000,
+    stateVersion: 0,
     cleanUpSuccessfulWork: true,
     maxParallel: 4,
     ...overrides,
@@ -650,37 +637,9 @@ suite('PlanScheduler', () => {
   });
 
   // =========================================================================
-  // Sub-plan coordination nodes
+  // Nodes without work
   // =========================================================================
-  suite('Sub-plan coordination nodes', () => {
-    test('sub-plan nodes do not consume execution slots', () => {
-      // Build a plan with a mix of job nodes (with work) and a sub-plan node
-      const plan = buildPlan([
-        ['job1', []],
-        ['sub1', []],
-        ['job2', []],
-      ], { maxParallel: 2 });
-
-      // Replace sub1 with a SubPlanNode
-      plan.nodes.set('sub1', makeSubPlanNode('sub1', [], []));
-
-      const sm = new PlanStateMachine(plan);
-      const scheduler = new PlanScheduler();
-
-      readyRoots(plan, sm);
-
-      // Mark sub1 as running — it should NOT count towards capacity
-      sm.transition('sub1', 'scheduled');
-      sm.transition('sub1', 'running');
-
-      // job1 and job2 are still ready and both should be selectable
-      // because sub1 doesn't consume work slots
-      const selected = scheduler.selectNodes(plan, sm);
-      assert.strictEqual(selected.length, 2);
-      assert.ok(selected.includes('job1'));
-      assert.ok(selected.includes('job2'));
-    });
-
+  suite('Nodes without work', () => {
     test('job nodes without work spec do not consume slots', () => {
       // A job node created without work={...}
       const plan = buildPlan(

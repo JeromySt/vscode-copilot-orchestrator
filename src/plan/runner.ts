@@ -14,15 +14,33 @@
  */
 
 import * as path from 'path';
-import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
+
+// Conditionally import vscode - may not be available in standalone processes
+let vscode: typeof import('vscode') | undefined;
+try {
+  vscode = require('vscode');
+} catch {
+  // Running outside VS Code extension host (e.g., stdio server)
+  vscode = undefined;
+}
+
+/**
+ * Get a configuration value from VS Code settings, with fallback for standalone mode.
+ */
+function getConfig<T>(section: string, key: string, defaultValue: T): T {
+  if (!vscode) {
+    return defaultValue;
+  }
+  return vscode.workspace.getConfiguration(section).get<T>(key, defaultValue);
+}
+
 import {
   PlanSpec,
   PlanInstance,
   PlanNode,
   JobNode,
-  SubPlanNode,
   NodeStatus,
   PlanStatus,
   JobExecutionResult,
@@ -289,7 +307,6 @@ export class PlanRunner extends EventEmitter {
   enqueue(spec: PlanSpec): PlanInstance {
     log.info(`Creating Plan: ${spec.name}`, {
       jobs: spec.jobs.length,
-      subPlans: spec.subPlans?.length || 0,
     });
     
     // Build the Plan
@@ -337,6 +354,7 @@ export class PlanRunner extends EventEmitter {
     instructions?: string;
     baseBranch?: string;
     targetBranch?: string;
+    expectsNoChanges?: boolean;
   }): PlanInstance {
     const plan = buildSingleJobPlan(jobSpec, {
       repoPath: this.config.defaultRepoPath,
@@ -454,7 +472,7 @@ export class PlanRunner extends EventEmitter {
         const node = plan.nodes.get(nodeId);
         if (!node) continue;
         
-        // Count job nodes (not subPlans)
+        // Count job nodes
         if (nodePerformsWork(node)) {
           if (state.status === 'running' || state.status === 'scheduled') {
             running++;
@@ -473,37 +491,18 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Get the effective endedAt for a plan, recursively including child plans.
-   * This is more accurate than plan.endedAt when subPlans ran asynchronously.
+   * Get the effective endedAt for a plan.
    * 
    * @param planId - The plan ID
-   * @returns The maximum endedAt across all nodes and child plans
+   * @returns The maximum endedAt across all nodes
    */
   getEffectiveEndedAt(planId: string): number | undefined {
-    return this.computeEffectiveEndedAtRecursive(planId);
-  }
-  
-  /**
-   * Recursively compute the effective endedAt across a plan and all child plans.
-   */
-  private computeEffectiveEndedAtRecursive(planId: string): number | undefined {
     const plan = this.plans.get(planId);
     if (!plan) return undefined;
     
     let maxEndedAt: number | undefined;
     
-    for (const [nodeId, state] of plan.nodeStates) {
-      const node = plan.nodes.get(nodeId);
-      
-      // For subPlan nodes, recursively check the child plan
-      if (node?.type === 'subPlan' && state.childPlanId) {
-        const childEndedAt = this.computeEffectiveEndedAtRecursive(state.childPlanId);
-        if (childEndedAt && (!maxEndedAt || childEndedAt > maxEndedAt)) {
-          maxEndedAt = childEndedAt;
-        }
-      }
-      
-      // Also check this node's own endedAt
+    for (const [, state] of plan.nodeStates) {
       if (state.endedAt && (!maxEndedAt || state.endedAt > maxEndedAt)) {
         maxEndedAt = state.endedAt;
       }
@@ -543,18 +542,9 @@ export class PlanRunner extends EventEmitter {
     const plan = this.plans.get(planId);
     if (!plan) return;
     
-    for (const [nodeId, state] of plan.nodeStates) {
-      const node = plan.nodes.get(nodeId);
-      if (!node) continue;
-      
-      // For subPlan nodes, recurse into child plan (don't count the subPlan node itself)
-      if (node.type === 'subPlan' && state.childPlanId) {
-        this.computeRecursiveStatusCounts(state.childPlanId, result);
-      } else {
-        // Count job nodes
-        result.totalNodes++;
-        result.counts[state.status]++;
-      }
+    for (const [, state] of plan.nodeStates) {
+      result.totalNodes++;
+      result.counts[state.status]++;
     }
   }
   
@@ -566,32 +556,14 @@ export class PlanRunner extends EventEmitter {
    * @returns The minimum startedAt across all nodes, or undefined if no nodes started
    */
   getEffectiveStartedAt(planId: string): number | undefined {
-    return this.computeEffectiveStartedAtRecursive(planId);
-  }
-  
-  /**
-   * Recursively compute the earliest startedAt across a plan and all child plans.
-   */
-  private computeEffectiveStartedAtRecursive(planId: string): number | undefined {
     const plan = this.plans.get(planId);
     if (!plan) return undefined;
     
     let minStartedAt: number | undefined;
     
-    for (const [nodeId, state] of plan.nodeStates) {
-      const node = plan.nodes.get(nodeId);
-      
-      // For subPlan nodes, recursively check the child plan
-      if (node?.type === 'subPlan' && state.childPlanId) {
-        const childStartedAt = this.computeEffectiveStartedAtRecursive(state.childPlanId);
-        if (childStartedAt && (!minStartedAt || childStartedAt < minStartedAt)) {
-          minStartedAt = childStartedAt;
-        }
-      } else {
-        // For job nodes, use their own startedAt
-        if (state.startedAt && (!minStartedAt || state.startedAt < minStartedAt)) {
-          minStartedAt = state.startedAt;
-        }
+    for (const [, state] of plan.nodeStates) {
+      if (state.startedAt && (!minStartedAt || state.startedAt < minStartedAt)) {
+        minStartedAt = state.startedAt;
       }
     }
     
@@ -771,17 +743,6 @@ export class PlanRunner extends EventEmitter {
             duration: null
           });
         }
-        
-        // For subPlan nodes, recurse into child Plan
-        if (node.type === 'subPlan' && state.childPlanId) {
-          const childPlan = this.plans.get(state.childPlanId);
-          if (childPlan) {
-            const childHierarchy = buildHierarchy(childPlan, planPath);
-            if (childHierarchy) {
-              children.push(childHierarchy);
-            }
-          }
-        }
       }
       
       // Return if there are jobs or active children (don't skip parent just because it has no running jobs)
@@ -825,17 +786,6 @@ export class PlanRunner extends EventEmitter {
           tree: [],
           duration: null
         });
-      }
-      
-      // For subPlan nodes, recurse
-      if (node.type === 'subPlan' && state.childPlanId) {
-        const childPlan = this.plans.get(state.childPlanId);
-        if (childPlan) {
-          const childHierarchy = buildHierarchy(childPlan, undefined);
-          if (childHierarchy) {
-            rootHierarchy.push(childHierarchy);
-          }
-        }
       }
     }
     
@@ -983,14 +933,6 @@ export class PlanRunner extends EventEmitter {
     
     log.info(`Deleting Plan: ${planId}`);
     
-    // First, recursively delete any child sub-plans
-    for (const [nodeId, state] of plan.nodeStates) {
-      if (state.childPlanId) {
-        log.debug(`Deleting child plan: ${state.childPlanId}`);
-        this.delete(state.childPlanId);
-      }
-    }
-    
     // Cancel if running
     this.cancel(planId);
     
@@ -1046,19 +988,7 @@ export class PlanRunner extends EventEmitter {
       }
     }
     
-    // Try to clean up the worktree root directory if it exists and is empty
-    if (plan.worktreeRoot) {
-      try {
-        const fs = require('fs');
-        const entries = fs.readdirSync(plan.worktreeRoot);
-        if (entries.length === 0) {
-          fs.rmdirSync(plan.worktreeRoot);
-          log.debug(`Removed empty worktree root: ${plan.worktreeRoot}`);
-        }
-      } catch (error: any) {
-        // Directory might not exist or not be empty - that's fine
-      }
-    }
+    // Note: worktreeRoot (.worktrees) is shared across plans, so we don't try to remove it
     
     // Clean up log files
     if (this.executor) {
@@ -1159,9 +1089,8 @@ export class PlanRunner extends EventEmitter {
       return; // Can't do anything without an executor
     }
     
-    // Count total running jobs across all Plans (only count actual job nodes, not sub-plan coordination nodes)
+    // Count total running jobs across all Plans
     let globalRunning = 0;
-    let globalsubPlansRunning = 0;
     for (const [planId, plan] of this.plans) {
       const sm = this.stateMachines.get(planId);
       if (!sm) continue;
@@ -1171,8 +1100,6 @@ export class PlanRunner extends EventEmitter {
           const node = plan.nodes.get(nodeId);
           if (node && nodePerformsWork(node)) {
             globalRunning++;
-          } else {
-            globalsubPlansRunning++;
           }
         }
       }
@@ -1181,7 +1108,7 @@ export class PlanRunner extends EventEmitter {
     // Log overall status periodically (only if there are active Plans)
     const totalPlans = this.plans.size;
     if (totalPlans > 0) {
-      log.debug(`Pump: ${totalPlans} Plans, ${globalRunning} jobs running, ${globalsubPlansRunning} sub-plans coordinating`);
+      log.debug(`Pump: ${totalPlans} Plans, ${globalRunning} jobs running`);
     }
     
     // Process each Plan
@@ -1224,19 +1151,11 @@ export class PlanRunner extends EventEmitter {
         // Mark as scheduled
         sm.transition(nodeId, 'scheduled');
         
-        // Only count nodes with work against global limit (sub-plans are coordination nodes)
-        if (nodePerformsWork(node)) {
-          globalRunning++;
-        } else {
-          globalsubPlansRunning++;
-        }
+        // Count against global limit
+        globalRunning++;
         
-        // Execute based on node type
-        if (node.type === 'job') {
-          this.executeJobNode(plan, sm, node as JobNode);
-        } else if (node.type === 'subPlan') {
-          this.executeSubPlanNode(plan, sm, node as SubPlanNode);
-        }
+        // Execute job node
+        this.executeJobNode(plan, sm, node);
       }
       
       // Persist after scheduling
@@ -1289,20 +1208,31 @@ export class PlanRunner extends EventEmitter {
         }
       }
       
-      // Create worktree path (use path.join for cross-platform compatibility)
-      const worktreePath = path.join(plan.worktreeRoot, node.producerId);
+      // Create worktree path using first 8 chars of node UUID (flat structure)
+      // All worktrees are directly under .worktrees/<shortId> for simplicity
+      const worktreePath = path.join(plan.worktreeRoot, node.id.slice(0, 8));
       
       // Store in state (no branchName since we use detached HEAD)
       nodeState.worktreePath = worktreePath;
       
       // Setup detached worktree (or reuse existing one for retries)
+      // This is part of Forward Integration (merge-fi) phase
       log.debug(`Setting up worktree for job ${node.name} at ${worktreePath} from ${baseCommitish}`);
-      const timing = await git.worktrees.createOrReuseDetached(
-        plan.repoPath,
-        worktreePath,
-        baseCommitish,
-        s => log.debug(s)
-      );
+      let timing: Awaited<ReturnType<typeof git.worktrees.createOrReuseDetached>>;
+      try {
+        timing = await git.worktrees.createOrReuseDetached(
+          plan.repoPath,
+          worktreePath,
+          baseCommitish,
+          s => log.debug(s)
+        );
+      } catch (wtError: any) {
+        // Worktree creation is part of FI phase - log and set correct phase
+        this.execLog(plan.id, node.id, 'merge-fi', 'error', `Failed to create worktree: ${wtError.message}`);
+        const fiError = new Error(wtError.message) as Error & { failedPhase: string };
+        fiError.failedPhase = 'merge-fi';
+        throw fiError;
+      }
       
       if (timing.reused) {
         log.info(`Reusing existing worktree for ${node.name} (retry)`);
@@ -1370,6 +1300,14 @@ export class PlanRunner extends EventEmitter {
         // FI succeeded - acknowledge consumption to all dependencies
         // This allows dependency worktrees to be cleaned up as soon as all consumers have FI'd
         await this.acknowledgeConsumption(plan, sm, node);
+      } else if (node.dependencies.length > 0) {
+        // Has dependencies but none produced commits (all expectsNoChanges)
+        // Still need to acknowledge consumption so those worktrees can be cleaned up
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========');
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${plan.baseBranch} (dependencies have no commits to merge)`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '===========================================');
+        
+        await this.acknowledgeConsumption(plan, sm, node);
       } else {
         // Root node - no dependencies
         this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========');
@@ -1377,174 +1315,189 @@ export class PlanRunner extends EventEmitter {
         this.execLog(plan.id, node.id, 'merge-fi', 'info', '===========================================');
       }
       
-      // Build execution context
-      // Use nodeState.baseCommit which is preserved across retries
-      const context: ExecutionContext = {
-        plan,
-        node,
-        baseCommit: nodeState.baseCommit!,
-        worktreePath,
-        copilotSessionId: nodeState.copilotSessionId, // Pass existing session for resumption
-        onProgress: (step) => {
-          log.debug(`Job progress: ${node.name} - ${step}`);
-        },
-      };
+      // Track whether executor succeeded (or was skipped for RI-only retry)
+      let executorSuccess = false;
       
-      // Execute
-      const result = await this.executor!.execute(context);
-      
-      // Store step statuses for UI display
-      if (result.stepStatuses) {
-        nodeState.stepStatuses = result.stepStatuses;
-      }
-      
-      // Store captured Copilot session ID for future resumption
-      if (result.copilotSessionId) {
-        nodeState.copilotSessionId = result.copilotSessionId;
-      }
-      
-      if (result.success) {
-        // Store completed commit
-        if (result.completedCommit) {
-          nodeState.completedCommit = result.completedCommit;
+      // Check if resuming from merge-ri phase - skip executor entirely
+      if (nodeState.resumeFromPhase === 'merge-ri') {
+        log.info(`Resuming from merge-ri phase - skipping executor for ${node.name}`);
+        this.execLog(plan.id, node.id, 'work', 'info', '========== WORK PHASES (SKIPPED - RESUMING FROM RI) ==========');
+        // The completedCommit is already set from the previous successful work phase
+        executorSuccess = true;
+        // Clear resumeFromPhase since we're handling the retry now
+        nodeState.resumeFromPhase = undefined;
+      } else {
+        // Build execution context
+        // Use nodeState.baseCommit which is preserved across retries
+        const context: ExecutionContext = {
+          plan,
+          node,
+          baseCommit: nodeState.baseCommit!,
+          worktreePath,
+          copilotSessionId: nodeState.copilotSessionId, // Pass existing session for resumption
+          resumeFromPhase: nodeState.resumeFromPhase, // Resume from failed phase
+          previousStepStatuses: nodeState.stepStatuses, // Preserve completed phase statuses
+          onProgress: (step) => {
+            log.debug(`Job progress: ${node.name} - ${step}`);
+          },
+        };
+        
+        // Execute
+        const result = await this.executor!.execute(context);
+        
+        // Store step statuses for UI display
+        if (result.stepStatuses) {
+          nodeState.stepStatuses = result.stepStatuses;
         }
         
-        // Store work summary on node state and aggregate to Plan
-        if (result.workSummary) {
-          nodeState.workSummary = result.workSummary;
-          this.appendWorkSummary(plan, result.workSummary);
+        // Store captured Copilot session ID for future resumption
+        if (result.copilotSessionId) {
+          nodeState.copilotSessionId = result.copilotSessionId;
         }
         
-        // Handle leaf node merge to target branch (Reverse Integration)
-        const isLeaf = plan.leaves.includes(node.id);
-        log.debug(`Merge check: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${plan.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
+        // Clear resumeFromPhase after execution (success or failure)
+        nodeState.resumeFromPhase = undefined;
         
-        // Track whether RI merge failed (only applies to leaf nodes with targetBranch)
-        let riMergeFailed = false;
-        
-        if (isLeaf && plan.targetBranch && nodeState.completedCommit) {
-          log.info(`Initiating merge to target: ${node.name} -> ${plan.targetBranch}`);
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========');
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', `Merging completed commit ${nodeState.completedCommit.slice(0, 8)} to ${plan.targetBranch}`);
-          
-          const mergeSuccess = await this.mergeLeafToTarget(plan, node, nodeState.completedCommit);
-          nodeState.mergedToTarget = mergeSuccess;
-          
-          if (mergeSuccess) {
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`);
-          } else {
-            riMergeFailed = true;
-            this.execLog(plan.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED - worktree preserved for manual retry`);
-            log.warn(`Leaf ${node.name} work succeeded but RI merge to ${plan.targetBranch} failed - treating as node failure`);
+        if (result.success) {
+          executorSuccess = true;
+          // Store completed commit
+          if (result.completedCommit) {
+            nodeState.completedCommit = result.completedCommit;
           }
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
           
-          log.info(`Merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
-        } else if (isLeaf) {
-          log.debug(`Skipping merge: isLeaf=${isLeaf}, hasTargetBranch=${!!plan.targetBranch}, hasCompletedCommit=${!!nodeState.completedCommit}`);
-        }
-        
-        // If RI merge failed, treat the node as failed (work succeeded but merge did not)
-        if (riMergeFailed) {
-          nodeState.error = `Reverse integration merge to ${plan.targetBranch} failed. Work completed successfully but merge could not be performed. Worktree preserved for manual retry.`;
+          // Store work summary on node state and aggregate to Plan
+          if (result.workSummary) {
+            nodeState.workSummary = result.workSummary;
+            this.appendWorkSummary(plan, result.workSummary);
+          }
+        } else {
+          // Executor failed - handle the failure
+          nodeState.error = result.error;
           
           // Store lastAttempt for retry context
           nodeState.lastAttempt = {
-            phase: 'merge-ri',
+            phase: result.failedPhase || 'work',
             startTime: nodeState.startedAt || Date.now(),
             endTime: Date.now(),
-            error: nodeState.error,
+            error: result.error,
+            exitCode: result.exitCode,
           };
           
           // Record failed attempt in history
-          const riFailedAttempt: AttemptRecord = {
+          const failedAttempt: AttemptRecord = {
             attemptNumber: nodeState.attempts,
             status: 'failed',
             startedAt: nodeState.startedAt || Date.now(),
             endedAt: Date.now(),
-            failedPhase: 'merge-ri',
-            error: nodeState.error,
+            failedPhase: result.failedPhase,
+            error: result.error,
+            exitCode: result.exitCode,
             copilotSessionId: nodeState.copilotSessionId,
             stepStatuses: nodeState.stepStatuses,
             worktreePath: nodeState.worktreePath,
             baseCommit: nodeState.baseCommit,
-            completedCommit: nodeState.completedCommit, // Work was successful, so we have the commit
             logs: this.getNodeLogs(plan.id, node.id),
             workUsed: node.work,
           };
-          nodeState.attemptHistory = [...(nodeState.attemptHistory || []), riFailedAttempt];
+          nodeState.attemptHistory = [...(nodeState.attemptHistory || []), failedAttempt];
           
           sm.transition(node.id, 'failed');
           this.emit('nodeCompleted', plan.id, node.id, false);
           
-          log.error(`Job failed (RI merge): ${node.name}`, {
+          log.error(`Job failed: ${node.name}`, {
             planId: plan.id,
             nodeId: node.id,
-            commit: nodeState.completedCommit?.slice(0, 8),
-            targetBranch: plan.targetBranch,
+            phase: result.failedPhase || 'unknown',
+            error: result.error,
           });
-        } else {
-          // Record successful attempt in history
-          const successAttempt: AttemptRecord = {
-            attemptNumber: nodeState.attempts,
-            status: 'succeeded',
-            startedAt: nodeState.startedAt || Date.now(),
-            endedAt: Date.now(),
-            copilotSessionId: nodeState.copilotSessionId,
-            stepStatuses: nodeState.stepStatuses,
-            worktreePath: nodeState.worktreePath,
-            baseCommit: nodeState.baseCommit,
-            logs: this.getNodeLogs(plan.id, node.id),
-            workUsed: node.work,
-          };
-          nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
-          
-          sm.transition(node.id, 'succeeded');
-          this.emit('nodeCompleted', plan.id, node.id, true);
-          
-          // Cleanup this node's worktree if eligible
-          // For leaf nodes: eligible after RI merge to targetBranch (or no targetBranch)
-          // For non-leaf nodes: handled via acknowledgeConsumption when dependents FI
-          if (plan.cleanUpSuccessfulWork && nodeState.worktreePath) {
-            const isLeafNode = plan.leaves.includes(node.id);
-            if (isLeafNode) {
-              // Leaf: cleanup now if merged (or no target branch)
-              if (!plan.targetBranch || nodeState.mergedToTarget) {
-                await this.cleanupWorktree(nodeState.worktreePath, plan.repoPath);
-                nodeState.worktreeCleanedUp = true;
-                this.persistence.save(plan);
-              }
-            }
-            // Non-leaf nodes are cleaned up via acknowledgeConsumption when dependents FI
-          }
-          
-          log.info(`Job succeeded: ${node.name}`, {
-            planId: plan.id,
-            nodeId: node.id,
-            commit: nodeState.completedCommit?.slice(0, 8),
-          });
+          return;
         }
-      } else {
-        nodeState.error = result.error;
+      }
+      
+      // At this point, executor succeeded (or was skipped for RI-only retry)
+      // Handle leaf node merge to target branch (Reverse Integration)
+      const isLeaf = plan.leaves.includes(node.id);
+      log.debug(`Merge check: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${plan.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
+      
+      // Track whether RI merge failed (only applies to leaf nodes with targetBranch)
+      let riMergeFailed = false;
+      
+      if (isLeaf && plan.targetBranch && nodeState.completedCommit) {
+        log.info(`Initiating merge to target: ${node.name} -> ${plan.targetBranch}`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========');
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Merging completed commit ${nodeState.completedCommit.slice(0, 8)} to ${plan.targetBranch}`);
+        
+        const mergeSuccess = await this.mergeLeafToTarget(plan, node, nodeState.completedCommit);
+        nodeState.mergedToTarget = mergeSuccess;
+        
+        if (mergeSuccess) {
+          this.execLog(plan.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`);
+        } else {
+          riMergeFailed = true;
+          this.execLog(plan.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED - worktree preserved for manual retry`);
+          log.warn(`Leaf ${node.name} work succeeded but RI merge to ${plan.targetBranch} failed - treating as node failure`);
+        }
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
+        
+        log.info(`Merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
+      } else if (isLeaf && plan.targetBranch && !nodeState.completedCommit) {
+        // Leaf node with no commit (e.g., expectsNoChanges) - nothing to merge to target
+        // Mark as "merged" so worktree cleanup can proceed
+        log.debug(`Leaf node ${node.name} has no commit to merge to ${plan.targetBranch} - marking as merged`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION ==========');
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', 'No commit to merge (expectsNoChanges or validation-only node)');
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '==========================================');
+        nodeState.mergedToTarget = true;
+      } else if (isLeaf) {
+        log.debug(`Skipping merge: isLeaf=${isLeaf}, hasTargetBranch=${!!plan.targetBranch}, hasCompletedCommit=${!!nodeState.completedCommit}`);
+      }
+      
+      // If RI merge failed, treat the node as failed (work succeeded but merge did not)
+      if (riMergeFailed) {
+        nodeState.error = `Reverse integration merge to ${plan.targetBranch} failed. Work completed successfully but merge could not be performed. Worktree preserved for manual retry.`;
         
         // Store lastAttempt for retry context
         nodeState.lastAttempt = {
-          phase: result.failedPhase || 'work',
+          phase: 'merge-ri',
           startTime: nodeState.startedAt || Date.now(),
           endTime: Date.now(),
-          error: result.error,
-          exitCode: result.exitCode,
+          error: nodeState.error,
         };
         
         // Record failed attempt in history
-        const failedAttempt: AttemptRecord = {
+        const riFailedAttempt: AttemptRecord = {
           attemptNumber: nodeState.attempts,
           status: 'failed',
           startedAt: nodeState.startedAt || Date.now(),
           endedAt: Date.now(),
-          failedPhase: result.failedPhase || 'work',
-          error: result.error,
-          exitCode: result.exitCode,
+          failedPhase: 'merge-ri',
+          error: nodeState.error,
+          copilotSessionId: nodeState.copilotSessionId,
+          stepStatuses: nodeState.stepStatuses,
+          worktreePath: nodeState.worktreePath,
+          baseCommit: nodeState.baseCommit,
+          completedCommit: nodeState.completedCommit, // Work was successful, so we have the commit
+          logs: this.getNodeLogs(plan.id, node.id),
+          workUsed: node.work,
+        };
+        nodeState.attemptHistory = [...(nodeState.attemptHistory || []), riFailedAttempt];
+        
+        sm.transition(node.id, 'failed');
+        this.emit('nodeCompleted', plan.id, node.id, false);
+        
+        log.error(`Job failed (RI merge): ${node.name}`, {
+          planId: plan.id,
+          nodeId: node.id,
+          commit: nodeState.completedCommit?.slice(0, 8),
+          targetBranch: plan.targetBranch,
+        });
+      } else {
+        // Record successful attempt in history
+        const successAttempt: AttemptRecord = {
+          attemptNumber: nodeState.attempts,
+          status: 'succeeded',
+          startedAt: nodeState.startedAt || Date.now(),
+          endedAt: Date.now(),
           copilotSessionId: nodeState.copilotSessionId,
           stepStatuses: nodeState.stepStatuses,
           worktreePath: nodeState.worktreePath,
@@ -1552,24 +1505,42 @@ export class PlanRunner extends EventEmitter {
           logs: this.getNodeLogs(plan.id, node.id),
           workUsed: node.work,
         };
-        nodeState.attemptHistory = [...(nodeState.attemptHistory || []), failedAttempt];
+        nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
         
-        sm.transition(node.id, 'failed');
-        this.emit('nodeCompleted', plan.id, node.id, false);
+        sm.transition(node.id, 'succeeded');
+        this.emit('nodeCompleted', plan.id, node.id, true);
         
-        log.error(`Job failed: ${node.name}`, {
+        // Cleanup this node's worktree if eligible
+        // For leaf nodes: eligible after RI merge to targetBranch (or no targetBranch)
+        // For non-leaf nodes: handled via acknowledgeConsumption when dependents FI
+        if (plan.cleanUpSuccessfulWork && nodeState.worktreePath) {
+          const isLeafNode = plan.leaves.includes(node.id);
+          if (isLeafNode) {
+            // Leaf: cleanup now if merged (or no target branch)
+            if (!plan.targetBranch || nodeState.mergedToTarget) {
+              await this.cleanupWorktree(nodeState.worktreePath, plan.repoPath);
+              nodeState.worktreeCleanedUp = true;
+              this.persistence.save(plan);
+            }
+          }
+          // Non-leaf nodes are cleaned up via acknowledgeConsumption when dependents FI
+        }
+        
+        log.info(`Job succeeded: ${node.name}`, {
           planId: plan.id,
           nodeId: node.id,
-          error: result.error,
-          failedPhase: result.failedPhase,
+          commit: nodeState.completedCommit?.slice(0, 8),
         });
       }
     } catch (error: any) {
       nodeState.error = error.message;
       
+      // Use failedPhase from error if set, otherwise default to 'work'
+      const failedPhase = error.failedPhase || 'work';
+      
       // Store lastAttempt for retry context
       nodeState.lastAttempt = {
-        phase: 'work',
+        phase: failedPhase,
         startTime: nodeState.startedAt || Date.now(),
         endTime: Date.now(),
         error: error.message,
@@ -1581,7 +1552,7 @@ export class PlanRunner extends EventEmitter {
         status: 'failed',
         startedAt: nodeState.startedAt || Date.now(),
         endedAt: Date.now(),
-        failedPhase: 'work',
+        failedPhase: failedPhase,
         error: error.message,
         copilotSessionId: nodeState.copilotSessionId,
         stepStatuses: nodeState.stepStatuses,
@@ -1604,201 +1575,6 @@ export class PlanRunner extends EventEmitter {
     
     // Persist after execution
     this.persistence.save(plan);
-  }
-  
-  /**
-   * Execute a sub-plan node
-   */
-  private async executeSubPlanNode(
-    parentPlan: PlanInstance,
-    sm: PlanStateMachine,
-    node: SubPlanNode
-  ): Promise<void> {
-    log.info(`Executing sub-plan node: ${node.name}`, {
-      planId: parentPlan.id,
-      nodeId: node.id,
-    });
-    
-    try {
-      // Transition to running
-      sm.transition(node.id, 'running');
-      this.emit('nodeStarted', parentPlan.id, node.id);
-      
-      // Determine base branch for sub-plan (from parent's dependencies)
-      const baseCommit = sm.getBaseCommitForNode(node.id);
-      
-      // SubPlan consumes its dependencies now - the base commit is captured
-      // and child plan jobs will create worktrees from it. Dependencies are no longer needed.
-      await this.acknowledgeConsumption(parentPlan, sm, node);
-      
-      // Build the child Plan - inherit targetBranch so leaf jobs can RI directly
-      const childSpec = {
-        ...node.childSpec,
-        baseBranch: baseCommit || parentPlan.baseBranch,
-        targetBranch: parentPlan.targetBranch, // Inherit target so leaf jobs merge directly
-        repoPath: parentPlan.repoPath,
-      };
-      
-      const childPlan = buildPlan(childSpec, {
-        parentPlanId: parentPlan.id,
-        parentNodeId: node.id,
-        repoPath: parentPlan.repoPath,
-        worktreeRoot: `${parentPlan.worktreeRoot}/${node.producerId}`,
-      });
-      
-      // Store child Plan reference
-      node.childPlanId = childPlan.id;
-      const nodeState = parentPlan.nodeStates.get(node.id);
-      if (nodeState) {
-        nodeState.childPlanId = childPlan.id;
-      }
-      
-      // Register the child Plan
-      this.plans.set(childPlan.id, childPlan);
-      const childSm = new PlanStateMachine(childPlan);
-      this.setupStateMachineListeners(childSm);
-      this.stateMachines.set(childPlan.id, childSm);
-      
-      // Listen for child completion
-      childSm.on('planComplete', (event: PlanCompletionEvent) => {
-        this.handlechildPlanComplete(parentPlan, sm, node, event).catch(err => {
-          log.error(`Error in child Plan completion handler: ${err.message}`);
-        });
-      });
-      
-      // Persist both
-      this.persistence.save(parentPlan);
-      this.persistence.save(childPlan);
-      
-      log.info(`sub-plan created: ${childPlan.id}`, {
-        parentPlanId: parentPlan.id,
-        parentNodeId: node.id,
-        childNodes: childPlan.nodes.size,
-      });
-      
-    } catch (error: any) {
-      const nodeState = parentPlan.nodeStates.get(node.id);
-      if (nodeState) {
-        nodeState.error = error.message;
-      }
-      sm.transition(node.id, 'failed');
-      this.emit('nodeCompleted', parentPlan.id, node.id, false);
-      
-      log.error(`sub-plan creation failed: ${node.name}`, {
-        planId: parentPlan.id,
-        nodeId: node.id,
-        error: error.message,
-      });
-      
-      this.persistence.save(parentPlan);
-    }
-  }
-  
-  /**
-   * Handle child Plan completion
-   */
-  private async handlechildPlanComplete(
-    parentPlan: PlanInstance,
-    parentSm: PlanStateMachine,
-    node: SubPlanNode,
-    event: PlanCompletionEvent
-  ): Promise<void> {
-    log.info(`Child Plan completed: ${event.planId}`, {
-      parentPlanId: parentPlan.id,
-      parentNodeId: node.id,
-      status: event.status,
-    });
-    
-    const nodeState = parentPlan.nodeStates.get(node.id);
-    const childPlan = this.plans.get(event.planId);
-    
-    // Ensure the subPlan node's endedAt reflects the child plan's actual completion time
-    if (nodeState) {
-      const childEndedAt = this.getEffectiveEndedAt(event.planId);
-      if (childEndedAt) {
-        nodeState.endedAt = childEndedAt;
-      }
-    }
-    
-    // Log child Plan completion details to the parent's subPlan node
-    this.execLog(parentPlan.id, node.id, 'work', 'info', '========== sub-plan EXECUTION COMPLETE ==========');
-    this.execLog(parentPlan.id, node.id, 'work', 'info', `child Plan: ${event.planId}`);
-    this.execLog(parentPlan.id, node.id, 'work', 'info', `Status: ${event.status.toUpperCase()}`);
-    
-    if (childPlan) {
-      // Log summary of child Plan jobs
-      const jobCount = childPlan.nodes.size;
-      let succeeded = 0, failed = 0, blocked = 0;
-      
-      for (const [nodeId, childState] of childPlan.nodeStates) {
-        const childNode = childPlan.nodes.get(nodeId);
-        if (childState.status === 'succeeded') succeeded++;
-        else if (childState.status === 'failed') failed++;
-        else if (childState.status === 'blocked') blocked++;
-        
-        // Log each job's status
-        const statusIcon = childState.status === 'succeeded' ? '✓' : 
-                          childState.status === 'failed' ? '✗' : 
-                          childState.status === 'blocked' ? '⊘' : '?';
-        this.execLog(parentPlan.id, node.id, 'work', 'info', 
-          `  ${statusIcon} ${childNode?.name || nodeId}: ${childState.status}`);
-        
-        if (childState.error) {
-          this.execLog(parentPlan.id, node.id, 'work', 'error', `    Error: ${childState.error}`);
-        }
-        if (childState.completedCommit) {
-          this.execLog(parentPlan.id, node.id, 'work', 'info', `    Commit: ${childState.completedCommit.slice(0, 8)}`);
-        }
-      }
-      
-      this.execLog(parentPlan.id, node.id, 'work', 'info', '');
-      this.execLog(parentPlan.id, node.id, 'work', 'info', `Summary: ${succeeded}/${jobCount} succeeded, ${failed} failed, ${blocked} blocked`);
-      
-      // Log work summary if available
-      if (childPlan.workSummary) {
-        const ws = childPlan.workSummary;
-        this.execLog(parentPlan.id, node.id, 'work', 'info', 
-          `Work: ${ws.totalCommits} commits, +${ws.totalFilesAdded} ~${ws.totalFilesModified} -${ws.totalFilesDeleted} files`);
-        
-        // Merge child plan's workSummary into parent plan's workSummary
-        // This ensures leaf merges from sub-plans are included in the parent's totals
-        parentPlan.workSummary = mergeWorkSummaryHelper(parentPlan.workSummary, childPlan.workSummary);
-      }
-    }
-    
-    this.execLog(parentPlan.id, node.id, 'work', 'info', '========== sub-plan EXECUTION COMPLETE ==========');
-    
-    if (event.status === 'succeeded') {
-      // SubPlan succeeded - leaf jobs within already merged to targetBranch
-      // Just record a representative completed commit for downstream consumers
-      if (childPlan && nodeState) {
-        // Find any completed commit from leaf nodes (for dependency tracking)
-        for (const leafId of childPlan.leaves) {
-          const leafState = childPlan.nodeStates.get(leafId);
-          if (leafState?.completedCommit) {
-            nodeState.completedCommit = leafState.completedCommit;
-            break;
-          }
-        }
-        // Note: No subPlan-level merge needed - each leaf job handles its own RI to targetBranch
-        // Child plan worktrees were cleaned up incrementally:
-        // - Leaf jobs cleaned up after RI merge
-        // - Non-leaf jobs cleaned up when dependents acknowledged FI consumption
-      }
-      
-      parentSm.transition(node.id, 'succeeded');
-      this.emit('nodeCompleted', parentPlan.id, node.id, true);
-      
-      // Parent worktrees were already cleaned when subPlan acknowledged consumption at startup
-    } else {
-      if (nodeState) {
-        nodeState.error = `Child Plan ${event.status}`;
-      }
-      parentSm.transition(node.id, 'failed');
-      this.emit('nodeCompleted', parentPlan.id, node.id, false);
-    }
-    
-    this.persistence.save(parentPlan);
   }
   
   // ============================================================================
@@ -1877,8 +1653,7 @@ export class PlanRunner extends EventEmitter {
         });
         
         // Push if configured
-        const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
-        const pushOnSuccess = mergeCfg.get<boolean>('pushOnSuccess', false);
+        const pushOnSuccess = getConfig<boolean>('copilotOrchestrator.merge', 'pushOnSuccess', false);
         
         if (pushOnSuccess) {
           try {
@@ -2184,8 +1959,7 @@ export class PlanRunner extends EventEmitter {
     commitMessage: string,
     logContext?: { planId: string; nodeId: string; phase: ExecutionPhase }
   ): Promise<boolean> {
-    const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
-    const prefer = mergeCfg.get<string>('prefer', 'theirs');
+    const prefer = getConfig<string>('copilotOrchestrator.merge', 'prefer', 'theirs');
     
     const mergeInstruction =
       `@agent Resolve the current git merge conflict. ` +
@@ -2306,8 +2080,7 @@ export class PlanRunner extends EventEmitter {
       log.info(`Merge conflict resolved by Copilot CLI`);
       
       // Push if configured
-      const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
-      const pushOnSuccess = mergeCfg.get<boolean>('pushOnSuccess', false);
+      const pushOnSuccess = getConfig<boolean>('copilotOrchestrator.merge', 'pushOnSuccess', false);
       
       if (pushOnSuccess) {
         try {
@@ -2583,7 +2356,25 @@ export class PlanRunner extends EventEmitter {
     nodeState.error = undefined;
     nodeState.endedAt = undefined;
     nodeState.startedAt = undefined;
-    nodeState.stepStatuses = undefined;
+    
+    // Determine if we should resume from failed phase or start fresh
+    const hasNewWork = !!options?.newWork;
+    const shouldResetPhases = hasNewWork || options?.clearWorktree;
+    
+    if (shouldResetPhases) {
+      // Starting fresh - clear all phase progress
+      nodeState.stepStatuses = undefined;
+      nodeState.resumeFromPhase = undefined;
+      log.info(`Retry with fresh state (hasNewWork=${hasNewWork}, clearWorktree=${options?.clearWorktree})`);
+    } else {
+      // Resuming - preserve step statuses and set resume point
+      const failedPhase = nodeState.lastAttempt?.phase;
+      if (failedPhase) {
+        nodeState.resumeFromPhase = failedPhase as any;
+        log.info(`Retry resuming from phase: ${failedPhase}`);
+      }
+      // stepStatuses are preserved - completed phases will be skipped
+    }
     
     // Note: We preserve worktreePath and baseCommit so the work can continue in the same worktree
     // If clearWorktree is true, we'll need to reset git state

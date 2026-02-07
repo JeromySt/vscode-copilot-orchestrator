@@ -10,12 +10,16 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '\.\./plan';
+import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '../plan';
 import { ProcessMonitor } from '../process/processMonitor';
-import { McpServerManager } from '../mcp/mcpServerManager';
+import { StdioMcpServerManager } from '../mcp/mcpServerManager';
 import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
+import { McpHandler } from '../mcp/handler';
+import { McpIpcServer } from '../mcp/ipc/server';
 import { Logger } from './logger';
 import { isCopilotCliAvailable } from '../agent/cliCheckCore';
+import { IMcpManager } from '../interfaces/IMcpManager';
+
 
 const log = Logger.for('init');
 
@@ -23,20 +27,12 @@ const log = Logger.for('init');
 // CONFIGURATION
 // ============================================================================
 
-export interface HttpConfig {
-  enabled: boolean;
-  host: string;
-  port: number;
-}
-
 export interface McpServerConfig {
+  /** Whether MCP server is enabled */
   enabled: boolean;
-  host: string;
-  port: number;
 }
 
 export interface ExtensionConfig {
-  http: HttpConfig;
   mcp: McpServerConfig;
   maxParallel: number;
 }
@@ -45,20 +41,12 @@ export interface ExtensionConfig {
  * Load extension configuration from VS Code settings
  */
 export function loadConfiguration(): ExtensionConfig {
-  const httpCfg = vscode.workspace.getConfiguration('copilotOrchestrator.http');
   const mcpCfg = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
   const rootCfg = vscode.workspace.getConfiguration('copilotOrchestrator');
 
   return {
-    http: {
-      enabled: httpCfg.get<boolean>('enabled', true),
-      host: httpCfg.get<string>('host', 'localhost'),
-      port: httpCfg.get<number>('port', 39219)
-    },
     mcp: {
       enabled: mcpCfg.get<boolean>('enabled', true),
-      host: httpCfg.get<string>('host', 'localhost'),
-      port: httpCfg.get<number>('port', 39219)
     },
     maxParallel: rootCfg.get<number>('maxWorkers', 0) || 4,
   };
@@ -308,151 +296,49 @@ export function initializePlanRunner(
 }
 
 // ============================================================================
-// HTTP SERVER
-// ============================================================================
-
-/**
- * Initialize HTTP server with MCP endpoint.
- * Returns the actual bound port (may differ from config if port was in use).
- */
-export async function initializeHttpServer(
-  context: vscode.ExtensionContext,
-  planRunner: PlanRunner,
-  config: HttpConfig
-): Promise<number | undefined> {
-  if (!config.enabled) {
-    log.info('HTTP server disabled');
-    return undefined;
-  }
-  
-  log.info(`Starting HTTP server on ${config.host}:${config.port}...`);
-  
-  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-  
-  // Create a simple HTTP server with the MCP handler
-  const http = require('http');
-  const { McpHandler } = require('../mcp/handler');
-  
-  const mcpHandler = new McpHandler(planRunner, workspacePath);
-  
-  const server = http.createServer(async (req: any, res: any) => {
-    // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    
-    if (req.method === 'OPTIONS') {
-      res.writeHead(200);
-      res.end();
-      return;
-    }
-    
-    // Health check
-    if (req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', version: '0.6.0' }));
-      return;
-    }
-    
-    // MCP endpoint
-    if (req.url === '/mcp' && req.method === 'POST') {
-      let body = '';
-      req.on('data', (chunk: Buffer) => body += chunk.toString());
-      req.on('end', async () => {
-        try {
-          const request = JSON.parse(body);
-          const response = await mcpHandler.handleRequest(request);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(response));
-        } catch (error: any) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: error.message }));
-        }
-      });
-      return;
-    }
-    
-    // Plan status endpoint
-    if (req.url?.startsWith('/api/plans')) {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      const Plans = planRunner.getAll().map(plan => ({
-        id: plan.id,
-        name: plan.spec.name,
-        status: planRunner.getStateMachine(plan.id)?.computePlanStatus(),
-        nodes: plan.nodes.size,
-      }));
-      res.end(JSON.stringify({ Plans }));
-      return;
-    }
-    
-    // Default: 404
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Not found' }));
-  });
-  
-  // Helper to start server on a specific port
-  const tryListen = (port: number): Promise<number> => {
-    return new Promise((resolve, reject) => {
-      server.once('error', (err: any) => {
-        if (err.code === 'EADDRINUSE' && port !== 0) {
-          // Port in use, try dynamic port
-          log.info(`Port ${port} in use, trying dynamic port...`);
-          server.removeAllListeners('error');
-          tryListen(0).then(resolve).catch(reject);
-        } else {
-          reject(err);
-        }
-      });
-      
-      server.listen(port, config.host, () => {
-        const addr = server.address();
-        const actualPort = typeof addr === 'object' ? addr?.port : port;
-        log.info(`HTTP server started at http://${config.host}:${actualPort}`);
-        log.info(`MCP endpoint: http://${config.host}:${actualPort}/mcp`);
-        
-        context.subscriptions.push({
-          dispose: () => {
-            try {
-              server.close();
-            } catch (e) {
-              // Server may already be closed
-            }
-          }
-        });
-        
-        resolve(actualPort);
-      });
-    });
-  };
-  
-  return tryListen(config.port);
-}
-
-// ============================================================================
 // MCP REGISTRATION
 // ============================================================================
 
 /**
- * Initialize MCP server registration with VS Code
+ * Initialize MCP server registration with VS Code using stdio transport.
+ * 
+ * The extension runs an IPC server that the stdio child process connects to.
+ * This ensures the same PlanRunner instance serves both the UI and Copilot.
  */
-export function initializeMcpServer(
+export async function initializeMcpServer(
   context: vscode.ExtensionContext,
-  httpConfig: HttpConfig,
+  planRunner: PlanRunner,
   mcpConfig: McpServerConfig
-): McpServerManager | undefined {
+): Promise<IMcpManager | undefined> {
   if (!mcpConfig.enabled) {
     log.info('MCP registration disabled');
     return undefined;
   }
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+
+  // Create the McpHandler that wraps our PlanRunner
+  const mcpHandler = new McpHandler(planRunner, workspacePath);
+
+  // Create and start the IPC server
+  // The stdio child process will connect to this server
+  const ipcServer = new McpIpcServer();
+  ipcServer.setHandler(mcpHandler);
   
-  const manager = new McpServerManager(context, {
-    enabled: true,
-    host: httpConfig.host,
-    port: httpConfig.port,
-    workspacePath
-  });
+  try {
+    await ipcServer.start();
+    log.info('MCP IPC server started', { pipePath: ipcServer.getPipePath() });
+  } catch (err) {
+    log.error('Failed to start MCP IPC server', err);
+    return undefined;
+  }
+
+  context.subscriptions.push({ dispose: () => {
+    ipcServer.stop();
+  }});
+
+  // Create stdio manager - VS Code manages the child process
+  const manager: IMcpManager = new StdioMcpServerManager(context);
   
   manager.start();
   context.subscriptions.push({ dispose: () => {
@@ -463,17 +349,17 @@ export function initializeMcpServer(
     }
   }});
   
-  // Register with VS Code
-  const providerDisposable = registerMcpDefinitionProvider(context, {
-    host: httpConfig.host,
-    port: httpConfig.port,
-    workspacePath
-  });
+  // Register with VS Code, passing the IPC path and auth nonce for security
+  // Auth nonce is passed via environment variable, not command line, for security
+  const providerDisposable = registerMcpDefinitionProvider(
+    context, 
+    workspacePath,
+    ipcServer.getPipePath(),
+    ipcServer.getAuthNonce()
+  );
   context.subscriptions.push(providerDisposable);
   
-  manager.setRegisteredWithVSCode(true);
-  
-  log.info(`MCP registered at http://${httpConfig.host}:${httpConfig.port}/mcp`);
+  log.info('MCP registered with stdio transport');
   
   // Show one-time reminder to enable MCP server if not previously acknowledged
   const MCP_ENABLED_KEY = 'mcpServerEnabledAcknowledged';
@@ -531,15 +417,97 @@ export function registerPlanCommands(
   
   // Show Plan details
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.showPlanDetails', (planId: string) => {
+    vscode.commands.registerCommand('orchestrator.showPlanDetails', async (planId?: string, preserveFocus?: boolean) => {
+      // If no planId provided, prompt user to select from available plans
+      if (!planId) {
+        const plans = planRunner.getAll();
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No plans available');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan to view',
+        });
+        
+        if (!selected) {
+          return;
+        }
+        planId = selected.planId;
+      }
+      
       const { planDetailPanel } = require('../ui/panels/planDetailPanel');
-      planDetailPanel.createOrShow(context.extensionUri, planId, planRunner);
+      planDetailPanel.createOrShow(context.extensionUri, planId, planRunner, { preserveFocus });
     })
   );
   
   // Show node details
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.showNodeDetails', (planId: string, nodeId: string) => {
+    vscode.commands.registerCommand('orchestrator.showNodeDetails', async (planId?: string, nodeId?: string) => {
+      // If no planId provided, prompt user to select
+      if (!planId) {
+        const plans = planRunner.getAll();
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No plans available');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan',
+        });
+        
+        if (!selected) {
+          return;
+        }
+        planId = selected.planId;
+      }
+      
+      // If no nodeId provided, prompt user to select from plan's nodes
+      if (!nodeId) {
+        const plan = planRunner.get(planId);
+        if (!plan) {
+          vscode.window.showErrorMessage(`Plan not found: ${planId}`);
+          return;
+        }
+        
+        const nodeItems = Array.from(plan.nodes.values()).map(n => {
+          // Get display name - check for spec.name if available
+          const spec = (n as any).spec;
+          const displayName = (spec && typeof spec.name === 'string') ? spec.name : n.id;
+          return {
+            label: displayName,
+            description: n.id,
+            nodeId: n.id,
+          };
+        });
+        
+        if (nodeItems.length === 0) {
+          vscode.window.showInformationMessage('No nodes in this plan');
+          return;
+        }
+        
+        const selectedNode = await vscode.window.showQuickPick(nodeItems, {
+          placeHolder: 'Select a node to view',
+        });
+        
+        if (!selectedNode) {
+          return;
+        }
+        nodeId = selectedNode.nodeId;
+      }
+      
       const { NodeDetailPanel } = require('../ui/panels/nodeDetailPanel');
       NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, planRunner);
     })
@@ -547,7 +515,36 @@ export function registerPlanCommands(
   
   // Cancel Plan
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.cancelPlan', async (planId: string) => {
+    vscode.commands.registerCommand('orchestrator.cancelPlan', async (planId?: string) => {
+      // If no planId provided, prompt user to select
+      if (!planId) {
+        const plans = planRunner.getAll().filter(p => {
+          const sm = planRunner.getStateMachine(p.id);
+          const status = sm?.computePlanStatus();
+          return status === 'running' || status === 'pending';
+        });
+        
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No active plans to cancel');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan to cancel',
+        });
+        
+        if (!selected) {
+          return;
+        }
+        planId = selected.planId;
+      }
+      
       const plan = planRunner.get(planId);
       if (!plan) {
         vscode.window.showErrorMessage(`Plan not found: ${planId}`);
@@ -569,7 +566,31 @@ export function registerPlanCommands(
   
   // Delete Plan
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.deletePlan', async (planId: string) => {
+    vscode.commands.registerCommand('orchestrator.deletePlan', async (planId?: string) => {
+      // If no planId provided, prompt user to select
+      if (!planId) {
+        const plans = planRunner.getAll();
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No plans to delete');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan to delete',
+        });
+        
+        if (!selected) {
+          return;
+        }
+        planId = selected.planId;
+      }
+      
       const plan = planRunner.get(planId);
       if (!plan) {
         vscode.window.showErrorMessage(`Plan not found: ${planId}`);

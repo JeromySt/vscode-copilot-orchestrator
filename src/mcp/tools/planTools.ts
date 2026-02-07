@@ -63,13 +63,61 @@ PRODUCER_ID IS REQUIRED:
 - Used in 'dependencies' arrays to establish execution order
 - Jobs with dependencies: [] are root jobs that start immediately
 
-NESTED sub-planS ("OUT AND BACK" PATTERN):
-- sub-plans can contain nested sub-plans for hierarchical work decomposition
-- Pattern: init → sub-plan → finish (work fans out, then converges back)
-- Each nesting level has its own scope for dependencies
-- Example 3-level nesting: main-init → sub-plan A → main-finish
-                            └→ a-init → sub-plan B → a-finish
-                                └→ b-init → sub-plan C → b-finish
+JOBS vs GROUPS (CRITICAL):
+- The 'jobs' array is for flat job definitions only. Jobs have: producer_id, task, work, dependencies.
+- The 'groups' array is for hierarchical organization. Groups have: name, jobs, groups.
+- DO NOT put groups in the 'jobs' array. DO NOT set type: "group" on jobs.
+- DO NOT put nested 'jobs' arrays inside items in the 'jobs' array.
+
+GROUPS (VISUAL HIERARCHY + NAMESPACE):
+- Groups organize jobs visually and provide namespace isolation for producer_ids
+- Groups do NOT have dependencies - only jobs have dependencies
+- Groups do NOT have: task, work, producer_id, expects_no_changes, type
+- Jobs within a group can reference siblings by local producer_id (e.g., "sibling-job")
+- Cross-group references use qualified paths (e.g., "other-group/job-id" or "phase1/collection/count-files")
+- Nested groups form hierarchical paths: "phase1/collection/count-files"
+- Groups render as nested boxes in the UI with aggregate status
+
+DEPENDENCY RESOLUTION:
+- Local refs (no '/') are qualified with current group path: "sibling" → "mygroup/sibling"
+- Qualified refs (contain '/') are used as-is: "phase1/analysis/done" stays "phase1/analysis/done"
+- All dependencies must resolve to valid job producer_ids
+
+EXAMPLE WITH GROUPS:
+{
+  "name": "Build Pipeline",
+  "jobs": [],  // Can be empty if all jobs are in groups
+  "groups": [{
+    "name": "phase1",
+    "groups": [
+      {
+        "name": "collection",
+        "jobs": [
+          { "producer_id": "count-files", "task": "Count files", "dependencies": [] },
+          { "producer_id": "count-dirs", "task": "Count dirs", "dependencies": [] }
+        ]
+      },
+      {
+        "name": "analysis",
+        "jobs": [{
+          "producer_id": "analyze",
+          "task": "Analyze",
+          "dependencies": ["collection/count-files", "collection/count-dirs"]  // Cross-group refs
+        }]
+      }
+    ]
+  }, {
+    "name": "phase2",
+    "groups": [{
+      "name": "reporting",
+      "jobs": [{
+        "producer_id": "report",
+        "task": "Generate report",
+        "dependencies": ["phase1/analysis/analyze"]  // Fully qualified cross-phase ref
+      }]
+    }]
+  }]
+}
 
 EXECUTION CONTEXT:
 - Each job gets its own git worktree for isolated work
@@ -81,26 +129,9 @@ WORK OPTIONS (work/prechecks/postchecks accept):
 3. Shell spec: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
 4. Agent spec: { type: "agent", instructions: "Implement the feature", maxTurns: 10 }
 
-IMPORTANT: Agent instructions MUST be in Markdown format for proper rendering:
-- Use # headers for sections (# Main Task, ## Steps)
-- Use numbered lists (1. First step, 2. Second step)
-- Use bullet lists (- item, - another item)
-- Use **bold** and *italic* for emphasis
+IMPORTANT: Agent instructions MUST be in Markdown format for proper rendering.
 
-SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"
-
-EXAMPLES:
-// Simple string command
-{ "work": "npm run build" }
-
-// Direct process (no shell quoting issues)
-{ "work": { "type": "process", "executable": "node", "args": ["--version"] }}
-
-// PowerShell with explicit shell
-{ "work": { "type": "shell", "command": "Get-ChildItem -Recurse", "shell": "powershell" }}
-
-// AI Agent with rich config
-{ "work": { "type": "agent", "instructions": "Add error handling to api.ts", "contextFiles": ["src/api.ts"] }}`,
+SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -169,47 +200,46 @@ Agent instructions MUST be in Markdown format with headers, numbered lists, bull
                 instructions: { 
                   type: 'string', 
                   description: 'Additional context for @agent tasks. MUST be in Markdown format (# headers, 1. numbered lists, - bullet lists).' 
+                },
+                expects_no_changes: {
+                  type: 'boolean',
+                  description: 'When true, this node is expected to produce no file changes. The commit phase will succeed without a commit instead of failing. Use for validation-only nodes, external-system updates, or analysis tasks.'
+                },
+                group: {
+                  type: 'string',
+                  description: 'Visual grouping tag. Jobs with the same group are rendered together in a box. Use / for nested groups (e.g., "backend/api" nests inside "backend"). Groups are purely visual and do not affect execution order.'
                 }
               },
               required: ['producer_id', 'task', 'dependencies']
             }
           },
-          subPlans: {
+          groups: {
             type: 'array',
-            description: 'Optional nested Plans that run as a unit. Supports recursive nesting for "out and back" patterns.',
+            description: `Visual groups for organizing jobs with namespace isolation.
+Jobs within a group can reference each other by local producer_id.
+Cross-group references use qualified paths: "group_name/producer_id".
+Nested groups form paths like "backend/api/auth".
+Groups do NOT have dependencies - jobs describe the full dependency graph.`,
             items: {
               type: 'object',
               properties: {
-                producer_id: { 
-                  type: 'string', 
-                  description: 'Unique identifier for the sub-plan',
-                  pattern: '^[a-z0-9-]{3,64}$'
-                },
                 name: { 
                   type: 'string', 
-                  description: 'Display name' 
-                },
-                dependencies: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Producer IDs this sub-plan depends on (parent scope jobs or sibling sub-plans)'
-                },
-                maxParallel: { 
-                  type: 'number', 
-                  description: 'Max concurrent jobs in this sub-plan' 
+                  description: 'Group name (forms part of qualified path for nested refs)'
                 },
                 jobs: {
                   type: 'array',
-                  description: 'Jobs within this sub-plan (same schema as top-level jobs). Dependencies reference other jobs/sub-plans in this scope.',
+                  description: 'Jobs within this group. Producer IDs are scoped to this group.',
                   items: { type: 'object' }
                 },
-                subPlans: {
+                groups: {
                   type: 'array',
-                  description: 'Nested sub-plans within this sub-plan (recursive). Forms "out and back" pattern: init → sub-plan → finish',
+                  description: 'Nested groups (recursive). Forms hierarchical paths like "parent/child".',
                   items: { type: 'object' }
                 }
               },
-              required: ['producer_id', 'dependencies', 'jobs']
+              required: ['name'],
+              additionalProperties: false
             }
           }
         },
