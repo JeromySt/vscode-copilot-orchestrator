@@ -14,9 +14,28 @@
  */
 
 import * as path from 'path';
-import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
+
+// Conditionally import vscode - may not be available in standalone processes
+let vscode: typeof import('vscode') | undefined;
+try {
+  vscode = require('vscode');
+} catch {
+  // Running outside VS Code extension host (e.g., stdio server)
+  vscode = undefined;
+}
+
+/**
+ * Get a configuration value from VS Code settings, with fallback for standalone mode.
+ */
+function getConfig<T>(section: string, key: string, defaultValue: T): T {
+  if (!vscode) {
+    return defaultValue;
+  }
+  return vscode.workspace.getConfiguration(section).get<T>(key, defaultValue);
+}
+
 import {
   PlanSpec,
   PlanInstance,
@@ -1899,8 +1918,7 @@ export class PlanRunner extends EventEmitter {
         });
         
         // Push if configured
-        const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
-        const pushOnSuccess = mergeCfg.get<boolean>('pushOnSuccess', false);
+        const pushOnSuccess = getConfig<boolean>('copilotOrchestrator.merge', 'pushOnSuccess', false);
         
         if (pushOnSuccess) {
           try {
@@ -2206,8 +2224,7 @@ export class PlanRunner extends EventEmitter {
     commitMessage: string,
     logContext?: { planId: string; nodeId: string; phase: ExecutionPhase }
   ): Promise<boolean> {
-    const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
-    const prefer = mergeCfg.get<string>('prefer', 'theirs');
+    const prefer = getConfig<string>('copilotOrchestrator.merge', 'prefer', 'theirs');
     
     const mergeInstruction =
       `@agent Resolve the current git merge conflict. ` +
@@ -2328,8 +2345,7 @@ export class PlanRunner extends EventEmitter {
       log.info(`Merge conflict resolved by Copilot CLI`);
       
       // Push if configured
-      const mergeCfg = vscode.workspace.getConfiguration('copilotOrchestrator.merge');
-      const pushOnSuccess = mergeCfg.get<boolean>('pushOnSuccess', false);
+      const pushOnSuccess = getConfig<boolean>('copilotOrchestrator.merge', 'pushOnSuccess', false);
       
       if (pushOnSuccess) {
         try {
