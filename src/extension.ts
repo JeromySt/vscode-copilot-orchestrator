@@ -69,10 +69,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   planRunner = runner;
 
   // ── HTTP Server ────────────────────────────────────────────────────────
-  await initializeHttpServer(context, planRunner, config.http);
+  const actualPort = await initializeHttpServer(context, planRunner, config.http);
 
   // ── MCP Server ─────────────────────────────────────────────────────────
-  mcpManager = initializeMcpServer(context, config.http, config.mcp);
+  // Use the actual bound port (may differ from config if port was in use)
+  const httpConfigWithActualPort = actualPort !== undefined 
+    ? { ...config.http, port: actualPort }
+    : config.http;
+  mcpManager = initializeMcpServer(context, httpConfigWithActualPort, config.mcp);
 
   // ── Plans view ──────────────────────────────────────────────────────────
   initializePlansView(context, planRunner);

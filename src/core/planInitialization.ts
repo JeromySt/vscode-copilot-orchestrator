@@ -312,16 +312,17 @@ export function initializePlanRunner(
 // ============================================================================
 
 /**
- * Initialize HTTP server with MCP endpoint
+ * Initialize HTTP server with MCP endpoint.
+ * Returns the actual bound port (may differ from config if port was in use).
  */
 export async function initializeHttpServer(
   context: vscode.ExtensionContext,
   planRunner: PlanRunner,
   config: HttpConfig
-): Promise<void> {
+): Promise<number | undefined> {
   if (!config.enabled) {
     log.info('HTTP server disabled');
-    return;
+    return undefined;
   }
   
   log.info(`Starting HTTP server on ${config.host}:${config.port}...`);
@@ -389,29 +390,42 @@ export async function initializeHttpServer(
     res.end(JSON.stringify({ error: 'Not found' }));
   });
   
-  return new Promise((resolve, reject) => {
-    server.listen(config.port, config.host, () => {
-      log.info(`HTTP server started at http://${config.host}:${config.port}`);
-      log.info(`MCP endpoint: http://${config.host}:${config.port}/mcp`);
-      
-      context.subscriptions.push({
-        dispose: () => {
-          try {
-            server.close();
-          } catch (e) {
-            // Server may already be closed
-          }
+  // Helper to start server on a specific port
+  const tryListen = (port: number): Promise<number> => {
+    return new Promise((resolve, reject) => {
+      server.once('error', (err: any) => {
+        if (err.code === 'EADDRINUSE' && port !== 0) {
+          // Port in use, try dynamic port
+          log.info(`Port ${port} in use, trying dynamic port...`);
+          server.removeAllListeners('error');
+          tryListen(0).then(resolve).catch(reject);
+        } else {
+          reject(err);
         }
       });
       
-      resolve();
+      server.listen(port, config.host, () => {
+        const addr = server.address();
+        const actualPort = typeof addr === 'object' ? addr?.port : port;
+        log.info(`HTTP server started at http://${config.host}:${actualPort}`);
+        log.info(`MCP endpoint: http://${config.host}:${actualPort}/mcp`);
+        
+        context.subscriptions.push({
+          dispose: () => {
+            try {
+              server.close();
+            } catch (e) {
+              // Server may already be closed
+            }
+          }
+        });
+        
+        resolve(actualPort);
+      });
     });
-    
-    server.on('error', (err: any) => {
-      log.error('HTTP server error', { error: err.message });
-      reject(err);
-    });
-  });
+  };
+  
+  return tryListen(config.port);
 }
 
 // ============================================================================
