@@ -169,7 +169,7 @@ export class planDetailPanel {
         break;
 
       case 'refresh':
-        this._update();
+        this._forceFullRefresh();
         break;
       case 'showWorkSummary':
         // Show work summary in a new editor tab as markdown
@@ -398,6 +398,30 @@ export class planDetailPanel {
   ` : ''}
 </body>
 </html>`;
+  }
+
+  /**
+   * Force a full HTML re-render, bypassing the state hash check.
+   * Used when the webview requests a refresh (e.g., after an error).
+   */
+  private _forceFullRefresh() {
+    const plan = this._planRunner.get(this._planId);
+    if (!plan) {
+      this._panel.webview.html = this._getErrorHtml('Plan not found');
+      return;
+    }
+    
+    const sm = this._planRunner.getStateMachine(this._planId);
+    const status = sm?.computePlanStatus() || 'pending';
+    const recursiveCounts = this._planRunner.getRecursiveStatusCounts(this._planId);
+    const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
+    
+    // Reset hashes to force next _update to also do full render
+    this._lastStateHash = '';
+    this._lastStructureHash = '';
+    this._isFirstRender = true;
+    
+    this._panel.webview.html = this._getHtml(plan, status, recursiveCounts.counts, effectiveEndedAt, recursiveCounts.totalNodes);
   }
 
   /**
@@ -1389,95 +1413,106 @@ ${mermaidDef}
     
     // Handle incremental status updates without full re-render (preserves zoom/scroll)
     function handleStatusUpdate(msg) {
-      const { planStatus, nodeStatuses, counts, progress, total, completed, startedAt, endedAt } = msg;
-      
-      // Update plan status badge
-      const statusBadge = document.querySelector('.status-badge');
-      if (statusBadge) {
-        statusBadge.className = 'status-badge ' + planStatus;
-        statusBadge.textContent = planStatus.charAt(0).toUpperCase() + planStatus.slice(1);
-      }
-      
-      // Update progress bar
-      const progressFill = document.querySelector('.progress-fill');
-      const progressText = document.querySelector('.progress-text');
-      if (progressFill) {
-        progressFill.style.width = progress + '%';
-      }
-      if (progressText) {
-        progressText.textContent = completed + ' / ' + total + ' (' + progress + '%)';
-      }
-      
-      // Update legend counts
-      const legendItems = document.querySelectorAll('.legend-item');
-      legendItems.forEach(item => {
-        const icon = item.querySelector('.legend-icon');
-        if (!icon) return;
-        const statusClass = Array.from(icon.classList).find(c => c !== 'legend-icon');
-        if (statusClass && counts[statusClass] !== undefined) {
-          const span = item.querySelector('span:last-child');
-          if (span) {
-            span.textContent = statusClass.charAt(0).toUpperCase() + statusClass.slice(1) + ' (' + counts[statusClass] + ')';
-          }
+      try {
+        const { planStatus, nodeStatuses, counts, progress, total, completed, startedAt, endedAt } = msg;
+        
+        // Update plan status badge
+        const statusBadge = document.querySelector('.status-badge');
+        if (statusBadge) {
+          statusBadge.className = 'status-badge ' + planStatus;
+          statusBadge.textContent = planStatus.charAt(0).toUpperCase() + planStatus.slice(1);
         }
-      });
-      
-      // Update Mermaid node classes in SVG (changes color)
-      const svgElement = document.querySelector('.mermaid svg');
-      if (svgElement) {
-        for (const [sanitizedId, data] of Object.entries(nodeStatuses)) {
-          const nodeGroup = svgElement.querySelector('g[id*="flowchart-' + sanitizedId + '-"]');
-          if (nodeGroup) {
-            const nodeEl = nodeGroup.querySelector('.node');
-            if (nodeEl) {
-              // Remove old status classes and add new one
-              nodeEl.classList.remove('pending', 'ready', 'running', 'succeeded', 'failed', 'blocked', 'canceled', 'scheduled');
-              nodeEl.classList.add(data.status);
+        
+        // Update progress bar
+        const progressFill = document.querySelector('.progress-fill');
+        const progressText = document.querySelector('.progress-text');
+        if (progressFill) {
+          progressFill.style.width = progress + '%';
+        }
+        if (progressText) {
+          progressText.textContent = completed + ' / ' + total + ' (' + progress + '%)';
+        }
+        
+        // Update legend counts
+        const legendItems = document.querySelectorAll('.legend-item');
+        legendItems.forEach(item => {
+          const icon = item.querySelector('.legend-icon');
+          if (!icon) return;
+          const statusClass = Array.from(icon.classList).find(c => c !== 'legend-icon');
+          if (statusClass && counts[statusClass] !== undefined) {
+            const span = item.querySelector('span:last-child');
+            if (span) {
+              span.textContent = statusClass.charAt(0).toUpperCase() + statusClass.slice(1) + ' (' + counts[statusClass] + ')';
             }
           }
-          // Update nodeData for duration tracking
-          if (nodeData[sanitizedId]) {
-            nodeData[sanitizedId].status = data.status;
-            nodeData[sanitizedId].startedAt = data.startedAt;
-            nodeData[sanitizedId].endedAt = data.endedAt;
-          }
-        }
-      }
-      
-      // Update plan duration counter data attributes
-      const durationEl = document.getElementById('planDuration');
-      if (durationEl) {
-        durationEl.dataset.status = planStatus;
-        if (startedAt) durationEl.dataset.started = startedAt.toString();
-        if (endedAt) durationEl.dataset.ended = endedAt.toString();
-      }
-      
-      // Update action buttons visibility based on new status
-      const actionsDiv = document.querySelector('.actions');
-      if (actionsDiv) {
-        const cancelBtn = actionsDiv.querySelector('button[onclick="cancelPlan()"]');
-        const workSummaryBtn = actionsDiv.querySelector('button[onclick="showWorkSummary()"]');
+        });
         
-        if (cancelBtn) {
-          cancelBtn.style.display = (planStatus === 'running' || planStatus === 'pending') ? '' : 'none';
-        }
-        if (workSummaryBtn) {
-          workSummaryBtn.style.display = planStatus === 'succeeded' ? '' : 'none';
-        } else if (planStatus === 'succeeded') {
-          // Add work summary button if it doesn't exist
-          const deleteBtn = actionsDiv.querySelector('button[onclick="deletePlan()"]');
-          if (deleteBtn) {
-            const newBtn = document.createElement('button');
-            newBtn.className = 'action-btn primary';
-            newBtn.onclick = showWorkSummary;
-            newBtn.textContent = 'View Work Summary';
-            actionsDiv.insertBefore(newBtn, deleteBtn);
+        // Update Mermaid node classes in SVG (changes color)
+        const svgElement = document.querySelector('.mermaid svg');
+        if (svgElement) {
+          for (const [sanitizedId, data] of Object.entries(nodeStatuses)) {
+            // Try multiple selector patterns to find the node
+            let nodeGroup = svgElement.querySelector('g[id*="flowchart-' + sanitizedId + '-"]');
+            if (!nodeGroup) {
+              // Fallback: try matching by partial ID (for grouped nodes)
+              nodeGroup = svgElement.querySelector('g[id*="' + sanitizedId + '"]');
+            }
+            if (nodeGroup) {
+              const nodeEl = nodeGroup.querySelector('.node');
+              if (nodeEl) {
+                // Remove old status classes and add new one
+                nodeEl.classList.remove('pending', 'ready', 'running', 'succeeded', 'failed', 'blocked', 'canceled', 'scheduled');
+                nodeEl.classList.add(data.status);
+              }
+            }
+            // Update nodeData for duration tracking
+            if (nodeData[sanitizedId]) {
+              nodeData[sanitizedId].status = data.status;
+              nodeData[sanitizedId].startedAt = data.startedAt;
+              nodeData[sanitizedId].endedAt = data.endedAt;
+            }
           }
         }
+        
+        // Update plan duration counter data attributes
+        const durationEl = document.getElementById('planDuration');
+        if (durationEl) {
+          durationEl.dataset.status = planStatus;
+          if (startedAt) durationEl.dataset.started = startedAt.toString();
+          if (endedAt) durationEl.dataset.ended = endedAt.toString();
+        }
+        
+        // Update action buttons visibility based on new status
+        const actionsDiv = document.querySelector('.actions');
+        if (actionsDiv) {
+          const cancelBtn = actionsDiv.querySelector('button[onclick="cancelPlan()"]');
+          const workSummaryBtn = actionsDiv.querySelector('button[onclick="showWorkSummary()"]');
+          
+          if (cancelBtn) {
+            cancelBtn.style.display = (planStatus === 'running' || planStatus === 'pending') ? '' : 'none';
+          }
+          if (workSummaryBtn) {
+            workSummaryBtn.style.display = planStatus === 'succeeded' ? '' : 'none';
+          } else if (planStatus === 'succeeded') {
+            // Add work summary button if it doesn't exist
+            const deleteBtn = actionsDiv.querySelector('button[onclick="deletePlan()"]');
+            if (deleteBtn) {
+              const newBtn = document.createElement('button');
+              newBtn.className = 'action-btn primary';
+              newBtn.onclick = showWorkSummary;
+              newBtn.textContent = 'View Work Summary';
+              actionsDiv.insertBefore(newBtn, deleteBtn);
+            }
+          }
+        }
+        
+        // Trigger duration update
+        updateNodeDurations();
+      } catch (err) {
+        console.error('handleStatusUpdate error:', err);
+        // On error, request a full refresh
+        vscode.postMessage({ type: 'refresh' });
       }
-      
-      // Trigger duration update
-      updateNodeDurations();
     }
     
     function formatMemory(bytes) {
