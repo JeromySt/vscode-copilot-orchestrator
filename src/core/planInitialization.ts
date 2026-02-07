@@ -53,13 +53,13 @@ export function loadConfiguration(): ExtensionConfig {
 
   return {
     http: {
-      enabled: httpCfg.get<boolean>('enabled', true),
+      enabled: httpCfg.get<boolean>('enabled', false),  // HTTP disabled by default - using stdio
       host: httpCfg.get<string>('host', 'localhost'),
       port: httpCfg.get<number>('port', 39219)
     },
     mcp: {
       enabled: mcpCfg.get<boolean>('enabled', true),
-      transport: mcpCfg.get<McpTransportKind>('transport', 'http'),
+      transport: mcpCfg.get<McpTransportKind>('transport', 'stdio'),  // stdio by default
       host: httpCfg.get<string>('host', 'localhost'),
       port: httpCfg.get<number>('port', 39219)
     },
