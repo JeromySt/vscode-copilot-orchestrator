@@ -189,13 +189,23 @@ export class planDetailPanel {
    * Query all process stats for this Plan and send them to the webview.
    */
   private async _sendAllProcessStats() {
-    const stats = await this._planRunner.getAllProcessStats(this._planId);
-    this._panel.webview.postMessage({
-      type: 'allProcessStats',
-      flat: (stats as any).flat || [],
-      hierarchy: (stats as any).hierarchy || [],
-      rootJobs: (stats as any).rootJobs || []
-    });
+    try {
+      const stats = await this._planRunner.getAllProcessStats(this._planId);
+      this._panel.webview.postMessage({
+        type: 'allProcessStats',
+        flat: (stats as any).flat || [],
+        hierarchy: (stats as any).hierarchy || [],
+        rootJobs: (stats as any).rootJobs || []
+      });
+    } catch (err) {
+      // Send empty stats on error to clear the loading state
+      this._panel.webview.postMessage({
+        type: 'allProcessStats',
+        flat: [],
+        hierarchy: [],
+        rootJobs: []
+      });
+    }
   }
   
   /**
@@ -407,16 +417,17 @@ export class planDetailPanel {
     
     const sm = this._planRunner.getStateMachine(this._planId);
     const status = sm?.computePlanStatus() || 'pending';
-    const defaultCounts: Record<NodeStatus, number> = {
-      pending: 0, ready: 0, scheduled: 0, running: 0,
-      succeeded: 0, failed: 0, blocked: 0, canceled: 0
-    };
-    const counts = sm?.getStatusCounts() || defaultCounts;
+    
+    // Get recursive counts including all child plans (for accurate totals)
+    const recursiveCounts = this._planRunner.getRecursiveStatusCounts(this._planId);
+    const counts = recursiveCounts.counts;
+    const totalNodes = recursiveCounts.totalNodes;
     
     // Create a state hash to detect changes - only re-render if something changed
     const stateHash = JSON.stringify({
       status,
       counts,
+      totalNodes,
       nodeStates: Array.from(plan.nodeStates.entries()).map(([id, s]) => [id, s.status])
     });
     
@@ -429,7 +440,7 @@ export class planDetailPanel {
     // Compute effective endedAt from node data for accurate duration (recursively includes child plans)
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
     
-    this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt);
+    this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt, totalNodes);
   }
   
   /**
@@ -453,16 +464,18 @@ export class planDetailPanel {
    * @param counts - Per-{@link NodeStatus} counts from the state machine.
    * @param effectiveEndedAt - Optional override for the Plan's end timestamp
    *   (accounts for still-running child Plans).
+   * @param totalNodes - Total node count recursively including child plans.
    * @returns Full HTML document string.
    */
   private _getHtml(
     plan: PlanInstance,
     status: string,
     counts: Record<NodeStatus, number>,
-    effectiveEndedAt?: number
+    effectiveEndedAt?: number,
+    totalNodes?: number
   ): string {
-    const total = plan.nodes.size;
-    const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0);
+    const total = totalNodes ?? plan.nodes.size;
+    const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
     // Build Mermaid diagram
@@ -479,9 +492,11 @@ export class planDetailPanel {
         const sanitizedId = prefix + this._sanitizeId(nodeId);
         const state = d.nodeStates.get(nodeId);
         
-        // For subPlan nodes, get effective endedAt recursively
+        // For subPlan nodes, get effective start/end times recursively
+        let effectiveStartedAt = state?.startedAt;
         let effectiveEndedAt = state?.endedAt;
         if (node.type === 'subPlan' && state?.childPlanId) {
+          effectiveStartedAt = this._planRunner.getEffectiveStartedAt(state.childPlanId) || state?.startedAt;
           effectiveEndedAt = this._planRunner.getEffectiveEndedAt(state.childPlanId) || state?.endedAt;
         }
         
@@ -491,7 +506,7 @@ export class planDetailPanel {
           type: node.type,
           childPlanId: node.type === 'subPlan' ? (state?.childPlanId || (node as SubPlanNode).childPlanId) : undefined,
           name: node.name,
-          startedAt: state?.startedAt,
+          startedAt: effectiveStartedAt,
           endedAt: effectiveEndedAt,
           status: state?.status || 'pending',
         };
@@ -1808,22 +1823,27 @@ ${mermaidDef}
           const label = this._escapeForMermaid(node.name);
           const subgraphId = `sg${subgraphCounter++}`;
           
-          // Calculate duration for subPlan - use recursive effective endedAt for child plan
+          // Calculate duration for subPlan - use child plan's actual start/end times
           let durationLabel = '';
-          if (state?.startedAt) {
-            const childPlanId = state?.childPlanId || subPlanNode.childPlanId;
-            // For subPlan nodes, get the effective endedAt recursively from child plan
-            const endTime = childPlanId 
-              ? (this._planRunner.getEffectiveEndedAt(childPlanId) || state.endedAt || Date.now())
-              : (state.endedAt || Date.now());
-            const duration = endTime - state.startedAt;
-            durationLabel = ' | ' + formatDurationMs(duration);
-          }
-          
-          // Track subgraph data for click handling
           const childPlanId = state?.childPlanId || subPlanNode.childPlanId;
           if (childPlanId) {
+            // Get the effective start time (when first child actually started)
+            const effectiveStartedAt = this._planRunner.getEffectiveStartedAt(childPlanId) || state?.startedAt;
+            // Get the effective end time (when last child finished)
+            const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(childPlanId) || state?.endedAt || Date.now();
+            
+            if (effectiveStartedAt) {
+              const duration = effectiveEndedAt - effectiveStartedAt;
+              durationLabel = ' | ' + formatDurationMs(duration);
+            }
+            
+            // Track subgraph data for click handling
             subgraphData[subgraphId] = { childPlanId, name: node.name };
+          } else if (state?.startedAt) {
+            // Fallback for not-yet-started subPlans
+            const endTime = state.endedAt || Date.now();
+            const duration = endTime - state.startedAt;
+            durationLabel = ' | ' + formatDurationMs(duration);
           }
           
           lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(status)} ${label}${durationLabel}"]`);

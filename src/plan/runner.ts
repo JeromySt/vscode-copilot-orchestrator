@@ -46,6 +46,7 @@ import { Logger } from '../core/logger';
 import {
   formatLogEntries,
   appendWorkSummary as appendWorkSummaryHelper,
+  mergeWorkSummary as mergeWorkSummaryHelper,
   computeProgress,
 } from './helpers';
 import * as git from '../git';
@@ -421,6 +422,46 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
+   * Get global execution statistics:
+   * - Total running jobs across all plans
+   * - Global max parallel limit
+   * - Jobs waiting in queue (ready but blocked by limit)
+   */
+  getGlobalStats(): {
+    running: number;
+    maxParallel: number;
+    queued: number;
+  } {
+    let running = 0;
+    let queued = 0;
+    
+    for (const [planId, plan] of this.plans) {
+      const sm = this.stateMachines.get(planId);
+      if (!sm) continue;
+      
+      for (const [nodeId, state] of plan.nodeStates) {
+        const node = plan.nodes.get(nodeId);
+        if (!node) continue;
+        
+        // Count job nodes (not subPlans)
+        if (nodePerformsWork(node)) {
+          if (state.status === 'running' || state.status === 'scheduled') {
+            running++;
+          } else if (state.status === 'ready') {
+            queued++;
+          }
+        }
+      }
+    }
+    
+    return {
+      running,
+      maxParallel: this.scheduler.getGlobalMaxParallel(),
+      queued,
+    };
+  }
+  
+  /**
    * Get the effective endedAt for a plan, recursively including child plans.
    * This is more accurate than plan.endedAt when subPlans ran asynchronously.
    * 
@@ -458,6 +499,92 @@ export class PlanRunner extends EventEmitter {
     }
     
     return maxEndedAt;
+  }
+  
+  /**
+   * Get recursive status counts including all child plans.
+   * This counts all work nodes across the entire plan hierarchy.
+   * 
+   * @param planId - Plan identifier
+   * @returns Object with totalNodes and counts for each status
+   */
+  getRecursiveStatusCounts(planId: string): {
+    totalNodes: number;
+    counts: Record<NodeStatus, number>;
+  } {
+    const defaultCounts: Record<NodeStatus, number> = {
+      pending: 0, ready: 0, scheduled: 0, running: 0,
+      succeeded: 0, failed: 0, blocked: 0, canceled: 0
+    };
+    
+    const result = { totalNodes: 0, counts: { ...defaultCounts } };
+    this.computeRecursiveStatusCounts(planId, result);
+    return result;
+  }
+  
+  /**
+   * Recursively compute status counts across a plan and all child plans.
+   */
+  private computeRecursiveStatusCounts(
+    planId: string, 
+    result: { totalNodes: number; counts: Record<NodeStatus, number> }
+  ): void {
+    const plan = this.plans.get(planId);
+    if (!plan) return;
+    
+    for (const [nodeId, state] of plan.nodeStates) {
+      const node = plan.nodes.get(nodeId);
+      if (!node) continue;
+      
+      // For subPlan nodes, recurse into child plan (don't count the subPlan node itself)
+      if (node.type === 'subPlan' && state.childPlanId) {
+        this.computeRecursiveStatusCounts(state.childPlanId, result);
+      } else {
+        // Count job nodes
+        result.totalNodes++;
+        result.counts[state.status]++;
+      }
+    }
+  }
+  
+  /**
+   * Get the effective startedAt for a plan (minimum startedAt across all nodes).
+   * This represents when the first child actually started execution.
+   * 
+   * @param planId - The plan ID
+   * @returns The minimum startedAt across all nodes, or undefined if no nodes started
+   */
+  getEffectiveStartedAt(planId: string): number | undefined {
+    return this.computeEffectiveStartedAtRecursive(planId);
+  }
+  
+  /**
+   * Recursively compute the earliest startedAt across a plan and all child plans.
+   */
+  private computeEffectiveStartedAtRecursive(planId: string): number | undefined {
+    const plan = this.plans.get(planId);
+    if (!plan) return undefined;
+    
+    let minStartedAt: number | undefined;
+    
+    for (const [nodeId, state] of plan.nodeStates) {
+      const node = plan.nodes.get(nodeId);
+      
+      // For subPlan nodes, recursively check the child plan
+      if (node?.type === 'subPlan' && state.childPlanId) {
+        const childStartedAt = this.computeEffectiveStartedAtRecursive(state.childPlanId);
+        if (childStartedAt && (!minStartedAt || childStartedAt < minStartedAt)) {
+          minStartedAt = childStartedAt;
+        }
+      } else {
+        // For job nodes, use their own startedAt
+        if (state.startedAt && (!minStartedAt || state.startedAt < minStartedAt)) {
+          minStartedAt = state.startedAt;
+        }
+      }
+    }
+    
+    return minStartedAt;
   }
   
   /**
@@ -1167,25 +1294,39 @@ export class PlanRunner extends EventEmitter {
         }
       }
       
-      // If job has multiple dependencies, merge the additional commits into the worktree (Forward Integration)
-      if (additionalSources.length > 0) {
-        log.info(`Merging ${additionalSources.length} additional source commits for job ${node.name}`);
+      // Log dependency info in merge-fi phase (even if no additional merges needed)
+      if (baseCommits.length > 0) {
+        const baseShort = typeof baseCommitish === 'string' && baseCommitish.length === 40 
+          ? baseCommitish.slice(0, 8) 
+          : baseCommitish;
         this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE START ==========');
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging ${additionalSources.length} source commit(s) into worktree`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${baseShort} (from dependency)`);
         
-        const mergeSuccess = await this.mergeSourcesIntoWorktree(plan, node, worktreePath, additionalSources);
-        
-        if (!mergeSuccess) {
-          this.execLog(plan.id, node.id, 'merge-fi', 'error', 'Forward integration merge FAILED');
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========');
-          nodeState.error = 'Failed to merge sources from dependencies';
-          sm.transition(node.id, 'failed');
-          this.emit('nodeCompleted', plan.id, node.id, false);
-          return;
+        if (additionalSources.length > 0) {
+          log.info(`Merging ${additionalSources.length} additional source commits for job ${node.name}`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging ${additionalSources.length} additional source commit(s) into worktree`);
+          
+          const mergeSuccess = await this.mergeSourcesIntoWorktree(plan, node, worktreePath, additionalSources);
+          
+          if (!mergeSuccess) {
+            this.execLog(plan.id, node.id, 'merge-fi', 'error', 'Forward integration merge FAILED');
+            this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========');
+            nodeState.error = 'Failed to merge sources from dependencies';
+            sm.transition(node.id, 'failed');
+            this.emit('nodeCompleted', plan.id, node.id, false);
+            return;
+          }
+          
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Forward integration merge succeeded');
+        } else {
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Single dependency - no additional merges needed');
         }
-        
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Forward integration merge succeeded');
         this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========');
+      } else {
+        // Root node - no dependencies
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========');
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${plan.baseBranch} (root node, no dependencies)`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '===========================================');
       }
       
       // Build execution context
@@ -1510,6 +1651,10 @@ export class PlanRunner extends EventEmitter {
         const ws = childPlan.workSummary;
         this.execLog(parentPlan.id, node.id, 'work', 'info', 
           `Work: ${ws.totalCommits} commits, +${ws.totalFilesAdded} ~${ws.totalFilesModified} -${ws.totalFilesDeleted} files`);
+        
+        // Merge child plan's workSummary into parent plan's workSummary
+        // This ensures leaf merges from sub-plans are included in the parent's totals
+        parentPlan.workSummary = mergeWorkSummaryHelper(parentPlan.workSummary, childPlan.workSummary);
       }
     }
     

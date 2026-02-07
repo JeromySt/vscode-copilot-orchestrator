@@ -197,11 +197,15 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     // Filter out sub-plans (they're shown under their parent)
     const topLevelPlans = planData.filter(d => !d.issubPlan);
     
+    // Get global execution stats
+    const globalStats = this._planRunner.getGlobalStats();
+    
     this._view.webview.postMessage({
       type: 'update',
       Plans: topLevelPlans,
       total: topLevelPlans.length,
       running: topLevelPlans.filter(d => d.status === 'running').length,
+      globalStats,
     });
   }
   
@@ -335,6 +339,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     <h3>Plans</h3>
     <span class="pill" id="badge">0 total</span>
   </div>
+  <div class="global-stats" id="globalStats" style="display: none; margin-bottom: 10px; padding: 6px 8px; background: var(--vscode-editor-inactiveSelectionBackground); border-radius: 4px; font-size: 11px;">
+    <span>Jobs: <span id="runningJobs">0</span>/<span id="maxParallel">8</span></span>
+    <span style="margin-left: 8px;" id="queuedSection">Queued: <span id="queuedJobs">0</span></span>
+  </div>
   <div id="plans"><div class="empty">No plans yet. Use <code>create_copilot_plan</code> or <code>create_copilot_job</code> MCP tool.</div></div>
   
   <script>
@@ -363,7 +371,21 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (ev.data.type !== 'update') return;
       
       const Plans = ev.data.Plans || [];
+      const globalStats = ev.data.globalStats;
+      
       document.getElementById('badge').textContent = Plans.length + ' total';
+      
+      // Update global stats
+      const statsEl = document.getElementById('globalStats');
+      if (globalStats && (globalStats.running > 0 || globalStats.queued > 0)) {
+        statsEl.style.display = 'block';
+        document.getElementById('runningJobs').textContent = globalStats.running;
+        document.getElementById('maxParallel').textContent = globalStats.maxParallel;
+        document.getElementById('queuedJobs').textContent = globalStats.queued;
+        document.getElementById('queuedSection').style.display = globalStats.queued > 0 ? 'inline' : 'none';
+      } else {
+        statsEl.style.display = 'none';
+      }
       
       const container = document.getElementById('plans');
       

@@ -254,3 +254,28 @@ export function appendWorkSummary(
 
   return ws;
 }
+
+/**
+ * Merge a child plan's work summary into a parent plan's work summary.
+ * This aggregates all job summaries and totals from the child into the parent.
+ *
+ * @param parent - The parent plan's work summary (can be undefined).
+ * @param child  - The child plan's work summary to merge.
+ * @returns The merged work summary.
+ */
+export function mergeWorkSummary(
+  parent: WorkSummary | undefined,
+  child: WorkSummary | undefined
+): WorkSummary {
+  const ws = parent ?? createEmptyWorkSummary();
+  
+  if (!child) return ws;
+  
+  ws.totalCommits += child.totalCommits;
+  ws.totalFilesAdded += child.totalFilesAdded;
+  ws.totalFilesModified += child.totalFilesModified;
+  ws.totalFilesDeleted += child.totalFilesDeleted;
+  ws.jobSummaries.push(...child.jobSummaries);
+  
+  return ws;
+}
