@@ -178,12 +178,14 @@ suite('MCP Plan Tool Definitions', () => {
   // getAllToolDefinitions
   // =========================================================================
   suite('getAllToolDefinitions', () => {
-    test('returns same tools as getPlanToolDefinitions', () => {
+    test('includes plan tools and additional node tools', () => {
       const all = getAllToolDefinitions();
       const plan = getPlanToolDefinitions();
-      assert.strictEqual(all.length, plan.length);
-      for (let i = 0; i < all.length; i++) {
-        assert.strictEqual(all[i].name, plan[i].name);
+      // getAllToolDefinitions should include all plan tools plus any node tools
+      assert.ok(all.length >= plan.length, 'should have at least as many tools as plan tools');
+      const allNames = all.map(t => t.name);
+      for (const tool of plan) {
+        assert.ok(allNames.includes(tool.name), `should include plan tool ${tool.name}`);
       }
     });
   });
