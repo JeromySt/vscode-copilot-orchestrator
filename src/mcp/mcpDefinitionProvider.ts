@@ -82,17 +82,20 @@ export function registerMcpDefinitionProvider(
         ? path.join(currentWorkspacePath, '.orchestrator', 'plans')
         : path.join(context.globalStorageUri.fsPath, 'plans');
 
-      const server = new (vscode as any).McpStdioServerDefinition({
-        label: 'Copilot Orchestrator',
-        command: 'node',
-        args: [serverScript],
-        cwd: currentWorkspacePath ? vscode.Uri.file(currentWorkspacePath) : undefined,
-        env: {
-          ORCHESTRATOR_WORKSPACE: currentWorkspacePath || '',
-          ORCHESTRATOR_STORAGE: storagePath,
-        },
-        version: context.extension.packageJSON.version,
-      });
+      // McpStdioServerDefinition constructor: (label, command, args?, options?)
+      const server = new (vscode as any).McpStdioServerDefinition(
+        'Copilot Orchestrator',  // label
+        'node',                  // command
+        [serverScript],          // args
+        {
+          cwd: currentWorkspacePath ? vscode.Uri.file(currentWorkspacePath) : undefined,
+          env: {
+            ORCHESTRATOR_WORKSPACE: currentWorkspacePath || '',
+            ORCHESTRATOR_STORAGE: storagePath,
+          },
+          version: context.extension.packageJSON.version,
+        }
+      );
 
       console.log(`[MCP Provider] Returning stdio server: ${server.label}`);
       return [server];
