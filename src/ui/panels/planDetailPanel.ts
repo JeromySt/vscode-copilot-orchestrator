@@ -46,7 +46,7 @@ export class planDetailPanel {
   private _planId: string;
   private _disposables: vscode.Disposable[] = [];
   private _updateInterval?: NodeJS.Timeout;
-  private _lastStateHash: string = '';
+  private _lastStateVersion: number = -1;
   private _lastStructureHash: string = '';
   private _isFirstRender: boolean = true;
   
@@ -94,23 +94,27 @@ export class planDetailPanel {
   public static createOrShow(
     extensionUri: vscode.Uri,
     planId: string,
-    planRunner: PlanRunner
+    planRunner: PlanRunner,
+    options?: { preserveFocus?: boolean }
   ) {
+    const preserveFocus = options?.preserveFocus ?? false;
+    
     // Check if panel already exists
     const existing = planDetailPanel.panels.get(planId);
     if (existing) {
-      existing._panel.reveal();
+      existing._panel.reveal(undefined, preserveFocus);
       return;
     }
     
     const plan = planRunner.get(planId);
     const title = plan ? `Plan: ${plan.spec.name}` : `Plan: ${planId.slice(0, 8)}`;
     
-    // Create new panel
+    // Create new panel - createWebviewPanel always takes focus, so we need to restore
+    // focus back to tree if preserveFocus is requested
     const panel = vscode.window.createWebviewPanel(
       'planDetail',
       title,
-      vscode.ViewColumn.One,
+      { viewColumn: vscode.ViewColumn.One, preserveFocus },
       {
         enableScripts: true,
         retainContextWhenHidden: true,
@@ -417,7 +421,7 @@ export class planDetailPanel {
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
     
     // Reset hashes to force next _update to also do full render
-    this._lastStateHash = '';
+    this._lastStateVersion = -1;
     this._lastStructureHash = '';
     this._isFirstRender = true;
     
@@ -443,12 +447,13 @@ export class planDetailPanel {
     const counts = recursiveCounts.counts;
     const totalNodes = recursiveCounts.totalNodes;
     
-    // Build node status map for incremental updates
-    const nodeStatuses: Record<string, { status: string; startedAt?: number; endedAt?: number }> = {};
+    // Build node status map for incremental updates (includes version for efficient updates)
+    const nodeStatuses: Record<string, { status: string; version: number; startedAt?: number; endedAt?: number }> = {};
     for (const [nodeId, state] of plan.nodeStates) {
       const sanitizedId = this._sanitizeId(nodeId);
       nodeStatuses[sanitizedId] = {
         status: state.status,
+        version: state.version || 0,
         startedAt: state.startedAt,
         endedAt: state.endedAt
       };
@@ -459,6 +464,7 @@ export class planDetailPanel {
       const sanitizedId = this._sanitizeId(groupId);
       nodeStatuses[sanitizedId] = {
         status: state.status,
+        version: state.version || 0,
         startedAt: state.startedAt,
         endedAt: state.endedAt
       };
@@ -470,21 +476,16 @@ export class planDetailPanel {
       spec: plan.spec.name
     });
     
-    // State hash: statuses, progress, counts (changes during execution)
-    const stateHash = JSON.stringify({
-      status,
-      counts,
-      totalNodes,
-      nodeStates: Array.from(plan.nodeStates.entries()).map(([id, s]) => [id, s.status])
-    });
+    // Use stateVersion for efficient change detection (incremented on every state change)
+    const currentStateVersion = plan.stateVersion || 0;
     
     // If nothing changed, skip entirely
-    if (stateHash === this._lastStateHash) {
+    if (currentStateVersion === this._lastStateVersion) {
       return;
     }
     
     const structureChanged = structureHash !== this._lastStructureHash;
-    this._lastStateHash = stateHash;
+    this._lastStateVersion = currentStateVersion;
     this._lastStructureHash = structureHash;
     
     // If structure changed or first render, do full HTML render
@@ -505,6 +506,7 @@ export class planDetailPanel {
     this._panel.webview.postMessage({
       type: 'statusUpdate',
       planStatus: status,
+      stateVersion: currentStateVersion,
       nodeStatuses,
       counts,
       progress,
@@ -554,7 +556,7 @@ export class planDetailPanel {
     const { diagram: mermaidDef, nodeTooltips } = this._buildMermaidDiagram(plan);
     
     // Build node data for click handling
-    const nodeData: Record<string, { nodeId: string; planId: string; type: string; name: string; startedAt?: number; endedAt?: number; status: string }> = {};
+    const nodeData: Record<string, { nodeId: string; planId: string; type: string; name: string; startedAt?: number; endedAt?: number; status: string; version: number }> = {};
     
     // Collect all node data with prefixes matching Mermaid IDs
     for (const [nodeId, node] of plan.nodes) {
@@ -569,6 +571,23 @@ export class planDetailPanel {
         startedAt: state?.startedAt,
         endedAt: state?.endedAt,
         status: state?.status || 'pending',
+        version: state?.version || 0,
+      };
+    }
+    
+    // Add group data for duration tracking
+    for (const [groupId, state] of plan.groupStates) {
+      const sanitizedId = this._sanitizeId(groupId);
+      const group = plan.groups.get(groupId);
+      nodeData[sanitizedId] = {
+        nodeId: groupId,
+        planId: plan.id,
+        type: 'group',
+        name: group?.name || groupId,
+        startedAt: state?.startedAt,
+        endedAt: state?.endedAt,
+        status: state?.status || 'pending',
+        version: state?.version || 0,
       };
     }
     
@@ -1503,6 +1522,13 @@ ${mermaidDef}
         
         if (svgElement) {
           for (const [sanitizedId, data] of Object.entries(nodeStatuses)) {
+            // Skip if version hasn't changed (efficient update)
+            const existingData = nodeData[sanitizedId];
+            if (existingData && existingData.version === data.version) {
+              nodesUpdated++; // Count as success (already up to date)
+              continue;
+            }
+            
             // Status colors for groups/subgraphs (dimmer than nodes)
             const groupColors = {
               pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
@@ -1584,9 +1610,10 @@ ${mermaidDef}
               }
             }
             
-            // Update nodeData for duration tracking
+            // Update nodeData for duration tracking (and version for next comparison)
             if (nodeData[sanitizedId]) {
               nodeData[sanitizedId].status = data.status;
+              nodeData[sanitizedId].version = data.version;
               nodeData[sanitizedId].startedAt = data.startedAt;
               nodeData[sanitizedId].endedAt = data.endedAt;
             }

@@ -46,6 +46,7 @@ interface SerializedPlan {
   createdAt: number;
   startedAt?: number;
   endedAt?: number;
+  stateVersion?: number;
   cleanUpSuccessfulWork: boolean;
   maxParallel: number;
   workSummary?: WorkSummary;
@@ -319,6 +320,7 @@ export class PlanPersistence {
       createdAt: plan.createdAt,
       startedAt: plan.startedAt,
       endedAt: plan.endedAt,
+      stateVersion: plan.stateVersion,
       cleanUpSuccessfulWork: plan.cleanUpSuccessfulWork,
       maxParallel: plan.maxParallel,
       workSummary: plan.workSummary,
@@ -411,6 +413,7 @@ export class PlanPersistence {
       createdAt: data.createdAt,
       startedAt: data.startedAt,
       endedAt: data.endedAt,
+      stateVersion: data.stateVersion || 0,
       cleanUpSuccessfulWork: data.cleanUpSuccessfulWork,
       maxParallel: data.maxParallel,
       workSummary: data.workSummary,

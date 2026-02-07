@@ -62,6 +62,9 @@ export interface NodeExecutionState {
   /** Current status */
   status: NodeStatus;
   
+  /** Version number - incremented on every state change (for efficient UI updates) */
+  version: number;
+  
   /** When the node was scheduled */
   scheduledAt?: number;
   
@@ -257,6 +260,9 @@ export interface GroupExecutionState {
    */
   status: import('./nodes').NodeStatus;
   
+  /** Version number - incremented on every state change (for efficient UI updates) */
+  version: number;
+  
   /** When the first job in this group started (set by first job to start) */
   startedAt?: number;
   
@@ -350,6 +356,9 @@ export interface PlanInstance {
   
   /** When execution ended */
   endedAt?: number;
+  
+  /** Global state version - incremented on any node/group state change (for UI polling) */
+  stateVersion: number;
   
   /** Whether cleanup is enabled */
   cleanUpSuccessfulWork: boolean;

@@ -66,7 +66,7 @@ function makeNode(
 }
 
 function makeState(status: NodeStatus = 'pending'): NodeExecutionState {
-  return { status, attempts: 0 };
+  return { status, version: 0, attempts: 0 };
 }
 
 /**
@@ -120,6 +120,7 @@ function buildPlan(
     baseBranch: 'main',
     worktreeRoot: '/worktrees',
     createdAt: 1000,
+    stateVersion: 0,
     cleanUpSuccessfulWork: true,
     maxParallel: 4,
     ...overrides,

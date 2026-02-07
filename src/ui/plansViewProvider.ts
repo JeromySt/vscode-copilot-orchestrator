@@ -97,7 +97,12 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.onDidReceiveMessage(message => {
       switch (message.type) {
         case 'openPlan':
-          vscode.commands.executeCommand('orchestrator.showPlanDetails', message.planId);
+          // Open plan and take focus
+          vscode.commands.executeCommand('orchestrator.showPlanDetails', message.planId, false);
+          break;
+        case 'previewPlan':
+          // Preview plan but keep focus in tree
+          vscode.commands.executeCommand('orchestrator.showPlanDetails', message.planId, true);
           break;
         case 'cancelPlan':
           vscode.commands.executeCommand('orchestrator.cancelPlan', message.planId);
@@ -468,9 +473,14 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         \`;
       }).join('');
       
-      // Add click handlers
+      // Add click handlers - click previews (keeps focus in tree), double-click opens
       document.querySelectorAll('.plan-item').forEach(el => {
         el.addEventListener('click', () => {
+          // Preview: show panel but keep focus in tree for continued navigation
+          vscode.postMessage({ type: 'previewPlan', planId: el.dataset.id });
+        });
+        el.addEventListener('dblclick', () => {
+          // Open: show panel and take focus
           vscode.postMessage({ type: 'openPlan', planId: el.dataset.id });
         });
       });

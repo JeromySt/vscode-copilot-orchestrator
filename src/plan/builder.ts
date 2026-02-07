@@ -139,6 +139,7 @@ export function buildPlan(
       // Initialize group state
       groupStates.set(groupId, {
         status: 'pending',
+        version: 0,
         runningCount: 0,
         succeededCount: 0,
         failedCount: 0,
@@ -190,6 +191,7 @@ export function buildPlan(
         groupPathToId.set(jobSpec.group, groupId);
         groupStates.set(groupId, {
           status: 'pending',
+          version: 0,
           runningCount: 0,
           succeededCount: 0,
           failedCount: 0,
@@ -320,6 +322,7 @@ export function buildPlan(
     const initialStatus = node.dependencies.length === 0 ? 'ready' : 'pending';
     nodeStates.set(node.id, {
       status: initialStatus,
+      version: 0,
       attempts: 0,
     });
   }
@@ -346,6 +349,7 @@ export function buildPlan(
     targetBranch: spec.targetBranch,
     worktreeRoot,
     createdAt: Date.now(),
+    stateVersion: 0,
     cleanUpSuccessfulWork: spec.cleanUpSuccessfulWork !== false,
     maxParallel: spec.maxParallel || 4,
   };

@@ -119,6 +119,10 @@ export class PlanStateMachine extends EventEmitter {
     // Apply the transition
     const oldState = { ...state };
     state.status = newStatus;
+    state.version = (state.version || 0) + 1;
+    
+    // Increment global plan state version
+    this.plan.stateVersion = (this.plan.stateVersion || 0) + 1;
     
     // Apply additional updates
     if (updates) {
@@ -189,158 +193,143 @@ export class PlanStateMachine extends EventEmitter {
    * Update group state when a job transitions.
    * Jobs push their state changes to their parent group.
    */
-  private updateGroupState(nodeId: string, from: NodeStatus, to: NodeStatus): void {
+  private updateGroupState(nodeId: string, _from: NodeStatus, _to: NodeStatus): void {
     const node = this.plan.nodes.get(nodeId);
     if (!node || !node.groupId) return;
     
-    const groupState = this.plan.groupStates.get(node.groupId);
-    if (!groupState) return;
-    
-    const now = Date.now();
-    
-    // Track running count
-    if (to === 'running' && from !== 'running') {
-      groupState.runningCount++;
-      // First job to start sets group startedAt
-      if (!groupState.startedAt) {
-        groupState.startedAt = now;
-      }
-    } else if (from === 'running' && to !== 'running') {
-      groupState.runningCount = Math.max(0, groupState.runningCount - 1);
-    }
-    
-    // Track terminal state counts
-    if (isTerminal(to) && !isTerminal(from)) {
-      switch (to) {
-        case 'succeeded':
-          groupState.succeededCount++;
-          break;
-        case 'failed':
-          groupState.failedCount++;
-          break;
-        case 'blocked':
-          groupState.blockedCount++;
-          break;
-        case 'canceled':
-          groupState.canceledCount++;
-          break;
-      }
-    }
-    
-    // Compute derived group status
-    const group = this.plan.groups.get(node.groupId);
-    if (!group) return;
-    
-    const totalNodes = group.totalNodes;
-    const completedCount = groupState.succeededCount + groupState.failedCount + 
-                           groupState.blockedCount + groupState.canceledCount;
-    
-    // Determine group status (uses same status values as nodes)
-    let newStatus: NodeStatus;
-    if (completedCount === 0) {
-      // No terminal nodes yet
-      if (groupState.runningCount > 0) {
-        newStatus = 'running';
-      } else if (groupState.startedAt) {
-        newStatus = 'running'; // Started but waiting
-      } else {
-        newStatus = 'pending';
-      }
-    } else if (completedCount < totalNodes) {
-      // Some completed, some still running/pending
-      newStatus = 'running';
-    } else {
-      // All nodes completed
-      if (groupState.succeededCount === totalNodes) {
-        newStatus = 'succeeded';
-      } else if (groupState.failedCount + groupState.blockedCount === totalNodes) {
-        newStatus = 'failed';
-      } else if (groupState.canceledCount === totalNodes) {
-        newStatus = 'canceled';
-      } else {
-        // Mixed results
-        newStatus = 'failed'; // Use 'failed' for partial (groups use NodeStatus)
-      }
-      
-      // Set group endedAt when all nodes complete
-      if (!groupState.endedAt) {
-        groupState.endedAt = now;
-      }
-    }
-    
-    groupState.status = newStatus;
-    
-    // Propagate to parent groups
-    const parentGroup = group.parentGroupId ? this.plan.groups.get(group.parentGroupId) : undefined;
-    if (parentGroup) {
-      // Parent groups compute their status from child group states
-      this.recomputeParentGroupStatus(parentGroup.id);
-    }
+    // Recompute the group state from its direct children and propagate up
+    this.recomputeGroupState(node.groupId);
   }
   
   /**
-   * Recompute parent group status from child groups.
+   * Recompute group state from direct children (nodes + child groups).
+   * Propagates up the chain if status changes.
+   * 
+   * Groups aggregate status from:
+   * - Direct nodes (nodeIds) 
+   * - Child groups (childGroupIds) - treated as single entities
+   * 
+   * Status rules (priority order):
+   * - Any running → running
+   * - Any failed/blocked → failed  
+   * - All succeeded → succeeded
+   * - All canceled → canceled
+   * - Otherwise → pending
    */
-  private recomputeParentGroupStatus(groupId: string): void {
+  private recomputeGroupState(groupId: string): void {
     const group = this.plan.groups.get(groupId);
     const groupState = this.plan.groupStates.get(groupId);
     if (!group || !groupState) return;
     
+    const oldStatus = groupState.status;
     const now = Date.now();
     
-    // Count statuses from all nodes in this group (including subgroups)
-    let running = 0;
-    let succeeded = 0;
-    let failed = 0;
-    let blocked = 0;
-    let canceled = 0;
-    let started = false;
+    // Count states from direct nodes
+    let running = 0, succeeded = 0, failed = 0, blocked = 0, canceled = 0, pending = 0;
+    let minStartedAt: number | undefined;
+    let maxEndedAt: number | undefined;
     
-    for (const nodeId of group.allNodeIds) {
+    for (const nodeId of group.nodeIds) {
       const nodeState = this.plan.nodeStates.get(nodeId);
       if (!nodeState) continue;
       
-      if (nodeState.startedAt) started = true;
-      if (nodeState.status === 'running') running++;
-      else if (nodeState.status === 'succeeded') succeeded++;
-      else if (nodeState.status === 'failed') failed++;
-      else if (nodeState.status === 'blocked') blocked++;
-      else if (nodeState.status === 'canceled') canceled++;
+      if (nodeState.startedAt && (!minStartedAt || nodeState.startedAt < minStartedAt)) {
+        minStartedAt = nodeState.startedAt;
+      }
+      if (nodeState.endedAt && (!maxEndedAt || nodeState.endedAt > maxEndedAt)) {
+        maxEndedAt = nodeState.endedAt;
+      }
+      
+      switch (nodeState.status) {
+        case 'running': case 'scheduled': running++; break;
+        case 'succeeded': succeeded++; break;
+        case 'failed': failed++; break;
+        case 'blocked': blocked++; break;
+        case 'canceled': canceled++; break;
+        default: pending++; break;
+      }
     }
     
+    // Also count from child groups (each child group counts as one entity)
+    for (const childGroupId of group.childGroupIds) {
+      const childState = this.plan.groupStates.get(childGroupId);
+      if (!childState) continue;
+      
+      if (childState.startedAt && (!minStartedAt || childState.startedAt < minStartedAt)) {
+        minStartedAt = childState.startedAt;
+      }
+      if (childState.endedAt && (!maxEndedAt || childState.endedAt > maxEndedAt)) {
+        maxEndedAt = childState.endedAt;
+      }
+      
+      switch (childState.status) {
+        case 'running': case 'scheduled': running++; break;
+        case 'succeeded': succeeded++; break;
+        case 'failed': failed++; break;
+        case 'blocked': blocked++; break;
+        case 'canceled': canceled++; break;
+        default: pending++; break;
+      }
+    }
+    
+    // Update counts
     groupState.runningCount = running;
     groupState.succeededCount = succeeded;
     groupState.failedCount = failed;
     groupState.blockedCount = blocked;
     groupState.canceledCount = canceled;
     
-    const totalNodes = group.totalNodes;
-    const completedCount = succeeded + failed + blocked + canceled;
+    // Update timestamps
+    if (minStartedAt && !groupState.startedAt) {
+      groupState.startedAt = minStartedAt;
+    }
     
-    // Determine status
+    // Determine group status from direct children count
+    const totalChildren = group.nodeIds.length + group.childGroupIds.length;
+    const completed = succeeded + failed + blocked + canceled;
+    
     let newStatus: NodeStatus;
-    if (completedCount === 0) {
-      newStatus = running > 0 || started ? 'running' : 'pending';
-    } else if (completedCount < totalNodes) {
+    if (running > 0) {
+      // Any child running → group is running
+      newStatus = 'running';
+    } else if (failed > 0 || blocked > 0) {
+      // Any child failed/blocked → group is failed
+      newStatus = 'failed';
+      if (!groupState.endedAt && completed === totalChildren) {
+        groupState.endedAt = maxEndedAt || now;
+      }
+    } else if (completed === totalChildren && totalChildren > 0) {
+      // All children completed
+      if (succeeded === totalChildren) {
+        newStatus = 'succeeded';
+      } else if (canceled === totalChildren) {
+        newStatus = 'canceled';
+      } else {
+        newStatus = 'failed'; // Mixed terminal states
+      }
+      if (!groupState.endedAt) {
+        groupState.endedAt = maxEndedAt || now;
+      }
+    } else if (minStartedAt) {
+      // Some started but not running (waiting between jobs)
       newStatus = 'running';
     } else {
-      if (succeeded === totalNodes) newStatus = 'succeeded';
-      else if (failed + blocked === totalNodes) newStatus = 'failed';
-      else if (canceled === totalNodes) newStatus = 'canceled';
-      else newStatus = 'failed';
+      newStatus = 'pending';
+    }
+    
+    // Only update and propagate if status changed
+    if (oldStatus !== newStatus) {
+      groupState.status = newStatus;
+      groupState.version = (groupState.version || 0) + 1;
+      this.plan.stateVersion = (this.plan.stateVersion || 0) + 1;
       
-      if (!groupState.endedAt) groupState.endedAt = now;
-    }
-    
-    if (!groupState.startedAt && started) {
-      groupState.startedAt = now;
-    }
-    
-    groupState.status = newStatus;
-    
-    // Propagate up the chain
-    if (group.parentGroupId) {
-      this.recomputeParentGroupStatus(group.parentGroupId);
+      // Propagate up to parent group
+      if (group.parentGroupId) {
+        this.recomputeGroupState(group.parentGroupId);
+      }
+    } else if (groupState.startedAt !== minStartedAt || groupState.endedAt !== maxEndedAt) {
+      // Timestamps changed but status didn't - still increment version
+      groupState.version = (groupState.version || 0) + 1;
     }
   }
   

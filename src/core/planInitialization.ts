@@ -417,7 +417,7 @@ export function registerPlanCommands(
   
   // Show Plan details
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.showPlanDetails', async (planId?: string) => {
+    vscode.commands.registerCommand('orchestrator.showPlanDetails', async (planId?: string, preserveFocus?: boolean) => {
       // If no planId provided, prompt user to select from available plans
       if (!planId) {
         const plans = planRunner.getAll();
@@ -443,7 +443,7 @@ export function registerPlanCommands(
       }
       
       const { planDetailPanel } = require('../ui/panels/planDetailPanel');
-      planDetailPanel.createOrShow(context.extensionUri, planId, planRunner);
+      planDetailPanel.createOrShow(context.extensionUri, planId, planRunner, { preserveFocus });
     })
   );
   
