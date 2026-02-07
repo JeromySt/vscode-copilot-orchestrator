@@ -2329,9 +2329,9 @@ export class PlanRunner extends EventEmitter {
    * 2. ALL of its dependents have succeeded (they've consumed our commit)
    * 3. The worktree hasn't already been cleaned up
    * 
-   * This ensures we don't lose state that downstream nodes might need.
-   * For leaf nodes (no dependents), they can be cleaned up immediately after success.
-   * For intermediate nodes, we wait until all children have completed.
+   * A node's worktree is eligible for cleanup once ALL consumers have consumed its output:
+   * - For leaf nodes (no DAG dependents): the consumer is the targetBranch merge
+   * - For non-leaf nodes: the consumers are the dependent nodes
    */
   private async cleanupEligibleWorktrees(
     plan: PlanInstance,
@@ -2354,34 +2354,9 @@ export class PlanRunner extends EventEmitter {
       const node = plan.nodes.get(nodeId);
       if (!node) continue;
       
-      // Leaf nodes (no dependents) - can only be cleaned up after successful merge to target
-      if (node.dependents.length === 0) {
-        // If there's a targetBranch, we need mergedToTarget to be true
-        // If no targetBranch, there's nothing to merge so it's safe to clean up
-        if (plan.targetBranch) {
-          if (state.mergedToTarget === true) {
-            eligibleNodes.push(nodeId);
-          }
-          // If mergedToTarget is false or undefined, keep the worktree for manual retry
-        } else {
-          // No targetBranch = no merge needed = safe to cleanup
-          eligibleNodes.push(nodeId);
-        }
-        continue;
-      }
-      
-      // For non-leaf nodes, check if ALL dependents have succeeded
-      // This means they've all had a chance to consume our commit
-      let allDependentsSucceeded = true;
-      for (const depId of node.dependents) {
-        const depState = plan.nodeStates.get(depId);
-        if (!depState || depState.status !== 'succeeded') {
-          allDependentsSucceeded = false;
-          break;
-        }
-      }
-      
-      if (allDependentsSucceeded) {
+      // Check if all consumers have consumed this node's output
+      const consumersReady = this.allConsumersConsumed(plan, node, state);
+      if (consumersReady) {
         eligibleNodes.push(nodeId);
       }
     }
@@ -2404,6 +2379,37 @@ export class PlanRunner extends EventEmitter {
       // Persist the updated state with worktreeCleanedUp flags
       this.persistence.save(plan);
     }
+  }
+  
+  /**
+   * Check if all consumers of a node have consumed its output.
+   * 
+   * A node's output (commit) can be consumed by:
+   * - DAG dependents (for non-leaf nodes)
+   * - The target branch merge (for leaf nodes)
+   * 
+   * Once all consumers have consumed, the worktree is safe to remove.
+   */
+  private allConsumersConsumed(plan: PlanInstance, node: PlanNode, state: NodeExecutionState): boolean {
+    // Leaf nodes (no DAG dependents) - consumer is the targetBranch
+    if (node.dependents.length === 0) {
+      // No target branch = no consumer = safe to cleanup
+      if (!plan.targetBranch) {
+        return true;
+      }
+      // Has target branch - check if merge succeeded
+      return state.mergedToTarget === true;
+    }
+    
+    // Non-leaf nodes - consumers are the dependent nodes
+    // Check if ALL dependents have succeeded (consumed our commit)
+    for (const depId of node.dependents) {
+      const depState = plan.nodeStates.get(depId);
+      if (!depState || depState.status !== 'succeeded') {
+        return false;
+      }
+    }
+    return true;
   }
   
   // ============================================================================
