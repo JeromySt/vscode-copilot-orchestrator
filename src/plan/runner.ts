@@ -1419,6 +1419,9 @@ export class PlanRunner extends EventEmitter {
         const isLeaf = plan.leaves.includes(node.id);
         log.debug(`Merge check: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${plan.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
         
+        // Track whether RI merge failed (only applies to leaf nodes with targetBranch)
+        let riMergeFailed = false;
+        
         if (isLeaf && plan.targetBranch && nodeState.completedCommit) {
           log.info(`Initiating merge to target: ${node.name} -> ${plan.targetBranch}`);
           this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========');
@@ -1430,8 +1433,9 @@ export class PlanRunner extends EventEmitter {
           if (mergeSuccess) {
             this.execLog(plan.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`);
           } else {
+            riMergeFailed = true;
             this.execLog(plan.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED - worktree preserved for manual retry`);
-            log.warn(`Leaf ${node.name} succeeded but merge to ${plan.targetBranch} failed - worktree preserved for manual retry`);
+            log.warn(`Leaf ${node.name} work succeeded but RI merge to ${plan.targetBranch} failed - treating as node failure`);
           }
           this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
           
@@ -1440,45 +1444,86 @@ export class PlanRunner extends EventEmitter {
           log.debug(`Skipping merge: isLeaf=${isLeaf}, hasTargetBranch=${!!plan.targetBranch}, hasCompletedCommit=${!!nodeState.completedCommit}`);
         }
         
-        // Record successful attempt in history
-        const successAttempt: AttemptRecord = {
-          attemptNumber: nodeState.attempts,
-          status: 'succeeded',
-          startedAt: nodeState.startedAt || Date.now(),
-          endedAt: Date.now(),
-          copilotSessionId: nodeState.copilotSessionId,
-          stepStatuses: nodeState.stepStatuses,
-          worktreePath: nodeState.worktreePath,
-          baseCommit: nodeState.baseCommit,
-          logs: this.getNodeLogs(plan.id, node.id),
-          workUsed: node.work,
-        };
-        nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
-        
-        sm.transition(node.id, 'succeeded');
-        this.emit('nodeCompleted', plan.id, node.id, true);
-        
-        // Cleanup this node's worktree if eligible
-        // For leaf nodes: eligible after RI merge to targetBranch (or no targetBranch)
-        // For non-leaf nodes: handled via acknowledgeConsumption when dependents FI
-        if (plan.cleanUpSuccessfulWork && nodeState.worktreePath) {
-          const isLeaf = plan.leaves.includes(node.id);
-          if (isLeaf) {
-            // Leaf: cleanup now if merged (or no target branch)
-            if (!plan.targetBranch || nodeState.mergedToTarget) {
-              await this.cleanupWorktree(nodeState.worktreePath, plan.repoPath);
-              nodeState.worktreeCleanedUp = true;
-              this.persistence.save(plan);
+        // If RI merge failed, treat the node as failed (work succeeded but merge did not)
+        if (riMergeFailed) {
+          nodeState.error = `Reverse integration merge to ${plan.targetBranch} failed. Work completed successfully but merge could not be performed. Worktree preserved for manual retry.`;
+          
+          // Store lastAttempt for retry context
+          nodeState.lastAttempt = {
+            phase: 'merge-ri',
+            startTime: nodeState.startedAt || Date.now(),
+            endTime: Date.now(),
+            error: nodeState.error,
+          };
+          
+          // Record failed attempt in history
+          const riFailedAttempt: AttemptRecord = {
+            attemptNumber: nodeState.attempts,
+            status: 'failed',
+            startedAt: nodeState.startedAt || Date.now(),
+            endedAt: Date.now(),
+            failedPhase: 'merge-ri',
+            error: nodeState.error,
+            copilotSessionId: nodeState.copilotSessionId,
+            stepStatuses: nodeState.stepStatuses,
+            worktreePath: nodeState.worktreePath,
+            baseCommit: nodeState.baseCommit,
+            completedCommit: nodeState.completedCommit, // Work was successful, so we have the commit
+            logs: this.getNodeLogs(plan.id, node.id),
+            workUsed: node.work,
+          };
+          nodeState.attemptHistory = [...(nodeState.attemptHistory || []), riFailedAttempt];
+          
+          sm.transition(node.id, 'failed');
+          this.emit('nodeCompleted', plan.id, node.id, false);
+          
+          log.error(`Job failed (RI merge): ${node.name}`, {
+            planId: plan.id,
+            nodeId: node.id,
+            commit: nodeState.completedCommit?.slice(0, 8),
+            targetBranch: plan.targetBranch,
+          });
+        } else {
+          // Record successful attempt in history
+          const successAttempt: AttemptRecord = {
+            attemptNumber: nodeState.attempts,
+            status: 'succeeded',
+            startedAt: nodeState.startedAt || Date.now(),
+            endedAt: Date.now(),
+            copilotSessionId: nodeState.copilotSessionId,
+            stepStatuses: nodeState.stepStatuses,
+            worktreePath: nodeState.worktreePath,
+            baseCommit: nodeState.baseCommit,
+            logs: this.getNodeLogs(plan.id, node.id),
+            workUsed: node.work,
+          };
+          nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
+          
+          sm.transition(node.id, 'succeeded');
+          this.emit('nodeCompleted', plan.id, node.id, true);
+          
+          // Cleanup this node's worktree if eligible
+          // For leaf nodes: eligible after RI merge to targetBranch (or no targetBranch)
+          // For non-leaf nodes: handled via acknowledgeConsumption when dependents FI
+          if (plan.cleanUpSuccessfulWork && nodeState.worktreePath) {
+            const isLeafNode = plan.leaves.includes(node.id);
+            if (isLeafNode) {
+              // Leaf: cleanup now if merged (or no target branch)
+              if (!plan.targetBranch || nodeState.mergedToTarget) {
+                await this.cleanupWorktree(nodeState.worktreePath, plan.repoPath);
+                nodeState.worktreeCleanedUp = true;
+                this.persistence.save(plan);
+              }
             }
+            // Non-leaf nodes are cleaned up via acknowledgeConsumption when dependents FI
           }
-          // Non-leaf nodes are cleaned up via acknowledgeConsumption when dependents FI
+          
+          log.info(`Job succeeded: ${node.name}`, {
+            planId: plan.id,
+            nodeId: node.id,
+            commit: nodeState.completedCommit?.slice(0, 8),
+          });
         }
-        
-        log.info(`Job succeeded: ${node.name}`, {
-          planId: plan.id,
-          nodeId: node.id,
-          commit: nodeState.completedCommit?.slice(0, 8),
-        });
       } else {
         nodeState.error = result.error;
         

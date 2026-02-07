@@ -193,6 +193,9 @@ export interface AttemptRecord {
   /** Base commit SHA this attempt started from */
   baseCommit?: string;
   
+  /** Completed commit SHA from this attempt (if work succeeded) */
+  completedCommit?: string;
+  
   /** Logs captured during this attempt (stored as string to reduce memory) */
   logs?: string;
   
