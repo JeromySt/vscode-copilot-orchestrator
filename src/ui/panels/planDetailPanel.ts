@@ -776,6 +776,16 @@ export class planDetailPanel {
       transform-origin: top left;
       transition: transform 0.2s ease;
     }
+    #mermaid-diagram {
+      cursor: grab;
+    }
+    #mermaid-diagram.panning {
+      cursor: grabbing;
+      user-select: none;
+    }
+    #mermaid-diagram.panning .mermaid-container {
+      transition: none;
+    }
     
     /* Mermaid node styling */
     .mermaid .node rect { rx: 8px; ry: 8px; }
@@ -1340,15 +1350,77 @@ ${mermaidDef}
       updateZoom();
     }
     
-    // Mouse wheel zoom
-    document.getElementById('mermaid-diagram')?.addEventListener('wheel', (e) => {
-      if (e.ctrlKey) {
+    // Mouse wheel zoom (no modifier needed when over diagram)
+    const diagramEl = document.getElementById('mermaid-diagram');
+    diagramEl?.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (e.deltaY < 0) {
+        zoomIn();
+      } else {
+        zoomOut();
+      }
+    }, { passive: false });
+    
+    // Mouse drag to pan
+    let isPanning = false;
+    let didPan = false;
+    let panStartX = 0;
+    let panStartY = 0;
+    let scrollStartX = 0;
+    let scrollStartY = 0;
+    
+    diagramEl?.addEventListener('mousedown', (e) => {
+      // Only pan on left mouse button, and not on interactive elements
+      if (e.button !== 0) return;
+      const target = e.target;
+      if (target.closest('.zoom-controls, .legend, button, a')) return;
+      
+      isPanning = true;
+      didPan = false;
+      panStartX = e.clientX;
+      panStartY = e.clientY;
+      scrollStartX = diagramEl.scrollLeft;
+      scrollStartY = diagramEl.scrollTop;
+      diagramEl.classList.add('panning');
+      e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+      if (!isPanning || !diagramEl) return;
+      
+      const dx = e.clientX - panStartX;
+      const dy = e.clientY - panStartY;
+      
+      // Mark as panned if moved more than 5px (distinguish from click)
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+        didPan = true;
+      }
+      
+      diagramEl.scrollLeft = scrollStartX - dx;
+      diagramEl.scrollTop = scrollStartY - dy;
+    });
+    
+    document.addEventListener('mouseup', () => {
+      if (isPanning && diagramEl) {
+        isPanning = false;
+        diagramEl.classList.remove('panning');
+      }
+    });
+    
+    // Suppress click after pan
+    document.addEventListener('click', (e) => {
+      if (didPan) {
+        e.stopPropagation();
         e.preventDefault();
-        if (e.deltaY < 0) {
-          zoomIn();
-        } else {
-          zoomOut();
-        }
+        didPan = false;
+      }
+    }, true); // Use capture phase to intercept before other handlers
+    
+    // Also stop panning if mouse leaves the window
+    document.addEventListener('mouseleave', () => {
+      if (isPanning && diagramEl) {
+        isPanning = false;
+        diagramEl.classList.remove('panning');
       }
     });
     
