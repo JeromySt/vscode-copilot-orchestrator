@@ -1399,28 +1399,59 @@ ${mermaidDef}
       for (const [sanitizedId, data] of Object.entries(nodeData)) {
         if (!data.startedAt) continue;
         
-        // Only update running/scheduled nodes (not completed ones)
+        // Only update running/scheduled nodes/groups (not completed ones)
         const isRunning = data.status === 'running' || data.status === 'scheduled';
         if (!isRunning) continue;
         
         const duration = Date.now() - data.startedAt;
         const durationStr = formatDurationLive(duration);
         
-        // Find the node group by its Mermaid ID, then locate the text element within it
-        const nodeGroup = svgElement.querySelector('g[id*="' + sanitizedId + '"]');
-        if (!nodeGroup) continue;
+        // Find the element - either a node or a cluster (group)
+        let targetGroup = svgElement.querySelector('g[id*="' + sanitizedId + '"]');
+        let textEls;
         
-        const textEls = nodeGroup.querySelectorAll('foreignObject *, text, tspan, .nodeLabel, .label');
+        // Check if this is a cluster/subgraph
+        if (data.type === 'group') {
+          // Try cluster selectors
+          let cluster = svgElement.querySelector('g.cluster[id*="' + sanitizedId + '"], g[id*="' + sanitizedId + '"].cluster');
+          if (!cluster) {
+            const allClusters = svgElement.querySelectorAll('g.cluster');
+            for (const c of allClusters) {
+              const clusterId = c.getAttribute('id') || '';
+              if (clusterId.includes(sanitizedId)) {
+                cluster = c;
+                break;
+              }
+            }
+          }
+          if (cluster) {
+            targetGroup = cluster;
+            textEls = cluster.querySelectorAll('.cluster-label .nodeLabel, .cluster-label text, .nodeLabel, text');
+          }
+        } else {
+          // Regular node
+          if (targetGroup) {
+            textEls = targetGroup.querySelectorAll('foreignObject *, text, tspan, .nodeLabel, .label');
+          }
+        }
+        
+        if (!targetGroup || !textEls) continue;
+        
         for (const textEl of textEls) {
           if (!textEl.childNodes.length || textEl.children.length > 0) continue;
           
           const text = textEl.textContent || '';
           if (text.includes('|')) {
+            // Update existing duration
             const pipeIndex = text.lastIndexOf('|');
             if (pipeIndex > 0) {
               const newText = text.substring(0, pipeIndex + 1) + ' ' + durationStr;
               textEl.textContent = newText;
             }
+            break;
+          } else if (text.length > 0) {
+            // No duration yet - add it (node just started running)
+            textEl.textContent = text + ' | ' + durationStr;
             break;
           }
         }
@@ -2132,6 +2163,14 @@ ${mermaidDef}
         // Get icon for group status (same as nodes)
         const icon = this._getStatusIcon(groupStatus);
         
+        // Calculate duration for groups (same as nodes)
+        let groupDurationLabel = '';
+        if (groupState?.startedAt) {
+          const endTime = groupState.endedAt || Date.now();
+          const duration = endTime - groupState.startedAt;
+          groupDurationLabel = ' | ' + formatDurationMs(duration);
+        }
+        
         // Status-specific styling for groups (same colors as nodes)
         const groupColors: Record<string, { fill: string; stroke: string }> = {
           pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
@@ -2145,8 +2184,13 @@ ${mermaidDef}
         const colors = groupColors[groupStatus] || groupColors.pending;
         
         const displayName = treeNode.name || groupPath;
+        const escapedName = this._escapeForMermaid(displayName);
+        const truncatedName = this._truncateNodeLabel(escapedName, groupDurationLabel);
+        if (truncatedName !== escapedName) {
+          nodeTooltips[sanitizedGroupId] = displayName;
+        }
         
-        lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${this._escapeForMermaid(displayName)}"]`);
+        lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedName}${groupDurationLabel}"]`);
         
         const childIndent = currentIndent + '  ';
         
