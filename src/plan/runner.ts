@@ -1717,10 +1717,24 @@ export class PlanRunner extends EventEmitter {
           }
         }
         // Note: No subPlan-level merge needed - each leaf job handles its own RI to targetBranch
+        
+        // Clean up child plan's worktrees now that it succeeded
+        if (childPlan.cleanUpSuccessfulWork) {
+          const childSm = this.stateMachines.get(event.planId);
+          if (childSm) {
+            await this.cleanupEligibleWorktrees(childPlan, childSm);
+          }
+        }
       }
       
       parentSm.transition(node.id, 'succeeded');
       this.emit('nodeCompleted', parentPlan.id, node.id, true);
+      
+      // Check if any parent plan worktrees are now eligible for cleanup
+      // (e.g., parent jobs whose dependents - including this subPlan - have all succeeded)
+      if (parentPlan.cleanUpSuccessfulWork) {
+        await this.cleanupEligibleWorktrees(parentPlan, parentSm);
+      }
     } else {
       if (nodeState) {
         nodeState.error = `Child Plan ${event.status}`;
