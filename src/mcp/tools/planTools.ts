@@ -63,9 +63,16 @@ PRODUCER_ID IS REQUIRED:
 - Used in 'dependencies' arrays to establish execution order
 - Jobs with dependencies: [] are root jobs that start immediately
 
+JOBS vs GROUPS (CRITICAL):
+- The 'jobs' array is for flat job definitions only. Jobs have: producer_id, task, work, dependencies.
+- The 'groups' array is for hierarchical organization. Groups have: name, jobs, groups.
+- DO NOT put groups in the 'jobs' array. DO NOT set type: "group" on jobs.
+- DO NOT put nested 'jobs' arrays inside items in the 'jobs' array.
+
 GROUPS (VISUAL HIERARCHY + NAMESPACE):
 - Groups organize jobs visually and provide namespace isolation for producer_ids
 - Groups do NOT have dependencies - only jobs have dependencies
+- Groups do NOT have: task, work, producer_id, expects_no_changes, type
 - Jobs within a group can reference siblings by local producer_id (e.g., "sibling-job")
 - Cross-group references use qualified paths (e.g., "other-group/job-id" or "phase1/collection/count-files")
 - Nested groups form hierarchical paths: "phase1/collection/count-files"

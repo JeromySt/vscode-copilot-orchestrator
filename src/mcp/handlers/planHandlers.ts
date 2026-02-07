@@ -121,9 +121,42 @@ function validateGroupsRecursively(
     }
     
     // Validate jobs in this group
+    const allowedJobProps = new Set([
+      'producer_id', 'name', 'task', 'work', 'dependencies',
+      'prechecks', 'postchecks', 'instructions', 'baseBranch',
+      'expects_no_changes', 'group'
+    ]);
+    
     for (let j = 0; j < (group.jobs || []).length; j++) {
       const job = group.jobs[j];
-      const qualifiedId = `${currentPath}/${job.producer_id}`;
+      const qualifiedId = `${currentPath}/${job.producer_id || `job[${j}]`}`;
+      
+      // Check for group-like structures in jobs array (common mistake)
+      if (job.type === 'group') {
+        errors.push(
+          `Item '${qualifiedId}' has type: "group" but is in a 'jobs' array. ` +
+          `Use nested 'groups' array for subgroups, not 'jobs' with type: "group".`
+        );
+        continue;
+      }
+      
+      if (Array.isArray(job.jobs)) {
+        errors.push(
+          `Job '${qualifiedId}' has a nested 'jobs' array. ` +
+          `Jobs cannot contain other jobs. Use 'groups' for hierarchical organization.`
+        );
+        continue;
+      }
+      
+      // Check for unknown properties on jobs
+      for (const key of Object.keys(job)) {
+        if (!allowedJobProps.has(key)) {
+          errors.push(
+            `Job '${qualifiedId}' has unknown property '${key}'. ` +
+            `Allowed: ${[...allowedJobProps].join(', ')}`
+          );
+        }
+      }
       
       if (!job.producer_id) {
         errors.push(`Job at index ${j} in group '${currentPath}' is missing required 'producer_id' field`);
@@ -213,9 +246,53 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
   const allProducerIds = new Set<string>();
   const errors: string[] = [];
   
+  // Allowed properties for job items
+  const allowedJobProps = new Set([
+    'producer_id', 'name', 'task', 'work', 'dependencies',
+    'prechecks', 'postchecks', 'instructions', 'baseBranch',
+    'expects_no_changes', 'group'
+  ]);
+  
   // Validate each job at root level
   for (let i = 0; i < (args.jobs || []).length; i++) {
     const job = args.jobs[i];
+    
+    // Check for group-like structures in jobs array (common mistake)
+    if (job.type === 'group') {
+      errors.push(
+        `Item at jobs[${i}] has type: "group" but is in the 'jobs' array. ` +
+        `Groups must be in the 'groups' array, not 'jobs'. ` +
+        `Move this item to "groups" instead.`
+      );
+      continue;
+    }
+    
+    if (Array.isArray(job.jobs)) {
+      errors.push(
+        `Item at jobs[${i}] (producer_id: '${job.producer_id || 'unset'}') has a nested 'jobs' array. ` +
+        `Jobs cannot contain other jobs - this looks like a group structure. ` +
+        `Use the 'groups' array for hierarchical organization, not 'jobs'.`
+      );
+      continue;
+    }
+    
+    if (Array.isArray(job.groups)) {
+      errors.push(
+        `Item at jobs[${i}] (producer_id: '${job.producer_id || 'unset'}') has a 'groups' array. ` +
+        `Jobs cannot contain groups. Move this structure to the root 'groups' array.`
+      );
+      continue;
+    }
+    
+    // Check for unknown properties on jobs
+    for (const key of Object.keys(job)) {
+      if (!allowedJobProps.has(key)) {
+        errors.push(
+          `Job '${job.producer_id || `jobs[${i}]`}' has unknown property '${key}'. ` +
+          `Allowed job properties: ${[...allowedJobProps].join(', ')}`
+        );
+      }
+    }
     
     if (!job.producer_id) {
       errors.push(`Job at index ${i} is missing required 'producer_id' field`);
