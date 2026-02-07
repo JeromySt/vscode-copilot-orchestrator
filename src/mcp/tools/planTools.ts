@@ -65,10 +65,52 @@ PRODUCER_ID IS REQUIRED:
 
 GROUPS (VISUAL HIERARCHY + NAMESPACE):
 - Groups organize jobs visually and provide namespace isolation for producer_ids
-- Jobs within a group can reference each other by local producer_id
-- Cross-group references use qualified paths: "group_name/producer_id"
-- Nested groups form paths like "backend/api/auth"
-- Groups do NOT have dependencies - jobs describe the full dependency graph
+- Groups do NOT have dependencies - only jobs have dependencies
+- Jobs within a group can reference siblings by local producer_id (e.g., "sibling-job")
+- Cross-group references use qualified paths (e.g., "other-group/job-id" or "phase1/collection/count-files")
+- Nested groups form hierarchical paths: "phase1/collection/count-files"
+- Groups render as nested boxes in the UI with aggregate status
+
+DEPENDENCY RESOLUTION:
+- Local refs (no '/') are qualified with current group path: "sibling" → "mygroup/sibling"
+- Qualified refs (contain '/') are used as-is: "phase1/analysis/done" stays "phase1/analysis/done"
+- All dependencies must resolve to valid job producer_ids
+
+EXAMPLE WITH GROUPS:
+{
+  "name": "Build Pipeline",
+  "jobs": [],  // Can be empty if all jobs are in groups
+  "groups": [{
+    "name": "phase1",
+    "groups": [
+      {
+        "name": "collection",
+        "jobs": [
+          { "producer_id": "count-files", "task": "Count files", "dependencies": [] },
+          { "producer_id": "count-dirs", "task": "Count dirs", "dependencies": [] }
+        ]
+      },
+      {
+        "name": "analysis",
+        "jobs": [{
+          "producer_id": "analyze",
+          "task": "Analyze",
+          "dependencies": ["collection/count-files", "collection/count-dirs"]  // Cross-group refs
+        }]
+      }
+    ]
+  }, {
+    "name": "phase2",
+    "groups": [{
+      "name": "reporting",
+      "jobs": [{
+        "producer_id": "report",
+        "task": "Generate report",
+        "dependencies": ["phase1/analysis/analyze"]  // Fully qualified cross-phase ref
+      }]
+    }]
+  }]
+}
 
 EXECUTION CONTEXT:
 - Each job gets its own git worktree for isolated work
@@ -80,26 +122,9 @@ WORK OPTIONS (work/prechecks/postchecks accept):
 3. Shell spec: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
 4. Agent spec: { type: "agent", instructions: "Implement the feature", maxTurns: 10 }
 
-IMPORTANT: Agent instructions MUST be in Markdown format for proper rendering:
-- Use # headers for sections (# Main Task, ## Steps)
-- Use numbered lists (1. First step, 2. Second step)
-- Use bullet lists (- item, - another item)
-- Use **bold** and *italic* for emphasis
+IMPORTANT: Agent instructions MUST be in Markdown format for proper rendering.
 
-SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"
-
-EXAMPLES:
-// Simple string command
-{ "work": "npm run build" }
-
-// Direct process (no shell quoting issues)
-{ "work": { "type": "process", "executable": "node", "args": ["--version"] }}
-
-// PowerShell with explicit shell
-{ "work": { "type": "shell", "command": "Get-ChildItem -Recurse", "shell": "powershell" }}
-
-// AI Agent with rich config
-{ "work": { "type": "agent", "instructions": "Add error handling to api.ts", "contextFiles": ["src/api.ts"] }}`,
+SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
       inputSchema: {
         type: 'object',
         properties: {

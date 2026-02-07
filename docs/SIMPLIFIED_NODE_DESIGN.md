@@ -1,8 +1,28 @@
 # Simplified Node Design
 
-> **Status:** Proposal  
+> **Status:** Implemented (v0.6.0)  
 > **Date:** 2026-02-07  
 > **Scope:** Plan/Node type system, MCP API, PlanRunner internals
+
+---
+
+## Implementation Notes (v0.6.0)
+
+This design was implemented with the following simplifications:
+
+1. **SubPlanNode removed entirely** — Plans use a flat DAG; all jobs are peers
+2. **Groups are purely visual + namespace** — Groups provide:
+   - Visual organization (nested Mermaid subgraphs with aggregate status)
+   - Namespace isolation (same `producer_id` can exist in different groups)
+   - NO execution dependencies — jobs explicitly declare all dependencies
+3. **Dependency resolution**:
+   - Local refs (no `/`): qualified with current group path (e.g., `"sibling"` → `"mygroup/sibling"`)
+   - Qualified refs (with `/`): used as-is (e.g., `"phase1/build"`)
+4. **MCP layer flattens groups** — `groups` input becomes flat `jobs` with qualified producer_ids
+
+See [GROUPS.md](./GROUPS.md) for current documentation.
+
+---
 
 ## 1. Problem Statement
 
