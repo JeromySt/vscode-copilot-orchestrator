@@ -734,7 +734,11 @@ export class planDetailPanel {
     .mermaid .node.blocked rect { fill: #3c3c3c; stroke: #858585; stroke-dasharray: 5,5; }
     
     .mermaid .node { cursor: pointer; }
-    .mermaid .node.branchNode { cursor: default; }  /* Branch nodes are not clickable */
+    .mermaid .node.branchNode,
+    .mermaid .node.baseBranchNode,
+    .mermaid g[id*="BASE_BRANCH"] .node,
+    .mermaid g[id*="TARGET_SOURCE"] .node,
+    .mermaid g[id*="TARGET_MERGED"] .node { cursor: default; }  /* Branch nodes are not clickable */
     
     /* Node labels are pre-truncated server-side; let Mermaid size the box */
     .mermaid .node .nodeLabel {
