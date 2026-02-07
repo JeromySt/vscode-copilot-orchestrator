@@ -1447,7 +1447,19 @@ ${mermaidDef}
           }
         });
         
-        // Update Mermaid node classes in SVG (changes color)
+        // Status color map (must match classDef in buildMermaidDiagram)
+        const statusColors = {
+          pending: { fill: '#3c3c3c', stroke: '#858585' },
+          ready: { fill: '#2d4a6e', stroke: '#3794ff' },
+          running: { fill: '#2d4a6e', stroke: '#3794ff' },
+          scheduled: { fill: '#2d4a6e', stroke: '#3794ff' },
+          succeeded: { fill: '#1e4d40', stroke: '#4ec9b0' },
+          failed: { fill: '#4d2929', stroke: '#f48771' },
+          blocked: { fill: '#3c3c3c', stroke: '#858585' },
+          canceled: { fill: '#3c3c3c', stroke: '#858585' }
+        };
+        
+        // Update Mermaid node colors in SVG directly (Mermaid uses inline styles)
         const svgElement = document.querySelector('.mermaid svg');
         if (svgElement) {
           for (const [sanitizedId, data] of Object.entries(nodeStatuses)) {
@@ -1460,9 +1472,22 @@ ${mermaidDef}
             if (nodeGroup) {
               const nodeEl = nodeGroup.querySelector('.node');
               if (nodeEl) {
-                // Remove old status classes and add new one
+                // Update CSS class for additional styling
                 nodeEl.classList.remove('pending', 'ready', 'running', 'succeeded', 'failed', 'blocked', 'canceled', 'scheduled');
                 nodeEl.classList.add(data.status);
+                
+                // Update inline styles on the rect (Mermaid uses inline styles from classDef)
+                const rect = nodeEl.querySelector('rect');
+                if (rect && statusColors[data.status]) {
+                  rect.style.fill = statusColors[data.status].fill;
+                  rect.style.stroke = statusColors[data.status].stroke;
+                  // Add animation for running nodes
+                  if (data.status === 'running') {
+                    rect.style.strokeWidth = '2px';
+                  } else {
+                    rect.style.strokeWidth = '';
+                  }
+                }
               }
             }
             // Update nodeData for duration tracking
