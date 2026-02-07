@@ -1484,32 +1484,37 @@ ${mermaidDef}
         
         // Update Mermaid node colors in SVG directly (Mermaid uses inline styles)
         const svgElement = document.querySelector('.mermaid svg');
+        let nodesUpdated = 0;
+        const totalNodes = Object.keys(nodeStatuses).length;
+        
+        if (!svgElement) {
+          console.warn('SVG element not found in handleStatusUpdate');
+        }
+        
         if (svgElement) {
           for (const [sanitizedId, data] of Object.entries(nodeStatuses)) {
-            // Try multiple selector patterns to find the node
-            let nodeGroup = svgElement.querySelector('g[id*="flowchart-' + sanitizedId + '-"]');
-            if (!nodeGroup) {
-              // Fallback: try matching by partial ID (for grouped nodes)
-              nodeGroup = svgElement.querySelector('g[id*="' + sanitizedId + '"]');
-            }
+            // Mermaid generates IDs like "flowchart-nabc123...-0" where nabc123... is our sanitizedId
+            // Use prefix match to find the exact node group
+            const nodeGroup = svgElement.querySelector('g[id^="flowchart-' + sanitizedId + '-"]');
+            
             if (nodeGroup) {
-              const nodeEl = nodeGroup.querySelector('.node');
-              if (nodeEl) {
-                // Update CSS class for additional styling
-                nodeEl.classList.remove('pending', 'ready', 'running', 'succeeded', 'failed', 'blocked', 'canceled', 'scheduled');
-                nodeEl.classList.add(data.status);
-                
-                // Update inline styles on the rect (Mermaid uses inline styles from classDef)
-                const rect = nodeEl.querySelector('rect');
-                if (rect && statusColors[data.status]) {
-                  rect.style.fill = statusColors[data.status].fill;
-                  rect.style.stroke = statusColors[data.status].stroke;
-                  // Add animation for running nodes
-                  if (data.status === 'running') {
-                    rect.style.strokeWidth = '2px';
-                  } else {
-                    rect.style.strokeWidth = '';
-                  }
+              nodesUpdated++;
+              const nodeEl = nodeGroup.querySelector('.node') || nodeGroup;
+              
+              // Update CSS class for additional styling
+              nodeEl.classList.remove('pending', 'ready', 'running', 'succeeded', 'failed', 'blocked', 'canceled', 'scheduled');
+              nodeEl.classList.add(data.status);
+              
+              // Update inline styles on the rect (Mermaid uses inline styles from classDef)
+              const rect = nodeEl.querySelector('rect');
+              if (rect && statusColors[data.status]) {
+                rect.style.fill = statusColors[data.status].fill;
+                rect.style.stroke = statusColors[data.status].stroke;
+                // Add animation for running nodes
+                if (data.status === 'running') {
+                  rect.style.strokeWidth = '2px';
+                } else {
+                  rect.style.strokeWidth = '';
                 }
               }
             }
@@ -1520,6 +1525,13 @@ ${mermaidDef}
               nodeData[sanitizedId].endedAt = data.endedAt;
             }
           }
+        }
+        
+        // If we couldn't update any nodes and there are nodes to update, force full refresh
+        if (totalNodes > 0 && nodesUpdated === 0) {
+          console.warn('SVG node update failed: updated 0 of ' + totalNodes + ' nodes, requesting full refresh');
+          vscode.postMessage({ type: 'refresh' });
+          return;
         }
         
         // Update plan duration counter data attributes
@@ -2183,13 +2195,15 @@ ${mermaidDef}
   }
   
   /**
-   * Sanitize a node ID for use as a Mermaid node identifier.
-   *
-   * @param id - The raw node ID.
-   * @returns A string safe for Mermaid node references (alphanumeric + underscores).
+   * Convert a node ID (UUID) to a Mermaid-safe identifier.
+   * Simply prefixes with 'n' and strips hyphens from UUID.
+   * 
+   * @param id - The raw node ID (UUID like "abc12345-6789-...").
+   * @returns Mermaid-safe ID like "nabc123456789..."
    */
   private _sanitizeId(id: string): string {
-    return 'node_' + id.replace(/[^a-zA-Z0-9]/g, '_');
+    // UUIDs have hyphens; just remove them and prefix with 'n'
+    return 'n' + id.replace(/-/g, '');
   }
   
   /**
