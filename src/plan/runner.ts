@@ -1458,9 +1458,20 @@ export class PlanRunner extends EventEmitter {
         sm.transition(node.id, 'succeeded');
         this.emit('nodeCompleted', plan.id, node.id, true);
         
-        // Try to cleanup eligible worktrees (this node and any ancestors that are now safe)
-        if (plan.cleanUpSuccessfulWork) {
-          await this.cleanupEligibleWorktrees(plan, sm);
+        // Cleanup this node's worktree if eligible
+        // For leaf nodes: eligible after RI merge to targetBranch (or no targetBranch)
+        // For non-leaf nodes: handled via acknowledgeConsumption when dependents FI
+        if (plan.cleanUpSuccessfulWork && nodeState.worktreePath) {
+          const isLeaf = plan.leaves.includes(node.id);
+          if (isLeaf) {
+            // Leaf: cleanup now if merged (or no target branch)
+            if (!plan.targetBranch || nodeState.mergedToTarget) {
+              await this.cleanupWorktree(nodeState.worktreePath, plan.repoPath);
+              nodeState.worktreeCleanedUp = true;
+              this.persistence.save(plan);
+            }
+          }
+          // Non-leaf nodes are cleaned up via acknowledgeConsumption when dependents FI
         }
         
         log.info(`Job succeeded: ${node.name}`, {
@@ -1725,25 +1736,15 @@ export class PlanRunner extends EventEmitter {
           }
         }
         // Note: No subPlan-level merge needed - each leaf job handles its own RI to targetBranch
-        
-        // Clean up child plan's worktrees now that it succeeded
-        if (childPlan.cleanUpSuccessfulWork) {
-          const childSm = this.stateMachines.get(event.planId);
-          if (childSm) {
-            await this.cleanupEligibleWorktrees(childPlan, childSm);
-          }
-        }
+        // Child plan worktrees were cleaned up incrementally:
+        // - Leaf jobs cleaned up after RI merge
+        // - Non-leaf jobs cleaned up when dependents acknowledged FI consumption
       }
       
       parentSm.transition(node.id, 'succeeded');
       this.emit('nodeCompleted', parentPlan.id, node.id, true);
       
-      // Check if any parent plan worktrees are now eligible for cleanup
-      // (This should mostly be a no-op since subPlan acknowledges consumption at startup,
-      // but serves as a fallback for any edge cases)
-      if (parentPlan.cleanUpSuccessfulWork) {
-        await this.cleanupEligibleWorktrees(parentPlan, parentSm);
-      }
+      // Parent worktrees were already cleaned when subPlan acknowledged consumption at startup
     } else {
       if (nodeState) {
         nodeState.error = `Child Plan ${event.status}`;
@@ -2368,16 +2369,13 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Clean up worktrees for nodes that are safe to clean up.
+   * Clean up worktrees for non-leaf nodes that are safe to clean up.
    * 
-   * A node's worktree is safe to clean up when:
-   * 1. The node itself has succeeded (has a completedCommit)
-   * 2. ALL consumers have consumed (FI'd from) this node's output
-   * 3. The worktree hasn't already been cleaned up
+   * Called from acknowledgeConsumption() when a dependent finishes FI.
+   * Checks all dependencies of the consumer to see if any are now fully
+   * consumed (all their dependents have FI'd from them).
    * 
-   * A node's worktree is eligible for cleanup once ALL consumers have consumed its output:
-   * - For leaf nodes (no DAG dependents): the consumer is the targetBranch merge
-   * - For non-leaf nodes: the consumers are the dependent nodes (via FI acknowledgment)
+   * Leaf nodes are cleaned up directly after RI merge - see executeJobNode.
    */
   private async cleanupEligibleWorktrees(
     plan: PlanInstance,
