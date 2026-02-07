@@ -1216,13 +1216,23 @@ export class PlanRunner extends EventEmitter {
       nodeState.worktreePath = worktreePath;
       
       // Setup detached worktree (or reuse existing one for retries)
+      // This is part of Forward Integration (merge-fi) phase
       log.debug(`Setting up worktree for job ${node.name} at ${worktreePath} from ${baseCommitish}`);
-      const timing = await git.worktrees.createOrReuseDetached(
-        plan.repoPath,
-        worktreePath,
-        baseCommitish,
-        s => log.debug(s)
-      );
+      let timing: Awaited<ReturnType<typeof git.worktrees.createOrReuseDetached>>;
+      try {
+        timing = await git.worktrees.createOrReuseDetached(
+          plan.repoPath,
+          worktreePath,
+          baseCommitish,
+          s => log.debug(s)
+        );
+      } catch (wtError: any) {
+        // Worktree creation is part of FI phase - log and set correct phase
+        this.execLog(plan.id, node.id, 'merge-fi', 'error', `Failed to create worktree: ${wtError.message}`);
+        const fiError = new Error(wtError.message) as Error & { failedPhase: string };
+        fiError.failedPhase = 'merge-fi';
+        throw fiError;
+      }
       
       if (timing.reused) {
         log.info(`Reusing existing worktree for ${node.name} (retry)`);
@@ -1525,9 +1535,12 @@ export class PlanRunner extends EventEmitter {
     } catch (error: any) {
       nodeState.error = error.message;
       
+      // Use failedPhase from error if set, otherwise default to 'work'
+      const failedPhase = error.failedPhase || 'work';
+      
       // Store lastAttempt for retry context
       nodeState.lastAttempt = {
-        phase: 'work',
+        phase: failedPhase,
         startTime: nodeState.startedAt || Date.now(),
         endTime: Date.now(),
         error: error.message,
@@ -1539,7 +1552,7 @@ export class PlanRunner extends EventEmitter {
         status: 'failed',
         startedAt: nodeState.startedAt || Date.now(),
         endedAt: Date.now(),
-        failedPhase: 'work',
+        failedPhase: failedPhase,
         error: error.message,
         copilotSessionId: nodeState.copilotSessionId,
         stepStatuses: nodeState.stepStatuses,
