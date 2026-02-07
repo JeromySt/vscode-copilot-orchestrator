@@ -6,5 +6,7 @@
  * @module ui/templates
  */
 
-// All templates are now embedded directly in panel components.
-// This file is kept for potential future template extraction.
+export { escapeHtml, formatDuration, formatDurationMs, errorPageHtml, loadingPageHtml } from './helpers';
+export { statusBadgeStyles, actionButtonStyles, workSummaryStatStyles, commitFileStyles } from './styles';
+export { commitDetailsHtml, workSummaryStatsHtml } from './workSummary';
+export type { CommitItemData } from './workSummary';

@@ -10,7 +10,22 @@ import * as vscode from 'vscode';
 import { PlanRunner } from '\.\./plan';
 
 /**
- * Attach status bar item that shows Plan execution status.
+ * Create and attach a status bar item that displays live Plan execution status.
+ *
+ * Polls every 1 second to show the number of running Plans and active jobs,
+ * or an idle/total count when nothing is executing. Clicking the item triggers
+ * the `orchestrator.refreshPlans` command.
+ *
+ * The status bar item and its polling interval are automatically disposed when
+ * the extension deactivates (via `context.subscriptions`).
+ *
+ * @param context - The VS Code extension context for registering disposables.
+ * @param planRunner - The {@link PlanRunner} instance used to query Plan state.
+ *
+ * @example
+ * ```ts
+ * attachStatusBar(context, planRunner);
+ * ```
  */
 export function attachStatusBar(context: vscode.ExtensionContext, planRunner: PlanRunner) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);

@@ -13,15 +13,39 @@ import { planDetailPanel } from './panels/planDetailPanel';
 import { NodeDetailPanel } from './panels/nodeDetailPanel';
 
 /**
- * Plans view Provider - webview in the sidebar showing Plans list
+ * Sidebar webview provider that displays all top-level Plans and their execution status.
+ *
+ * Renders an interactive list of Plans with progress bars, status badges, and node
+ * count summaries. Automatically refreshes when Plans are created, completed, deleted,
+ * or when node transitions occur (debounced).
+ *
+ * **Webview → Extension messages:**
+ * - `{ type: 'openPlan', planId: string }` — open the {@link planDetailPanel} for a Plan
+ * - `{ type: 'cancelPlan', planId: string }` — cancel a running Plan
+ * - `{ type: 'deletePlan', planId: string }` — delete a Plan and close associated panels
+ * - `{ type: 'refresh' }` — request a manual data refresh
+ *
+ * **Extension → Webview messages:**
+ * - `{ type: 'update', Plans: PlanData[], total: number, running: number }` — refreshed Plan list
+ *
+ * @example
+ * ```ts
+ * const provider = new plansViewProvider(context, planRunner);
+ * vscode.window.registerWebviewViewProvider(plansViewProvider.viewType, provider);
+ * ```
  */
 export class plansViewProvider implements vscode.WebviewViewProvider {
+  /** View identifier used to register this provider with VS Code. */
   public static readonly viewType = 'orchestrator.plansView';
   
   private _view?: vscode.WebviewView;
   private _refreshTimer?: NodeJS.Timeout;
   private _debounceTimer?: NodeJS.Timeout;
   
+  /**
+   * @param _context - The extension context for managing subscriptions and resources.
+   * @param _planRunner - The {@link PlanRunner} instance used to query Plan state.
+   */
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _planRunner: PlanRunner
@@ -38,6 +62,17 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     _planRunner.on('nodeTransition', () => this.scheduleRefresh());
   }
   
+  /**
+   * Called by VS Code when the webview view becomes visible. Sets up the
+   * webview's HTML content, message handling, and periodic refresh for running Plans.
+   *
+   * Starts a 2-second polling interval that triggers a refresh whenever at least
+   * one Plan has a `running` or `pending` status.
+   *
+   * @param webviewView - The webview view instance provided by VS Code.
+   * @param context - Additional context about how the view was resolved.
+   * @param _token - Cancellation token (unused).
+   */
   resolveWebviewView(
     webviewView: vscode.WebviewView,
     context: vscode.WebviewViewResolveContext,
@@ -97,7 +132,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   }
   
   /**
-   * Schedule a debounced refresh
+   * Schedule a debounced refresh (100 ms). Coalesces rapid node-transition
+   * events into a single view update.
    */
   private scheduleRefresh() {
     // Debounce rapid updates
@@ -109,7 +145,11 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   }
   
   /**
-   * Refresh the view with current Plan data
+   * Refresh the webview with current Plan data.
+   *
+   * Queries all Plans from the {@link PlanRunner}, computes per-Plan progress and
+   * status counts, filters out sub-plans (shown under their parents), and sends an
+   * `update` message to the webview. Top-level Plans are sorted newest-first.
    */
   refresh() {
     if (!this._view) return;
@@ -165,6 +205,14 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     });
   }
   
+  /**
+   * Generate the static HTML shell for the sidebar webview.
+   *
+   * The returned markup contains the layout, styles, and client-side JavaScript
+   * that listens for `update` messages and renders the Plan list dynamically.
+   *
+   * @returns Full HTML document string for the webview.
+   */
   private _getHtml(): string {
     return `<!DOCTYPE html>
 <html>

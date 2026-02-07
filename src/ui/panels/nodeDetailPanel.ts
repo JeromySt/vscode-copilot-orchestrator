@@ -14,9 +14,13 @@
 
 import * as vscode from 'vscode';
 import { PlanRunner, PlanInstance, JobNode, SubPlanNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord } from '../../plan';
+import { escapeHtml, formatDuration, errorPageHtml, loadingPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 
 /**
- * Format a WorkSpec for display (plain text)
+ * Format a {@link WorkSpec} as a plain-text summary string.
+ *
+ * @param spec - The work specification to format.
+ * @returns A human-readable text representation of the work spec, or empty string if undefined.
  */
 function formatWorkSpec(spec: WorkSpec | undefined): string {
   if (!spec) return '';
@@ -40,7 +44,14 @@ function formatWorkSpec(spec: WorkSpec | undefined): string {
 }
 
 /**
- * Format a WorkSpec for HTML display with proper formatting
+ * Format a {@link WorkSpec} as HTML with type badges and styled commands.
+ *
+ * Renders `process` and `shell` specs as `<code>` blocks with type badges,
+ * and `agent` specs as Markdown-rendered instruction blocks.
+ *
+ * @param spec - The work specification to format.
+ * @param escapeHtml - HTML escaping function for sanitizing user-supplied text.
+ * @returns An HTML fragment string, or empty string if the spec is undefined.
  */
 function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) => string): string {
   if (!spec) return '';
@@ -71,8 +82,14 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
 }
 
 /**
- * Simple Markdown to HTML renderer for agent instructions.
- * Handles: headers, lists, code blocks, inline code, bold, italic, links.
+ * Convert a subset of Markdown to HTML for rendering agent instructions.
+ *
+ * Supports headers (`#`–`######`), ordered/unordered lists, fenced code blocks,
+ * inline code, bold, italic, and `[text](url)` links.
+ *
+ * @param md - Raw Markdown source string.
+ * @param escapeHtml - HTML escaping function for sanitizing text content.
+ * @returns An HTML fragment string.
  */
 function renderMarkdown(md: string, escapeHtml: (s: string) => string): string {
   const lines = md.split('\n');
@@ -158,7 +175,11 @@ function renderMarkdown(md: string, escapeHtml: (s: string) => string): string {
 }
 
 /**
- * Format inline markdown elements: bold, italic, code, links
+ * Apply inline Markdown formatting (bold, italic, code, links) to a single line.
+ *
+ * @param text - The raw text to format (already split from block elements).
+ * @param escapeHtml - HTML escaping function.
+ * @returns The text with inline Markdown converted to HTML spans.
  */
 function formatInline(text: string, escapeHtml: (s: string) => string): string {
   // First escape HTML
@@ -182,7 +203,29 @@ function formatInline(text: string, escapeHtml: (s: string) => string): string {
 }
 
 /**
- * Node Detail Panel - shows job/node execution details with logs
+ * Webview panel that shows detailed information for a single Plan node.
+ *
+ * Displays execution state with phase tabs (merge-fi, prechecks, work, commit,
+ * postchecks, merge-ri), a live-streaming log viewer, work summary with commit
+ * details, process tree for running jobs, and retry controls.
+ *
+ * Only one panel is created per Plan ID + node ID pair — subsequent calls to
+ * {@link createOrShow} reveal the existing panel and trigger an update.
+ *
+ * **Webview → Extension messages:**
+ * - `{ type: 'openPlan', planId: string }` — navigate to the parent Plan panel
+ * - `{ type: 'openWorktree' }` — open the node's worktree folder in a new VS Code window
+ * - `{ type: 'refresh' }` — request a full data refresh
+ * - `{ type: 'getLog', phase: string }` — request log content for a specific execution phase
+ * - `{ type: 'getProcessStats' }` — request current process tree statistics
+ * - `{ type: 'copyToClipboard', text: string }` — copy text to the system clipboard
+ * - `{ type: 'retryNode', planId: string, nodeId: string, resumeSession: boolean }` — retry the node
+ *
+ * **Extension → Webview messages:**
+ * - `{ type: 'logContent', phase: string, content: string }` — log data for a phase
+ * - `{ type: 'processStats', ... }` — process tree statistics
+ *
+ * @see {@link planDetailPanel} for the parent Plan detail view
  */
 export class NodeDetailPanel {
   private static panels = new Map<string, NodeDetailPanel>();
@@ -195,6 +238,12 @@ export class NodeDetailPanel {
   private _currentPhase: string | null = null;
   private _lastStatus: string | null = null;
   
+  /**
+   * @param panel - The VS Code webview panel instance.
+   * @param planId - The Plan ID that contains this node.
+   * @param nodeId - The unique identifier of the node to display.
+   * @param _planRunner - The {@link PlanRunner} instance for querying state and logs.
+   */
   private constructor(
     panel: vscode.WebviewPanel,
     planId: string,
@@ -246,6 +295,18 @@ export class NodeDetailPanel {
     );
   }
   
+  /**
+   * Create a new detail panel for the given node, or reveal an existing one.
+   *
+   * If a panel for the `planId:nodeId` pair already exists, it is revealed and
+   * refreshed. Otherwise a new {@link vscode.WebviewPanel} is created in
+   * {@link vscode.ViewColumn.Two}.
+   *
+   * @param extensionUri - The extension's root URI (used for local resource roots).
+   * @param planId - The Plan that contains the target node.
+   * @param nodeId - The unique identifier of the node to display.
+   * @param planRunner - The {@link PlanRunner} instance for querying state.
+   */
   public static createOrShow(
     extensionUri: vscode.Uri,
     planId: string,
@@ -280,7 +341,9 @@ export class NodeDetailPanel {
   }
   
   /**
-   * Close all node panels associated with a Plan (used when Plan is deleted)
+   * Close all node panels associated with a Plan (used when a Plan is deleted).
+   *
+   * @param planId - The Plan ID whose node panels should be closed.
    */
   public static closeForPlan(planId: string): void {
     // Find and close all panels whose key starts with this planId
@@ -298,6 +361,7 @@ export class NodeDetailPanel {
     }
   }
   
+  /** Dispose the panel, clear timers, and remove it from the static panel map. */
   public dispose() {
     const key = `${this._planId}:${this._nodeId}`;
     NodeDetailPanel.panels.delete(key);
@@ -314,6 +378,11 @@ export class NodeDetailPanel {
     }
   }
   
+  /**
+   * Handle incoming messages from the webview.
+   *
+   * @param message - The message object received from the webview's `postMessage`.
+   */
   private _handleMessage(message: any) {
     switch (message.type) {
       case 'openPlan':
@@ -348,6 +417,14 @@ export class NodeDetailPanel {
     }
   }
   
+  /**
+   * Retry a failed node, optionally resuming the existing Copilot session.
+   *
+   * @param planId - The Plan containing the node.
+   * @param nodeId - The node to retry.
+   * @param resumeSession - If `true`, resume the existing agent session;
+   *   if `false`, start a fresh session.
+   */
   private _retryNode(planId: string, nodeId: string, resumeSession: boolean) {
     // If resumeSession is false, provide an agent spec that clears the session
     const newWork = resumeSession ? undefined : { type: 'agent' as const, instructions: '', resumeSession: false };
@@ -365,6 +442,7 @@ export class NodeDetailPanel {
     }
   }
   
+  /** Query process stats for this node and send them to the webview. */
   private async _sendProcessStats() {
     const stats = await this._planRunner.getProcessStats(this._planId, this._nodeId);
     this._panel.webview.postMessage({
@@ -373,6 +451,12 @@ export class NodeDetailPanel {
     });
   }
   
+  /**
+   * Retrieve log content for a specific execution phase and send it to the webview.
+   *
+   * @param phase - The execution phase to retrieve logs for
+   *   (e.g., `'work'`, `'merge-fi'`, `'postchecks'`).
+   */
   private async _sendLog(phase: string) {
     const plan = this._planRunner.get(this._planId);
     const node = plan?.nodes.get(this._nodeId);
@@ -388,6 +472,7 @@ export class NodeDetailPanel {
     });
   }
   
+  /** Re-render the panel HTML with current node state. */
   private _update() {
     const plan = this._planRunner.get(this._planId);
     if (!plan) {
@@ -406,61 +491,36 @@ export class NodeDetailPanel {
     this._panel.webview.html = this._getHtml(plan, node, state);
   }
   
+  /**
+   * Generate a loading spinner page HTML.
+   *
+   * @returns Full HTML document string with a loading animation.
+   */
   private _getLoadingHtml(): string {
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
-  <style>
-    body { 
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      padding: 20px;
-      color: var(--vscode-foreground);
-      background: var(--vscode-editor-background);
-    }
-    .loading-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 60px 20px;
-    }
-    .loading-spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid var(--vscode-panel-border);
-      border-top-color: var(--vscode-progressBar-background);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .loading-text { margin-top: 16px; font-size: 14px; opacity: 0.8; }
-  </style>
-</head>
-<body>
-  <div class="loading-container">
-    <div class="loading-spinner"></div>
-    <div class="loading-text">Loading node details...</div>
-  </div>
-</body>
-</html>`;
+    return loadingPageHtml('Loading node details...');
   }
   
+  /**
+   * Generate a minimal error page HTML.
+   *
+   * @param message - Error text to display.
+   * @returns Full HTML document string.
+   */
   private _getErrorHtml(message: string): string {
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
-</head>
-<body style="padding: 20px; color: var(--vscode-errorForeground);">
-  <h2>Error</h2>
-  <p>${message}</p>
-</body>
-</html>`;
+    return errorPageHtml(message);
   }
-  
+
+  /**
+   * Build the full HTML document for the node detail view.
+   *
+   * Includes execution state metadata, phase tabs with log viewer, work summary,
+   * child Plan summary (for sub-plan nodes), and attempt history.
+   *
+   * @param plan - The parent Plan instance.
+   * @param node - The node definition (job or sub-plan).
+   * @param state - The node's current execution state.
+   * @returns Full HTML document string.
+   */
   private _getHtml(
     plan: PlanInstance,
     node: JobNode | SubPlanNode,
@@ -471,7 +531,7 @@ export class NodeDetailPanel {
     const subPlanNode = !isJob ? node as SubPlanNode : null;
     
     const duration = state.startedAt 
-      ? this._formatDuration(Math.round(((state.endedAt || Date.now()) - state.startedAt) / 1000))
+      ? formatDuration(Math.round(((state.endedAt || Date.now()) - state.startedAt) / 1000))
       : null;
     
     // Build phase status indicators
@@ -506,11 +566,11 @@ export class NodeDetailPanel {
 </head>
 <body>
   <div class="breadcrumb">
-    <a onclick="openPlan('${plan.id}')">${this._escapeHtml(plan.spec.name)}</a> / ${this._escapeHtml(node.name)}
+    <a onclick="openPlan('${plan.id}')">${escapeHtml(plan.spec.name)}</a> / ${escapeHtml(node.name)}
   </div>
   
   <div class="header">
-    <h2>${this._escapeHtml(node.name)}</h2>
+    <h2>${escapeHtml(node.name)}</h2>
     <span class="status-badge ${state.status}">${state.status.toUpperCase()}</span>
   </div>
   
@@ -549,7 +609,7 @@ export class NodeDetailPanel {
     </div>
     ${state.error ? `
     <div class="error-box">
-      <strong>Error:</strong> ${this._escapeHtml(state.error)}
+      <strong>Error:</strong> ${escapeHtml(state.error)}
       ${state.lastAttempt?.phase ? `<div class="error-phase">Failed in phase: <strong>${state.lastAttempt.phase}</strong></div>` : ''}
       ${state.lastAttempt?.exitCode !== undefined ? `<div class="error-phase">Exit code: <strong>${state.lastAttempt.exitCode}</strong></div>` : ''}
     </div>
@@ -586,18 +646,18 @@ export class NodeDetailPanel {
     <h3>Job Configuration</h3>
     <div class="config-item">
       <div class="config-label">Task</div>
-      <div class="config-value">${this._escapeHtml(jobNode.task)}</div>
+      <div class="config-value">${escapeHtml(jobNode.task)}</div>
     </div>
     ${jobNode.work ? `
     <div class="config-item work-item">
       <div class="config-label">Work</div>
-      <div class="config-value work-content">${formatWorkSpecHtml(jobNode.work, this._escapeHtml)}</div>
+      <div class="config-value work-content">${formatWorkSpecHtml(jobNode.work, escapeHtml)}</div>
     </div>
     ` : ''}
     ${jobNode.instructions ? `
     <div class="config-item">
       <div class="config-label">Instructions</div>
-      <div class="config-value">${this._escapeHtml(jobNode.instructions)}</div>
+      <div class="config-value">${escapeHtml(jobNode.instructions)}</div>
     </div>
     ` : ''}
   </div>
@@ -645,7 +705,7 @@ export class NodeDetailPanel {
       ${node.dependencies.map(depId => {
         const depNode = plan.nodes.get(depId);
         const depState = plan.nodeStates.get(depId);
-        return `<span class="dep-badge ${depState?.status || 'pending'}">${this._escapeHtml(depNode?.name || depId)}</span>`;
+        return `<span class="dep-badge ${depState?.status || 'pending'}">${escapeHtml(depNode?.name || depId)}</span>`;
       }).join('')}
     </div>
     ` : '<div class="config-value">No dependencies (root node)</div>'}
@@ -675,7 +735,7 @@ export class NodeDetailPanel {
     ${state.worktreePath ? `
     <div class="config-item">
       <div class="config-label">Worktree${state.worktreeCleanedUp ? ' (cleaned up)' : ' (detached HEAD)'}</div>
-      <div class="config-value mono" style="${state.worktreeCleanedUp ? 'text-decoration: line-through; opacity: 0.6;' : ''}">${this._escapeHtml(state.worktreePath)}</div>
+      <div class="config-value mono" style="${state.worktreeCleanedUp ? 'text-decoration: line-through; opacity: 0.6;' : ''}">${escapeHtml(state.worktreePath)}</div>
     </div>
     ` : ''}
   </div>
@@ -962,6 +1022,16 @@ export class NodeDetailPanel {
 </html>`;
   }
   
+  /**
+   * Derive phase-level status indicators from the node's execution state.
+   *
+   * Uses `stepStatuses` when available (populated by the executor), otherwise
+   * falls back to heuristic inference based on overall node status.
+   *
+   * @param state - The node's current execution state.
+   * @returns A map of phase names (`'prechecks'`, `'work'`, `'commit'`, etc.)
+   *   to status strings (`'pending'`, `'running'`, `'succeeded'`, `'failed'`, `'skipped'`).
+   */
   private _getPhaseStatus(state: NodeExecutionState): Record<string, string> {
     // Use tracked stepStatuses if available (from executor)
     if (state.stepStatuses) {
@@ -1034,7 +1104,14 @@ export class NodeDetailPanel {
   }
   
   /**
-   * Determine the initial phase to show based on current state
+   * Determine the initial phase to show based on current state.
+   *
+   * Selects the currently running phase if the node is active, the first failed
+   * phase if the node has failed, or the `'work'` phase as the default.
+   *
+   * @param phaseStatus - Phase-to-status mapping from {@link _getPhaseStatus}.
+   * @param nodeStatus - The overall node status string.
+   * @returns The phase name to display initially.
    */
   private _getInitialPhase(phaseStatus: Record<string, string>, nodeStatus: string): string {
     // If node is running, show the currently running phase
@@ -1063,6 +1140,16 @@ export class NodeDetailPanel {
     return 'all';
   }
   
+  /**
+   * Build HTML for the execution phase tab bar.
+   *
+   * Each tab shows a phase icon and label, with the active phase highlighted.
+   * Clicking a tab sends a `getLog` message to load that phase's logs.
+   *
+   * @param phaseStatus - Phase-to-status mapping from {@link _getPhaseStatus}.
+   * @param isRunning - Whether the node is currently running (affects tab styling).
+   * @returns HTML fragment string for the tab bar.
+   */
   private _buildPhaseTabs(phaseStatus: Record<string, string>, isRunning: boolean): string {
     const phases = [
       { id: 'all', name: 'Full Log', icon: '📋' },
@@ -1084,6 +1171,12 @@ export class NodeDetailPanel {
     `).join('');
   }
   
+  /**
+   * Map a phase status to a Unicode icon character.
+   *
+   * @param status - The phase status string.
+   * @returns A single Unicode icon character.
+   */
   private _getPhaseIcon(status: string): string {
     switch (status) {
       case 'success': return '✓';
@@ -1094,6 +1187,13 @@ export class NodeDetailPanel {
     }
   }
   
+  /**
+   * Map a merge status to a directional merge icon.
+   *
+   * @param status - The merge phase status string.
+   * @param arrow - Direction indicator (`'→'` for forward-integrate, `'←'` for reverse-integrate).
+   * @returns A styled merge icon string.
+   */
   private _getMergeIcon(status: string, arrow: string): string {
     switch (status) {
       case 'success': return `✓${arrow}`;
@@ -1104,66 +1204,43 @@ export class NodeDetailPanel {
     }
   }
   
+  /**
+   * Build an HTML work summary section from a node's {@link JobWorkSummary}.
+   *
+   * Renders stat cards (commits, files added/modified/deleted) and commit
+   * detail lists using the shared {@link workSummaryStatsHtml} and
+   * {@link commitDetailsHtml} template helpers.
+   *
+   * @param ws - The job work summary data.
+   * @returns HTML fragment string, or empty string if no data.
+   */
   private _buildWorkSummaryHtml(ws: JobWorkSummary): string {
     if (!ws || (ws.commits === 0 && ws.filesAdded === 0 && ws.filesModified === 0 && ws.filesDeleted === 0)) {
       return '';
     }
     
-    // Build commit details HTML if available
-    let commitsHtml = '';
-    if (ws.commitDetails && ws.commitDetails.length > 0) {
-      commitsHtml = `<div class="commits-list">`;
-      for (const commit of ws.commitDetails) {
-        let filesHtml = '';
-        if (commit.filesAdded?.length) {
-          filesHtml += commit.filesAdded.map(f => `<div class="file-item file-added">+${this._escapeHtml(f)}</div>`).join('');
-        }
-        if (commit.filesModified?.length) {
-          filesHtml += commit.filesModified.map(f => `<div class="file-item file-modified">~${this._escapeHtml(f)}</div>`).join('');
-        }
-        if (commit.filesDeleted?.length) {
-          filesHtml += commit.filesDeleted.map(f => `<div class="file-item file-deleted">-${this._escapeHtml(f)}</div>`).join('');
-        }
-        
-        commitsHtml += `
-          <div class="commit-item">
-            <code class="commit-hash">${this._escapeHtml(commit.shortHash)}</code>
-            <span class="commit-message">${this._escapeHtml(commit.message)}</span>
-            ${filesHtml ? `<div class="commit-files">${filesHtml}</div>` : ''}
-          </div>`;
-      }
-      commitsHtml += `</div>`;
-    }
+    const commitsHtml = commitDetailsHtml(ws.commitDetails || []);
     
     return `
     <div class="section">
       <h3>Work Summary</h3>
       <div class="work-summary-stats">
-        <div class="work-stat">
-          <div class="work-stat-value">${ws.commits}</div>
-          <div class="work-stat-label">Commits</div>
-        </div>
-        <div class="work-stat added">
-          <div class="work-stat-value">+${ws.filesAdded}</div>
-          <div class="work-stat-label">Added</div>
-        </div>
-        <div class="work-stat modified">
-          <div class="work-stat-value">~${ws.filesModified}</div>
-          <div class="work-stat-label">Modified</div>
-        </div>
-        <div class="work-stat deleted">
-          <div class="work-stat-value">-${ws.filesDeleted}</div>
-          <div class="work-stat-label">Deleted</div>
-        </div>
+        ${workSummaryStatsHtml(ws)}
       </div>
-      ${ws.description ? `<div class="work-summary-desc">${this._escapeHtml(ws.description)}</div>` : ''}
+      ${ws.description ? `<div class="work-summary-desc">${escapeHtml(ws.description)}</div>` : ''}
       ${commitsHtml}
     </div>
     `;
   }
   
   /**
-   * Build HTML summary of a child Plan's execution results
+   * Build an HTML summary of a child Plan's execution results.
+   *
+   * Renders a card showing per-node status (succeeded/failed/blocked/running/pending)
+   * with a link to open the child Plan's detail view.
+   *
+   * @param childPlanId - The ID of the child Plan to summarize.
+   * @returns HTML fragment string, or empty string if the child Plan is not found.
    */
   private _buildchildPlanSummaryHtml(childPlanId: string): string {
     const childPlan = this._planRunner.get(childPlanId);
@@ -1233,10 +1310,10 @@ export class NodeDetailPanel {
               j.status === 'blocked' ? '⊘' :
               j.status === 'running' ? '◐' : '○'
             }</span>
-            <span style="flex: 1; ${j.status === 'failed' ? 'color: #f48771;' : ''}">${this._escapeHtml(j.name)}</span>
+            <span style="flex: 1; ${j.status === 'failed' ? 'color: #f48771;' : ''}">${escapeHtml(j.name)}</span>
             ${j.commit ? `<span class="mono" style="font-size: 11px; color: var(--vscode-descriptionForeground);">${j.commit}</span>` : ''}
           </div>
-          ${j.error ? `<div style="font-size: 11px; color: #f48771; padding-left: 24px; margin-bottom: 4px;">${this._escapeHtml(j.error.slice(0, 100))}${j.error.length > 100 ? '...' : ''}</div>` : ''}
+          ${j.error ? `<div style="font-size: 11px; color: #f48771; padding-left: 24px; margin-bottom: 4px;">${escapeHtml(j.error.slice(0, 100))}${j.error.length > 100 ? '...' : ''}</div>` : ''}
         `).join('')}
       </div>
     </div>
@@ -1244,7 +1321,13 @@ export class NodeDetailPanel {
   }
   
   /**
-   * Build attempt history HTML with collapsible cards
+   * Build attempt history HTML with collapsible cards.
+   *
+   * Renders a reverse-chronological list of past execution attempts,
+   * each showing duration, status, error (if any), and phase-level log tabs.
+   *
+   * @param state - The node execution state containing `attemptHistory`.
+   * @returns HTML fragment string, or empty string if there are no past attempts.
    */
   private _buildAttemptHistoryHtml(state: NodeExecutionState): string {
     const attempts = state.attemptHistory;
@@ -1255,7 +1338,7 @@ export class NodeDetailPanel {
     // Build cards in reverse order (latest first)
     const cards = attempts.slice().reverse().map((attempt, reverseIdx) => {
       const isLatest = reverseIdx === 0;
-      const duration = this._formatDuration(Math.round((attempt.endedAt - attempt.startedAt) / 1000));
+      const duration = formatDuration(Math.round((attempt.endedAt - attempt.startedAt) / 1000));
       const timestamp = new Date(attempt.startedAt).toLocaleString();
       
       // Step indicators
@@ -1282,7 +1365,7 @@ export class NodeDetailPanel {
       
       const errorHtml = attempt.error
         ? `<div class="attempt-error">
-            <strong>Error:</strong> ${this._escapeHtml(attempt.error)}
+            <strong>Error:</strong> ${escapeHtml(attempt.error)}
             ${attempt.failedPhase ? `<div style="margin-top: 4px;">Failed in phase: <strong>${attempt.failedPhase}</strong></div>` : ''}
             ${attempt.exitCode !== undefined ? `<div>Exit code: <strong>${attempt.exitCode}</strong></div>` : ''}
            </div>`
@@ -1292,8 +1375,8 @@ export class NodeDetailPanel {
       const contextHtml = (attempt.worktreePath || attempt.baseCommit || attempt.workUsed) 
         ? `<div class="attempt-context">
             ${attempt.baseCommit ? `<div class="attempt-meta-row"><strong>Base:</strong> <code>${attempt.baseCommit.slice(0, 8)}</code></div>` : ''}
-            ${attempt.worktreePath ? `<div class="attempt-meta-row"><strong>Worktree:</strong> <code>${this._escapeHtml(attempt.worktreePath)}</code></div>` : ''}
-            ${attempt.workUsed ? `<div class="attempt-meta-row"><strong>Work:</strong> <code>${this._escapeHtml(formatWorkSpec(attempt.workUsed))}</code></div>` : ''}
+            ${attempt.worktreePath ? `<div class="attempt-meta-row"><strong>Worktree:</strong> <code>${escapeHtml(attempt.worktreePath)}</code></div>` : ''}
+            ${attempt.workUsed ? `<div class="attempt-meta-row"><strong>Work:</strong> <code>${escapeHtml(formatWorkSpec(attempt.workUsed))}</code></div>` : ''}
            </div>`
         : '';
       
@@ -1333,7 +1416,13 @@ export class NodeDetailPanel {
   }
   
   /**
-   * Build phase tabs for a specific attempt
+   * Build phase tabs for a specific historical attempt record.
+   *
+   * Parses the attempt's combined log output to extract per-phase sections
+   * and renders them as selectable tabs with inline log content.
+   *
+   * @param attempt - The attempt record containing logs and phase data.
+   * @returns HTML fragment string for the phase tab UI, or empty string if no logs.
    */
   private _buildAttemptPhaseTabs(attempt: AttemptRecord): string {
     if (!attempt.logs) return '';
@@ -1415,7 +1504,7 @@ export class NodeDetailPanel {
     return `
       <div class="attempt-phases" data-attempt="${attempt.attemptNumber}">
         <div class="attempt-phase-tabs">${tabs}</div>
-        <pre class="attempt-log-viewer" data-attempt="${attempt.attemptNumber}">${this._escapeHtml(phaseLogsData['all'])}</pre>
+        <pre class="attempt-log-viewer" data-attempt="${attempt.attemptNumber}">${escapeHtml(phaseLogsData['all'])}</pre>
         <script type="application/json" class="attempt-logs-data" data-attempt="${attempt.attemptNumber}">
           ${JSON.stringify(phaseLogsData)}
         </script>
@@ -1423,6 +1512,14 @@ export class NodeDetailPanel {
     `;
   }
   
+  /**
+   * Generate the shared CSS styles used across the node detail panel.
+   *
+   * Includes styles for phase tabs, log viewer, status badges, meta grid,
+   * work summary, process tree, breadcrumb navigation, and attempt history cards.
+   *
+   * @returns CSS style string (without `<style>` tags).
+   */
   private _getStyles(): string {
     return `
     * { box-sizing: border-box; }
@@ -2118,25 +2215,5 @@ export class NodeDetailPanel {
       overflow: auto;
     }
     `;
-  }
-  
-  private _formatDuration(seconds: number): string {
-    if (seconds < 0) return '0s';
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    const parts: string[] = [];
-    if (hours > 0) parts.push(`${hours}h`);
-    if (minutes > 0) parts.push(`${minutes}m`);
-    if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
-    return parts.join(' ');
-  }
-  
-  private _escapeHtml(str: string): string {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
   }
 }

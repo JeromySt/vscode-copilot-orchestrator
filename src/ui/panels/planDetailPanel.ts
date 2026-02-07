@@ -12,9 +12,32 @@
 
 import * as vscode from 'vscode';
 import { PlanRunner, PlanInstance, PlanNode, JobNode, SubPlanNode, NodeStatus, NodeExecutionState } from '../../plan';
+import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 
 /**
- * Plan Detail Panel - shows Plan execution flow
+ * Webview panel that shows a detailed view of a single Plan's execution.
+ *
+ * Displays a Mermaid-based DAG diagram of the Plan's node structure, real-time
+ * node status updates, progress tracking, branch/merge flow, work summary
+ * (commit/file stats), and action buttons (cancel, delete).
+ *
+ * Only one panel is created per Plan ID — subsequent calls to
+ * {@link createOrShow} reveal the existing panel.
+ *
+ * **Webview → Extension messages:**
+ * - `{ type: 'cancel' }` — cancel the Plan
+ * - `{ type: 'delete' }` — delete the Plan
+ * - `{ type: 'openNode', nodeId: string, planId?: string }` — open a {@link NodeDetailPanel}
+ * - `{ type: 'opensubPlan', planId: string }` — open a nested Plan's detail panel
+ * - `{ type: 'refresh' }` — request a manual data refresh
+ * - `{ type: 'showWorkSummary' }` — open work summary in a separate webview panel
+ * - `{ type: 'getAllProcessStats' }` — request process tree statistics
+ *
+ * **Extension → Webview messages:**
+ * - Full HTML re-render via `webview.html` on each update cycle
+ * - `{ type: 'allProcessStats', flat, hierarchy, rootJobs }` — process stats response
+ *
+ * @see {@link NodeDetailPanel} for per-node detail views
  */
 export class planDetailPanel {
   private static panels = new Map<string, planDetailPanel>();
@@ -25,6 +48,11 @@ export class planDetailPanel {
   private _updateInterval?: NodeJS.Timeout;
   private _lastStateHash: string = '';
   
+  /**
+   * @param panel - The VS Code webview panel instance.
+   * @param planId - Unique identifier of the Plan to display.
+   * @param _planRunner - The {@link PlanRunner} instance for querying Plan/node state.
+   */
   private constructor(
     panel: vscode.WebviewPanel,
     planId: string,
@@ -50,6 +78,17 @@ export class planDetailPanel {
     );
   }
   
+  /**
+   * Create a new detail panel for the given Plan, or reveal an existing one.
+   *
+   * If a panel for `planId` already exists, it is brought to the foreground.
+   * Otherwise a new {@link vscode.WebviewPanel} is created in
+   * {@link vscode.ViewColumn.One} with scripts enabled and context retention.
+   *
+   * @param extensionUri - The extension's root URI (used for local resource roots).
+   * @param planId - The unique identifier of the Plan to display.
+   * @param planRunner - The {@link PlanRunner} instance for querying state.
+   */
   public static createOrShow(
     extensionUri: vscode.Uri,
     planId: string,
@@ -81,7 +120,9 @@ export class planDetailPanel {
   }
   
   /**
-   * Close all panels associated with a Plan (used when Plan is deleted)
+   * Close all panels associated with a Plan (used when Plan is deleted).
+   *
+   * @param planId - The Plan ID whose panel should be closed.
    */
   public static closeForPlan(planId: string): void {
     const panel = planDetailPanel.panels.get(planId);
@@ -90,6 +131,7 @@ export class planDetailPanel {
     }
   }
   
+  /** Dispose the panel, clear timers, and remove it from the static panel map. */
   public dispose() {
     planDetailPanel.panels.delete(this._planId);
     
@@ -105,6 +147,11 @@ export class planDetailPanel {
     }
   }
   
+  /**
+   * Handle incoming messages from the webview.
+   *
+   * @param message - The message object received from the webview's `postMessage`.
+   */
   private _handleMessage(message: any) {
     switch (message.type) {
       case 'cancel':
@@ -138,6 +185,9 @@ export class planDetailPanel {
     }
   }
   
+  /**
+   * Query all process stats for this Plan and send them to the webview.
+   */
   private async _sendAllProcessStats() {
     const stats = await this._planRunner.getAllProcessStats(this._planId);
     this._panel.webview.postMessage({
@@ -149,7 +199,8 @@ export class planDetailPanel {
   }
   
   /**
-   * Show the work summary in a styled webview panel
+   * Open the Plan's work summary in a separate read-only webview panel
+   * (displayed beside the current editor column).
    */
   private async _showWorkSummaryDocument(): Promise<void> {
     const plan = this._planRunner.get(this._planId);
@@ -164,36 +215,12 @@ export class planDetailPanel {
     let jobDetailsHtml = '';
     if (summary.jobSummaries && summary.jobSummaries.length > 0) {
       for (const job of summary.jobSummaries) {
-        let commitsHtml = '';
-        if (job.commitDetails && job.commitDetails.length > 0) {
-          commitsHtml = `<div class="commits-list">`;
-          for (const commit of job.commitDetails) {
-            // Build files list with one file per line
-            let filesHtml = '';
-            if (commit.filesAdded?.length) {
-              filesHtml += commit.filesAdded.map(f => `<div class="file-item file-added">+${this._escapeHtml(f)}</div>`).join('');
-            }
-            if (commit.filesModified?.length) {
-              filesHtml += commit.filesModified.map(f => `<div class="file-item file-modified">~${this._escapeHtml(f)}</div>`).join('');
-            }
-            if (commit.filesDeleted?.length) {
-              filesHtml += commit.filesDeleted.map(f => `<div class="file-item file-deleted">-${this._escapeHtml(f)}</div>`).join('');
-            }
-            
-            commitsHtml += `
-              <div class="commit-item">
-                <code class="commit-hash">${this._escapeHtml(commit.shortHash)}</code>
-                <span class="commit-message">${this._escapeHtml(commit.message)}</span>
-                ${filesHtml ? `<div class="commit-files">${filesHtml}</div>` : ''}
-              </div>`;
-          }
-          commitsHtml += `</div>`;
-        }
+        const commitsHtml = commitDetailsHtml(job.commitDetails || []);
         
         jobDetailsHtml += `
           <div class="job-card">
             <div class="job-header">
-              <span class="job-name">${this._escapeHtml(job.nodeName)}</span>
+              <span class="job-name">${escapeHtml(job.nodeName)}</span>
               <span class="job-stats">
                 <span class="stat-commits">${job.commits} commits</span>
                 <span class="stat-added">+${job.filesAdded}</span>
@@ -201,7 +228,7 @@ export class planDetailPanel {
                 <span class="stat-deleted">-${job.filesDeleted}</span>
               </span>
             </div>
-            <div class="job-description">${this._escapeHtml(job.description)}</div>
+            <div class="job-description">${escapeHtml(job.description)}</div>
             ${commitsHtml}
           </div>`;
       }
@@ -338,7 +365,7 @@ export class planDetailPanel {
   </style>
 </head>
 <body>
-  <h1>📊 Work Summary: ${this._escapeHtml(plan.spec.name)}</h1>
+  <h1>📊 Work Summary: ${escapeHtml(plan.spec.name)}</h1>
   
   <div class="overview-grid">
     <div class="overview-stat">
@@ -367,6 +394,10 @@ export class planDetailPanel {
 </html>`;
   }
 
+  /**
+   * Re-render the panel HTML if the Plan state has changed since the last render.
+   * Uses a JSON state hash to skip redundant re-renders.
+   */
   private _update() {
     const plan = this._planRunner.get(this._planId);
     if (!plan) {
@@ -401,20 +432,29 @@ export class planDetailPanel {
     this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt);
   }
   
+  /**
+   * Generate a minimal error page HTML.
+   *
+   * @param message - Error text to display.
+   * @returns Full HTML document string.
+   */
   private _getErrorHtml(message: string): string {
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
-</head>
-<body style="padding: 20px; color: var(--vscode-errorForeground);">
-  <h2>Error</h2>
-  <p>${message}</p>
-</body>
-</html>`;
+    return errorPageHtml(message);
   }
   
+  /**
+   * Build the full HTML document for the Plan detail view.
+   *
+   * Includes a Mermaid DAG diagram, node status grid, progress bar, action buttons,
+   * branch flow info, and work summary section. Loads Mermaid from CDN.
+   *
+   * @param plan - The Plan instance to render.
+   * @param status - The computed overall Plan status.
+   * @param counts - Per-{@link NodeStatus} counts from the state machine.
+   * @param effectiveEndedAt - Optional override for the Plan's end timestamp
+   *   (accounts for still-running child Plans).
+   * @returns Full HTML document string.
+   */
   private _getHtml(
     plan: PlanInstance,
     status: string,
@@ -977,7 +1017,7 @@ export class planDetailPanel {
 </head>
 <body>
   <div class="header">
-    <h2>${this._escapeHtml(plan.spec.name)}</h2>
+    <h2>${escapeHtml(plan.spec.name)}</h2>
     <div class="header-duration">
       <span class="duration-icon">⏱</span>
       <span class="duration-value ${status}" id="planDuration" data-started="${plan.startedAt || 0}" data-ended="${effectiveEndedAt || 0}" data-status="${status}">${this._formatPlanDuration(plan.startedAt, effectiveEndedAt)}</span>
@@ -988,12 +1028,12 @@ export class planDetailPanel {
   ${showBranchFlow ? `
   <div class="branch-flow">
     <span class="branch-label">Base:</span>
-    <span class="branch-name">${this._escapeHtml(baseBranch)}</span>
+    <span class="branch-name">${escapeHtml(baseBranch)}</span>
     <span class="branch-arrow">→</span>
     <span class="branch-label">Work</span>
     <span class="branch-arrow">→</span>
     <span class="branch-label">Target:</span>
-    <span class="branch-name">${this._escapeHtml(targetBranch)}</span>
+    <span class="branch-name">${escapeHtml(targetBranch)}</span>
   </div>
   ` : ''}
   
@@ -1568,7 +1608,13 @@ ${mermaidDef}
   }
   
   /**
-   * Build work summary HTML from node execution states
+   * Build work summary HTML from node execution states.
+   *
+   * Aggregates commit/file counts across all nodes that have a work summary,
+   * then renders stats cards and per-job detail sections.
+   *
+   * @param plan - The Plan instance whose node states contain work summaries.
+   * @returns HTML fragment string, or empty string if no work has been performed.
    */
   private _buildWorkSummaryHtml(plan: PlanInstance): string {
     // Count totals across all nodes
@@ -1624,7 +1670,7 @@ ${mermaidDef}
     
     const jobSummariesHtml = jobSummaries.map(j => `
       <div class="job-summary" data-node-id="${j.nodeId}">
-        <span class="job-name">${this._escapeHtml(j.name)}</span>
+        <span class="job-name">${escapeHtml(j.name)}</span>
         <span class="job-stats">
           <span class="stat-commits">${j.commits} commits</span>
           <span class="stat-added">+${j.added}</span>
@@ -1664,6 +1710,17 @@ ${mermaidDef}
     `;
   }
   
+  /**
+   * Build a Mermaid flowchart definition for the Plan's node DAG.
+   *
+   * Recursively expands sub-plan nodes into subgraphs. Applies status-based
+   * styling (green for succeeded, red for failed, blue for running) and tracks
+   * edge indices for `linkStyle` coloring.
+   *
+   * @param plan - The Plan instance whose nodes form the DAG.
+   * @returns An object containing the Mermaid diagram string and a map of
+   *   subgraph IDs to their child Plan metadata.
+   */
   private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; subgraphData: Record<string, { childPlanId: string; name: string }> } {
     const lines: string[] = ['flowchart LR'];
     
@@ -1760,7 +1817,7 @@ ${mermaidDef}
               ? (this._planRunner.getEffectiveEndedAt(childPlanId) || state.endedAt || Date.now())
               : (state.endedAt || Date.now());
             const duration = endTime - state.startedAt;
-            durationLabel = ' | ' + this._formatNodeDuration(duration);
+            durationLabel = ' | ' + formatDurationMs(duration);
           }
           
           // Track subgraph data for click handling
@@ -1823,7 +1880,7 @@ ${mermaidDef}
           if (state?.startedAt) {
             const endTime = state.endedAt || Date.now();
             const duration = endTime - state.startedAt;
-            durationLabel = ' | ' + this._formatNodeDuration(duration);
+            durationLabel = ' | ' + formatDurationMs(duration);
           }
           
           lines.push(`${indent}${sanitizedId}["${icon} ${label}${durationLabel}"]`);
@@ -2024,6 +2081,12 @@ ${mermaidDef}
     return { diagram: lines.join('\n'), subgraphData };
   }
   
+  /**
+   * Map a node status string to a single-character icon.
+   *
+   * @param status - The node status (e.g., `'succeeded'`, `'failed'`, `'running'`).
+   * @returns A Unicode status icon character.
+   */
   private _getStatusIcon(status: string): string {
     switch (status) {
       case 'succeeded': return '✓';
@@ -2034,10 +2097,22 @@ ${mermaidDef}
     }
   }
   
+  /**
+   * Sanitize a node ID for use as a Mermaid node identifier.
+   *
+   * @param id - The raw node ID.
+   * @returns A string safe for Mermaid node references (alphanumeric + underscores).
+   */
   private _sanitizeId(id: string): string {
     return 'node_' + id.replace(/[^a-zA-Z0-9]/g, '_');
   }
   
+  /**
+   * Escape a string for safe inclusion in a Mermaid node label.
+   *
+   * @param str - The raw label text.
+   * @returns The escaped string with Mermaid-special characters removed or replaced.
+   */
   private _escapeForMermaid(str: string): string {
     return str
       .replace(/"/g, "'")
@@ -2046,37 +2121,16 @@ ${mermaidDef}
       .replace(/\]/g, ')');
   }
   
+  /**
+   * Format a Plan's duration from start/end timestamps.
+   *
+   * @param startedAt - Epoch millisecond timestamp when the Plan started.
+   * @param endedAt - Epoch millisecond timestamp when the Plan ended (uses `Date.now()` if omitted).
+   * @returns Human-readable duration string, or `'--'` if `startedAt` is not set.
+   */
   private _formatPlanDuration(startedAt?: number, endedAt?: number): string {
     if (!startedAt) return '--';
     const duration = (endedAt || Date.now()) - startedAt;
-    if (duration < 1000) return '< 1s';
-    const secs = Math.floor(duration / 1000);
-    if (secs < 60) return secs + 's';
-    const mins = Math.floor(secs / 60);
-    const remSecs = secs % 60;
-    if (mins < 60) return mins + 'm ' + remSecs + 's';
-    const hours = Math.floor(mins / 60);
-    const remMins = mins % 60;
-    return hours + 'h ' + remMins + 'm';
-  }
-  
-  private _formatNodeDuration(ms: number): string {
-    if (ms < 1000) return '< 1s';
-    const secs = Math.floor(ms / 1000);
-    if (secs < 60) return secs + 's';
-    const mins = Math.floor(secs / 60);
-    const remSecs = secs % 60;
-    if (mins < 60) return mins + 'm ' + remSecs + 's';
-    const hours = Math.floor(mins / 60);
-    const remMins = mins % 60;
-    return hours + 'h ' + remMins + 'm';
-  }
-  
-  private _escapeHtml(str: string): string {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    return formatDurationMs(duration);
   }
 }
