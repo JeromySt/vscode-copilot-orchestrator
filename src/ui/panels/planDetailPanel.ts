@@ -1433,6 +1433,29 @@ ${mermaidDef}
           progressText.textContent = completed + ' / ' + total + ' (' + progress + '%)';
         }
         
+        // Update stats section
+        const statsContainer = document.querySelector('.stats');
+        if (statsContainer) {
+          const statItems = statsContainer.querySelectorAll('.stat');
+          statItems.forEach(stat => {
+            const label = stat.querySelector('.stat-label');
+            const value = stat.querySelector('.stat-value');
+            if (!label || !value) return;
+            const labelText = label.textContent.trim();
+            if (labelText === 'Total Nodes') {
+              value.textContent = total;
+            } else if (labelText === 'Succeeded') {
+              value.textContent = counts.succeeded || 0;
+            } else if (labelText === 'Failed') {
+              value.textContent = counts.failed || 0;
+            } else if (labelText === 'Running') {
+              value.textContent = (counts.running || 0) + (counts.scheduled || 0);
+            } else if (labelText === 'Pending') {
+              value.textContent = (counts.pending || 0) + (counts.ready || 0);
+            }
+          });
+        }
+        
         // Update legend counts
         const legendItems = document.querySelectorAll('.legend-item');
         legendItems.forEach(item => {
