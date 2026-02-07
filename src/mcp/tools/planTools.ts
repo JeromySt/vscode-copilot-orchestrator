@@ -231,7 +231,8 @@ Groups do NOT have dependencies - jobs describe the full dependency graph.`,
                   items: { type: 'object' }
                 }
               },
-              required: ['name']
+              required: ['name'],
+              additionalProperties: false
             }
           }
         },
