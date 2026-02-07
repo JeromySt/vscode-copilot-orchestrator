@@ -1377,174 +1377,181 @@ export class PlanRunner extends EventEmitter {
         this.execLog(plan.id, node.id, 'merge-fi', 'info', '===========================================');
       }
       
-      // Build execution context
-      // Use nodeState.baseCommit which is preserved across retries
-      const context: ExecutionContext = {
-        plan,
-        node,
-        baseCommit: nodeState.baseCommit!,
-        worktreePath,
-        copilotSessionId: nodeState.copilotSessionId, // Pass existing session for resumption
-        onProgress: (step) => {
-          log.debug(`Job progress: ${node.name} - ${step}`);
-        },
-      };
+      // Track whether executor succeeded (or was skipped for RI-only retry)
+      let executorSuccess = false;
       
-      // Execute
-      const result = await this.executor!.execute(context);
-      
-      // Store step statuses for UI display
-      if (result.stepStatuses) {
-        nodeState.stepStatuses = result.stepStatuses;
-      }
-      
-      // Store captured Copilot session ID for future resumption
-      if (result.copilotSessionId) {
-        nodeState.copilotSessionId = result.copilotSessionId;
-      }
-      
-      if (result.success) {
-        // Store completed commit
-        if (result.completedCommit) {
-          nodeState.completedCommit = result.completedCommit;
+      // Check if resuming from merge-ri phase - skip executor entirely
+      if (nodeState.resumeFromPhase === 'merge-ri') {
+        log.info(`Resuming from merge-ri phase - skipping executor for ${node.name}`);
+        this.execLog(plan.id, node.id, 'work', 'info', '========== WORK PHASES (SKIPPED - RESUMING FROM RI) ==========');
+        // The completedCommit is already set from the previous successful work phase
+        executorSuccess = true;
+        // Clear resumeFromPhase since we're handling the retry now
+        nodeState.resumeFromPhase = undefined;
+      } else {
+        // Build execution context
+        // Use nodeState.baseCommit which is preserved across retries
+        const context: ExecutionContext = {
+          plan,
+          node,
+          baseCommit: nodeState.baseCommit!,
+          worktreePath,
+          copilotSessionId: nodeState.copilotSessionId, // Pass existing session for resumption
+          resumeFromPhase: nodeState.resumeFromPhase, // Resume from failed phase
+          previousStepStatuses: nodeState.stepStatuses, // Preserve completed phase statuses
+          onProgress: (step) => {
+            log.debug(`Job progress: ${node.name} - ${step}`);
+          },
+        };
+        
+        // Execute
+        const result = await this.executor!.execute(context);
+        
+        // Store step statuses for UI display
+        if (result.stepStatuses) {
+          nodeState.stepStatuses = result.stepStatuses;
         }
         
-        // Store work summary on node state and aggregate to Plan
-        if (result.workSummary) {
-          nodeState.workSummary = result.workSummary;
-          this.appendWorkSummary(plan, result.workSummary);
+        // Store captured Copilot session ID for future resumption
+        if (result.copilotSessionId) {
+          nodeState.copilotSessionId = result.copilotSessionId;
         }
         
-        // Handle leaf node merge to target branch (Reverse Integration)
-        const isLeaf = plan.leaves.includes(node.id);
-        log.debug(`Merge check: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${plan.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
+        // Clear resumeFromPhase after execution (success or failure)
+        nodeState.resumeFromPhase = undefined;
         
-        // Track whether RI merge failed (only applies to leaf nodes with targetBranch)
-        let riMergeFailed = false;
-        
-        if (isLeaf && plan.targetBranch && nodeState.completedCommit) {
-          log.info(`Initiating merge to target: ${node.name} -> ${plan.targetBranch}`);
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========');
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', `Merging completed commit ${nodeState.completedCommit.slice(0, 8)} to ${plan.targetBranch}`);
-          
-          const mergeSuccess = await this.mergeLeafToTarget(plan, node, nodeState.completedCommit);
-          nodeState.mergedToTarget = mergeSuccess;
-          
-          if (mergeSuccess) {
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`);
-          } else {
-            riMergeFailed = true;
-            this.execLog(plan.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED - worktree preserved for manual retry`);
-            log.warn(`Leaf ${node.name} work succeeded but RI merge to ${plan.targetBranch} failed - treating as node failure`);
+        if (result.success) {
+          executorSuccess = true;
+          // Store completed commit
+          if (result.completedCommit) {
+            nodeState.completedCommit = result.completedCommit;
           }
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
           
-          log.info(`Merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
-        } else if (isLeaf) {
-          log.debug(`Skipping merge: isLeaf=${isLeaf}, hasTargetBranch=${!!plan.targetBranch}, hasCompletedCommit=${!!nodeState.completedCommit}`);
-        }
-        
-        // If RI merge failed, treat the node as failed (work succeeded but merge did not)
-        if (riMergeFailed) {
-          nodeState.error = `Reverse integration merge to ${plan.targetBranch} failed. Work completed successfully but merge could not be performed. Worktree preserved for manual retry.`;
+          // Store work summary on node state and aggregate to Plan
+          if (result.workSummary) {
+            nodeState.workSummary = result.workSummary;
+            this.appendWorkSummary(plan, result.workSummary);
+          }
+        } else {
+          // Executor failed - handle the failure
+          nodeState.error = result.error;
           
           // Store lastAttempt for retry context
           nodeState.lastAttempt = {
-            phase: 'merge-ri',
+            phase: result.failedPhase || 'work',
             startTime: nodeState.startedAt || Date.now(),
             endTime: Date.now(),
-            error: nodeState.error,
+            error: result.error,
+            exitCode: result.exitCode,
           };
           
           // Record failed attempt in history
-          const riFailedAttempt: AttemptRecord = {
+          const failedAttempt: AttemptRecord = {
             attemptNumber: nodeState.attempts,
             status: 'failed',
             startedAt: nodeState.startedAt || Date.now(),
             endedAt: Date.now(),
-            failedPhase: 'merge-ri',
-            error: nodeState.error,
+            failedPhase: result.failedPhase,
+            error: result.error,
+            exitCode: result.exitCode,
             copilotSessionId: nodeState.copilotSessionId,
             stepStatuses: nodeState.stepStatuses,
             worktreePath: nodeState.worktreePath,
             baseCommit: nodeState.baseCommit,
-            completedCommit: nodeState.completedCommit, // Work was successful, so we have the commit
             logs: this.getNodeLogs(plan.id, node.id),
             workUsed: node.work,
           };
-          nodeState.attemptHistory = [...(nodeState.attemptHistory || []), riFailedAttempt];
+          nodeState.attemptHistory = [...(nodeState.attemptHistory || []), failedAttempt];
           
           sm.transition(node.id, 'failed');
           this.emit('nodeCompleted', plan.id, node.id, false);
           
-          log.error(`Job failed (RI merge): ${node.name}`, {
+          log.error(`Job failed: ${node.name}`, {
             planId: plan.id,
             nodeId: node.id,
-            commit: nodeState.completedCommit?.slice(0, 8),
-            targetBranch: plan.targetBranch,
+            phase: result.failedPhase || 'unknown',
+            error: result.error,
           });
-        } else {
-          // Record successful attempt in history
-          const successAttempt: AttemptRecord = {
-            attemptNumber: nodeState.attempts,
-            status: 'succeeded',
-            startedAt: nodeState.startedAt || Date.now(),
-            endedAt: Date.now(),
-            copilotSessionId: nodeState.copilotSessionId,
-            stepStatuses: nodeState.stepStatuses,
-            worktreePath: nodeState.worktreePath,
-            baseCommit: nodeState.baseCommit,
-            logs: this.getNodeLogs(plan.id, node.id),
-            workUsed: node.work,
-          };
-          nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
-          
-          sm.transition(node.id, 'succeeded');
-          this.emit('nodeCompleted', plan.id, node.id, true);
-          
-          // Cleanup this node's worktree if eligible
-          // For leaf nodes: eligible after RI merge to targetBranch (or no targetBranch)
-          // For non-leaf nodes: handled via acknowledgeConsumption when dependents FI
-          if (plan.cleanUpSuccessfulWork && nodeState.worktreePath) {
-            const isLeafNode = plan.leaves.includes(node.id);
-            if (isLeafNode) {
-              // Leaf: cleanup now if merged (or no target branch)
-              if (!plan.targetBranch || nodeState.mergedToTarget) {
-                await this.cleanupWorktree(nodeState.worktreePath, plan.repoPath);
-                nodeState.worktreeCleanedUp = true;
-                this.persistence.save(plan);
-              }
-            }
-            // Non-leaf nodes are cleaned up via acknowledgeConsumption when dependents FI
-          }
-          
-          log.info(`Job succeeded: ${node.name}`, {
-            planId: plan.id,
-            nodeId: node.id,
-            commit: nodeState.completedCommit?.slice(0, 8),
-          });
+          return;
         }
-      } else {
-        nodeState.error = result.error;
+      }
+      
+      // At this point, executor succeeded (or was skipped for RI-only retry)
+      // Handle leaf node merge to target branch (Reverse Integration)
+      const isLeaf = plan.leaves.includes(node.id);
+      log.debug(`Merge check: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${plan.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
+      
+      // Track whether RI merge failed (only applies to leaf nodes with targetBranch)
+      let riMergeFailed = false;
+      
+      if (isLeaf && plan.targetBranch && nodeState.completedCommit) {
+        log.info(`Initiating merge to target: ${node.name} -> ${plan.targetBranch}`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========');
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Merging completed commit ${nodeState.completedCommit.slice(0, 8)} to ${plan.targetBranch}`);
+        
+        const mergeSuccess = await this.mergeLeafToTarget(plan, node, nodeState.completedCommit);
+        nodeState.mergedToTarget = mergeSuccess;
+        
+        if (mergeSuccess) {
+          this.execLog(plan.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`);
+        } else {
+          riMergeFailed = true;
+          this.execLog(plan.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED - worktree preserved for manual retry`);
+          log.warn(`Leaf ${node.name} work succeeded but RI merge to ${plan.targetBranch} failed - treating as node failure`);
+        }
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
+        
+        log.info(`Merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
+      } else if (isLeaf) {
+        log.debug(`Skipping merge: isLeaf=${isLeaf}, hasTargetBranch=${!!plan.targetBranch}, hasCompletedCommit=${!!nodeState.completedCommit}`);
+      }
+      
+      // If RI merge failed, treat the node as failed (work succeeded but merge did not)
+      if (riMergeFailed) {
+        nodeState.error = `Reverse integration merge to ${plan.targetBranch} failed. Work completed successfully but merge could not be performed. Worktree preserved for manual retry.`;
         
         // Store lastAttempt for retry context
         nodeState.lastAttempt = {
-          phase: result.failedPhase || 'work',
+          phase: 'merge-ri',
           startTime: nodeState.startedAt || Date.now(),
           endTime: Date.now(),
-          error: result.error,
-          exitCode: result.exitCode,
+          error: nodeState.error,
         };
         
         // Record failed attempt in history
-        const failedAttempt: AttemptRecord = {
+        const riFailedAttempt: AttemptRecord = {
           attemptNumber: nodeState.attempts,
           status: 'failed',
           startedAt: nodeState.startedAt || Date.now(),
           endedAt: Date.now(),
-          failedPhase: result.failedPhase || 'work',
-          error: result.error,
-          exitCode: result.exitCode,
+          failedPhase: 'merge-ri',
+          error: nodeState.error,
+          copilotSessionId: nodeState.copilotSessionId,
+          stepStatuses: nodeState.stepStatuses,
+          worktreePath: nodeState.worktreePath,
+          baseCommit: nodeState.baseCommit,
+          completedCommit: nodeState.completedCommit, // Work was successful, so we have the commit
+          logs: this.getNodeLogs(plan.id, node.id),
+          workUsed: node.work,
+        };
+        nodeState.attemptHistory = [...(nodeState.attemptHistory || []), riFailedAttempt];
+        
+        sm.transition(node.id, 'failed');
+        this.emit('nodeCompleted', plan.id, node.id, false);
+        
+        log.error(`Job failed (RI merge): ${node.name}`, {
+          planId: plan.id,
+          nodeId: node.id,
+          commit: nodeState.completedCommit?.slice(0, 8),
+          targetBranch: plan.targetBranch,
+        });
+      } else {
+        // Record successful attempt in history
+        const successAttempt: AttemptRecord = {
+          attemptNumber: nodeState.attempts,
+          status: 'succeeded',
+          startedAt: nodeState.startedAt || Date.now(),
+          endedAt: Date.now(),
           copilotSessionId: nodeState.copilotSessionId,
           stepStatuses: nodeState.stepStatuses,
           worktreePath: nodeState.worktreePath,
@@ -1552,16 +1559,31 @@ export class PlanRunner extends EventEmitter {
           logs: this.getNodeLogs(plan.id, node.id),
           workUsed: node.work,
         };
-        nodeState.attemptHistory = [...(nodeState.attemptHistory || []), failedAttempt];
+        nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
         
-        sm.transition(node.id, 'failed');
-        this.emit('nodeCompleted', plan.id, node.id, false);
+        sm.transition(node.id, 'succeeded');
+        this.emit('nodeCompleted', plan.id, node.id, true);
         
-        log.error(`Job failed: ${node.name}`, {
+        // Cleanup this node's worktree if eligible
+        // For leaf nodes: eligible after RI merge to targetBranch (or no targetBranch)
+        // For non-leaf nodes: handled via acknowledgeConsumption when dependents FI
+        if (plan.cleanUpSuccessfulWork && nodeState.worktreePath) {
+          const isLeafNode = plan.leaves.includes(node.id);
+          if (isLeafNode) {
+            // Leaf: cleanup now if merged (or no target branch)
+            if (!plan.targetBranch || nodeState.mergedToTarget) {
+              await this.cleanupWorktree(nodeState.worktreePath, plan.repoPath);
+              nodeState.worktreeCleanedUp = true;
+              this.persistence.save(plan);
+            }
+          }
+          // Non-leaf nodes are cleaned up via acknowledgeConsumption when dependents FI
+        }
+        
+        log.info(`Job succeeded: ${node.name}`, {
           planId: plan.id,
           nodeId: node.id,
-          error: result.error,
-          failedPhase: result.failedPhase,
+          commit: nodeState.completedCommit?.slice(0, 8),
         });
       }
     } catch (error: any) {
@@ -2583,7 +2605,25 @@ export class PlanRunner extends EventEmitter {
     nodeState.error = undefined;
     nodeState.endedAt = undefined;
     nodeState.startedAt = undefined;
-    nodeState.stepStatuses = undefined;
+    
+    // Determine if we should resume from failed phase or start fresh
+    const hasNewWork = !!options?.newWork;
+    const shouldResetPhases = hasNewWork || options?.clearWorktree;
+    
+    if (shouldResetPhases) {
+      // Starting fresh - clear all phase progress
+      nodeState.stepStatuses = undefined;
+      nodeState.resumeFromPhase = undefined;
+      log.info(`Retry with fresh state (hasNewWork=${hasNewWork}, clearWorktree=${options?.clearWorktree})`);
+    } else {
+      // Resuming - preserve step statuses and set resume point
+      const failedPhase = nodeState.lastAttempt?.phase;
+      if (failedPhase) {
+        nodeState.resumeFromPhase = failedPhase as any;
+        log.info(`Retry resuming from phase: ${failedPhase}`);
+      }
+      // stepStatuses are preserved - completed phases will be skipped
+    }
     
     // Note: We preserve worktreePath and baseCommit so the work can continue in the same worktree
     // If clearWorktree is true, we'll need to reset git state
