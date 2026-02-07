@@ -907,6 +907,28 @@ export class planDetailPanel {
       opacity: 0.7;
     }
     
+    /* Process Aggregation Summary */
+    .processes-summary {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      background: rgba(55, 148, 255, 0.08);
+      border: 1px solid rgba(55, 148, 255, 0.25);
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .processes-summary-label {
+      color: var(--vscode-foreground);
+    }
+    .processes-summary-stat {
+      color: var(--vscode-descriptionForeground);
+      font-weight: 500;
+      font-size: 12px;
+    }
+
     /* Job status indicators */
     .job-scheduled .node-stats.job-scheduled {
       color: var(--vscode-charts-yellow);
@@ -1424,6 +1446,53 @@ ${mermaidDef}
       }
     });
     
+    function formatMemory(bytes) {
+      const mb = bytes / 1024 / 1024;
+      if (mb >= 1024) {
+        return (mb / 1024).toFixed(2) + ' GB';
+      }
+      return mb.toFixed(1) + ' MB';
+    }
+
+    function sumAllProcessStats(rootJobs, hierarchy) {
+      let totalCount = 0;
+      let totalCpu = 0;
+      let totalMemory = 0;
+
+      function sumProc(proc) {
+        totalCount++;
+        totalCpu += proc.cpu || 0;
+        totalMemory += proc.memory || 0;
+        if (proc.children) {
+          for (const child of proc.children) {
+            sumProc(child);
+          }
+        }
+      }
+
+      function sumJob(job) {
+        for (const proc of (job.tree || [])) {
+          sumProc(proc);
+        }
+      }
+
+      function sumHierarchy(plans) {
+        for (const plan of (plans || [])) {
+          for (const job of (plan.jobs || [])) {
+            sumJob(job);
+          }
+          sumHierarchy(plan.children);
+        }
+      }
+
+      for (const job of (rootJobs || [])) {
+        sumJob(job);
+      }
+      sumHierarchy(hierarchy);
+
+      return { totalCount, totalCpu, totalMemory };
+    }
+
     function renderAllProcesses(rootJobs, hierarchy) {
       const container = document.getElementById('processesContainer');
       if (!container) return;
@@ -1436,7 +1505,14 @@ ${mermaidDef}
         return;
       }
       
-      let html = '';
+      // Aggregation summary
+      const agg = sumAllProcessStats(rootJobs, hierarchy);
+      let html = '<div class="processes-summary">';
+      html += '<span class="processes-summary-label">Total</span>';
+      html += '<span class="processes-summary-stat">' + agg.totalCount + ' processes</span>';
+      html += '<span class="processes-summary-stat">' + agg.totalCpu.toFixed(0) + '% CPU</span>';
+      html += '<span class="processes-summary-stat">' + formatMemory(agg.totalMemory) + '</span>';
+      html += '</div>';
       
       // Render root-level jobs first (jobs directly in main Plan)
       for (const job of (rootJobs || [])) {
