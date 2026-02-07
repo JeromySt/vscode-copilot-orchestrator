@@ -1751,22 +1751,54 @@ ${mermaidDef}
         }
       }
       
-      // Render ungrouped nodes first
-      for (const { nodeId, node } of ungroupedNodes) {
-        renderJobNode(node as JobNode, nodeId, d, prefix, indent, nodeHasDependents, localRoots, localLeaves);
+      // Build a tree structure from group paths
+      interface GroupTreeNode {
+        name: string;
+        children: Map<string, GroupTreeNode>;
+        nodes: { nodeId: string; node: PlanNode }[];
       }
       
-      // Render each visual group as a subgraph with computed status styling
-      for (const [groupTag, groupNodes] of groupedNodes) {
-        const groupId = `grp${groupSubgraphCounter++}`;
+      const groupTree: GroupTreeNode = { name: '', children: new Map(), nodes: [] };
+      
+      for (const [groupPath, nodes] of groupedNodes) {
+        const parts = groupPath.split('/');
+        let current = groupTree;
         
-        // Compute group status from contained nodes
+        for (const part of parts) {
+          if (!current.children.has(part)) {
+            current.children.set(part, { name: part, children: new Map(), nodes: [] });
+          }
+          current = current.children.get(part)!;
+        }
+        
+        // Nodes belong to the leaf group
+        current.nodes = nodes;
+      }
+      
+      // Recursively render group tree as nested subgraphs
+      const renderGroupTree = (
+        treeNode: GroupTreeNode,
+        groupPath: string,
+        currentIndent: string
+      ): void => {
+        // Get all nodes in this subtree for status calculation
+        const collectAllNodes = (node: GroupTreeNode): { nodeId: string; node: PlanNode }[] => {
+          const result = [...node.nodes];
+          for (const child of node.children.values()) {
+            result.push(...collectAllNodes(child));
+          }
+          return result;
+        };
+        
+        const allNodesInSubtree = collectAllNodes(treeNode);
+        
+        // Compute group status from all contained nodes
         let groupSucceeded = 0;
         let groupFailed = 0;
         let groupRunning = 0;
-        let groupTotal = groupNodes.length;
+        const groupTotal = allNodesInSubtree.length;
         
-        for (const { nodeId } of groupNodes) {
+        for (const { nodeId } of allNodesInSubtree) {
           const state = d.nodeStates.get(nodeId);
           if (state?.status === 'succeeded') groupSucceeded++;
           else if (state?.status === 'failed' || state?.status === 'blocked') groupFailed++;
@@ -1775,7 +1807,9 @@ ${mermaidDef}
         
         // Determine group status
         let groupStatus: string;
-        if (groupFailed > 0) {
+        if (groupTotal === 0) {
+          groupStatus = 'pending';
+        } else if (groupFailed > 0) {
           groupStatus = groupSucceeded > 0 ? 'partial' : 'failed';
         } else if (groupRunning > 0) {
           groupStatus = 'running';
@@ -1795,15 +1829,36 @@ ${mermaidDef}
         };
         const colors = groupColors[groupStatus] || groupColors.pending;
         
-        lines.push(`${indent}subgraph ${groupId}["📦 ${this._escapeForMermaid(groupTag)}"]`);
+        const groupId = `grp${groupSubgraphCounter++}`;
+        const displayName = treeNode.name || groupPath;
         
-        const groupIndent = indent + '  ';
-        for (const { nodeId, node } of groupNodes) {
-          renderJobNode(node as JobNode, nodeId, d, prefix, groupIndent, nodeHasDependents, localRoots, localLeaves);
+        lines.push(`${currentIndent}subgraph ${groupId}["📦 ${this._escapeForMermaid(displayName)}"]`);
+        
+        const childIndent = currentIndent + '  ';
+        
+        // Render child groups first (nested subgraphs)
+        for (const childGroup of treeNode.children.values()) {
+          const childPath = groupPath ? `${groupPath}/${childGroup.name}` : childGroup.name;
+          renderGroupTree(childGroup, childPath, childIndent);
         }
         
-        lines.push(`${indent}end`);
-        lines.push(`${indent}style ${groupId} fill:${colors.fill},stroke:${colors.stroke},stroke-width:2px,stroke-dasharray:5`);
+        // Render nodes directly in this group
+        for (const { nodeId, node } of treeNode.nodes) {
+          renderJobNode(node as JobNode, nodeId, d, prefix, childIndent, nodeHasDependents, localRoots, localLeaves);
+        }
+        
+        lines.push(`${currentIndent}end`);
+        lines.push(`${currentIndent}style ${groupId} fill:${colors.fill},stroke:${colors.stroke},stroke-width:2px,stroke-dasharray:5`);
+      };
+      
+      // Render ungrouped nodes first
+      for (const { nodeId, node } of ungroupedNodes) {
+        renderJobNode(node as JobNode, nodeId, d, prefix, indent, nodeHasDependents, localRoots, localLeaves);
+      }
+      
+      // Render group tree (top-level groups)
+      for (const topGroup of groupTree.children.values()) {
+        renderGroupTree(topGroup, topGroup.name, indent);
       }
       
       return { roots: localRoots, leaves: localLeaves };
