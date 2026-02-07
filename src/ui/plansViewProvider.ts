@@ -119,7 +119,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (hasRunning) {
         this.refresh();
       }
-    }, 2000);
+    }, 1000);
     
     webviewView.onDidDispose(() => {
       if (this._refreshTimer) {
