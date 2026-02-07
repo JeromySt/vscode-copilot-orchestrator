@@ -39,12 +39,10 @@ jobs:
     - name: Run tests (Ubuntu)
       if: runner.os == 'Linux'
       run: xvfb-run -a npm test
-      continue-on-error: true
     
     - name: Run tests (Windows/macOS)
       if: runner.os != 'Linux'
       run: npm test
-      continue-on-error: true
 
   package:
     name: Package VSIX
@@ -102,3 +100,51 @@ jobs:
     - name: Check for outdated dependencies
       run: npm outdated
       continue-on-error: true
+
+  # Auto-create pre-release on push to main
+  prerelease:
+    name: Create Pre-release
+    needs: [build, package]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Download VSIX artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: vsix-package
+    
+    - name: Get version and generate tag
+      id: version
+      run: |
+        VERSION=$(node -p "require('./package.json').version")
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        TIMESTAMP=$(date +%Y%m%d%H%M%S)
+        TAG="v${VERSION}-pre.${TIMESTAMP}.${SHORT_SHA}"
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "tag=${TAG}" >> $GITHUB_OUTPUT
+        echo "Generated pre-release tag: ${TAG}"
+    
+    - name: Create pre-release tag
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag ${{ steps.version.outputs.tag }}
+        git push origin ${{ steps.version.outputs.tag }}
+    
+    - name: Create GitHub Pre-release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        name: Pre-release ${{ steps.version.outputs.tag }}
+        files: '*.vsix'
+        prerelease: true
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
