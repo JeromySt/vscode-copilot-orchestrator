@@ -28,6 +28,12 @@ import { NodeDetailPanel } from './panels/nodeDetailPanel';
  * **Extension → Webview messages:**
  * - `{ type: 'update', Plans: PlanData[], total: number, running: number }` — refreshed Plan list
  *
+ * **Keyboard shortcuts (when a plan item is focused):**
+ * - `Enter` — open plan details panel
+ * - `Delete` — delete the plan
+ * - `Ctrl+Escape` — cancel the plan (if running)
+ * - `Arrow Up/Down` — navigate between plans
+ *
  * @example
  * ```ts
  * const provider = new plansViewProvider(context, planRunner);
@@ -252,8 +258,13 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       cursor: pointer;
       border-left: 3px solid transparent;
     }
-    .plan-item:hover {
+    .plan-item:hover,
+    .plan-item:focus {
       background: var(--vscode-list-activeSelectionBackground);
+      outline: none;
+    }
+    .plan-item:focus {
+      box-shadow: 0 0 0 1px var(--vscode-focusBorder) inset;
     }
     .plan-item.running { border-left-color: var(--vscode-progressBar-background); }
     .plan-item.succeeded { border-left-color: var(--vscode-testing-iconPassed); }
@@ -399,7 +410,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
                              plan.status === 'succeeded' ? 'succeeded' : '';
         
         return \`
-          <div class="plan-item \${plan.status}" data-id="\${plan.id}">
+          <div class="plan-item \${plan.status}" data-id="\${plan.id}" data-status="\${plan.status}" tabindex="0">
             <div class="plan-name">
               <span>\${plan.name}</span>
               <span class="plan-status \${plan.status}">\${plan.status}</span>
@@ -422,6 +433,42 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       document.querySelectorAll('.plan-item').forEach(el => {
         el.addEventListener('click', () => {
           vscode.postMessage({ type: 'openPlan', planId: el.dataset.id });
+        });
+        
+        // Add keyboard handlers
+        el.addEventListener('keydown', (e) => {
+          const planId = el.dataset.id;
+          const status = el.dataset.status;
+          
+          if (e.key === 'Enter') {
+            // Open plan details
+            e.preventDefault();
+            vscode.postMessage({ type: 'openPlan', planId });
+          } else if (e.key === 'Delete') {
+            // Delete the plan
+            e.preventDefault();
+            vscode.postMessage({ type: 'deletePlan', planId });
+          } else if (e.key === 'Escape' && e.ctrlKey) {
+            // Cancel if running
+            e.preventDefault();
+            if (status === 'running' || status === 'pending') {
+              vscode.postMessage({ type: 'cancelPlan', planId });
+            }
+          } else if (e.key === 'ArrowDown') {
+            // Navigate to next plan
+            e.preventDefault();
+            const next = el.nextElementSibling;
+            if (next && next.classList.contains('plan-item')) {
+              next.focus();
+            }
+          } else if (e.key === 'ArrowUp') {
+            // Navigate to previous plan
+            e.preventDefault();
+            const prev = el.previousElementSibling;
+            if (prev && prev.classList.contains('plan-item')) {
+              prev.focus();
+            }
+          }
         });
       });
     });
