@@ -11,7 +11,7 @@
  */
 
 import * as vscode from 'vscode';
-import { PlanRunner, PlanInstance, PlanNode, JobNode, SubPlanNode, NodeStatus, NodeExecutionState } from '../../plan';
+import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState } from '../../plan';
 import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 
 /**
@@ -28,7 +28,7 @@ import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSum
  * - `{ type: 'cancel' }` — cancel the Plan
  * - `{ type: 'delete' }` — delete the Plan
  * - `{ type: 'openNode', nodeId: string, planId?: string }` — open a {@link NodeDetailPanel}
- * - `{ type: 'opensubPlan', planId: string }` — open a nested Plan's detail panel
+ * - `{ type: 'openNode', nodeId, planId }` — open a node detail panel
  * - `{ type: 'refresh' }` — request a manual data refresh
  * - `{ type: 'showWorkSummary' }` — open work summary in a separate webview panel
  * - `{ type: 'getAllProcessStats' }` — request process tree statistics
@@ -165,13 +165,7 @@ export class planDetailPanel {
         const planIdForNode = message.planId || this._planId;
         vscode.commands.executeCommand('orchestrator.showNodeDetails', planIdForNode, message.nodeId);
         break;
-      case 'opensubPlan':
-        planDetailPanel.createOrShow(
-          this._panel.webview.cspSource as any,
-          message.planId,
-          this._planRunner
-        );
-        break;
+
       case 'refresh':
         this._update();
         break;
@@ -479,56 +473,26 @@ export class planDetailPanel {
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
     // Build Mermaid diagram
-    const { diagram: mermaidDef, subgraphData, nodeTooltips } = this._buildMermaidDiagram(plan);
+    const { diagram: mermaidDef, nodeTooltips } = this._buildMermaidDiagram(plan);
     
-    // Build node data for click handling - recursively include all nested nodes
-    const nodeData: Record<string, { nodeId: string; planId: string; type: string; childPlanId?: string; name: string; startedAt?: number; endedAt?: number; status: string }> = {};
+    // Build node data for click handling
+    const nodeData: Record<string, { nodeId: string; planId: string; type: string; name: string; startedAt?: number; endedAt?: number; status: string }> = {};
     
-    // Recursive function to collect all node data with prefixes matching Mermaid IDs
-    const collectNodeData = (d: PlanInstance, prefix: string, subgraphCounterStart: number): number => {
-      let subgraphCounter = subgraphCounterStart;
+    // Collect all node data with prefixes matching Mermaid IDs
+    for (const [nodeId, node] of plan.nodes) {
+      const sanitizedId = this._sanitizeId(nodeId);
+      const state = plan.nodeStates.get(nodeId);
       
-      for (const [nodeId, node] of d.nodes) {
-        const sanitizedId = prefix + this._sanitizeId(nodeId);
-        const state = d.nodeStates.get(nodeId);
-        
-        // For subPlan nodes, get effective start/end times recursively
-        let effectiveStartedAt = state?.startedAt;
-        let effectiveEndedAt = state?.endedAt;
-        if (node.type === 'subPlan' && state?.childPlanId) {
-          effectiveStartedAt = this._planRunner.getEffectiveStartedAt(state.childPlanId) || state?.startedAt;
-          effectiveEndedAt = this._planRunner.getEffectiveEndedAt(state.childPlanId) || state?.endedAt;
-        }
-        
-        nodeData[sanitizedId] = {
-          nodeId,
-          planId: d.id,
-          type: node.type,
-          childPlanId: node.type === 'subPlan' ? (state?.childPlanId || (node as SubPlanNode).childPlanId) : undefined,
-          name: node.name,
-          startedAt: effectiveStartedAt,
-          endedAt: effectiveEndedAt,
-          status: state?.status || 'pending',
-        };
-        
-        // If this is a subPlan with an instantiated child, recurse into it
-        if (node.type === 'subPlan') {
-          subgraphCounter++;
-          const childPlanId = state?.childPlanId || (node as SubPlanNode).childPlanId;
-          
-          if (childPlanId) {
-            const childPlan = this._planRunner.get(childPlanId);
-            if (childPlan) {
-              subgraphCounter = collectNodeData(childPlan, prefix + 'c' + subgraphCounter + '_', subgraphCounter);
-            }
-          }
-        }
-      }
-      
-      return subgraphCounter;
-    };
-    
-    collectNodeData(plan, '', 0);
+      nodeData[sanitizedId] = {
+        nodeId,
+        planId: plan.id,
+        type: node.type,
+        name: node.name,
+        startedAt: state?.startedAt,
+        endedAt: state?.endedAt,
+        status: state?.status || 'pending',
+      };
+    }
     
     // Get branch info
     const baseBranch = plan.spec.baseBranch || 'main';
@@ -875,38 +839,6 @@ export class planDetailPanel {
     .proc-pid { color: var(--vscode-descriptionForeground); font-size: 11px; }
     .proc-stats { color: var(--vscode-descriptionForeground); font-size: 11px; }
     
-    /* sub-plan hierarchy styles */
-    .subPlan-node {
-      margin-bottom: 8px;
-      background: var(--vscode-sideBar-background);
-      border-radius: 6px;
-      overflow: hidden;
-      border-left: 3px solid var(--vscode-charts-blue);
-    }
-    .subPlan-node.collapsed .subPlan-children { display: none; }
-    .subPlan-node.collapsed .node-chevron { transform: rotate(-90deg); }
-    .subPlan-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      cursor: pointer;
-      font-weight: 500;
-      background: rgba(0, 100, 200, 0.1);
-    }
-    .subPlan-header:hover {
-      background: rgba(0, 100, 200, 0.15);
-    }
-    .subPlan-icon { font-size: 14px; }
-    .subPlan-name { flex: 1; font-weight: 600; }
-    .subPlan-children {
-      padding: 8px 8px 8px 12px;
-    }
-    .subPlan-waiting {
-      font-style: italic;
-      opacity: 0.7;
-    }
-    
     /* Process Aggregation Summary */
     .processes-summary {
       display: flex;
@@ -1155,7 +1087,6 @@ ${mermaidDef}
   <script>
     const vscode = acquireVsCodeApi();
     const nodeData = ${JSON.stringify(nodeData)};
-    const subgraphData = ${JSON.stringify(subgraphData)};
     const nodeTooltips = ${JSON.stringify(nodeTooltips)};
     const mermaidDef = ${JSON.stringify(mermaidDef)};
     
@@ -1209,30 +1140,6 @@ ${mermaidDef}
     document.addEventListener('click', (e) => {
       let el = e.target;
       
-      // First check if we clicked on a cluster (subgraph)
-      const clickedCluster = el.closest('g.cluster');
-      if (clickedCluster && clickedCluster.id) {
-        console.log('Cluster clicked, id:', clickedCluster.id);
-        // Mermaid uses various formats: "flowchart-sg0-123", "subGraph0", etc.
-        const sgMatch = clickedCluster.id.match(/sg(\\d+)/i) || clickedCluster.id.match(/subGraph(\\d+)/i);
-        if (sgMatch) {
-          const subgraphId = 'sg' + sgMatch[1];
-          console.log('Looking for subgraphId:', subgraphId, 'in', Object.keys(subgraphData));
-          const data = subgraphData[subgraphId];
-          if (data && data.childPlanId) {
-            // Only open if we clicked on the label area (top part of cluster), not on nodes inside
-            const clickedOnNode = el.closest('.node');
-            if (!clickedOnNode || el.closest('.cluster-label')) {
-              console.log('Opening sub-plan:', data.childPlanId);
-              vscode.postMessage({ type: 'opensubPlan', planId: data.childPlanId });
-              e.stopPropagation();
-              e.preventDefault();
-              return;
-            }
-          }
-        }
-      }
-      
       while (el && el !== document.body) {
         // Check for node click
         if (el.classList && el.classList.contains('node')) {
@@ -1243,11 +1150,7 @@ ${mermaidDef}
               const sanitizedId = match[1];
               const data = nodeData[sanitizedId];
               if (data) {
-                if (data.type === 'subPlan' && data.childPlanId) {
-                  vscode.postMessage({ type: 'opensubPlan', planId: data.childPlanId });
-                } else {
-                  vscode.postMessage({ type: 'openNode', nodeId: data.nodeId, planId: data.planId });
-                }
+                vscode.postMessage({ type: 'openNode', nodeId: data.nodeId, planId: data.planId });
               }
             }
           }
@@ -1256,18 +1159,6 @@ ${mermaidDef}
         el = el.parentElement;
       }
     });
-    
-    // Make subgraph labels look clickable and add click handlers
-    setTimeout(() => {
-      document.querySelectorAll('.cluster-label').forEach(label => {
-        label.style.cursor = 'pointer';
-        label.style.pointerEvents = 'all';
-      });
-      // Also make the cluster rect clickable
-      document.querySelectorAll('g.cluster').forEach(cluster => {
-        cluster.style.cursor = 'pointer';
-      });
-    }, 500);
     
     // Handle job summary clicks
     document.querySelectorAll('.job-summary').forEach(el => {
@@ -1442,7 +1333,7 @@ ${mermaidDef}
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.type === 'allProcessStats') {
-        renderAllProcesses(msg.rootJobs, msg.hierarchy);
+        renderAllProcesses(msg.rootJobs);
       }
     });
     
@@ -1454,7 +1345,7 @@ ${mermaidDef}
       return mb.toFixed(1) + ' MB';
     }
 
-    function sumAllProcessStats(rootJobs, hierarchy) {
+    function sumAllProcessStats(rootJobs) {
       let totalCount = 0;
       let totalCpu = 0;
       let totalMemory = 0;
@@ -1476,37 +1367,26 @@ ${mermaidDef}
         }
       }
 
-      function sumHierarchy(plans) {
-        for (const plan of (plans || [])) {
-          for (const job of (plan.jobs || [])) {
-            sumJob(job);
-          }
-          sumHierarchy(plan.children);
-        }
-      }
-
       for (const job of (rootJobs || [])) {
         sumJob(job);
       }
-      sumHierarchy(hierarchy);
 
       return { totalCount, totalCpu, totalMemory };
     }
 
-    function renderAllProcesses(rootJobs, hierarchy) {
+    function renderAllProcesses(rootJobs) {
       const container = document.getElementById('processesContainer');
       if (!container) return;
       
       const hasRootJobs = rootJobs && rootJobs.length > 0;
-      const hassubPlans = hierarchy && hierarchy.length > 0;
       
-      if (!hasRootJobs && !hassubPlans) {
+      if (!hasRootJobs) {
         container.innerHTML = '<div class="processes-loading">No active processes</div>';
         return;
       }
       
       // Aggregation summary
-      const agg = sumAllProcessStats(rootJobs, hierarchy);
+      const agg = sumAllProcessStats(rootJobs);
       let html = '<div class="processes-summary">';
       html += '<span class="processes-summary-label">Total</span>';
       html += '<span class="processes-summary-stat">' + agg.totalCount + ' processes</span>';
@@ -1514,97 +1394,12 @@ ${mermaidDef}
       html += '<span class="processes-summary-stat">' + formatMemory(agg.totalMemory) + '</span>';
       html += '</div>';
       
-      // Render root-level jobs first (jobs directly in main Plan)
+      // Render all jobs
       for (const job of (rootJobs || [])) {
         html += renderJobNode(job, 0);
       }
       
-      // Render sub-plan hierarchy
-      for (const subPlan of (hierarchy || [])) {
-        html += rendersubPlan(subPlan, 0);
-      }
-      
       container.innerHTML = html;
-    }
-    
-    // Render a sub-plan as a collapsible section
-    function rendersubPlan(subPlan, depth) {
-      const indent = depth * 16;
-      const hasChildren = (subPlan.children && subPlan.children.length > 0) || (subPlan.jobs && subPlan.jobs.length > 0);
-      
-      // Count total processes in this sub-plan
-      let totalProcs = 0;
-      let totalCpu = 0;
-      let totalMem = 0;
-      
-      function sumJobStats(job) {
-        const tree = job.tree || [];
-        for (const proc of tree) {
-          const s = sumProcStats(proc);
-          totalProcs += s.count;
-          totalCpu += s.cpu;
-          totalMem += s.memory;
-        }
-      }
-      
-      function sumProcStats(proc) {
-        let count = 1;
-        let cpu = proc.cpu || 0;
-        let memory = proc.memory || 0;
-        if (proc.children) {
-          for (const child of proc.children) {
-            const s = sumProcStats(child);
-            count += s.count;
-            cpu += s.cpu;
-            memory += s.memory;
-          }
-        }
-        return { count, cpu, memory };
-      }
-      
-      for (const job of (subPlan.jobs || [])) {
-        sumJobStats(job);
-      }
-      
-      // Recursively sum children
-      function sumChildren(children) {
-        for (const child of (children || [])) {
-          for (const job of (child.jobs || [])) {
-            sumJobStats(job);
-          }
-          sumChildren(child.children);
-        }
-      }
-      sumChildren(subPlan.children);
-      
-      const memMB = (totalMem / 1024 / 1024).toFixed(1);
-      const statusClass = 'subPlan-' + subplan.status;
-      
-      let html = '<div class="subPlan-node ' + statusClass + '" style="margin-left: ' + indent + 'px;">';
-      html += '<div class="subPlan-header" onclick="this.parentElement.classList.toggle(\\'collapsed\\')">';
-      html += '<span class="node-chevron">▼</span>';
-      html += '<span class="subPlan-icon">📦</span>';
-      html += '<span class="subPlan-name">' + escapeHtml(subPlan.planName) + '</span>';
-      if (totalProcs > 0) {
-        html += '<span class="node-stats">(' + totalProcs + ' proc • ' + totalCpu.toFixed(0) + '% CPU • ' + memMB + ' MB)</span>';
-      } else {
-        html += '<span class="node-stats subPlan-waiting">(waiting)</span>';
-      }
-      html += '</div>';
-      html += '<div class="subPlan-children">';
-      
-      // Render jobs in this sub-plan
-      for (const job of (subPlan.jobs || [])) {
-        html += renderJobNode(job, 1);
-      }
-      
-      // Render nested sub-plans
-      for (const child of (subPlan.children || [])) {
-        html += rendersubPlan(child, depth + 1);
-      }
-      
-      html += '</div></div>';
-      return html;
     }
     
     // Render a job node with its process tree
@@ -1813,14 +1608,10 @@ ${mermaidDef}
    * edge indices for `linkStyle` coloring.
    *
    * @param plan - The Plan instance whose nodes form the DAG.
-   * @returns An object containing the Mermaid diagram string and a map of
-   *   subgraph IDs to their child Plan metadata.
+   * @returns An object containing the Mermaid diagram string and node tooltips.
    */
-  private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; subgraphData: Record<string, { childPlanId: string; name: string }>; nodeTooltips: Record<string, string> } {
+  private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; nodeTooltips: Record<string, string> } {
     const lines: string[] = ['flowchart LR'];
-    
-    // Track subgraph data for click handling
-    const subgraphData: Record<string, { childPlanId: string; name: string }> = {};
     
     // Track full names for tooltip display when labels are truncated
     const nodeTooltips: Record<string, string> = {};
@@ -1871,9 +1662,6 @@ ${mermaidDef}
     
     // Track leaf node states for mergedToTarget status
     const leafnodeStates = new Map<string, NodeExecutionState | undefined>();
-    
-    // Counter for unique subgraph IDs
-    let subgraphCounter = 0;
     
     // Counter for unique group subgraph IDs
     let groupSubgraphCounter = 0;
@@ -1952,7 +1740,7 @@ ${mermaidDef}
       const ungroupedNodes: { nodeId: string; node: PlanNode }[] = [];
       
       for (const [nodeId, node] of d.nodes) {
-        const groupTag = node.type === 'job' ? (node as JobNode).group : undefined;
+        const groupTag = node.group;
         if (groupTag) {
           if (!groupedNodes.has(groupTag)) {
             groupedNodes.set(groupTag, []);
@@ -1963,86 +1751,9 @@ ${mermaidDef}
         }
       }
       
-      // Helper to render a subPlan node
-      const renderSubPlanNode = (nodeId: string, node: SubPlanNode, nodeIndent: string) => {
-        const state = d.nodeStates.get(nodeId);
-        const status = state?.status || 'pending';
-        const sanitizedId = prefix + this._sanitizeId(nodeId);
-        
-        const isRoot = node.dependencies.length === 0;
-        const isLeaf = !nodeHasDependents.has(nodeId);
-        
-        const label = this._escapeForMermaid(node.name);
-        const subgraphId = `sg${subgraphCounter++}`;
-        
-        // Calculate duration for subPlan
-        let durationLabel = '';
-        const childPlanId = state?.childPlanId || node.childPlanId;
-        if (childPlanId) {
-          const effectiveStartedAt = this._planRunner.getEffectiveStartedAt(childPlanId) || state?.startedAt;
-          const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(childPlanId) || state?.endedAt || Date.now();
-          
-          if (effectiveStartedAt) {
-            const duration = effectiveEndedAt - effectiveStartedAt;
-            durationLabel = ' | ' + formatDurationMs(duration);
-          }
-          
-          subgraphData[subgraphId] = { childPlanId, name: node.name };
-        } else if (state?.startedAt) {
-          const endTime = state.endedAt || Date.now();
-          const duration = endTime - state.startedAt;
-          durationLabel = ' | ' + formatDurationMs(duration);
-        }
-        
-        const displayLabel = this._truncateNodeLabel(label, durationLabel);
-        if (displayLabel !== label) {
-          nodeTooltips[subgraphId] = label;
-        }
-        
-        lines.push(`${nodeIndent}subgraph ${subgraphId}["${this._getStatusIcon(status)} ${displayLabel}${durationLabel}"]`);
-        
-        let innerRoots: string[] = [];
-        let innerLeaves: string[] = [];
-        
-        const childPlan = state?.childPlanId ? this._planRunner.get(state.childPlanId) : undefined;
-        
-        if (childPlan) {
-          const result = renderPlanInstance(childPlan, prefix + 'c' + subgraphCounter + '_', depth + 1);
-          innerRoots = result.roots;
-          innerLeaves = result.leaves;
-        } else if (node.childSpec) {
-          const result = renderFromSpec(node.childSpec, prefix + 'c' + subgraphCounter + '_', depth + 1, status);
-          innerRoots = result.roots;
-          innerLeaves = result.leaves;
-        }
-        
-        lines.push(`${nodeIndent}end`);
-        
-        const boxColor = status === 'running' ? '#1a2a4e' : status === 'succeeded' ? '#1a3a2e' : '#1a1a2e';
-        const borderColor = status === 'running' ? '#3794ff' : status === 'succeeded' ? '#4ec9b0' : '#4a4a6a';
-        lines.push(`${nodeIndent}style ${subgraphId} fill:${boxColor},stroke:${borderColor},stroke-width:2px`);
-        
-        nodeEntryExitMap.set(sanitizedId, {
-          entryIds: innerRoots.length > 0 ? innerRoots : [sanitizedId],
-          exitIds: innerLeaves.length > 0 ? innerLeaves : [sanitizedId]
-        });
-        
-        if (isRoot) localRoots.push(...(innerRoots.length > 0 ? innerRoots : [sanitizedId]));
-        if (isLeaf) localLeaves.push(...(innerLeaves.length > 0 ? innerLeaves : [sanitizedId]));
-        
-        for (const depId of node.dependencies) {
-          const depSanitizedId = prefix + this._sanitizeId(depId);
-          edgesToAdd.push({ from: depSanitizedId, to: sanitizedId, status: d.nodeStates.get(depId)?.status });
-        }
-      };
-      
       // Render ungrouped nodes first
       for (const { nodeId, node } of ungroupedNodes) {
-        if (node.type === 'subPlan') {
-          renderSubPlanNode(nodeId, node as SubPlanNode, indent);
-        } else {
-          renderJobNode(node as JobNode, nodeId, d, prefix, indent, nodeHasDependents, localRoots, localLeaves);
-        }
+        renderJobNode(node as JobNode, nodeId, d, prefix, indent, nodeHasDependents, localRoots, localLeaves);
       }
       
       // Render each visual group as a subgraph with computed status styling
@@ -2088,124 +1799,11 @@ ${mermaidDef}
         
         const groupIndent = indent + '  ';
         for (const { nodeId, node } of groupNodes) {
-          if (node.type === 'subPlan') {
-            renderSubPlanNode(nodeId, node as SubPlanNode, groupIndent);
-          } else {
-            renderJobNode(node as JobNode, nodeId, d, prefix, groupIndent, nodeHasDependents, localRoots, localLeaves);
-          }
+          renderJobNode(node as JobNode, nodeId, d, prefix, groupIndent, nodeHasDependents, localRoots, localLeaves);
         }
         
         lines.push(`${indent}end`);
         lines.push(`${indent}style ${groupId} fill:${colors.fill},stroke:${colors.stroke},stroke-width:2px,stroke-dasharray:5`);
-      }
-      
-      return { roots: localRoots, leaves: localLeaves };
-    };
-    
-    // Render from spec (for sub-plans not yet instantiated)
-    const renderFromSpec = (
-      spec: import('../../plan/types').PlanSpec, 
-      prefix: string, 
-      depth: number, 
-      inheritedStatus: string
-    ): { roots: string[], leaves: string[] } => {
-      const indent = '  '.repeat(depth + 1);
-      const localRoots: string[] = [];
-      const localLeaves: string[] = [];
-      
-      // Build maps
-      const producerToSanitized = new Map<string, string>();
-      const nodeHasDependents = new Set<string>();
-      
-      // First pass: collect all node IDs and build dependency info
-      for (const jobSpec of spec.jobs || []) {
-        const sanitizedId = prefix + this._sanitizeId(jobSpec.producerId);
-        producerToSanitized.set(jobSpec.producerId, sanitizedId);
-        for (const dep of jobSpec.dependencies || []) {
-          nodeHasDependents.add(dep);
-        }
-      }
-      for (const subPlanSpec of spec.subPlans || []) {
-        const sanitizedId = prefix + this._sanitizeId(subPlanSpec.producerId);
-        producerToSanitized.set(subPlanSpec.producerId, sanitizedId);
-        for (const dep of subPlanSpec.dependencies || []) {
-          nodeHasDependents.add(dep);
-        }
-      }
-      
-      // Render jobs
-      for (const jobSpec of spec.jobs || []) {
-        const sanitizedId = producerToSanitized.get(jobSpec.producerId)!;
-        const label = this._escapeForMermaid(jobSpec.name || jobSpec.producerId);
-        const icon = this._getStatusIcon(inheritedStatus);
-        const isRoot = (jobSpec.dependencies || []).length === 0;
-        const isLeaf = !nodeHasDependents.has(jobSpec.producerId);
-        
-        const displayLabel = this._truncateNodeLabel(label, '');
-        if (displayLabel !== label) {
-          nodeTooltips[sanitizedId] = label;
-        }
-        
-        lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}"]`);
-        lines.push(`${indent}class ${sanitizedId} ${inheritedStatus}`);
-        
-        nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
-        
-        if (isRoot) localRoots.push(sanitizedId);
-        if (isLeaf) localLeaves.push(sanitizedId);
-        
-        // Add edges
-        for (const dep of jobSpec.dependencies || []) {
-          const depSanitizedId = producerToSanitized.get(dep);
-          if (depSanitizedId) {
-            edgesToAdd.push({ from: depSanitizedId, to: sanitizedId });
-          }
-        }
-      }
-      
-      // Render nested sub-plans
-      for (const subPlanSpec of spec.subPlans || []) {
-        const sanitizedId = producerToSanitized.get(subPlanSpec.producerId)!;
-        const label = this._escapeForMermaid(subPlanSpec.name || subPlanSpec.producerId);
-        const subgraphId = `sg${subgraphCounter++}`;
-        const isRoot = (subPlanSpec.dependencies || []).length === 0;
-        const isLeaf = !nodeHasDependents.has(subPlanSpec.producerId);
-        
-        const displayLabel = this._truncateNodeLabel(label, '');
-        if (displayLabel !== label) {
-          nodeTooltips[subgraphId] = label;
-        }
-        
-        lines.push(`${indent}subgraph ${subgraphId}["${this._getStatusIcon(inheritedStatus)} ${displayLabel}"]`);
-        // Don't set direction inside subgraphs - let them inherit from parent
-        
-        // Build nested spec and render
-        const nestedSpec: import('../../plan/types').PlanSpec = {
-          name: subPlanSpec.name || subPlanSpec.producerId,
-          jobs: subPlanSpec.jobs,
-          subPlans: subPlanSpec.subPlans,
-        };
-        
-        const result = renderFromSpec(nestedSpec, prefix + 'n' + subgraphCounter + '_', depth + 1, inheritedStatus);
-        
-        lines.push(`${indent}end`);
-        lines.push(`${indent}style ${subgraphId} fill:#1a1a2e,stroke:#4a4a6a,stroke-width:2px`);
-        
-        nodeEntryExitMap.set(sanitizedId, {
-          entryIds: result.roots.length > 0 ? result.roots : [sanitizedId],
-          exitIds: result.leaves.length > 0 ? result.leaves : [sanitizedId]
-        });
-        
-        if (isRoot) localRoots.push(...(result.roots.length > 0 ? result.roots : [sanitizedId]));
-        if (isLeaf) localLeaves.push(...(result.leaves.length > 0 ? result.leaves : [sanitizedId]));
-        
-        // Add edges
-        for (const dep of subPlanSpec.dependencies || []) {
-          const depSanitizedId = producerToSanitized.get(dep);
-          if (depSanitizedId) {
-            edgesToAdd.push({ from: depSanitizedId, to: sanitizedId });
-          }
-        }
       }
       
       return { roots: localRoots, leaves: localLeaves };
@@ -2284,7 +1882,7 @@ ${mermaidDef}
       lines.push(`  linkStyle ${failedEdges.join(',')} stroke:#f48771,stroke-width:2px`);
     }
     
-    return { diagram: lines.join('\n'), subgraphData, nodeTooltips };
+    return { diagram: lines.join('\n'), nodeTooltips };
   }
   
   /**

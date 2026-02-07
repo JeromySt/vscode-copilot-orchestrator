@@ -17,7 +17,6 @@ import {
   PlanInstance,
   PlanNode,
   JobNode,
-  SubPlanNode,
   NodeExecutionState,
 } from '../../../plan/types';
 

@@ -8,7 +8,7 @@
  */
 
 import type { WorkSpec } from './specs';
-import type { NodeStatus, JobNodeSpec, SubPlanNodeSpec, PlanNode, JobNode } from './nodes';
+import type { NodeStatus, JobNodeSpec, GroupSpec, PlanNode, JobNode } from './nodes';
 
 // ============================================================================
 // PLAN SPECIFICATION (User Input)
@@ -36,11 +36,14 @@ export interface PlanSpec {
   /** Whether to clean up worktrees after successful merges (default: true) */
   cleanUpSuccessfulWork?: boolean;
   
-  /** Job nodes in this Plan */
+  /** Job nodes at the top level of this Plan */
   jobs: JobNodeSpec[];
   
-  /** sub-plan nodes */
-  subPlans?: SubPlanNodeSpec[];
+  /** 
+   * Visual groups for organizing jobs.
+   * Groups provide namespace isolation for producer_ids and visual hierarchy.
+   */
+  groups?: GroupSpec[];
 }
 
 // ============================================================================
@@ -79,9 +82,6 @@ export interface NodeExecutionState {
   
   /** Worktree path (for jobs) - detached HEAD mode, no branch */
   worktreePath?: string;
-  
-  /** Child Plan ID (for subPlans) */
-  childPlanId?: string;
   
   /** Execution attempt count */
   attempts: number;
@@ -522,63 +522,6 @@ export interface GroupInfo {
   createdAt: number;
   startedAt?: number;
   endedAt?: number;
-}
-
-/**
- * Specification for creating a group of nodes.
- * This is the new equivalent of PlanSpec.
- */
-export interface GroupSpec {
-  /** Human-readable group name */
-  name: string;
-
-  /** Repository path (defaults to workspace) */
-  repoPath?: string;
-
-  /** Base branch (default: main) */
-  baseBranch?: string;
-
-  /** Target branch for final merge */
-  targetBranch?: string;
-
-  /** Max concurrent nodes (default: 4) */
-  maxParallel?: number;
-
-  /** Clean up worktrees after merge (default: true) */
-  cleanUpSuccessfulWork?: boolean;
-
-  /** Nodes in this group */
-  nodes: import('./nodes').NodeSpec[];
-
-  /**
-   * Sub-groups (replaces subPlans).
-   * Each sub-group becomes a child group with its own scheduling.
-   */
-  subGroups?: SubGroupSpec[];
-}
-
-/**
- * Sub-group specification (replaces SubPlanNodeSpec).
- * Flattened into the node registry at build time.
- */
-export interface SubGroupSpec {
-  /** Producer ID for this sub-group (used as dependency target) */
-  producerId: string;
-
-  /** Display name */
-  name?: string;
-
-  /** Nodes within this sub-group */
-  nodes: import('./nodes').NodeSpec[];
-
-  /** Nested sub-groups */
-  subGroups?: SubGroupSpec[];
-
-  /** Dependencies on nodes in the parent group */
-  dependencies: string[];
-
-  /** Max parallel within this sub-group */
-  maxParallel?: number;
 }
 
 /** Same values as current PlanStatus, now derived from grouped nodes */

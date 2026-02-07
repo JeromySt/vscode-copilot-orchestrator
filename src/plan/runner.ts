@@ -41,7 +41,6 @@ import {
   PlanInstance,
   PlanNode,
   JobNode,
-  SubPlanNode,
   NodeStatus,
   PlanStatus,
   JobExecutionResult,
@@ -308,7 +307,6 @@ export class PlanRunner extends EventEmitter {
   enqueue(spec: PlanSpec): PlanInstance {
     log.info(`Creating Plan: ${spec.name}`, {
       jobs: spec.jobs.length,
-      subPlans: spec.subPlans?.length || 0,
     });
     
     // Build the Plan
@@ -474,7 +472,7 @@ export class PlanRunner extends EventEmitter {
         const node = plan.nodes.get(nodeId);
         if (!node) continue;
         
-        // Count job nodes (not subPlans)
+        // Count job nodes
         if (nodePerformsWork(node)) {
           if (state.status === 'running' || state.status === 'scheduled') {
             running++;
@@ -493,37 +491,18 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Get the effective endedAt for a plan, recursively including child plans.
-   * This is more accurate than plan.endedAt when subPlans ran asynchronously.
+   * Get the effective endedAt for a plan.
    * 
    * @param planId - The plan ID
-   * @returns The maximum endedAt across all nodes and child plans
+   * @returns The maximum endedAt across all nodes
    */
   getEffectiveEndedAt(planId: string): number | undefined {
-    return this.computeEffectiveEndedAtRecursive(planId);
-  }
-  
-  /**
-   * Recursively compute the effective endedAt across a plan and all child plans.
-   */
-  private computeEffectiveEndedAtRecursive(planId: string): number | undefined {
     const plan = this.plans.get(planId);
     if (!plan) return undefined;
     
     let maxEndedAt: number | undefined;
     
-    for (const [nodeId, state] of plan.nodeStates) {
-      const node = plan.nodes.get(nodeId);
-      
-      // For subPlan nodes, recursively check the child plan
-      if (node?.type === 'subPlan' && state.childPlanId) {
-        const childEndedAt = this.computeEffectiveEndedAtRecursive(state.childPlanId);
-        if (childEndedAt && (!maxEndedAt || childEndedAt > maxEndedAt)) {
-          maxEndedAt = childEndedAt;
-        }
-      }
-      
-      // Also check this node's own endedAt
+    for (const [, state] of plan.nodeStates) {
       if (state.endedAt && (!maxEndedAt || state.endedAt > maxEndedAt)) {
         maxEndedAt = state.endedAt;
       }
@@ -563,18 +542,9 @@ export class PlanRunner extends EventEmitter {
     const plan = this.plans.get(planId);
     if (!plan) return;
     
-    for (const [nodeId, state] of plan.nodeStates) {
-      const node = plan.nodes.get(nodeId);
-      if (!node) continue;
-      
-      // For subPlan nodes, recurse into child plan (don't count the subPlan node itself)
-      if (node.type === 'subPlan' && state.childPlanId) {
-        this.computeRecursiveStatusCounts(state.childPlanId, result);
-      } else {
-        // Count job nodes
-        result.totalNodes++;
-        result.counts[state.status]++;
-      }
+    for (const [, state] of plan.nodeStates) {
+      result.totalNodes++;
+      result.counts[state.status]++;
     }
   }
   
@@ -586,32 +556,14 @@ export class PlanRunner extends EventEmitter {
    * @returns The minimum startedAt across all nodes, or undefined if no nodes started
    */
   getEffectiveStartedAt(planId: string): number | undefined {
-    return this.computeEffectiveStartedAtRecursive(planId);
-  }
-  
-  /**
-   * Recursively compute the earliest startedAt across a plan and all child plans.
-   */
-  private computeEffectiveStartedAtRecursive(planId: string): number | undefined {
     const plan = this.plans.get(planId);
     if (!plan) return undefined;
     
     let minStartedAt: number | undefined;
     
-    for (const [nodeId, state] of plan.nodeStates) {
-      const node = plan.nodes.get(nodeId);
-      
-      // For subPlan nodes, recursively check the child plan
-      if (node?.type === 'subPlan' && state.childPlanId) {
-        const childStartedAt = this.computeEffectiveStartedAtRecursive(state.childPlanId);
-        if (childStartedAt && (!minStartedAt || childStartedAt < minStartedAt)) {
-          minStartedAt = childStartedAt;
-        }
-      } else {
-        // For job nodes, use their own startedAt
-        if (state.startedAt && (!minStartedAt || state.startedAt < minStartedAt)) {
-          minStartedAt = state.startedAt;
-        }
+    for (const [, state] of plan.nodeStates) {
+      if (state.startedAt && (!minStartedAt || state.startedAt < minStartedAt)) {
+        minStartedAt = state.startedAt;
       }
     }
     
@@ -791,17 +743,6 @@ export class PlanRunner extends EventEmitter {
             duration: null
           });
         }
-        
-        // For subPlan nodes, recurse into child Plan
-        if (node.type === 'subPlan' && state.childPlanId) {
-          const childPlan = this.plans.get(state.childPlanId);
-          if (childPlan) {
-            const childHierarchy = buildHierarchy(childPlan, planPath);
-            if (childHierarchy) {
-              children.push(childHierarchy);
-            }
-          }
-        }
       }
       
       // Return if there are jobs or active children (don't skip parent just because it has no running jobs)
@@ -845,17 +786,6 @@ export class PlanRunner extends EventEmitter {
           tree: [],
           duration: null
         });
-      }
-      
-      // For subPlan nodes, recurse
-      if (node.type === 'subPlan' && state.childPlanId) {
-        const childPlan = this.plans.get(state.childPlanId);
-        if (childPlan) {
-          const childHierarchy = buildHierarchy(childPlan, undefined);
-          if (childHierarchy) {
-            rootHierarchy.push(childHierarchy);
-          }
-        }
       }
     }
     
@@ -1002,14 +932,6 @@ export class PlanRunner extends EventEmitter {
     if (!plan) return false;
     
     log.info(`Deleting Plan: ${planId}`);
-    
-    // First, recursively delete any child sub-plans
-    for (const [nodeId, state] of plan.nodeStates) {
-      if (state.childPlanId) {
-        log.debug(`Deleting child plan: ${state.childPlanId}`);
-        this.delete(state.childPlanId);
-      }
-    }
     
     // Cancel if running
     this.cancel(planId);
@@ -1179,9 +1101,8 @@ export class PlanRunner extends EventEmitter {
       return; // Can't do anything without an executor
     }
     
-    // Count total running jobs across all Plans (only count actual job nodes, not sub-plan coordination nodes)
+    // Count total running jobs across all Plans
     let globalRunning = 0;
-    let globalsubPlansRunning = 0;
     for (const [planId, plan] of this.plans) {
       const sm = this.stateMachines.get(planId);
       if (!sm) continue;
@@ -1191,8 +1112,6 @@ export class PlanRunner extends EventEmitter {
           const node = plan.nodes.get(nodeId);
           if (node && nodePerformsWork(node)) {
             globalRunning++;
-          } else {
-            globalsubPlansRunning++;
           }
         }
       }
@@ -1201,7 +1120,7 @@ export class PlanRunner extends EventEmitter {
     // Log overall status periodically (only if there are active Plans)
     const totalPlans = this.plans.size;
     if (totalPlans > 0) {
-      log.debug(`Pump: ${totalPlans} Plans, ${globalRunning} jobs running, ${globalsubPlansRunning} sub-plans coordinating`);
+      log.debug(`Pump: ${totalPlans} Plans, ${globalRunning} jobs running`);
     }
     
     // Process each Plan
@@ -1244,19 +1163,11 @@ export class PlanRunner extends EventEmitter {
         // Mark as scheduled
         sm.transition(nodeId, 'scheduled');
         
-        // Only count nodes with work against global limit (sub-plans are coordination nodes)
-        if (nodePerformsWork(node)) {
-          globalRunning++;
-        } else {
-          globalsubPlansRunning++;
-        }
+        // Count against global limit
+        globalRunning++;
         
-        // Execute based on node type
-        if (node.type === 'job') {
-          this.executeJobNode(plan, sm, node as JobNode);
-        } else if (node.type === 'subPlan') {
-          this.executeSubPlanNode(plan, sm, node as SubPlanNode);
-        }
+        // Execute job node
+        this.executeJobNode(plan, sm, node);
       }
       
       // Persist after scheduling
@@ -1646,201 +1557,6 @@ export class PlanRunner extends EventEmitter {
     
     // Persist after execution
     this.persistence.save(plan);
-  }
-  
-  /**
-   * Execute a sub-plan node
-   */
-  private async executeSubPlanNode(
-    parentPlan: PlanInstance,
-    sm: PlanStateMachine,
-    node: SubPlanNode
-  ): Promise<void> {
-    log.info(`Executing sub-plan node: ${node.name}`, {
-      planId: parentPlan.id,
-      nodeId: node.id,
-    });
-    
-    try {
-      // Transition to running
-      sm.transition(node.id, 'running');
-      this.emit('nodeStarted', parentPlan.id, node.id);
-      
-      // Determine base branch for sub-plan (from parent's dependencies)
-      const baseCommit = sm.getBaseCommitForNode(node.id);
-      
-      // SubPlan consumes its dependencies now - the base commit is captured
-      // and child plan jobs will create worktrees from it. Dependencies are no longer needed.
-      await this.acknowledgeConsumption(parentPlan, sm, node);
-      
-      // Build the child Plan - inherit targetBranch so leaf jobs can RI directly
-      const childSpec = {
-        ...node.childSpec,
-        baseBranch: baseCommit || parentPlan.baseBranch,
-        targetBranch: parentPlan.targetBranch, // Inherit target so leaf jobs merge directly
-        repoPath: parentPlan.repoPath,
-      };
-      
-      const childPlan = buildPlan(childSpec, {
-        parentPlanId: parentPlan.id,
-        parentNodeId: node.id,
-        repoPath: parentPlan.repoPath,
-        worktreeRoot: `${parentPlan.worktreeRoot}/${node.producerId}`,
-      });
-      
-      // Store child Plan reference
-      node.childPlanId = childPlan.id;
-      const nodeState = parentPlan.nodeStates.get(node.id);
-      if (nodeState) {
-        nodeState.childPlanId = childPlan.id;
-      }
-      
-      // Register the child Plan
-      this.plans.set(childPlan.id, childPlan);
-      const childSm = new PlanStateMachine(childPlan);
-      this.setupStateMachineListeners(childSm);
-      this.stateMachines.set(childPlan.id, childSm);
-      
-      // Listen for child completion
-      childSm.on('planComplete', (event: PlanCompletionEvent) => {
-        this.handlechildPlanComplete(parentPlan, sm, node, event).catch(err => {
-          log.error(`Error in child Plan completion handler: ${err.message}`);
-        });
-      });
-      
-      // Persist both
-      this.persistence.save(parentPlan);
-      this.persistence.save(childPlan);
-      
-      log.info(`sub-plan created: ${childPlan.id}`, {
-        parentPlanId: parentPlan.id,
-        parentNodeId: node.id,
-        childNodes: childPlan.nodes.size,
-      });
-      
-    } catch (error: any) {
-      const nodeState = parentPlan.nodeStates.get(node.id);
-      if (nodeState) {
-        nodeState.error = error.message;
-      }
-      sm.transition(node.id, 'failed');
-      this.emit('nodeCompleted', parentPlan.id, node.id, false);
-      
-      log.error(`sub-plan creation failed: ${node.name}`, {
-        planId: parentPlan.id,
-        nodeId: node.id,
-        error: error.message,
-      });
-      
-      this.persistence.save(parentPlan);
-    }
-  }
-  
-  /**
-   * Handle child Plan completion
-   */
-  private async handlechildPlanComplete(
-    parentPlan: PlanInstance,
-    parentSm: PlanStateMachine,
-    node: SubPlanNode,
-    event: PlanCompletionEvent
-  ): Promise<void> {
-    log.info(`Child Plan completed: ${event.planId}`, {
-      parentPlanId: parentPlan.id,
-      parentNodeId: node.id,
-      status: event.status,
-    });
-    
-    const nodeState = parentPlan.nodeStates.get(node.id);
-    const childPlan = this.plans.get(event.planId);
-    
-    // Ensure the subPlan node's endedAt reflects the child plan's actual completion time
-    if (nodeState) {
-      const childEndedAt = this.getEffectiveEndedAt(event.planId);
-      if (childEndedAt) {
-        nodeState.endedAt = childEndedAt;
-      }
-    }
-    
-    // Log child Plan completion details to the parent's subPlan node
-    this.execLog(parentPlan.id, node.id, 'work', 'info', '========== sub-plan EXECUTION COMPLETE ==========');
-    this.execLog(parentPlan.id, node.id, 'work', 'info', `child Plan: ${event.planId}`);
-    this.execLog(parentPlan.id, node.id, 'work', 'info', `Status: ${event.status.toUpperCase()}`);
-    
-    if (childPlan) {
-      // Log summary of child Plan jobs
-      const jobCount = childPlan.nodes.size;
-      let succeeded = 0, failed = 0, blocked = 0;
-      
-      for (const [nodeId, childState] of childPlan.nodeStates) {
-        const childNode = childPlan.nodes.get(nodeId);
-        if (childState.status === 'succeeded') succeeded++;
-        else if (childState.status === 'failed') failed++;
-        else if (childState.status === 'blocked') blocked++;
-        
-        // Log each job's status
-        const statusIcon = childState.status === 'succeeded' ? '✓' : 
-                          childState.status === 'failed' ? '✗' : 
-                          childState.status === 'blocked' ? '⊘' : '?';
-        this.execLog(parentPlan.id, node.id, 'work', 'info', 
-          `  ${statusIcon} ${childNode?.name || nodeId}: ${childState.status}`);
-        
-        if (childState.error) {
-          this.execLog(parentPlan.id, node.id, 'work', 'error', `    Error: ${childState.error}`);
-        }
-        if (childState.completedCommit) {
-          this.execLog(parentPlan.id, node.id, 'work', 'info', `    Commit: ${childState.completedCommit.slice(0, 8)}`);
-        }
-      }
-      
-      this.execLog(parentPlan.id, node.id, 'work', 'info', '');
-      this.execLog(parentPlan.id, node.id, 'work', 'info', `Summary: ${succeeded}/${jobCount} succeeded, ${failed} failed, ${blocked} blocked`);
-      
-      // Log work summary if available
-      if (childPlan.workSummary) {
-        const ws = childPlan.workSummary;
-        this.execLog(parentPlan.id, node.id, 'work', 'info', 
-          `Work: ${ws.totalCommits} commits, +${ws.totalFilesAdded} ~${ws.totalFilesModified} -${ws.totalFilesDeleted} files`);
-        
-        // Merge child plan's workSummary into parent plan's workSummary
-        // This ensures leaf merges from sub-plans are included in the parent's totals
-        parentPlan.workSummary = mergeWorkSummaryHelper(parentPlan.workSummary, childPlan.workSummary);
-      }
-    }
-    
-    this.execLog(parentPlan.id, node.id, 'work', 'info', '========== sub-plan EXECUTION COMPLETE ==========');
-    
-    if (event.status === 'succeeded') {
-      // SubPlan succeeded - leaf jobs within already merged to targetBranch
-      // Just record a representative completed commit for downstream consumers
-      if (childPlan && nodeState) {
-        // Find any completed commit from leaf nodes (for dependency tracking)
-        for (const leafId of childPlan.leaves) {
-          const leafState = childPlan.nodeStates.get(leafId);
-          if (leafState?.completedCommit) {
-            nodeState.completedCommit = leafState.completedCommit;
-            break;
-          }
-        }
-        // Note: No subPlan-level merge needed - each leaf job handles its own RI to targetBranch
-        // Child plan worktrees were cleaned up incrementally:
-        // - Leaf jobs cleaned up after RI merge
-        // - Non-leaf jobs cleaned up when dependents acknowledged FI consumption
-      }
-      
-      parentSm.transition(node.id, 'succeeded');
-      this.emit('nodeCompleted', parentPlan.id, node.id, true);
-      
-      // Parent worktrees were already cleaned when subPlan acknowledged consumption at startup
-    } else {
-      if (nodeState) {
-        nodeState.error = `Child Plan ${event.status}`;
-      }
-      parentSm.transition(node.id, 'failed');
-      this.emit('nodeCompleted', parentPlan.id, node.id, false);
-    }
-    
-    this.persistence.save(parentPlan);
   }
   
   // ============================================================================

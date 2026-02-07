@@ -63,13 +63,12 @@ PRODUCER_ID IS REQUIRED:
 - Used in 'dependencies' arrays to establish execution order
 - Jobs with dependencies: [] are root jobs that start immediately
 
-NESTED sub-planS ("OUT AND BACK" PATTERN):
-- sub-plans can contain nested sub-plans for hierarchical work decomposition
-- Pattern: init → sub-plan → finish (work fans out, then converges back)
-- Each nesting level has its own scope for dependencies
-- Example 3-level nesting: main-init → sub-plan A → main-finish
-                            └→ a-init → sub-plan B → a-finish
-                                └→ b-init → sub-plan C → b-finish
+GROUPS (VISUAL HIERARCHY + NAMESPACE):
+- Groups organize jobs visually and provide namespace isolation for producer_ids
+- Jobs within a group can reference each other by local producer_id
+- Cross-group references use qualified paths: "group_name/producer_id"
+- Nested groups form paths like "backend/api/auth"
+- Group dependencies apply to all root nodes within the group
 
 EXECUTION CONTEXT:
 - Each job gets its own git worktree for isolated work
@@ -182,42 +181,36 @@ Agent instructions MUST be in Markdown format with headers, numbered lists, bull
               required: ['producer_id', 'task', 'dependencies']
             }
           },
-          subPlans: {
+          groups: {
             type: 'array',
-            description: 'Optional nested Plans that run as a unit. Supports recursive nesting for "out and back" patterns.',
+            description: `Visual groups for organizing jobs with namespace isolation.
+Jobs within a group can reference each other by local producer_id.
+Cross-group references use qualified paths: "group_name/producer_id".
+Nested groups form paths like "backend/api/auth".`,
             items: {
               type: 'object',
               properties: {
-                producer_id: { 
-                  type: 'string', 
-                  description: 'Unique identifier for the sub-plan',
-                  pattern: '^[a-z0-9-]{3,64}$'
-                },
                 name: { 
                   type: 'string', 
-                  description: 'Display name' 
+                  description: 'Group name (forms part of qualified path for nested refs)'
                 },
                 dependencies: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'Producer IDs this sub-plan depends on (parent scope jobs or sibling sub-plans)'
-                },
-                maxParallel: { 
-                  type: 'number', 
-                  description: 'Max concurrent jobs in this sub-plan' 
+                  description: 'Dependencies for all root nodes in this group. Uses qualified paths for cross-group refs.'
                 },
                 jobs: {
                   type: 'array',
-                  description: 'Jobs within this sub-plan (same schema as top-level jobs). Dependencies reference other jobs/sub-plans in this scope.',
+                  description: 'Jobs within this group. Producer IDs are scoped to this group.',
                   items: { type: 'object' }
                 },
-                subPlans: {
+                groups: {
                   type: 'array',
-                  description: 'Nested sub-plans within this sub-plan (recursive). Forms "out and back" pattern: init → sub-plan → finish',
+                  description: 'Nested groups (recursive). Forms hierarchical paths like "parent/child".',
                   items: { type: 'object' }
                 }
               },
-              required: ['producer_id', 'dependencies', 'jobs']
+              required: ['name']
             }
           }
         },

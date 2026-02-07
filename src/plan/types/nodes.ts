@@ -139,27 +139,27 @@ export interface JobNodeSpec {
 }
 
 /**
- * Specification for a sub-plan node (user input).
- * sub-plans are nested Plans that run as a unit.
+ * Specification for a group (user input).
+ * Groups provide namespace isolation for producer_ids and visual hierarchy.
+ * Jobs within a group can reference each other by local producer_id.
+ * Cross-group references use qualified paths: "group/producer_id".
  */
-export interface SubPlanNodeSpec {
-  /** User-controlled identifier for Plan references */
-  producerId: string;
+export interface GroupSpec {
+  /** Group name (forms part of qualified path) */
+  name: string;
   
-  /** Human-friendly display name */
-  name?: string;
+  /** Jobs within this group */
+  jobs?: JobNodeSpec[];
   
-  /** Jobs within this sub-plan */
-  jobs: JobNodeSpec[];
+  /** Nested groups (recursive - forms path like "parent/child") */
+  groups?: GroupSpec[];
   
-  /** Nested sub-plans (recursive) */
-  subPlans?: SubPlanNodeSpec[];
-  
-  /** IDs of nodes this sub-plan depends on */
-  dependencies: string[];
-  
-  /** Max parallel jobs in this sub-plan */
-  maxParallel?: number;
+  /** 
+   * Dependencies on nodes outside this group.
+   * These apply to all root nodes within the group.
+   * Uses qualified paths for cross-group refs.
+   */
+  dependencies?: string[];
 }
 
 // ============================================================================
@@ -167,9 +167,10 @@ export interface SubPlanNodeSpec {
 // ============================================================================
 
 /**
- * Type discriminator for nodes
+ * Type discriminator for nodes.
+ * All nodes are jobs - groups are visual hierarchy only.
  */
-export type NodeType = 'job' | 'subPlan';
+export type NodeType = 'job';
 
 /**
  * Base node properties (shared by all node types)
@@ -228,44 +229,28 @@ export interface JobNode extends BaseNode {
   expectsNoChanges?: boolean;
 
   /**
-   * Visual grouping tag. Nodes with the same group tag are
-   * rendered together in a Mermaid subgraph.
-   */
-  group?: string;
+ * Visual group path. Nodes with the same group path are
+ * rendered together in a Mermaid subgraph.
+ * Nested groups use "/" separator: "backend/api/auth"
+ */
+ group?: string;
 }
 
 /**
- * sub-plan node (internal representation)
+ * All nodes are jobs - PlanNode is an alias.
+ * Groups are visual hierarchy only, not a separate node type.
  */
-export interface SubPlanNode extends BaseNode {
-  type: 'subPlan';
-  
-  /** The nested Plan specification */
-  childSpec: PlanSpec;
-  
-  /** Max parallel for the sub-plan */
-  maxParallel?: number;
-  
-  /** Child Plan ID when instantiated (set when node starts running) */
-  childPlanId?: string;
-}
-
-/**
- * Union type for all node types
- */
-export type PlanNode = JobNode | SubPlanNode;
-
+export type PlanNode = JobNode;
 /**
  * Check if a node performs work (has a work specification).
  *
  * Nodes with work consume execution resources and count against parallelism limits.
- * Sub-plan nodes are coordination nodes that don't perform work directly.
  *
  * @param node - The plan node to check.
  * @returns `true` if the node has a `work` property defined.
  */
 export function nodePerformsWork(node: PlanNode): boolean {
-  return 'work' in node && node.work !== undefined;
+  return node.work !== undefined;
 }
 
 // ============================================================================

@@ -13,7 +13,6 @@ import {
   PlanInstance,
   PlanNode,
   JobNode,
-  SubPlanNode,
   NodeExecutionState,
   WorkSummary,
   WorkSpec,
@@ -51,7 +50,7 @@ interface SerializedNode {
   id: string;
   producerId: string;
   name: string;
-  type: 'job' | 'subPlan';
+  type: 'job';
   dependencies: string[];
   dependents: string[];
   // Job-specific
@@ -63,10 +62,6 @@ interface SerializedNode {
   baseBranch?: string;
   expectsNoChanges?: boolean;
   group?: string;
-  // subPlan-specific
-  childSpec?: any;
-  maxParallel?: number;
-  childPlanId?: string;
 }
 
 /**
@@ -262,11 +257,6 @@ export class PlanPersistence {
         serializedNode.baseBranch = jobNode.baseBranch;
         serializedNode.expectsNoChanges = jobNode.expectsNoChanges;
         serializedNode.group = jobNode.group;
-      } else if (node.type === 'subPlan') {
-        const subPlanNode = node as SubPlanNode;
-        serializedNode.childSpec = subPlanNode.childSpec;
-        serializedNode.maxParallel = subPlanNode.maxParallel;
-        serializedNode.childPlanId = subPlanNode.childPlanId;
       }
       
       nodes.push(serializedNode);
@@ -329,19 +319,6 @@ export class PlanPersistence {
           baseBranch: serializedNode.baseBranch,
           expectsNoChanges: serializedNode.expectsNoChanges,
           group: serializedNode.group,
-          dependencies: serializedNode.dependencies,
-          dependents: serializedNode.dependents,
-        };
-        nodes.set(node.id, node);
-      } else if (serializedNode.type === 'subPlan') {
-        const node: SubPlanNode = {
-          id: serializedNode.id,
-          producerId: serializedNode.producerId,
-          name: serializedNode.name,
-          type: 'subPlan',
-          childSpec: serializedNode.childSpec,
-          maxParallel: serializedNode.maxParallel,
-          childPlanId: serializedNode.childPlanId,
           dependencies: serializedNode.dependencies,
           dependents: serializedNode.dependents,
         };

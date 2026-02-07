@@ -19,9 +19,7 @@ import {
   PlanInstance,
   PlanNode,
   JobNode,
-  SubPlanNode,
   JobNodeSpec,
-  SubPlanNodeSpec,
   NodeExecutionState,
 } from './types';
 
@@ -130,51 +128,9 @@ export function buildPlan(
     producerIdToNodeId.set(jobSpec.producerId, nodeId);
   }
   
-  // Process sub-plans
-  for (const subPlanSpec of spec.subPlans || []) {
-    if (!subPlanSpec.producerId) {
-      errors.push(`sub-plan is missing required 'producerId' field`);
-      continue;
-    }
-    
-    if (producerIdToNodeId.has(subPlanSpec.producerId)) {
-      errors.push(`Duplicate producerId: '${subPlanSpec.producerId}'`);
-      continue;
-    }
-    
-    const nodeId = uuidv4();
-    
-    // Build the child PlanSpec from the SubPlanNodeSpec
-    // Note: targetBranch is set at instantiation time in runner.ts to inherit from parent
-    const childSpec: PlanSpec = {
-      name: subPlanSpec.name || subPlanSpec.producerId,
-      jobs: subPlanSpec.jobs,
-      subPlans: subPlanSpec.subPlans,
-      maxParallel: subPlanSpec.maxParallel,
-      baseBranch: spec.baseBranch,
-      targetBranch: spec.targetBranch, // Inherit from parent - leaf jobs merge directly
-      cleanUpSuccessfulWork: spec.cleanUpSuccessfulWork,
-    };
-    
-    const node: SubPlanNode = {
-      id: nodeId,
-      producerId: subPlanSpec.producerId,
-      name: subPlanSpec.name || subPlanSpec.producerId,
-      type: 'subPlan',
-      childSpec,
-      maxParallel: subPlanSpec.maxParallel,
-      dependencies: [], // Will be resolved in second pass
-      dependents: [],
-    };
-    
-    nodes.set(nodeId, node);
-    producerIdToNodeId.set(subPlanSpec.producerId, nodeId);
-  }
-  
   // Second pass: Resolve dependencies (producerId -> nodeId)
   const allSpecs = [
     ...spec.jobs.map(j => ({ producerId: j.producerId, dependencies: j.dependencies })),
-    ...(spec.subPlans || []).map(s => ({ producerId: s.producerId, dependencies: s.dependencies })),
   ];
   
   for (const nodeSpec of allSpecs) {
