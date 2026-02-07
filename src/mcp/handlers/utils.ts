@@ -171,7 +171,7 @@ export async function resolveTargetBranch(
   if (needsCreation) {
     const exists = await git.branches.exists(targetBranchRoot, repoPath);
     if (!exists) {
-      await git.branches.create(repoPath, targetBranchRoot, baseBranch);
+      await git.branches.create(targetBranchRoot, baseBranch, repoPath);
     }
   }
 
