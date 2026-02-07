@@ -160,7 +160,14 @@ export async function resolveTargetBranch(
   repoPath: string,
   requested?: string
 ): Promise<string> {
-  if (requested) return requested;
+  // If explicit branch requested, ensure it exists (create from base if needed)
+  if (requested) {
+    const exists = await git.branches.exists(requested, repoPath);
+    if (!exists) {
+      await git.branches.create(requested, baseBranch, repoPath);
+    }
+    return requested;
+  }
 
   const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
     baseBranch,
