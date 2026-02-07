@@ -388,7 +388,31 @@ export function registerPlanCommands(
   
   // Show Plan details
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.showPlanDetails', (planId: string) => {
+    vscode.commands.registerCommand('orchestrator.showPlanDetails', async (planId?: string) => {
+      // If no planId provided, prompt user to select from available plans
+      if (!planId) {
+        const plans = planRunner.getAll();
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No plans available');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan to view',
+        });
+        
+        if (!selected) {
+          return;
+        }
+        planId = selected.planId;
+      }
+      
       const { planDetailPanel } = require('../ui/panels/planDetailPanel');
       planDetailPanel.createOrShow(context.extensionUri, planId, planRunner);
     })
@@ -396,7 +420,65 @@ export function registerPlanCommands(
   
   // Show node details
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.showNodeDetails', (planId: string, nodeId: string) => {
+    vscode.commands.registerCommand('orchestrator.showNodeDetails', async (planId?: string, nodeId?: string) => {
+      // If no planId provided, prompt user to select
+      if (!planId) {
+        const plans = planRunner.getAll();
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No plans available');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan',
+        });
+        
+        if (!selected) {
+          return;
+        }
+        planId = selected.planId;
+      }
+      
+      // If no nodeId provided, prompt user to select from plan's nodes
+      if (!nodeId) {
+        const plan = planRunner.get(planId);
+        if (!plan) {
+          vscode.window.showErrorMessage(`Plan not found: ${planId}`);
+          return;
+        }
+        
+        const nodeItems = Array.from(plan.nodes.values()).map(n => {
+          // Get display name - check for spec.name if available
+          const spec = (n as any).spec;
+          const displayName = (spec && typeof spec.name === 'string') ? spec.name : n.id;
+          return {
+            label: displayName,
+            description: n.id,
+            nodeId: n.id,
+          };
+        });
+        
+        if (nodeItems.length === 0) {
+          vscode.window.showInformationMessage('No nodes in this plan');
+          return;
+        }
+        
+        const selectedNode = await vscode.window.showQuickPick(nodeItems, {
+          placeHolder: 'Select a node to view',
+        });
+        
+        if (!selectedNode) {
+          return;
+        }
+        nodeId = selectedNode.nodeId;
+      }
+      
       const { NodeDetailPanel } = require('../ui/panels/nodeDetailPanel');
       NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, planRunner);
     })
@@ -404,7 +486,36 @@ export function registerPlanCommands(
   
   // Cancel Plan
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.cancelPlan', async (planId: string) => {
+    vscode.commands.registerCommand('orchestrator.cancelPlan', async (planId?: string) => {
+      // If no planId provided, prompt user to select
+      if (!planId) {
+        const plans = planRunner.getAll().filter(p => {
+          const sm = planRunner.getStateMachine(p.id);
+          const status = sm?.computePlanStatus();
+          return status === 'running' || status === 'pending';
+        });
+        
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No active plans to cancel');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan to cancel',
+        });
+        
+        if (!selected) {
+          return;
+        }
+        planId = selected.planId;
+      }
+      
       const plan = planRunner.get(planId);
       if (!plan) {
         vscode.window.showErrorMessage(`Plan not found: ${planId}`);
@@ -426,7 +537,31 @@ export function registerPlanCommands(
   
   // Delete Plan
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.deletePlan', async (planId: string) => {
+    vscode.commands.registerCommand('orchestrator.deletePlan', async (planId?: string) => {
+      // If no planId provided, prompt user to select
+      if (!planId) {
+        const plans = planRunner.getAll();
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No plans to delete');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan to delete',
+        });
+        
+        if (!selected) {
+          return;
+        }
+        planId = selected.planId;
+      }
+      
       const plan = planRunner.get(planId);
       if (!plan) {
         vscode.window.showErrorMessage(`Plan not found: ${planId}`);
