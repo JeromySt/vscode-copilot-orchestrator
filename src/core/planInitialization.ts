@@ -12,11 +12,11 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '\.\./plan';
 import { ProcessMonitor } from '../process/processMonitor';
-import { McpServerManager, StdioMcpServerManager } from '../mcp/mcpServerManager';
+import { StdioMcpServerManager } from '../mcp/mcpServerManager';
 import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
 import { Logger } from './logger';
 import { isCopilotCliAvailable } from '../agent/cliCheckCore';
-import { IMcpManager, McpTransportKind } from '../interfaces/IMcpManager';
+import { IMcpManager } from '../interfaces/IMcpManager';
 
 const log = Logger.for('init');
 
@@ -24,21 +24,12 @@ const log = Logger.for('init');
 // CONFIGURATION
 // ============================================================================
 
-export interface HttpConfig {
-  enabled: boolean;
-  host: string;
-  port: number;
-}
-
 export interface McpServerConfig {
+  /** Whether MCP server is enabled */
   enabled: boolean;
-  transport: McpTransportKind;
-  host: string;
-  port: number;
 }
 
 export interface ExtensionConfig {
-  http: HttpConfig;
   mcp: McpServerConfig;
   maxParallel: number;
 }
@@ -47,21 +38,12 @@ export interface ExtensionConfig {
  * Load extension configuration from VS Code settings
  */
 export function loadConfiguration(): ExtensionConfig {
-  const httpCfg = vscode.workspace.getConfiguration('copilotOrchestrator.http');
   const mcpCfg = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
   const rootCfg = vscode.workspace.getConfiguration('copilotOrchestrator');
 
   return {
-    http: {
-      enabled: httpCfg.get<boolean>('enabled', false),  // HTTP disabled by default - using stdio
-      host: httpCfg.get<string>('host', 'localhost'),
-      port: httpCfg.get<number>('port', 39219)
-    },
     mcp: {
       enabled: mcpCfg.get<boolean>('enabled', true),
-      transport: mcpCfg.get<McpTransportKind>('transport', 'stdio'),  // stdio by default
-      host: httpCfg.get<string>('host', 'localhost'),
-      port: httpCfg.get<number>('port', 39219)
     },
     maxParallel: rootCfg.get<number>('maxWorkers', 0) || 4,
   };
@@ -311,140 +293,18 @@ export function initializePlanRunner(
 }
 
 // ============================================================================
-// HTTP SERVER
-// ============================================================================
-
-/**
- * Initialize HTTP server with MCP endpoint.
- * Returns the actual bound port (may differ from config if port was in use).
- */
-export async function initializeHttpServer(
-  context: vscode.ExtensionContext,
-  planRunner: PlanRunner,
-  config: HttpConfig
-): Promise<number | undefined> {
-  if (!config.enabled) {
-    log.info('HTTP server disabled');
-    return undefined;
-  }
-  
-  log.info(`Starting HTTP server on ${config.host}:${config.port}...`);
-  
-  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-  
-  // Create a simple HTTP server with the MCP handler
-  const http = require('http');
-  const { McpHandler } = require('../mcp/handler');
-  
-  const mcpHandler = new McpHandler(planRunner, workspacePath);
-  
-  const server = http.createServer(async (req: any, res: any) => {
-    // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    
-    if (req.method === 'OPTIONS') {
-      res.writeHead(200);
-      res.end();
-      return;
-    }
-    
-    // Health check
-    if (req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', version: '0.6.0' }));
-      return;
-    }
-    
-    // MCP endpoint
-    if (req.url === '/mcp' && req.method === 'POST') {
-      let body = '';
-      req.on('data', (chunk: Buffer) => body += chunk.toString());
-      req.on('end', async () => {
-        try {
-          const request = JSON.parse(body);
-          const response = await mcpHandler.handleRequest(request);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(response));
-        } catch (error: any) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: error.message }));
-        }
-      });
-      return;
-    }
-    
-    // Plan status endpoint
-    if (req.url?.startsWith('/api/plans')) {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      const Plans = planRunner.getAll().map(plan => ({
-        id: plan.id,
-        name: plan.spec.name,
-        status: planRunner.getStateMachine(plan.id)?.computePlanStatus(),
-        nodes: plan.nodes.size,
-      }));
-      res.end(JSON.stringify({ Plans }));
-      return;
-    }
-    
-    // Default: 404
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Not found' }));
-  });
-  
-  // Helper to start server on a specific port
-  const tryListen = (port: number): Promise<number> => {
-    return new Promise((resolve, reject) => {
-      server.once('error', (err: any) => {
-        if (err.code === 'EADDRINUSE' && port !== 0) {
-          // Port in use, try dynamic port
-          log.info(`Port ${port} in use, trying dynamic port...`);
-          server.removeAllListeners('error');
-          tryListen(0).then(resolve).catch(reject);
-        } else {
-          reject(err);
-        }
-      });
-      
-      server.listen(port, config.host, () => {
-        const addr = server.address();
-        const actualPort = typeof addr === 'object' ? addr?.port : port;
-        log.info(`HTTP server started at http://${config.host}:${actualPort}`);
-        log.info(`MCP endpoint: http://${config.host}:${actualPort}/mcp`);
-        
-        context.subscriptions.push({
-          dispose: () => {
-            try {
-              server.close();
-            } catch (e) {
-              // Server may already be closed
-            }
-          }
-        });
-        
-        resolve(actualPort);
-      });
-    });
-  };
-  
-  return tryListen(config.port);
-}
-
-// ============================================================================
 // MCP REGISTRATION
 // ============================================================================
 
 /**
- * Initialize MCP server registration with VS Code.
- *
- * When `mcpConfig.transport` is `'stdio'`, a {@link StdioMcpServerManager}
- * is used and the definition provider registers a `McpStdioServerDefinition`.
- * Otherwise falls back to the HTTP-based {@link McpServerManager}.
+ * Initialize MCP server registration with VS Code using stdio transport.
+ * 
+ * VS Code manages the MCP child process lifecycle. The extension just
+ * registers the definition provider and tracks status.
  */
 export function initializeMcpServer(
   context: vscode.ExtensionContext,
-  httpConfig: HttpConfig,
+  planRunner: PlanRunner,
   mcpConfig: McpServerConfig
 ): IMcpManager | undefined {
   if (!mcpConfig.enabled) {
@@ -453,17 +313,9 @@ export function initializeMcpServer(
   }
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-  const useStdio = mcpConfig.transport === 'stdio';
 
-  // Create the appropriate manager
-  const manager: IMcpManager = useStdio
-    ? new StdioMcpServerManager(context)
-    : new McpServerManager(context, {
-        enabled: true,
-        host: httpConfig.host,
-        port: httpConfig.port,
-        workspacePath,
-      });
+  // Create stdio manager - VS Code manages the child process
+  const manager: IMcpManager = new StdioMcpServerManager(context);
   
   manager.start();
   context.subscriptions.push({ dispose: () => {
@@ -475,19 +327,10 @@ export function initializeMcpServer(
   }});
   
   // Register with VS Code
-  const providerDisposable = registerMcpDefinitionProvider(context, {
-    transport: mcpConfig.transport,
-    host: httpConfig.host,
-    port: httpConfig.port,
-    workspacePath,
-  });
+  const providerDisposable = registerMcpDefinitionProvider(context, workspacePath);
   context.subscriptions.push(providerDisposable);
   
-  if (useStdio) {
-    log.info('MCP registered with stdio transport');
-  } else {
-    log.info(`MCP registered at http://${httpConfig.host}:${httpConfig.port}/mcp`);
-  }
+  log.info('MCP registered with stdio transport');
   
   // Show one-time reminder to enable MCP server if not previously acknowledged
   const MCP_ENABLED_KEY = 'mcpServerEnabledAcknowledged';

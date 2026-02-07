@@ -13,7 +13,6 @@ import * as vscode from 'vscode';
 import {
   loadConfiguration,
   initializePlanRunner,
-  initializeHttpServer,
   initializeMcpServer,
   initializePlansView,
   registerPlanCommands,
@@ -46,10 +45,9 @@ let planRunner: PlanRunner | undefined;
  * Initializes all components in order:
  * 1. Load configuration
  * 2. Plan Runner (replaces JobRunner + PlanRunner)
- * 3. HTTP API server with MCP endpoint
- * 4. MCP registration with VS Code
- * 5. UI components
- * 6. Commands
+ * 3. MCP registration with VS Code (stdio transport)
+ * 4. UI components
+ * 5. Commands
  * 
  * @param context - VS Code extension context
  */
@@ -68,36 +66,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   processMonitor = pm;
   planRunner = runner;
 
-  // ── HTTP Server ────────────────────────────────────────────────────────
-  const actualPort = await initializeHttpServer(context, planRunner, config.http);
-
-  // ── MCP Server ─────────────────────────────────────────────────────────
-  // Use the actual bound port (may differ from config if port was in use)
-  const httpConfigWithActualPort = actualPort !== undefined 
-    ? { ...config.http, port: actualPort }
-    : config.http;
-  mcpManager = initializeMcpServer(context, httpConfigWithActualPort, config.mcp);
-
-  // ── Port change detection ──────────────────────────────────────────────
-  // If port changed from last startup, prompt user to enable MCP server
-  if (actualPort !== undefined) {
-    const LAST_PORT_KEY = 'mcpServerLastPort';
-    const lastPort = context.globalState.get<number>(LAST_PORT_KEY);
-    
-    if (lastPort !== undefined && lastPort !== actualPort) {
-      extLog.info(`MCP port changed: ${lastPort} → ${actualPort}`);
-      vscode.window.showWarningMessage(
-        `MCP server port changed to ${actualPort} (was ${lastPort}). You may need to re-enable the server in the MCP Servers panel.`,
-        'Open MCP Servers'
-      ).then(choice => {
-        if (choice === 'Open MCP Servers') {
-          vscode.commands.executeCommand('workbench.action.chat.listMcpServers');
-        }
-      });
-    }
-    
-    context.globalState.update(LAST_PORT_KEY, actualPort);
-  }
+  // ── MCP Server (stdio transport) ───────────────────────────────────────
+  mcpManager = initializeMcpServer(context, planRunner, config.mcp);
 
   // ── Plans view ──────────────────────────────────────────────────────────
   initializePlansView(context, planRunner);

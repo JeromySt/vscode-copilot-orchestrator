@@ -8,27 +8,11 @@
  */
 
 /**
- * Configuration for the HTTP API server.
- */
-export interface HttpServerConfig {
-  /** Whether the HTTP server is enabled */
-  enabled: boolean;
-  /** Host to bind to (default: 127.0.0.1) */
-  host: string;
-  /** Port to listen on (default: 39218) */
-  port: number;
-}
-
-/**
  * Configuration for the MCP server.
  */
 export interface McpServerConfig {
   /** Whether the MCP server is enabled */
   enabled: boolean;
-  /** Host for the orchestrator API */
-  host: string;
-  /** Port for the orchestrator API */
-  port: number;
 }
 
 /**
@@ -40,8 +24,6 @@ export interface OrchestratorConfig {
   worktreeRoot?: string;
   /** Maximum concurrent job workers */
   maxWorkers?: number;
-  /** HTTP server configuration */
-  http?: HttpServerConfig;
 }
 
 /**
@@ -52,9 +34,5 @@ export interface ExtensionSettings {
   mcp: {
     /** Whether MCP server auto-starts */
     enabled: boolean;
-    /** Host for orchestrator API */
-    host: string;
-    /** Port for orchestrator API */
-    port: number;
   };
 }

@@ -2,15 +2,12 @@
  * @fileoverview Interfaces for MCP server management.
  * 
  * The MCP (Model Context Protocol) server allows external AI agents
- * to interact with the orchestrator via stdio or HTTP transport.
+ * to interact with the orchestrator via stdio transport.
  * 
  * @module interfaces/IMcpManager
  */
 
 import { JsonRpcRequest, JsonRpcResponse } from '../mcp/types';
-
-/** Transport type for MCP communication. */
-export type McpTransportKind = 'stdio' | 'http';
 
 /**
  * Routes a JSON-RPC request to the appropriate handler
@@ -21,13 +18,13 @@ export interface IMcpRequestRouter {
 }
 
 /**
- * Transport-agnostic MCP server lifecycle interface.
+ * MCP server lifecycle interface for stdio transport.
  */
 export interface IMcpServerLifecycle {
-  /** Current transport in use. */
-  readonly transport: McpTransportKind;
+  /** Transport identifier (always 'stdio'). */
+  readonly transport: 'stdio';
 
-  /** Start the MCP server (stdio listener or HTTP server). */
+  /** Start the MCP server (marks as available). */
   start(): void;
 
   /** Stop the MCP server. */
@@ -50,11 +47,10 @@ export interface IMcpServerLifecycle {
  * ```typescript
  * if (config.mcp.enabled) {
  *   mcpManager.start(); // Mark as available
- *   mcpManager.setRegisteredWithVSCode(true);
  * }
  * ```
  */
 export interface IMcpManager extends IMcpServerLifecycle {
-  /** Get a display-friendly endpoint identifier (URL or "stdio"). */
+  /** Get a display-friendly endpoint identifier (always "stdio"). */
   getEndpoint(): string;
 }
