@@ -57,7 +57,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     private readonly _planRunner: PlanRunner
   ) {
     // Listen for Plan events to refresh
-    _planRunner.on('planCreated', () => this.refresh());
+    _planRunner.on('planCreated', () => {
+      // Immediate refresh for new plans (user expectation)
+      this.refresh();
+    });
     _planRunner.on('planCompleted', () => this.refresh());
     _planRunner.on('planDeleted', (planId) => {
       // Close any open panels for this Plan

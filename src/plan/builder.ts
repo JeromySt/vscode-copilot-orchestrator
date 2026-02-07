@@ -169,36 +169,63 @@ export function buildPlan(
     
     const nodeId = uuidv4();
     
-    // Resolve group path to group ID
+    // Resolve group path to group ID, auto-creating hierarchy if needed
     let resolvedGroupId: string | undefined;
     if (jobSpec.group) {
       resolvedGroupId = groupPathToId.get(jobSpec.group);
-      // If no exact match, try creating a group for it on the fly
+      
+      // If no exact match, auto-create the full group hierarchy
       if (!resolvedGroupId) {
-        // Auto-create group for nodes that reference a group path not defined in spec.groups
-        const groupId = uuidv4();
-        const group: GroupInstance = {
-          id: groupId,
-          name: jobSpec.group,
-          path: jobSpec.group,
-          parentGroupId: undefined,
-          childGroupIds: [],
-          nodeIds: [],
-          allNodeIds: [],
-          totalNodes: 0,
-        };
-        groups.set(groupId, group);
-        groupPathToId.set(jobSpec.group, groupId);
-        groupStates.set(groupId, {
-          status: 'pending',
-          version: 0,
-          runningCount: 0,
-          succeededCount: 0,
-          failedCount: 0,
-          blockedCount: 0,
-          canceledCount: 0,
-        });
-        resolvedGroupId = groupId;
+        const parts = jobSpec.group.split('/');
+        let currentPath = '';
+        let parentGroupId: string | undefined;
+        
+        for (const part of parts) {
+          currentPath = currentPath ? `${currentPath}/${part}` : part;
+          
+          let existingGroupId = groupPathToId.get(currentPath);
+          if (!existingGroupId) {
+            // Create this group in the hierarchy
+            const newGroupId = uuidv4();
+            const newGroup: GroupInstance = {
+              id: newGroupId,
+              name: part,
+              path: currentPath,
+              parentGroupId,
+              childGroupIds: [],
+              nodeIds: [],
+              allNodeIds: [],
+              totalNodes: 0,
+            };
+            groups.set(newGroupId, newGroup);
+            groupPathToId.set(currentPath, newGroupId);
+            
+            // Link to parent
+            if (parentGroupId) {
+              const parent = groups.get(parentGroupId);
+              if (parent && !parent.childGroupIds.includes(newGroupId)) {
+                parent.childGroupIds.push(newGroupId);
+              }
+            }
+            
+            // Initialize group state
+            groupStates.set(newGroupId, {
+              status: 'pending',
+              version: 0,
+              runningCount: 0,
+              succeededCount: 0,
+              failedCount: 0,
+              blockedCount: 0,
+              canceledCount: 0,
+            });
+            
+            existingGroupId = newGroupId;
+          }
+          
+          parentGroupId = existingGroupId;
+        }
+        
+        resolvedGroupId = parentGroupId;
       }
     }
     

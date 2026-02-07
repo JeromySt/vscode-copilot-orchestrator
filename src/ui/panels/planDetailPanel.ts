@@ -1580,33 +1580,42 @@ ${mermaidDef}
             } else {
               // Try to find as a subgraph (group)
               // Mermaid generates subgraph clusters with ID patterns we can match
-              const subgraphEl = svgElement.querySelector('g.cluster[id*="' + sanitizedId + '"], g[id*="' + sanitizedId + '"].cluster');
-              if (!subgraphEl) {
-                // Also try matching the rect inside a cluster by finding clusters and checking their content
+              let cluster = svgElement.querySelector('g.cluster[id*="' + sanitizedId + '"], g[id*="' + sanitizedId + '"].cluster');
+              
+              // Fallback: iterate all clusters and check their IDs
+              if (!cluster) {
                 const allClusters = svgElement.querySelectorAll('g.cluster');
-                for (const cluster of allClusters) {
-                  // Check if the cluster's rect or label contains our ID
-                  const clusterId = cluster.getAttribute('id') || '';
+                for (const c of allClusters) {
+                  const clusterId = c.getAttribute('id') || '';
                   if (clusterId.includes(sanitizedId)) {
-                    const clusterRect = cluster.querySelector('rect');
-                    if (clusterRect && groupColors[data.status]) {
-                      clusterRect.style.fill = groupColors[data.status].fill;
-                      clusterRect.style.stroke = groupColors[data.status].stroke;
-                    }
-                    // Update icon in subgraph label
-                    const labelText = cluster.querySelector('.nodeLabel, text');
-                    if (labelText) {
-                      const icons = { succeeded: '✓', failed: '✗', running: '▶', blocked: '⊘', pending: '○', ready: '○', scheduled: '▶', canceled: '⊘' };
-                      const newIcon = icons[data.status] || '○';
-                      const currentText = labelText.textContent || '';
-                      if (currentText.length > 0 && ['✓', '✗', '▶', '⊘', '○', '📦'].includes(currentText[0])) {
-                        labelText.textContent = newIcon + currentText.substring(1);
-                      }
-                    }
-                    nodesUpdated++;
+                    cluster = c;
                     break;
                   }
                 }
+              }
+              
+              // Update the cluster if found
+              if (cluster) {
+                const clusterRect = cluster.querySelector('rect');
+                if (clusterRect && groupColors[data.status]) {
+                  clusterRect.style.fill = groupColors[data.status].fill;
+                  clusterRect.style.stroke = groupColors[data.status].stroke;
+                }
+                // Update icon in subgraph label - Mermaid uses various label selectors
+                const labelText = cluster.querySelector('.cluster-label .nodeLabel, .cluster-label text, .nodeLabel, text');
+                if (labelText) {
+                  const icons = { succeeded: '✓', failed: '✗', running: '▶', blocked: '⊘', pending: '○', ready: '○', scheduled: '▶', canceled: '⊘' };
+                  const newIcon = icons[data.status] || '○';
+                  const currentText = labelText.textContent || '';
+                  // Check for status icon at start or package icon (📦)
+                  if (currentText.length > 0) {
+                    const firstChar = currentText[0];
+                    if (['✓', '✗', '▶', '⊘', '○', '📦'].includes(firstChar)) {
+                      labelText.textContent = newIcon + currentText.substring(1);
+                    }
+                  }
+                }
+                nodesUpdated++;
               }
             }
             
