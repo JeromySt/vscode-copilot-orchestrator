@@ -1,0 +1,143 @@
+/**
+ * @fileoverview Interface for git operations abstraction.
+ * 
+ * Provides a high-level interface over the modular git operations in `src/git/`.
+ * Organized into sub-interfaces matching the git module structure:
+ * branches, worktrees, merge, and repository operations.
+ * 
+ * @module interfaces/IGitOperations
+ */
+
+import type {
+  CommandResult,
+  GitLogger,
+  MergeResult,
+  MergeOptions,
+  MergeTreeResult,
+  MergeTreeOptions,
+  CommitInfo,
+  FileChange,
+  WorktreeCreateOptions,
+} from '../git';
+
+/**
+ * Interface for git branch operations.
+ * 
+ * @see src/git/core/branches.ts for the concrete implementation.
+ */
+export interface IGitBranches {
+  isDefaultBranch(branchName: string, repoPath: string): Promise<boolean>;
+  exists(branchName: string, repoPath: string): Promise<boolean>;
+  remoteExists(branchName: string, repoPath: string, remote?: string): Promise<boolean>;
+  current(repoPath: string): Promise<string>;
+  currentOrNull(repoPath: string): Promise<string | null>;
+  create(branchName: string, fromRef: string, repoPath: string, log?: GitLogger): Promise<void>;
+  createOrReset(branchName: string, fromRef: string, repoPath: string, log?: GitLogger): Promise<void>;
+  checkout(repoPath: string, branchName: string, log?: GitLogger): Promise<void>;
+  list(repoPath: string): Promise<string[]>;
+  getCommit(branchName: string, repoPath: string): Promise<string | null>;
+  getMergeBase(branch1: string, branch2: string, repoPath: string): Promise<string | null>;
+  remove(branchName: string, repoPath: string, options?: { remote?: boolean; force?: boolean; log?: GitLogger }): Promise<void>;
+  deleteLocal(branchName: string, repoPath: string, force?: boolean, log?: GitLogger): Promise<void>;
+  deleteRemote(branchName: string, repoPath: string, remote?: string, log?: GitLogger): Promise<void>;
+}
+
+/**
+ * Interface for git worktree operations.
+ * 
+ * @see src/git/core/worktrees.ts for the concrete implementation.
+ */
+export interface IGitWorktrees {
+  create(options: WorktreeCreateOptions): Promise<void>;
+  remove(worktreePath: string, repoPath: string, log?: GitLogger): Promise<void>;
+  removeSafe(worktreePath: string, repoPath: string, log?: GitLogger): Promise<void>;
+  isValid(worktreePath: string): Promise<boolean>;
+  getBranch(worktreePath: string): Promise<string | null>;
+  getHeadCommit(worktreePath: string): Promise<string | null>;
+  list(repoPath: string): Promise<Array<{ path: string; branch: string | null }>>;
+  prune(repoPath: string): Promise<void>;
+}
+
+/**
+ * Interface for git merge operations.
+ * 
+ * @see src/git/core/merge.ts for the concrete implementation.
+ */
+export interface IGitMerge {
+  merge(options: MergeOptions): Promise<MergeResult>;
+  mergeWithoutCheckout(options: MergeTreeOptions): Promise<MergeTreeResult>;
+  abort(cwd: string, log?: GitLogger): Promise<void>;
+  listConflicts(cwd: string): Promise<string[]>;
+  isInProgress(cwd: string): Promise<boolean>;
+}
+
+/**
+ * Interface for general git repository operations.
+ * 
+ * @see src/git/core/repository.ts for the concrete implementation.
+ */
+export interface IGitRepository {
+  fetch(cwd: string, options?: { remote?: string; all?: boolean; tags?: boolean; log?: GitLogger }): Promise<void>;
+  pull(cwd: string, log?: GitLogger): Promise<boolean>;
+  push(cwd: string, options?: { remote?: string; branch?: string; force?: boolean; log?: GitLogger }): Promise<boolean>;
+  stageAll(cwd: string, log?: GitLogger): Promise<void>;
+  commit(cwd: string, message: string, options?: { allowEmpty?: boolean; log?: GitLogger }): Promise<boolean>;
+  hasChanges(cwd: string): Promise<boolean>;
+  hasStagedChanges(cwd: string): Promise<boolean>;
+  hasUncommittedChanges(cwd: string): Promise<boolean>;
+  getHead(cwd: string): Promise<string | null>;
+  resolveRef(ref: string, cwd: string): Promise<string>;
+  getCommitLog(from: string, to: string, cwd: string): Promise<CommitInfo[]>;
+  getCommitChanges(commitHash: string, cwd: string): Promise<FileChange[]>;
+  getDiffStats(from: string, to: string, cwd: string): Promise<{ added: number; modified: number; deleted: number }>;
+  stashPush(cwd: string, message: string, log?: GitLogger): Promise<boolean>;
+  stashPop(cwd: string, log?: GitLogger): Promise<boolean>;
+  stashList(cwd: string): Promise<string[]>;
+}
+
+/**
+ * Interface for git command execution.
+ * 
+ * @see src/git/core/executor.ts for the concrete implementation.
+ */
+export interface IGitExecutor {
+  /**
+   * Execute a git command asynchronously.
+   */
+  execAsync(args: string[], options: { cwd: string; log?: GitLogger; throwOnError?: boolean; errorPrefix?: string; timeoutMs?: number }): Promise<CommandResult>;
+
+  /**
+   * Execute a git command, returning stdout or throwing on failure.
+   */
+  execAsyncOrThrow(args: string[], cwd: string): Promise<string>;
+
+  /**
+   * Execute a git command, returning stdout or null on failure.
+   */
+  execAsyncOrNull(args: string[], cwd: string): Promise<string | null>;
+}
+
+/**
+ * Unified interface for all git operations.
+ * 
+ * Groups the git API into logical sub-interfaces matching the
+ * modular structure of the `src/git/` module.
+ * 
+ * @example
+ * ```typescript
+ * class PlanRunner {
+ *   constructor(private readonly git: IGitOperations) {}
+ *   
+ *   async mergeBranch(source: string, target: string, cwd: string) {
+ *     return this.git.merge.merge({ source, target, cwd });
+ *   }
+ * }
+ * ```
+ */
+export interface IGitOperations {
+  readonly branches: IGitBranches;
+  readonly worktrees: IGitWorktrees;
+  readonly merge: IGitMerge;
+  readonly repository: IGitRepository;
+  readonly executor: IGitExecutor;
+}

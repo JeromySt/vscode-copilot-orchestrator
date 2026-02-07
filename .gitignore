@@ -1,0 +1,52 @@
+# Build outputs
+out/
+dist/
+*.js.map
+
+# Dependencies
+node_modules/
+
+# Package files
+*.vsix
+
+# Test outputs
+.vscode-test/
+coverage/
+.nyc_output/
+
+# IDE/Editor
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# TypeScript incremental compilation
+*.tsbuildinfo
+
+# Optional: local config overrides (uncomment if needed)
+# .orchestrator/
+
+# Copilot Orchestrator
+.orchestrator/
+.worktrees/

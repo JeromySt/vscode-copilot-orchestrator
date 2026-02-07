@@ -1,0 +1,336 @@
+{
+  "name": "vscode-copilot-orchestrator",
+  "displayName": "Copilot Orchestrator",
+  "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees. Delegate complex tasks to AI while maintaining clean git history with automated pre-checks, work execution, post-checks, and merge workflows.",
+  "version": "0.5.0",
+  "publisher": "JeromyStatia",
+  "license": "MIT",
+  "icon": "media/copilot-icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JeromySt/vscode-copilot-orchestrator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JeromySt/vscode-copilot-orchestrator/issues"
+  },
+  "homepage": "https://github.com/JeromySt/vscode-copilot-orchestrator#readme",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "SCM Providers"
+  ],
+  "keywords": [
+    "copilot",
+    "github",
+    "ai",
+    "agent",
+    "orchestrator",
+    "worktree",
+    "git",
+    "mcp",
+    "model context protocol",
+    "parallel",
+    "automation"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "copilot-orchestrator.mcp-server",
+        "label": "Copilot Orchestrator",
+        "enabledByDefault": true
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copilot-orchestrator",
+          "title": "Copilot Orchestrator",
+          "icon": "media/copilot-icon.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "orchestrator.createJob",
+        "title": "Copilot Orchestrator: Create Job"
+      },
+      {
+        "command": "orchestrator.cancelJob",
+        "title": "Copilot Orchestrator: Cancel Job",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "orchestrator.startJob",
+        "title": "Copilot Orchestrator: Start Job"
+      },
+      {
+        "command": "orchestrator.inspectStatus",
+        "title": "Copilot Orchestrator: Inspect Status"
+      },
+      {
+        "command": "orchestrator.showJobDetails",
+        "title": "Copilot Orchestrator: Show Job Details/Logs"
+      },
+      {
+        "command": "orchestrator.showJobSection",
+        "title": "Copilot Orchestrator: Show Job Section (Prechecks/Work/Postchecks)"
+      },
+      {
+        "command": "orchestrator.retryJob",
+        "title": "Retry Job",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "orchestrator.deleteJob",
+        "title": "Delete Job",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "orchestrator.openJobWorktree",
+        "title": "Open Job Worktree",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "orchestrator.mergeCompletedJob",
+        "title": "Copilot Orchestrator: Merge Completed Job"
+      },
+      {
+        "command": "orchestrator.resolveConflicts",
+        "title": "Copilot Orchestrator: Resolve Merge Conflicts"
+      },
+      {
+        "command": "orchestrator.generateTests",
+        "title": "Copilot Orchestrator: Generate Test Suite"
+      },
+      {
+        "command": "orchestrator.produceDocs",
+        "title": "Copilot Orchestrator: Produce Documentation"
+      },
+      {
+        "command": "orchestrator.mcp.howToConnect",
+        "title": "Copilot Orchestrator: MCP – How to Connect"
+      },
+      {
+        "command": "orchestrator.mcp.configure",
+        "title": "Copilot Orchestrator: Add MCP to GitHub Copilot"
+      },
+      {
+        "command": "orchestrator.copilotCli.check",
+        "title": "Copilot Orchestrator: Check Copilot CLI"
+      },
+      {
+        "command": "orchestrator.showPlanDetails",
+        "title": "Copilot Orchestrator: Show Plan Details"
+      },
+      {
+        "command": "orchestrator.cancelPlan",
+        "title": "Copilot Orchestrator: Cancel Plan",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "orchestrator.deletePlan",
+        "title": "Copilot Orchestrator: Delete Plan",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "orchestrator.refreshPlans",
+        "title": "Copilot Orchestrator: Refresh Plans",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "orchestrator.showLogs",
+        "title": "Copilot Orchestrator: Show Logs"
+      },
+      {
+        "command": "orchestrator.cleanupOrphans",
+        "title": "Copilot Orchestrator: Clean Up Orphaned Worktrees & Branches"
+      },
+      {
+        "command": "orchestrator.showDagDetails",
+        "title": "Copilot Orchestrator: Show DAG Details"
+      },
+      {
+        "command": "orchestrator.showNodeDetails",
+        "title": "Copilot Orchestrator: Show Node Details"
+      },
+      {
+        "command": "orchestrator.cancelDag",
+        "title": "Copilot Orchestrator: Cancel DAG",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "orchestrator.deletePlan",
+        "title": "Copilot Orchestrator: Delete Plan",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "orchestrator.refreshPlans",
+        "title": "Copilot Orchestrator: Refresh Plans",
+        "icon": "$(refresh)"
+      }
+    ],
+    "views": {
+      "copilot-orchestrator": [
+        {
+          "id": "orchestrator.plansView",
+          "name": "Plans",
+          "type": "webview"
+        }
+      ]
+    },
+    "notebooks": [
+      {
+        "type": "orchestrator-notebook",
+        "displayName": "Copilot Orchestrator Job Plan",
+        "selector": [
+          {
+            "filenamePattern": "**/*.orchestrator.json"
+          },
+          {
+            "filenamePattern": "**/*.orchestrator.ipynb.json"
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Copilot Orchestrator",
+      "properties": {
+        "copilotOrchestrator.mcp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the MCP server for GitHub Copilot integration"
+        },
+        "copilotOrchestrator.worktreeRoot": {
+          "type": "string",
+          "default": ".worktrees",
+          "description": "Directory name for git worktrees (relative to repository root)"
+        },
+        "copilotOrchestrator.maxConcurrentJobs": {
+          "type": "number",
+          "default": 0,
+          "description": "Maximum concurrent jobs (0 = auto, based on CPU count minus 1). Plans do not count against this limit."
+        },
+        "copilotOrchestrator.copilotCli.required": {
+          "type": "boolean",
+          "default": true,
+          "description": "Warn/guide install if GitHub Copilot CLI is missing on activation"
+        },
+        "copilotOrchestrator.copilotCli.preferredInstall": {
+          "type": "string",
+          "enum": [
+            "gh",
+            "npm",
+            "auto"
+          ],
+          "default": "auto",
+          "description": "Preferred installation method for Copilot CLI"
+        },
+        "copilotOrchestrator.copilotCli.enforceInJobs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Fail jobs early if Copilot CLI is missing (with install guidance)"
+        },
+        "copilotOrchestrator.merge.mode": {
+          "type": "string",
+          "enum": [
+            "merge",
+            "rebase",
+            "squash"
+          ],
+          "default": "squash",
+          "description": "Git merge strategy for completed jobs (squash creates a single commit)"
+        },
+        "copilotOrchestrator.merge.prefer": {
+          "type": "string",
+          "enum": [
+            "ours",
+            "theirs"
+          ],
+          "default": "theirs",
+          "description": "Default conflict resolution preference (used by Copilot CLI)"
+        },
+        "copilotOrchestrator.merge.pushOnSuccess": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically push to remote after successful merge"
+        },
+        "copilotOrchestrator.logging.debug.mcp": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging for MCP protocol and server operations"
+        },
+        "copilotOrchestrator.logging.debug.http": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging for HTTP server requests and responses"
+        },
+        "copilotOrchestrator.logging.debug.jobs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging for job runner operations"
+        },
+        "copilotOrchestrator.logging.debug.plans": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging for plan runner operations"
+        },
+        "copilotOrchestrator.logging.debug.git": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging for git and worktree operations"
+        },
+        "copilotOrchestrator.logging.debug.ui": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging for UI and webview operations"
+        },
+        "copilotOrchestrator.logging.debug.extension": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging for extension lifecycle events"
+        }
+      }
+    }
+  },
+  "main": "./out/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\" && tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js",
+    "test:watch": "tsc -watch -p ./ & node ./out/test/runTest.js",
+    "test:coverage": "node ./out/test/runTest.js --coverage",
+    "lint": "eslint src --ext ts || echo 'Linting complete'",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.0.0",
+    "@types/sinon": "^21.0.0",
+    "@types/uuid": "^10.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vscode/test-electron": "^2.5.0",
+    "@vscode/vsce": "^3.0.0",
+    "canvas": "^3.2.1",
+    "eslint": "^9.0.0",
+    "glob": "^13.0.1",
+    "mocha": "^10.0.0",
+    "sharp": "^0.34.5",
+    "sinon": "^21.0.1",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "micromatch": "^4.0.5",
+    "uuid": "^9.0.0"
+  }
+}

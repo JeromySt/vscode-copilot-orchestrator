@@ -1,0 +1,22 @@
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- AI Brain/Network with flowing lines (Copilot style) - scaled up -->
+  <path d="M12 2C12 2 7 4 7 9C7 11 8.5 12.5 10.5 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M12 2C12 2 17 4 17 9C17 11 15.5 12.5 13.5 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  
+  <!-- Central hub (orchestrator) - larger -->
+  <circle cx="12" cy="14" r="4" fill="currentColor" opacity="0.2"/>
+  <circle cx="12" cy="14" r="4" stroke="currentColor" stroke-width="2"/>
+  <circle cx="12" cy="14" r="1.5" fill="currentColor"/>
+  
+  <!-- Job nodes (distributed work) - larger -->
+  <circle cx="3" cy="14" r="2.5" fill="currentColor" opacity="0.6"/>
+  <circle cx="21" cy="14" r="2.5" fill="currentColor" opacity="0.6"/>
+  <circle cx="7" cy="22" r="2.5" fill="currentColor" opacity="0.6"/>
+  <circle cx="17" cy="22" r="2.5" fill="currentColor" opacity="0.6"/>
+  
+  <!-- Flowing connection lines - thicker -->
+  <path d="M5.5 14L8 14" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+  <path d="M16 14L18.5 14" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+  <path d="M10 17L8 20" stroke="currentColor" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+  <path d="M14 17L16 20" stroke="currentColor" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+</svg>
