@@ -233,7 +233,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
     }
 
     // Build Copilot CLI command
-    let copilotCmd = `copilot -p ${JSON.stringify(taskDescription)} --allow-all-paths --allow-all-urls --allow-all-tools --log-dir ${JSON.stringify(copilotLogDir)} --log-level debug --share ${JSON.stringify(sessionSharePath)}`;
+    let copilotCmd = `copilot -p ${JSON.stringify(taskDescription)} --stream off --allow-all-paths --allow-all-urls --allow-all-tools --log-dir ${JSON.stringify(copilotLogDir)} --log-level debug --share ${JSON.stringify(sessionSharePath)}`;
 
     // Resume existing session if we have one
     if (sessionId) {
@@ -257,47 +257,99 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
         this.logger.log(`[${label}] Copilot PID: ${proc.pid}`);
       }
 
-      // Stream stdout
-      proc.stdout?.on('data', (data: Buffer) => {
-        const lines = data.toString().split('\n');
-        lines.forEach(line => {
-          if (line.trim()) {
-            this.logger.log(`[${label}] ${line.trim()}`);
+      // Buffers to accumulate streaming output - flush after quiet period
+      let stdoutBuffer = '';
+      let stderrBuffer = '';
+      let stdoutFlushTimer: NodeJS.Timeout | null = null;
+      let stderrFlushTimer: NodeJS.Timeout | null = null;
+      const FLUSH_DELAY_MS = 3000; // Wait 3s of silence before flushing (Copilot streams tokens slowly)
+      
+      // Helper to log a line and check for session ID
+      const logLine = (line: string) => {
+        this.logger.log(`[${label}] ${line}`);
+        
+        // Try to extract session ID
+        if (!capturedSessionId) {
+          const extracted = this.extractSessionId(line);
+          if (extracted) {
+            capturedSessionId = extracted;
+            this.logger.log(`[${label}] ✓ Captured Copilot session ID: ${capturedSessionId}`);
+            this.callbacks.onSessionCaptured?.(capturedSessionId);
+          }
+        }
+      };
+      
+      // Helper to flush buffered content as complete lines
+      const flushBuffer = (buffer: string): string => {
+        const lines = buffer.split('\n');
+        // Log all complete lines (all but the last if incomplete)
+        for (let i = 0; i < lines.length - 1; i++) {
+          const line = lines[i].trim();
+          if (line) {
+            logLine(line);
+          }
+        }
+        // Return the incomplete last line for further buffering
+        const lastLine = lines[lines.length - 1];
+        // If buffer ended with newline, last element is empty - return it
+        return lastLine;
+      };
 
-            // Try to extract session ID
-            if (!capturedSessionId) {
-              const extracted = this.extractSessionId(line);
-              if (extracted) {
-                capturedSessionId = extracted;
-                this.logger.log(`[${label}] ✓ Captured Copilot session ID: ${capturedSessionId}`);
-                this.callbacks.onSessionCaptured?.(capturedSessionId);
-              }
+      // Stream stdout - accumulate and flush after quiet period
+      proc.stdout?.on('data', (data: Buffer) => {
+        stdoutBuffer += data.toString();
+        
+        // Reset the flush timer on each new data
+        if (stdoutFlushTimer) {
+          clearTimeout(stdoutFlushTimer);
+        }
+        stdoutFlushTimer = setTimeout(() => {
+          if (stdoutBuffer.trim()) {
+            stdoutBuffer = flushBuffer(stdoutBuffer);
+            // Flush any remaining incomplete line too
+            if (stdoutBuffer.trim()) {
+              logLine(stdoutBuffer.trim());
+              stdoutBuffer = '';
             }
           }
-        });
+          stdoutFlushTimer = null;
+        }, FLUSH_DELAY_MS);
       });
 
-      // Stream stderr
+      // Stream stderr - accumulate and flush after quiet period
       proc.stderr?.on('data', (data: Buffer) => {
-        const lines = data.toString().split('\n');
-        lines.forEach(line => {
-          if (line.trim()) {
-            this.logger.log(`[${label}] ${line.trim()}`);
-
-            // Also check stderr for session ID
-            if (!capturedSessionId) {
-              const extracted = this.extractSessionId(line);
-              if (extracted) {
-                capturedSessionId = extracted;
-                this.logger.log(`[${label}] ✓ Captured Copilot session ID: ${capturedSessionId}`);
-                this.callbacks.onSessionCaptured?.(capturedSessionId);
-              }
+        stderrBuffer += data.toString();
+        
+        // Reset the flush timer on each new data
+        if (stderrFlushTimer) {
+          clearTimeout(stderrFlushTimer);
+        }
+        stderrFlushTimer = setTimeout(() => {
+          if (stderrBuffer.trim()) {
+            stderrBuffer = flushBuffer(stderrBuffer);
+            // Flush any remaining incomplete line too
+            if (stderrBuffer.trim()) {
+              logLine(stderrBuffer.trim());
+              stderrBuffer = '';
             }
           }
-        });
+          stderrFlushTimer = null;
+        }, FLUSH_DELAY_MS);
       });
 
       proc.on('exit', (code: number | null) => {
+        // Clear any pending flush timers
+        if (stdoutFlushTimer) clearTimeout(stdoutFlushTimer);
+        if (stderrFlushTimer) clearTimeout(stderrFlushTimer);
+        
+        // Flush any remaining buffered output
+        if (stdoutBuffer.trim()) {
+          logLine(stdoutBuffer.trim());
+        }
+        if (stderrBuffer.trim()) {
+          logLine(stderrBuffer.trim());
+        }
+        
         // Notify process exited
         if (proc.pid) {
           this.callbacks.onProcessExited?.(proc.pid);

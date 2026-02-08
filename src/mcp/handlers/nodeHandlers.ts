@@ -126,11 +126,12 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
     if (validation.specs.length === 1) {
       // Single node → create as a single job plan
       const nodeSpec = validation.specs[0];
+      const nodeName = nodeSpec.name || nodeSpec.producerId;
       const baseBranch = await resolveBaseBranch(repoPath, args.base_branch || nodeSpec.baseBranch);
-      const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.target_branch);
+      const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.target_branch, nodeName);
 
       const plan = ctx.PlanRunner.enqueueJob({
-        name: nodeSpec.name || nodeSpec.producerId,
+        name: nodeName,
         task: nodeSpec.task,
         work: nodeSpec.work as string | undefined,
         prechecks: nodeSpec.prechecks as string | undefined,
@@ -149,16 +150,17 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
         groupId: plan.id,
         baseBranch: plan.baseBranch,
         targetBranch: plan.targetBranch,
-        message: `Node '${nodeSpec.name || nodeSpec.producerId}' created. ` +
+        message: `Node '${nodeName}' created. ` +
                  `Use nodeId '${nodeId}' or groupId '${plan.id}' to monitor progress.`,
       };
     } else {
       // Multiple nodes → create as a plan
+      const batchName = `Batch (${validation.specs.length} nodes)`;
       const baseBranch = await resolveBaseBranch(repoPath, args.base_branch);
-      const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.target_branch);
+      const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.target_branch, batchName);
 
       const spec: PlanSpec = {
-        name: `Batch (${validation.specs.length} nodes)`,
+        name: batchName,
         repoPath,
         baseBranch,
         targetBranch,
@@ -544,6 +546,40 @@ export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promi
         };
       } else {
         return errorResult(result.error || 'Failed to retry node');
+      }
+    }
+  }
+
+  return errorResult(`Node not found: ${args.node_id}`);
+}
+
+/**
+ * Handle the `force_fail_copilot_node` MCP tool call.
+ *
+ * Forces a stuck running/scheduled node to failed state so it can be retried.
+ */
+export async function handleForceFailNode(args: any, ctx: PlanHandlerContext): Promise<any> {
+  const fieldError = validateRequired(args, ['node_id']);
+  if (fieldError) return fieldError;
+
+  // Find the node across all plans
+  const plans = ctx.PlanRunner.getAll();
+  for (const plan of plans) {
+    let nodeId = args.node_id;
+    if (!plan.nodes.has(nodeId)) {
+      nodeId = plan.producerIdToNodeId.get(args.node_id) || '';
+    }
+
+    if (plan.nodes.has(nodeId)) {
+      const result = ctx.PlanRunner.forceFailNode(plan.id, nodeId, args.reason);
+      if (result.success) {
+        return {
+          success: true,
+          message: `Node '${args.node_id}' has been force failed. It can now be retried.`,
+          groupId: plan.id,
+        };
+      } else {
+        return errorResult(result.error || 'Failed to force fail node');
       }
     }
   }

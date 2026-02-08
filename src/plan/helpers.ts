@@ -104,11 +104,29 @@ export function computeProgress(
  * 
  * @param nodeStates - Iterable of every node's execution state
  * @param hasStarted - Whether the plan has been started (plan.startedAt is set)
+ * @param isPaused - Whether the plan is paused by user
  */
 export function computePlanStatus(
   nodeStates: Iterable<NodeExecutionState>,
-  hasStarted: boolean
+  hasStarted: boolean,
+  isPaused: boolean = false
 ): PlanStatus {
+  // If paused, return paused status (overrides running/pending)
+  if (isPaused && hasStarted) {
+    // Check if there are still non-terminal nodes (paused only makes sense if there's work to do)
+    let hasNonTerminal = false;
+    for (const state of nodeStates) {
+      if (!['succeeded', 'failed', 'canceled', 'blocked'].includes(state.status)) {
+        hasNonTerminal = true;
+        break;
+      }
+    }
+    if (hasNonTerminal) {
+      return 'paused';
+    }
+    // All nodes are terminal - fall through to compute final status
+  }
+  
   let hasRunning = false;
   let hasPending = false;
   let hasReady = false;

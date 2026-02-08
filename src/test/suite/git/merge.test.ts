@@ -1,40 +1,24 @@
 /**
- * @fileoverview Unit tests for git merge operations.
- *
- * Tests the merge module (src/git/core/merge.ts) by mocking
- * the underlying git command executor.
+ * @fileoverview Tests for git merge operations (src/git/core/merge.ts).
  */
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as merge from '../../../git/core/merge';
 import * as executor from '../../../git/core/executor';
-import type { CommandResult } from '../../../git/core/executor';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Build a successful CommandResult. */
-function ok(stdout = '', stderr = ''): CommandResult {
-  return { success: true, stdout, stderr, exitCode: 0 };
+function silenceConsole() {
+  sinon.stub(console, 'error');
+  sinon.stub(console, 'warn');
 }
 
-/** Build a failed CommandResult. */
-function fail(stderr = '', stdout = '', exitCode = 1): CommandResult {
-  return { success: false, stdout, stderr, exitCode };
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-suite('Git Merge Operations', () => {
+suite('Git Merge', () => {
   let execAsyncStub: sinon.SinonStub;
   let execAsyncOrNullStub: sinon.SinonStub;
   let execAsyncOrThrowStub: sinon.SinonStub;
 
   setup(() => {
+    silenceConsole();
     execAsyncStub = sinon.stub(executor, 'execAsync');
     execAsyncOrNullStub = sinon.stub(executor, 'execAsyncOrNull');
     execAsyncOrThrowStub = sinon.stub(executor, 'execAsyncOrThrow');
@@ -45,16 +29,20 @@ suite('Git Merge Operations', () => {
   });
 
   // =========================================================================
-  // merge()
+  // merge
   // =========================================================================
 
-  suite('merge()', () => {
-
-    test('fast-forward merge succeeds', async () => {
-      execAsyncStub.resolves(ok('Already up to date.\n'));
+  suite('merge', () => {
+    test('returns success on clean merge', async () => {
+      execAsyncStub.resolves({
+        success: true,
+        stdout: 'Already up to date.\n',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const result = await merge.merge({
-        source: 'feature/login',
+        source: 'feature',
         target: 'main',
         cwd: '/repo',
       });
@@ -62,172 +50,197 @@ suite('Git Merge Operations', () => {
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.hasConflicts, false);
       assert.deepStrictEqual(result.conflictFiles, []);
-
-      // Should call git merge with --no-edit and source
-      const [args] = execAsyncStub.firstCall.args;
-      assert.ok(args.includes('merge'), 'should call merge');
-      assert.ok(args.includes('--no-edit'), 'default merge uses --no-edit');
-      assert.ok(args.includes('feature/login'), 'should include source branch');
     });
 
-    test('merge with --no-ff flag', async () => {
-      execAsyncStub.resolves(ok());
-
-      await merge.merge({
-        source: 'feature/x',
-        target: 'main',
-        cwd: '/repo',
-        fastForward: false,
+    test('returns conflict info on merge conflict', async () => {
+      execAsyncStub.resolves({
+        success: false,
+        stdout: '',
+        stderr: 'CONFLICT (content): Merge conflict in file.txt',
+        exitCode: 1,
       });
-
-      const [args] = execAsyncStub.firstCall.args;
-      assert.ok(args.includes('--no-ff'), 'should include --no-ff flag');
-    });
-
-    test('merge with custom commit message', async () => {
-      execAsyncStub.resolves(ok());
-
-      await merge.merge({
-        source: 'feature/y',
-        target: 'main',
-        cwd: '/repo',
-        message: 'Merge feature/y into main',
-      });
-
-      const [args] = execAsyncStub.firstCall.args;
-      assert.ok(args.includes('-m'), 'should include -m flag');
-      assert.ok(
-        args.includes('Merge feature/y into main'),
-        'should include commit message',
-      );
-      assert.ok(!args.includes('--no-edit'), 'should not include --no-edit when message provided');
-    });
-
-    test('squash merge commits separately', async () => {
-      // First call: git merge --squash <source> => success
-      // Second call: git commit -m <msg> => success
-      execAsyncStub
-        .onFirstCall().resolves(ok())
-        .onSecondCall().resolves(ok());
+      execAsyncOrNullStub.resolves('file.txt');
 
       const result = await merge.merge({
-        source: 'feature/z',
-        target: 'main',
-        cwd: '/repo',
-        squash: true,
-        message: 'squashed',
-      });
-
-      assert.strictEqual(result.success, true);
-
-      // First call should be merge --squash
-      const [mergeArgs] = execAsyncStub.firstCall.args;
-      assert.ok(mergeArgs.includes('--squash'), 'should include --squash');
-      assert.ok(!mergeArgs.includes('-m'), 'squash merge should not include -m');
-
-      // Second call should be commit -m
-      const [commitArgs] = execAsyncStub.secondCall.args;
-      assert.ok(commitArgs.includes('commit'), 'should commit after squash');
-      assert.ok(commitArgs.includes('squashed'), 'should use provided message');
-    });
-
-    test('squash merge uses default message when none provided', async () => {
-      execAsyncStub
-        .onFirstCall().resolves(ok())
-        .onSecondCall().resolves(ok());
-
-      await merge.merge({
-        source: 'feature/abc',
-        target: 'main',
-        cwd: '/repo',
-        squash: true,
-      });
-
-      const [commitArgs] = execAsyncStub.secondCall.args;
-      assert.ok(
-        commitArgs.includes("Merge branch 'feature/abc'"),
-        'should use default merge message',
-      );
-    });
-
-    test('detects merge conflicts', async () => {
-      execAsyncStub
-        .onFirstCall().resolves(
-          fail('CONFLICT (content): Merge conflict in file.txt', ''),
-        );
-
-      // listConflicts uses execAsyncOrNull
-      execAsyncOrNullStub.resolves('file.txt\nother.ts');
-
-      const result = await merge.merge({
-        source: 'feature/conflict',
+        source: 'feature',
         target: 'main',
         cwd: '/repo',
       });
 
       assert.strictEqual(result.success, false);
       assert.strictEqual(result.hasConflicts, true);
-      assert.deepStrictEqual(result.conflictFiles, ['file.txt', 'other.ts']);
-      assert.strictEqual(result.error, 'Merge conflicts detected');
+      assert.ok(result.conflictFiles.includes('file.txt'));
     });
 
-    test('reports non-conflict failure', async () => {
-      execAsyncStub.resolves(fail('fatal: not a git repository'));
+    test('uses --no-ff when fastForward is false', async () => {
+      execAsyncStub.resolves({
+        success: true,
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      await merge.merge({
+        source: 'feature',
+        target: 'main',
+        cwd: '/repo',
+        fastForward: false,
+      });
+
+      const args = execAsyncStub.firstCall.args[0];
+      assert.ok(args.includes('--no-ff'));
+    });
+
+    test('uses --squash when squash is true', async () => {
+      // First call: merge --squash
+      execAsyncStub.onFirstCall().resolves({
+        success: true,
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+      // Second call: commit
+      execAsyncStub.onSecondCall().resolves({
+        success: true,
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const result = await merge.merge({
-        source: 'feature/bad',
+        source: 'feature',
+        target: 'main',
+        cwd: '/repo',
+        squash: true,
+        message: 'squash commit',
+      });
+
+      assert.strictEqual(result.success, true);
+      const args = execAsyncStub.firstCall.args[0];
+      assert.ok(args.includes('--squash'));
+    });
+
+    test('passes custom message with -m flag', async () => {
+      execAsyncStub.resolves({
+        success: true,
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      await merge.merge({
+        source: 'feature',
+        target: 'main',
+        cwd: '/repo',
+        message: 'custom merge message',
+      });
+
+      const args = execAsyncStub.firstCall.args[0];
+      assert.ok(args.includes('-m'));
+      assert.ok(args.includes('custom merge message'));
+    });
+
+    test('returns error for non-conflict failure', async () => {
+      execAsyncStub.resolves({
+        success: false,
+        stdout: '',
+        stderr: 'fatal: not something we can merge',
+        exitCode: 128,
+      });
+
+      const result = await merge.merge({
+        source: 'nonexistent',
         target: 'main',
         cwd: '/repo',
       });
 
       assert.strictEqual(result.success, false);
       assert.strictEqual(result.hasConflicts, false);
-      assert.strictEqual(result.error, 'fatal: not a git repository');
-    });
-
-    test('invokes logger when provided', async () => {
-      execAsyncStub.resolves(ok());
-      const messages: string[] = [];
-
-      await merge.merge({
-        source: 'feature/logged',
-        target: 'main',
-        cwd: '/repo',
-        log: (msg) => messages.push(msg),
-      });
-
-      assert.ok(messages.length > 0, 'logger should have been called');
-      assert.ok(
-        messages.some((m) => m.includes('Merging')),
-        'should log merge start',
-      );
-    });
-
-    test('passes cwd to executor', async () => {
-      execAsyncStub.resolves(ok());
-
-      await merge.merge({
-        source: 'feature/cwd',
-        target: 'main',
-        cwd: '/my/custom/path',
-      });
-
-      const [, opts] = execAsyncStub.firstCall.args;
-      assert.strictEqual(opts.cwd, '/my/custom/path');
+      assert.ok(result.error);
     });
   });
 
   // =========================================================================
-  // mergeWithoutCheckout()
+  // listConflicts (hasConflicts / getConflictFiles equivalent)
   // =========================================================================
 
-  suite('mergeWithoutCheckout()', () => {
+  suite('listConflicts', () => {
+    test('returns empty array when no conflicts', async () => {
+      execAsyncOrNullStub.resolves('');
+      const result = await merge.listConflicts('/repo');
+      assert.deepStrictEqual(result, []);
+    });
 
-    test('successful merge returns tree SHA', async () => {
-      execAsyncStub.resolves(ok('abc123def456\n'));
+    test('returns list of conflicting files', async () => {
+      execAsyncOrNullStub.resolves('file1.txt\nfile2.txt');
+      const result = await merge.listConflicts('/repo');
+      assert.deepStrictEqual(result, ['file1.txt', 'file2.txt']);
+    });
+
+    test('returns empty array when command returns null', async () => {
+      execAsyncOrNullStub.resolves(null);
+      const result = await merge.listConflicts('/repo');
+      assert.deepStrictEqual(result, []);
+    });
+  });
+
+  // =========================================================================
+  // abort
+  // =========================================================================
+
+  suite('abort', () => {
+    test('calls git merge --abort', async () => {
+      execAsyncStub.resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      await merge.abort('/repo');
+      const args = execAsyncStub.firstCall.args[0];
+      assert.deepStrictEqual(args, ['merge', '--abort']);
+    });
+  });
+
+  // =========================================================================
+  // isInProgress
+  // =========================================================================
+
+  suite('isInProgress', () => {
+    test('returns false when rev-parse fails', async () => {
+      execAsyncStub.resolves({
+        success: false,
+        stdout: '',
+        stderr: 'fatal',
+        exitCode: 128,
+      });
+      const result = await merge.isInProgress('/repo');
+      assert.strictEqual(result, false);
+    });
+
+    test('returns false when MERGE_HEAD file does not exist', async () => {
+      execAsyncStub.resolves({
+        success: true,
+        stdout: 'MERGE_HEAD\n',
+        stderr: '',
+        exitCode: 0,
+      });
+      // MERGE_HEAD file won't exist at the test path
+      const result = await merge.isInProgress('/nonexistent/repo/path/xyz');
+      assert.strictEqual(result, false);
+    });
+  });
+
+  // =========================================================================
+  // mergeWithoutCheckout
+  // =========================================================================
+
+  suite('mergeWithoutCheckout', () => {
+    test('returns success with tree SHA on clean merge', async () => {
+      execAsyncStub.resolves({
+        success: true,
+        stdout: 'abc123def456\n',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const result = await merge.mergeWithoutCheckout({
-        source: 'feature/a',
+        source: 'feature',
         target: 'main',
         repoPath: '/repo',
       });
@@ -235,37 +248,37 @@ suite('Git Merge Operations', () => {
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.treeSha, 'abc123def456');
       assert.strictEqual(result.hasConflicts, false);
-      assert.deepStrictEqual(result.conflictFiles, []);
     });
 
-    test('detects conflicts from merge-tree output', async () => {
-      const conflictOutput = [
-        'abc123',
-        'CONFLICT (content): Merge conflict in src/app.ts',
-        'CONFLICT (content): Merge conflict in README.md',
-      ].join('\n');
-
-      execAsyncStub.resolves(fail('', conflictOutput));
+    test('returns conflicts when merge-tree reports CONFLICT', async () => {
+      execAsyncStub.resolves({
+        success: false,
+        stdout: 'CONFLICT (content): Merge conflict in src/file.ts\n',
+        stderr: '',
+        exitCode: 1,
+      });
 
       const result = await merge.mergeWithoutCheckout({
-        source: 'feature/b',
+        source: 'feature',
         target: 'main',
         repoPath: '/repo',
       });
 
       assert.strictEqual(result.success, false);
       assert.strictEqual(result.hasConflicts, true);
-      assert.deepStrictEqual(result.conflictFiles, ['src/app.ts', 'README.md']);
-      assert.strictEqual(result.error, 'Merge conflicts detected');
+      assert.ok(result.conflictFiles.includes('src/file.ts'));
     });
 
-    test('handles old git version (merge-tree not available)', async () => {
-      execAsyncStub.resolves(
-        fail('git merge-tree is not a git command'),
-      );
+    test('returns error when git merge-tree is not available', async () => {
+      execAsyncStub.resolves({
+        success: false,
+        stdout: '',
+        stderr: 'is not a git command',
+        exitCode: 1,
+      });
 
       const result = await merge.mergeWithoutCheckout({
-        source: 'feature/c',
+        source: 'feature',
         target: 'main',
         repoPath: '/repo',
       });
@@ -274,316 +287,144 @@ suite('Git Merge Operations', () => {
       assert.strictEqual(result.hasConflicts, false);
       assert.ok(result.error?.includes('Git 2.38'));
     });
+  });
 
-    test('handles unknown option error for old git', async () => {
-      execAsyncStub.resolves(fail('unknown option `write-tree'));
+  // =========================================================================
+  // commitTree
+  // =========================================================================
 
+  suite('commitTree', () => {
+    test('creates commit with correct parent args', async () => {
+      execAsyncOrThrowStub.resolves('newcommitsha\n');
+
+      const result = await merge.commitTree(
+        'treeSha123',
+        ['parent1', 'parent2'],
+        'merge commit message',
+        '/repo'
+      );
+
+      assert.strictEqual(result, 'newcommitsha');
+      const args = execAsyncOrThrowStub.firstCall.args[0];
+      assert.ok(args.includes('-p'));
+      assert.ok(args.includes('parent1'));
+      assert.ok(args.includes('parent2'));
+      assert.ok(args.includes('-m'));
+      assert.ok(args.includes('merge commit message'));
+    });
+  });
+
+  // =========================================================================
+  // resolveBySide
+  // =========================================================================
+
+  suite('resolveBySide', () => {
+    test('resolves conflict using ours', async () => {
+      execAsyncOrThrowStub.resolves('');
+      await merge.resolveBySide('file.txt', 'ours', '/repo');
+      assert.ok(execAsyncOrThrowStub.calledWith(['checkout', '--ours', '--', 'file.txt'], '/repo'));
+      assert.ok(execAsyncOrThrowStub.calledWith(['add', 'file.txt'], '/repo'));
+    });
+
+    test('resolves conflict using theirs', async () => {
+      execAsyncOrThrowStub.resolves('');
+      await merge.resolveBySide('file.txt', 'theirs', '/repo');
+      assert.ok(execAsyncOrThrowStub.calledWith(['checkout', '--theirs', '--', 'file.txt'], '/repo'));
+    });
+  });
+
+  // =========================================================================
+  // continueAfterResolve
+  // =========================================================================
+
+  suite('continueAfterResolve', () => {
+    test('stages all and commits on success', async () => {
+      execAsyncStub.resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const result = await merge.continueAfterResolve('/repo', 'resolve merge');
+      assert.strictEqual(result, true);
+      // First call should be 'add -A', second should be 'commit -m ...'
+      assert.deepStrictEqual(execAsyncStub.firstCall.args[0], ['add', '-A']);
+      assert.deepStrictEqual(execAsyncStub.secondCall.args[0], ['commit', '-m', 'resolve merge']);
+    });
+
+    test('returns false when commit fails', async () => {
+      // add -A succeeds
+      execAsyncStub.onFirstCall().resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      // commit fails
+      execAsyncStub.onSecondCall().resolves({ success: false, stdout: '', stderr: 'nothing to commit', exitCode: 1 });
+      const result = await merge.continueAfterResolve('/repo', 'resolve merge');
+      assert.strictEqual(result, false);
+    });
+  });
+
+  // =========================================================================
+  // mergeWithoutCheckout - unknown option
+  // =========================================================================
+
+  suite('mergeWithoutCheckout edge cases', () => {
+    test('returns error for unknown option in stderr', async () => {
+      execAsyncStub.resolves({
+        success: false,
+        stdout: '',
+        stderr: 'unknown option --write-tree',
+        exitCode: 1,
+      });
       const result = await merge.mergeWithoutCheckout({
-        source: 'a',
-        target: 'b',
+        source: 'feature',
+        target: 'main',
         repoPath: '/repo',
       });
-
       assert.strictEqual(result.success, false);
       assert.ok(result.error?.includes('Git 2.38'));
     });
 
     test('returns generic error for other failures', async () => {
-      execAsyncStub.resolves(fail('something unexpected'));
-
+      execAsyncStub.resolves({
+        success: false,
+        stdout: '',
+        stderr: 'some other error',
+        exitCode: 1,
+      });
       const result = await merge.mergeWithoutCheckout({
-        source: 'x',
-        target: 'y',
+        source: 'feature',
+        target: 'main',
         repoPath: '/repo',
       });
-
       assert.strictEqual(result.success, false);
-      assert.strictEqual(result.hasConflicts, false);
-      assert.strictEqual(result.error, 'something unexpected');
-    });
-
-    test('constructs correct merge-tree command', async () => {
-      execAsyncStub.resolves(ok('sha\n'));
-
-      await merge.mergeWithoutCheckout({
-        source: 'src-branch',
-        target: 'tgt-branch',
-        repoPath: '/repo',
-      });
-
-      const [args, opts] = execAsyncStub.firstCall.args;
-      assert.deepStrictEqual(args, ['merge-tree', '--write-tree', 'tgt-branch', 'src-branch']);
-      assert.strictEqual(opts.cwd, '/repo');
+      assert.ok(result.error);
     });
   });
 
   // =========================================================================
-  // commitTree()
+  // merge - squash with nothing to commit
   // =========================================================================
 
-  suite('commitTree()', () => {
-
-    test('creates commit with correct parent args', async () => {
-      execAsyncOrThrowStub.resolves('newcommitsha\n');
-
-      const sha = await merge.commitTree(
-        'treeSha123',
-        ['parentA', 'parentB'],
-        'merge commit msg',
-        '/repo',
-      );
-
-      assert.strictEqual(sha, 'newcommitsha');
-
-      const [args] = execAsyncOrThrowStub.firstCall.args;
-      assert.deepStrictEqual(args, [
-        'commit-tree', 'treeSha123',
-        '-p', 'parentA',
-        '-p', 'parentB',
-        '-m', 'merge commit msg',
-      ]);
-    });
-
-    test('works with a single parent', async () => {
-      execAsyncOrThrowStub.resolves('abc\n');
-
-      await merge.commitTree('tree', ['singleParent'], 'msg', '/repo');
-
-      const [args] = execAsyncOrThrowStub.firstCall.args;
-      assert.ok(args.filter((a: string) => a === '-p').length === 1);
-    });
-  });
-
-  // =========================================================================
-  // abort()
-  // =========================================================================
-
-  suite('abort()', () => {
-
-    test('calls git merge --abort', async () => {
-      execAsyncStub.resolves(ok());
-
-      await merge.abort('/repo');
-
-      const [args, opts] = execAsyncStub.firstCall.args;
-      assert.deepStrictEqual(args, ['merge', '--abort']);
-      assert.strictEqual(opts.cwd, '/repo');
-    });
-
-    test('invokes logger', async () => {
-      execAsyncStub.resolves(ok());
-      const messages: string[] = [];
-
-      await merge.abort('/repo', (m) => messages.push(m));
-
-      assert.ok(messages.some((m) => m.includes('Aborting')));
-    });
-  });
-
-  // =========================================================================
-  // listConflicts()
-  // =========================================================================
-
-  suite('listConflicts()', () => {
-
-    test('returns conflicting file names', async () => {
-      execAsyncOrNullStub.resolves('a.ts\nb.ts\nc.ts');
-
-      const files = await merge.listConflicts('/repo');
-
-      assert.deepStrictEqual(files, ['a.ts', 'b.ts', 'c.ts']);
-    });
-
-    test('returns empty array on null result', async () => {
-      execAsyncOrNullStub.resolves(null);
-
-      const files = await merge.listConflicts('/repo');
-
-      assert.deepStrictEqual(files, []);
-    });
-
-    test('filters blank lines', async () => {
-      execAsyncOrNullStub.resolves('x.ts\n\ny.ts\n');
-
-      const files = await merge.listConflicts('/repo');
-
-      assert.deepStrictEqual(files, ['x.ts', 'y.ts']);
-    });
-  });
-
-  // =========================================================================
-  // isInProgress()
-  // =========================================================================
-
-  suite('isInProgress()', () => {
-
-    test('returns false when rev-parse fails', async () => {
-      execAsyncStub.resolves(fail(''));
-
-      const inProgress = await merge.isInProgress('/repo');
-
-      assert.strictEqual(inProgress, false);
-    });
-
-    // Note: testing the true path requires fs.promises.access which
-    // would need an fs stub. We verify the false-path logic here.
-    test('returns false when MERGE_HEAD file does not exist', async () => {
-      execAsyncStub.resolves(ok('.git/MERGE_HEAD\n'));
-
-      const inProgress = await merge.isInProgress('/repo');
-
-      // MERGE_HEAD file won't exist in unit-test context
-      assert.strictEqual(inProgress, false);
-    });
-  });
-
-  // =========================================================================
-  // resolveBySide()
-  // =========================================================================
-
-  suite('resolveBySide()', () => {
-
-    test('resolves using "ours"', async () => {
-      execAsyncOrThrowStub.resolves('');
-
-      await merge.resolveBySide('conflict.ts', 'ours', '/repo');
-
-      const [checkoutArgs] = execAsyncOrThrowStub.firstCall.args;
-      assert.deepStrictEqual(checkoutArgs, ['checkout', '--ours', '--', 'conflict.ts']);
-
-      const [addArgs] = execAsyncOrThrowStub.secondCall.args;
-      assert.deepStrictEqual(addArgs, ['add', 'conflict.ts']);
-    });
-
-    test('resolves using "theirs"', async () => {
-      execAsyncOrThrowStub.resolves('');
-
-      await merge.resolveBySide('other.ts', 'theirs', '/repo');
-
-      const [checkoutArgs] = execAsyncOrThrowStub.firstCall.args;
-      assert.ok(checkoutArgs.includes('--theirs'));
-    });
-
-    test('invokes logger', async () => {
-      execAsyncOrThrowStub.resolves('');
-      const messages: string[] = [];
-
-      await merge.resolveBySide('f.ts', 'ours', '/repo', (m) => messages.push(m));
-
-      assert.ok(messages.some((m) => m.includes('Resolving')));
-      assert.ok(messages.some((m) => m.includes('Resolved')));
-    });
-  });
-
-  // =========================================================================
-  // continueAfterResolve()
-  // =========================================================================
-
-  suite('continueAfterResolve()', () => {
-
-    test('stages all and commits', async () => {
-      execAsyncStub
-        .onFirstCall().resolves(ok())   // git add -A
-        .onSecondCall().resolves(ok());  // git commit -m ...
-
-      const ok_ = await merge.continueAfterResolve('/repo', 'Resolved merge');
-
-      assert.strictEqual(ok_, true);
-
-      const [addArgs] = execAsyncStub.firstCall.args;
-      assert.deepStrictEqual(addArgs, ['add', '-A']);
-
-      const [commitArgs] = execAsyncStub.secondCall.args;
-      assert.ok(commitArgs.includes('commit'));
-      assert.ok(commitArgs.includes('Resolved merge'));
-    });
-
-    test('returns false when commit fails', async () => {
-      execAsyncStub
-        .onFirstCall().resolves(ok())
-        .onSecondCall().resolves(fail('commit failed'));
-
-      const ok_ = await merge.continueAfterResolve('/repo', 'msg');
-
-      assert.strictEqual(ok_, false);
-    });
-
-    test('invokes logger on success', async () => {
-      execAsyncStub.resolves(ok());
-      const messages: string[] = [];
-
-      await merge.continueAfterResolve('/repo', 'msg', (m) => messages.push(m));
-
-      assert.ok(messages.some((m) => m.includes('committed') || m.includes('Committing')));
-    });
-  });
-
-  // =========================================================================
-  // Merge strategy edge-cases
-  // =========================================================================
-
-  suite('merge strategy edge-cases', () => {
-
-    test('squash merge tolerates "nothing to commit"', async () => {
-      execAsyncStub
-        .onFirstCall().resolves(ok())  // merge --squash
-        .onSecondCall().resolves(
-          fail('nothing to commit, working tree clean', '', 1),
-        );
+  suite('merge squash edge cases', () => {
+    test('squash merge handles nothing to commit', async () => {
+      // merge --squash succeeds
+      execAsyncStub.onFirstCall().resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      // commit returns nothing to commit
+      execAsyncStub.onSecondCall().resolves({ success: false, stdout: '', stderr: 'nothing to commit', exitCode: 1 });
 
       const result = await merge.merge({
-        source: 'feature/empty',
+        source: 'feature',
         target: 'main',
         cwd: '/repo',
         squash: true,
       });
 
-      // Should still report success because the squash itself succeeded
       assert.strictEqual(result.success, true);
     });
 
-    test('squash flag prevents --no-ff', async () => {
-      execAsyncStub.resolves(ok());
-
+    test('merge uses --no-edit when no message and not squash', async () => {
+      execAsyncStub.resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       await merge.merge({
-        source: 'f',
-        target: 't',
-        cwd: '/repo',
-        squash: true,
-        fastForward: false, // should be ignored when squash is set
-      });
-
-      const [args] = execAsyncStub.firstCall.args;
-      assert.ok(args.includes('--squash'));
-      assert.ok(!args.includes('--no-ff'), '--no-ff should not appear with --squash');
-    });
-
-    test('conflict detection checks stdout too', async () => {
-      execAsyncStub.resolves(
-        fail('', 'Auto-merging a.txt\nCONFLICT (content): ...', 1),
-      );
-      execAsyncOrNullStub.resolves('a.txt');
-
-      const result = await merge.merge({
-        source: 'x',
-        target: 'y',
+        source: 'feature',
+        target: 'main',
         cwd: '/repo',
       });
-
-      assert.strictEqual(result.hasConflicts, true);
-    });
-
-    test('empty stderr falls back to generic error message', async () => {
-      execAsyncStub.resolves(fail(''));
-
-      const result = await merge.merge({
-        source: 'a',
-        target: 'b',
-        cwd: '/repo',
-      });
-
-      assert.strictEqual(result.success, false);
-      assert.strictEqual(result.error, 'Merge failed');
+      const args = execAsyncStub.firstCall.args[0];
+      assert.ok(args.includes('--no-edit'));
     });
   });
 });

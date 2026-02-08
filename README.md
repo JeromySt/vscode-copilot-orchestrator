@@ -43,6 +43,7 @@ You have Copilot. It's great at coding tasks. But it works sequentially—one ta
 | ⚡ **Automated Pipelines** | Pre-checks → AI Work → Post-checks → Auto-merge → Cleanup |
 | 🤖 **Native MCP Integration** | Create and monitor jobs directly from GitHub Copilot Chat |
 | 🔄 **Smart Retry** | Failed jobs include AI-analyzed failure context for intelligent retry |
+| 🛡️ **Default Branch Protection** | Auto-creates feature branches when targeting main/master—never writes directly to default |
 
 ---
 
@@ -141,6 +142,34 @@ Jobs support multiple work types:
 }
 ```
 
+**Work Evidence** (for nodes that don't produce file changes):
+
+Nodes that perform external actions (API calls, analysis, validation) can prove completion via evidence files instead of requiring git changes:
+```json
+{
+  "work": { "type": "agent", "instructions": "Run the audit and report results" },
+  "expects_no_changes": true
+}
+```
+When `expects_no_changes` is `true`, the node succeeds without requiring file modifications. Agents can optionally write evidence to `.orchestrator/evidence/{nodeId}.json`.
+
+### 🛡️ Default Branch Protection
+
+When you create a plan or node targeting a **default branch** (`main`, `master`, or whatever your repository's default branch is), the orchestrator **automatically creates a feature branch** under the `copilot_plan/` namespace:
+
+```
+Base branch: main  →  Target branch: copilot_plan/<uuid>  (auto-created)
+Base branch: develop  →  Target branch: develop  (used as-is)
+```
+
+**How it works:**
+- The orchestrator detects default branches via `git symbolic-ref refs/remotes/origin/HEAD` with a fallback to `main`/`master`
+- When the base is a default branch, a new `copilot_plan/<uuid>` branch is forked from it automatically
+- When the base is already a feature branch, it is used directly as the target
+- You can always override by providing an explicit `target_branch` parameter
+
+This ensures AI agents **never write directly to your default branch**, keeping your trunk safe while still allowing one-step plan creation without manual branch setup.
+
 ### 📊 Real-Time Monitoring
 
 <p align="center">
@@ -170,6 +199,15 @@ The orchestrator exposes a full MCP server that integrates directly with GitHub 
 | `list_copilot_nodes` | List nodes with filtering (group, status, name) |
 | `retry_copilot_node` | Retry a specific failed node |
 | `get_copilot_node_failure_context` | Get failure details for a node |
+
+**Group Tools (Group-Level Operations):**
+| Tool | Description |
+|------|-------------|
+| `get_copilot_group_status` | Get group progress and node states |
+| `list_copilot_groups` | List all groups with status summary |
+| `cancel_copilot_group` | Cancel a group and all its nodes |
+| `delete_copilot_group` | Delete a group and its state |
+| `retry_copilot_group` | Retry failed nodes in a group |
 
 **Plan Tools:**
 | Tool | Description |
@@ -566,6 +604,7 @@ Enable granular logging for troubleshooting:
 **Key design principles:**
 - **No external runtime** - Everything runs inside the VS Code extension
 - **Isolated execution** - Each job gets its own git worktree
+- **Thread-safe worktrees** - Per-repository mutex serializes worktree create/remove operations to prevent git race conditions
 - **Automatic cleanup** - Worktrees are removed after successful merge
 - **Event-driven UI** - Real-time updates via VS Code webview messaging
 

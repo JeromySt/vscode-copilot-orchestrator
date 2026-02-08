@@ -414,9 +414,29 @@ export class NodeDetailPanel {
       case 'retryNode':
         this._retryNode(message.planId, message.nodeId, message.resumeSession);
         break;
+      case 'forceFailNode':
+        this._forceFailNode(message.planId, message.nodeId);
+        break;
     }
   }
   
+  /**
+   * Force a stuck running node to failed state so it can be retried.
+   *
+   * @param planId - The Plan containing the node.
+   * @param nodeId - The node to force fail.
+   */
+  private _forceFailNode(planId: string, nodeId: string) {
+    const result = this._planRunner.forceFailNode(planId, nodeId, 'Force failed via UI - process may have crashed');
+    
+    if (result.success) {
+      vscode.window.showInformationMessage('Node force failed. You can now retry it.');
+      this._update();
+    } else {
+      vscode.window.showErrorMessage(`Force fail failed: ${result.error}`);
+    }
+  }
+
   /**
    * Retry a failed node, optionally resuming the existing Copilot session.
    *
@@ -616,6 +636,16 @@ export class NodeDetailPanel {
       </button>
     </div>
     ` : ''}
+    ${(state.status === 'running' || state.status === 'scheduled') ? `
+    <div class="force-fail-section">
+      <p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 8px;">
+        If the process has crashed or is stuck, you can force fail this node to enable retry.
+      </p>
+      <button class="retry-btn secondary" data-action="force-fail-node" data-plan-id="${plan.id}" data-node-id="${node.id}">
+        ⚠️ Force Fail (Enable Retry)
+      </button>
+    </div>
+    ` : ''}
   </div>
   
   ${(state.status === 'running' || state.status === 'scheduled') ? `
@@ -723,6 +753,17 @@ export class NodeDetailPanel {
     let currentPhase = ${this._currentPhase ? `'${this._currentPhase}'` : 'null'};
     const initialPhase = ${initialPhase ? `'${initialPhase}'` : 'null'};
     
+    // Global Ctrl+C handler for copying selected text in webview
+    document.addEventListener('keydown', function(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        const selectedText = window.getSelection().toString();
+        if (selectedText) {
+          e.preventDefault();
+          vscode.postMessage({ type: 'copyToClipboard', text: selectedText });
+        }
+      }
+    });
+    
     // Auto-select a phase on load: restore previous selection, or use initial phase
     const phaseToSelect = currentPhase || initialPhase;
     if (phaseToSelect) {
@@ -760,6 +801,8 @@ export class NodeDetailPanel {
           vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: true });
         } else if (action === 'retry-node-fresh') {
           vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
+        } else if (action === 'force-fail-node') {
+          vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
         }
       });
     });
@@ -829,12 +872,38 @@ export class NodeDetailPanel {
     }
     
     // Handle log content messages
+    // Track last log content to avoid unnecessary updates
+    let lastLogContent = '';
+    
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.type === 'logContent' && msg.phase === currentPhase) {
         const viewer = document.getElementById('logViewer');
+        
+        // Skip update if content hasn't changed
+        if (msg.content === lastLogContent) {
+          return;
+        }
+        
+        // Skip update if user has text selected (don't disrupt their selection)
+        const selection = window.getSelection();
+        if (selection && selection.toString().length > 0) {
+          // User has selection - defer update (will get it on next refresh when they deselect)
+          return;
+        }
+        
+        lastLogContent = msg.content;
+        
+        // Check if user was at bottom before updating content
+        // Allow some tolerance (50px) for "at bottom" detection
+        const wasAtBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 50;
+        
         viewer.innerHTML = '<pre class="log-content" tabindex="0">' + escapeHtml(msg.content) + '</pre>';
-        viewer.scrollTop = viewer.scrollHeight;
+        
+        // Only auto-scroll if user was already at bottom (respect manual scrolling)
+        if (wasAtBottom) {
+          viewer.scrollTop = viewer.scrollHeight;
+        }
         
         // Setup log viewer keyboard shortcuts
         const logContent = viewer.querySelector('.log-content');

@@ -24,23 +24,49 @@ const log = Logger.for('git');
 // =============================================================================
 
 /**
+ * Convert a string to a valid git branch name slug.
+ * 
+ * Rules:
+ * - Lowercase
+ * - Replace spaces and special chars with hyphens
+ * - Remove consecutive hyphens
+ * - Remove leading/trailing hyphens
+ * - Truncate to reasonable length
+ */
+export function slugify(name: string, maxLength: number = 50): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')  // Replace non-alphanumeric with hyphens
+    .replace(/-+/g, '-')           // Collapse consecutive hyphens
+    .replace(/^-|-$/g, '')         // Remove leading/trailing hyphens
+    .slice(0, maxLength);          // Truncate
+}
+
+/**
  * Determine the targetBranchRoot for a job or plan.
  * 
  * Rules:
  * - If baseBranch is a default branch → create and return a new feature branch name
  * - If baseBranch is not default → return baseBranch as-is
  * 
+ * @param baseBranch - The base branch to check
+ * @param repoPath - Path to the git repository
+ * @param featureBranchPrefix - Prefix for the feature branch (e.g., 'copilot_plan', 'users/name')
+ * @param branchSuffix - Optional suffix for the branch name (e.g., plan name slug). If not provided, generates a short UUID.
  * @returns Object with targetBranchRoot and whether a new branch needs to be created
  */
 export async function resolveTargetBranchRoot(
   baseBranch: string,
   repoPath: string,
-  featureBranchPrefix: string = 'copilot_jobs'
+  featureBranchPrefix: string = 'copilot_jobs',
+  branchSuffix?: string
 ): Promise<{ targetBranchRoot: string; needsCreation: boolean }> {
   const isDefault = await branches.isDefaultBranch(baseBranch, repoPath);
   if (isDefault) {
     // Default branch - must create a feature branch
-    const featureBranch = `${featureBranchPrefix}/${randomUUID()}`;
+    // Use provided suffix (plan name slug) or generate a short unique ID
+    const suffix = branchSuffix || randomUUID().split('-')[0];
+    const featureBranch = `${featureBranchPrefix}/${suffix}`;
     return { targetBranchRoot: featureBranch, needsCreation: true };
   } else {
     // Non-default branch - use as-is

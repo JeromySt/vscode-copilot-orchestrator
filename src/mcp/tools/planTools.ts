@@ -437,6 +437,36 @@ Use this to analyze the history of retries and their outcomes.`,
     },
     
     {
+      name: 'pause_copilot_plan',
+      description: 'Pause a running Plan. Running jobs will complete but no new work will be scheduled. Worktrees are preserved for resume.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { 
+            type: 'string', 
+            description: 'Plan ID to pause' 
+          }
+        },
+        required: ['id']
+      }
+    },
+    
+    {
+      name: 'resume_copilot_plan',
+      description: 'Resume a paused Plan. Allows new work to be scheduled again.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { 
+            type: 'string', 
+            description: 'Plan ID to resume' 
+          }
+        },
+        required: ['id']
+      }
+    },
+    
+    {
       name: 'delete_copilot_plan',
       description: 'Delete a Plan and its history.',
       inputSchema: {

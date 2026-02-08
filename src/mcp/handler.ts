@@ -28,6 +28,8 @@ import {
   handleGetNodeLogs,
   handleGetNodeAttempts,
   handleCancelPlan,
+  handlePausePlan,
+  handleResumePlan,
   handleDeletePlan,
   handleRetryPlan,
   handleGetNodeFailureContext,
@@ -36,6 +38,7 @@ import {
   handleGetNode,
   handleListNodes,
   handleRetryNode,
+  handleForceFailNode,
   handleNodeFailureContext,
 } from './handlers';
 
@@ -257,6 +260,14 @@ export class McpHandler implements IMcpRequestRouter {
         result = await handleCancelPlan(args || {}, this.context);
         break;
         
+      case 'pause_copilot_plan':
+        result = await handlePausePlan(args || {}, this.context);
+        break;
+        
+      case 'resume_copilot_plan':
+        result = await handleResumePlan(args || {}, this.context);
+        break;
+        
       case 'delete_copilot_plan':
         result = await handleDeletePlan(args || {}, this.context);
         break;
@@ -288,6 +299,10 @@ export class McpHandler implements IMcpRequestRouter {
         
       case 'retry_copilot_node':
         result = await handleRetryNode(args || {}, this.context);
+        break;
+        
+      case 'force_fail_copilot_node':
+        result = await handleForceFailNode(args || {}, this.context);
         break;
         
       case 'get_copilot_node_failure_context':

@@ -138,7 +138,7 @@ function createAgentDelegatorAdapter(log: any) {
       const prompt = instructions ? `${task}\n\nAdditional context:\n${instructions}` : task;
       
       // Build Copilot CLI command
-      let copilotCmd = `copilot -p ${JSON.stringify(prompt)} --allow-all-paths --allow-all-tools`;
+      let copilotCmd = `copilot -p ${JSON.stringify(prompt)} --stream off --allow-all-paths --allow-all-tools`;
       
       // Add session resumption if available
       if (sessionId) {
@@ -561,6 +561,82 @@ export function registerPlanCommands(
         planRunner.cancel(planId);
         vscode.window.showInformationMessage(`Plan "${plan.spec.name}" canceled`);
       }
+    })
+  );
+  
+  // Pause Plan
+  context.subscriptions.push(
+    vscode.commands.registerCommand('orchestrator.pausePlan', async (planId?: string) => {
+      if (!planId) {
+        const plans = planRunner.getAll().filter(p => {
+          const sm = planRunner.getStateMachine(p.id);
+          const status = sm?.computePlanStatus();
+          return status === 'running' && !p.isPaused;
+        });
+        
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No running plans to pause');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan to pause',
+        });
+        
+        if (!selected) return;
+        planId = selected.planId;
+      }
+      
+      const plan = planRunner.get(planId);
+      if (!plan) {
+        vscode.window.showErrorMessage(`Plan not found: ${planId}`);
+        return;
+      }
+      
+      planRunner.pause(planId);
+      vscode.window.showInformationMessage(`Plan "${plan.spec.name}" paused. Running jobs will complete.`);
+    })
+  );
+  
+  // Resume Plan
+  context.subscriptions.push(
+    vscode.commands.registerCommand('orchestrator.resumePlan', async (planId?: string) => {
+      if (!planId) {
+        const plans = planRunner.getAll().filter(p => p.isPaused);
+        
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No paused plans to resume');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan to resume',
+        });
+        
+        if (!selected) return;
+        planId = selected.planId;
+      }
+      
+      const plan = planRunner.get(planId);
+      if (!plan) {
+        vscode.window.showErrorMessage(`Plan not found: ${planId}`);
+        return;
+      }
+      
+      planRunner.resume(planId);
+      vscode.window.showInformationMessage(`Plan "${plan.spec.name}" resumed`);
     })
   );
   

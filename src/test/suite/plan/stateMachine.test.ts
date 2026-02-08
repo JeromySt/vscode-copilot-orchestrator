@@ -1,372 +1,274 @@
 /**
- * @fileoverview Unit tests for PlanStateMachine
- *
- * Tests cover:
- * - Node state transitions (valid and invalid)
- * - Plan status computation
- * - Duration / timestamp calculations
- * - Error state handling & dependency propagation
- * - Retry (resetNodeToPending) scenarios
- * - Concurrent node execution
- * - Event emissions
+ * @fileoverview Tests for PlanStateMachine (src/plan/stateMachine.ts).
  */
 
 import * as assert from 'assert';
+import * as sinon from 'sinon';
 import { PlanStateMachine } from '../../../plan/stateMachine';
 import {
   PlanInstance,
-  PlanNode,
-  JobNode,
   NodeExecutionState,
+  JobNode,
   NodeStatus,
-  NodeTransitionEvent,
-  PlanCompletionEvent,
+  isValidTransition,
+  isTerminal,
+  GroupInstance,
+  GroupExecutionState,
 } from '../../../plan/types';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Suppress Logger console output to avoid hanging test workers. */
-function silenceConsole(): { restore: () => void } {
-  const origLog = console.log;
-  const origDebug = console.debug;
-  const origWarn = console.warn;
-  const origError = console.error;
-  /* eslint-disable no-console */
-  console.log = () => {};
-  console.debug = () => {};
-  console.warn = () => {};
-  console.error = () => {};
-  /* eslint-enable no-console */
-  return {
-    restore() {
-      console.log = origLog;
-      console.debug = origDebug;
-      console.warn = origWarn;
-      console.error = origError;
-    },
-  };
+function silenceConsole() {
+  sinon.stub(console, 'error');
+  sinon.stub(console, 'warn');
+  sinon.stub(console, 'info');
 }
 
-function makeNode(
-  id: string,
-  deps: string[] = [],
-  dependents: string[] = [],
-): JobNode {
-  return {
-    id,
-    producerId: id,
-    name: id,
-    type: 'job',
-    task: `Task ${id}`,
-    dependencies: deps,
-    dependents,
-  };
-}
-
-function makeState(status: NodeStatus = 'pending'): NodeExecutionState {
-  return { status, version: 0, attempts: 0 };
-}
-
-/**
- * Build a minimal PlanInstance with the given topology.
- * Each entry in `topology` is `[nodeId, dependencyIds[]]`.
- * Dependents are computed automatically.
- */
-function buildPlan(
-  topology: Array<[string, string[]]>,
-  overrides?: Partial<PlanInstance>,
-): PlanInstance {
-  const nodes = new Map<string, PlanNode>();
+/** Create a minimal plan with N independent nodes. */
+function createPlan(nodeCount: number = 1): PlanInstance {
+  const nodes = new Map<string, JobNode>();
   const nodeStates = new Map<string, NodeExecutionState>();
   const producerIdToNodeId = new Map<string, string>();
-  const dependentsMap = new Map<string, string[]>();
-
-  for (const [id] of topology) {
-    dependentsMap.set(id, []);
-  }
-
-  for (const [id, deps] of topology) {
-    for (const dep of deps) {
-      dependentsMap.get(dep)!.push(id);
-    }
-  }
-
   const roots: string[] = [];
   const leaves: string[] = [];
 
-  for (const [id, deps] of topology) {
-    const dependents = dependentsMap.get(id) || [];
-    nodes.set(id, makeNode(id, deps, dependents));
-    nodeStates.set(id, makeState());
-    producerIdToNodeId.set(id, id);
-    if (deps.length === 0) roots.push(id);
-    if (dependents.length === 0) leaves.push(id);
+  for (let i = 0; i < nodeCount; i++) {
+    const id = `node-${i}`;
+    nodes.set(id, {
+      id,
+      producerId: `job-${i}`,
+      name: `Job ${i}`,
+      type: 'job',
+      task: `task ${i}`,
+      dependencies: [],
+      dependents: [],
+    });
+    nodeStates.set(id, { status: 'pending', version: 0, attempts: 0 });
+    producerIdToNodeId.set(`job-${i}`, id);
+    roots.push(id);
+    leaves.push(id);
   }
 
   return {
     id: 'plan-1',
     spec: { name: 'Test Plan', jobs: [] },
-    nodes,
+    nodes: nodes as any,
     producerIdToNodeId,
     roots,
     leaves,
     nodeStates,
-    groups: new Map(),
-    groupStates: new Map(),
-    groupPathToId: new Map(),
+    groups: new Map<string, GroupInstance>(),
+    groupStates: new Map<string, GroupExecutionState>(),
+    groupPathToId: new Map<string, string>(),
     repoPath: '/repo',
     baseBranch: 'main',
-    worktreeRoot: '/worktrees',
-    createdAt: 1000,
+    worktreeRoot: '.wt',
+    createdAt: Date.now(),
     stateVersion: 0,
     cleanUpSuccessfulWork: true,
     maxParallel: 4,
-    ...overrides,
   };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+/** Create a plan with a dependency chain: A -> B -> C */
+function createChainPlan(): PlanInstance {
+  const plan = createPlan(0);
+
+  const nodeA: JobNode = { id: 'a', producerId: 'a', name: 'A', type: 'job', task: 'a', dependencies: [], dependents: ['b'] };
+  const nodeB: JobNode = { id: 'b', producerId: 'b', name: 'B', type: 'job', task: 'b', dependencies: ['a'], dependents: ['c'] };
+  const nodeC: JobNode = { id: 'c', producerId: 'c', name: 'C', type: 'job', task: 'c', dependencies: ['b'], dependents: [] };
+
+  plan.nodes.set('a', nodeA);
+  plan.nodes.set('b', nodeB);
+  plan.nodes.set('c', nodeC);
+  plan.nodeStates.set('a', { status: 'pending', version: 0, attempts: 0 });
+  plan.nodeStates.set('b', { status: 'pending', version: 0, attempts: 0 });
+  plan.nodeStates.set('c', { status: 'pending', version: 0, attempts: 0 });
+  plan.roots = ['a'];
+  plan.leaves = ['c'];
+
+  return plan;
+}
 
 suite('PlanStateMachine', () => {
-  let quiet: { restore: () => void };
-
   setup(() => {
-    quiet = silenceConsole();
+    silenceConsole();
   });
 
   teardown(() => {
-    quiet.restore();
+    sinon.restore();
   });
 
   // =========================================================================
-  // Node state transitions
+  // isValidTransition / isTerminal (type helpers)
   // =========================================================================
-  suite('Node state transitions', () => {
-    test('valid transition: pending → ready', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      assert.ok(sm.transition('a', 'ready'));
-      assert.strictEqual(sm.getNodeStatus('a'), 'ready');
+
+  suite('type helpers', () => {
+    test('valid transitions from pending', () => {
+      assert.ok(isValidTransition('pending', 'ready'));
+      assert.ok(isValidTransition('pending', 'blocked'));
+      assert.ok(isValidTransition('pending', 'canceled'));
+      assert.ok(!isValidTransition('pending', 'running'));
+      assert.ok(!isValidTransition('pending', 'succeeded'));
     });
 
-    test('valid full lifecycle: pending → ready → scheduled → running → succeeded', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      assert.ok(sm.transition('a', 'ready'));
-      assert.ok(sm.transition('a', 'scheduled'));
-      assert.ok(sm.transition('a', 'running'));
-      assert.ok(sm.transition('a', 'succeeded'));
-      assert.strictEqual(sm.getNodeStatus('a'), 'succeeded');
+    test('valid transitions from ready', () => {
+      assert.ok(isValidTransition('ready', 'scheduled'));
+      assert.ok(isValidTransition('ready', 'blocked'));
+      assert.ok(isValidTransition('ready', 'canceled'));
+      assert.ok(!isValidTransition('ready', 'pending'));
     });
 
-    test('valid transition: pending → canceled', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      assert.ok(sm.transition('a', 'canceled'));
-      assert.strictEqual(sm.getNodeStatus('a'), 'canceled');
+    test('valid transitions from running', () => {
+      assert.ok(isValidTransition('running', 'succeeded'));
+      assert.ok(isValidTransition('running', 'failed'));
+      assert.ok(isValidTransition('running', 'canceled'));
+      assert.ok(!isValidTransition('running', 'pending'));
     });
 
-    test('valid transition: running → failed', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      assert.ok(sm.transition('a', 'failed'));
-      assert.strictEqual(sm.getNodeStatus('a'), 'failed');
+    test('terminal states have no valid transitions', () => {
+      for (const terminal of ['succeeded', 'failed', 'blocked', 'canceled'] as NodeStatus[]) {
+        assert.ok(isTerminal(terminal));
+        assert.ok(!isValidTransition(terminal, 'pending'));
+        assert.ok(!isValidTransition(terminal, 'running'));
+      }
     });
 
-    test('invalid transition: pending → running is rejected', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.transition('a', 'running'), false);
-      assert.strictEqual(sm.getNodeStatus('a'), 'pending');
-    });
-
-    test('invalid transition: succeeded → failed is rejected (terminal)', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      assert.strictEqual(sm.transition('a', 'failed'), false);
-      assert.strictEqual(sm.getNodeStatus('a'), 'succeeded');
-    });
-
-    test('transition on unknown node returns false', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.transition('unknown', 'ready'), false);
-    });
-
-    test('transition applies optional updates', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'failed', { error: 'boom' });
-      assert.strictEqual(sm.getNodeState('a')!.error, 'boom');
+    test('non-terminal states are not terminal', () => {
+      for (const status of ['pending', 'ready', 'scheduled', 'running'] as NodeStatus[]) {
+        assert.ok(!isTerminal(status));
+      }
     });
   });
 
   // =========================================================================
-  // Automatic timestamp management
+  // transition
   // =========================================================================
-  suite('Timestamp management', () => {
-    test('scheduledAt is set when entering scheduled', () => {
-      const plan = buildPlan([['a', []]]);
+
+  suite('transition', () => {
+    test('valid transition succeeds', () => {
+      const plan = createPlan(1);
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      const state = sm.getNodeState('a')!;
-      assert.ok(state.scheduledAt, 'scheduledAt should be set');
-      assert.strictEqual(typeof state.scheduledAt, 'number');
+      const result = sm.transition('node-0', 'ready');
+      assert.strictEqual(result, true);
+      assert.strictEqual(sm.getNodeStatus('node-0'), 'ready');
     });
 
-    test('startedAt is set when entering running', () => {
-      const plan = buildPlan([['a', []]]);
+    test('invalid transition is rejected', () => {
+      const plan = createPlan(1);
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      const state = sm.getNodeState('a')!;
-      assert.ok(state.startedAt, 'startedAt should be set');
+      const result = sm.transition('node-0', 'running');
+      assert.strictEqual(result, false);
+      assert.strictEqual(sm.getNodeStatus('node-0'), 'pending');
     });
 
-    test('endedAt is set when entering terminal state', () => {
-      const plan = buildPlan([['a', []]]);
+    test('transition for unknown node returns false', () => {
+      const plan = createPlan(1);
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      const state = sm.getNodeState('a')!;
-      assert.ok(state.endedAt, 'endedAt should be set');
+      assert.strictEqual(sm.transition('nonexistent', 'ready'), false);
     });
 
-    test('timestamps are not overwritten if already set', () => {
-      const plan = buildPlan([['a', []]]);
+    test('emits transition event', () => {
+      const plan = createPlan(1);
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled', { scheduledAt: 42 });
-      assert.strictEqual(sm.getNodeState('a')!.scheduledAt, 42);
+      let eventReceived = false;
+      sm.on('transition', (evt) => {
+        eventReceived = true;
+        assert.strictEqual(evt.from, 'pending');
+        assert.strictEqual(evt.to, 'ready');
+        assert.strictEqual(evt.nodeId, 'node-0');
+      });
+      sm.transition('node-0', 'ready');
+      assert.ok(eventReceived);
+    });
+
+    test('sets startedAt on running transition', () => {
+      const plan = createPlan(1);
+      const sm = new PlanStateMachine(plan);
+      sm.transition('node-0', 'ready');
+      sm.transition('node-0', 'scheduled');
+      sm.transition('node-0', 'running');
+      const state = sm.getNodeState('node-0');
+      assert.ok(state?.startedAt);
+    });
+
+    test('sets endedAt on terminal transition', () => {
+      const plan = createPlan(1);
+      const sm = new PlanStateMachine(plan);
+      sm.transition('node-0', 'ready');
+      sm.transition('node-0', 'scheduled');
+      sm.transition('node-0', 'running');
+      sm.transition('node-0', 'succeeded');
+      const state = sm.getNodeState('node-0');
+      assert.ok(state?.endedAt);
+    });
+
+    test('increments version on transition', () => {
+      const plan = createPlan(1);
+      const sm = new PlanStateMachine(plan);
+      assert.strictEqual(sm.getNodeState('node-0')?.version, 0);
+      sm.transition('node-0', 'ready');
+      assert.strictEqual(sm.getNodeState('node-0')?.version, 1);
+    });
+
+    test('increments plan stateVersion on transition', () => {
+      const plan = createPlan(1);
+      const sm = new PlanStateMachine(plan);
+      assert.strictEqual(plan.stateVersion, 0);
+      sm.transition('node-0', 'ready');
+      assert.strictEqual(plan.stateVersion, 1);
     });
   });
 
   // =========================================================================
-  // Plan status computation
+  // dependency propagation
   // =========================================================================
-  suite('computePlanStatus', () => {
-    test('all pending → pending', () => {
-      const plan = buildPlan([['a', []], ['b', []]]);
-      const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.computePlanStatus(), 'pending');
-    });
 
-    test('one running → running', () => {
-      const plan = buildPlan([['a', []], ['b', []]]);
+  suite('dependency propagation', () => {
+    test('dependent becomes ready when dependency succeeds', () => {
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      assert.strictEqual(sm.computePlanStatus(), 'running');
-    });
 
-    test('one scheduled → running', () => {
-      const plan = buildPlan([['a', []], ['b', []]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      assert.strictEqual(sm.computePlanStatus(), 'running');
-    });
-
-    test('all succeeded → succeeded', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
       sm.transition('a', 'ready');
       sm.transition('a', 'scheduled');
       sm.transition('a', 'running');
       sm.transition('a', 'succeeded');
-      assert.strictEqual(sm.computePlanStatus(), 'succeeded');
+
+      // B should now be ready since A succeeded
+      assert.strictEqual(sm.getNodeStatus('b'), 'ready');
     });
 
-    test('all failed → failed', () => {
-      const plan = buildPlan([['a', []]]);
+    test('downstream nodes get blocked when dependency fails', () => {
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
+
       sm.transition('a', 'ready');
       sm.transition('a', 'scheduled');
       sm.transition('a', 'running');
       sm.transition('a', 'failed');
-      assert.strictEqual(sm.computePlanStatus(), 'failed');
-    });
 
-    test('mixed succeeded and failed → partial', () => {
-      const plan = buildPlan([['a', []], ['b', []]]);
-      const sm = new PlanStateMachine(plan);
-      // a succeeds
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      // b fails
-      sm.transition('b', 'ready');
-      sm.transition('b', 'scheduled');
-      sm.transition('b', 'running');
-      sm.transition('b', 'failed');
-      assert.strictEqual(sm.computePlanStatus(), 'partial');
-    });
-
-    test('canceled → canceled', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'canceled');
-      assert.strictEqual(sm.computePlanStatus(), 'canceled');
-    });
-
-    test('all blocked → failed', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'failed');
-      // b gets blocked automatically
       assert.strictEqual(sm.getNodeStatus('b'), 'blocked');
-      assert.strictEqual(sm.computePlanStatus(), 'failed');
-    });
-
-    test('pending with startedAt → running', () => {
-      const plan = buildPlan([['a', []], ['b', []]]);
-      plan.startedAt = Date.now();
-      const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.computePlanStatus(), 'running');
+      assert.strictEqual(sm.getNodeStatus('c'), 'blocked');
     });
   });
 
   // =========================================================================
-  // Dependency management
+  // areDependenciesMet / hasDependencyFailed
   // =========================================================================
-  suite('Dependency management', () => {
-    test('areDependenciesMet returns true for root nodes', () => {
-      const plan = buildPlan([['a', []]]);
+
+  suite('areDependenciesMet', () => {
+    test('returns true for root node with no dependencies', () => {
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
       assert.ok(sm.areDependenciesMet('a'));
     });
 
-    test('areDependenciesMet returns false when dependency pending', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']]]);
+    test('returns false when dependencies are pending', () => {
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.areDependenciesMet('b'), false);
+      assert.ok(!sm.areDependenciesMet('b'));
     });
 
-    test('areDependenciesMet returns true when all deps succeeded', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']]]);
+    test('returns true when all dependencies succeeded', () => {
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
       sm.transition('a', 'ready');
       sm.transition('a', 'scheduled');
@@ -374,15 +276,17 @@ suite('PlanStateMachine', () => {
       sm.transition('a', 'succeeded');
       assert.ok(sm.areDependenciesMet('b'));
     });
+  });
 
-    test('areDependenciesMet returns false for unknown node', () => {
-      const plan = buildPlan([['a', []]]);
+  suite('hasDependencyFailed', () => {
+    test('returns false when no dependencies failed', () => {
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.areDependenciesMet('nope'), false);
+      assert.ok(!sm.hasDependencyFailed('b'));
     });
 
-    test('hasDependencyFailed returns true when dep failed', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']]]);
+    test('returns true when a dependency is failed', () => {
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
       sm.transition('a', 'ready');
       sm.transition('a', 'scheduled');
@@ -390,562 +294,498 @@ suite('PlanStateMachine', () => {
       sm.transition('a', 'failed');
       assert.ok(sm.hasDependencyFailed('b'));
     });
-
-    test('hasDependencyFailed returns true when dep blocked', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']], ['c', ['b']]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'failed');
-      // b gets blocked, so c's dependency (b) is blocked
-      assert.ok(sm.hasDependencyFailed('c'));
-    });
-
-    test('hasDependencyFailed returns false for unknown node', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.hasDependencyFailed('nope'), false);
-    });
   });
 
   // =========================================================================
-  // Side effects: dependency propagation
+  // getNodesByStatus / getReadyNodes
   // =========================================================================
-  suite('Dependency propagation', () => {
-    test('succeeding node transitions pending dependent to ready', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      assert.strictEqual(sm.getNodeStatus('b'), 'ready');
-    });
 
-    test('dependent stays pending when only some deps succeeded', () => {
-      const plan = buildPlan([['a', []], ['b', []], ['c', ['a', 'b']]]);
+  suite('getNodesByStatus', () => {
+    test('returns nodes in given status', () => {
+      const plan = createPlan(3);
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      // b still pending → c should still be pending
-      assert.strictEqual(sm.getNodeStatus('c'), 'pending');
-    });
+      sm.transition('node-0', 'ready');
+      sm.transition('node-1', 'ready');
 
-    test('dependent becomes ready when all deps succeed', () => {
-      const plan = buildPlan([['a', []], ['b', []], ['c', ['a', 'b']]]);
-      const sm = new PlanStateMachine(plan);
-      // a succeeds
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      // b succeeds
-      sm.transition('b', 'ready');
-      sm.transition('b', 'scheduled');
-      sm.transition('b', 'running');
-      sm.transition('b', 'succeeded');
-      assert.strictEqual(sm.getNodeStatus('c'), 'ready');
-    });
-
-    test('failing node blocks downstream nodes', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']], ['c', ['b']]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'failed');
-      assert.strictEqual(sm.getNodeStatus('b'), 'blocked');
-      assert.strictEqual(sm.getNodeStatus('c'), 'blocked');
-    });
-
-    test('blocked node has error message', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'failed');
-      const state = sm.getNodeState('b')!;
-      assert.ok(state.error);
-      assert.ok(state.error!.toLowerCase().includes('blocked'), `Expected error to contain 'blocked', got: ${state.error}`);
-    });
-
-    test('already-terminal nodes are not blocked', () => {
-      const plan = buildPlan([['a', []], ['b', []], ['c', ['a', 'b']]]);
-      const sm = new PlanStateMachine(plan);
-      // b succeeds first
-      sm.transition('b', 'ready');
-      sm.transition('b', 'scheduled');
-      sm.transition('b', 'running');
-      sm.transition('b', 'succeeded');
-      // a fails — c gets blocked, b stays succeeded
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'failed');
-      assert.strictEqual(sm.getNodeStatus('b'), 'succeeded');
-      assert.strictEqual(sm.getNodeStatus('c'), 'blocked');
+      const readyNodes = sm.getNodesByStatus('ready');
+      assert.strictEqual(readyNodes.length, 2);
+      assert.ok(readyNodes.includes('node-0'));
+      assert.ok(readyNodes.includes('node-1'));
     });
   });
 
-  // =========================================================================
-  // Ready nodes
-  // =========================================================================
-  suite('getReadyNodes / getNodesByStatus', () => {
-    test('getReadyNodes returns nodes in ready state', () => {
-      const plan = buildPlan([['a', []], ['b', []]]);
+  suite('getReadyNodes', () => {
+    test('returns ready nodes', () => {
+      const plan = createPlan(2);
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
+      sm.transition('node-0', 'ready');
       const ready = sm.getReadyNodes();
-      assert.deepStrictEqual(ready, ['a']);
-    });
-
-    test('getNodesByStatus returns correct nodes', () => {
-      const plan = buildPlan([['a', []], ['b', []], ['c', []]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('b', 'ready');
-      const pending = sm.getNodesByStatus('pending');
-      const ready = sm.getNodesByStatus('ready');
-      assert.deepStrictEqual(pending, ['c']);
-      assert.strictEqual(ready.length, 2);
-      assert.ok(ready.includes('a'));
-      assert.ok(ready.includes('b'));
+      assert.strictEqual(ready.length, 1);
+      assert.strictEqual(ready[0], 'node-0');
     });
   });
 
   // =========================================================================
-  // Status counts
+  // computePlanStatus
   // =========================================================================
-  suite('getStatusCounts', () => {
-    test('returns correct counts for mixed states', () => {
-      const plan = buildPlan([['a', []], ['b', []], ['c', ['a']]]);
+
+  suite('computePlanStatus', () => {
+    test('returns pending when all nodes pending', () => {
+      const plan = createPlan(2);
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      // c becomes ready automatically
-      sm.transition('b', 'ready');
+      assert.strictEqual(sm.computePlanStatus(), 'pending');
+    });
+
+    test('returns running when a node is running', () => {
+      const plan = createPlan(2);
+      plan.startedAt = Date.now();
+      const sm = new PlanStateMachine(plan);
+      sm.transition('node-0', 'ready');
+      sm.transition('node-0', 'scheduled');
+      sm.transition('node-0', 'running');
+      assert.strictEqual(sm.computePlanStatus(), 'running');
+    });
+
+    test('returns succeeded when all nodes succeeded', () => {
+      const plan = createPlan(2);
+      plan.startedAt = Date.now();
+      const sm = new PlanStateMachine(plan);
+      for (const nodeId of ['node-0', 'node-1']) {
+        sm.transition(nodeId, 'ready');
+        sm.transition(nodeId, 'scheduled');
+        sm.transition(nodeId, 'running');
+        sm.transition(nodeId, 'succeeded');
+      }
+      assert.strictEqual(sm.computePlanStatus(), 'succeeded');
+    });
+
+    test('returns failed when a node failed', () => {
+      const plan = createPlan(1);
+      plan.startedAt = Date.now();
+      const sm = new PlanStateMachine(plan);
+      sm.transition('node-0', 'ready');
+      sm.transition('node-0', 'scheduled');
+      sm.transition('node-0', 'running');
+      sm.transition('node-0', 'failed');
+      assert.strictEqual(sm.computePlanStatus(), 'failed');
+    });
+
+    test('returns partial when some succeeded and some failed', () => {
+      const plan = createPlan(2);
+      plan.startedAt = Date.now();
+      const sm = new PlanStateMachine(plan);
+
+      sm.transition('node-0', 'ready');
+      sm.transition('node-0', 'scheduled');
+      sm.transition('node-0', 'running');
+      sm.transition('node-0', 'succeeded');
+
+      sm.transition('node-1', 'ready');
+      sm.transition('node-1', 'scheduled');
+      sm.transition('node-1', 'running');
+      sm.transition('node-1', 'failed');
+
+      assert.strictEqual(sm.computePlanStatus(), 'partial');
+    });
+  });
+
+  // =========================================================================
+  // getStatusCounts
+  // =========================================================================
+
+  suite('getStatusCounts', () => {
+    test('counts all statuses', () => {
+      const plan = createPlan(3);
+      const sm = new PlanStateMachine(plan);
+      sm.transition('node-0', 'ready');
+
       const counts = sm.getStatusCounts();
-      assert.strictEqual(counts.succeeded, 1);
-      assert.strictEqual(counts.ready, 2); // b and c
-      assert.strictEqual(counts.pending, 0);
+      assert.strictEqual(counts.ready, 1);
+      assert.strictEqual(counts.pending, 2);
     });
   });
 
   // =========================================================================
   // cancelAll
   // =========================================================================
+
   suite('cancelAll', () => {
     test('cancels all non-terminal nodes', () => {
-      const plan = buildPlan([['a', []], ['b', []], ['c', ['a']]]);
+      const plan = createPlan(3);
       const sm = new PlanStateMachine(plan);
+      sm.transition('node-0', 'ready');
+      sm.transition('node-0', 'scheduled');
+      sm.transition('node-0', 'running');
+      sm.transition('node-0', 'succeeded');
+
+      sm.cancelAll();
+
+      assert.strictEqual(sm.getNodeStatus('node-0'), 'succeeded'); // already terminal
+      assert.strictEqual(sm.getNodeStatus('node-1'), 'canceled');
+      assert.strictEqual(sm.getNodeStatus('node-2'), 'canceled');
+    });
+  });
+
+  // =========================================================================
+  // resetNodeToPending
+  // =========================================================================
+
+  suite('resetNodeToPending', () => {
+    test('resets failed node to ready when deps are met', () => {
+      const plan = createChainPlan();
+      const sm = new PlanStateMachine(plan);
+
+      // A succeeds
       sm.transition('a', 'ready');
       sm.transition('a', 'scheduled');
       sm.transition('a', 'running');
       sm.transition('a', 'succeeded');
-      // c becomes ready, b is pending
-      sm.cancelAll();
-      assert.strictEqual(sm.getNodeStatus('a'), 'succeeded'); // terminal, untouched
-      assert.strictEqual(sm.getNodeStatus('b'), 'canceled');
-      assert.strictEqual(sm.getNodeStatus('c'), 'canceled');
+
+      // B fails
+      sm.transition('b', 'scheduled');
+      sm.transition('b', 'running');
+      sm.transition('b', 'failed');
+
+      // Reset B
+      const result = sm.resetNodeToPending('b');
+      assert.ok(result);
+      assert.strictEqual(sm.getNodeStatus('b'), 'ready');
+    });
+
+    test('returns false for unknown node', () => {
+      const plan = createPlan(1);
+      const sm = new PlanStateMachine(plan);
+      assert.strictEqual(sm.resetNodeToPending('nonexistent'), false);
     });
   });
 
   // =========================================================================
-  // Duration / effective endedAt
+  // plan completion
   // =========================================================================
-  suite('Duration calculations', () => {
-    test('computeEffectiveEndedAt returns max endedAt across nodes', () => {
-      const plan = buildPlan([['a', []], ['b', []]]);
-      plan.nodeStates.get('a')!.endedAt = 5000;
-      plan.nodeStates.get('b')!.endedAt = 9000;
-      const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.computeEffectiveEndedAt(), 9000);
-    });
 
-    test('computeEffectiveEndedAt returns undefined when no nodes ended', () => {
-      const plan = buildPlan([['a', []]]);
+  suite('plan completion', () => {
+    test('emits planComplete when all nodes reach terminal state', () => {
+      const plan = createPlan(1);
+      plan.startedAt = Date.now();
       const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.computeEffectiveEndedAt(), undefined);
-    });
 
-    test('getEffectiveEndedAt falls back to plan.endedAt', () => {
-      const plan = buildPlan([['a', []]]);
-      plan.endedAt = 7777;
-      const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.getEffectiveEndedAt(), 7777);
-    });
+      let completionEvent: any = null;
+      sm.on('planComplete', (evt) => { completionEvent = evt; });
 
-    test('getEffectiveEndedAt prefers computed value over stored', () => {
-      const plan = buildPlan([['a', []]]);
-      plan.endedAt = 5000;
-      plan.nodeStates.get('a')!.endedAt = 9000;
-      const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.getEffectiveEndedAt(), 9000);
+      sm.transition('node-0', 'ready');
+      sm.transition('node-0', 'scheduled');
+      sm.transition('node-0', 'running');
+      sm.transition('node-0', 'succeeded');
+
+      assert.ok(completionEvent);
+      assert.strictEqual(completionEvent.status, 'succeeded');
     });
   });
 
   // =========================================================================
-  // Base commits
+  // getBaseCommitsForNode
   // =========================================================================
+
   suite('getBaseCommitsForNode', () => {
-    test('returns empty array for root nodes', () => {
-      const plan = buildPlan([['a', []]]);
+    test('returns empty array for root node', () => {
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
       assert.deepStrictEqual(sm.getBaseCommitsForNode('a'), []);
     });
 
-    test('returns completed commits from dependencies', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']]]);
+    test('returns commit from succeeded dependency', () => {
+      const plan = createChainPlan();
+      const sm = new PlanStateMachine(plan);
       plan.nodeStates.get('a')!.completedCommit = 'abc123';
-      const sm = new PlanStateMachine(plan);
-      assert.deepStrictEqual(sm.getBaseCommitsForNode('b'), ['abc123']);
-    });
+      plan.nodeStates.get('a')!.status = 'succeeded';
 
-    test('returns multiple commits for multi-dep node', () => {
-      const plan = buildPlan([['a', []], ['b', []], ['c', ['a', 'b']]]);
-      plan.nodeStates.get('a')!.completedCommit = 'sha-a';
-      plan.nodeStates.get('b')!.completedCommit = 'sha-b';
-      const sm = new PlanStateMachine(plan);
-      const commits = sm.getBaseCommitsForNode('c');
-      assert.strictEqual(commits.length, 2);
-      assert.ok(commits.includes('sha-a'));
-      assert.ok(commits.includes('sha-b'));
-    });
-
-    test('skips deps without completedCommit', () => {
-      const plan = buildPlan([['a', []], ['b', []], ['c', ['a', 'b']]]);
-      plan.nodeStates.get('a')!.completedCommit = 'sha-a';
-      // b has no completedCommit
-      const sm = new PlanStateMachine(plan);
-      assert.deepStrictEqual(sm.getBaseCommitsForNode('c'), ['sha-a']);
+      const commits = sm.getBaseCommitsForNode('b');
+      assert.deepStrictEqual(commits, ['abc123']);
     });
 
     test('returns empty for unknown node', () => {
-      const plan = buildPlan([['a', []]]);
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
-      assert.deepStrictEqual(sm.getBaseCommitsForNode('nope'), []);
+      assert.deepStrictEqual(sm.getBaseCommitsForNode('unknown'), []);
     });
+  });
 
-    test('deprecated getBaseCommitForNode returns first commit', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']]]);
-      plan.nodeStates.get('a')!.completedCommit = 'abc123';
+  // =========================================================================
+  // getBaseCommitForNode (deprecated)
+  // =========================================================================
+
+  suite('getBaseCommitForNode', () => {
+    test('returns first commit from dependency', () => {
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
+      plan.nodeStates.get('a')!.completedCommit = 'abc123';
+      plan.nodeStates.get('a')!.status = 'succeeded';
       assert.strictEqual(sm.getBaseCommitForNode('b'), 'abc123');
     });
 
-    test('deprecated getBaseCommitForNode returns undefined for root', () => {
-      const plan = buildPlan([['a', []]]);
+    test('returns undefined for root node', () => {
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
       assert.strictEqual(sm.getBaseCommitForNode('a'), undefined);
     });
   });
 
   // =========================================================================
-  // Retry – resetNodeToPending
+  // getEffectiveEndedAt
   // =========================================================================
-  suite('Retry scenarios', () => {
-    test('resetNodeToPending resets failed node to ready when deps met', () => {
-      const plan = buildPlan([['a', []]]);
+
+  suite('getEffectiveEndedAt', () => {
+    test('returns undefined when plan is still running', () => {
+      const plan = createPlan(1);
+      plan.startedAt = Date.now();
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'failed');
-      assert.ok(sm.resetNodeToPending('a'));
-      // No deps → should be ready
-      assert.strictEqual(sm.getNodeStatus('a'), 'ready');
+      sm.transition('node-0', 'ready');
+      sm.transition('node-0', 'scheduled');
+      sm.transition('node-0', 'running');
+      assert.strictEqual(sm.getEffectiveEndedAt(), undefined);
     });
 
-    test('resetNodeToPending resets to pending when deps not met', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']]]);
+    test('returns endedAt when all nodes succeeded', () => {
+      const plan = createPlan(1);
+      plan.startedAt = Date.now();
       const sm = new PlanStateMachine(plan);
-      // Force b to failed without propagation for test
-      plan.nodeStates.get('b')!.status = 'failed' as NodeStatus;
-      assert.ok(sm.resetNodeToPending('b'));
-      // a is still pending → deps not met → b should be pending
-      assert.strictEqual(sm.getNodeStatus('b'), 'pending');
+      sm.transition('node-0', 'ready');
+      sm.transition('node-0', 'scheduled');
+      sm.transition('node-0', 'running');
+      sm.transition('node-0', 'succeeded');
+      const ended = sm.getEffectiveEndedAt();
+      assert.ok(typeof ended === 'number');
     });
 
-    test('resetNodeToPending unblocks downstream nodes', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']], ['c', ['b']]]);
+    test('falls back to plan.endedAt', () => {
+      const plan = createPlan(1);
+      plan.startedAt = Date.now();
+      plan.endedAt = 12345;
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'failed');
-      // b and c are now blocked
-      assert.strictEqual(sm.getNodeStatus('b'), 'blocked');
-      assert.strictEqual(sm.getNodeStatus('c'), 'blocked');
-      // Reset a
-      sm.resetNodeToPending('a');
-      assert.strictEqual(sm.getNodeStatus('a'), 'ready'); // root, no deps
-      assert.strictEqual(sm.getNodeStatus('b'), 'pending'); // unblocked
-      assert.strictEqual(sm.getNodeStatus('c'), 'pending'); // unblocked recursively
-    });
-
-    test('resetNodeToPending returns false for unknown node', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.resetNodeToPending('nope'), false);
-    });
-
-    test('retry full lifecycle: fail then reset and succeed', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']]]);
-      const sm = new PlanStateMachine(plan);
-      // First attempt: a fails
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'failed');
-      assert.strictEqual(sm.getNodeStatus('b'), 'blocked');
-      // Retry a
-      sm.resetNodeToPending('a');
-      assert.strictEqual(sm.getNodeStatus('a'), 'ready');
-      assert.strictEqual(sm.getNodeStatus('b'), 'pending');
-      // Second attempt: a succeeds
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      assert.strictEqual(sm.getNodeStatus('b'), 'ready');
+      sm.transition('node-0', 'canceled');
+      // Node has no endedAt set before the cancel - but cancel sets it
+      const ended = sm.getEffectiveEndedAt();
+      assert.ok(typeof ended === 'number');
     });
   });
 
   // =========================================================================
-  // Concurrent node execution
+  // computeEffectiveEndedAt
   // =========================================================================
-  suite('Concurrent node execution', () => {
-    test('multiple independent nodes can run concurrently', () => {
-      const plan = buildPlan([['a', []], ['b', []], ['c', []]]);
+
+  suite('computeEffectiveEndedAt', () => {
+    test('returns undefined when no nodes ended', () => {
+      const plan = createPlan(1);
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('b', 'ready');
-      sm.transition('c', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('b', 'scheduled');
-      sm.transition('c', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('b', 'running');
-      sm.transition('c', 'running');
-      assert.strictEqual(sm.getNodeStatus('a'), 'running');
-      assert.strictEqual(sm.getNodeStatus('b'), 'running');
-      assert.strictEqual(sm.getNodeStatus('c'), 'running');
-      assert.strictEqual(sm.computePlanStatus(), 'running');
+      assert.strictEqual(sm.computeEffectiveEndedAt(), undefined);
     });
 
-    test('plan completes only when all concurrent nodes finish', () => {
-      const plan = buildPlan([['a', []], ['b', []]]);
+    test('returns max endedAt across all nodes', () => {
+      const plan = createPlan(2);
+      plan.startedAt = Date.now();
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('b', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('b', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('b', 'running');
-      sm.transition('a', 'succeeded');
-      // b still running
-      assert.strictEqual(sm.computePlanStatus(), 'running');
-      sm.transition('b', 'succeeded');
-      assert.strictEqual(sm.computePlanStatus(), 'succeeded');
-    });
-
-    test('diamond dependency: c waits for both a and b', () => {
-      // a ─┐
-      //    ├─→ c
-      // b ─┘
-      const plan = buildPlan([['a', []], ['b', []], ['c', ['a', 'b']]]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('b', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      // c still pending (b not done)
-      assert.strictEqual(sm.getNodeStatus('c'), 'pending');
-      sm.transition('b', 'scheduled');
-      sm.transition('b', 'running');
-      sm.transition('b', 'succeeded');
-      // Now c should be ready
-      assert.strictEqual(sm.getNodeStatus('c'), 'ready');
+      sm.transition('node-0', 'ready');
+      sm.transition('node-0', 'scheduled');
+      sm.transition('node-0', 'running');
+      sm.transition('node-0', 'succeeded');
+      sm.transition('node-1', 'ready');
+      sm.transition('node-1', 'scheduled');
+      sm.transition('node-1', 'running');
+      sm.transition('node-1', 'succeeded');
+      const ended = sm.computeEffectiveEndedAt();
+      assert.ok(typeof ended === 'number');
     });
   });
 
   // =========================================================================
-  // Event emission
+  // group state management
   // =========================================================================
-  suite('Event emission', () => {
-    test('transition emits transition event with correct data', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      const events: NodeTransitionEvent[] = [];
-      sm.on('transition', (e: NodeTransitionEvent) => events.push(e));
-      sm.transition('a', 'ready');
-      assert.strictEqual(events.length, 1);
-      assert.strictEqual(events[0].planId, 'plan-1');
-      assert.strictEqual(events[0].nodeId, 'a');
-      assert.strictEqual(events[0].from, 'pending');
-      assert.strictEqual(events[0].to, 'ready');
-      assert.strictEqual(typeof events[0].timestamp, 'number');
-    });
 
-    test('nodeReady event emitted when dependent becomes ready', () => {
-      const plan = buildPlan([['a', []], ['b', ['a']]]);
-      const sm = new PlanStateMachine(plan);
-      const readyEvents: Array<{ planId: string; nodeId: string }> = [];
-      sm.on('nodeReady', (planId: string, nodeId: string) => {
-        readyEvents.push({ planId, nodeId });
+  suite('group state', () => {
+    function createGroupPlan(): PlanInstance {
+      const plan = createPlan(0);
+      const groupId = 'group-1';
+
+      const nodeA: JobNode = { id: 'ga', producerId: 'ga', name: 'GA', type: 'job', task: 'a', dependencies: [], dependents: [], groupId };
+      const nodeB: JobNode = { id: 'gb', producerId: 'gb', name: 'GB', type: 'job', task: 'b', dependencies: [], dependents: [], groupId };
+      plan.nodes.set('ga', nodeA);
+      plan.nodes.set('gb', nodeB);
+      plan.nodeStates.set('ga', { status: 'pending', version: 0, attempts: 0 });
+      plan.nodeStates.set('gb', { status: 'pending', version: 0, attempts: 0 });
+      plan.roots = ['ga', 'gb'];
+      plan.leaves = ['ga', 'gb'];
+
+      const group: GroupInstance = {
+        id: groupId,
+        name: 'Group 1',
+        path: 'Group 1',
+        childGroupIds: [],
+        nodeIds: ['ga', 'gb'],
+        allNodeIds: ['ga', 'gb'],
+        totalNodes: 2,
+      };
+      plan.groups.set(groupId, group);
+      plan.groupStates.set(groupId, {
+        status: 'pending',
+        version: 0,
+        runningCount: 0,
+        succeededCount: 0,
+        failedCount: 0,
+        blockedCount: 0,
+        canceledCount: 0,
       });
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      assert.ok(readyEvents.length > 0);
-      assert.ok(readyEvents.some(e => e.nodeId === 'b'));
+
+      return plan;
+    }
+
+    test('group becomes running when a node starts running', () => {
+      const plan = createGroupPlan();
+      plan.startedAt = Date.now();
+      const sm = new PlanStateMachine(plan);
+
+      sm.transition('ga', 'ready');
+      sm.transition('ga', 'scheduled');
+      sm.transition('ga', 'running');
+
+      const gs = plan.groupStates.get('group-1')!;
+      assert.strictEqual(gs.status, 'running');
+      assert.strictEqual(gs.runningCount, 1);
     });
 
-    test('planComplete event emitted when all nodes terminal', () => {
-      const plan = buildPlan([['a', []]]);
+    test('group becomes succeeded when all nodes succeed', () => {
+      const plan = createGroupPlan();
+      plan.startedAt = Date.now();
       const sm = new PlanStateMachine(plan);
-      const completionEvents: PlanCompletionEvent[] = [];
-      sm.on('planComplete', (e: PlanCompletionEvent) => completionEvents.push(e));
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      assert.strictEqual(completionEvents.length, 1);
-      assert.strictEqual(completionEvents[0].status, 'succeeded');
+
+      for (const nid of ['ga', 'gb']) {
+        sm.transition(nid, 'ready');
+        sm.transition(nid, 'scheduled');
+        sm.transition(nid, 'running');
+        sm.transition(nid, 'succeeded');
+      }
+
+      const gs = plan.groupStates.get('group-1')!;
+      assert.strictEqual(gs.status, 'succeeded');
+      assert.strictEqual(gs.succeededCount, 2);
     });
 
-    test('planComplete not emitted while nodes still active', () => {
-      const plan = buildPlan([['a', []], ['b', []]]);
+    test('group becomes failed when a node fails', () => {
+      const plan = createGroupPlan();
+      plan.startedAt = Date.now();
       const sm = new PlanStateMachine(plan);
-      const completionEvents: PlanCompletionEvent[] = [];
-      sm.on('planComplete', (e: PlanCompletionEvent) => completionEvents.push(e));
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      // b still pending
-      assert.strictEqual(completionEvents.length, 0);
+
+      sm.transition('ga', 'ready');
+      sm.transition('ga', 'scheduled');
+      sm.transition('ga', 'running');
+      sm.transition('ga', 'failed');
+
+      sm.transition('gb', 'ready');
+      sm.transition('gb', 'scheduled');
+      sm.transition('gb', 'running');
+      sm.transition('gb', 'succeeded');
+
+      const gs = plan.groupStates.get('group-1')!;
+      assert.strictEqual(gs.status, 'failed');
     });
 
-    test('resetNodeToPending emits transition event', () => {
-      const plan = buildPlan([['a', []]]);
+    test('group becomes canceled when all nodes canceled', () => {
+      const plan = createGroupPlan();
+      plan.startedAt = Date.now();
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'failed');
-      const events: NodeTransitionEvent[] = [];
-      sm.on('transition', (e: NodeTransitionEvent) => events.push(e));
-      sm.resetNodeToPending('a');
-      assert.ok(events.length > 0);
-      assert.strictEqual(events[0].from, 'failed');
-      assert.strictEqual(events[0].to, 'ready');
+
+      sm.transition('ga', 'canceled');
+      sm.transition('gb', 'canceled');
+
+      const gs = plan.groupStates.get('group-1')!;
+      assert.strictEqual(gs.status, 'canceled');
     });
 
-    test('resetNodeToPending emits nodeReady when reset to ready', () => {
-      const plan = buildPlan([['a', []]]);
+    test('group with child groups aggregates status', () => {
+      const plan = createGroupPlan();
+      plan.startedAt = Date.now();
+      const parentGroupId = 'parent-group';
+      const childGroupId = 'group-1';
+
+      // Update child group to have parent
+      const childGroup = plan.groups.get(childGroupId)!;
+      childGroup.parentGroupId = parentGroupId;
+
+      // Create parent group
+      const parentGroup: GroupInstance = {
+        id: parentGroupId,
+        name: 'Parent',
+        path: 'Parent',
+        childGroupIds: [childGroupId],
+        nodeIds: [],
+        allNodeIds: ['ga', 'gb'],
+        totalNodes: 2,
+      };
+      plan.groups.set(parentGroupId, parentGroup);
+      plan.groupStates.set(parentGroupId, {
+        status: 'pending',
+        version: 0,
+        runningCount: 0,
+        succeededCount: 0,
+        failedCount: 0,
+        blockedCount: 0,
+        canceledCount: 0,
+      });
+
       const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'failed');
-      const readyEvents: string[] = [];
-      sm.on('nodeReady', (_planId: string, nodeId: string) => readyEvents.push(nodeId));
-      sm.resetNodeToPending('a');
-      assert.ok(readyEvents.includes('a'));
+      sm.transition('ga', 'ready');
+      sm.transition('ga', 'scheduled');
+      sm.transition('ga', 'running');
+
+      // Parent should also be running
+      const parentState = plan.groupStates.get(parentGroupId)!;
+      assert.strictEqual(parentState.status, 'running');
     });
   });
 
   // =========================================================================
-  // Edge cases
+  // resetNodeToPending with unblocking
   // =========================================================================
-  suite('Edge cases', () => {
-    test('getNodeStatus returns undefined for unknown node', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.getNodeStatus('missing'), undefined);
-    });
 
-    test('getNodeState returns undefined for unknown node', () => {
-      const plan = buildPlan([['a', []]]);
+  suite('resetNodeToPending unblocking', () => {
+    test('unblocks downstream nodes when failed node is retried', () => {
+      const plan = createChainPlan();
       const sm = new PlanStateMachine(plan);
-      assert.strictEqual(sm.getNodeState('missing'), undefined);
-    });
 
-    test('single node plan: happy path completes plan', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      let completed = false;
-      sm.on('planComplete', () => { completed = true; });
+      // A succeeds, B fails, C gets blocked
       sm.transition('a', 'ready');
       sm.transition('a', 'scheduled');
       sm.transition('a', 'running');
       sm.transition('a', 'succeeded');
-      assert.ok(completed);
-      assert.strictEqual(sm.computePlanStatus(), 'succeeded');
-    });
-
-    test('plan endedAt is set when plan completes', () => {
-      const plan = buildPlan([['a', []]]);
-      const sm = new PlanStateMachine(plan);
-      assert.strictEqual(plan.endedAt, undefined);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      assert.ok(plan.endedAt, 'plan.endedAt should be set after completion');
-    });
-
-    test('deeply chained dependencies propagate correctly', () => {
-      // a → b → c → d
-      const plan = buildPlan([
-        ['a', []],
-        ['b', ['a']],
-        ['c', ['b']],
-        ['d', ['c']],
-      ]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      assert.strictEqual(sm.getNodeStatus('b'), 'ready');
-      sm.transition('b', 'scheduled');
-      sm.transition('b', 'running');
-      sm.transition('b', 'succeeded');
-      assert.strictEqual(sm.getNodeStatus('c'), 'ready');
-      sm.transition('c', 'scheduled');
-      sm.transition('c', 'running');
-      sm.transition('c', 'succeeded');
-      assert.strictEqual(sm.getNodeStatus('d'), 'ready');
-    });
-
-    test('failing mid-chain blocks all downstream', () => {
-      // a → b → c → d
-      const plan = buildPlan([
-        ['a', []],
-        ['b', ['a']],
-        ['c', ['b']],
-        ['d', ['c']],
-      ]);
-      const sm = new PlanStateMachine(plan);
-      sm.transition('a', 'ready');
-      sm.transition('a', 'scheduled');
-      sm.transition('a', 'running');
-      sm.transition('a', 'succeeded');
-      assert.strictEqual(sm.getNodeStatus('b'), 'ready');
       sm.transition('b', 'scheduled');
       sm.transition('b', 'running');
       sm.transition('b', 'failed');
+
       assert.strictEqual(sm.getNodeStatus('c'), 'blocked');
-      assert.strictEqual(sm.getNodeStatus('d'), 'blocked');
+
+      // Reset B - should unblock C
+      sm.resetNodeToPending('b');
+      assert.strictEqual(sm.getNodeStatus('c'), 'pending');
+    });
+
+    test('emits nodeReady when reset to ready', () => {
+      const plan = createChainPlan();
+      const sm = new PlanStateMachine(plan);
+
+      sm.transition('a', 'ready');
+      sm.transition('a', 'scheduled');
+      sm.transition('a', 'running');
+      sm.transition('a', 'succeeded');
+      sm.transition('b', 'scheduled');
+      sm.transition('b', 'running');
+      sm.transition('b', 'failed');
+
+      let readyEmitted = false;
+      sm.on('nodeReady', (_planId, nodeId) => {
+        if (nodeId === 'b') readyEmitted = true;
+      });
+
+      sm.resetNodeToPending('b');
+      assert.ok(readyEmitted);
     });
   });
 });

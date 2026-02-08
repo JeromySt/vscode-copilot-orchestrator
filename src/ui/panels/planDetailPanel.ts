@@ -163,6 +163,12 @@ export class planDetailPanel {
       case 'cancel':
         vscode.commands.executeCommand('orchestrator.cancelPlan', this._planId);
         break;
+      case 'pause':
+        vscode.commands.executeCommand('orchestrator.pausePlan', this._planId);
+        break;
+      case 'resume':
+        vscode.commands.executeCommand('orchestrator.resumePlan', this._planId);
+        break;
       case 'delete':
         vscode.commands.executeCommand('orchestrator.deletePlan', this._planId);
         break;
@@ -809,13 +815,28 @@ export class planDetailPanel {
     }
     
     /* Subgraph/cluster styling */
-    .mermaid .cluster rect { rx: 8px; ry: 8px; }
+    .mermaid .cluster rect { 
+      rx: 8px; 
+      ry: 8px;
+    }
+    .mermaid .cluster,
+    .mermaid .cluster-label,
+    .mermaid g.cluster,
+    .mermaid g.cluster foreignObject,
+    .mermaid g.cluster foreignObject div {
+      overflow: visible !important;
+      clip-path: none !important;
+    }
     .mermaid .cluster-label,
     .mermaid .cluster-label span,
     .mermaid g.cluster text { 
       cursor: pointer !important;
       font-weight: bold;
       pointer-events: all !important;
+    }
+    /* Disable any clipping on cluster labels */
+    .mermaid .cluster .label-container {
+      overflow: visible !important;
     }
     .mermaid .cluster-label:hover,
     .mermaid g.cluster text:hover {
@@ -1188,6 +1209,10 @@ ${mermaidDef}
   
   <div class="actions">
     ${status === 'running' || status === 'pending' ? 
+      '<button class="action-btn secondary" onclick="pausePlan()">Pause</button>' : ''}
+    ${status === 'paused' ? 
+      '<button class="action-btn primary" onclick="resumePlan()">Resume</button>' : ''}
+    ${status === 'running' || status === 'pending' || status === 'paused' ? 
       '<button class="action-btn secondary" onclick="cancelPlan()">Cancel</button>' : ''}
     <button class="action-btn secondary" onclick="refresh()">Refresh</button>
     ${status === 'succeeded' ? 
@@ -1220,6 +1245,31 @@ ${mermaidDef}
         const element = document.querySelector('.mermaid');
         const { svg } = await mermaid.render('mermaid-graph', mermaidDef);
         element.innerHTML = svg;
+        
+        // Fix cluster label clipping: expand foreignObject width to fit text
+        const clusterLabels = element.querySelectorAll('.cluster-label');
+        clusterLabels.forEach(label => {
+          // Find the foreignObject (parent) and expand its width
+          let parent = label.parentElement;
+          while (parent && parent.tagName !== 'foreignObject') {
+            parent = parent.parentElement;
+          }
+          if (parent && parent.tagName === 'foreignObject') {
+            // Get actual text width and add padding
+            const textEl = label.querySelector('.nodeLabel, span, div');
+            if (textEl) {
+              const textWidth = textEl.scrollWidth || textEl.offsetWidth || 200;
+              const currentWidth = parseFloat(parent.getAttribute('width')) || 0;
+              if (textWidth + 20 > currentWidth) {
+                parent.setAttribute('width', String(textWidth + 30));
+              }
+            }
+          }
+          // Also set overflow visible on the label itself
+          label.style.overflow = 'visible';
+          label.style.width = 'auto';
+        });
+        
         // Add tooltips for truncated node labels
         for (const [id, fullName] of Object.entries(nodeTooltips)) {
           // Regular nodes: Mermaid renders them as g[id*="id"]
@@ -1239,6 +1289,8 @@ ${mermaidDef}
         }
         // Immediately update durations for running nodes after render
         setTimeout(updateNodeDurations, 100);
+        // Set initial container size based on rendered SVG
+        setTimeout(updateZoom, 150);
       } catch (err) {
         console.error('Mermaid error:', err);
         console.log('Mermaid definition:', mermaidDef);
@@ -1285,6 +1337,14 @@ ${mermaidDef}
       vscode.postMessage({ type: 'cancel' });
     }
     
+    function pausePlan() {
+      vscode.postMessage({ type: 'pause' });
+    }
+    
+    function resumePlan() {
+      vscode.postMessage({ type: 'resume' });
+    }
+    
     function deletePlan() {
       vscode.postMessage({ type: 'delete' });
     }
@@ -1308,6 +1368,15 @@ ${mermaidDef}
       const zoomLabel = document.getElementById('zoomLevel');
       if (container) {
         container.style.transform = 'scale(' + currentZoom + ')';
+        
+        // Adjust container size to match scaled content (prevents empty space when zoomed out)
+        const svg = container.querySelector('svg');
+        if (svg) {
+          const naturalWidth = svg.getBBox().width + 20;
+          const naturalHeight = svg.getBBox().height + 20;
+          container.style.width = (naturalWidth * currentZoom) + 'px';
+          container.style.height = (naturalHeight * currentZoom) + 'px';
+        }
       }
       if (zoomLabel) {
         zoomLabel.textContent = Math.round(currentZoom * 100) + '%';
@@ -2134,7 +2203,8 @@ ${mermaidDef}
       const icon = this._getStatusIcon(status);
       
       // Calculate duration for completed or running nodes
-      let durationLabel = '';
+      // Always include a duration placeholder to maintain consistent node sizing
+      let durationLabel = ' | --';
       if (state?.startedAt) {
         const endTime = state.endedAt || Date.now();
         const duration = endTime - state.startedAt;
@@ -2235,8 +2305,9 @@ ${mermaidDef}
         // Get icon for group status (same as nodes)
         const icon = this._getStatusIcon(groupStatus);
         
-        // Calculate duration for groups (same as nodes)
-        let groupDurationLabel = '';
+        // Calculate duration for groups
+        // Always include a duration placeholder to maintain consistent sizing
+        let groupDurationLabel = ' | --';
         if (groupState?.startedAt) {
           const endTime = groupState.endedAt || Date.now();
           const duration = endTime - groupState.startedAt;
@@ -2255,14 +2326,15 @@ ${mermaidDef}
         };
         const colors = groupColors[groupStatus] || groupColors.pending;
         
-        const displayName = treeNode.name || groupPath;
+        // For groups, use full path name without truncation (subgraphs have more room)
+        // Add trailing non-breaking spaces to give Mermaid extra room for text measurement
+        // (regular spaces may be collapsed/trimmed)
+        const displayName = groupPath || treeNode.name;
         const escapedName = this._escapeForMermaid(displayName);
-        const truncatedName = this._truncateNodeLabel(escapedName, groupDurationLabel);
-        if (truncatedName !== escapedName) {
-          nodeTooltips[sanitizedGroupId] = displayName;
-        }
+        const nbsp = '\u00A0'; // non-breaking space
+        const padding = nbsp.repeat(6); // extra padding to prevent cutoff
         
-        lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedName}${groupDurationLabel}"]`);
+        lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${escapedName}${groupDurationLabel}${padding}"]`);
         
         const childIndent = currentIndent + '  ';
         
@@ -2414,8 +2486,9 @@ ${mermaidDef}
 
   /**
    * Maximum character length for a node label (name + duration) before truncation.
+   * Set to 45 to accommodate icon (2) + typical name (25) + duration (" | 00m 00s" = ~12).
    */
-  private static readonly NODE_LABEL_MAX_LENGTH = 25;
+  private static readonly NODE_LABEL_MAX_LENGTH = 45;
 
   /**
    * Truncate a node name so that the combined label (name + duration suffix)

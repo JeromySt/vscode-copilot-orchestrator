@@ -425,6 +425,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       }
     });
     
+    let isInitialLoad = true;
+    
     window.addEventListener('message', ev => {
       if (ev.data.type !== 'update') return;
       
@@ -488,10 +490,13 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         });
       });
       
-      // Auto-focus the first plan item for keyboard navigation
-      const firstPlan = document.querySelector('.plan-item');
-      if (firstPlan) {
-        firstPlan.focus();
+      // Auto-focus the first plan item only on initial load (don't steal focus on updates)
+      if (isInitialLoad) {
+        isInitialLoad = false;
+        const firstPlan = document.querySelector('.plan-item');
+        if (firstPlan) {
+          firstPlan.focus();
+        }
       }
     });
     

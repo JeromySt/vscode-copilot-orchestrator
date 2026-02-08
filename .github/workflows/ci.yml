@@ -44,6 +44,26 @@ jobs:
       if: runner.os != 'Linux'
       run: npm test
 
+  unit_coverage:
+    name: Unit tests + coverage (PR)
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+    - name: Install dependencies
+      run: npm ci
+    - name: Run unit tests + enforce coverage
+      run: xvfb-run -a npm run test:coverage
+
   package:
     name: Package VSIX
     needs: build
@@ -139,12 +159,10 @@ jobs:
         git push origin ${{ steps.version.outputs.tag }}
     
     - name: Create GitHub Pre-release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.tag }}
         name: Pre-release ${{ steps.version.outputs.tag }}
         files: '*.vsix'
         prerelease: true
         generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

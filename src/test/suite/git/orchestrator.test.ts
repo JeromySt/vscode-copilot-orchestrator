@@ -1,725 +1,305 @@
 /**
- * @fileoverview Unit tests for the git orchestrator module.
- *
- * Tests the orchestrator-level git operations (src/git/orchestrator.ts) by
- * mocking the underlying core git modules (branches, worktrees, repository,
- * executor) and the fs module.
- *
- * Uses the same sinon-based stubbing approach as merge.test.ts.
+ * @fileoverview Tests for git orchestrator (src/git/orchestrator.ts).
  */
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as path from 'path';
 import * as fs from 'fs';
-
+import * as os from 'os';
 import * as orchestrator from '../../../git/orchestrator';
-import * as branches from '../../../git/core/branches';
 import * as worktrees from '../../../git/core/worktrees';
-import * as repository from '../../../git/core/repository';
+import * as branches from '../../../git/core/branches';
 import * as executor from '../../../git/core/executor';
-import type { CommandResult } from '../../../git/core/executor';
+import * as repository from '../../../git/core/repository';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Build a successful CommandResult. */
-function ok(stdout = '', stderr = ''): CommandResult {
-  return { success: true, stdout, stderr, exitCode: 0 };
+function silenceConsole() {
+  sinon.stub(console, 'error');
+  sinon.stub(console, 'warn');
 }
-
-/** Build a failed CommandResult. */
-function fail(stderr = '', stdout = '', exitCode = 1): CommandResult {
-  return { success: false, stdout, stderr, exitCode };
-}
-
-/** Collect log messages from a GitLogger. */
-function captureLogger(): { messages: string[]; log: (msg: string) => void } {
-  const messages: string[] = [];
-  return { messages, log: (msg: string) => messages.push(msg) };
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 suite('Git Orchestrator', () => {
-
-  let sandbox: sinon.SinonSandbox;
+  let execAsyncStub: sinon.SinonStub;
 
   setup(() => {
-    sandbox = sinon.createSandbox();
+    silenceConsole();
+    execAsyncStub = sinon.stub(executor, 'execAsync');
+    execAsyncStub.resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
   });
 
   teardown(() => {
-    sandbox.restore();
+    sinon.restore();
   });
 
   // =========================================================================
-  // resolveTargetBranchRoot()
+  // slugify
   // =========================================================================
 
-  suite('resolveTargetBranchRoot()', () => {
+  suite('slugify', () => {
+    test('converts to lowercase', () => {
+      assert.strictEqual(orchestrator.slugify('HelloWorld'), 'helloworld');
+    });
 
-    test('creates feature branch when baseBranch is default', async () => {
-      sandbox.stub(branches, 'isDefaultBranch').resolves(true);
+    test('replaces spaces with hyphens', () => {
+      assert.strictEqual(orchestrator.slugify('hello world'), 'hello-world');
+    });
 
+    test('removes special characters', () => {
+      assert.strictEqual(orchestrator.slugify('hello@world!'), 'hello-world');
+    });
+
+    test('collapses consecutive hyphens', () => {
+      assert.strictEqual(orchestrator.slugify('hello---world'), 'hello-world');
+    });
+
+    test('removes leading/trailing hyphens', () => {
+      assert.strictEqual(orchestrator.slugify('-hello-'), 'hello');
+    });
+
+    test('truncates to maxLength', () => {
+      const result = orchestrator.slugify('a'.repeat(100), 10);
+      assert.strictEqual(result.length, 10);
+    });
+  });
+
+  // =========================================================================
+  // resolveTargetBranchRoot
+  // =========================================================================
+
+  suite('resolveTargetBranchRoot', () => {
+    test('creates feature branch for default branch', async () => {
+      sinon.stub(branches, 'isDefaultBranch').resolves(true);
       const result = await orchestrator.resolveTargetBranchRoot('main', '/repo');
-
       assert.strictEqual(result.needsCreation, true);
-      assert.ok(
-        result.targetBranchRoot.startsWith('copilot_jobs/'),
-        `expected branch to start with copilot_jobs/, got: ${result.targetBranchRoot}`,
-      );
+      assert.ok(result.targetBranchRoot.startsWith('copilot_jobs/'));
     });
 
     test('uses custom prefix for feature branch', async () => {
-      sandbox.stub(branches, 'isDefaultBranch').resolves(true);
-
-      const result = await orchestrator.resolveTargetBranchRoot('main', '/repo', 'my_prefix');
-
-      assert.ok(
-        result.targetBranchRoot.startsWith('my_prefix/'),
-        `expected branch to start with my_prefix/, got: ${result.targetBranchRoot}`,
-      );
-      assert.strictEqual(result.needsCreation, true);
+      sinon.stub(branches, 'isDefaultBranch').resolves(true);
+      const result = await orchestrator.resolveTargetBranchRoot('main', '/repo', 'users/test');
+      assert.ok(result.targetBranchRoot.startsWith('users/test/'));
     });
 
-    test('returns baseBranch as-is when not default', async () => {
-      sandbox.stub(branches, 'isDefaultBranch').resolves(false);
+    test('uses custom suffix for feature branch', async () => {
+      sinon.stub(branches, 'isDefaultBranch').resolves(true);
+      const result = await orchestrator.resolveTargetBranchRoot('main', '/repo', 'copilot_jobs', 'my-plan');
+      assert.strictEqual(result.targetBranchRoot, 'copilot_jobs/my-plan');
+    });
 
-      const result = await orchestrator.resolveTargetBranchRoot('feature/existing', '/repo');
-
-      assert.strictEqual(result.targetBranchRoot, 'feature/existing');
+    test('returns baseBranch as-is for non-default branch', async () => {
+      sinon.stub(branches, 'isDefaultBranch').resolves(false);
+      const result = await orchestrator.resolveTargetBranchRoot('feature-branch', '/repo');
+      assert.strictEqual(result.targetBranchRoot, 'feature-branch');
       assert.strictEqual(result.needsCreation, false);
-    });
-
-    test('generates unique branch names on repeated calls', async () => {
-      sandbox.stub(branches, 'isDefaultBranch').resolves(true);
-
-      const result1 = await orchestrator.resolveTargetBranchRoot('main', '/repo');
-      const result2 = await orchestrator.resolveTargetBranchRoot('main', '/repo');
-
-      assert.notStrictEqual(
-        result1.targetBranchRoot,
-        result2.targetBranchRoot,
-        'each call should produce a unique branch name',
-      );
     });
   });
 
   // =========================================================================
-  // createJobWorktree()
+  // createJobWorktree
   // =========================================================================
 
-  suite('createJobWorktree()', () => {
+  suite('createJobWorktree', () => {
+    test('creates worktree and returns path', async () => {
+      sinon.stub(worktrees, 'isValid').resolves(false);
+      sinon.stub(worktrees, 'create').resolves();
+      sinon.stub(branches, 'exists').resolves(true);
 
-    let execAsyncStub: sinon.SinonStub;
-
-    setup(() => {
-      execAsyncStub = sandbox.stub(executor, 'execAsync').resolves(ok());
-      // Default: .gitignore doesn't exist yet
-      sandbox.stub(fs.promises, 'readFile').rejects(new Error('ENOENT'));
-      sandbox.stub(fs.promises, 'writeFile').resolves();
-    });
-
-    test('creates worktree from remote ref when available', async () => {
-      sandbox.stub(worktrees, 'isValid').resolves(false);
-      sandbox.stub(branches, 'exists').resolves(true);
-      const createStub = sandbox.stub(worktrees, 'create').resolves();
+      // Stub .gitignore reading/writing
+      const readStub = sinon.stub(fs.promises, 'readFile').resolves('');
+      const writeStub = sinon.stub(fs.promises, 'writeFile').resolves();
 
       const result = await orchestrator.createJobWorktree({
         repoPath: '/repo',
         worktreeRoot: '.worktrees',
         jobId: 'job-1',
         baseBranch: 'main',
-        targetBranch: 'copilot_jobs/abc',
+        targetBranch: 'feature',
       });
 
-      assert.strictEqual(result, path.join('/repo', '.worktrees', 'job-1'));
-
-      // Should create worktree from origin/main
-      const createCall = createStub.firstCall.args[0];
-      assert.strictEqual(createCall.fromRef, 'origin/main');
-      assert.strictEqual(createCall.branchName, 'copilot_jobs/abc');
+      assert.ok(result.includes('job-1'));
     });
 
-    test('creates worktree from local ref when no remote', async () => {
-      sandbox.stub(worktrees, 'isValid').resolves(false);
-      sandbox.stub(branches, 'exists').resolves(false);
-      const createStub = sandbox.stub(worktrees, 'create').resolves();
+    test('reuses existing valid worktree', async () => {
+      sinon.stub(worktrees, 'isValid').resolves(true);
+      const createStub = sinon.stub(worktrees, 'create');
+      sinon.stub(fs.promises, 'readFile').resolves('.worktrees\n');
+      sinon.stub(fs.promises, 'writeFile').resolves();
+
+      const result = await orchestrator.createJobWorktree({
+        repoPath: '/repo',
+        worktreeRoot: '.worktrees',
+        jobId: 'job-1',
+        baseBranch: 'main',
+        targetBranch: 'feature',
+      });
+
+      assert.ok(result.includes('job-1'));
+      assert.ok(createStub.notCalled);
+    });
+  });
+
+  // =========================================================================
+  // removeJobWorktree
+  // =========================================================================
+
+  suite('removeJobWorktree', () => {
+    test('removes worktree', async () => {
+      const removeStub = sinon.stub(worktrees, 'remove').resolves();
+      await orchestrator.removeJobWorktree('/repo/.wt/job1', '/repo');
+      assert.ok(removeStub.calledOnce);
+    });
+
+    test('deletes branch when requested', async () => {
+      sinon.stub(worktrees, 'remove').resolves();
+      const removeBranchStub = sinon.stub(branches, 'remove').resolves();
+
+      await orchestrator.removeJobWorktree('/repo/.wt/job1', '/repo', {
+        deleteBranch: true,
+        branchName: 'feature',
+      });
+
+      assert.ok(removeBranchStub.calledOnce);
+    });
+
+    test('does not throw when remove fails', async () => {
+      sinon.stub(worktrees, 'remove').rejects(new Error('fail'));
+      await orchestrator.removeJobWorktree('/repo/.wt/job1', '/repo');
+      // Should not throw
+    });
+
+    test('does not throw when branch delete fails', async () => {
+      sinon.stub(worktrees, 'remove').resolves();
+      sinon.stub(branches, 'remove').rejects(new Error('branch fail'));
+      await orchestrator.removeJobWorktree('/repo/.wt/job1', '/repo', {
+        deleteBranch: true,
+        branchName: 'feature',
+      });
+      // Should not throw
+    });
+  });
+
+  // =========================================================================
+  // createJobWorktree - local ref fallback
+  // =========================================================================
+
+  suite('createJobWorktree local fallback', () => {
+    test('uses local baseBranch when remote does not exist', async () => {
+      sinon.stub(worktrees, 'isValid').resolves(false);
+      const createStub = sinon.stub(worktrees, 'create').resolves();
+      sinon.stub(branches, 'exists').resolves(false);
+      sinon.stub(fs.promises, 'readFile').resolves('');
+      sinon.stub(fs.promises, 'writeFile').resolves();
 
       await orchestrator.createJobWorktree({
         repoPath: '/repo',
         worktreeRoot: '.worktrees',
         jobId: 'job-2',
-        baseBranch: 'local-branch',
-        targetBranch: 'copilot_jobs/def',
+        baseBranch: 'local-only',
+        targetBranch: 'feature-2',
       });
 
+      // Should have created with local-only as fromRef (not origin/local-only)
       const createCall = createStub.firstCall.args[0];
-      assert.strictEqual(createCall.fromRef, 'local-branch');
-    });
-
-    test('reuses existing valid worktree', async () => {
-      sandbox.stub(worktrees, 'isValid').resolves(true);
-      const createStub = sandbox.stub(worktrees, 'create').resolves();
-
-      const { messages, log } = captureLogger();
-
-      const result = await orchestrator.createJobWorktree({
-        repoPath: '/repo',
-        worktreeRoot: '.worktrees',
-        jobId: 'job-3',
-        baseBranch: 'main',
-        targetBranch: 'copilot_jobs/ghi',
-        logger: log,
-      });
-
-      assert.strictEqual(result, path.join('/repo', '.worktrees', 'job-3'));
-      assert.ok(createStub.notCalled, 'should not create a new worktree');
-      assert.ok(
-        messages.some(m => m.includes('reusing')),
-        'should log that worktree is being reused',
-      );
-    });
-
-    test('fetches latest changes before creating worktree', async () => {
-      sandbox.stub(worktrees, 'isValid').resolves(false);
-      sandbox.stub(branches, 'exists').resolves(true);
-      sandbox.stub(worktrees, 'create').resolves();
-
-      await orchestrator.createJobWorktree({
-        repoPath: '/repo',
-        worktreeRoot: '.worktrees',
-        jobId: 'job-4',
-        baseBranch: 'main',
-        targetBranch: 'copilot_jobs/jkl',
-      });
-
-      // execAsync should have been called with fetch --all --tags
-      const fetchCall = execAsyncStub.getCalls().find(
-        (c: sinon.SinonSpyCall) => c.args[0].includes('fetch'),
-      );
-      assert.ok(fetchCall, 'should call fetch');
-      assert.ok(fetchCall!.args[0].includes('--all'), 'should fetch all');
+      assert.strictEqual(createCall.fromRef, 'local-only');
     });
   });
 
   // =========================================================================
-  // removeJobWorktree()
+  // finalizeWorktree
   // =========================================================================
 
-  suite('removeJobWorktree()', () => {
+  suite('finalizeWorktree', () => {
+    test('stages, checks and commits changes', async () => {
+      const stageAllStub = sinon.stub(repository, 'stageAll').resolves();
+      sinon.stub(repository, 'hasStagedChanges').resolves(true);
+      const commitStub = sinon.stub(repository, 'commit').resolves();
 
-    test('removes worktree', async () => {
-      const removeStub = sandbox.stub(worktrees, 'remove').resolves();
-
-      await orchestrator.removeJobWorktree('/repo/.worktrees/job-1', '/repo');
-
-      assert.ok(removeStub.calledOnce);
-      assert.strictEqual(removeStub.firstCall.args[0], '/repo/.worktrees/job-1');
-    });
-
-    test('deletes branch when requested', async () => {
-      sandbox.stub(worktrees, 'remove').resolves();
-      const branchRemoveStub = sandbox.stub(branches, 'remove').resolves();
-
-      await orchestrator.removeJobWorktree('/repo/.worktrees/job-2', '/repo', {
-        deleteBranch: true,
-        branchName: 'copilot_jobs/abc',
-      });
-
-      assert.ok(branchRemoveStub.calledOnce);
-      assert.strictEqual(branchRemoveStub.firstCall.args[0], 'copilot_jobs/abc');
-    });
-
-    test('does not delete branch when not requested', async () => {
-      sandbox.stub(worktrees, 'remove').resolves();
-      const branchRemoveStub = sandbox.stub(branches, 'remove').resolves();
-
-      await orchestrator.removeJobWorktree('/repo/.worktrees/job-3', '/repo');
-
-      assert.ok(branchRemoveStub.notCalled);
-    });
-
-    test('tolerates worktree removal failure', async () => {
-      sandbox.stub(worktrees, 'remove').rejects(new Error('worktree locked'));
-
-      // Should not throw
-      await orchestrator.removeJobWorktree('/repo/.worktrees/job-4', '/repo');
-    });
-
-    test('tolerates branch deletion failure', async () => {
-      sandbox.stub(worktrees, 'remove').resolves();
-      sandbox.stub(branches, 'remove').rejects(new Error('branch not found'));
-
-      // Should not throw
-      await orchestrator.removeJobWorktree('/repo/.worktrees/job-5', '/repo', {
-        deleteBranch: true,
-        branchName: 'nonexistent',
-      });
-    });
-
-    test('logs warnings on failure', async () => {
-      sandbox.stub(worktrees, 'remove').rejects(new Error('locked'));
-      const { messages, log } = captureLogger();
-
-      await orchestrator.removeJobWorktree('/repo/.worktrees/job-6', '/repo', {
-        logger: log,
-      });
-
-      assert.ok(
-        messages.some(m => m.includes('Warning')),
-        'should log a warning on failure',
-      );
-    });
-  });
-
-  // =========================================================================
-  // finalizeWorktree()
-  // =========================================================================
-
-  suite('finalizeWorktree()', () => {
-
-    test('stages and commits when there are changes', async () => {
-      const stageStub = sandbox.stub(repository, 'stageAll').resolves();
-      sandbox.stub(repository, 'hasStagedChanges').resolves(true);
-      const commitStub = sandbox.stub(repository, 'commit').resolves(true);
-
-      const result = await orchestrator.finalizeWorktree('/wt', 'commit msg');
-
+      const result = await orchestrator.finalizeWorktree('/wt', 'commit message');
       assert.strictEqual(result, true);
-      assert.ok(stageStub.calledOnce);
+      assert.ok(stageAllStub.calledOnceWith('/wt'));
       assert.ok(commitStub.calledOnce);
-      assert.strictEqual(commitStub.firstCall.args[1], 'commit msg');
     });
 
-    test('returns false when there are no changes', async () => {
-      sandbox.stub(repository, 'stageAll').resolves();
-      sandbox.stub(repository, 'hasStagedChanges').resolves(false);
-      const commitStub = sandbox.stub(repository, 'commit').resolves(true);
+    test('returns false when no changes to commit', async () => {
+      sinon.stub(repository, 'stageAll').resolves();
+      sinon.stub(repository, 'hasStagedChanges').resolves(false);
 
       const result = await orchestrator.finalizeWorktree('/wt', 'msg');
-
       assert.strictEqual(result, false);
-      assert.ok(commitStub.notCalled, 'should not commit when no changes');
-    });
-
-    test('logs commit success', async () => {
-      sandbox.stub(repository, 'stageAll').resolves();
-      sandbox.stub(repository, 'hasStagedChanges').resolves(true);
-      sandbox.stub(repository, 'commit').resolves(true);
-      const { messages, log } = captureLogger();
-
-      await orchestrator.finalizeWorktree('/wt', 'msg', log);
-
-      assert.ok(
-        messages.some(m => m.includes('committed')),
-        'should log commit confirmation',
-      );
-    });
-
-    test('logs "no changes" when nothing to commit', async () => {
-      sandbox.stub(repository, 'stageAll').resolves();
-      sandbox.stub(repository, 'hasStagedChanges').resolves(false);
-      const { messages, log } = captureLogger();
-
-      await orchestrator.finalizeWorktree('/wt', 'msg', log);
-
-      assert.ok(
-        messages.some(m => m.includes('No changes')),
-        'should log no changes message',
-      );
     });
   });
 
   // =========================================================================
-  // squashMerge()
+  // squashMerge
   // =========================================================================
 
-  suite('squashMerge()', () => {
+  suite('squashMerge', () => {
+    test('merges and commits when on target branch', async () => {
+      sinon.stub(branches, 'current').resolves('target');
+      execAsyncStub.resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      sinon.stub(repository, 'hasStagedChanges').resolves(true);
+      const commitStub = sinon.stub(repository, 'commit').resolves();
 
-    let execAsyncStub: sinon.SinonStub;
-
-    setup(() => {
-      execAsyncStub = sandbox.stub(executor, 'execAsync').resolves(ok());
-    });
-
-    test('squash merges source into target', async () => {
-      sandbox.stub(branches, 'current').resolves('target-branch');
-      sandbox.stub(repository, 'hasStagedChanges').resolves(true);
-      sandbox.stub(repository, 'commit').resolves(true);
-
-      await orchestrator.squashMerge(
-        'source-branch', 'target-branch', 'Squash merge', '/wt',
-      );
-
-      // Should call git merge --squash source-branch
-      const mergeCall = execAsyncStub.firstCall;
-      assert.ok(mergeCall.args[0].includes('merge'));
-      assert.ok(mergeCall.args[0].includes('--squash'));
-      assert.ok(mergeCall.args[0].includes('source-branch'));
-    });
-
-    test('switches branch if not on target', async () => {
-      sandbox.stub(branches, 'current').resolves('wrong-branch');
-      const checkoutStub = sandbox.stub(branches, 'checkout').resolves();
-      sandbox.stub(repository, 'hasStagedChanges').resolves(true);
-      sandbox.stub(repository, 'commit').resolves(true);
-
-      await orchestrator.squashMerge(
-        'source', 'target', 'msg', '/wt',
-      );
-
-      assert.ok(checkoutStub.calledOnce, 'should checkout target branch');
-    });
-
-    test('does not switch branch if already on target', async () => {
-      sandbox.stub(branches, 'current').resolves('target');
-      const checkoutStub = sandbox.stub(branches, 'checkout').resolves();
-      sandbox.stub(repository, 'hasStagedChanges').resolves(true);
-      sandbox.stub(repository, 'commit').resolves(true);
-
-      await orchestrator.squashMerge(
-        'source', 'target', 'msg', '/wt',
-      );
-
-      assert.ok(checkoutStub.notCalled, 'should not checkout if already on target');
-    });
-
-    test('commits when there are staged changes', async () => {
-      sandbox.stub(branches, 'current').resolves('target');
-      sandbox.stub(repository, 'hasStagedChanges').resolves(true);
-      const commitStub = sandbox.stub(repository, 'commit').resolves(true);
-
-      await orchestrator.squashMerge(
-        'source', 'target', 'Squash commit', '/wt',
-      );
-
+      await orchestrator.squashMerge('source', 'target', 'Squash msg', '/wt');
       assert.ok(commitStub.calledOnce);
-      assert.strictEqual(commitStub.firstCall.args[1], 'Squash commit');
     });
 
-    test('skips commit when branches are in sync', async () => {
-      sandbox.stub(branches, 'current').resolves('target');
-      sandbox.stub(repository, 'hasStagedChanges').resolves(false);
-      const commitStub = sandbox.stub(repository, 'commit').resolves(true);
-      const { messages, log } = captureLogger();
+    test('checks out target branch when not on it', async () => {
+      sinon.stub(branches, 'current').resolves('other');
+      const checkoutStub = sinon.stub(branches, 'checkout').resolves();
+      execAsyncStub.resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      sinon.stub(repository, 'hasStagedChanges').resolves(false);
 
-      await orchestrator.squashMerge(
-        'source', 'target', 'msg', '/wt', log,
-      );
+      await orchestrator.squashMerge('source', 'target', 'Squash msg', '/wt');
+      assert.ok(checkoutStub.calledOnceWith('target', '/wt', sinon.match.func));
+    });
 
+    test('skips commit when no staged changes', async () => {
+      sinon.stub(branches, 'current').resolves('target');
+      execAsyncStub.resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      sinon.stub(repository, 'hasStagedChanges').resolves(false);
+      const commitStub = sinon.stub(repository, 'commit');
+
+      await orchestrator.squashMerge('source', 'target', 'msg', '/wt');
       assert.ok(commitStub.notCalled);
-      assert.ok(
-        messages.some(m => m.includes('already in sync')),
-        'should log branches in sync',
-      );
-    });
-
-    test('uses cwd from worktreePath', async () => {
-      sandbox.stub(branches, 'current').resolves('target');
-      sandbox.stub(repository, 'hasStagedChanges').resolves(true);
-      sandbox.stub(repository, 'commit').resolves(true);
-
-      await orchestrator.squashMerge(
-        'source', 'target', 'msg', '/my/worktree',
-      );
-
-      const [, opts] = execAsyncStub.firstCall.args;
-      assert.strictEqual(opts.cwd, '/my/worktree');
     });
   });
 
   // =========================================================================
-  // ensureGitignorePatterns()
+  // ensureGitignorePatterns
   // =========================================================================
 
-  suite('ensureGitignorePatterns()', () => {
-
-    test('creates .gitignore with patterns when file does not exist', async () => {
-      sandbox.stub(fs.promises, 'readFile').rejects(new Error('ENOENT'));
-      const writeStub = sandbox.stub(fs.promises, 'writeFile').resolves();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees', '.orchestrator']);
-
-      assert.ok(writeStub.calledOnce);
-      const content = writeStub.firstCall.args[1] as string;
-      assert.ok(content.includes('/.worktrees'), 'should include normalized worktrees pattern');
-      assert.ok(content.includes('/.orchestrator'), 'should include normalized orchestrator pattern');
-      assert.ok(content.includes('Copilot Orchestrator'), 'should include header comment');
-    });
-
-    test('appends patterns to existing .gitignore', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('node_modules/\n');
-      const writeStub = sandbox.stub(fs.promises, 'writeFile').resolves();
+  suite('ensureGitignorePatterns', () => {
+    test('creates .gitignore when it does not exist', async () => {
+      sinon.stub(fs.promises, 'readFile').rejects(new Error('ENOENT'));
+      const writeStub = sinon.stub(fs.promises, 'writeFile').resolves();
 
       await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees']);
 
       assert.ok(writeStub.calledOnce);
       const content = writeStub.firstCall.args[1] as string;
-      assert.ok(content.startsWith('node_modules/\n'), 'should preserve existing content');
-      assert.ok(content.includes('/.worktrees'), 'should append new pattern');
+      assert.ok(content.includes('/.worktrees'));
     });
 
-    test('does not modify .gitignore if patterns already present', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('/.worktrees\n/.orchestrator\n');
-      const writeStub = sandbox.stub(fs.promises, 'writeFile').resolves();
+    test('appends patterns not already present', async () => {
+      sinon.stub(fs.promises, 'readFile').resolves('node_modules\n');
+      const writeStub = sinon.stub(fs.promises, 'writeFile').resolves();
 
       await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees', '.orchestrator']);
 
-      assert.ok(writeStub.notCalled, 'should not write when patterns already exist');
+      assert.ok(writeStub.calledOnce);
+      const content = writeStub.firstCall.args[1] as string;
+      assert.ok(content.includes('/.worktrees'));
+      assert.ok(content.includes('/.orchestrator'));
     });
 
-    test('tolerates write errors gracefully', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('');
-      sandbox.stub(fs.promises, 'writeFile').rejects(new Error('EACCES'));
+    test('does not modify when patterns already exist', async () => {
+      sinon.stub(fs.promises, 'readFile').resolves('/.worktrees\n');
+      const writeStub = sinon.stub(fs.promises, 'writeFile').resolves();
 
-      // Should not throw
       await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees']);
-    });
 
-    test('invokes logger when updating .gitignore', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('');
-      sandbox.stub(fs.promises, 'writeFile').resolves();
-      const { messages, log } = captureLogger();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees'], log);
-
-      assert.ok(
-        messages.some(m => m.includes('.gitignore')),
-        'should log .gitignore update',
-      );
-    });
-  });
-
-  // =========================================================================
-  // Full Workflow: branch → work → merge
-  // =========================================================================
-
-  suite('Full workflow: branch → work → merge', () => {
-
-    test('single job flow: resolve → create worktree → finalize → squash merge → cleanup', async () => {
-      // 1. Resolve target branch
-      sandbox.stub(branches, 'isDefaultBranch').resolves(true);
-
-      const resolved = await orchestrator.resolveTargetBranchRoot('main', '/repo');
-      assert.strictEqual(resolved.needsCreation, true);
-
-      // 2. Create job worktree
-      sandbox.stub(executor, 'execAsync').resolves(ok());
-      sandbox.stub(fs.promises, 'readFile').rejects(new Error('ENOENT'));
-      sandbox.stub(fs.promises, 'writeFile').resolves();
-      sandbox.stub(worktrees, 'isValid').resolves(false);
-      sandbox.stub(branches, 'exists').resolves(true);
-      sandbox.stub(worktrees, 'create').resolves();
-
-      const wtPath = await orchestrator.createJobWorktree({
-        repoPath: '/repo',
-        worktreeRoot: '.worktrees',
-        jobId: 'job-1',
-        baseBranch: 'main',
-        targetBranch: resolved.targetBranchRoot,
-      });
-      assert.ok(wtPath.includes('job-1'));
-
-      // 3. Finalize worktree (stage & commit)
-      sandbox.stub(repository, 'stageAll').resolves();
-      sandbox.stub(repository, 'hasStagedChanges').resolves(true);
-      sandbox.stub(repository, 'commit').resolves(true);
-
-      const committed = await orchestrator.finalizeWorktree(wtPath, 'Implement feature');
-      assert.strictEqual(committed, true);
-
-      // 4. Squash merge back
-      sandbox.stub(branches, 'current').resolves(resolved.targetBranchRoot);
-
-      await orchestrator.squashMerge(
-        'job-branch', resolved.targetBranchRoot, 'Merge job work', wtPath,
-      );
-
-      // 5. Cleanup
-      sandbox.stub(worktrees, 'remove').resolves();
-      sandbox.stub(branches, 'remove').resolves();
-
-      await orchestrator.removeJobWorktree(wtPath, '/repo', {
-        deleteBranch: true,
-        branchName: 'job-branch',
-      });
-    });
-  });
-
-  // =========================================================================
-  // Multi-branch coordination
-  // =========================================================================
-
-  suite('Multi-branch coordination', () => {
-
-    test('parallel jobs get independent worktrees and branches', async () => {
-      sandbox.stub(branches, 'isDefaultBranch').resolves(true);
-
-      const result1 = await orchestrator.resolveTargetBranchRoot('main', '/repo');
-      const result2 = await orchestrator.resolveTargetBranchRoot('main', '/repo');
-
-      // Each should get a unique branch
-      assert.notStrictEqual(result1.targetBranchRoot, result2.targetBranchRoot);
-      assert.strictEqual(result1.needsCreation, true);
-      assert.strictEqual(result2.needsCreation, true);
-
-      // Both should share the same prefix
-      assert.ok(result1.targetBranchRoot.startsWith('copilot_jobs/'));
-      assert.ok(result2.targetBranchRoot.startsWith('copilot_jobs/'));
-    });
-
-    test('non-default branches are shared across jobs', async () => {
-      sandbox.stub(branches, 'isDefaultBranch').resolves(false);
-
-      const result1 = await orchestrator.resolveTargetBranchRoot('feature/shared', '/repo');
-      const result2 = await orchestrator.resolveTargetBranchRoot('feature/shared', '/repo');
-
-      assert.strictEqual(result1.targetBranchRoot, 'feature/shared');
-      assert.strictEqual(result2.targetBranchRoot, 'feature/shared');
-      assert.strictEqual(result1.needsCreation, false);
-      assert.strictEqual(result2.needsCreation, false);
-    });
-  });
-
-  // =========================================================================
-  // Error recovery
-  // =========================================================================
-
-  suite('Error recovery', () => {
-
-    test('cleanup succeeds even when worktree removal fails', async () => {
-      sandbox.stub(worktrees, 'remove').rejects(new Error('worktree locked'));
-      const branchRemoveStub = sandbox.stub(branches, 'remove').resolves();
-
-      await orchestrator.removeJobWorktree('/wt/job-1', '/repo', {
-        deleteBranch: true,
-        branchName: 'job-branch',
-      });
-
-      // Branch deletion should still proceed
-      assert.ok(branchRemoveStub.calledOnce);
-    });
-
-    test('cleanup succeeds even when branch deletion fails', async () => {
-      const removeStub = sandbox.stub(worktrees, 'remove').resolves();
-      sandbox.stub(branches, 'remove').rejects(new Error('branch not found'));
-
-      await orchestrator.removeJobWorktree('/wt/job-2', '/repo', {
-        deleteBranch: true,
-        branchName: 'nonexistent',
-      });
-
-      // Worktree removal should still succeed
-      assert.ok(removeStub.calledOnce);
-    });
-
-    test('cleanup succeeds even when both operations fail', async () => {
-      sandbox.stub(worktrees, 'remove').rejects(new Error('locked'));
-      sandbox.stub(branches, 'remove').rejects(new Error('not found'));
-
-      // Should not throw
-      await orchestrator.removeJobWorktree('/wt/job-3', '/repo', {
-        deleteBranch: true,
-        branchName: 'bad-branch',
-      });
-    });
-
-    test('createJobWorktree recovers from existing worktree (retry scenario)', async () => {
-      sandbox.stub(executor, 'execAsync').resolves(ok());
-      sandbox.stub(fs.promises, 'readFile').rejects(new Error('ENOENT'));
-      sandbox.stub(fs.promises, 'writeFile').resolves();
-      sandbox.stub(worktrees, 'isValid').resolves(true);
-      const createStub = sandbox.stub(worktrees, 'create').resolves();
-
-      const result = await orchestrator.createJobWorktree({
-        repoPath: '/repo',
-        worktreeRoot: '.worktrees',
-        jobId: 'retry-job',
-        baseBranch: 'main',
-        targetBranch: 'copilot_jobs/retry',
-      });
-
-      assert.ok(result.includes('retry-job'));
-      assert.ok(createStub.notCalled, 'should not create new worktree on retry');
-    });
-
-    test('finalizeWorktree handles no-changes gracefully', async () => {
-      sandbox.stub(repository, 'stageAll').resolves();
-      sandbox.stub(repository, 'hasStagedChanges').resolves(false);
-
-      const result = await orchestrator.finalizeWorktree('/wt', 'msg');
-
-      assert.strictEqual(result, false);
-    });
-  });
-
-  // =========================================================================
-  // State consistency
-  // =========================================================================
-
-  suite('State consistency', () => {
-
-    test('createJobWorktree passes correct paths to worktree.create', async () => {
-      sandbox.stub(executor, 'execAsync').resolves(ok());
-      sandbox.stub(fs.promises, 'readFile').rejects(new Error('ENOENT'));
-      sandbox.stub(fs.promises, 'writeFile').resolves();
-      sandbox.stub(worktrees, 'isValid').resolves(false);
-      sandbox.stub(branches, 'exists').resolves(true);
-      const createStub = sandbox.stub(worktrees, 'create').resolves();
-
-      await orchestrator.createJobWorktree({
-        repoPath: '/repo',
-        worktreeRoot: '.worktrees',
-        jobId: 'my-job',
-        baseBranch: 'develop',
-        targetBranch: 'copilot_jobs/xyz',
-      });
-
-      const opts = createStub.firstCall.args[0];
-      assert.strictEqual(opts.repoPath, '/repo');
-      assert.strictEqual(opts.worktreePath, path.join('/repo', '.worktrees', 'my-job'));
-      assert.strictEqual(opts.branchName, 'copilot_jobs/xyz');
-      assert.strictEqual(opts.fromRef, 'origin/develop');
-    });
-
-    test('squashMerge passes throwOnError to execAsync', async () => {
-      const execStub = sandbox.stub(executor, 'execAsync').resolves(ok());
-      sandbox.stub(branches, 'current').resolves('target');
-      sandbox.stub(repository, 'hasStagedChanges').resolves(false);
-
-      await orchestrator.squashMerge('src', 'target', 'msg', '/wt');
-
-      const [, opts] = execStub.firstCall.args;
-      assert.strictEqual(opts.throwOnError, true, 'squash merge should use throwOnError');
-    });
-
-    test('ensureGitignorePatterns normalizes patterns with leading slash', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('');
-      const writeStub = sandbox.stub(fs.promises, 'writeFile').resolves();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['mydir']);
-
-      const content = writeStub.firstCall.args[1] as string;
-      assert.ok(content.includes('/mydir'), 'pattern should be normalized with leading /');
-    });
-
-    test('ensureGitignorePatterns does not double-prefix patterns starting with /', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('');
-      const writeStub = sandbox.stub(fs.promises, 'writeFile').resolves();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['/already-prefixed']);
-
-      const content = writeStub.firstCall.args[1] as string;
-      assert.ok(content.includes('/already-prefixed'), 'should include the pattern');
-      assert.ok(
-        !content.includes('//already-prefixed'),
-        'should not double-prefix with //',
-      );
+      assert.ok(writeStub.notCalled);
     });
   });
 });

@@ -31,32 +31,87 @@ Ask Copilot to list plans to verify:
 
 ## Available MCP Tools
 
-### Plan Creation
+The orchestrator exposes two API surfaces: the **plan-based API** (legacy, full-featured)
+and the **node-centric API** (simplified, no plan/group ID required for lookups).
+
+### Plan-Based API (Legacy)
+
+#### Plan Creation
 
 | Tool | Description |
 |------|-------------|
-| `create_copilot_plan` | Create a DAG of work nodes with dependencies |
-| `create_copilot_job` | Create a single job (convenience wrapper) |
+| `create_copilot_plan` | Create a DAG of work nodes with dependencies and optional groups |
+| `create_copilot_job` | Create a single job (convenience wrapper — internally becomes a one-node plan) |
 
-### Status & Queries
-
-| Tool | Description |
-|------|-------------|
-| `get_copilot_plan_status` | Get plan execution status and progress |
-| `list_copilot_plans` | List all plans with their status |
-| `get_copilot_node_details` | Get details about a specific node |
-| `get_copilot_node_logs` | Get execution logs for a node |
-| `get_copilot_node_attempts` | Get all retry attempts for a node |
-
-### Control
+#### Status & Queries
 
 | Tool | Description |
 |------|-------------|
-| `cancel_copilot_plan` | Cancel a running plan |
+| `get_copilot_plan_status` | Get plan execution status, progress, and per-node states |
+| `list_copilot_plans` | List all plans with their status (optionally filter by status) |
+| `get_copilot_node_details` | Get details about a specific node by plan ID + node ID |
+| `get_copilot_node_logs` | Get execution logs for a node, filterable by phase (`prechecks`, `work`, `postchecks`, `commit`, `all`) |
+| `get_copilot_node_attempts` | Get all retry attempts for a node with timestamps, errors, and per-phase step statuses |
+
+#### Control
+
+| Tool | Description |
+|------|-------------|
+| `cancel_copilot_plan` | Cancel a running plan and all its jobs |
 | `delete_copilot_plan` | Delete a plan and its history |
-| `retry_copilot_plan` | Retry failed nodes in a plan |
-| `retry_copilot_plan_node` | Retry a specific node |
-| `get_copilot_plan_node_failure_context` | Get failure details for retry |
+| `retry_copilot_plan` | Retry all failed nodes (or specific nodes) in a plan, with optional replacement work |
+| `retry_copilot_plan_node` | Retry a single failed node with optional replacement work |
+| `get_copilot_plan_node_failure_context` | Get failure details including logs, failed phase, error message, and worktree path |
+
+### Node-Centric API
+
+These tools provide a simplified interface where nodes are looked up globally — no
+plan or group ID is required for queries and control operations.
+
+#### Node Creation
+
+| Tool | Description |
+|------|-------------|
+| `create_copilot_node` | Create one or more work nodes with dependencies and optional visual grouping |
+
+#### Status & Queries
+
+| Tool | Description |
+|------|-------------|
+| `get_copilot_node` | Get detailed information about a node (global lookup by UUID or producer_id) |
+| `list_copilot_nodes` | List nodes with optional filters by group ID, group name, or status |
+
+#### Control
+
+| Tool | Description |
+|------|-------------|
+| `retry_copilot_node` | Retry a specific failed node (global lookup, no plan ID needed) |
+| `get_copilot_node_failure_context` | Get failure context for a node (global lookup, no plan ID needed) |
+
+## Default Branch Protection
+
+When the `baseBranch` is a **default branch** (e.g., `main` or `master`), the orchestrator
+automatically creates a feature branch instead of committing directly to it. This prevents
+accidental modifications to your primary branch.
+
+**How it works:**
+
+1. The orchestrator detects the repository's default branch via `origin/HEAD`, then
+   `init.defaultBranch` git config, and finally falls back to `main` / `master`.
+2. If `baseBranch` matches the default branch, a new feature branch is created under
+   the `copilot_plan/<uuid>` namespace.
+3. If `baseBranch` is a non-default branch (e.g., `feature/my-work`), it is used as-is.
+
+**Example:**
+
+| `baseBranch` | Behavior |
+|---|---|
+| `main` (default) | Auto-creates `copilot_plan/<uuid>` branch |
+| `master` (default) | Auto-creates `copilot_plan/<uuid>` branch |
+| `feature/auth` | Uses `feature/auth` directly |
+
+This means you can safely pass `baseBranch: "main"` — the orchestrator will never commit
+directly to your default branch.
 
 ## Example Usage
 
@@ -81,6 +136,32 @@ Copilot will call `create_copilot_plan` with:
 }
 ```
 
+### Using the Node-Centric API
+
+The same plan can be created with the node-centric API:
+
+```
+@workspace Create nodes for a build and test pipeline
+```
+
+Copilot will call `create_copilot_node` with:
+```json
+{
+  "nodes": [
+    { "producer_id": "build", "task": "Build the project", "work": "npm run build", "dependencies": [] },
+    { "producer_id": "test", "task": "Run tests", "work": "npm test", "dependencies": ["build"] }
+  ]
+}
+```
+
+With the node-centric API, subsequent queries are simpler — no plan ID needed:
+
+```
+@workspace What's the status of the "build" node?
+```
+
+Copilot calls `get_copilot_node` with `{ "node_id": "build" }`.
+
 ### Checking Plan Status
 
 ```
@@ -98,9 +179,37 @@ When a job fails, ask Copilot to investigate:
 ```
 
 Copilot will:
-1. Call `get_copilot_plan_node_failure_context` to get logs
+1. Call `get_copilot_plan_node_failure_context` (or `get_copilot_node_failure_context`) to get logs
 2. Analyze the error
-3. Suggest a `retry_copilot_plan_node` call with corrected work
+3. Suggest a `retry_copilot_plan_node` (or `retry_copilot_node`) call with corrected work
+
+### Retrying with Replacement Work
+
+You can retry a failed node with new work instructions:
+
+```
+@workspace Retry the build node with "npm run build -- --verbose" instead
+```
+
+Copilot will call `retry_copilot_node` with:
+```json
+{
+  "node_id": "build",
+  "newWork": "npm run build -- --verbose"
+}
+```
+
+For agent work, you can resume the existing Copilot session or start fresh:
+```json
+{
+  "node_id": "refactor-auth",
+  "newWork": {
+    "type": "agent",
+    "instructions": "# Fix Build\n\n1. Check the error in tsconfig.json\n2. Fix the missing import",
+    "resumeSession": true
+  }
+}
+```
 
 ## Using Agent Work
 

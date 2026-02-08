@@ -21,11 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Work evidence validation**: Nodes can prove work completion via evidence files (`.orchestrator/evidence/{nodeId}.json`) for tasks that don't produce file changes (external API calls, analysis, validation). Supports `expectsNoChanges` flag for validation-only nodes
 - **Node builder**: New `buildNodes()` function that creates `NodeInstance[]` directly with DAG validation and dependency resolution
 - **Legacy MCP adapters**: Backward-compatible wrappers that translate old plan-based tool calls to the new node-centric API
+- **Pause/resume plan functionality**: Plans can be paused and resumed, allowing users to halt execution and continue later
+- **Default branch protection**: Prevents orchestrated work from targeting the repository's default branch directly
+- **Pan/zoom for diagrams**: Plan detail diagrams now support pan and zoom for navigating large dependency graphs
 
 ### Changed
 - **Commands cleanup**: Removed 14 unimplemented commands from `package.json`, keeping only actually registered commands (MCP connection, plan/node details, cancel/delete/refresh)
 - **Simplified node interface**: `NodeInstance` now combines node definition and runtime state into a single type (ID, task, status, attempts, dependencies, git context, step statuses)
 - **Plan-to-group terminology**: Internal transition from plan-centric to group-centric node management
+- **Group labels show full path**: Group labels in the UI now display the full hierarchical path for clarity
+- **Node duration placeholders**: Nodes display duration placeholders while running, showing elapsed time
+
+### Fixed
+- **Worktree race conditions**: Added per-repo mutex to prevent concurrent worktree operations from conflicting
+- **Phase reporting for merge failures**: Merge failure phases are now correctly reported in node status
 
 ### Removed
 - Unregistered commands: `createJob`, `cancelJob`, `startJob`, `inspectStatus`, `showJobDetails`, `showJobSection`, `retryJob`, `deleteJob`, `openJobWorktree`, `mergeCompletedJob`, `resolveConflicts`, `generateTests`, `produceDocs`, `showLogs`, `cleanupOrphans`, `showDagDetails`, `cancelDag`
