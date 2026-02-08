@@ -71,6 +71,62 @@ Target Branch ──→ Job A → SHA1 ──┤
                             Squash merge SHA4 → main
 ```
 
+## Merge Phases
+
+Each node in a plan progresses through well-defined phases. Merging occurs in two distinct phases:
+
+```
+merge-fi → prechecks → work → commit → postchecks → merge-ri
+```
+
+| Phase | Description |
+|-------|-------------|
+| **`merge-fi`** | Forward Integration — merge dependency commits into the node's worktree |
+| **`prechecks`** | Pre-execution validation (e.g., build, lint) |
+| **`work`** | Copilot agent executes the task |
+| **`commit`** | Changes are committed in the worktree |
+| **`postchecks`** | Post-execution validation (e.g., tests) |
+| **`merge-ri`** | Reverse Integration — merge leaf node's commit to the target branch |
+
+If any phase fails, the `failedPhase` field is set on the node state, enabling targeted retries that skip already-completed phases.
+
+### Forward Integration (FI)
+
+When a node has dependencies, their completed commits must be merged into the node's worktree before work begins.
+
+**Process:**
+1. The worktree is created at the first dependency's commit (detached HEAD)
+2. Additional dependency commits are merged into the worktree one at a time
+3. Each merge uses `git merge` with fast-forward allowed
+4. Conflicts are resolved automatically via Copilot CLI
+5. After successful FI, consumption is acknowledged to all dependencies
+
+```
+Dependency A (commit SHA1)  ─┐
+                              ├──→  Node X worktree (created at SHA1, merges SHA2)
+Dependency B (commit SHA2)  ─┘
+```
+
+**Consumption tracking:** After FI, the node acknowledges consumption of each dependency's output. This is tracked via `consumedByDependents` on each dependency's state, which drives worktree cleanup eligibility (see below).
+
+### Reverse Integration (RI)
+
+When a leaf node completes and the plan has a `targetBranch`, the node's completed commit is merged to the target branch.
+
+**Fast path (`git merge-tree`):**
+```bash
+# Compute merge result as a tree object (no checkout needed)
+git merge-tree --write-tree <target-branch> <completed-commit>
+
+# Create squash commit from tree (single parent = target branch)
+git commit-tree <tree-sha> -p <target-sha> -m "message"
+
+# Update branch ref
+git branch -f <target> <new-commit>
+```
+
+**Conflict path:** If `merge-tree` detects conflicts, falls back to main repo merge with Copilot CLI conflict resolution (see below).
+
 ## Merge Strategies
 
 ### 1. Fast Path: `git merge-tree` (Git 2.38+)
@@ -201,33 +257,67 @@ When a job has multiple parents (consumes from multiple jobs):
 - Child can see all commits from ancestors
 - Important for understanding context during execution
 
-## Merge Lock
+## Per-Repository Mutex Locking
 
-To prevent race conditions when multiple jobs complete simultaneously:
+Git's `worktree add` and `worktree remove` commands have a race condition when run in parallel on the same repository, causing `"failed to read .git/worktrees/<id>/commondir"` errors. To prevent this, all worktree operations are serialized per-repository using a mutex.
 
 ```typescript
-const mergeLocks = new Map<string, Promise<void>>();
+const repoMutexes = new Map<string, Promise<void>>();
 
-async function acquireMergeLock(repoPath: string, targetBranch: string) {
-  const lockKey = `${repoPath}:${targetBranch}`;
-  
-  // Wait for existing lock
-  while (mergeLocks.has(lockKey)) {
-    await mergeLocks.get(lockKey);
+async function acquireRepoMutex(repoPath: string): Promise<() => void> {
+  const normalizedPath = path.resolve(repoPath).toLowerCase();
+
+  // Wait for any existing operation to complete
+  while (repoMutexes.has(normalizedPath)) {
+    await repoMutexes.get(normalizedPath);
   }
-  
-  // Create new lock
-  let release;
-  mergeLocks.set(lockKey, new Promise(r => release = () => {
-    mergeLocks.delete(lockKey);
-    r();
-  }));
-  
-  return release;
+
+  // Create a new promise that will resolve when we release
+  let release: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  repoMutexes.set(normalizedPath, promise);
+
+  return () => {
+    repoMutexes.delete(normalizedPath);
+    release!();
+  };
 }
 ```
 
-This ensures merges to the same target branch are serialized, preventing conflicts from concurrent merge attempts.
+**Key design decisions:**
+
+| Aspect | Choice | Rationale |
+|--------|--------|-----------|
+| **Lock scope** | Per-repository (normalized path) | Different repos can run in parallel safely |
+| **Serialization** | All worktree add/remove ops | Git's internal `.git/worktrees/` directory is the shared resource |
+| **Release** | Try/finally in every caller | Guarantees release even on error |
+| **Path normalization** | `path.resolve().toLowerCase()` | Prevents duplicate locks from path variations |
+
+Every worktree operation (`create`, `createDetached`, `remove`, `removeSafe`, `createOrReuseDetached`) acquires the repo mutex before executing any git commands:
+
+```typescript
+const releaseMutex = await acquireRepoMutex(repoPath);
+try {
+  await execAsyncOrThrow(['worktree', 'add', '--detach', worktreePath, fromRef], repoPath);
+} finally {
+  releaseMutex();
+}
+```
+
+> **Note:** This mutex serializes only git worktree operations, not merge operations. Merges use `git merge-tree` (which operates on the object store) or `git merge --squash` (which operates in the main repo), neither of which conflicts with worktree add/remove.
+
+### Race Condition Prevention Strategy
+
+The mutex prevents three classes of race conditions:
+
+1. **Concurrent worktree creation** — Two jobs starting simultaneously both call `git worktree add`. Without serialization, both may try to write to `.git/worktrees/` at the same time, corrupting the worktree registry.
+
+2. **Create/remove interleaving** — A job cleanup removing a worktree while another job is being created. The `remove` may delete shared git metadata that `add` is still writing.
+
+3. **Concurrent worktree removal** — Multiple jobs completing at the same time all try to remove their worktrees. Git's worktree prune and remove operations can interfere with each other when run in parallel.
 
 ## Conflict Resolution
 
@@ -246,12 +336,47 @@ The `prefer` setting (`ours` or `theirs`) is configurable in VS Code settings:
 
 ## Worktree Cleanup
 
-### Automatic Cleanup
+### Automatic Cleanup (During Execution)
 
-Worktrees are cleaned up automatically when:
-- Job completes (success or failure)
-- Plan completes
-- Merge worktree finishes (in `finally` block)
+Worktrees are cleaned up eagerly during plan execution to minimize disk usage:
+
+**Non-leaf nodes:** Cleaned up once all downstream dependents have completed Forward Integration (consumed the node's output). This is tracked via the `consumedByDependents` array on each node's state.
+
+```
+Node A completes → Node B does FI (consumes A) → Node C does FI (consumes A) → A's worktree cleaned up
+```
+
+**Leaf nodes:** Cleaned up after successful Reverse Integration merge to the target branch.
+
+The `cleanUpSuccessfulWork` plan-level setting controls whether automatic cleanup occurs (default: `true`).
+
+### Cleanup on Plan Cancellation
+
+When a plan is canceled (`cancel()`) or deleted (`delete()`), worktree cleanup follows a specific sequence:
+
+```
+cancel(planId)
+  ├── 1. Cancel all running/scheduled nodes in executor
+  ├── 2. Transition all non-terminal nodes to 'canceled' (via sm.cancelAll())
+  └── 3. Persist updated state
+
+delete(planId)
+  ├── 1. cancel(planId)  — stops all work
+  ├── 2. cleanupPlanResources(plan)  — runs in BACKGROUND (non-blocking)
+  │     ├── Collect all worktree paths from nodeStates
+  │     ├── removeSafe() each worktree (acquires repo mutex internally)
+  │     └── Remove log files from executor storage
+  ├── 3. Remove from in-memory maps
+  ├── 4. Remove from persistence
+  └── 5. Emit 'planDeleted' event
+```
+
+**Key design decisions:**
+- `cancel()` stops work but does **not** clean up worktrees — the plan remains inspectable
+- `delete()` cancels first, then cleans up resources **in the background** to avoid blocking the UI
+- Cleanup errors are logged but never thrown — partial cleanup is acceptable
+- Each `removeSafe()` call acquires the per-repo mutex, so concurrent cleanups are serialized
+- With detached HEAD worktrees, there are no branches to clean up
 
 ### Manual Cleanup
 
@@ -319,5 +444,7 @@ This error should not occur with the detached HEAD approach. If it does:
 
 1. **Submodules**: Worktrees use symlinks to main repo's submodules (fast)
 2. **Large repos**: Worktree creation shares objects with main repo (no clone)
-3. **Conflict-free merges**: Use fast path (no disk I/O for working dir)
-4. **Parallel jobs**: Each job has isolated worktree, no lock contention
+3. **Conflict-free merges**: RI uses `git merge-tree` fast path (no disk I/O for working dir)
+4. **Parallel jobs**: Each job has isolated worktree; only worktree add/remove is serialized per-repo
+5. **Mutex overhead**: The per-repo mutex adds minimal latency — only `git worktree add/remove` commands are serialized, not the actual job work
+6. **Eager cleanup**: Non-leaf worktrees are removed as soon as all dependents consume them, reducing peak disk usage
