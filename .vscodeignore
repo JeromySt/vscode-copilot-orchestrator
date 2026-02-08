@@ -2,9 +2,11 @@
 .vscode-test/**
 .worktrees/**
 src/**
+out/**
 test/**
 docs/**
 scripts/**
+node_modules/**
 .gitignore
 .github/**
 coverage/**
@@ -15,6 +17,7 @@ coverage/**
 **/*.md
 !README.md
 tsconfig.json
+esbuild.js
 eslint.config.mjs
 .eslintrc.json
 .eslintrc.js

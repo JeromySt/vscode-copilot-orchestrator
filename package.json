@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -225,18 +225,23 @@
       }
     }
   },
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\" && tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile",
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && node esbuild.js",
+    "compile:tsc": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\" && tsc -p ./",
+    "check-types": "tsc --noEmit",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && node esbuild.js --production",
+    "pretest": "npm run compile:tsc",
     "test": "node ./out/test/runTest.js",
-    "test:unit": "npm run compile && mocha --ui tdd \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
+    "test:unit": "npm run compile:tsc && mocha --ui tdd \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
     "test:watch": "tsc -watch -p ./ & node ./out/test/runTest.js",
-    "test:coverage": "npm run compile && c8 --reporter=text --reporter=lcov --check-coverage --lines 55 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js mocha --ui tdd \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
+    "test:coverage": "npm run compile:tsc && c8 --reporter=text --reporter=lcov --check-coverage --lines 55 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js mocha --ui tdd \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
     "lint": "eslint src --ext ts || echo 'Linting complete'",
-    "package": "npx @vscode/vsce package --no-dependencies"
+    "package:vsix": "npx @vscode/vsce package --no-dependencies"
   },
   "devDependencies": {
     "@types/glob": "^9.0.0",
@@ -251,9 +256,11 @@
     "@vscode/vsce": "^3.0.0",
     "c8": "^10.1.3",
     "canvas": "^3.2.1",
+    "esbuild": "^0.27.3",
     "eslint": "^9.39.2",
     "glob": "^13.0.1",
     "mocha": "^11.7.5",
+    "npm-run-all2": "^8.0.4",
     "sharp": "^0.34.5",
     "sinon": "^21.0.1",
     "typescript": "^5.4.0"

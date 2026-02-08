@@ -23,9 +23,6 @@ jobs:
     - name: Install dependencies
       run: npm ci
     
-    - name: Compile TypeScript
-      run: npm run compile
-    
     - name: Package VSIX
       run: npx @vscode/vsce package
 
@@ -61,9 +58,6 @@ jobs:
     
     - name: Install dependencies
       run: npm ci
-    
-    - name: Compile TypeScript
-      run: npm run compile
 
     - name: Azure Login (OIDC — no secrets stored)
       uses: azure/login@v2
@@ -91,9 +85,6 @@ jobs:
     
     - name: Install dependencies
       run: npm ci
-    
-    - name: Compile TypeScript
-      run: npm run compile
     
     - name: Publish to Open VSX
       run: npx ovsx publish

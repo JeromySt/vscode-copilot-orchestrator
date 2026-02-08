@@ -34,7 +34,7 @@ jobs:
       continue-on-error: true
     
     - name: Compile TypeScript
-      run: npm run compile
+      run: npm run compile:tsc
     
     - name: Run tests (Ubuntu)
       if: runner.os == 'Linux'
@@ -82,9 +82,6 @@ jobs:
     
     - name: Install dependencies
       run: npm ci
-    
-    - name: Compile TypeScript
-      run: npm run compile
     
     - name: Package VSIX
       run: npx @vscode/vsce package
