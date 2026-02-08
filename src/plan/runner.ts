@@ -891,7 +891,34 @@ export class PlanRunner extends EventEmitter {
   // ============================================================================
   
   /**
-   * Cancel all non-terminal nodes in a Plan and signal running executors to abort.
+   * Pause a Plan - stops scheduling new work but preserves worktrees for resume.
+   * Running nodes will complete but no new nodes will be started.
+   *
+   * @param planId - Plan identifier.
+   * @returns `true` if the plan was found and paused.
+   */
+  pause(planId: string): boolean {
+    const plan = this.plans.get(planId);
+    if (!plan) return false;
+    
+    if (plan.isPaused) {
+      log.info(`Plan already paused: ${planId}`);
+      return true;
+    }
+    
+    log.info(`Pausing Plan: ${planId}`);
+    plan.isPaused = true;
+    
+    // Persist
+    this.persistence.save(plan);
+    this.emit('planUpdated', planId);
+    
+    return true;
+  }
+  
+  /**
+   * Cancel all non-terminal nodes in a Plan, signal running executors to abort,
+   * and clean up all worktrees since canceled plans cannot be resumed.
    *
    * @param planId - Plan identifier.
    * @returns `true` if the plan was found and cancellation initiated.
@@ -912,6 +939,11 @@ export class PlanRunner extends EventEmitter {
     
     // Cancel all non-terminal nodes
     sm.cancelAll();
+    
+    // Clean up worktrees in background (since cancel is terminal, we don't need them)
+    this.cleanupPlanResources(plan).catch(err => {
+      log.error(`Failed to cleanup canceled Plan resources`, { planId, error: err.message });
+    });
     
     // Persist
     this.persistence.save(plan);
@@ -1030,6 +1062,12 @@ export class PlanRunner extends EventEmitter {
     
     log.info(`Resuming Plan: ${planId}`);
     
+    // Clear paused state if set
+    if (plan.isPaused) {
+      plan.isPaused = false;
+      this.emit('planUpdated', planId);
+    }
+    
     // Clear endedAt so it gets recalculated when the plan completes
     // This handles the case where the plan was previously marked complete
     if (plan.endedAt) {
@@ -1119,7 +1157,12 @@ export class PlanRunner extends EventEmitter {
       const status = sm.computePlanStatus();
       
       // Skip completed Plans
-      if (status !== 'pending' && status !== 'running') {
+      if (status !== 'pending' && status !== 'running' && status !== 'paused') {
+        continue;
+      }
+      
+      // Skip paused Plans (don't schedule new work, but let running work complete)
+      if (plan.isPaused) {
         continue;
       }
       
@@ -1967,7 +2010,7 @@ export class PlanRunner extends EventEmitter {
       `Prefer '${prefer}' changes when there are conflicts. ` +
       `Resolve all conflicts, stage the changes with 'git add', and commit with message '${commitMessage}'`;
     
-    const copilotCmd = `copilot -p ${JSON.stringify(mergeInstruction)} --allow-all-paths --allow-all-tools`;
+    const copilotCmd = `copilot -p ${JSON.stringify(mergeInstruction)} --stream off --allow-all-paths --allow-all-tools`;
     
     log.info(`Running Copilot CLI to resolve conflicts...`, { cwd });
     
@@ -2270,6 +2313,114 @@ export class PlanRunner extends EventEmitter {
   }
   
   // ============================================================================
+  // FORCE FAIL STUCK NODES
+  // ============================================================================
+  
+  /**
+   * Force a stuck running node to failed state.
+   *
+   * Use this when a job's process has crashed but the node is still
+   * showing as "running". This allows the node to be retried.
+   *
+   * @param planId  - Plan ID.
+   * @param nodeId  - Node ID to force fail.
+   * @param reason  - Optional reason for the forced failure.
+   * @returns `{ success: true }` if force fail succeeded, or `{ success: false, error }`.
+   */
+  forceFailNode(planId: string, nodeId: string, reason?: string): { success: boolean; error?: string } {
+    const plan = this.plans.get(planId);
+    if (!plan) {
+      return { success: false, error: `Plan not found: ${planId}` };
+    }
+    
+    const node = plan.nodes.get(nodeId);
+    if (!node) {
+      return { success: false, error: `Node not found: ${nodeId}` };
+    }
+    
+    const nodeState = plan.nodeStates.get(nodeId);
+    if (!nodeState) {
+      return { success: false, error: `Node state not found: ${nodeId}` };
+    }
+    
+    if (nodeState.status !== 'running' && nodeState.status !== 'scheduled') {
+      return { success: false, error: `Node is not running or scheduled (current: ${nodeState.status})` };
+    }
+    
+    const sm = this.stateMachines.get(planId);
+    if (!sm) {
+      return { success: false, error: `State machine not found for Plan: ${planId}` };
+    }
+    
+    const failReason = reason || 'Force failed by user (process may have crashed)';
+    
+    log.info(`Force failing stuck node: ${node.name}`, {
+      planId,
+      nodeId,
+      previousStatus: nodeState.status,
+      reason: failReason,
+    });
+    
+    // Cancel any active execution tracking
+    if (this.executor) {
+      this.executor.cancel(planId, nodeId);
+    }
+    
+    // Force transition to failed state
+    nodeState.status = 'failed';
+    nodeState.endedAt = Date.now();
+    nodeState.error = failReason;
+    
+    // Increment version counters for UI change detection
+    nodeState.version = (nodeState.version || 0) + 1;
+    plan.stateVersion = (plan.stateVersion || 0) + 1;
+    
+    // Note: attempts was already incremented when the node started running,
+    // so we don't increment it again here
+    
+    // Update last attempt info
+    nodeState.lastAttempt = {
+      phase: 'work',
+      startTime: nodeState.startedAt || Date.now(),
+      endTime: Date.now(),
+      error: failReason,
+    };
+    
+    // Add to attempt history with execution logs preserved
+    if (!nodeState.attemptHistory) {
+      nodeState.attemptHistory = [];
+    }
+    
+    // Get any logs that were captured before the crash
+    const logs = this.getNodeLogs(planId, nodeId);
+    
+    nodeState.attemptHistory.push({
+      attemptNumber: nodeState.attempts || 1,
+      startedAt: nodeState.startedAt || Date.now(),
+      endedAt: Date.now(),
+      status: 'failed',
+      failedPhase: 'work',
+      error: failReason,
+      copilotSessionId: nodeState.copilotSessionId,
+      stepStatuses: nodeState.stepStatuses,
+      worktreePath: nodeState.worktreePath,
+      baseCommit: nodeState.baseCommit,
+      logs,
+      workUsed: node.type === 'job' ? (node as JobNode).work : undefined,
+    });
+    
+    // Emit events
+    this.emit('nodeTransition', planId, nodeId, 'running', 'failed');
+    this.emit('nodeUpdated', planId, nodeId);
+    this.emit('planUpdated', planId);
+    
+    // Persist the updated state
+    this.persistence.save(plan);
+    
+    return { success: true };
+  }
+
+  // ============================================================================
   // RETRY FAILED NODES
   // ============================================================================
   
@@ -2347,6 +2498,45 @@ export class PlanRunner extends EventEmitter {
         jobNode.work = newWork;
         nodeState.copilotSessionId = undefined;
       }
+    } else if (!options?.newWork && node.type === 'job') {
+      // No new work provided - auto-generate failure-fixing instructions for agent jobs
+      const jobNode = node as JobNode;
+      const isAgentWork = typeof jobNode.work === 'string' 
+        ? jobNode.work.startsWith('@agent')
+        : (jobNode.work && 'type' in jobNode.work && jobNode.work.type === 'agent');
+      
+      if (isAgentWork && nodeState.copilotSessionId) {
+        // This is an agent job with an existing session - generate fix instructions
+        const failureContext = this.getNodeFailureContext(planId, nodeId);
+        
+        if (!('error' in failureContext)) {
+          // Build retry instructions that ask AI to fix the issue
+          const truncatedLogs = failureContext.logs.length > 2000 
+            ? '...' + failureContext.logs.slice(-2000) 
+            : failureContext.logs;
+          
+          const retryInstructions = `@agent The previous attempt at this task failed. Please analyze the error and fix it, then continue the original work.
+
+## Previous Error
+Phase: ${failureContext.phase}
+Error: ${failureContext.errorMessage}
+
+## Recent Logs
+\`\`\`
+${truncatedLogs}
+\`\`\`
+
+## Instructions
+1. Analyze what went wrong in the previous attempt
+2. Fix the root cause of the failure
+3. Complete the original task: ${(node as JobNode).task || node.name}
+
+Resume working in the existing worktree and session context.`;
+
+          jobNode.work = retryInstructions;
+          log.info(`Auto-generated retry instructions for agent job: ${node.name}`);
+        }
+      }
     }
     
     // Reset node state for retry
@@ -2379,6 +2569,26 @@ export class PlanRunner extends EventEmitter {
     // Note: We preserve worktreePath and baseCommit so the work can continue in the same worktree
     // If clearWorktree is true, we'll need to reset git state
     if (options?.clearWorktree && nodeState.worktreePath) {
+      // Check if this node has consumed from upstream dependencies
+      // If so, clearing the worktree would lose those merged commits
+      const upstreamWithCommits: string[] = [];
+      for (const depId of node.dependencies) {
+        const depState = plan.nodeStates.get(depId);
+        if (depState?.completedCommit) {
+          const depNode = plan.nodes.get(depId);
+          upstreamWithCommits.push(depNode?.name || depId);
+        }
+      }
+      
+      if (upstreamWithCommits.length > 0) {
+        // Don't allow clearing - would lose upstream merges
+        return { 
+          success: false, 
+          error: `Cannot clear worktree: would lose merged commits from upstream dependencies (${upstreamWithCommits.join(', ')}). ` +
+                 `Retry without clearWorktree to preserve upstream work, or manually merge upstream commits after reset.`
+        };
+      }
+      
       // Reset detached HEAD to base commit
       const resetWorktree = async () => {
         try {
