@@ -454,6 +454,12 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       
+      // Preserve focus: remember which plan was focused before re-render
+      const focusedEl = document.activeElement;
+      const focusedPlanId = focusedEl && focusedEl.classList.contains('plan-item') 
+        ? focusedEl.dataset.id 
+        : null;
+      
       container.innerHTML = Plans.map(plan => {
         const progressClass = plan.status === 'failed' ? 'failed' : 
                              plan.status === 'succeeded' ? 'succeeded' : '';
@@ -490,8 +496,13 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         });
       });
       
-      // Auto-focus the first plan item only on initial load (don't steal focus on updates)
-      if (isInitialLoad) {
+      // Restore focus to the previously focused plan, or focus first on initial load
+      if (focusedPlanId) {
+        const targetEl = document.querySelector('.plan-item[data-id="' + focusedPlanId + '"]');
+        if (targetEl) {
+          targetEl.focus();
+        }
+      } else if (isInitialLoad) {
         isInitialLoad = false;
         const firstPlan = document.querySelector('.plan-item');
         if (firstPlan) {
