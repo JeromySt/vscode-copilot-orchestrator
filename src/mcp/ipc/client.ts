@@ -108,7 +108,7 @@ export class McpIpcClient {
               
               // Process any remaining buffered data
               if (authBuffer.trim()) {
-                this.handleData(Buffer.from(authBuffer));
+                this.handleData(authBuffer);
               }
               
               resolve();
@@ -161,7 +161,7 @@ export class McpIpcClient {
   /**
    * Handle incoming data from the server.
    */
-  private handleData(data: Buffer): void {
+  private handleData(data: Buffer | string): void {
     this.buffer += data.toString();
     
     // Process complete lines (newline-delimited JSON)
