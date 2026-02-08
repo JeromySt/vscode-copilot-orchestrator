@@ -607,7 +607,7 @@ export class NodeDetailPanel {
       ${duration ? `
       <div class="meta-item">
         <div class="meta-label">Duration</div>
-        <div class="meta-value">${duration}</div>
+        <div class="meta-value" id="duration-timer"${!state.endedAt && state.startedAt ? ` data-started-at="${state.startedAt}"` : ''}>${duration}</div>
       </div>
       ` : ''}
       ${state.copilotSessionId ? `
@@ -1049,6 +1049,16 @@ export class NodeDetailPanel {
       vscode.postMessage({ type: 'getProcessStats' });
       setInterval(() => {
         vscode.postMessage({ type: 'getProcessStats' });
+      }, 1000);
+    }
+
+    // Live duration timer for running jobs
+    const durationTimer = document.getElementById('duration-timer');
+    if (durationTimer && durationTimer.hasAttribute('data-started-at')) {
+      const startedAt = parseInt(durationTimer.getAttribute('data-started-at'), 10);
+      setInterval(() => {
+        const elapsed = Math.round((Date.now() - startedAt) / 1000);
+        durationTimer.textContent = formatDuration(elapsed * 1000);
       }, 1000);
     }
 

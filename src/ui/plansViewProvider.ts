@@ -299,6 +299,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     .plan-status.failed { background: rgba(244, 135, 113, 0.2); color: var(--vscode-testing-iconFailed); }
     .plan-status.partial { background: rgba(255, 204, 0, 0.2); color: var(--vscode-editorWarning-foreground); }
     .plan-status.pending { background: rgba(133, 133, 133, 0.2); color: var(--vscode-descriptionForeground); }
+    .plan-status.paused { background: rgba(255, 165, 0, 0.2); color: #ffa500; }
+    .plan-status.canceled { background: rgba(133, 133, 133, 0.2); color: var(--vscode-descriptionForeground); }
     
     .plan-details {
       font-size: 11px;
