@@ -295,7 +295,7 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
     validation.spec.baseBranch = baseBranch;
     
     validation.spec.targetBranch = await resolveTargetBranch(
-      baseBranch, repoPath, validation.spec.targetBranch
+      baseBranch, repoPath, validation.spec.targetBranch, validation.spec.name
     );
     
     // Create the Plan
@@ -362,7 +362,7 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
   try {
     const repoPath = ctx.workspacePath;
     const baseBranch = await resolveBaseBranch(repoPath, args.baseBranch);
-    const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.targetBranch);
+    const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.targetBranch, args.name);
     
     const plan = ctx.PlanRunner.enqueueJob({
       name: args.name,
@@ -719,6 +719,53 @@ export async function handleCancelPlan(args: any, ctx: PlanHandlerContext): Prom
     message: success 
       ? `Plan ${args.id} has been canceled` 
       : `Failed to cancel Plan ${args.id}`,
+  };
+}
+
+/**
+ * Handle the `pause_copilot_plan` MCP tool call.
+ *
+ * Pauses a running plan. Running jobs will complete but no new work will be scheduled.
+ * Worktrees are preserved so the plan can be resumed later.
+ *
+ * @param args - Must contain `id` (Plan UUID).
+ * @param ctx  - Handler context.
+ * @returns `{ success, message }`.
+ */
+export async function handlePausePlan(args: any, ctx: PlanHandlerContext): Promise<any> {
+  const fieldError = validateRequired(args, ['id']);
+  if (fieldError) return fieldError;
+  
+  const success = ctx.PlanRunner.pause(args.id);
+  
+  return {
+    success,
+    message: success 
+      ? `Plan ${args.id} has been paused. Running jobs will complete but no new work will be scheduled.` 
+      : `Failed to pause Plan ${args.id}`,
+  };
+}
+
+/**
+ * Handle the `resume_copilot_plan` MCP tool call.
+ *
+ * Resumes a paused plan. Allows new work to be scheduled again.
+ *
+ * @param args - Must contain `id` (Plan UUID).
+ * @param ctx  - Handler context.
+ * @returns `{ success, message }`.
+ */
+export async function handleResumePlan(args: any, ctx: PlanHandlerContext): Promise<any> {
+  const fieldError = validateRequired(args, ['id']);
+  if (fieldError) return fieldError;
+  
+  const success = ctx.PlanRunner.resume(args.id);
+  
+  return {
+    success,
+    message: success 
+      ? `Plan ${args.id} has been resumed. New work will be scheduled.` 
+      : `Failed to resume Plan ${args.id}`,
   };
 }
 

@@ -291,6 +291,7 @@ export interface GroupExecutionState {
 export type PlanStatus = 
   | 'pending'    // Not started
   | 'running'    // At least one node running
+  | 'paused'     // Paused by user (can resume)
   | 'succeeded'  // All nodes succeeded
   | 'failed'     // At least one node failed (not blocked)
   | 'partial'    // Some succeeded, some failed
@@ -365,6 +366,9 @@ export interface PlanInstance {
   
   /** Max parallel jobs */
   maxParallel: number;
+  
+  /** Whether the plan is paused (no new work scheduled, worktrees preserved) */
+  isPaused?: boolean;
   
   /** Aggregated work summary */
   workSummary?: WorkSummary;

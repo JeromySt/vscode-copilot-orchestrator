@@ -197,6 +197,30 @@ WORKFLOW:
     },
 
     {
+      name: 'force_fail_copilot_node',
+      description: `Force a stuck running node to failed state.
+
+Use this when a node's process has crashed or hung but the node is still 
+showing as "running" or "scheduled". This allows the node to be retried.
+
+Only works on nodes in 'running' or 'scheduled' state.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          node_id: {
+            type: 'string',
+            description: 'Node ID to force fail'
+          },
+          reason: {
+            type: 'string',
+            description: 'Optional reason for the forced failure (for logging)'
+          }
+        },
+        required: ['node_id']
+      }
+    },
+
+    {
       name: 'get_copilot_node_failure_context',
       description: `Get detailed failure context for a failed node. No group/plan ID required.
 

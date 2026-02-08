@@ -7,6 +7,7 @@
  * @module mcp/handlers/utils
  */
 
+import * as vscode from 'vscode';
 import { ToolHandlerContext } from '../types';
 import { PlanInstance } from '../../plan/types';
 import { PlanRunner } from '../../plan/runner';
@@ -160,39 +161,62 @@ export async function resolveBaseBranch(repoPath: string, requested?: string): P
  * @param baseBranch - The resolved base branch name.
  * @param repoPath   - Absolute path to the git repository.
  * @param requested  - Explicitly requested target branch name (used as-is if provided).
+ * @param planName   - Optional plan/job name to use for generating a readable branch name.
  * @returns Resolved target branch name.
  */
 export async function resolveTargetBranch(
   baseBranch: string,
   repoPath: string,
-  requested?: string
+  requested?: string,
+  planName?: string
 ): Promise<string> {
-  // If explicit branch requested, ensure it exists (create from base if needed)
+  // Helper to generate a new feature branch
+  const generateFeatureBranch = async (): Promise<string> => {
+    // Use VS Code's git.branchPrefix setting if configured, otherwise fallback to 'copilot_plan'
+    const gitConfig = vscode.workspace.getConfiguration('git');
+    const userPrefix = gitConfig.get<string>('branchPrefix', '').trim();
+    const prefix = userPrefix || 'copilot_plan';
+    
+    // Generate a readable branch suffix from the plan name, or use short UUID
+    const branchSuffix = planName ? git.orchestrator.slugify(planName) : undefined;
+    
+    const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
+      baseBranch,
+      repoPath,
+      prefix,
+      branchSuffix
+    );
+    if (needsCreation) {
+      const exists = await git.branches.exists(targetBranchRoot, repoPath);
+      if (!exists) {
+        await git.branches.create(targetBranchRoot, baseBranch, repoPath);
+      }
+    }
+    return targetBranchRoot;
+  };
+
+  // If explicit branch requested, check if it's a protected default branch
   if (requested) {
     try {
+      // NEVER allow merging back to a default branch (main, master, etc.)
+      const isDefault = await git.branches.isDefaultBranch(requested, repoPath);
+      if (isDefault) {
+        // Requested branch is protected - generate a feature branch instead
+        return await generateFeatureBranch();
+      }
+      
+      // Not a default branch - ensure it exists (create from base if needed)
       const exists = await git.branches.exists(requested, repoPath);
       if (!exists) {
         await git.branches.create(requested, baseBranch, repoPath);
       }
+      return requested;
     } catch (err) {
       // In test environments or invalid paths, branch operations may fail
-      // Log but continue - the branch will be created later or already exists
-    }
-    return requested;
-  }
-
-  const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
-    baseBranch,
-    repoPath,
-    'copilot_plan'
-  );
-
-  if (needsCreation) {
-    const exists = await git.branches.exists(targetBranchRoot, repoPath);
-    if (!exists) {
-      await git.branches.create(targetBranchRoot, baseBranch, repoPath);
+      // Fall through to generate a safe feature branch
     }
   }
 
-  return targetBranchRoot;
+  // No explicit request or error in validation - generate a new feature branch
+  return await generateFeatureBranch();
 }

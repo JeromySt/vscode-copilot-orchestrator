@@ -292,6 +292,10 @@ export class PlanStateMachine extends EventEmitter {
     if (running > 0) {
       // Any child running → group is running
       newStatus = 'running';
+      // Clear endedAt when group is running again (e.g., after retry)
+      if (groupState.endedAt) {
+        groupState.endedAt = undefined;
+      }
     } else if (failed > 0 || blocked > 0) {
       // Any child failed/blocked → group is failed
       newStatus = 'failed';
@@ -464,7 +468,7 @@ export class PlanStateMachine extends EventEmitter {
    * @returns Derived {@link PlanStatus} (`'pending'`, `'running'`, `'succeeded'`, etc.).
    */
   computePlanStatus(): PlanStatus {
-    return computePlanStatusHelper(this.plan.nodeStates.values(), !!this.plan.startedAt);
+    return computePlanStatusHelper(this.plan.nodeStates.values(), !!this.plan.startedAt, !!this.plan.isPaused);
   }
   
   /**
@@ -633,10 +637,17 @@ export class PlanStateMachine extends EventEmitter {
    * Get the effective plan end time, falling back to the stored value.
    *
    * More accurate than `plan.endedAt` when child plans ran asynchronously.
+   * Returns undefined if the plan still has active work (pending/running nodes).
    *
    * @returns Timestamp in ms, or `undefined` if the plan hasn't ended.
    */
   getEffectiveEndedAt(): number | undefined {
+    // If plan has any active (non-terminal) nodes, it's not ended yet
+    const status = this.computePlanStatus();
+    if (status === 'running' || status === 'pending') {
+      return undefined;
+    }
+    
     // First try the computed value from node data
     const computed = this.computeEffectiveEndedAt();
     if (computed) return computed;
