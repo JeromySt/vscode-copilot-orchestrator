@@ -164,10 +164,16 @@ export class planDetailPanel {
         vscode.commands.executeCommand('orchestrator.cancelPlan', this._planId);
         break;
       case 'pause':
-        vscode.commands.executeCommand('orchestrator.pausePlan', this._planId);
+        vscode.commands.executeCommand('orchestrator.pausePlan', this._planId).then(() => {
+          // Force refresh after pause to update button visibility
+          setTimeout(() => this._forceFullRefresh(), 100);
+        });
         break;
       case 'resume':
-        vscode.commands.executeCommand('orchestrator.resumePlan', this._planId);
+        vscode.commands.executeCommand('orchestrator.resumePlan', this._planId).then(() => {
+          // Force refresh after resume to update button visibility
+          setTimeout(() => this._forceFullRefresh(), 100);
+        });
         break;
       case 'delete':
         vscode.commands.executeCommand('orchestrator.deletePlan', this._planId);
@@ -637,6 +643,8 @@ export class planDetailPanel {
     .status-badge.failed { background: rgba(244, 135, 113, 0.2); color: #f48771; }
     .status-badge.partial { background: rgba(255, 204, 0, 0.2); color: #cca700; }
     .status-badge.pending { background: rgba(133, 133, 133, 0.2); color: #858585; }
+    .status-badge.paused { background: rgba(255, 165, 0, 0.2); color: #ffa500; }
+    .status-badge.canceled { background: rgba(133, 133, 133, 0.2); color: #858585; }
     
     /* Duration display in header */
     .header-duration {
@@ -1080,10 +1088,14 @@ export class planDetailPanel {
     }
     .action-btn {
       padding: 6px 12px;
-      border: none;
+      border: 1px solid var(--vscode-button-border, transparent);
       border-radius: 4px;
       cursor: pointer;
       font-size: 12px;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .action-btn:hover {
+      opacity: 0.9;
     }
     .action-btn.primary {
       background: var(--vscode-button-background);
@@ -1092,6 +1104,11 @@ export class planDetailPanel {
     .action-btn.secondary {
       background: var(--vscode-button-secondaryBackground);
       color: var(--vscode-button-secondaryForeground);
+      border: 1px solid var(--vscode-button-secondaryBackground);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
+    }
+    .action-btn.secondary:hover {
+      background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground));
     }
     .action-btn.danger {
       background: #cc3333;
@@ -1209,14 +1226,18 @@ ${mermaidDef}
   
   <div class="actions">
     ${status === 'running' || status === 'pending' ? 
-      '<button class="action-btn secondary" onclick="pausePlan()">Pause</button>' : ''}
+      '<button id="pauseBtn" class="action-btn secondary" onclick="pausePlan()">Pause</button>' : 
+      '<button id="pauseBtn" class="action-btn secondary" onclick="pausePlan()" style="display:none">Pause</button>'}
     ${status === 'paused' ? 
-      '<button class="action-btn primary" onclick="resumePlan()">Resume</button>' : ''}
+      '<button id="resumeBtn" class="action-btn primary" onclick="resumePlan()">Resume</button>' : 
+      '<button id="resumeBtn" class="action-btn primary" onclick="resumePlan()" style="display:none">Resume</button>'}
     ${status === 'running' || status === 'pending' || status === 'paused' ? 
-      '<button class="action-btn secondary" onclick="cancelPlan()">Cancel</button>' : ''}
+      '<button id="cancelBtn" class="action-btn secondary" onclick="cancelPlan()">Cancel</button>' : 
+      '<button id="cancelBtn" class="action-btn secondary" onclick="cancelPlan()" style="display:none">Cancel</button>'}
     <button class="action-btn secondary" onclick="refresh()">Refresh</button>
     ${status === 'succeeded' ? 
-      '<button class="action-btn primary" onclick="showWorkSummary()">View Work Summary</button>' : ''}
+      '<button id="workSummaryBtn" class="action-btn primary" onclick="showWorkSummary()">View Work Summary</button>' : 
+      '<button id="workSummaryBtn" class="action-btn primary" onclick="showWorkSummary()" style="display:none">View Work Summary</button>'}
     <button class="action-btn danger" onclick="deletePlan()">Delete</button>
   </div>
   
@@ -1819,24 +1840,26 @@ ${mermaidDef}
         // Update action buttons visibility based on new status
         const actionsDiv = document.querySelector('.actions');
         if (actionsDiv) {
-          const cancelBtn = actionsDiv.querySelector('button[onclick="cancelPlan()"]');
-          const workSummaryBtn = actionsDiv.querySelector('button[onclick="showWorkSummary()"]');
+          const pauseBtn = document.getElementById('pauseBtn');
+          const resumeBtn = document.getElementById('resumeBtn');
+          const cancelBtn = document.getElementById('cancelBtn');
+          const workSummaryBtn = document.getElementById('workSummaryBtn');
           
+          const isActive = (planStatus === 'running' || planStatus === 'pending');
+          const isPaused = (planStatus === 'paused');
+          const canControl = isActive || isPaused;
+          
+          if (pauseBtn) {
+            pauseBtn.style.display = isActive ? '' : 'none';
+          }
+          if (resumeBtn) {
+            resumeBtn.style.display = isPaused ? '' : 'none';
+          }
           if (cancelBtn) {
-            cancelBtn.style.display = (planStatus === 'running' || planStatus === 'pending') ? '' : 'none';
+            cancelBtn.style.display = canControl ? '' : 'none';
           }
           if (workSummaryBtn) {
             workSummaryBtn.style.display = planStatus === 'succeeded' ? '' : 'none';
-          } else if (planStatus === 'succeeded') {
-            // Add work summary button if it doesn't exist
-            const deleteBtn = actionsDiv.querySelector('button[onclick="deletePlan()"]');
-            if (deleteBtn) {
-              const newBtn = document.createElement('button');
-              newBtn.className = 'action-btn primary';
-              newBtn.onclick = showWorkSummary;
-              newBtn.textContent = 'View Work Summary';
-              actionsDiv.insertBefore(newBtn, deleteBtn);
-            }
           }
         }
         

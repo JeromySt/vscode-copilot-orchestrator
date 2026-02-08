@@ -111,11 +111,15 @@ export function computePlanStatus(
   hasStarted: boolean,
   isPaused: boolean = false
 ): PlanStatus {
+  // Convert to array so we can iterate multiple times
+  const states = Array.from(nodeStates);
+  
   // If paused, return paused status (overrides running/pending)
-  if (isPaused && hasStarted) {
+  // Note: isPaused can be set before or after the plan starts
+  if (isPaused) {
     // Check if there are still non-terminal nodes (paused only makes sense if there's work to do)
     let hasNonTerminal = false;
-    for (const state of nodeStates) {
+    for (const state of states) {
       if (!['succeeded', 'failed', 'canceled', 'blocked'].includes(state.status)) {
         hasNonTerminal = true;
         break;
@@ -136,7 +140,7 @@ export function computePlanStatus(
   let hasCanceled = false;
   let activeNonTerminal = 0;
 
-  for (const state of nodeStates) {
+  for (const state of states) {
     switch (state.status) {
       case 'running':
         hasRunning = true;

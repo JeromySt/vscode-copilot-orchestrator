@@ -1,7 +1,7 @@
 {
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
-  "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees. Delegate complex tasks to AI while maintaining clean git history with automated pre-checks, work execution, post-checks, and merge workflows.",
+  "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
   "version": "0.6.0",
   "publisher": "JeromyStatia",
   "license": "MIT",
@@ -18,9 +18,10 @@
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other",
+    "AI",
     "Machine Learning",
-    "SCM Providers"
+    "SCM Providers",
+    "Other"
   ],
   "keywords": [
     "copilot",
@@ -33,7 +34,11 @@
     "mcp",
     "model context protocol",
     "parallel",
-    "automation"
+    "automation",
+    "dag",
+    "pipeline",
+    "ipc",
+    "stdio"
   ],
   "activationEvents": [
     "onStartupFinished"

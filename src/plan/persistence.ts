@@ -50,6 +50,7 @@ interface SerializedPlan {
   cleanUpSuccessfulWork: boolean;
   maxParallel: number;
   workSummary?: WorkSummary;
+  isPaused?: boolean;
 }
 
 interface SerializedNode {
@@ -324,6 +325,7 @@ export class PlanPersistence {
       cleanUpSuccessfulWork: plan.cleanUpSuccessfulWork,
       maxParallel: plan.maxParallel,
       workSummary: plan.workSummary,
+      isPaused: plan.isPaused,
     };
   }
   
@@ -417,6 +419,7 @@ export class PlanPersistence {
       cleanUpSuccessfulWork: data.cleanUpSuccessfulWork,
       maxParallel: data.maxParallel,
       workSummary: data.workSummary,
+      isPaused: data.isPaused,
     };
   }
   
