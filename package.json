@@ -217,8 +217,9 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
     "test": "node ./out/test/runTest.js",
+    "test:unit": "npm run compile && mocha --ui tdd \"out/test/unit/**/*.unit.test.js\" --require out/test/unit/register-vscode-mock.js",
     "test:watch": "tsc -watch -p ./ & node ./out/test/runTest.js",
-    "test:coverage": "node ./out/test/runTest.js --coverage",
+    "test:coverage": "npm run compile && c8 --reporter=text --reporter=lcov --check-coverage --lines 70 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js mocha --ui tdd \"out/test/unit/**/*.unit.test.js\" --require out/test/unit/register-vscode-mock.js",
     "lint": "eslint src --ext ts || echo 'Linting complete'",
     "package": "npx @vscode/vsce package --no-dependencies"
   },
@@ -233,6 +234,7 @@
     "@typescript-eslint/parser": "^8.0.0",
     "@vscode/test-electron": "^2.5.0",
     "@vscode/vsce": "^3.0.0",
+    "c8": "^10.1.3",
     "canvas": "^3.2.1",
     "eslint": "^9.0.0",
     "glob": "^13.0.1",
