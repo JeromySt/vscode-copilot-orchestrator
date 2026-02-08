@@ -66,7 +66,9 @@ export async function resolveTargetBranchRoot(
     // Default branch - must create a feature branch
     // Use provided suffix (plan name slug) or generate a short unique ID
     const suffix = branchSuffix || randomUUID().split('-')[0];
-    const featureBranch = `${featureBranchPrefix}/${suffix}`;
+    // Remove trailing slash from prefix to avoid double slashes
+    const normalizedPrefix = featureBranchPrefix.replace(/\/+$/, '');
+    const featureBranch = `${normalizedPrefix}/${suffix}`;
     return { targetBranchRoot: featureBranch, needsCreation: true };
   } else {
     // Non-default branch - use as-is
