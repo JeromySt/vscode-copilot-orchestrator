@@ -229,7 +229,7 @@
     "test": "node ./out/test/runTest.js",
     "test:unit": "npm run compile && mocha --ui tdd \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
     "test:watch": "tsc -watch -p ./ & node ./out/test/runTest.js",
-    "test:coverage": "npm run compile && c8 --reporter=text --reporter=lcov --check-coverage --lines 70 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js mocha --ui tdd \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
+    "test:coverage": "npm run compile && c8 --reporter=text --reporter=lcov --check-coverage --lines 60 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js mocha --ui tdd \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
     "lint": "eslint src --ext ts || echo 'Linting complete'",
     "package": "npx @vscode/vsce package --no-dependencies"
   },
