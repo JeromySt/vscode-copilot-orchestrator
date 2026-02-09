@@ -286,6 +286,12 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
 
       let capturedSessionId: string | undefined = sessionId;
 
+      // Track whether Copilot printed its completion marker ("Task complete").
+      // On Windows, shell:true spawns nested cmd.exe wrappers whose exit-code
+      // propagation can break, producing code=null/signal=null even though the
+      // CLI finished normally.  When we see the marker we treat null as success.
+      let sawTaskComplete = false;
+
       // Notify process spawned
       if (proc.pid) {
         this.callbacks.onProcessSpawned?.(proc.pid);
@@ -299,10 +305,15 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       let stderrFlushTimer: NodeJS.Timeout | null = null;
       const FLUSH_DELAY_MS = 3000; // Wait 3s of silence before flushing (Copilot streams tokens slowly)
       
-      // Helper to log a line and check for session ID
+      // Helper to log a line and check for session ID / completion marker
       const logLine = (line: string) => {
         this.logger.log(`[${label}] ${line}`);
-        
+
+        // Detect Copilot's completion marker ("✓ Task complete" or "Task complete")
+        if (!sawTaskComplete && line.includes('Task complete')) {
+          sawTaskComplete = true;
+        }
+
         // Try to extract session ID
         if (!capturedSessionId) {
           const extracted = this.extractSessionId(line);
@@ -404,20 +415,29 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
         // Extract token usage from log files
         const tokenUsage = await this.extractTokenUsage(copilotLogDir, model);
 
-        if (code !== 0) {
+        // On Windows, nested cmd.exe wrapper chains can exit with
+        // code=null & signal=null even after a normal completion.  When
+        // the completion marker was observed in stdout, treat null as 0.
+        const effectiveCode = (code === null && signal === null && sawTaskComplete) ? 0 : code;
+
+        if (effectiveCode !== 0) {
           const reason = signal
             ? `Copilot was killed by signal ${signal}`
-            : `Copilot failed with exit code ${code}`;
+            : `Copilot failed with exit code ${effectiveCode}`;
           this.logger.log(`[${label}] ${reason}`);
           resolve({
             success: false,
             sessionId: capturedSessionId,
             error: reason,
-            exitCode: code ?? undefined,
+            exitCode: effectiveCode ?? undefined,
             tokenUsage
           });
         } else {
-          this.logger.log(`[${label}] Copilot completed successfully`);
+          if (code === null) {
+            this.logger.log(`[${label}] Copilot completed (exit code null coerced to 0 — task completion marker was present)`);
+          } else {
+            this.logger.log(`[${label}] Copilot completed successfully`);
+          }
           resolve({
             success: true,
             sessionId: capturedSessionId,

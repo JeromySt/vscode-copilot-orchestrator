@@ -290,6 +290,12 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       });
       
       let capturedSessionId: string | undefined = sessionId;
+
+      // Track whether Copilot printed its completion marker ("Task complete").
+      // On Windows, shell:true spawns nested cmd.exe wrappers whose exit-code
+      // propagation can break, producing code=null/signal=null even though the
+      // CLI finished normally.  When we see the marker we treat null as success.
+      let sawTaskComplete = false;
       
       // Notify process spawned
       if (proc.pid) {
@@ -316,6 +322,10 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
           if (line.trim()) {
             this.logger.debug(`[${label}] ${line.trim()}`);
             onOutput?.(line.trim());
+            // Detect Copilot completion marker
+            if (!sawTaskComplete && line.includes('Task complete')) {
+              sawTaskComplete = true;
+            }
           }
         });
         extractSession(text);
@@ -335,19 +345,28 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       
       // Handle exit
       proc.on('exit', (code, signal) => {
-        if (code !== 0) {
+        // On Windows, nested cmd.exe wrapper chains can exit with
+        // code=null & signal=null even after a normal completion.  When
+        // the completion marker was observed in stdout, treat null as 0.
+        const effectiveCode = (code === null && signal === null && sawTaskComplete) ? 0 : code;
+
+        if (effectiveCode !== 0) {
           const reason = signal
             ? `Copilot CLI was killed by signal ${signal}`
-            : `Copilot CLI exited with code ${code}`;
+            : `Copilot CLI exited with code ${effectiveCode}`;
           this.logger.error(`[${label}] ${reason}`);
           resolve({
             success: false,
             sessionId: capturedSessionId,
             error: reason,
-            exitCode: code ?? undefined,
+            exitCode: effectiveCode ?? undefined,
           });
         } else {
-          this.logger.info(`[${label}] Copilot CLI completed successfully`);
+          if (code === null) {
+            this.logger.info(`[${label}] Copilot CLI completed (exit code null coerced to 0 — task completion marker was present)`);
+          } else {
+            this.logger.info(`[${label}] Copilot CLI completed successfully`);
+          }
           resolve({
             success: true,
             sessionId: capturedSessionId,
