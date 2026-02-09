@@ -196,7 +196,8 @@ export const createPlanSchema = {
       type: 'array',
       items: { $ref: '#/$defs/group' },
       maxItems: 50
-    }
+    },
+    startPaused: { type: 'boolean' }
   },
   required: ['name', 'jobs'],
   additionalProperties: false,
@@ -219,7 +220,8 @@ export const createJobSchema = {
     postchecks: { type: 'string', maxLength: 10000 },
     instructions: { type: 'string', maxLength: 100000 },
     baseBranch: { type: 'string', maxLength: 200 },
-    targetBranch: { type: 'string', maxLength: 200 }
+    targetBranch: { type: 'string', maxLength: 200 },
+    startPaused: { type: 'boolean' }
   },
   required: ['name', 'task'],
   additionalProperties: false
@@ -329,7 +331,33 @@ export const retryPlanSchema = {
   $id: 'retry_copilot_plan',
   type: 'object',
   properties: {
-    id: { type: 'string', minLength: 1, maxLength: 100 }
+    id: { type: 'string', minLength: 1, maxLength: 100 },
+    nodeIds: {
+      type: 'array',
+      items: { type: 'string', minLength: 1, maxLength: 100 },
+      maxItems: 100
+    },
+    newWork: {
+      oneOf: [
+        { type: 'string', maxLength: 50000 },
+        workSpecObjectSchema
+      ]
+    },
+    newPrechecks: {
+      oneOf: [
+        { type: 'string', maxLength: 10000 },
+        { type: 'null' },
+        workSpecObjectSchema
+      ]
+    },
+    newPostchecks: {
+      oneOf: [
+        { type: 'string', maxLength: 10000 },
+        { type: 'null' },
+        workSpecObjectSchema
+      ]
+    },
+    clearWorktree: { type: 'boolean' }
   },
   required: ['id'],
   additionalProperties: false
@@ -343,7 +371,28 @@ export const retryNodeSchema = {
   type: 'object',
   properties: {
     planId: { type: 'string', minLength: 1, maxLength: 100 },
-    nodeId: { type: 'string', minLength: 1, maxLength: 100 }
+    nodeId: { type: 'string', minLength: 1, maxLength: 100 },
+    newWork: {
+      oneOf: [
+        { type: 'string', maxLength: 50000 },
+        workSpecObjectSchema
+      ]
+    },
+    newPrechecks: {
+      oneOf: [
+        { type: 'string', maxLength: 10000 },
+        { type: 'null' },
+        workSpecObjectSchema
+      ]
+    },
+    newPostchecks: {
+      oneOf: [
+        { type: 'string', maxLength: 10000 },
+        { type: 'null' },
+        workSpecObjectSchema
+      ]
+    },
+    clearWorktree: { type: 'boolean' }
   },
   required: ['planId', 'nodeId'],
   additionalProperties: false
