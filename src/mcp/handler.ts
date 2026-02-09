@@ -188,7 +188,7 @@ export class McpHandler implements IMcpRequestRouter {
   private async handleToolsList(request: JsonRpcRequest): Promise<JsonRpcResponse> {
     const tools = [
       ...(await getPlanToolDefinitions()),
-      ...getNodeToolDefinitions(),
+      ...(await getNodeToolDefinitions()),
     ];
     log.info('Tools list requested', { toolCount: tools.length });
     log.debug('Tools list - tool names', { tools: tools.map(t => t.name) });

@@ -55,14 +55,14 @@ suite('MCP Node Tool Definitions', () => {
   // TOOL ARRAY
   // =========================================================================
   suite('getNodeToolDefinitions', () => {
-    test('returns a non-empty array', () => {
-      const tools = getNodeToolDefinitions();
+    test('returns a non-empty array', async () => {
+      const tools = await getNodeToolDefinitions();
       assert.ok(Array.isArray(tools));
       assert.ok(tools.length > 0);
     });
 
-    test('all tools have required fields', () => {
-      const tools = getNodeToolDefinitions();
+    test('all tools have required fields', async () => {
+      const tools = await getNodeToolDefinitions();
       for (const tool of tools) {
         assert.ok(tool.name, `Tool missing name`);
         assert.ok(tool.description, `Tool ${tool.name} missing description`);
@@ -71,8 +71,8 @@ suite('MCP Node Tool Definitions', () => {
       }
     });
 
-    test('all tool names are unique', () => {
-      const tools = getNodeToolDefinitions();
+    test('all tool names are unique', async () => {
+      const tools = await getNodeToolDefinitions();
       const names = tools.map(t => t.name);
       const unique = new Set(names);
       assert.strictEqual(unique.size, names.length, 'Duplicate tool names found');
@@ -92,8 +92,8 @@ suite('MCP Node Tool Definitions', () => {
     ];
 
     for (const toolName of expectedTools) {
-      test(`includes ${toolName}`, () => {
-        const tools = getNodeToolDefinitions();
+      test(`includes ${toolName}`, async () => {
+        const tools = await getNodeToolDefinitions();
         const found = tools.find(t => t.name === toolName);
         assert.ok(found, `Expected tool ${toolName} not found`);
       });
@@ -104,14 +104,14 @@ suite('MCP Node Tool Definitions', () => {
   // create_copilot_node SCHEMA
   // =========================================================================
   suite('create_copilot_node schema', () => {
-    test('requires nodes array', () => {
-      const tools = getNodeToolDefinitions();
+    test('requires nodes array', async () => {
+      const tools = await getNodeToolDefinitions();
       const tool = tools.find(t => t.name === 'create_copilot_node')!;
       assert.ok(tool.inputSchema.required?.includes('nodes'));
     });
 
-    test('nodes items require producer_id, task, dependencies', () => {
-      const tools = getNodeToolDefinitions();
+    test('nodes items require producer_id, task, dependencies', async () => {
+      const tools = await getNodeToolDefinitions();
       const tool = tools.find(t => t.name === 'create_copilot_node')!;
       const nodesSchema = tool.inputSchema.properties?.nodes as any;
       assert.ok(nodesSchema);
@@ -120,8 +120,8 @@ suite('MCP Node Tool Definitions', () => {
       assert.ok(nodesSchema.items?.required?.includes('dependencies'));
     });
 
-    test('has optional group property on nodes', () => {
-      const tools = getNodeToolDefinitions();
+    test('has optional group property on nodes', async () => {
+      const tools = await getNodeToolDefinitions();
       const tool = tools.find(t => t.name === 'create_copilot_node')!;
       const nodesSchema = tool.inputSchema.properties?.nodes as any;
       // group is optional per-node for visual grouping in Mermaid
@@ -135,8 +135,8 @@ suite('MCP Node Tool Definitions', () => {
   // get_copilot_node SCHEMA
   // =========================================================================
   suite('get_copilot_node schema', () => {
-    test('requires node_id', () => {
-      const tools = getNodeToolDefinitions();
+    test('requires node_id', async () => {
+      const tools = await getNodeToolDefinitions();
       const tool = tools.find(t => t.name === 'get_copilot_node')!;
       assert.ok(tool.inputSchema.required?.includes('node_id'));
     });
@@ -146,8 +146,8 @@ suite('MCP Node Tool Definitions', () => {
   // list_copilot_nodes SCHEMA
   // =========================================================================
   suite('list_copilot_nodes schema', () => {
-    test('has optional filters', () => {
-      const tools = getNodeToolDefinitions();
+    test('has optional filters', async () => {
+      const tools = await getNodeToolDefinitions();
       const tool = tools.find(t => t.name === 'list_copilot_nodes')!;
       assert.ok(tool.inputSchema.properties?.group_id);
       assert.ok(tool.inputSchema.properties?.status);
@@ -164,7 +164,7 @@ suite('MCP Node Tool Definitions', () => {
     test('includes both plan and node tools', async () => {
       const all = await getAllToolDefinitions();
       const planTools = await getPlanToolDefinitions();
-      const nodeTools = getNodeToolDefinitions();
+      const nodeTools = await getNodeToolDefinitions();
 
       assert.strictEqual(all.length, planTools.length + nodeTools.length);
     });
