@@ -237,6 +237,7 @@ export class NodeDetailPanel {
   private _updateInterval?: NodeJS.Timeout;
   private _currentPhase: string | null = null;
   private _lastStatus: string | null = null;
+  private _lastWorktreeCleanedUp: boolean | undefined = undefined;
   
   /**
    * @param panel - The VS Code webview panel instance.
@@ -280,6 +281,12 @@ export class NodeDetailPanel {
         // Send final log update
         if (this._currentPhase) {
           setTimeout(() => this._sendLog(this._currentPhase!), 100);
+        }
+      } else {
+        // Terminal state - check for worktree cleanup or other state changes
+        if (state?.worktreeCleanedUp !== this._lastWorktreeCleanedUp) {
+          this._lastWorktreeCleanedUp = state?.worktreeCleanedUp;
+          this._update();
         }
       }
     }, 500);
@@ -621,7 +628,7 @@ export class NodeDetailPanel {
     </div>
     ${state.error ? `
     <div class="error-box">
-      <strong>Error:</strong> ${escapeHtml(state.error)}
+      <strong>Error:</strong> <span class="error-message">${escapeHtml(state.error)}</span>
       ${state.lastAttempt?.phase ? `<div class="error-phase">Failed in phase: <strong>${state.lastAttempt.phase}</strong></div>` : ''}
       ${state.lastAttempt?.exitCode !== undefined ? `<div class="error-phase">Exit code: <strong>${state.lastAttempt.exitCode}</strong></div>` : ''}
     </div>
@@ -1327,7 +1334,7 @@ export class NodeDetailPanel {
       
       const errorHtml = attempt.error
         ? `<div class="attempt-error">
-            <strong>Error:</strong> ${escapeHtml(attempt.error)}
+            <strong>Error:</strong> <span class="error-message">${escapeHtml(attempt.error)}</span>
             ${attempt.failedPhase ? `<div style="margin-top: 4px;">Failed in phase: <strong>${attempt.failedPhase}</strong></div>` : ''}
             ${attempt.exitCode !== undefined ? `<div>Exit code: <strong>${attempt.exitCode}</strong></div>` : ''}
            </div>`
@@ -1338,7 +1345,7 @@ export class NodeDetailPanel {
         ? `<div class="attempt-context">
             ${attempt.baseCommit ? `<div class="attempt-meta-row"><strong>Base:</strong> <code>${attempt.baseCommit.slice(0, 8)}</code></div>` : ''}
             ${attempt.worktreePath ? `<div class="attempt-meta-row"><strong>Worktree:</strong> <code>${escapeHtml(attempt.worktreePath)}</code></div>` : ''}
-            ${attempt.workUsed ? `<div class="attempt-meta-row"><strong>Work:</strong> <code>${escapeHtml(formatWorkSpec(attempt.workUsed))}</code></div>` : ''}
+            ${attempt.workUsed ? `<div class="attempt-meta-row attempt-work-row"><strong>Work:</strong> <div class="attempt-work-content">${formatWorkSpecHtml(attempt.workUsed, escapeHtml)}</div></div>` : ''}
            </div>`
         : '';
       
@@ -1699,6 +1706,15 @@ export class NodeDetailPanel {
       padding: 10px;
       margin-top: 12px;
       color: #f48771;
+    }
+    .error-message {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--vscode-editor-font-family), monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      display: block;
+      margin-top: 4px;
     }
     .error-phase {
       margin-top: 6px;
@@ -2103,6 +2119,15 @@ export class NodeDetailPanel {
       color: #f48771;
       font-size: 11px;
     }
+    .attempt-error .error-message {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--vscode-editor-font-family), monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      display: block;
+      margin-top: 4px;
+    }
     .attempt-context {
       margin-top: 8px;
       padding: 8px;
@@ -2116,6 +2141,22 @@ export class NodeDetailPanel {
       border-radius: 2px;
       font-family: var(--vscode-editor-font-family);
       font-size: 10px;
+    }
+    .attempt-work-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .attempt-work-content {
+      margin-top: 4px;
+    }
+    .attempt-work-content .work-instructions {
+      font-size: 11px;
+      padding: 8px 12px;
+    }
+    .attempt-work-content .work-command {
+      font-size: 11px;
+      padding: 6px 10px;
     }
     /* Attempt phase tabs */
     .attempt-phases {
