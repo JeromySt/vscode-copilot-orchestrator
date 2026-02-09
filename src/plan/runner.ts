@@ -2560,19 +2560,30 @@ Resume working in the existing worktree and session context.`;
     nodeState.endedAt = undefined;
     nodeState.startedAt = undefined;
     
-    // Determine if we should resume from failed phase or start fresh
+    // Determine if we should resume from the failed phase or start fresh.
+    //
+    // Rules:
+    //   - newWork or clearWorktree → always start fresh (work output changed)
+    //   - newPrechecks → start fresh (prechecks run before work)
+    //   - newPostchecks ONLY, failure was at postchecks → resume from postchecks
+    //   - nothing changed → resume from whichever phase failed
     const hasNewWork = !!options?.newWork;
-    const hasNewChecks = options?.newPrechecks !== undefined || options?.newPostchecks !== undefined;
-    const shouldResetPhases = hasNewWork || hasNewChecks || options?.clearWorktree;
+    const hasNewPrechecks = options?.newPrechecks !== undefined;
+    const hasNewPostchecks = options?.newPostchecks !== undefined;
+    const failedPhase = nodeState.lastAttempt?.phase;
+    const shouldResetPhases = hasNewWork || hasNewPrechecks || options?.clearWorktree;
     
     if (shouldResetPhases) {
       // Starting fresh - clear all phase progress
       nodeState.stepStatuses = undefined;
       nodeState.resumeFromPhase = undefined;
-      log.info(`Retry with fresh state (hasNewWork=${hasNewWork}, clearWorktree=${options?.clearWorktree})`);
+      log.info(`Retry with fresh state (hasNewWork=${hasNewWork}, hasNewPrechecks=${hasNewPrechecks}, clearWorktree=${options?.clearWorktree})`);
+    } else if (hasNewPostchecks && failedPhase === 'postchecks') {
+      // Only postchecks changed and failure was at postchecks - resume from postchecks
+      nodeState.resumeFromPhase = 'postchecks' as any;
+      log.info(`Retry resuming from postchecks (postchecks updated, failed phase was postchecks)`);
     } else {
       // Resuming - preserve step statuses and set resume point
-      const failedPhase = nodeState.lastAttempt?.phase;
       if (failedPhase) {
         nodeState.resumeFromPhase = failedPhase as any;
         log.info(`Retry resuming from phase: ${failedPhase}`);
