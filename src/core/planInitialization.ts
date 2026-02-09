@@ -573,7 +573,7 @@ export function registerPlanCommands(
         return;
       }
       
-      planRunner.resume(planId);
+      await planRunner.resume(planId);
       vscode.window.showInformationMessage(`Plan "${plan.spec.name}" resumed`);
     })
   );

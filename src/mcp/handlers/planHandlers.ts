@@ -773,7 +773,7 @@ export async function handleResumePlan(args: any, ctx: PlanHandlerContext): Prom
   const fieldError = validateRequired(args, ['id']);
   if (fieldError) return fieldError;
   
-  const success = ctx.PlanRunner.resume(args.id);
+  const success = await ctx.PlanRunner.resume(args.id);
   
   return {
     success,
@@ -870,7 +870,7 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   const errors: Array<{ id: string; error: string }> = [];
   
   for (const nodeId of nodeIdsToRetry) {
-    const result = ctx.PlanRunner.retryNode(args.id, nodeId, retryOptions);
+    const result = await ctx.PlanRunner.retryNode(args.id, nodeId, retryOptions);
     const node = plan.nodes.get(nodeId);
     
     if (result.success) {
@@ -881,7 +881,7 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   }
   
   // Resume the Plan if it was stopped
-  ctx.PlanRunner.resume(args.id);
+  await ctx.PlanRunner.resume(args.id);
   
   return {
     success: retriedNodes.length > 0,
@@ -973,14 +973,14 @@ export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): P
     clearWorktree: args.clearWorktree || false,
   };
   
-  const result = ctx.PlanRunner.retryNode(args.planId, args.nodeId, retryOptions);
+  const result = await ctx.PlanRunner.retryNode(args.planId, args.nodeId, retryOptions);
   
   if (!result.success) {
     return errorResult(result.error || 'Retry failed');
   }
   
   // Resume the Plan if it was stopped
-  ctx.PlanRunner.resume(args.planId);
+  await ctx.PlanRunner.resume(args.planId);
   
   return {
     success: true,

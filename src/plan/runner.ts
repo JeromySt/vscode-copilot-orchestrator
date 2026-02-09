@@ -1075,11 +1075,19 @@ export class PlanRunner extends EventEmitter {
    * @param planId - Plan identifier.
    * @returns `true` if the plan was found and resumed.
    */
-  resume(planId: string): boolean {
+  async resume(planId: string): Promise<boolean> {
     const plan = this.plans.get(planId);
     if (!plan) return false;
     
     log.info(`Resuming Plan: ${planId}`);
+    
+    // Fetch latest refs so worktrees created after resume use current branch state
+    try {
+      await git.repository.fetch(plan.repoPath, { all: true });
+      log.info(`Fetched latest refs for plan ${planId} before resuming`);
+    } catch (e: any) {
+      log.warn(`Git fetch failed before resume (continuing anyway): ${e.message}`);
+    }
     
     // Clear paused state if set
     if (plan.isPaused) {
@@ -2667,7 +2675,7 @@ export class PlanRunner extends EventEmitter {
    * @param options - Optional overrides (new work spec, worktree reset).
    * @returns `{ success: true }` if retry was initiated, or `{ success: false, error }`.
    */
-  retryNode(planId: string, nodeId: string, options?: RetryNodeOptions): { success: boolean; error?: string } {
+  async retryNode(planId: string, nodeId: string, options?: RetryNodeOptions): Promise<{ success: boolean; error?: string }> {
     const plan = this.plans.get(planId);
     if (!plan) {
       return { success: false, error: `Plan not found: ${planId}` };
@@ -2849,19 +2857,24 @@ Resume working in the existing worktree and session context.`;
         };
       }
       
+      // Fetch latest refs so the cleared worktree can be re-based on current branch state
+      try {
+        await git.repository.fetch(plan.repoPath, { all: true });
+        log.info(`Fetched latest refs before clearing worktree for node: ${node.name}`);
+      } catch (e: any) {
+        log.warn(`Git fetch failed before worktree clear (continuing anyway): ${e.message}`);
+      }
+      
       // Reset detached HEAD to base commit
-      const resetWorktree = async () => {
-        try {
-          if (nodeState.baseCommit && nodeState.worktreePath) {
-            log.info(`Resetting worktree to base commit: ${nodeState.baseCommit.slice(0, 8)}`);
-            await git.executor.execAsync(['reset', '--hard', nodeState.baseCommit], { cwd: nodeState.worktreePath });
-            await git.executor.execAsync(['clean', '-fd'], { cwd: nodeState.worktreePath });
-          }
-        } catch (e: any) {
-          log.warn(`Failed to reset worktree: ${e.message}`);
+      try {
+        if (nodeState.baseCommit && nodeState.worktreePath) {
+          log.info(`Resetting worktree to base commit: ${nodeState.baseCommit.slice(0, 8)}`);
+          await git.executor.execAsync(['reset', '--hard', nodeState.baseCommit], { cwd: nodeState.worktreePath });
+          await git.executor.execAsync(['clean', '-fd'], { cwd: nodeState.worktreePath });
         }
-      };
-      resetWorktree(); // Fire and forget
+      } catch (e: any) {
+        log.warn(`Failed to reset worktree: ${e.message}`);
+      }
     }
     
     // Clear plan.endedAt so it gets recalculated when the plan completes

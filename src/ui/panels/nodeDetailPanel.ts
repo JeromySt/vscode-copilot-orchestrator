@@ -463,11 +463,11 @@ export class NodeDetailPanel {
    * @param resumeSession - If `true`, resume the existing agent session;
    *   if `false`, start a fresh session.
    */
-  private _retryNode(planId: string, nodeId: string, resumeSession: boolean) {
+  private async _retryNode(planId: string, nodeId: string, resumeSession: boolean) {
     // If resumeSession is false, provide an agent spec that clears the session
     const newWork = resumeSession ? undefined : { type: 'agent' as const, instructions: '', resumeSession: false };
     
-    const result = this._planRunner.retryNode(planId, nodeId, {
+    const result = await this._planRunner.retryNode(planId, nodeId, {
       newWork,
       clearWorktree: false,
     });
