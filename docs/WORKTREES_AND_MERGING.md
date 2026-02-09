@@ -319,6 +319,30 @@ The mutex prevents three classes of race conditions:
 
 3. **Concurrent worktree removal** — Multiple jobs completing at the same time all try to remove their worktrees. Git's worktree prune and remove operations can interfere with each other when run in parallel.
 
+## Fetch on Resume and Retry
+
+When a plan is paused (e.g., created with `startPaused=true`) the target branch may receive new commits before the plan is resumed. To prevent worktrees from being created against stale refs, the orchestrator fetches the latest remote state before resuming or retrying.
+
+### Fetch on Resume
+
+When `resume()` is called on a paused plan, the orchestrator runs `git fetch --all` before unpausing any nodes. This ensures all local refs reflect the current state of remote branches, so worktrees created for pending root nodes use the latest target branch commit.
+
+### Fetch on Retry with clearWorktree
+
+When `retryNode()` is called with `clearWorktree=true`, a `git fetch --all` is performed before the worktree is removed and recreated. This ensures the new worktree is based on the current base ref rather than a potentially outdated one.
+
+### Graceful Failure Handling
+
+Fetch failures are logged as warnings but **never block** the resume or retry operation. If the fetch fails (e.g., due to network issues), the plan proceeds with whatever refs are locally available.
+
+### Scenarios
+
+| Scenario | Behavior |
+|----------|----------|
+| **Fresh paused plan** (no nodes started) | Fetch updates all refs before any worktrees are created, so root nodes use the latest target branch commit |
+| **Paused mid-execution** (some nodes pending) | Fetch ensures pending root nodes that haven't started yet get up-to-date refs |
+| **Node retry after target branch advanced** | Fetch before worktree reset ensures the retried node works against the current base, not a stale snapshot |
+
 ## Conflict Resolution
 
 When merge conflicts occur, Copilot CLI is invoked:

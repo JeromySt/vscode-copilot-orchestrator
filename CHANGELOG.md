@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pan/zoom for diagrams**: Plan detail diagrams now support pan and zoom for navigating large dependency graphs
 
 ### Changed
+- **Forward Integration on resume**: `resume()` and `retryNode()` now perform `git fetch --all` before unpausing or resetting worktrees, ensuring local refs reflect the latest target branch state. Prevents stale worktrees when the target branch has advanced during a pause period
 - **Commands cleanup**: Removed 14 unimplemented commands from `package.json`, keeping only actually registered commands (MCP connection, plan/node details, cancel/delete/refresh)
 - **Simplified node interface**: `NodeInstance` now combines node definition and runtime state into a single type (ID, task, status, attempts, dependencies, git context, step statuses)
 - **Plan-to-group terminology**: Internal transition from plan-centric to group-centric node management
