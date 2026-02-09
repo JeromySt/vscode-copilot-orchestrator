@@ -142,10 +142,12 @@ export interface NodeExecutionState {
   resumeFromPhase?: 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
 
   /**
-   * Whether an automatic AI-assisted heal attempt has been made for this node.
-   * Prevents infinite auto-heal loops — only one auto-heal attempt is allowed.
+   * Tracks which phases have had an auto-heal attempt.
+   * Each phase gets at most one auto-heal attempt independently, so if
+   * prechecks is healed successfully and postchecks later fails, postchecks
+   * will still get its own auto-heal attempt.
    */
-  autoHealAttempted?: boolean;
+  autoHealAttempted?: Partial<Record<'prechecks' | 'work' | 'postchecks', boolean>>;
   
   /**
    * Details about the last execution attempt (for retry context).

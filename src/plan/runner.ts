@@ -1479,14 +1479,16 @@ export class PlanRunner extends EventEmitter {
           const isNonAgentWork = normalizedFailedSpec && normalizedFailedSpec.type !== 'agent';
           const autoHealEnabled = node.autoHeal !== false; // default true
           
-          if (isHealablePhase && isNonAgentWork && autoHealEnabled && !nodeState.autoHealAttempted) {
+          const phaseAlreadyHealed = nodeState.autoHealAttempted?.[failedPhase as 'prechecks' | 'work' | 'postchecks'];
+          if (isHealablePhase && isNonAgentWork && autoHealEnabled && !phaseAlreadyHealed) {
             log.info(`Auto-heal: attempting AI-assisted fix for ${node.name} (phase: ${failedPhase})`, {
               planId: plan.id,
               nodeId: node.id,
               exitCode: result.exitCode,
             });
             
-            nodeState.autoHealAttempted = true;
+            if (!nodeState.autoHealAttempted) nodeState.autoHealAttempted = {};
+            nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = true;
             
             // Log the auto-heal attempt in the failed phase's log stream
             this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '');
