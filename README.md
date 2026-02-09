@@ -198,6 +198,10 @@ Groups enable:
 
 On retry, the orchestrator provides the AI agent with **structured failure context** — the error output, the phase that failed, and the previous attempt's logs — enabling smarter second attempts.
 
+**Forward Integration on Resume/Retry:**
+- `resume()` and `retryNode(clearWorktree)` now fetch the latest remote refs (`git fetch --all`) before proceeding, ensuring worktrees reflect the current target branch state
+- `expectsNoChanges` nodes carry forward their base commit to maintain the forward integration chain, so leaf node reverse-integration merges include all accumulated ancestor changes
+
 ### 🛡️ Default Branch Protection
 
 When targeting a **default branch** (`main`, `master`), the orchestrator **auto-creates a feature branch**:
@@ -335,29 +339,67 @@ Copilot: I'll create an orchestrator plan with parallel build nodes and
          • Status: running
 ```
 
-### LLM Model Selection
+### 🧠 LLM Model Selection
 
-The orchestrator supports specifying which LLM model to use for agent tasks. Models are automatically discovered from your installed Copilot CLI.
+The orchestrator supports specifying which LLM model to use for agent tasks. Models are automatically discovered from your installed Copilot CLI and are available on both `create_copilot_plan` jobs and `create_copilot_node` nodes via the `model` property.
 
-**Example:**
+**Per-job example** (in a `create_copilot_plan` call):
 ```json
 {
-  "type": "agent",
-  "instructions": "Design the API architecture",
+  "producer_id": "architect",
+  "task": "Design the API architecture",
+  "work": { "type": "agent", "instructions": "Design a REST API..." },
   "model": "claude-opus-4.5"
 }
 ```
 
-**Model Tiers:**
-- **Fast** (mini, haiku): Simple tasks, code fixes, formatting
-- **Standard** (sonnet, gpt-5): General coding, implementation
-- **Premium** (opus, max): Complex reasoning, architecture, planning
+**Per-node example** (in a `create_copilot_node` call):
+```json
+{
+  "name": "lint-check",
+  "work": { "type": "agent", "instructions": "Run linting and fix issues" },
+  "model": "gpt-4.1-mini"
+}
+```
 
-**Token Tracking:**
-The plan detail panel shows token usage and estimated costs for each job.
+**Model Tiers — When to Use What:**
+
+| Tier | Models | Best For |
+|------|--------|----------|
+| **Fast** | `gpt-4.1-mini`, `claude-haiku-4.5`, `gemini-2.0-flash` | Linting, formatting, simple fixes, validation nodes |
+| **Standard** | `claude-sonnet-4.5`, `gpt-5`, `gemini-2.0` | General coding, implementation, test writing |
+| **Premium** | `claude-opus-4.5`, `gpt-5-max` | Complex reasoning, architecture design, multi-file refactors |
 
 **Refresh Models:**
 Run `Copilot Orchestrator: Refresh Available Models` to update the available model list after updating Copilot CLI.
+
+### 📊 Copilot Usage Statistics
+
+The orchestrator parses Copilot CLI output to extract AI usage metrics for each node. Metrics are displayed in the node detail panel as a rich **AI Usage** card and aggregate to plan level for total resource tracking.
+
+**Tracked metrics per node:**
+- **Premium requests** consumed
+- **API time** and **total session time**
+- **Code changes** — lines added / removed
+- **Per-model token breakdown** — input tokens, output tokens, cached tokens
+
+**Example CLI output parsed:**
+```
+Total usage est: 3 Premium requests
+API time spent: 1m 30s
+Total session time: 2m 14s
+Total code changes: +142 -38
+Breakdown by AI model:
+  claude-sonnet-4.5   231.5k in, 1.3k out, 158.2k cached (Est. 3 Premium requests)
+```
+
+### 🤖 AI Review for No-Change Commits
+
+When a node's work phase produces no file changes, the orchestrator doesn't immediately fail. Instead, an AI agent reviews the execution logs to determine if "no changes" is a legitimate outcome.
+
+- If the AI determines no changes were needed (e.g., tests already pass, linter found no issues), the node **succeeds**
+- If changes were expected but not produced, the node **fails** with the AI's reasoning
+- This reduces false failures for validation and quality-check nodes that may not always produce file modifications
 
 ---
 
