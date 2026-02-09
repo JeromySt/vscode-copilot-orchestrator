@@ -1484,6 +1484,7 @@ export class PlanRunner extends EventEmitter {
             baseCommit: nodeState.baseCommit,
             logs: this.getNodeLogs(plan.id, node.id),
             workUsed: node.work,
+            metrics: nodeState.metrics,
           };
           nodeState.attemptHistory = [...(nodeState.attemptHistory || []), failedAttempt];
           
@@ -1671,6 +1672,7 @@ export class PlanRunner extends EventEmitter {
                 baseCommit: nodeState.baseCommit,
                 logs: this.getNodeLogs(plan.id, node.id),
                 workUsed: healSpec,
+                metrics: nodeState.metrics,
               };
               nodeState.attemptHistory = [...(nodeState.attemptHistory || []), healAttempt];
               
@@ -1766,6 +1768,7 @@ export class PlanRunner extends EventEmitter {
           completedCommit: nodeState.completedCommit, // Work was successful, so we have the commit
           logs: this.getNodeLogs(plan.id, node.id),
           workUsed: node.work,
+          metrics: nodeState.metrics,
         };
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), riFailedAttempt];
         
@@ -1792,6 +1795,7 @@ export class PlanRunner extends EventEmitter {
           baseCommit: nodeState.baseCommit,
           logs: this.getNodeLogs(plan.id, node.id),
           workUsed: node.work,
+          metrics: nodeState.metrics,
         };
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
         
@@ -1849,6 +1853,7 @@ export class PlanRunner extends EventEmitter {
         baseCommit: nodeState.baseCommit,
         logs: this.getNodeLogs(plan.id, node.id),
         workUsed: node.work,
+        metrics: nodeState.metrics,
       };
       nodeState.attemptHistory = [...(nodeState.attemptHistory || []), errorAttempt];
       

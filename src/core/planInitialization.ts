@@ -17,7 +17,9 @@ import { McpHandler } from '../mcp/handler';
 import { McpIpcServer } from '../mcp/ipc/server';
 import { Logger } from './logger';
 import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
+import { CopilotStatsParser } from '../agent/copilotStatsParser';
 import { IMcpManager } from '../interfaces/IMcpManager';
+import type { CopilotUsageMetrics } from '../plan/types';
 
 
 const log = Logger.for('init');
@@ -134,19 +136,30 @@ function createAgentDelegatorAdapter(log: any) {
       sessionId?: string;
       error?: string;
       exitCode?: number;
+      metrics?: CopilotUsageMetrics;
     }> {
       const { task, instructions, worktreePath, sessionId, logOutput, onProcess, model } = options;
       
-      return runner.run({
+      const statsParser = new CopilotStatsParser();
+      
+      const result = await runner.run({
         cwd: worktreePath,
         task,
         instructions,
         label: 'agent',
         sessionId,
         model,
-        onOutput: logOutput ? (line) => logOutput(`[copilot] ${line}`) : undefined,
+        onOutput: logOutput ? (line) => {
+          statsParser.feedLine(line);
+          logOutput(`[copilot] ${line}`);
+        } : (line) => {
+          statsParser.feedLine(line);
+        },
         onProcess,
       });
+      
+      const parsedMetrics = statsParser.getMetrics();
+      return { ...result, metrics: parsedMetrics };
     }
   };
 }
