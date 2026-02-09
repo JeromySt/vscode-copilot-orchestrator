@@ -13,8 +13,9 @@
  */
 
 import * as vscode from 'vscode';
-import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord } from '../../plan';
+import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord, CopilotUsageMetrics } from '../../plan';
 import { escapeHtml, formatDuration, errorPageHtml, loadingPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
+import { getNodeMetrics, formatPremiumRequests, formatDurationSeconds, formatTokenCount, formatCodeChanges } from '../../plan/metricsAggregator';
 
 /**
  * Format a {@link WorkSpec} as a plain-text summary string.
@@ -583,6 +584,10 @@ export class NodeDetailPanel {
       ? this._buildAttemptHistoryHtml(state)
       : '';
 
+    // Compute aggregated metrics across all attempts
+    const nodeMetrics = getNodeMetrics(state);
+    const nodeMetricsHtml = nodeMetrics ? this._buildMetricsSummaryHtml(nodeMetrics) : '';
+
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -678,6 +683,8 @@ export class NodeDetailPanel {
   </div>
   ` : ''}
   
+  ${nodeMetricsHtml}
+  
   <!-- Job Configuration -->
   <div class="section">
     <h3>Job Configuration</h3>
@@ -712,27 +719,6 @@ export class NodeDetailPanel {
   
   ${workSummaryHtml}
   
-  ${state.metrics ? `
-  <!-- Execution Metrics -->
-  <div class="section">
-    <h3>Execution Metrics</h3>
-    <div class="metrics-section">
-      <div class="metric-row">
-        <span class="metric-label">Model:</span>
-        <span class="metric-value">${state.metrics.tokenUsage?.model || 'N/A'}</span>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label">Tokens:</span>
-        <span class="metric-value">${state.metrics.tokenUsage?.inputTokens || 0} in / ${state.metrics.tokenUsage?.outputTokens || 0} out</span>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label">Est. Cost:</span>
-        <span class="metric-value">${state.metrics.tokenUsage?.estimatedCostUsd?.toFixed(4) || 'N/A'}</span>
-      </div>
-    </div>
-  </div>
-  ` : ''}
-
   <!-- Dependencies -->
   <div class="section">
     <h3>Dependencies</h3>
@@ -1402,6 +1388,9 @@ export class NodeDetailPanel {
       // Build phase tabs for this attempt
       const phaseTabsHtml = attempt.logs ? this._buildAttemptPhaseTabs(attempt) : '';
       
+      // Build compact metrics row for this attempt
+      const attemptMetricsHtml = attempt.metrics ? this._buildAttemptMetricsHtml(attempt.metrics) : '';
+      
       return `
         <div class="attempt-card" data-attempt="${attempt.attemptNumber}">
           <div class="attempt-header" data-expanded="false">
@@ -1419,6 +1408,7 @@ export class NodeDetailPanel {
               <div class="attempt-meta-row"><strong>Status:</strong> <span class="status-${attempt.status}">${attempt.status}</span></div>
               ${sessionHtml}
             </div>
+            ${attemptMetricsHtml}
             ${contextHtml}
             ${errorHtml}
             ${phaseTabsHtml}
@@ -1433,6 +1423,91 @@ export class NodeDetailPanel {
       ${cards}
     </div>
     `;
+  }
+  
+  /**
+   * Build a prominent metrics summary card for aggregated node metrics.
+   *
+   * @param metrics - The aggregated CopilotUsageMetrics to display.
+   * @returns HTML fragment string for the metrics card.
+   */
+  private _buildMetricsSummaryHtml(metrics: CopilotUsageMetrics): string {
+    const statsHtml: string[] = [];
+    
+    if (metrics.premiumRequests !== undefined) {
+      statsHtml.push(`<div class="metrics-stat">🎫 ${formatPremiumRequests(metrics.premiumRequests)}</div>`);
+    }
+    if (metrics.apiTimeSeconds !== undefined) {
+      statsHtml.push(`<div class="metrics-stat">⏱ API: ${formatDurationSeconds(metrics.apiTimeSeconds)}</div>`);
+    }
+    if (metrics.sessionTimeSeconds !== undefined) {
+      statsHtml.push(`<div class="metrics-stat">🕐 Session: ${formatDurationSeconds(metrics.sessionTimeSeconds)}</div>`);
+    }
+    if (metrics.codeChanges) {
+      statsHtml.push(`<div class="metrics-stat">📝 Code: ${formatCodeChanges(metrics.codeChanges)}</div>`);
+    }
+    
+    let modelBreakdownHtml = '';
+    if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
+      const rows = metrics.modelBreakdown.map(b => {
+        const cached = b.cachedTokens ? `, ${formatTokenCount(b.cachedTokens)} cached` : '';
+        const reqs = b.premiumRequests !== undefined ? ` (${b.premiumRequests} req)` : '';
+        return `<div class="model-row">
+          <span class="model-name">${escapeHtml(b.model)}</span>
+          <span class="model-tokens">${formatTokenCount(b.inputTokens)} in, ${formatTokenCount(b.outputTokens)} out${cached}${reqs}</span>
+        </div>`;
+      }).join('');
+      
+      modelBreakdownHtml = `
+        <div class="model-breakdown">
+          <div class="model-breakdown-label">Model Breakdown:</div>
+          <div class="model-breakdown-list">${rows}</div>
+        </div>`;
+    }
+    
+    return `
+    <div class="section metrics-card">
+      <h3>⚡ AI Usage</h3>
+      <div class="metrics-stats-grid">${statsHtml.join('')}</div>
+      ${modelBreakdownHtml}
+    </div>`;
+  }
+  
+  /**
+   * Build a compact metrics row for an individual attempt.
+   *
+   * @param metrics - The CopilotUsageMetrics for a single attempt.
+   * @returns HTML fragment string for a compact metrics display.
+   */
+  private _buildAttemptMetricsHtml(metrics: CopilotUsageMetrics): string {
+    const parts: string[] = [];
+    
+    if (metrics.premiumRequests !== undefined) {
+      parts.push(`🎫 ${metrics.premiumRequests} Premium req`);
+    }
+    if (metrics.apiTimeSeconds !== undefined || metrics.sessionTimeSeconds !== undefined) {
+      const apiPart = metrics.apiTimeSeconds !== undefined ? `${formatDurationSeconds(metrics.apiTimeSeconds)} API` : '';
+      const sessionPart = metrics.sessionTimeSeconds !== undefined ? `${formatDurationSeconds(metrics.sessionTimeSeconds)} session` : '';
+      const timeParts = [apiPart, sessionPart].filter(Boolean).join(' / ');
+      parts.push(`⏱ ${timeParts}`);
+    }
+    if (metrics.codeChanges) {
+      parts.push(`📝 ${formatCodeChanges(metrics.codeChanges)}`);
+    }
+    
+    let modelLine = '';
+    if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
+      modelLine = metrics.modelBreakdown.map(b => {
+        const cached = b.cachedTokens ? `, ${formatTokenCount(b.cachedTokens)} cached` : '';
+        return `${escapeHtml(b.model)}: ${formatTokenCount(b.inputTokens)} in, ${formatTokenCount(b.outputTokens)} out${cached}`;
+      }).join('; ');
+    }
+    
+    return `
+    <div class="attempt-metrics-compact">
+      <div class="attempt-metrics-row">${parts.join('  ')}</div>
+      ${modelLine ? `<div class="attempt-metrics-models">${modelLine}</div>` : ''}
+    </div>`;
   }
   
   /**
@@ -2284,25 +2359,70 @@ export class NodeDetailPanel {
       overflow: auto;
     }
     
-    /* Metrics */
-    .metrics-section {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+    /* AI Usage Metrics Card */
+    .metrics-card {
+      border: 1px solid var(--vscode-progressBar-background);
+      background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-progressBar-background));
+      border-radius: 8px;
     }
-    .metric-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+    .metrics-card h3 {
+      margin-top: 0;
     }
-    .metric-label {
+    .metrics-stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 16px;
+      margin-bottom: 12px;
+    }
+    .metrics-stat {
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .model-breakdown {
+      margin-top: 8px;
+    }
+    .model-breakdown-label {
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
-      min-width: 80px;
+      margin-bottom: 6px;
     }
-    .metric-value {
-      font-size: 13px;
+    .model-breakdown-list {
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      padding: 8px 10px;
+    }
+    .model-row {
+      display: flex;
+      gap: 12px;
+      align-items: baseline;
+      padding: 2px 0;
+      font-size: 11px;
       font-family: var(--vscode-editor-font-family), monospace;
+    }
+    .model-name {
+      font-weight: 600;
+      min-width: 140px;
+    }
+    .model-tokens {
+      color: var(--vscode-descriptionForeground);
+    }
+    /* Compact attempt-level metrics */
+    .attempt-metrics-compact {
+      margin-top: 8px;
+      padding: 6px 8px;
+      background: color-mix(in srgb, var(--vscode-sideBar-background) 80%, var(--vscode-progressBar-background));
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    .attempt-metrics-row {
+      white-space: nowrap;
+    }
+    .attempt-metrics-models {
+      margin-top: 3px;
+      color: var(--vscode-descriptionForeground);
+      font-family: var(--vscode-editor-font-family), monospace;
+      font-size: 10px;
     }
     `;
   }
