@@ -182,6 +182,10 @@ export interface PlanRunnerConfig {
 export interface RetryNodeOptions {
   /** New work spec to replace/augment original. Can be string, process, shell, or agent spec */
   newWork?: WorkSpec;
+  /** New prechecks spec to replace original */
+  newPrechecks?: WorkSpec | null;
+  /** New postchecks spec to replace original (use null to remove postchecks) */
+  newPostchecks?: WorkSpec | null;
   /** Reset worktree to base commit (default: false) */
   clearWorktree?: boolean;
 }
@@ -2484,7 +2488,24 @@ export class PlanRunner extends EventEmitter {
         jobNode.work = newWork;
         nodeState.copilotSessionId = undefined;
       }
-    } else if (!options?.newWork && node.type === 'job') {
+    }
+    
+    // Handle new prechecks/postchecks if provided
+    if (node.type === 'job') {
+      const jobNode = node as JobNode;
+      if (options?.newPrechecks !== undefined) {
+        // null means remove prechecks entirely
+        jobNode.prechecks = options.newPrechecks === null ? undefined : options.newPrechecks;
+        log.info(`Updated prechecks for retry: ${node.name}`);
+      }
+      if (options?.newPostchecks !== undefined) {
+        // null means remove postchecks entirely
+        jobNode.postchecks = options.newPostchecks === null ? undefined : options.newPostchecks;
+        log.info(`Updated postchecks for retry: ${node.name}`);
+      }
+    }
+    
+    if (!options?.newWork && node.type === 'job') {
       // No new work provided - auto-generate failure-fixing instructions for agent jobs
       const jobNode = node as JobNode;
       const isAgentWork = typeof jobNode.work === 'string' 
@@ -2535,7 +2556,8 @@ Resume working in the existing worktree and session context.`;
     
     // Determine if we should resume from failed phase or start fresh
     const hasNewWork = !!options?.newWork;
-    const shouldResetPhases = hasNewWork || options?.clearWorktree;
+    const hasNewChecks = options?.newPrechecks !== undefined || options?.newPostchecks !== undefined;
+    const shouldResetPhases = hasNewWork || hasNewChecks || options?.clearWorktree;
     
     if (shouldResetPhases) {
       // Starting fresh - clear all phase progress

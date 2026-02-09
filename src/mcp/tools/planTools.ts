@@ -538,6 +538,12 @@ Options:
 For agent type, resumeSession (default: true) continues existing Copilot session.
 Agent instructions MUST be in Markdown format.`
           },
+          newPrechecks: {
+            description: 'Optional replacement prechecks for the retry. Same format as work specs. Use null to remove prechecks.'
+          },
+          newPostchecks: {
+            description: 'Optional replacement postchecks for the retry. Same format as work specs. Use null to remove postchecks.'
+          },
           clearWorktree: {
             type: 'boolean',
             description: 'Reset worktree to base commit before retry (default: false)'
@@ -619,6 +625,12 @@ WORKFLOW:
 
 For agent type, resumeSession (default: true) continues existing Copilot session.
 Agent instructions MUST be in Markdown format.`
+          },
+          newPrechecks: {
+            description: 'Optional replacement prechecks for the retry. Same format as work specs. Use null to remove prechecks.'
+          },
+          newPostchecks: {
+            description: 'Optional replacement postchecks for the retry. Same format as work specs. Use null to remove postchecks.'
           },
           clearWorktree: {
             type: 'boolean',

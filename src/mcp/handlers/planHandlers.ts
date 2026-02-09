@@ -860,6 +860,8 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   // Build retry options from args
   const retryOptions = {
     newWork: args.newWork,
+    newPrechecks: args.newPrechecks,
+    newPostchecks: args.newPostchecks,
     clearWorktree: args.clearWorktree || false,
   };
   
@@ -964,7 +966,10 @@ export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): P
   }
   
   // Build retry options from args
-  const retryOptions = {    newWork: args.newWork,
+  const retryOptions = {
+    newWork: args.newWork,
+    newPrechecks: args.newPrechecks,
+    newPostchecks: args.newPostchecks,
     clearWorktree: args.clearWorktree || false,
   };
   
