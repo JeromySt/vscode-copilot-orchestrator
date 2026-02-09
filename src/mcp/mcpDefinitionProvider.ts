@@ -102,7 +102,7 @@ export function registerMcpDefinitionProvider(
       }
 
       const extensionPath = context.extensionPath;
-      const serverScript = path.join(extensionPath, 'out', 'mcp', 'stdio', 'server.js');
+      const serverScript = path.join(extensionPath, 'dist', 'mcp-stdio-server.js');
 
       // The stdio server connects back to the extension via IPC
       // All config passed via environment variables to keep server "shape" stable
