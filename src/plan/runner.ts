@@ -1467,8 +1467,9 @@ export class PlanRunner extends EventEmitter {
           // AUTO-HEAL: Automatic AI-assisted retry for process/shell failures
           // ============================================================
           // If a process/shell phase failed and auto-heal is enabled,
-          // retry once with a Copilot agent that can inspect the failure
-          // and fix it directly in the worktree.
+          // retry once by swapping ONLY the failed phase to a Copilot agent
+          // and resuming from that phase. Earlier phases that passed are
+          // skipped; later phases (including commit) run normally.
           const failedPhase = result.failedPhase || 'work';
           const isHealablePhase = ['prechecks', 'work', 'postchecks'].includes(failedPhase);
           const failedWorkSpec = failedPhase === 'prechecks' ? node.prechecks
@@ -1487,14 +1488,14 @@ export class PlanRunner extends EventEmitter {
             
             nodeState.autoHealAttempted = true;
             
-            // Log the auto-heal attempt
-            this.execLog(plan.id, node.id, 'work', 'info', '');
-            this.execLog(plan.id, node.id, 'work', 'info', '========== AUTO-HEAL: AI-ASSISTED FIX ATTEMPT ==========');
-            this.execLog(plan.id, node.id, 'work', 'info', `Phase "${failedPhase}" failed. Delegating to Copilot agent to diagnose and fix.`);
+            // Log the auto-heal attempt in the failed phase's log stream
+            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '');
+            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: AI-ASSISTED FIX ATTEMPT ==========');
+            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', `Phase "${failedPhase}" failed. Delegating to Copilot agent to diagnose and fix.`);
             
             // Build a minimal agent spec — the agent runs in the worktree
             // and can see the failure context from the execution environment
-            const healWork: WorkSpec = {
+            const healSpec: WorkSpec = {
               type: 'agent',
               instructions: [
                 `# Auto-Heal: Fix Failed ${failedPhase} Phase`,
@@ -1513,29 +1514,33 @@ export class PlanRunner extends EventEmitter {
               ].join('\n'),
             };
             
-            // Save the original work spec so we can restore it after healing
-            const originalWork = node.work;
+            // Swap ONLY the failed phase to the agent, preserve the rest
             const originalPrechecks = node.prechecks;
+            const originalWork = node.work;
             const originalPostchecks = node.postchecks;
             
-            // Replace work/checks: agent handles everything from the failed phase onward
-            node.work = healWork;
-            node.prechecks = undefined; // Agent handles fix + re-run
-            node.postchecks = undefined;
+            if (failedPhase === 'prechecks') {
+              node.prechecks = healSpec;
+            } else if (failedPhase === 'work') {
+              node.work = healSpec;
+            } else if (failedPhase === 'postchecks') {
+              node.postchecks = healSpec;
+            }
             
             // Reset state for the heal attempt
             nodeState.error = undefined;
             nodeState.startedAt = Date.now();
-            nodeState.stepStatuses = undefined;
             nodeState.attempts++;
             
-            // Execute the heal attempt
+            // Execute with resumeFromPhase to skip already-passed phases
             const healContext: ExecutionContext = {
               plan,
               node,
               baseCommit: nodeState.baseCommit!,
               worktreePath,
               copilotSessionId: nodeState.copilotSessionId,
+              resumeFromPhase: failedPhase as ExecutionContext['resumeFromPhase'],
+              previousStepStatuses: nodeState.stepStatuses,
               onProgress: (step) => {
                 log.debug(`Auto-heal progress: ${node.name} - ${step}`);
               },
@@ -1543,9 +1548,9 @@ export class PlanRunner extends EventEmitter {
             
             const healResult = await this.executor!.execute(healContext);
             
-            // Restore original work specs regardless of outcome
-            node.work = originalWork;
+            // Restore original specs regardless of outcome
             node.prechecks = originalPrechecks;
+            node.work = originalWork;
             node.postchecks = originalPostchecks;
             
             // Store step statuses from heal attempt
@@ -1563,7 +1568,7 @@ export class PlanRunner extends EventEmitter {
                 planId: plan.id,
                 nodeId: node.id,
               });
-              this.execLog(plan.id, node.id, 'work', 'info', '========== AUTO-HEAL: SUCCESS ==========');
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: SUCCESS ==========');
               
               executorSuccess = true;
               if (healResult.completedCommit) {
@@ -1581,8 +1586,8 @@ export class PlanRunner extends EventEmitter {
                 nodeId: node.id,
                 error: healResult.error,
               });
-              this.execLog(plan.id, node.id, 'work', 'info', '========== AUTO-HEAL: FAILED ==========');
-              this.execLog(plan.id, node.id, 'work', 'error', `Auto-heal could not fix the issue: ${healResult.error}`);
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: FAILED ==========');
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'error', `Auto-heal could not fix the issue: ${healResult.error}`);
               
               nodeState.error = `Auto-heal failed: ${healResult.error}`;
               
@@ -1600,7 +1605,7 @@ export class PlanRunner extends EventEmitter {
                 worktreePath: nodeState.worktreePath,
                 baseCommit: nodeState.baseCommit,
                 logs: this.getNodeLogs(plan.id, node.id),
-                workUsed: healWork,
+                workUsed: healSpec,
               };
               nodeState.attemptHistory = [...(nodeState.attemptHistory || []), healAttempt];
               
