@@ -137,13 +137,19 @@ commitChanges(node, worktreePath, executionKey, baseCommit)
   ├─ HEAD != baseCommit?
   │   YES → return HEAD (existing path, unchanged)
   │
-  ├─ evidenceFileExists?                          ◄── NEW
+  ├─ evidenceFileExists?
   │   YES → stageAll + commit (evidence file is the change)
   │
-  ├─ node.expectsNoChanges?                       ◄── NEW
+  ├─ node.expectsNoChanges?
   │   YES → return { success: true, commit: undefined }
   │
-  └─ FAIL: "No work evidence produced"            ◄── UPDATED message
+  ├─ AI Review (if agentDelegator available)       ◄── NEW
+  │   │ Asks a fast AI model to review execution logs
+  │   │ and determine if "no changes" is legitimate
+  │   ├─ legitimate: true  → succeed without commit
+  │   └─ legitimate: false → fall through to FAIL
+  │
+  └─ FAIL: "No work evidence produced"
 ```
 
 #### Pseudocode
@@ -183,6 +189,17 @@ private async commitChanges(
       this.logInfo(executionKey, 'commit', 
         'Node declares expectsNoChanges — succeeding without commit');
       return { success: true, commit: undefined };
+    }
+    
+    // NEW: AI Review — ask a fast model to review execution logs
+    // and determine if "no changes" is a legitimate outcome
+    if (this.agentDelegator) {
+      const reviewResult = await this.aiReviewNoChanges(
+        node, worktreePath, executionKey
+      );
+      if (reviewResult.legitimate) {
+        return { success: true, commit: undefined };
+      }
     }
     
     // No evidence — fail

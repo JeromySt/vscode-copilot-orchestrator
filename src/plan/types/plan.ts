@@ -578,7 +578,10 @@ export interface EvidenceValidationResult {
   evidence?: EvidenceFile;
 
   /** How the node satisfied evidence requirements */
-  method?: 'file_changes' | 'evidence_file' | 'expects_no_changes' | 'none';
+  method?: 'file_changes' | 'evidence_file' | 'expects_no_changes' | 'ai_review' | 'none';
+
+  /** AI review summary when method is 'ai_review' */
+  aiReviewSummary?: string;
 }
 
 // ============================================================================

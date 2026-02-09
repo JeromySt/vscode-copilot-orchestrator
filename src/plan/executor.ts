@@ -1006,6 +1006,25 @@ export class DefaultJobExecutor implements JobExecutor {
           return { success: true, commit: undefined };
         }
         
+        // AI Review: Ask an agent to review the execution logs and determine
+        // whether "no changes" is a legitimate outcome (e.g., work was already
+        // done by a dependency, tests already pass, linter found no issues).
+        if (this.agentDelegator) {
+          this.logInfo(executionKey, 'commit',
+            'No file changes detected. Requesting AI review of execution logs...');
+          const reviewResult = await this.aiReviewNoChanges(
+            node, worktreePath, executionKey
+          );
+          if (reviewResult.legitimate) {
+            this.logInfo(executionKey, 'commit',
+              `AI review: No changes needed — ${reviewResult.reason}`);
+            return { success: true, commit: undefined };
+          } else {
+            this.logInfo(executionKey, 'commit',
+              `AI review: Changes were expected — ${reviewResult.reason}`);
+          }
+        }
+        
         // No evidence — fail
         const error =
           'No work evidence produced. The node must either:\n' +
@@ -1034,6 +1053,138 @@ export class DefaultJobExecutor implements JobExecutor {
     } catch (error: any) {
       this.logError(executionKey, 'commit', `Commit error: ${error.message}`);
       return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * AI Review: Determine whether "no changes" is a legitimate outcome.
+   *
+   * When the commit phase finds no file changes and no evidence file,
+   * this method asks an AI agent to review the execution logs and judge
+   * whether the absence of changes is expected (e.g., work was already
+   * done by a dependency, tests passed with nothing to fix, linter found
+   * no issues) or whether the work genuinely failed to produce output.
+   *
+   * @returns `{ legitimate: true, reason }` if no-op is acceptable,
+   *          `{ legitimate: false, reason }` if changes were expected.
+   */
+  private async aiReviewNoChanges(
+    node: JobNode,
+    worktreePath: string,
+    executionKey: string
+  ): Promise<{ legitimate: boolean; reason: string }> {
+    try {
+      // Gather execution logs — truncated to keep the prompt manageable
+      const logs = this.executionLogs.get(executionKey) || [];
+      const logText = logs
+        .map(e => `[${e.phase}] [${e.type}] ${e.message}`)
+        .join('\n');
+      const logLines = logText.split('\n');
+      const truncatedLogs = logLines.length > 150
+        ? `... (${logLines.length - 150} earlier lines omitted)\n` + logLines.slice(-150).join('\n')
+        : logText;
+
+      // Describe the original work spec for context
+      const workDesc = (() => {
+        const spec = normalizeWorkSpec(node.work);
+        if (!spec) return 'No work specified';
+        if (spec.type === 'shell') return `Shell: ${spec.command}`;
+        if (spec.type === 'process') return `Process: ${spec.executable} ${(spec.args || []).join(' ')}`;
+        if (spec.type === 'agent') return `Agent: ${spec.instructions.slice(0, 200)}`;
+        return 'Unknown work type';
+      })();
+
+      const reviewPrompt = [
+        '# No-Change Review: Was This Outcome Expected?',
+        '',
+        '## Context',
+        `A plan node completed its work phase successfully, but produced NO file changes.`,
+        `The commit phase needs to determine: is this a legitimate "no-op" or a failure?`,
+        '',
+        '## Node Details',
+        `- **Name**: ${node.name}`,
+        `- **Task**: ${node.task}`,
+        `- **Work**: ${workDesc}`,
+        '',
+        '## Execution Logs',
+        '```',
+        truncatedLogs,
+        '```',
+        '',
+        '## Your Judgment',
+        'Based on the logs above, determine ONE of:',
+        '',
+        '1. **LEGITIMATE**: The work ran correctly but no file changes were needed.',
+        '   Examples: tests already pass, linter found no issues, files were already',
+        '   created by a dependency, agent verified work was already done.',
+        '',
+        '2. **UNEXPECTED**: The work should have produced changes but didn\'t.',
+        '   Examples: agent said it would write files but didn\'t, command silently',
+        '   failed, work was not attempted.',
+        '',
+        '## CRITICAL: Response Format',
+        'You MUST write your answer as a single-line JSON object on the LAST LINE',
+        'of your output. No markdown fences, no extra text after it.',
+        '',
+        'Format: {"legitimate": true|false, "reason": "brief explanation"}',
+        '',
+        'Example last line:',
+        '{"legitimate": true, "reason": "Tests already existed and all 24 passed — no changes needed"}',
+      ].join('\n');
+
+      this.logInfo(executionKey, 'commit', '========== AI REVIEW: NO-CHANGE ASSESSMENT ==========');
+
+      // Use a lightweight, fast model for the review
+      const result = await this.agentDelegator.delegate({
+        task: reviewPrompt,
+        worktreePath,
+        model: 'claude-haiku-4.5',
+        logOutput: (line: string) => this.logInfo(executionKey, 'commit', `[ai-review] ${line}`),
+        onProcess: () => {}, // No need to track this short-lived process
+      });
+
+      this.logInfo(executionKey, 'commit', '========== AI REVIEW: COMPLETE ==========');
+
+      if (!result.success) {
+        // AI review itself failed — don't block on it, fall through to normal fail
+        this.logInfo(executionKey, 'commit',
+          `AI review could not complete: ${result.error}. Falling through to standard validation.`);
+        return { legitimate: false, reason: 'AI review unavailable' };
+      }
+
+      // Parse the AI's judgment from the execution logs.
+      // The agent writes to stdout via logOutput — look for the JSON verdict
+      // in the commit-phase logs written since we started the review.
+      const reviewLogs = (this.executionLogs.get(executionKey) || [])
+        .filter(e => e.phase === 'commit' && e.message.includes('[ai-review]'))
+        .map(e => e.message);
+
+      // Search for JSON response — try last lines first (most likely location)
+      for (let i = reviewLogs.length - 1; i >= 0; i--) {
+        const line = reviewLogs[i];
+        const jsonMatch = line.match(/\{[^{}]*"legitimate"\s*:\s*(true|false)[^{}]*\}/);
+        if (jsonMatch) {
+          try {
+            const parsed = JSON.parse(jsonMatch[0]) as { legitimate: boolean; reason: string };
+            return {
+              legitimate: parsed.legitimate === true,
+              reason: parsed.reason || (parsed.legitimate ? 'AI review approved' : 'AI review rejected'),
+            };
+          } catch {
+            // JSON parse failed, continue searching
+          }
+        }
+      }
+
+      // Couldn't parse a structured response — fall through
+      this.logInfo(executionKey, 'commit',
+        'AI review did not return a parseable judgment. Falling through to standard validation.');
+      return { legitimate: false, reason: 'AI review returned no parseable judgment' };
+    } catch (error: any) {
+      // Don't let AI review errors block the pipeline
+      this.logInfo(executionKey, 'commit',
+        `AI review error: ${error.message}. Falling through to standard validation.`);
+      return { legitimate: false, reason: `AI review error: ${error.message}` };
     }
   }
   
