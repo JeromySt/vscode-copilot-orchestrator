@@ -242,6 +242,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
     targetBranch: args.targetBranch,
     maxParallel: args.maxParallel,
     cleanUpSuccessfulWork: args.cleanUpSuccessfulWork,
+    startPaused: args.startPaused,
     jobs: [...rootJobs, ...groupJobs],
     // Note: groups are flattened into jobs, not stored separately
   };
@@ -307,18 +308,24 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
       nodeMapping[producerId] = nodeId;
     }
     
+    const isPaused = plan.isPaused === true;
+    const pauseNote = isPaused
+      ? ' Plan is PAUSED. Use resume_copilot_plan to start execution.'
+      : '';
+    
     return {
       success: true,
       planId: plan.id,
       name: plan.spec.name,
       baseBranch: plan.baseBranch,
       targetBranch: plan.targetBranch,
+      paused: isPaused,
       message: `Plan '${plan.spec.name}' created with ${plan.nodes.size} nodes. ` +
-               `Base: ${plan.baseBranch}, Target: ${plan.targetBranch}. ` +
+               `Base: ${plan.baseBranch}, Target: ${plan.targetBranch}.${pauseNote} ` +
                `Use planId '${plan.id}' to monitor progress.`,
       nodeMapping,
       status: {
-        status: 'pending',
+        status: isPaused ? 'paused' : 'pending',
         nodes: plan.nodes.size,
         roots: plan.roots.length,
         leaves: plan.leaves.length,
@@ -373,10 +380,16 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
       instructions: args.instructions,
       baseBranch,
       targetBranch,
+      startPaused: args.startPaused,
     });
     
     // Get the single node ID
     const nodeId = plan.roots[0];
+    
+    const isPaused = plan.isPaused === true;
+    const pauseNote = isPaused
+      ? ' Job is PAUSED. Use resume_copilot_plan to start execution.'
+      : '';
     
     return {
       success: true,
@@ -384,7 +397,8 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
       nodeId,
       baseBranch: plan.baseBranch,
       targetBranch: plan.targetBranch,
-      message: `Job '${args.name}' created. Base: ${plan.baseBranch}, Target: ${plan.targetBranch}. Use planId '${plan.id}' to monitor progress.`,
+      paused: isPaused,
+      message: `Job '${args.name}' created. Base: ${plan.baseBranch}, Target: ${plan.targetBranch}.${pauseNote} Use planId '${plan.id}' to monitor progress.`,
     };
   } catch (error: any) {
     return errorResult(error.message);

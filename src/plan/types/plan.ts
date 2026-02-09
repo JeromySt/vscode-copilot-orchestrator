@@ -36,6 +36,9 @@ export interface PlanSpec {
   /** Whether to clean up worktrees after successful merges (default: true) */
   cleanUpSuccessfulWork?: boolean;
   
+  /** Whether to create the plan in a paused state (default: true for plans, false for single jobs) */
+  startPaused?: boolean;
+  
   /** Job nodes at the top level of this Plan */
   jobs: JobNodeSpec[];
   

@@ -317,6 +317,12 @@ export class PlanRunner extends EventEmitter {
     // Store the Plan
     this.plans.set(plan.id, plan);
     
+    // Start paused by default (plans default to true, single jobs default to false)
+    const shouldPause = spec.startPaused !== undefined ? spec.startPaused : true;
+    if (shouldPause) {
+      plan.isPaused = true;
+    }
+    
     // Create state machine
     const sm = new PlanStateMachine(plan);
     this.setupStateMachineListeners(sm);
@@ -333,6 +339,7 @@ export class PlanRunner extends EventEmitter {
       nodes: plan.nodes.size,
       roots: plan.roots.length,
       leaves: plan.leaves.length,
+      paused: shouldPause,
     });
     
     return plan;
@@ -355,10 +362,16 @@ export class PlanRunner extends EventEmitter {
     baseBranch?: string;
     targetBranch?: string;
     expectsNoChanges?: boolean;
+    startPaused?: boolean;
   }): PlanInstance {
     const plan = buildSingleJobPlan(jobSpec, {
       repoPath: this.config.defaultRepoPath,
     });
+    
+    // Single jobs default to running (startPaused: false) unless explicitly paused
+    if (jobSpec.startPaused === true) {
+      plan.isPaused = true;
+    }
     
     // Store and setup
     this.plans.set(plan.id, plan);

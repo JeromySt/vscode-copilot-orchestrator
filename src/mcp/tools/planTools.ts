@@ -155,6 +155,10 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
             type: 'boolean', 
             description: 'Clean up worktrees after successful merges (default: true)' 
           },
+          startPaused: {
+            type: 'boolean',
+            description: 'Create the plan in paused state for review before execution (default: true). Set to false to start immediately.'
+          },
           jobs: {
             type: 'array',
             description: 'Array of job specifications',
@@ -297,6 +301,10 @@ EXAMPLES:
           targetBranch: { 
             type: 'string', 
             description: 'Branch to merge results into' 
+          },
+          startPaused: {
+            type: 'boolean',
+            description: 'Create the job in paused state for review before execution (default: false). Set to true to pause.'
           }
         },
         required: ['name', 'task']
