@@ -7,7 +7,7 @@
  * @module plan/types/plan
  */
 
-import type { WorkSpec, AgentExecutionMetrics } from './specs';
+import type { WorkSpec, CopilotUsageMetrics } from './specs';
 import type { NodeStatus, JobNodeSpec, GroupSpec, PlanNode, JobNode } from './nodes';
 
 // ============================================================================
@@ -175,7 +175,7 @@ export interface NodeExecutionState {
    * Agent execution metrics (token usage, duration, turns, tool calls).
    * Captured from agent delegation results when available.
    */
-  metrics?: AgentExecutionMetrics;
+  metrics?: CopilotUsageMetrics;
 }
 
 /**
@@ -231,6 +231,9 @@ export interface AttemptRecord {
   
   /** Work spec used for this attempt (for reference) */
   workUsed?: WorkSpec;
+  
+  /** Execution metrics captured during this attempt */
+  metrics?: CopilotUsageMetrics;
 }
 
 // ============================================================================
@@ -487,7 +490,7 @@ export interface JobExecutionResult {
   /** Exit code from failed process */
   exitCode?: number;
   /** Agent execution metrics (token usage, duration, turns, tool calls) */
-  metrics?: AgentExecutionMetrics;
+  metrics?: CopilotUsageMetrics;
 }
 
 /**
