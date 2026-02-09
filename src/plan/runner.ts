@@ -1191,6 +1191,19 @@ export class PlanRunner extends EventEmitter {
         this.emit('planStarted', plan);
       }
       
+      // Safety net: promote any pending nodes whose dependencies are now met.
+      // This handles edge cases like extension reload where persisted state
+      // saved 'pending' before the in-memory transition to 'ready'.
+      for (const [nodeId, state] of plan.nodeStates) {
+        if (state.status === 'pending') {
+          const node = plan.nodes.get(nodeId);
+          if (node && sm.areDependenciesMet(nodeId)) {
+            log.info(`Pump: promoting stuck pending node to ready: ${node.name}`);
+            sm.resetNodeToPending(nodeId);
+          }
+        }
+      }
+      
       // Get nodes to schedule - pass only actual job running count (sub-plans don't consume job slots)
       const nodesToSchedule = this.scheduler.selectNodes(plan, sm, globalRunning);
       
@@ -2836,15 +2849,17 @@ Resume working in the existing worktree and session context.`;
       plan.endedAt = undefined;
     }
     
-    // Persist the reset state
-    this.persistence.save(plan);
-    
     // Check if ready to run (all dependencies succeeded)
     const readyNodes = sm.getReadyNodes();
     if (!readyNodes.includes(nodeId)) {
-      // Need to manually transition to ready since we reset
+      // Transition to ready/pending based on dependency state
       sm.resetNodeToPending(nodeId);
     }
+    
+    // Persist AFTER state transition so the saved status is 'ready' not 'pending'.
+    // This prevents a bug where extension reload between save and transition
+    // would leave the node stuck in 'pending' forever.
+    this.persistence.save(plan);
     
     // Ensure pump is running to process the node
     this.startPump();
