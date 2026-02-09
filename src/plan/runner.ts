@@ -2356,14 +2356,20 @@ export class PlanRunner extends EventEmitter {
       this.executor.cancel(planId, nodeId);
     }
     
-    // Force transition to failed state
-    nodeState.status = 'failed';
-    nodeState.endedAt = Date.now();
+    // Set error before transition so it's available in side-effect handlers
     nodeState.error = failReason;
     
-    // Increment version counters for UI change detection
-    nodeState.version = (nodeState.version || 0) + 1;
-    plan.stateVersion = (plan.stateVersion || 0) + 1;
+    // Use state machine transition to properly propagate failure
+    // This handles: status change, timestamps, version increments,
+    // blocking dependents, updating group state, and checking plan completion
+    const transitioned = sm.transition(nodeId, 'failed');
+    if (!transitioned) {
+      // Fallback: force it directly (should not happen for running/scheduled nodes)
+      nodeState.status = 'failed';
+      nodeState.endedAt = Date.now();
+      nodeState.version = (nodeState.version || 0) + 1;
+      plan.stateVersion = (plan.stateVersion || 0) + 1;
+    }
     
     // Note: attempts was already incremented when the node started running,
     // so we don't increment it again here
