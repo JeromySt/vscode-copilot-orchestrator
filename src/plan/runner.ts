@@ -15,7 +15,6 @@
 
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { spawn } from 'child_process';
 
 // Conditionally import vscode - may not be available in standalone processes
 let vscode: typeof import('vscode') | undefined;
@@ -69,6 +68,7 @@ import {
   computeProgress,
 } from './helpers';
 import * as git from '../git';
+import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
 
 const log = Logger.for('plan-runner');
 
@@ -2004,62 +2004,35 @@ export class PlanRunner extends EventEmitter {
   ): Promise<boolean> {
     const prefer = getConfig<string>('copilotOrchestrator.merge', 'prefer', 'theirs');
     
-    const mergeInstruction =
-      `@agent Resolve the current git merge conflict. ` +
+    const mergeTask =
+      `Resolve the current git merge conflict. ` +
       `We are merging '${sourceBranch}' into '${targetBranch}'. ` +
       `Prefer '${prefer}' changes when there are conflicts. ` +
       `Resolve all conflicts, stage the changes with 'git add', and commit with message '${commitMessage}'`;
     
-    const copilotCmd = `copilot -p ${JSON.stringify(mergeInstruction)} --stream off --allow-all-paths --allow-all-tools`;
-    
     log.info(`Running Copilot CLI to resolve conflicts...`, { cwd });
     
-    // Helper to log CLI output to execution logs
-    const logOutput = (line: string) => {
-      if (logContext && line.trim()) {
-        this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  [copilot] ${line.trim()}`);
-      }
+    const cliLogger: CopilotCliLogger = {
+      info: (msg) => log.info(msg),
+      warn: (msg) => log.warn(msg),
+      error: (msg) => log.error(msg),
+      debug: (msg) => log.debug(msg),
     };
     
-    const result = await new Promise<{ status: number | null }>((resolve) => {
-      const child = spawn(copilotCmd, [], {
-        cwd,
-        shell: true,
-        timeout: 300000, // 5 minute timeout
-      });
-      
-      // Capture stdout
-      child.stdout?.on('data', (data: Buffer) => {
-        const lines = data.toString().split('\n');
-        lines.forEach(line => {
-          log.debug(`[copilot] ${line}`);
-          logOutput(line);
-        });
-      });
-      
-      // Capture stderr
-      child.stderr?.on('data', (data: Buffer) => {
-        const lines = data.toString().split('\n');
-        lines.forEach(line => {
-          log.debug(`[copilot] ${line}`);
-          logOutput(line);
-        });
-      });
-      
-      child.on('close', (code) => {
-        resolve({ status: code });
-      });
-      
-      child.on('error', (err) => {
-        log.error('Copilot CLI spawn error', { error: err.message });
-        if (logContext) {
-          this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'error', `  [copilot] Error: ${err.message}`);
+    const runner = new CopilotCliRunner(cliLogger);
+    const result = await runner.run({
+      cwd,
+      task: mergeTask,
+      label: 'merge-conflict',
+      timeout: 300000,
+      onOutput: (line) => {
+        if (logContext && line.trim()) {
+          this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  [copilot] ${line.trim()}`);
         }
-        resolve({ status: 1 });
-      });
+      },
     });
     
-    return result.status === 0;
+    return result.success;
   }
   
   /**

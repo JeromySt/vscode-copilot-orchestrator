@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { isCopilotCliAvailable } from './cliCheckCore';
+import { CopilotCliRunner, CopilotCliLogger } from './copilotCliRunner';
 import * as git from '../git';
 
 // ============================================================================
@@ -221,6 +222,15 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
   private async delegateViaCopilot(options: DelegateOptions): Promise<DelegateResult> {
     const { jobId, taskDescription, label, worktreePath, sessionId } = options;
 
+    // Create CLI runner with logger adapter
+    const cliLogger: CopilotCliLogger = {
+      info: (msg) => this.logger.log(msg),
+      warn: (msg) => this.logger.log(msg),
+      error: (msg) => this.logger.log(msg),
+      debug: (msg) => this.logger.log(msg),
+    };
+    const cliRunner = new CopilotCliRunner(cliLogger);
+
     // Create job-specific directories for Copilot logs and session tracking
     const copilotJobDir = path.join(worktreePath, '.copilot-orchestrator');
     const copilotLogDir = path.join(copilotJobDir, 'logs');
@@ -232,21 +242,33 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       this.logger.log(`[${label}] Warning: Could not create Copilot log directory: ${e}`);
     }
 
-    // Build Copilot CLI command
-    let copilotCmd = `copilot -p ${JSON.stringify(taskDescription)} --stream off --allow-all-paths --allow-all-urls --allow-all-tools --log-dir ${JSON.stringify(copilotLogDir)} --log-level debug --share ${JSON.stringify(sessionSharePath)}`;
+    // Write instructions file using the unified runner
+    const { filePath: instructionsFile, dirPath: instructionsDir } = cliRunner.writeInstructionsFile(
+      worktreePath,
+      taskDescription,
+      undefined, // No additional instructions
+      label
+    );
 
-    // Resume existing session if we have one
-    if (sessionId) {
-      this.logger.log(`[${label}] Resuming Copilot session: ${sessionId}`);
-      copilotCmd += ` --resume ${sessionId}`;
-    } else {
-      this.logger.log(`[${label}] Starting new Copilot session...`);
-    }
+    // Build command using the unified runner
+    const copilotCmd = cliRunner.buildCommand({
+      task: 'Complete the task described in the instructions.',
+      sessionId,
+      logDir: copilotLogDir,
+      sharePath: sessionSharePath,
+    });
+    
+    this.logger.log(`[${label}] ${sessionId ? 'Resuming' : 'Starting new'} Copilot session...`);
+    
+    // Cleanup function using the unified runner
+    const cleanup = () => {
+      cliRunner.cleanupInstructionsFile(instructionsFile, instructionsDir, label);
+    };
 
     return new Promise<DelegateResult>((resolve) => {
       const proc = spawn(copilotCmd, [], {
         cwd: worktreePath,
-        shell: true
+        shell: true,
       });
 
       let capturedSessionId: string | undefined = sessionId;
@@ -338,6 +360,9 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       });
 
       proc.on('exit', (code: number | null) => {
+        // Clean up temp prompt file and instructions
+        cleanup();
+        
         // Clear any pending flush timers
         if (stdoutFlushTimer) clearTimeout(stdoutFlushTimer);
         if (stderrFlushTimer) clearTimeout(stderrFlushTimer);
@@ -382,6 +407,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       });
 
       proc.on('error', (err: Error) => {
+        cleanup();
         this.logger.log(`[${label}] Copilot delegation failed: ${err}`);
         if (proc.pid) {
           this.callbacks.onProcessExited?.(proc.pid);

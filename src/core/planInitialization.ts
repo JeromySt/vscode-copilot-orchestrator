@@ -9,7 +9,6 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { spawn } from 'child_process';
 import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '../plan';
 import { ProcessMonitor } from '../process/processMonitor';
 import { StdioMcpServerManager } from '../mcp/mcpServerManager';
@@ -17,7 +16,7 @@ import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
 import { McpHandler } from '../mcp/handler';
 import { McpIpcServer } from '../mcp/ipc/server';
 import { Logger } from './logger';
-import { isCopilotCliAvailable } from '../agent/cliCheckCore';
+import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
 import { IMcpManager } from '../interfaces/IMcpManager';
 
 
@@ -106,9 +105,19 @@ function ensureGitignoreEntries(workspacePath: string, entries: string[]): void 
  * Create an agent delegator adapter for the executor.
  * 
  * This bridges the executor's expected interface to the Copilot CLI.
- * It handles session resumption and session ID capture.
+ * Uses the unified CopilotCliRunner for all Copilot CLI interactions.
  */
 function createAgentDelegatorAdapter(log: any) {
+  // Create a logger adapter for CopilotCliRunner
+  const cliLogger: CopilotCliLogger = {
+    info: (msg) => log.info(msg),
+    warn: (msg) => log.warn(msg),
+    error: (msg) => log.error(msg),
+    debug: (msg) => log.debug(msg),
+  };
+  
+  const runner = new CopilotCliRunner(cliLogger);
+  
   return {
     async delegate(options: {
       task: string;
@@ -119,108 +128,24 @@ function createAgentDelegatorAdapter(log: any) {
       maxTurns?: number;
       sessionId?: string;
       logOutput?: (line: string) => void;
-      onProcess?: (proc: any) => void; // Callback to expose process for tracking
+      onProcess?: (proc: any) => void;
     }): Promise<{
       success: boolean;
       sessionId?: string;
       error?: string;
       exitCode?: number;
     }> {
-      const { task, instructions, worktreePath, sessionId, logOutput, onProcess } = options;
+      const { task, instructions, worktreePath, sessionId, logOutput, onProcess, model } = options;
       
-      // Check if Copilot CLI is available
-      if (!isCopilotCliAvailable()) {
-        log.warn('Copilot CLI not available, skipping agent delegation');
-        return { success: true }; // Silent success - work can be done manually
-      }
-      
-      // Build the prompt
-      const prompt = instructions ? `${task}\n\nAdditional context:\n${instructions}` : task;
-      
-      // Build Copilot CLI command
-      let copilotCmd = `copilot -p ${JSON.stringify(prompt)} --stream off --allow-all-paths --allow-all-tools`;
-      
-      // Add session resumption if available
-      if (sessionId) {
-        copilotCmd += ` --resume ${sessionId}`;
-        log.info(`Resuming Copilot session: ${sessionId}`);
-      }
-      
-      return new Promise((resolve) => {
-        let capturedSessionId: string | undefined = sessionId;
-        
-        const proc = spawn(copilotCmd, [], {
-          cwd: worktreePath,
-          shell: true,
-        });
-        
-        // Expose process for tracking (PID, CPU, memory)
-        if (proc.pid) {
-          log.info(`Copilot CLI started with PID: ${proc.pid}`);
-          onProcess?.(proc);
-        }
-        
-        // Extract session ID from output
-        const extractSession = (text: string) => {
-          if (capturedSessionId) return;
-          const match = text.match(/Session ID[:\\s]+([a-f0-9-]{36})/i) ||
-                       text.match(/session[:\\s]+([a-f0-9-]{36})/i) ||
-                       text.match(/Starting session[:\\s]+([a-f0-9-]{36})/i);
-          if (match) {
-            capturedSessionId = match[1];
-            log.info(`Captured Copilot session ID: ${capturedSessionId}`);
-          }
-        };
-        
-        proc.stdout?.on('data', (data: Buffer) => {
-          const text = data.toString();
-          const lines = text.split('\n');
-          lines.forEach(line => {
-            if (line.trim()) {
-              log.debug(`[agent] ${line.trim()}`);
-              logOutput?.(`[copilot] ${line.trim()}`);
-            }
-          });
-          extractSession(text);
-        });
-        
-        proc.stderr?.on('data', (data: Buffer) => {
-          const text = data.toString();
-          const lines = text.split('\n');
-          lines.forEach(line => {
-            if (line.trim()) {
-              log.debug(`[agent] ${line.trim()}`);
-              logOutput?.(`[copilot] ${line.trim()}`);
-            }
-          });
-          extractSession(text);
-        });
-        
-        proc.on('exit', (code) => {
-          if (code !== 0) {
-            log.error(`Copilot CLI exited with code ${code}`);
-            resolve({
-              success: false,
-              sessionId: capturedSessionId,
-              error: `Copilot CLI exited with code ${code}`,
-              exitCode: code ?? undefined,
-            });
-          } else {
-            log.info('Copilot CLI completed successfully');
-            resolve({
-              success: true,
-              sessionId: capturedSessionId,
-            });
-          }
-        });
-        
-        proc.on('error', (err) => {
-          log.error(`Copilot CLI error: ${err.message}`);
-          resolve({
-            success: false,
-            error: err.message,
-          });
-        });
+      return runner.run({
+        cwd: worktreePath,
+        task,
+        instructions,
+        label: 'agent',
+        sessionId,
+        model,
+        onOutput: logOutput ? (line) => logOutput(`[copilot] ${line}`) : undefined,
+        onProcess,
       });
     }
   };

@@ -14,3 +14,12 @@ export {
 
 export { isCopilotCliAvailable, checkCopilotCliAsync, resetCliCache, isCliCachePopulated } from './cliCheckCore';
 export { ensureCopilotCliInteractive, registerCopilotCliCheck } from './cliCheck';
+
+export {
+  CopilotCliRunner,
+  CopilotRunOptions,
+  CopilotRunResult,
+  CopilotCliLogger,
+  getCopilotCliRunner,
+  runCopilotCli,
+} from './copilotCliRunner';
