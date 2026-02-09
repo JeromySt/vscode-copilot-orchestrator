@@ -12,9 +12,10 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { isCopilotCliAvailable } from './cliCheckCore';
 import { CopilotCliRunner, CopilotCliLogger } from './copilotCliRunner';
+import { CopilotStatsParser } from './copilotStatsParser';
 import { isValidModel } from './modelDiscovery';
 import * as git from '../git';
-import { TokenUsage } from '../plan/types';
+import { TokenUsage, CopilotUsageMetrics } from '../plan/types';
 
 // ============================================================================
 // TYPES
@@ -56,8 +57,13 @@ export interface DelegateResult {
   error?: string;
   /** Exit code from the process */
   exitCode?: number;
-  /** Token usage metrics (if extracted from logs) */
+  /**
+   * Token usage metrics (if extracted from logs).
+   * @deprecated Use {@link metrics} instead.
+   */
   tokenUsage?: TokenUsage;
+  /** Rich usage metrics parsed from Copilot CLI stdout */
+  metrics?: CopilotUsageMetrics;
 }
 
 /**
@@ -285,12 +291,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       });
 
       let capturedSessionId: string | undefined = sessionId;
-
-      // Track whether Copilot printed its completion marker ("Task complete").
-      // On Windows, shell:true spawns nested cmd.exe wrappers whose exit-code
-      // propagation can break, producing code=null/signal=null even though the
-      // CLI finished normally.  When we see the marker we treat null as success.
-      let sawTaskComplete = false;
+      const statsParser = new CopilotStatsParser();
 
       // Notify process spawned
       if (proc.pid) {
@@ -308,12 +309,10 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       // Helper to log a line and check for session ID / completion marker
       const logLine = (line: string) => {
         this.logger.log(`[${label}] ${line}`);
-
-        // Detect Copilot's completion marker ("✓ Task complete" or "Task complete")
-        if (!sawTaskComplete && line.includes('Task complete')) {
-          sawTaskComplete = true;
-        }
-
+        
+        // Feed line to stats parser
+        statsParser.feedLine(line);
+        
         // Try to extract session ID
         if (!capturedSessionId) {
           const extracted = this.extractSessionId(line);
@@ -415,22 +414,38 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
         // Extract token usage from log files
         const tokenUsage = await this.extractTokenUsage(copilotLogDir, model);
 
-        // On Windows, nested cmd.exe wrapper chains can exit with
-        // code=null & signal=null even after a normal completion.  When
-        // the completion marker was observed in stdout, treat null as 0.
-        const effectiveCode = (code === null && signal === null && sawTaskComplete) ? 0 : code;
+        // Use parsed metrics from stdout, falling back to legacy log-based extraction
+        const parsedMetrics = statsParser.getMetrics();
+        let metrics: CopilotUsageMetrics | undefined;
+        if (parsedMetrics) {
+          metrics = parsedMetrics;
+          // Backfill legacy tokenUsage from model breakdown if available
+          if (!metrics.tokenUsage && metrics.modelBreakdown?.length) {
+            const totals = metrics.modelBreakdown.reduce(
+              (acc, m) => ({ input: acc.input + m.inputTokens, output: acc.output + m.outputTokens }),
+              { input: 0, output: 0 }
+            );
+            metrics.tokenUsage = {
+              inputTokens: totals.input,
+              outputTokens: totals.output,
+              totalTokens: totals.input + totals.output,
+              model: model || metrics.modelBreakdown[0].model,
+            };
+          }
+        } else if (tokenUsage) {
+          // Fallback: wrap legacy token usage in CopilotUsageMetrics
+          metrics = { durationMs: 0, tokenUsage };
+        }
 
-        if (effectiveCode !== 0) {
-          const reason = signal
-            ? `Copilot was killed by signal ${signal}`
-            : `Copilot failed with exit code ${effectiveCode}`;
-          this.logger.log(`[${label}] ${reason}`);
+        if (code !== 0) {
+          this.logger.log(`[${label}] Copilot exited with code ${code}`);
           resolve({
             success: false,
             sessionId: capturedSessionId,
-            error: reason,
-            exitCode: effectiveCode ?? undefined,
-            tokenUsage
+            error: `Copilot failed with exit code ${code}`,
+            exitCode: code ?? undefined,
+            tokenUsage,
+            metrics,
           });
         } else {
           if (code === null) {
@@ -442,7 +457,8 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
             success: true,
             sessionId: capturedSessionId,
             exitCode: 0,
-            tokenUsage
+            tokenUsage,
+            metrics,
           });
         }
       });

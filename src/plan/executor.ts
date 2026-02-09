@@ -30,6 +30,7 @@ import {
   ShellSpec,
   AgentSpec,
   AgentExecutionMetrics,
+  CopilotUsageMetrics,
   normalizeWorkSpec,
 } from './types';
 import { JobExecutor } from './runner';
@@ -134,7 +135,7 @@ export class DefaultJobExecutor implements JobExecutor {
       ? { ...context.previousStepStatuses } 
       : {};
     let capturedSessionId: string | undefined = context.copilotSessionId;
-    let capturedMetrics: AgentExecutionMetrics | undefined;
+    let capturedMetrics: CopilotUsageMetrics | undefined;
     
     // Determine which phases to skip based on resumeFromPhase
     const phaseOrder = ['prechecks', 'work', 'postchecks', 'commit'] as const;
@@ -601,7 +602,7 @@ export class DefaultJobExecutor implements JobExecutor {
     phase: ExecutionPhase,
     node: JobNode,
     sessionId?: string
-  ): Promise<{ success: boolean; error?: string; isAgent?: boolean; copilotSessionId?: string; exitCode?: number; metrics?: AgentExecutionMetrics }> {
+  ): Promise<{ success: boolean; error?: string; isAgent?: boolean; copilotSessionId?: string; exitCode?: number; metrics?: CopilotUsageMetrics }> {
     const normalized = normalizeWorkSpec(spec);
     
     if (!normalized) {
@@ -866,7 +867,7 @@ export class DefaultJobExecutor implements JobExecutor {
     executionKey: string,
     node: JobNode,
     sessionId?: string
-  ): Promise<{ success: boolean; error?: string; copilotSessionId?: string; exitCode?: number; metrics?: AgentExecutionMetrics }> {
+  ): Promise<{ success: boolean; error?: string; copilotSessionId?: string; exitCode?: number; metrics?: CopilotUsageMetrics }> {
     if (!this.agentDelegator) {
       return {
         success: false,
@@ -914,9 +915,16 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Build metrics from delegation result
       const durationMs = Date.now() - execution.startTime;
-      const metrics: AgentExecutionMetrics = { durationMs };
-      if (result.tokenUsage) {
-        metrics.tokenUsage = result.tokenUsage;
+      let metrics: CopilotUsageMetrics;
+      if (result.metrics) {
+        // Use rich parsed metrics from CopilotStatsParser
+        metrics = { ...result.metrics, durationMs };
+      } else {
+        // Fallback to legacy token usage
+        metrics = { durationMs };
+        if (result.tokenUsage) {
+          metrics.tokenUsage = result.tokenUsage;
+        }
       }
       
       if (result.success) {
