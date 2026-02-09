@@ -2239,7 +2239,10 @@ ${mermaidDef}
         nodeTooltips[sanitizedId] = label;
       }
       
-      lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);
+      // Add trailing non-breaking spaces to prevent Mermaid SVG text clipping
+      const nbsp = '\u00A0';
+      const nodePadding = nbsp.repeat(2);
+      lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}${nodePadding}"]`);
       lines.push(`${indent}class ${sanitizedId} ${status}`);
       
       nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
