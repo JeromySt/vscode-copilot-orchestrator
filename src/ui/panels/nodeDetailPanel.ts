@@ -259,7 +259,16 @@ export class NodeDetailPanel {
     this._panel.webview.html = this._getLoadingHtml();
     
     // Initial render (deferred)
-    setImmediate(() => this._update());
+    setImmediate(() => {
+      // Set _lastStatus before first render to prevent the interval from
+      // immediately triggering a redundant full update that kills the
+      // client-side duration timer
+      const plan = this._planRunner.get(this._planId);
+      const state = plan?.nodeStates.get(this._nodeId);
+      this._lastStatus = state?.status || null;
+      this._lastWorktreeCleanedUp = state?.worktreeCleanedUp;
+      this._update();
+    });
     
     // Setup update interval for running nodes
     this._updateInterval = setInterval(() => {
