@@ -286,6 +286,10 @@ export class DefaultJobExecutor implements JobExecutor {
       }
       
       // Commit changes
+      // When resuming from postchecks or later, work was already validated
+      // in a prior attempt. If commitChanges finds no evidence (work was a
+      // no-op — e.g., files already committed by a dependency), that's OK.
+      const workWasSkipped = shouldSkipPhase('work');
       context.onProgress?.('Committing changes');
       this.logInfo(executionKey, 'commit', '========== COMMIT SECTION START ==========');
       const commitResult = await this.commitChanges(
@@ -297,16 +301,25 @@ export class DefaultJobExecutor implements JobExecutor {
       this.logInfo(executionKey, 'commit', '========== COMMIT SECTION END ==========');
       
       if (!commitResult.success) {
-        stepStatuses.commit = 'failed';
-        return {
-          success: false,
-          error: `Commit failed: ${commitResult.error}`,
-          stepStatuses,
-          copilotSessionId: capturedSessionId,
-          failedPhase: 'commit',
-        };
+        if (workWasSkipped) {
+          // Work was skipped (resume from postchecks or later). The prior work
+          // phase already validated — a no-op commit is acceptable.
+          this.logInfo(executionKey, 'commit',
+            'Commit found no evidence, but work was skipped (resuming). Succeeding without commit.');
+          stepStatuses.commit = 'success';
+        } else {
+          stepStatuses.commit = 'failed';
+          return {
+            success: false,
+            error: `Commit failed: ${commitResult.error}`,
+            stepStatuses,
+            copilotSessionId: capturedSessionId,
+            failedPhase: 'commit',
+          };
+        }
+      } else {
+        stepStatuses.commit = 'success';
       }
-      stepStatuses.commit = 'success';
       
       // Get work summary
       const workSummary = await this.computeWorkSummary(
