@@ -2486,15 +2486,18 @@ ${mermaidDef}
         };
         const colors = groupColors[groupStatus] || groupColors.pending;
         
-        // For groups, use full path name without truncation (subgraphs have more room)
-        // Add trailing non-breaking spaces to give Mermaid extra room for text measurement
-        // (regular spaces may be collapsed/trimmed)
+        // Truncate group names to prevent label overflow, using a generous
+        // limit since subgraph boxes are generally wider than node boxes.
         const displayName = groupPath || treeNode.name;
         const escapedName = this._escapeForMermaid(displayName);
+        const truncatedGroupName = this._truncateNodeLabel(escapedName, groupDurationLabel);
+        if (truncatedGroupName !== escapedName) {
+          nodeTooltips[sanitizedGroupId] = displayName;
+        }
         const nbsp = '\u00A0'; // non-breaking space
-        const padding = nbsp.repeat(6); // extra padding to prevent cutoff
+        const padding = nbsp.repeat(4); // extra padding to prevent cutoff
         
-        lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${escapedName}${groupDurationLabel}${padding}"]`);
+        lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedGroupName}${groupDurationLabel}${padding}"]`);
         
         const childIndent = currentIndent + '  ';
         
@@ -2645,10 +2648,10 @@ ${mermaidDef}
   }
 
   /**
-   * Maximum character length for a node label (name + duration) before truncation.
-   * Set to 45 to accommodate icon (2) + typical name (25) + duration (" | 00m 00s" = ~12).
+   * Maximum character length for a node/group label (name + duration) before truncation.
+   * Accommodates icon (2) + name (up to ~20) + duration (" | 00m 00s" = ~12) + padding.
    */
-  private static readonly NODE_LABEL_MAX_LENGTH = 45;
+  private static readonly NODE_LABEL_MAX_LENGTH = 35;
 
   /**
    * Truncate a node name so that the combined label (name + duration suffix)
