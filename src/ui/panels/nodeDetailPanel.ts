@@ -818,7 +818,9 @@ export class NodeDetailPanel {
         } else if (action === 'retry-node-fresh') {
           vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
         } else if (action === 'force-fail-node') {
-          vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
+          if (confirm('Are you sure you want to force fail this node? This will mark it as failed and allow retry.')) {
+            vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
+          }
         }
       });
     });
