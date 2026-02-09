@@ -1453,9 +1453,14 @@ export class PlanRunner extends EventEmitter {
         
         if (result.success) {
           executorSuccess = true;
-          // Store completed commit
+          // Store completed commit.
+          // If the executor produced no commit (e.g., expectsNoChanges validation
+          // node), carry forward the baseCommit so downstream nodes in the FI
+          // chain still receive the correct parent commit.
           if (result.completedCommit) {
             nodeState.completedCommit = result.completedCommit;
+          } else if (!nodeState.completedCommit && nodeState.baseCommit) {
+            nodeState.completedCommit = nodeState.baseCommit;
           }
           
           // Store work summary on node state and aggregate to Plan
@@ -1737,11 +1742,10 @@ export class PlanRunner extends EventEmitter {
         
         log.info(`Merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
       } else if (isLeaf && plan.targetBranch && !nodeState.completedCommit) {
-        // Leaf node with no commit (e.g., expectsNoChanges) - nothing to merge to target
-        // Mark as "merged" so worktree cleanup can proceed
+        // Leaf node with no commit at all (no baseCommit either) - nothing to merge
         log.debug(`Leaf node ${node.name} has no commit to merge to ${plan.targetBranch} - marking as merged`);
         this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION ==========');
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', 'No commit to merge (expectsNoChanges or validation-only node)');
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', 'No commit to merge (validation-only root node)');
         this.execLog(plan.id, node.id, 'merge-ri', 'info', '==========================================');
         nodeState.mergedToTarget = true;
       } else if (isLeaf) {
