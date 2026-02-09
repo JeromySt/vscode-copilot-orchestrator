@@ -23,3 +23,16 @@ export {
   getCopilotCliRunner,
   runCopilotCli,
 } from './copilotCliRunner';
+
+export {
+  ModelInfo,
+  ModelDiscoveryResult,
+  classifyModel,
+  parseModelChoices,
+  discoverAvailableModels,
+  getCachedModels,
+  refreshModelCache,
+  isValidModel,
+  suggestModel,
+  resetModelCache,
+} from './modelDiscovery';

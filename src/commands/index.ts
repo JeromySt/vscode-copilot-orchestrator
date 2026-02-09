@@ -8,3 +8,4 @@
  */
 
 export { registerMcpCommands } from './mcpCommands';
+export { registerUtilityCommands } from './utilityCommands';

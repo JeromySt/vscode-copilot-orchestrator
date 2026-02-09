@@ -8,6 +8,7 @@
  */
 
 import { McpTool } from '../types';
+import { discoverAvailableModels } from '../../agent/modelDiscovery';
 
 /**
  * Regex pattern for valid `producer_id` values.
@@ -44,11 +45,16 @@ export const PRODUCER_ID_PATTERN = /^[a-z0-9-]{3,64}$/;
  *
  * @example
  * ```ts
- * const tools = getPlanToolDefinitions();
+ * const tools = await getPlanToolDefinitions();
  * // tools[0].name === 'create_copilot_plan'
  * ```
  */
-export function getPlanToolDefinitions(): McpTool[] {
+export async function getPlanToolDefinitions(): Promise<McpTool[]> {
+  const modelResult = await discoverAvailableModels();
+  const modelEnum = modelResult.rawChoices.length > 0
+    ? modelResult.rawChoices
+    : ['gpt-5', 'claude-sonnet-4.5'];
+
   return [
     // =========================================================================
     // Plan CREATION
@@ -183,12 +189,18 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
 1. STRING: Shell command like "npm run build" or "@agent Do something" for AI
 2. PROCESS OBJECT: { "type": "process", "executable": "node", "args": ["script.js"] }
 3. SHELL OBJECT: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one\\n2. Step two" }
+4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one\\n2. Step two", "model": "${modelEnum[0]}" }
 
 For process type, args is an array - no shell quoting needed.
 For shell type, shell can be: cmd, powershell, pwsh, bash, sh
+For agent type, use model to select an LLM. Available models: ${modelEnum.join(', ')}
 
 Agent instructions MUST be in Markdown format with headers, numbered lists, bullet lists.`,
+                },
+                model: {
+                  type: 'string',
+                  enum: modelEnum,
+                  description: 'LLM model to use. Fast (mini/haiku) for simple tasks, premium (opus) for complex reasoning.'
                 },
                 dependencies: {
                   type: 'array',

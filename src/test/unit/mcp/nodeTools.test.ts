@@ -161,16 +161,16 @@ suite('MCP Node Tool Definitions', () => {
   // getAllToolDefinitions AGGREGATION
   // =========================================================================
   suite('getAllToolDefinitions', () => {
-    test('includes both plan and node tools', () => {
-      const all = getAllToolDefinitions();
-      const planTools = getPlanToolDefinitions();
+    test('includes both plan and node tools', async () => {
+      const all = await getAllToolDefinitions();
+      const planTools = await getPlanToolDefinitions();
       const nodeTools = getNodeToolDefinitions();
 
       assert.strictEqual(all.length, planTools.length + nodeTools.length);
     });
 
-    test('no duplicate tool names across plan and node tools', () => {
-      const all = getAllToolDefinitions();
+    test('no duplicate tool names across plan and node tools', async () => {
+      const all = await getAllToolDefinitions();
       const names = all.map(t => t.name);
       const unique = new Set(names);
       assert.strictEqual(unique.size, names.length, 'Duplicate tool names found across modules');

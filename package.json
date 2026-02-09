@@ -105,6 +105,10 @@
         "command": "orchestrator.refreshPlans",
         "title": "Copilot Orchestrator: Refresh Plans",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "copilotOrchestrator.refreshModels",
+        "title": "Copilot Orchestrator: Refresh Available Models"
       }
     ],
     "views": {
