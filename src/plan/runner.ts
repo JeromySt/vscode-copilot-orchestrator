@@ -1493,8 +1493,26 @@ export class PlanRunner extends EventEmitter {
             this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: AI-ASSISTED FIX ATTEMPT ==========');
             this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', `Phase "${failedPhase}" failed. Delegating to Copilot agent to diagnose and fix.`);
             
-            // Build a minimal agent spec — the agent runs in the worktree
-            // and can see the failure context from the execution environment
+            // Gather context the agent needs to diagnose and fix the failure:
+            // 1. The original command that was run
+            // 2. The full execution logs (stdout/stderr) from the failed phase
+            const originalCommand = (() => {
+              const spec = normalizeWorkSpec(failedWorkSpec);
+              if (!spec) return 'Unknown command';
+              if (spec.type === 'shell') return spec.command;
+              if (spec.type === 'process') return `${spec.executable} ${(spec.args || []).join(' ')}`;
+              return 'Unknown command';
+            })();
+            
+            // Get the execution logs for the failed phase — these contain
+            // the full stdout/stderr streams plus timing info
+            const phaseLogs = this.getNodeLogs(plan.id, node.id, failedPhase as ExecutionPhase);
+            // Truncate to last ~200 lines to avoid overwhelming the agent
+            const logLines = phaseLogs.split('\n');
+            const truncatedLogs = logLines.length > 200
+              ? `... (${logLines.length - 200} earlier lines omitted)\n` + logLines.slice(-200).join('\n')
+              : phaseLogs;
+            
             const healSpec: WorkSpec = {
               type: 'agent',
               instructions: [
@@ -1503,14 +1521,29 @@ export class PlanRunner extends EventEmitter {
                 `## Task Context`,
                 `This node's task: ${node.task || node.name}`,
                 '',
-                `## What Happened`,
-                `The "${failedPhase}" phase failed with exit code ${result.exitCode ?? 'unknown'}.`,
-                `Error: ${result.error || 'Unknown error'}`,
+                `## Original Command`,
+                '```',
+                originalCommand,
+                '```',
+                '',
+                `## Failure Details`,
+                `- Phase: ${failedPhase}`,
+                `- Exit code: ${result.exitCode ?? 'unknown'}`,
+                '',
+                `## Execution Logs`,
+                'The following are the full stdout/stderr logs from the failed execution:',
+                '',
+                '```',
+                truncatedLogs,
+                '```',
                 '',
                 `## Instructions`,
-                `1. Look at the error above and diagnose the root cause`,
+                `1. Analyze the logs above to diagnose the root cause of the failure`,
                 `2. Fix the issue in the worktree (edit files, fix configs, etc.)`,
-                `3. Re-run the original command to verify it passes`,
+                `3. Re-run the original command to verify it now passes:`,
+                '   ```',
+                `   ${originalCommand}`,
+                '   ```',
               ].join('\n'),
             };
             
