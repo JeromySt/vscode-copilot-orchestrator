@@ -13,6 +13,7 @@
 import * as vscode from 'vscode';
 import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState } from '../../plan';
 import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
+import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges, formatTokenCount } from '../../plan/metricsAggregator';
 
 /**
  * Webview panel that shows a detailed view of a single Plan's execution.
@@ -525,7 +526,8 @@ export class planDetailPanel {
       total,
       completed,
       startedAt: plan.startedAt,
-      endedAt: effectiveEndedAt
+      endedAt: effectiveEndedAt,
+      planMetrics: this._serializeMetrics(plan)
     });
   }
   
@@ -610,7 +612,7 @@ export class planDetailPanel {
     
     // Build work summary from node states
     const workSummaryHtml = this._buildWorkSummaryHtml(plan);
-    const tokenSummaryHtml = this._buildTokenSummaryHtml(plan);
+    const metricsBarHtml = this._buildMetricsBarHtml(plan);
     
     return `<!DOCTYPE html>
 <html>
@@ -1082,47 +1084,33 @@ export class planDetailPanel {
     .job-stats .stat-modified { color: #dcdcaa; }
     .job-stats .stat-deleted { color: #f48771; }
     
-    .token-summary {
+    .plan-metrics-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 12px;
       background: var(--vscode-sideBar-background);
       border-radius: 8px;
-      padding: 16px;
       margin-bottom: 16px;
     }
-    .token-summary > summary {
-      margin: 0 0 12px 0;
+    .plan-metrics-bar .metrics-label {
+      font-weight: 600;
       font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--vscode-descriptionForeground);
-      cursor: pointer;
+    }
+    .plan-metrics-bar .metric-item {
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .plan-metrics-bar .metric-value {
+      font-family: var(--vscode-editor-font-family);
       font-weight: 600;
     }
-    .token-table {
+    .plan-metrics-bar .models-line {
       width: 100%;
-      border-collapse: collapse;
-      font-size: 12px;
-    }
-    .token-table th,
-    .token-table td {
-      padding: 6px 10px;
-      text-align: right;
-      border-bottom: 1px solid var(--vscode-widget-border);
-    }
-    .token-table th:first-child,
-    .token-table td:first-child {
-      text-align: left;
-    }
-    .token-table th {
-      color: var(--vscode-descriptionForeground);
-      font-weight: 600;
       font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .token-table .total-row td {
-      font-weight: 600;
-      border-top: 2px solid var(--vscode-widget-border);
-      border-bottom: none;
+      color: var(--vscode-descriptionForeground);
+      padding-left: 2px;
     }
     
     .actions {
@@ -1219,6 +1207,8 @@ export class planDetailPanel {
     </div>
   </div>
   
+  ${metricsBarHtml}
+  
   <div id="mermaid-diagram">
     <div class="zoom-controls">
       <button class="zoom-btn" onclick="zoomOut()" title="Zoom Out">−</button>
@@ -1267,8 +1257,6 @@ ${mermaidDef}
   ` : ''}
   
   ${workSummaryHtml}
-  
-  ${tokenSummaryHtml}
   
   <div class="actions">
     ${status === 'running' || status === 'pending' ? 
@@ -1682,7 +1670,7 @@ ${mermaidDef}
     // Handle incremental status updates without full re-render (preserves zoom/scroll)
     function handleStatusUpdate(msg) {
       try {
-        const { planStatus, nodeStatuses, counts, progress, total, completed, startedAt, endedAt } = msg;
+        const { planStatus, nodeStatuses, counts, progress, total, completed, startedAt, endedAt, planMetrics } = msg;
         
         // Update plan status badge
         const statusBadge = document.querySelector('.status-badge');
@@ -1722,6 +1710,32 @@ ${mermaidDef}
               value.textContent = (counts.pending || 0) + (counts.ready || 0);
             }
           });
+        }
+        
+        // Update metrics bar
+        if (planMetrics) {
+          const metricsBar = document.getElementById('planMetricsBar');
+          if (metricsBar) {
+            const items = [];
+            if (planMetrics.premiumRequests) {
+              items.push('<span class="metric-item">🎫 <span class="metric-value">' + planMetrics.premiumRequests + '</span></span>');
+            }
+            if (planMetrics.apiTime) {
+              items.push('<span class="metric-item">⏱ API: <span class="metric-value">' + planMetrics.apiTime + '</span></span>');
+            }
+            if (planMetrics.sessionTime) {
+              items.push('<span class="metric-item">🕐 Session: <span class="metric-value">' + planMetrics.sessionTime + '</span></span>');
+            }
+            if (planMetrics.codeChanges) {
+              items.push('<span class="metric-item">📝 <span class="metric-value">' + planMetrics.codeChanges + '</span></span>');
+            }
+            var modelsHtml = '';
+            if (planMetrics.models) {
+              modelsHtml = '<div class="models-line">Models: ' + planMetrics.models + '</div>';
+            }
+            metricsBar.innerHTML = '<span class="metrics-label">⚡ AI Usage:</span> ' + items.join(' ') + modelsHtml;
+            metricsBar.style.display = '';
+          }
         }
         
         // Update legend counts
@@ -2182,89 +2196,80 @@ ${mermaidDef}
   }
   
   /**
-   * Build an HTML token usage summary table from node metrics.
-   *
-   * Iterates over all job nodes that have token usage metrics and produces
-   * a collapsible `<details>` element with per-job rows and a totals footer.
-   *
-   * @param plan - The Plan instance to summarise token usage for.
-   * @returns HTML string (empty if no token usage data is available).
+   * Serialize plan metrics into a plain object for the webview statusUpdate message.
    */
-  private _buildTokenSummaryHtml(plan: PlanInstance): string {
-    const jobRows: Array<{
-      name: string;
-      model: string;
-      inputTokens: number;
-      outputTokens: number;
-      totalTokens: number;
-      cost: number;
-    }> = [];
+  private _serializeMetrics(plan: PlanInstance): Record<string, unknown> | undefined {
+    const metrics = getPlanMetrics(plan);
+    if (!metrics) { return undefined; }
 
-    for (const [nodeId, node] of plan.nodes) {
-      if (node.type !== 'job') continue;
+    const result: Record<string, unknown> = {};
+    if (metrics.premiumRequests !== undefined) {
+      result.premiumRequests = formatPremiumRequests(metrics.premiumRequests);
+    }
+    if (metrics.apiTimeSeconds !== undefined) {
+      result.apiTime = formatDurationSeconds(metrics.apiTimeSeconds);
+    }
+    if (metrics.sessionTimeSeconds !== undefined) {
+      result.sessionTime = formatDurationSeconds(metrics.sessionTimeSeconds);
+    }
+    if (metrics.codeChanges) {
+      result.codeChanges = formatCodeChanges(metrics.codeChanges);
+    }
+    if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
+      result.models = metrics.modelBreakdown
+        .sort((a, b) => (b.premiumRequests ?? 0) - (a.premiumRequests ?? 0))
+        .map(m => {
+          const reqs = m.premiumRequests ?? 0;
+          return `${escapeHtml(m.model)} (${reqs} req)`;
+        })
+        .join(' · ');
+    }
+    return result;
+  }
 
-      const state = plan.nodeStates.get(nodeId);
-      if (!state?.metrics?.tokenUsage) continue;
+  /**
+   * Build a compact AI usage metrics bar from plan-level aggregate metrics.
+   *
+   * @param plan - The Plan instance to compute metrics for.
+   * @returns HTML string (empty if no metrics data is available).
+   */
+  private _buildMetricsBarHtml(plan: PlanInstance): string {
+    const metrics = getPlanMetrics(plan);
+    if (!metrics) { return ''; }
 
-      const tu = state.metrics.tokenUsage;
-      jobRows.push({
-        name: node.name,
-        model: tu.model || 'N/A',
-        inputTokens: tu.inputTokens || 0,
-        outputTokens: tu.outputTokens || 0,
-        totalTokens: tu.totalTokens || 0,
-        cost: tu.estimatedCostUsd || 0,
-      });
+    const parts: string[] = [];
+    if (metrics.premiumRequests !== undefined) {
+      parts.push(`<span class="metric-item">🎫 <span class="metric-value">${escapeHtml(formatPremiumRequests(metrics.premiumRequests))}</span></span>`);
+    }
+    if (metrics.apiTimeSeconds !== undefined) {
+      parts.push(`<span class="metric-item">⏱ API: <span class="metric-value">${escapeHtml(formatDurationSeconds(metrics.apiTimeSeconds))}</span></span>`);
+    }
+    if (metrics.sessionTimeSeconds !== undefined) {
+      parts.push(`<span class="metric-item">🕐 Session: <span class="metric-value">${escapeHtml(formatDurationSeconds(metrics.sessionTimeSeconds))}</span></span>`);
+    }
+    if (metrics.codeChanges) {
+      parts.push(`<span class="metric-item">📝 <span class="metric-value">${escapeHtml(formatCodeChanges(metrics.codeChanges))}</span></span>`);
     }
 
-    if (jobRows.length === 0) {
-      return '';
+    if (parts.length === 0) { return ''; }
+
+    let modelsLine = '';
+    if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
+      const modelParts = metrics.modelBreakdown
+        .sort((a, b) => (b.premiumRequests ?? 0) - (a.premiumRequests ?? 0))
+        .map(m => {
+          const reqs = m.premiumRequests ?? 0;
+          return `${escapeHtml(m.model)} (${reqs} req)`;
+        });
+      modelsLine = `<div class="models-line">Models: ${modelParts.join(' · ')}</div>`;
     }
-
-    const totalInput = jobRows.reduce((s, j) => s + j.inputTokens, 0);
-    const totalOutput = jobRows.reduce((s, j) => s + j.outputTokens, 0);
-    const totalTokens = jobRows.reduce((s, j) => s + j.totalTokens, 0);
-    const totalCost = jobRows.reduce((s, j) => s + j.cost, 0);
-
-    const rowsHtml = jobRows.map(j => `
-      <tr>
-        <td>${escapeHtml(j.name)}</td>
-        <td>${escapeHtml(j.model)}</td>
-        <td>${j.inputTokens.toLocaleString()}</td>
-        <td>${j.outputTokens.toLocaleString()}</td>
-        <td>${j.totalTokens.toLocaleString()}</td>
-        <td>${j.cost > 0 ? '$' + j.cost.toFixed(4) : 'N/A'}</td>
-      </tr>
-    `).join('');
 
     return `
-    <details class="token-summary" open>
-      <summary>Token Usage Summary</summary>
-      <table class="token-table">
-        <thead>
-          <tr>
-            <th>Job</th>
-            <th>Model</th>
-            <th>Input</th>
-            <th>Output</th>
-            <th>Total</th>
-            <th>Cost</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rowsHtml}
-        </tbody>
-        <tfoot>
-          <tr class="total-row">
-            <td colspan="2">Total</td>
-            <td>${totalInput.toLocaleString()}</td>
-            <td>${totalOutput.toLocaleString()}</td>
-            <td>${totalTokens.toLocaleString()}</td>
-            <td>${totalCost > 0 ? '$' + totalCost.toFixed(4) : 'N/A'}</td>
-          </tr>
-        </tfoot>
-      </table>
-    </details>
+    <div class="plan-metrics-bar" id="planMetricsBar">
+      <span class="metrics-label">⚡ AI Usage:</span>
+      ${parts.join('\n      ')}
+      ${modelsLine}
+    </div>
     `;
   }
   
