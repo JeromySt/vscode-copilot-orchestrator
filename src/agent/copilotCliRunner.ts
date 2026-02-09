@@ -60,6 +60,9 @@ export interface CopilotRunOptions {
   
   /** Skip writing instructions file (for simple one-off prompts) */
   skipInstructionsFile?: boolean;
+  
+  /** Unique job/node ID to disambiguate instructions files across concurrent jobs */
+  jobId?: string;
 }
 
 /**
@@ -144,7 +147,7 @@ export class CopilotCliRunner {
     let instructionsDir: string | undefined;
     
     if (!skipInstructionsFile) {
-      const instructionsSetup = this.writeInstructionsFile(cwd, task, instructions, label);
+      const instructionsSetup = this.writeInstructionsFile(cwd, task, instructions, label, options.jobId);
       instructionsFile = instructionsSetup.filePath;
       instructionsDir = instructionsSetup.dirPath;
     }
@@ -189,10 +192,12 @@ export class CopilotCliRunner {
     cwd: string,
     task: string,
     instructions: string | undefined,
-    label: string
+    label: string,
+    jobId?: string
   ): { filePath: string; dirPath: string } {
     const instructionsDir = path.join(cwd, '.github', 'instructions');
-    const instructionsFile = path.join(instructionsDir, 'orchestrator-job.instructions.md');
+    const suffix = jobId ? `-${jobId.slice(0, 8)}` : '';
+    const instructionsFile = path.join(instructionsDir, `orchestrator-job${suffix}.instructions.md`);
     
     // Get the worktree folder name for scoping
     const worktreeName = path.basename(cwd);

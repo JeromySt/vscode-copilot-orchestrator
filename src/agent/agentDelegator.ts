@@ -247,7 +247,8 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       worktreePath,
       taskDescription,
       undefined, // No additional instructions
-      label
+      label,
+      jobId
     );
 
     // Build command using the unified runner
