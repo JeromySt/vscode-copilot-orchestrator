@@ -74,7 +74,8 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
       // Render agent instructions as Markdown
       const instructions = spec.instructions || '';
       const rendered = renderMarkdown(instructions, escapeHtml);
-      return `<div class="work-type-badge agent">AGENT</div><div class="work-instructions">${rendered}</div>`;
+      const modelLabel = spec.model ? escapeHtml(spec.model) : 'unspecified';
+      return `<div class="work-type-badge agent">AGENT</div><div class="agent-model-label">${modelLabel}</div><div class="work-instructions">${rendered}</div>`;
     }
     default:
       return `<code>${escapeHtml(JSON.stringify(spec))}</code>`;
@@ -1651,6 +1652,19 @@ export class NodeDetailPanel {
       background: rgba(99, 179, 237, 0.2);
       color: #63b3ed;
       border: 1px solid rgba(99, 179, 237, 0.3);
+    }
+    .agent-model-label {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--vscode-editor-font-family), monospace;
+      color: #a78bfa;
+      background: rgba(167, 139, 250, 0.12);
+      border: 1px solid rgba(167, 139, 250, 0.25);
+      padding: 2px 8px;
+      border-radius: 3px;
+      margin-bottom: 6px;
+      margin-left: 4px;
     }
     .work-type-badge.shell {
       background: rgba(72, 187, 120, 0.2);
