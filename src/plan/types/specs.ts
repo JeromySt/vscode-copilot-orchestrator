@@ -133,6 +133,27 @@ export interface AgentSpec {
 }
 
 /**
+ * Token usage metrics from an AI model invocation.
+ */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  model: string;
+  estimatedCostUsd?: number;
+}
+
+/**
+ * Execution metrics captured during agent delegation.
+ */
+export interface AgentExecutionMetrics {
+  tokenUsage?: TokenUsage;
+  durationMs: number;
+  turns?: number;
+  toolCalls?: number;
+}
+
+/**
  * Work specification - what to execute.
  * Can be:
  * - string: Legacy format, interpreted as shell command or "@agent ..." 

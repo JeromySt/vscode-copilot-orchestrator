@@ -712,8 +712,27 @@ export class NodeDetailPanel {
   
   ${workSummaryHtml}
   
+  ${state.metrics ? `
+  <!-- Execution Metrics -->
+  <div class="section">
+    <h3>Execution Metrics</h3>
+    <div class="metrics-section">
+      <div class="metric-row">
+        <span class="metric-label">Model:</span>
+        <span class="metric-value">${state.metrics.tokenUsage?.model || 'N/A'}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Tokens:</span>
+        <span class="metric-value">${state.metrics.tokenUsage?.inputTokens || 0} in / ${state.metrics.tokenUsage?.outputTokens || 0} out</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Est. Cost:</span>
+        <span class="metric-value">${state.metrics.tokenUsage?.estimatedCostUsd?.toFixed(4) || 'N/A'}</span>
+      </div>
+    </div>
+  </div>
+  ` : ''}
 
-  
   <!-- Dependencies -->
   <div class="section">
     <h3>Dependencies</h3>
@@ -2227,6 +2246,27 @@ export class NodeDetailPanel {
       word-break: break-word;
       max-height: 300px;
       overflow: auto;
+    }
+    
+    /* Metrics */
+    .metrics-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .metric-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .metric-label {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      min-width: 80px;
+    }
+    .metric-value {
+      font-size: 13px;
+      font-family: var(--vscode-editor-font-family), monospace;
     }
     `;
   }

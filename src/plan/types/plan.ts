@@ -7,7 +7,7 @@
  * @module plan/types/plan
  */
 
-import type { WorkSpec } from './specs';
+import type { WorkSpec, AgentExecutionMetrics } from './specs';
 import type { NodeStatus, JobNodeSpec, GroupSpec, PlanNode, JobNode } from './nodes';
 
 // ============================================================================
@@ -170,6 +170,12 @@ export interface NodeExecutionState {
    * Each attempt captures the state and outcome of an execution try.
    */
   attemptHistory?: AttemptRecord[];
+  
+  /**
+   * Agent execution metrics (token usage, duration, turns, tool calls).
+   * Captured from agent delegation results when available.
+   */
+  metrics?: AgentExecutionMetrics;
 }
 
 /**
@@ -477,6 +483,8 @@ export interface JobExecutionResult {
   failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri';
   /** Exit code from failed process */
   exitCode?: number;
+  /** Agent execution metrics (token usage, duration, turns, tool calls) */
+  metrics?: AgentExecutionMetrics;
 }
 
 /**

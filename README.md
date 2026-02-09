@@ -335,6 +335,30 @@ Copilot: I'll create an orchestrator plan with parallel build nodes and
          • Status: running
 ```
 
+### LLM Model Selection
+
+The orchestrator supports specifying which LLM model to use for agent tasks. Models are automatically discovered from your installed Copilot CLI.
+
+**Example:**
+```json
+{
+  "type": "agent",
+  "instructions": "Design the API architecture",
+  "model": "claude-opus-4.5"
+}
+```
+
+**Model Tiers:**
+- **Fast** (mini, haiku): Simple tasks, code fixes, formatting
+- **Standard** (sonnet, gpt-5): General coding, implementation
+- **Premium** (opus, max): Complex reasoning, architecture, planning
+
+**Token Tracking:**
+The plan detail panel shows token usage and estimated costs for each job.
+
+**Refresh Models:**
+Run `Copilot Orchestrator: Refresh Available Models` to update the available model list after updating Copilot CLI.
+
 ---
 
 ## Installation

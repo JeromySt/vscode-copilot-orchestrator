@@ -10,6 +10,9 @@ import { runTests } from '@vscode/test-electron';
 
 async function main() {
   try {
+    // Ensure the test VS Code instance launches as Electron, not Node
+    delete process.env.ELECTRON_RUN_AS_NODE;
+
     // The folder containing the Extension Manifest (package.json)
     const extensionDevelopmentPath = path.resolve(__dirname, '../../');
 

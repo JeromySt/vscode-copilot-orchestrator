@@ -1417,6 +1417,11 @@ export class PlanRunner extends EventEmitter {
           nodeState.copilotSessionId = result.copilotSessionId;
         }
         
+        // Store agent execution metrics
+        if (result.metrics) {
+          nodeState.metrics = result.metrics;
+        }
+        
         // Clear resumeFromPhase after execution (success or failure)
         nodeState.resumeFromPhase = undefined;
         

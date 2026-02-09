@@ -14,6 +14,8 @@ export {
   AgentSpec,
   WorkSpec,
   normalizeWorkSpec,
+  TokenUsage,
+  AgentExecutionMetrics,
 } from './specs';
 
 // Node types, status, and specifications

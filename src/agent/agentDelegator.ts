@@ -12,7 +12,9 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { isCopilotCliAvailable } from './cliCheckCore';
 import { CopilotCliRunner, CopilotCliLogger } from './copilotCliRunner';
+import { isValidModel } from './modelDiscovery';
 import * as git from '../git';
+import { TokenUsage } from '../plan/types';
 
 // ============================================================================
 // TYPES
@@ -38,6 +40,8 @@ export interface DelegateOptions {
   instructions?: string;
   /** Existing Copilot session ID to resume */
   sessionId?: string;
+  /** Model to use for the AI agent */
+  model?: string;
 }
 
 /**
@@ -52,6 +56,8 @@ export interface DelegateResult {
   error?: string;
   /** Exit code from the process */
   exitCode?: number;
+  /** Token usage metrics (if extracted from logs) */
+  tokenUsage?: TokenUsage;
 }
 
 /**
@@ -220,7 +226,12 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
    * Delegate task via GitHub Copilot CLI.
    */
   private async delegateViaCopilot(options: DelegateOptions): Promise<DelegateResult> {
-    const { jobId, taskDescription, label, worktreePath, sessionId } = options;
+    const { jobId, taskDescription, label, worktreePath, sessionId, model } = options;
+
+    // Validate model if provided
+    if (model && !await isValidModel(model)) {
+      this.logger.log(`[${label}] Warning: Model '${model}' not in discovered models`);
+    }
 
     // Create CLI runner with logger adapter
     const cliLogger: CopilotCliLogger = {
@@ -255,6 +266,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
     const copilotCmd = cliRunner.buildCommand({
       task: 'Complete the task described in the instructions.',
       sessionId,
+      model,
       logDir: copilotLogDir,
       sharePath: sessionSharePath,
     });
@@ -360,7 +372,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
         }, FLUSH_DELAY_MS);
       });
 
-      proc.on('exit', (code: number | null) => {
+      proc.on('exit', async (code: number | null) => {
         // Clean up temp prompt file and instructions
         cleanup();
         
@@ -389,20 +401,25 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
           }
         }
 
+        // Extract token usage from log files
+        const tokenUsage = await this.extractTokenUsage(copilotLogDir, model);
+
         if (code !== 0) {
           this.logger.log(`[${label}] Copilot exited with code ${code}`);
           resolve({
             success: false,
             sessionId: capturedSessionId,
             error: `Copilot failed with exit code ${code}`,
-            exitCode: code ?? undefined
+            exitCode: code ?? undefined,
+            tokenUsage
           });
         } else {
           this.logger.log(`[${label}] Copilot completed successfully`);
           resolve({
             success: true,
             sessionId: capturedSessionId,
-            exitCode: 0
+            exitCode: 0,
+            tokenUsage
           });
         }
       });
@@ -419,6 +436,70 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
         });
       });
     });
+  }
+
+  /**
+   * Extract token usage from Copilot log files.
+   */
+  private async extractTokenUsage(logDir: string, model?: string): Promise<TokenUsage | undefined> {
+    try {
+      if (!fs.existsSync(logDir)) {
+        return undefined;
+      }
+
+      const logFiles = fs.readdirSync(logDir)
+        .filter(f => f.endsWith('.log'))
+        .map(f => ({
+          name: f,
+          time: fs.statSync(path.join(logDir, f)).mtime.getTime()
+        }))
+        .sort((a, b) => b.time - a.time);
+
+      if (logFiles.length === 0) {
+        return undefined;
+      }
+
+      const logContent = fs.readFileSync(path.join(logDir, logFiles[0].name), 'utf-8');
+
+      const patterns = [
+        /prompt_tokens["']?:\s*(\d+)/gi,
+        /completion_tokens["']?:\s*(\d+)/gi,
+        /input[_\s]tokens?["']?:\s*(\d+)/gi,
+        /output[_\s]tokens?["']?:\s*(\d+)/gi,
+      ];
+
+      let inputTokens = 0;
+      let outputTokens = 0;
+
+      // prompt_tokens / input_tokens → inputTokens
+      for (const pattern of [patterns[0], patterns[2]]) {
+        let match;
+        while ((match = pattern.exec(logContent)) !== null) {
+          inputTokens += parseInt(match[1], 10);
+        }
+      }
+
+      // completion_tokens / output_tokens → outputTokens
+      for (const pattern of [patterns[1], patterns[3]]) {
+        let match;
+        while ((match = pattern.exec(logContent)) !== null) {
+          outputTokens += parseInt(match[1], 10);
+        }
+      }
+
+      if (inputTokens === 0 && outputTokens === 0) {
+        return undefined;
+      }
+
+      return {
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+        model: model || 'unknown',
+      };
+    } catch (e) {
+      return undefined;
+    }
   }
 
   /**

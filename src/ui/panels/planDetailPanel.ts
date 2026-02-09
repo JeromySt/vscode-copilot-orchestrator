@@ -610,6 +610,7 @@ export class planDetailPanel {
     
     // Build work summary from node states
     const workSummaryHtml = this._buildWorkSummaryHtml(plan);
+    const tokenSummaryHtml = this._buildTokenSummaryHtml(plan);
     
     return `<!DOCTYPE html>
 <html>
@@ -1081,6 +1082,49 @@ export class planDetailPanel {
     .job-stats .stat-modified { color: #dcdcaa; }
     .job-stats .stat-deleted { color: #f48771; }
     
+    .token-summary {
+      background: var(--vscode-sideBar-background);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .token-summary > summary {
+      margin: 0 0 12px 0;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .token-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .token-table th,
+    .token-table td {
+      padding: 6px 10px;
+      text-align: right;
+      border-bottom: 1px solid var(--vscode-widget-border);
+    }
+    .token-table th:first-child,
+    .token-table td:first-child {
+      text-align: left;
+    }
+    .token-table th {
+      color: var(--vscode-descriptionForeground);
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .token-table .total-row td {
+      font-weight: 600;
+      border-top: 2px solid var(--vscode-widget-border);
+      border-bottom: none;
+    }
+    
     .actions {
       margin-top: 16px;
       display: flex;
@@ -1223,6 +1267,8 @@ ${mermaidDef}
   ` : ''}
   
   ${workSummaryHtml}
+  
+  ${tokenSummaryHtml}
   
   <div class="actions">
     ${status === 'running' || status === 'pending' ? 
@@ -2132,6 +2178,93 @@ ${mermaidDef}
       </div>
       ` : ''}
     </div>
+    `;
+  }
+  
+  /**
+   * Build an HTML token usage summary table from node metrics.
+   *
+   * Iterates over all job nodes that have token usage metrics and produces
+   * a collapsible `<details>` element with per-job rows and a totals footer.
+   *
+   * @param plan - The Plan instance to summarise token usage for.
+   * @returns HTML string (empty if no token usage data is available).
+   */
+  private _buildTokenSummaryHtml(plan: PlanInstance): string {
+    const jobRows: Array<{
+      name: string;
+      model: string;
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+      cost: number;
+    }> = [];
+
+    for (const [nodeId, node] of plan.nodes) {
+      if (node.type !== 'job') continue;
+
+      const state = plan.nodeStates.get(nodeId);
+      if (!state?.metrics?.tokenUsage) continue;
+
+      const tu = state.metrics.tokenUsage;
+      jobRows.push({
+        name: node.name,
+        model: tu.model || 'N/A',
+        inputTokens: tu.inputTokens || 0,
+        outputTokens: tu.outputTokens || 0,
+        totalTokens: tu.totalTokens || 0,
+        cost: tu.estimatedCostUsd || 0,
+      });
+    }
+
+    if (jobRows.length === 0) {
+      return '';
+    }
+
+    const totalInput = jobRows.reduce((s, j) => s + j.inputTokens, 0);
+    const totalOutput = jobRows.reduce((s, j) => s + j.outputTokens, 0);
+    const totalTokens = jobRows.reduce((s, j) => s + j.totalTokens, 0);
+    const totalCost = jobRows.reduce((s, j) => s + j.cost, 0);
+
+    const rowsHtml = jobRows.map(j => `
+      <tr>
+        <td>${escapeHtml(j.name)}</td>
+        <td>${escapeHtml(j.model)}</td>
+        <td>${j.inputTokens.toLocaleString()}</td>
+        <td>${j.outputTokens.toLocaleString()}</td>
+        <td>${j.totalTokens.toLocaleString()}</td>
+        <td>${j.cost > 0 ? '$' + j.cost.toFixed(4) : 'N/A'}</td>
+      </tr>
+    `).join('');
+
+    return `
+    <details class="token-summary" open>
+      <summary>Token Usage Summary</summary>
+      <table class="token-table">
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Model</th>
+            <th>Input</th>
+            <th>Output</th>
+            <th>Total</th>
+            <th>Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+        <tfoot>
+          <tr class="total-row">
+            <td colspan="2">Total</td>
+            <td>${totalInput.toLocaleString()}</td>
+            <td>${totalOutput.toLocaleString()}</td>
+            <td>${totalTokens.toLocaleString()}</td>
+            <td>${totalCost > 0 ? '$' + totalCost.toFixed(4) : 'N/A'}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </details>
     `;
   }
   

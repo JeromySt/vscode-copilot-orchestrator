@@ -29,6 +29,7 @@ import {
   ProcessSpec,
   ShellSpec,
   AgentSpec,
+  AgentExecutionMetrics,
   normalizeWorkSpec,
 } from './types';
 import { JobExecutor } from './runner';
@@ -133,6 +134,7 @@ export class DefaultJobExecutor implements JobExecutor {
       ? { ...context.previousStepStatuses } 
       : {};
     let capturedSessionId: string | undefined = context.copilotSessionId;
+    let capturedMetrics: AgentExecutionMetrics | undefined;
     
     // Determine which phases to skip based on resumeFromPhase
     const phaseOrder = ['prechecks', 'work', 'postchecks', 'commit'] as const;
@@ -217,6 +219,11 @@ export class DefaultJobExecutor implements JobExecutor {
           capturedSessionId = workResult.copilotSessionId;
         }
         
+        // Capture agent execution metrics
+        if (workResult.metrics) {
+          capturedMetrics = workResult.metrics;
+        }
+        
         this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
         
         if (!workResult.success) {
@@ -228,6 +235,7 @@ export class DefaultJobExecutor implements JobExecutor {
             copilotSessionId: capturedSessionId,
             failedPhase: 'work',
             exitCode: workResult.exitCode,
+            metrics: capturedMetrics,
           };
         }
         stepStatuses.work = 'success';
@@ -334,6 +342,7 @@ export class DefaultJobExecutor implements JobExecutor {
         workSummary,
         stepStatuses,
         copilotSessionId: capturedSessionId,
+        metrics: capturedMetrics,
       };
       
     } catch (error: any) {
@@ -343,6 +352,7 @@ export class DefaultJobExecutor implements JobExecutor {
         error: error.message,
         stepStatuses,
         copilotSessionId: capturedSessionId,
+        metrics: capturedMetrics,
       };
     } finally {
       this.activeExecutions.delete(executionKey);
@@ -587,7 +597,7 @@ export class DefaultJobExecutor implements JobExecutor {
     phase: ExecutionPhase,
     node: JobNode,
     sessionId?: string
-  ): Promise<{ success: boolean; error?: string; isAgent?: boolean; copilotSessionId?: string; exitCode?: number }> {
+  ): Promise<{ success: boolean; error?: string; isAgent?: boolean; copilotSessionId?: string; exitCode?: number; metrics?: AgentExecutionMetrics }> {
     const normalized = normalizeWorkSpec(spec);
     
     if (!normalized) {
@@ -852,7 +862,7 @@ export class DefaultJobExecutor implements JobExecutor {
     executionKey: string,
     node: JobNode,
     sessionId?: string
-  ): Promise<{ success: boolean; error?: string; copilotSessionId?: string; exitCode?: number }> {
+  ): Promise<{ success: boolean; error?: string; copilotSessionId?: string; exitCode?: number; metrics?: AgentExecutionMetrics }> {
     if (!this.agentDelegator) {
       return {
         success: false,
@@ -866,7 +876,7 @@ export class DefaultJobExecutor implements JobExecutor {
     
     this.logInfo(executionKey, 'work', `Agent instructions: ${spec.instructions}`);
     if (spec.model) {
-      this.logInfo(executionKey, 'work', `Agent model: ${spec.model}`);
+      this.logInfo(executionKey, 'work', `Using model: ${spec.model}`);
     }
     if (spec.contextFiles?.length) {
       this.logInfo(executionKey, 'work', `Agent context files: ${spec.contextFiles.join(', ')}`);
@@ -898,24 +908,33 @@ export class DefaultJobExecutor implements JobExecutor {
         },
       });
       
+      // Build metrics from delegation result
+      const durationMs = Date.now() - execution.startTime;
+      const metrics: AgentExecutionMetrics = { durationMs };
+      if (result.tokenUsage) {
+        metrics.tokenUsage = result.tokenUsage;
+      }
+      
       if (result.success) {
         this.logInfo(executionKey, 'work', 'Agent completed successfully');
         if (result.sessionId) {
           this.logInfo(executionKey, 'work', `Captured session ID: ${result.sessionId}`);
         }
-        return { success: true, copilotSessionId: result.sessionId };
+        return { success: true, copilotSessionId: result.sessionId, metrics };
       } else {
         this.logError(executionKey, 'work', `Agent failed: ${result.error}`);
         return { 
           success: false, 
           error: result.error, 
           copilotSessionId: result.sessionId,
-          exitCode: result.exitCode 
+          exitCode: result.exitCode,
+          metrics,
         };
       }
     } catch (error: any) {
       this.logError(executionKey, 'work', `Agent error: ${error.message}`);
-      return { success: false, error: error.message };
+      const durationMs = Date.now() - (execution.startTime || Date.now());
+      return { success: false, error: error.message, metrics: { durationMs } };
     }
   }
   
