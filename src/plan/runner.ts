@@ -55,6 +55,7 @@ import {
   nodePerformsWork,
   AttemptRecord,
   WorkSpec,
+  normalizeWorkSpec,
 } from './types';
 import { buildPlan, buildSingleJobPlan, PlanValidationError } from './builder';
 import { PlanStateMachine } from './stateMachine';
@@ -366,6 +367,7 @@ export class PlanRunner extends EventEmitter {
     baseBranch?: string;
     targetBranch?: string;
     expectsNoChanges?: boolean;
+    autoHeal?: boolean;
     startPaused?: boolean;
   }): PlanInstance {
     const plan = buildSingleJobPlan(jobSpec, {
@@ -1461,16 +1463,170 @@ export class PlanRunner extends EventEmitter {
           };
           nodeState.attemptHistory = [...(nodeState.attemptHistory || []), failedAttempt];
           
-          sm.transition(node.id, 'failed');
-          this.emit('nodeCompleted', plan.id, node.id, false);
+          // ============================================================
+          // AUTO-HEAL: Automatic AI-assisted retry for process/shell failures
+          // ============================================================
+          // If a process/shell phase failed and auto-heal is enabled,
+          // retry once with a Copilot agent that can inspect the failure
+          // and fix it directly in the worktree.
+          const failedPhase = result.failedPhase || 'work';
+          const isHealablePhase = ['prechecks', 'work', 'postchecks'].includes(failedPhase);
+          const failedWorkSpec = failedPhase === 'prechecks' ? node.prechecks
+            : failedPhase === 'postchecks' ? node.postchecks
+            : node.work;
+          const normalizedFailedSpec = normalizeWorkSpec(failedWorkSpec);
+          const isNonAgentWork = normalizedFailedSpec && normalizedFailedSpec.type !== 'agent';
+          const autoHealEnabled = node.autoHeal !== false; // default true
           
-          log.error(`Job failed: ${node.name}`, {
-            planId: plan.id,
-            nodeId: node.id,
-            phase: result.failedPhase || 'unknown',
-            error: result.error,
-          });
-          return;
+          if (isHealablePhase && isNonAgentWork && autoHealEnabled && !nodeState.autoHealAttempted) {
+            log.info(`Auto-heal: attempting AI-assisted fix for ${node.name} (phase: ${failedPhase})`, {
+              planId: plan.id,
+              nodeId: node.id,
+              exitCode: result.exitCode,
+            });
+            
+            nodeState.autoHealAttempted = true;
+            
+            // Log the auto-heal attempt
+            this.execLog(plan.id, node.id, 'work', 'info', '');
+            this.execLog(plan.id, node.id, 'work', 'info', '========== AUTO-HEAL: AI-ASSISTED FIX ATTEMPT ==========');
+            this.execLog(plan.id, node.id, 'work', 'info', `Phase "${failedPhase}" failed. Delegating to Copilot agent to diagnose and fix.`);
+            
+            // Build a minimal agent spec — the agent runs in the worktree
+            // and can see the failure context from the execution environment
+            const healWork: WorkSpec = {
+              type: 'agent',
+              instructions: [
+                `# Auto-Heal: Fix Failed ${failedPhase} Phase`,
+                '',
+                `## Task Context`,
+                `This node's task: ${node.task || node.name}`,
+                '',
+                `## What Happened`,
+                `The "${failedPhase}" phase failed with exit code ${result.exitCode ?? 'unknown'}.`,
+                `Error: ${result.error || 'Unknown error'}`,
+                '',
+                `## Instructions`,
+                `1. Look at the error above and diagnose the root cause`,
+                `2. Fix the issue in the worktree (edit files, fix configs, etc.)`,
+                `3. Re-run the original command to verify it passes`,
+              ].join('\n'),
+            };
+            
+            // Save the original work spec so we can restore it after healing
+            const originalWork = node.work;
+            const originalPrechecks = node.prechecks;
+            const originalPostchecks = node.postchecks;
+            
+            // Replace work/checks: agent handles everything from the failed phase onward
+            node.work = healWork;
+            node.prechecks = undefined; // Agent handles fix + re-run
+            node.postchecks = undefined;
+            
+            // Reset state for the heal attempt
+            nodeState.error = undefined;
+            nodeState.startedAt = Date.now();
+            nodeState.stepStatuses = undefined;
+            nodeState.attempts++;
+            
+            // Execute the heal attempt
+            const healContext: ExecutionContext = {
+              plan,
+              node,
+              baseCommit: nodeState.baseCommit!,
+              worktreePath,
+              copilotSessionId: nodeState.copilotSessionId,
+              onProgress: (step) => {
+                log.debug(`Auto-heal progress: ${node.name} - ${step}`);
+              },
+            };
+            
+            const healResult = await this.executor!.execute(healContext);
+            
+            // Restore original work specs regardless of outcome
+            node.work = originalWork;
+            node.prechecks = originalPrechecks;
+            node.postchecks = originalPostchecks;
+            
+            // Store step statuses from heal attempt
+            if (healResult.stepStatuses) {
+              nodeState.stepStatuses = healResult.stepStatuses;
+            }
+            
+            // Capture session ID from heal attempt
+            if (healResult.copilotSessionId) {
+              nodeState.copilotSessionId = healResult.copilotSessionId;
+            }
+            
+            if (healResult.success) {
+              log.info(`Auto-heal succeeded for ${node.name}!`, {
+                planId: plan.id,
+                nodeId: node.id,
+              });
+              this.execLog(plan.id, node.id, 'work', 'info', '========== AUTO-HEAL: SUCCESS ==========');
+              
+              executorSuccess = true;
+              if (healResult.completedCommit) {
+                nodeState.completedCommit = healResult.completedCommit;
+              }
+              if (healResult.workSummary) {
+                nodeState.workSummary = healResult.workSummary;
+                this.appendWorkSummary(plan, healResult.workSummary);
+              }
+              // Fall through to RI merge handling below
+            } else {
+              // Auto-heal also failed — record it and transition to failed
+              log.warn(`Auto-heal failed for ${node.name}`, {
+                planId: plan.id,
+                nodeId: node.id,
+                error: healResult.error,
+              });
+              this.execLog(plan.id, node.id, 'work', 'info', '========== AUTO-HEAL: FAILED ==========');
+              this.execLog(plan.id, node.id, 'work', 'error', `Auto-heal could not fix the issue: ${healResult.error}`);
+              
+              nodeState.error = `Auto-heal failed: ${healResult.error}`;
+              
+              // Record heal attempt in history
+              const healAttempt: AttemptRecord = {
+                attemptNumber: nodeState.attempts,
+                status: 'failed',
+                startedAt: nodeState.startedAt || Date.now(),
+                endedAt: Date.now(),
+                failedPhase: healResult.failedPhase,
+                error: healResult.error,
+                exitCode: healResult.exitCode,
+                copilotSessionId: nodeState.copilotSessionId,
+                stepStatuses: nodeState.stepStatuses,
+                worktreePath: nodeState.worktreePath,
+                baseCommit: nodeState.baseCommit,
+                logs: this.getNodeLogs(plan.id, node.id),
+                workUsed: healWork,
+              };
+              nodeState.attemptHistory = [...(nodeState.attemptHistory || []), healAttempt];
+              
+              sm.transition(node.id, 'failed');
+              this.emit('nodeCompleted', plan.id, node.id, false);
+              
+              log.error(`Job failed (after auto-heal): ${node.name}`, {
+                planId: plan.id,
+                nodeId: node.id,
+                error: healResult.error,
+              });
+              return;
+            }
+          } else {
+            // No auto-heal — transition to failed normally
+            sm.transition(node.id, 'failed');
+            this.emit('nodeCompleted', plan.id, node.id, false);
+            
+            log.error(`Job failed: ${node.name}`, {
+              planId: plan.id,
+              nodeId: node.id,
+              phase: result.failedPhase || 'unknown',
+              error: result.error,
+            });
+            return;
+          }
         }
       }
       

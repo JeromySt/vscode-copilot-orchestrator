@@ -140,6 +140,12 @@ export interface NodeExecutionState {
    * Cleared when new work is provided or worktree is reset.
    */
   resumeFromPhase?: 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
+
+  /**
+   * Whether an automatic AI-assisted heal attempt has been made for this node.
+   * Prevents infinite auto-heal loops — only one auto-heal attempt is allowed.
+   */
+  autoHealAttempted?: boolean;
   
   /**
    * Details about the last execution attempt (for retry context).

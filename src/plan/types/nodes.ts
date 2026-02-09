@@ -132,6 +132,20 @@ export interface JobNodeSpec {
   expectsNoChanges?: boolean;
 
   /**
+   * Controls automatic AI-assisted retry when a process/shell phase fails.
+   * When enabled (default), if prechecks, work, or postchecks fail with a
+   * non-zero exit code, the executor automatically retries once by delegating
+   * to a Copilot agent that can inspect the failure and fix it.
+   *
+   * - `true` (default for process/shell work) — auto-heal enabled
+   * - `false` — auto-heal disabled, fail immediately
+   *
+   * Auto-heal does NOT apply to agent work (AI already had its chance),
+   * commit failures, or merge failures.
+   */
+  autoHeal?: boolean;
+
+  /**
    * Visual grouping tag. Nodes with the same group tag are
    * rendered together in a Mermaid subgraph. Optional.
    */
@@ -224,6 +238,12 @@ export interface JobNode extends BaseNode {
   expectsNoChanges?: boolean;
 
   /**
+   * Controls automatic AI-assisted retry when a process/shell phase fails.
+   * Default: true for process/shell work, false for agent work.
+   */
+  autoHeal?: boolean;
+
+  /**
  * Visual group path. Nodes with the same group path are
  * rendered together in a Mermaid subgraph.
  * Nested groups use "/" separator: "backend/api/auth"
@@ -297,6 +317,12 @@ export interface NodeSpec {
    * Use for validation-only nodes, external-system updates, or analysis tasks.
    */
   expectsNoChanges?: boolean;
+
+  /**
+   * Controls automatic AI-assisted retry when a process/shell phase fails.
+   * Default: true for process/shell work.
+   */
+  autoHeal?: boolean;
 
   /** Visual group tag for Mermaid rendering - nodes with same group render in a subgraph */
   group?: string;

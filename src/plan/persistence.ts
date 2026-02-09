@@ -68,6 +68,7 @@ interface SerializedNode {
   instructions?: string;
   baseBranch?: string;
   expectsNoChanges?: boolean;
+  autoHeal?: boolean;
   group?: string;
   groupId?: string;
 }
@@ -264,6 +265,7 @@ export class PlanPersistence {
         serializedNode.instructions = jobNode.instructions;
         serializedNode.baseBranch = jobNode.baseBranch;
         serializedNode.expectsNoChanges = jobNode.expectsNoChanges;
+        serializedNode.autoHeal = jobNode.autoHeal;
         serializedNode.group = jobNode.group;
         serializedNode.groupId = jobNode.groupId;
       }
@@ -350,6 +352,7 @@ export class PlanPersistence {
           instructions: serializedNode.instructions,
           baseBranch: serializedNode.baseBranch,
           expectsNoChanges: serializedNode.expectsNoChanges,
+          autoHeal: serializedNode.autoHeal,
           group: serializedNode.group,
           groupId: serializedNode.groupId,
           dependencies: serializedNode.dependencies,
