@@ -188,6 +188,9 @@ export interface AttemptRecord {
   /** Status of this attempt */
   status: 'succeeded' | 'failed' | 'canceled';
   
+  /** What triggered this attempt */
+  triggerType?: 'initial' | 'auto-heal' | 'retry';
+  
   /** When the attempt started */
   startedAt: number;
   
@@ -505,6 +508,9 @@ export interface ExecutionContext {
   
   /** Callback to report progress */
   onProgress?: (step: string) => void;
+  
+  /** Callback to report per-phase status changes (e.g. 'running', 'success', 'failed') */
+  onStepStatusChange?: (phase: string, status: PhaseStatus) => void;
   
   /** Abort signal for cancellation */
   abortSignal?: AbortSignal;

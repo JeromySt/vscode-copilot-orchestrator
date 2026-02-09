@@ -1130,6 +1130,19 @@ export class NodeDetailPanel {
       };
     }
     
+    // For pending/ready nodes that have been retried, show the last attempt's phase statuses
+    if ((state.status === 'pending' || state.status === 'ready') && state.attemptHistory?.length) {
+      const lastAttempt = state.attemptHistory[state.attemptHistory.length - 1];
+      if (lastAttempt.stepStatuses) {
+        return {
+          prechecks: lastAttempt.stepStatuses.prechecks || 'pending',
+          work: lastAttempt.stepStatuses.work || 'pending',
+          commit: lastAttempt.stepStatuses.commit || 'pending',
+          postchecks: lastAttempt.stepStatuses.postchecks || 'pending',
+        };
+      }
+    }
+    
     // Fallback: derive phase status from execution state and error message
     const status = state.status;
     const error = state.error || '';
@@ -1379,6 +1392,13 @@ export class NodeDetailPanel {
            </div>`
         : '';
       
+      // Trigger type badge
+      const triggerBadge = attempt.triggerType === 'auto-heal'
+        ? '<span class="trigger-badge auto-heal">🔧 Auto-Heal</span>'
+        : attempt.triggerType === 'retry'
+          ? '<span class="trigger-badge retry">🔄 Retry</span>'
+          : '';
+      
       // Build phase tabs for this attempt
       const phaseTabsHtml = attempt.logs ? this._buildAttemptPhaseTabs(attempt) : '';
       
@@ -1387,6 +1407,7 @@ export class NodeDetailPanel {
           <div class="attempt-header" data-expanded="false">
             <div class="attempt-header-left">
               <span class="attempt-badge">#${attempt.attemptNumber}</span>
+              ${triggerBadge}
               <span class="step-indicators">${stepIndicators}</span>
               <span class="attempt-time">${timestamp}</span>
               <span class="attempt-duration">(${duration})</span>
@@ -2100,6 +2121,21 @@ export class NodeDetailPanel {
       font-size: 10px;
       min-width: 20px;
       text-align: center;
+    }
+    .trigger-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+    .trigger-badge.auto-heal {
+      background: rgba(255, 167, 38, 0.2);
+      color: #ffa726;
+    }
+    .trigger-badge.retry {
+      background: rgba(66, 165, 245, 0.2);
+      color: #42a5f5;
     }
     .step-indicators {
       display: flex;

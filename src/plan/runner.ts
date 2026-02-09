@@ -1392,6 +1392,7 @@ export class PlanRunner extends EventEmitter {
       
       // Track whether executor succeeded (or was skipped for RI-only retry)
       let executorSuccess = false;
+      let autoHealSucceeded = false; // Track if success came from auto-heal
       
       // Check if resuming from merge-ri phase - skip executor entirely
       if (nodeState.resumeFromPhase === 'merge-ri') {
@@ -1414,6 +1415,10 @@ export class PlanRunner extends EventEmitter {
           previousStepStatuses: nodeState.stepStatuses, // Preserve completed phase statuses
           onProgress: (step) => {
             log.debug(`Job progress: ${node.name} - ${step}`);
+          },
+          onStepStatusChange: (phase, status) => {
+            if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+            (nodeState.stepStatuses as any)[phase] = status;
           },
         };
         
@@ -1466,6 +1471,7 @@ export class PlanRunner extends EventEmitter {
           // Record failed attempt in history
           const failedAttempt: AttemptRecord = {
             attemptNumber: nodeState.attempts,
+            triggerType: nodeState.attempts === 1 ? 'initial' : 'retry',
             status: 'failed',
             startedAt: nodeState.startedAt || Date.now(),
             endedAt: Date.now(),
@@ -1597,6 +1603,10 @@ export class PlanRunner extends EventEmitter {
               onProgress: (step) => {
                 log.debug(`Auto-heal progress: ${node.name} - ${step}`);
               },
+              onStepStatusChange: (phase, status) => {
+                if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+                (nodeState.stepStatuses as any)[phase] = status;
+              },
             };
             
             const healResult = await this.executor!.execute(healContext);
@@ -1624,6 +1634,7 @@ export class PlanRunner extends EventEmitter {
               this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: SUCCESS ==========');
               
               executorSuccess = true;
+              autoHealSucceeded = true;
               if (healResult.completedCommit) {
                 nodeState.completedCommit = healResult.completedCommit;
               }
@@ -1647,6 +1658,7 @@ export class PlanRunner extends EventEmitter {
               // Record heal attempt in history
               const healAttempt: AttemptRecord = {
                 attemptNumber: nodeState.attempts,
+                triggerType: 'auto-heal',
                 status: 'failed',
                 startedAt: nodeState.startedAt || Date.now(),
                 endedAt: Date.now(),
@@ -1741,6 +1753,7 @@ export class PlanRunner extends EventEmitter {
         // Record failed attempt in history
         const riFailedAttempt: AttemptRecord = {
           attemptNumber: nodeState.attempts,
+          triggerType: autoHealSucceeded ? 'auto-heal' : (nodeState.attempts === 1 ? 'initial' : 'retry'),
           status: 'failed',
           startedAt: nodeState.startedAt || Date.now(),
           endedAt: Date.now(),
@@ -1769,6 +1782,7 @@ export class PlanRunner extends EventEmitter {
         // Record successful attempt in history
         const successAttempt: AttemptRecord = {
           attemptNumber: nodeState.attempts,
+          triggerType: autoHealSucceeded ? 'auto-heal' : (nodeState.attempts === 1 ? 'initial' : 'retry'),
           status: 'succeeded',
           startedAt: nodeState.startedAt || Date.now(),
           endedAt: Date.now(),
@@ -1823,6 +1837,7 @@ export class PlanRunner extends EventEmitter {
       // Record failed attempt in history
       const errorAttempt: AttemptRecord = {
         attemptNumber: nodeState.attempts,
+        triggerType: nodeState.attempts === 1 ? 'initial' : 'retry',
         status: 'failed',
         startedAt: nodeState.startedAt || Date.now(),
         endedAt: Date.now(),
@@ -2606,6 +2621,7 @@ export class PlanRunner extends EventEmitter {
     
     nodeState.attemptHistory.push({
       attemptNumber: nodeState.attempts || 1,
+      triggerType: 'retry',
       startedAt: nodeState.startedAt || Date.now(),
       endedAt: Date.now(),
       status: 'failed',

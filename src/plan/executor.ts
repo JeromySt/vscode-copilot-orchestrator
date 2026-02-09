@@ -163,6 +163,7 @@ export class DefaultJobExecutor implements JobExecutor {
         // stepStatuses.prechecks already preserved from previousStepStatuses
       } else if (node.prechecks) {
         context.onProgress?.('Running prechecks');
+        context.onStepStatusChange?.('prechecks', 'running');
         this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION START ==========');
         
         const precheckResult = await this.runWorkSpec(
@@ -202,6 +203,7 @@ export class DefaultJobExecutor implements JobExecutor {
         // stepStatuses.work already preserved from previousStepStatuses
       } else if (node.work) {
         context.onProgress?.('Running work');
+        context.onStepStatusChange?.('work', 'running');
         this.logInfo(executionKey, 'work', '========== WORK SECTION START ==========');
         
         const workResult = await this.runWorkSpec(
@@ -259,6 +261,7 @@ export class DefaultJobExecutor implements JobExecutor {
         // stepStatuses.postchecks already preserved from previousStepStatuses
       } else if (node.postchecks) {
         context.onProgress?.('Running postchecks');
+        context.onStepStatusChange?.('postchecks', 'running');
         this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION START ==========');
         
         const postcheckResult = await this.runWorkSpec(
@@ -299,6 +302,7 @@ export class DefaultJobExecutor implements JobExecutor {
       // no-op — e.g., files already committed by a dependency), that's OK.
       const workWasSkipped = shouldSkipPhase('work');
       context.onProgress?.('Committing changes');
+      context.onStepStatusChange?.('commit', 'running');
       this.logInfo(executionKey, 'commit', '========== COMMIT SECTION START ==========');
       const commitResult = await this.commitChanges(
         node,
