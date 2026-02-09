@@ -2367,10 +2367,8 @@ ${mermaidDef}
         durationLabel = ' | ' + formatDurationMs(duration);
       }
       
-      const displayLabel = this._truncateNodeLabel(label, durationLabel);
-      if (displayLabel !== label) {
-        nodeTooltips[sanitizedId] = label;
-      }
+      // Nodes are not truncated — they size their own Mermaid boxes.
+      const displayLabel = label;
       
       // Add trailing non-breaking spaces to prevent Mermaid SVG text clipping
       // Use 4 spaces to account for status icon width + duration label characters
@@ -2448,6 +2446,47 @@ ${mermaidDef}
         current.nodes = nodes;
       }
       
+      // Pre-compute rendered label width for each node (icon + name + duration)
+      // so that group labels can be truncated to the widest descendant node.
+      const nodeLabelWidths = new Map<string, number>();
+      for (const [nodeId, node] of d.nodes) {
+        const escapedName = this._escapeForMermaid(node.name);
+        const st = d.nodeStates.get(nodeId);
+        let dur = ' | --';
+        if (st?.startedAt) {
+          const endTime = st.endedAt || Date.now();
+          dur = ' | ' + formatDurationMs(endTime - st.startedAt);
+        }
+        // Total = icon(2) + name + duration (matches the formula in _truncateLabel)
+        nodeLabelWidths.set(nodeId, 2 + escapedName.length + dur.length);
+      }
+
+      // Recursively compute the max descendant-node label width for each group
+      const computeMaxGroupWidth = (treeNode: GroupTreeNode): number => {
+        let maxW = 0;
+        for (const { nodeId } of treeNode.nodes) {
+          const w = nodeLabelWidths.get(nodeId) || 0;
+          if (w > maxW) maxW = w;
+        }
+        for (const child of treeNode.children.values()) {
+          const w = computeMaxGroupWidth(child);
+          if (w > maxW) maxW = w;
+        }
+        return maxW;
+      };
+
+      const groupMaxWidths = new Map<string, number>();
+      const precomputeGroupWidths = (treeNode: GroupTreeNode, path: string) => {
+        groupMaxWidths.set(path, computeMaxGroupWidth(treeNode));
+        for (const [childName, child] of treeNode.children) {
+          const childPath = path ? `${path}/${childName}` : childName;
+          precomputeGroupWidths(child, childPath);
+        }
+      };
+      for (const [name, child] of groupTree.children) {
+        precomputeGroupWidths(child, name);
+      }
+
       // Recursively render group tree as nested subgraphs
       const renderGroupTree = (
         treeNode: GroupTreeNode,
@@ -2486,11 +2525,14 @@ ${mermaidDef}
         };
         const colors = groupColors[groupStatus] || groupColors.pending;
         
-        // Truncate group names to prevent label overflow, using a generous
-        // limit since subgraph boxes are generally wider than node boxes.
+        // Truncate group names based on the widest descendant node's rendered
+        // label width, so the group title never overflows its content box.
         const displayName = groupPath || treeNode.name;
         const escapedName = this._escapeForMermaid(displayName);
-        const truncatedGroupName = this._truncateNodeLabel(escapedName, groupDurationLabel);
+        const maxWidth = groupMaxWidths.get(groupPath) || 0;
+        const truncatedGroupName = maxWidth > 0
+          ? this._truncateLabel(escapedName, groupDurationLabel, maxWidth)
+          : escapedName;
         if (truncatedGroupName !== escapedName) {
           nodeTooltips[sanitizedGroupId] = displayName;
         }
@@ -2648,22 +2690,16 @@ ${mermaidDef}
   }
 
   /**
-   * Maximum character length for a node/group label (name + duration) before truncation.
-   * Accommodates icon (2) + name (up to ~20) + duration (" | 00m 00s" = ~12) + padding.
-   */
-  private static readonly NODE_LABEL_MAX_LENGTH = 35;
-
-  /**
-   * Truncate a node name so that the combined label (name + duration suffix)
-   * stays within {@link NODE_LABEL_MAX_LENGTH} characters. When truncation
-   * occurs the name is trimmed and an ellipsis ('...') is appended.
+   * Truncate a label name so that the combined label (icon + name + duration)
+   * stays within the given `maxLen` characters. When truncation occurs the
+   * name is trimmed and an ellipsis ('...') is appended.
    *
-   * @param name - The escaped node name.
+   * @param name - The escaped display name.
    * @param durationLabel - The duration suffix (e.g., ' | 2m 34s'), may be empty.
+   * @param maxLen - Maximum total character count (icon(2) + name + duration).
    * @returns The (possibly truncated) name.
    */
-  private _truncateNodeLabel(name: string, durationLabel: string): string {
-    const maxLen = planDetailPanel.NODE_LABEL_MAX_LENGTH;
+  private _truncateLabel(name: string, durationLabel: string, maxLen: number): string {
     // +2 accounts for the status icon + space prefix ("✓ ")
     const totalLen = 2 + name.length + durationLabel.length;
     if (totalLen <= maxLen) {
