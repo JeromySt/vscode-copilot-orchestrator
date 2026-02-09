@@ -109,6 +109,24 @@ Dependency B (commit SHA2)  ─┘
 
 **Consumption tracking:** After FI, the node acknowledges consumption of each dependency's output. This is tracked via `consumedByDependents` on each dependency's state, which drives worktree cleanup eligibility (see below).
 
+#### FI Chain Continuity with `expectsNoChanges`
+
+Validation nodes (e.g., typecheck, lint) often use `expectsNoChanges: true` to indicate they won't produce file changes. When such a node succeeds without creating a commit, it carries forward its `baseCommit` as its `completedCommit`:
+
+```typescript
+if (!result.completedCommit && !nodeState.completedCommit && nodeState.baseCommit) {
+  nodeState.completedCommit = nodeState.baseCommit;
+}
+```
+
+This ensures downstream nodes receive the correct parent commit during FI, rather than falling back to `plan.baseBranch`. Without this behavior, a linear chain like:
+
+```
+Code Change A → Typecheck (expectsNoChanges) → Code Change B
+```
+
+would break: Code Change B's FI would miss Code Change A's work because the Typecheck node would have no `completedCommit` to pass along, and the leaf RI merge would lose accumulated ancestor changes.
+
 ### Reverse Integration (RI)
 
 When a leaf node completes and the plan has a `targetBranch`, the node's completed commit is merged to the target branch.
@@ -321,15 +339,15 @@ The mutex prevents three classes of race conditions:
 
 ## Fetch on Resume and Retry
 
-When a plan is paused (e.g., created with `startPaused=true`) the target branch may receive new commits before the plan is resumed. To prevent worktrees from being created against stale refs, the orchestrator fetches the latest remote state before resuming or retrying.
+When a plan is paused (e.g., created with `startPaused=true`) the target branch may receive new commits before the plan is resumed. To prevent worktrees from being created against stale refs, the orchestrator fetches the latest remote state before resuming or retrying. Both `resume()` and `retryNode()` are async operations that return promises.
 
 ### Fetch on Resume
 
-When `resume()` is called on a paused plan, the orchestrator runs `git fetch --all` before unpausing any nodes. This ensures all local refs reflect the current state of remote branches, so worktrees created for pending root nodes use the latest target branch commit.
+When `await resume(planId)` is called on a paused plan, the orchestrator runs `git fetch --all` before unpausing any nodes. This ensures all local refs reflect the current state of remote branches, so worktrees created for pending root nodes use the latest target branch commit.
 
 ### Fetch on Retry with clearWorktree
 
-When `retryNode()` is called with `clearWorktree=true`, a `git fetch --all` is performed before the worktree is removed and recreated. This ensures the new worktree is based on the current base ref rather than a potentially outdated one.
+When `await retryNode(planId, nodeId, { clearWorktree: true })` is called, a `git fetch --all` is performed before the worktree is removed and recreated. This ensures the new worktree is based on the current base ref rather than a potentially outdated one.
 
 ### Graceful Failure Handling
 
