@@ -334,13 +334,16 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       });
       
       // Handle exit
-      proc.on('exit', (code) => {
+      proc.on('exit', (code, signal) => {
         if (code !== 0) {
-          this.logger.error(`[${label}] Copilot CLI exited with code ${code}`);
+          const reason = signal
+            ? `Copilot CLI was killed by signal ${signal}`
+            : `Copilot CLI exited with code ${code}`;
+          this.logger.error(`[${label}] ${reason}`);
           resolve({
             success: false,
             sessionId: capturedSessionId,
-            error: `Copilot CLI exited with code ${code}`,
+            error: reason,
             exitCode: code ?? undefined,
           });
         } else {

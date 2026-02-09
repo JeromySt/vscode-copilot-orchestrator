@@ -372,7 +372,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
         }, FLUSH_DELAY_MS);
       });
 
-      proc.on('exit', async (code: number | null) => {
+      proc.on('exit', async (code: number | null, signal: NodeJS.Signals | null) => {
         // Clean up temp prompt file and instructions
         cleanup();
         
@@ -405,11 +405,14 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
         const tokenUsage = await this.extractTokenUsage(copilotLogDir, model);
 
         if (code !== 0) {
-          this.logger.log(`[${label}] Copilot exited with code ${code}`);
+          const reason = signal
+            ? `Copilot was killed by signal ${signal}`
+            : `Copilot failed with exit code ${code}`;
+          this.logger.log(`[${label}] ${reason}`);
           resolve({
             success: false,
             sessionId: capturedSessionId,
-            error: `Copilot failed with exit code ${code}`,
+            error: reason,
             exitCode: code ?? undefined,
             tokenUsage
           });
