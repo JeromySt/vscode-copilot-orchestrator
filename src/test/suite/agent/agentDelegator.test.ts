@@ -82,6 +82,7 @@ suite('AgentDelegator', () => {
     sandbox = sinon.createSandbox();
     spawnStub = sandbox.stub(cp, 'spawn');
     delete require.cache[require.resolve('../../../agent/cliCheckCore')];
+    delete require.cache[require.resolve('../../../agent/copilotCliRunner')];
     delete require.cache[require.resolve('../../../agent/agentDelegator')];
     cliCheck = require('../../../agent/cliCheckCore');
     gitExec = require('../../../git/core/executor');
@@ -152,7 +153,7 @@ suite('AgentDelegator', () => {
       const delegator = new AgentDelegator(logger);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.success, false);
-      assert.ok(result.error?.includes('exit code 1'));
+      assert.ok(result.error?.includes('exited with code 1'));
     });
 
     test('handles process error event', async () => {

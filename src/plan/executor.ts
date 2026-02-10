@@ -37,6 +37,7 @@ import { JobExecutor } from './runner';
 import { Logger } from '../core/logger';
 import * as git from '../git';
 import { DefaultEvidenceValidator } from './evidenceValidator';
+import { aggregateMetrics } from './metricsAggregator';
 import type { IEvidenceValidator } from '../interfaces';
 
 const log = Logger.for('job-executor');
@@ -151,6 +152,7 @@ export class DefaultJobExecutor implements JobExecutor {
       : {};
     let capturedSessionId: string | undefined = context.copilotSessionId;
     let capturedMetrics: CopilotUsageMetrics | undefined;
+    const phaseMetrics: Record<string, CopilotUsageMetrics> = {};
     
     // Determine which phases to skip based on resumeFromPhase
     const phaseOrder = ['prechecks', 'work', 'postchecks', 'commit'] as const;
@@ -191,6 +193,17 @@ export class DefaultJobExecutor implements JobExecutor {
           node
         );
         
+        // Capture session ID and metrics from prechecks (relevant for auto-heal agent specs)
+        if (precheckResult.copilotSessionId) {
+          capturedSessionId = precheckResult.copilotSessionId;
+        }
+        if (precheckResult.metrics) {
+          capturedMetrics = capturedMetrics
+            ? aggregateMetrics([capturedMetrics, precheckResult.metrics])
+            : precheckResult.metrics;
+          phaseMetrics['prechecks'] = precheckResult.metrics;
+        }
+        
         this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION END ==========');
         
         if (!precheckResult.success) {
@@ -199,8 +212,11 @@ export class DefaultJobExecutor implements JobExecutor {
             success: false,
             error: `Prechecks failed: ${precheckResult.error}`,
             stepStatuses,
+            copilotSessionId: capturedSessionId,
             failedPhase: 'prechecks',
             exitCode: precheckResult.exitCode,
+            metrics: capturedMetrics,
+            phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
           };
         }
         stepStatuses.prechecks = 'success';
@@ -240,6 +256,7 @@ export class DefaultJobExecutor implements JobExecutor {
         // Capture agent execution metrics
         if (workResult.metrics) {
           capturedMetrics = workResult.metrics;
+          phaseMetrics['work'] = workResult.metrics;
         }
         
         this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
@@ -254,6 +271,7 @@ export class DefaultJobExecutor implements JobExecutor {
             failedPhase: 'work',
             exitCode: workResult.exitCode,
             metrics: capturedMetrics,
+            phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
           };
         }
         stepStatuses.work = 'success';
@@ -289,6 +307,17 @@ export class DefaultJobExecutor implements JobExecutor {
           node
         );
         
+        // Capture session ID and metrics from postchecks (relevant for auto-heal agent specs)
+        if (postcheckResult.copilotSessionId) {
+          capturedSessionId = postcheckResult.copilotSessionId;
+        }
+        if (postcheckResult.metrics) {
+          capturedMetrics = capturedMetrics
+            ? aggregateMetrics([capturedMetrics, postcheckResult.metrics])
+            : postcheckResult.metrics;
+          phaseMetrics['postchecks'] = postcheckResult.metrics;
+        }
+        
         this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION END ==========');
         
         if (!postcheckResult.success) {
@@ -300,6 +329,8 @@ export class DefaultJobExecutor implements JobExecutor {
             copilotSessionId: capturedSessionId,
             failedPhase: 'postchecks',
             exitCode: postcheckResult.exitCode,
+            metrics: capturedMetrics,
+            phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
           };
         }
         stepStatuses.postchecks = 'success';
@@ -328,6 +359,14 @@ export class DefaultJobExecutor implements JobExecutor {
       );
       this.logInfo(executionKey, 'commit', '========== COMMIT SECTION END ==========');
       
+      // Merge any AI review metrics from the commit phase into captured metrics
+      if (commitResult.reviewMetrics) {
+        phaseMetrics['commit'] = commitResult.reviewMetrics;
+        capturedMetrics = capturedMetrics
+          ? aggregateMetrics([capturedMetrics, commitResult.reviewMetrics])
+          : commitResult.reviewMetrics;
+      }
+      
       if (!commitResult.success) {
         if (workWasSkipped) {
           // Work was skipped (resume from postchecks or later). The prior work
@@ -343,6 +382,8 @@ export class DefaultJobExecutor implements JobExecutor {
             stepStatuses,
             copilotSessionId: capturedSessionId,
             failedPhase: 'commit',
+            metrics: capturedMetrics,
+            phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
           };
         }
       } else {
@@ -363,6 +404,7 @@ export class DefaultJobExecutor implements JobExecutor {
         stepStatuses,
         copilotSessionId: capturedSessionId,
         metrics: capturedMetrics,
+        phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
       };
       
     } catch (error: any) {
@@ -373,6 +415,7 @@ export class DefaultJobExecutor implements JobExecutor {
         stepStatuses,
         copilotSessionId: capturedSessionId,
         metrics: capturedMetrics,
+        phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
       };
     } finally {
       this.activeExecutions.delete(executionKey);
@@ -634,7 +677,7 @@ export class DefaultJobExecutor implements JobExecutor {
         return this.runShell(normalized, worktreePath, execution, executionKey, phase);
       
       case 'agent':
-        const result = await this.runAgent(normalized, worktreePath, execution, executionKey, node, sessionId);
+        const result = await this.runAgent(normalized, worktreePath, execution, executionKey, node, phase, sessionId);
         return { ...result, isAgent: true };
       
       default:
@@ -881,6 +924,7 @@ export class DefaultJobExecutor implements JobExecutor {
     execution: ActiveExecution,
     executionKey: string,
     node: JobNode,
+    phase: ExecutionPhase,
     sessionId?: string
   ): Promise<{ success: boolean; error?: string; copilotSessionId?: string; exitCode?: number; metrics?: CopilotUsageMetrics }> {
     if (!this.agentDelegator) {
@@ -894,21 +938,21 @@ export class DefaultJobExecutor implements JobExecutor {
     execution.isAgentWork = true;
     execution.startTime = Date.now();
     
-    this.logInfo(executionKey, 'work', `Agent instructions: ${spec.instructions}`);
+    this.logInfo(executionKey, phase, `Agent instructions: ${spec.instructions}`);
     if (spec.model) {
-      this.logInfo(executionKey, 'work', `Using model: ${spec.model}`);
+      this.logInfo(executionKey, phase, `Using model: ${spec.model}`);
     }
     if (spec.contextFiles?.length) {
-      this.logInfo(executionKey, 'work', `Agent context files: ${spec.contextFiles.join(', ')}`);
+      this.logInfo(executionKey, phase, `Agent context files: ${spec.contextFiles.join(', ')}`);
     }
     if (spec.maxTurns) {
-      this.logInfo(executionKey, 'work', `Agent max turns: ${spec.maxTurns}`);
+      this.logInfo(executionKey, phase, `Agent max turns: ${spec.maxTurns}`);
     }
     if (spec.context) {
-      this.logInfo(executionKey, 'work', `Agent context: ${spec.context}`);
+      this.logInfo(executionKey, phase, `Agent context: ${spec.context}`);
     }
     if (sessionId) {
-      this.logInfo(executionKey, 'work', `Resuming Copilot session: ${sessionId}`);
+      this.logInfo(executionKey, phase, `Resuming Copilot session: ${sessionId}`);
     }
     
     try {
@@ -920,7 +964,7 @@ export class DefaultJobExecutor implements JobExecutor {
         contextFiles: spec.contextFiles,
         maxTurns: spec.maxTurns,
         sessionId, // Pass session ID for resumption
-        logOutput: (line: string) => this.logInfo(executionKey, 'work', line),
+        logOutput: (line: string) => this.logInfo(executionKey, phase, line),
         onProcess: (proc: any) => {
           // Track the Copilot CLI process for monitoring (CPU/memory/tree)
           execution.process = proc;
@@ -943,13 +987,13 @@ export class DefaultJobExecutor implements JobExecutor {
       }
       
       if (result.success) {
-        this.logInfo(executionKey, 'work', 'Agent completed successfully');
+        this.logInfo(executionKey, phase, 'Agent completed successfully');
         if (result.sessionId) {
-          this.logInfo(executionKey, 'work', `Captured session ID: ${result.sessionId}`);
+          this.logInfo(executionKey, phase, `Captured session ID: ${result.sessionId}`);
         }
         return { success: true, copilotSessionId: result.sessionId, metrics };
       } else {
-        this.logError(executionKey, 'work', `Agent failed: ${result.error}`);
+        this.logError(executionKey, phase, `Agent failed: ${result.error}`);
         return { 
           success: false, 
           error: result.error, 
@@ -959,7 +1003,7 @@ export class DefaultJobExecutor implements JobExecutor {
         };
       }
     } catch (error: any) {
-      this.logError(executionKey, 'work', `Agent error: ${error.message}`);
+      this.logError(executionKey, phase, `Agent error: ${error.message}`);
       const durationMs = Date.now() - (execution.startTime || Date.now());
       return { success: false, error: error.message, metrics: { durationMs } };
     }
@@ -976,7 +1020,7 @@ export class DefaultJobExecutor implements JobExecutor {
     worktreePath: string,
     executionKey: string,
     baseCommit: string
-  ): Promise<{ success: boolean; commit?: string; error?: string }> {
+  ): Promise<{ success: boolean; commit?: string; error?: string; reviewMetrics?: CopilotUsageMetrics }> {
     try {
       // Log git status for debugging
       this.logInfo(executionKey, 'commit', `Checking git status in ${worktreePath}`);
@@ -1041,14 +1085,22 @@ export class DefaultJobExecutor implements JobExecutor {
           if (reviewResult.legitimate) {
             this.logInfo(executionKey, 'commit',
               `AI review: No changes needed — ${reviewResult.reason}`);
-            return { success: true, commit: undefined };
+            return { success: true, commit: undefined, reviewMetrics: reviewResult.metrics };
           } else {
             this.logInfo(executionKey, 'commit',
               `AI review: Changes were expected — ${reviewResult.reason}`);
+            // Fall through to failure — but preserve AI review metrics
+            const error =
+              'No work evidence produced. The node must either:\n' +
+              '  1. Modify files (results in a commit)\n' +
+              '  2. Create an evidence file at .orchestrator/evidence/<nodeId>.json\n' +
+              '  3. Declare expectsNoChanges: true in the node spec';
+            this.logError(executionKey, 'commit', error);
+            return { success: false, error, reviewMetrics: reviewResult.metrics };
           }
         }
         
-        // No evidence — fail
+        // No evidence — fail (no AI review available)
         const error =
           'No work evidence produced. The node must either:\n' +
           '  1. Modify files (results in a commit)\n' +
@@ -1088,14 +1140,14 @@ export class DefaultJobExecutor implements JobExecutor {
    * done by a dependency, tests passed with nothing to fix, linter found
    * no issues) or whether the work genuinely failed to produce output.
    *
-   * @returns `{ legitimate: true, reason }` if no-op is acceptable,
-   *          `{ legitimate: false, reason }` if changes were expected.
+   * @returns `{ legitimate: true, reason, metrics? }` if no-op is acceptable,
+   *          `{ legitimate: false, reason, metrics? }` if changes were expected.
    */
   private async aiReviewNoChanges(
     node: JobNode,
     worktreePath: string,
     executionKey: string
-  ): Promise<{ legitimate: boolean; reason: string }> {
+  ): Promise<{ legitimate: boolean; reason: string; metrics?: CopilotUsageMetrics }> {
     try {
       // Gather execution logs — truncated to keep the prompt manageable
       const logs = this.executionLogs.get(executionKey) || [];
@@ -1168,11 +1220,14 @@ export class DefaultJobExecutor implements JobExecutor {
 
       this.logInfo(executionKey, 'commit', '========== AI REVIEW: COMPLETE ==========');
 
+      // Capture metrics from the AI review delegation
+      const reviewMetrics = result.metrics;
+
       if (!result.success) {
         // AI review itself failed — don't block on it, fall through to normal fail
         this.logInfo(executionKey, 'commit',
           `AI review could not complete: ${result.error}. Falling through to standard validation.`);
-        return { legitimate: false, reason: 'AI review unavailable' };
+        return { legitimate: false, reason: 'AI review unavailable', metrics: reviewMetrics };
       }
 
       // Parse the AI's judgment from the execution logs.
@@ -1198,6 +1253,7 @@ export class DefaultJobExecutor implements JobExecutor {
             return {
               legitimate: parsed.legitimate === true,
               reason: parsed.reason || (parsed.legitimate ? 'AI review approved' : 'AI review rejected'),
+              metrics: reviewMetrics,
             };
           } catch {
             // JSON parse failed, continue searching
@@ -1215,6 +1271,7 @@ export class DefaultJobExecutor implements JobExecutor {
           return {
             legitimate: parsed.legitimate === true,
             reason: parsed.reason || (parsed.legitimate ? 'AI review approved' : 'AI review rejected'),
+            metrics: reviewMetrics,
           };
         } catch {
           // JSON parse failed
@@ -1224,7 +1281,7 @@ export class DefaultJobExecutor implements JobExecutor {
       // Couldn't parse a structured response — fall through
       this.logInfo(executionKey, 'commit',
         'AI review did not return a parseable judgment. Falling through to standard validation.');
-      return { legitimate: false, reason: 'AI review returned no parseable judgment' };
+      return { legitimate: false, reason: 'AI review returned no parseable judgment', metrics: reviewMetrics };
     } catch (error: any) {
       // Don't let AI review errors block the pipeline
       this.logInfo(executionKey, 'commit',

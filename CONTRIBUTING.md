@@ -46,6 +46,24 @@ Thank you for your interest in contributing to Copilot Orchestrator! This docume
 | `npm run lint` | Run ESLint |
 | `npm test` | Run tests |
 | `npm run package` | Create VSIX package |
+| `npm run deploy:local` | Build, package, and install locally (see below) |
+
+### Local Deployment
+
+To quickly test changes in your local VS Code instance without the F5 Extension Development Host:
+
+```bash
+npm run deploy:local
+```
+
+This single command:
+1. **Bumps the patch version** (`npm version patch --no-git-tag-version`) — avoids version conflicts with the marketplace
+2. **Packages a VSIX** (`npx @vscode/vsce package --no-dependencies`) — creates `vscode-copilot-orchestrator-<version>.vsix`
+3. **Installs the VSIX** (`code --install-extension ... --force`) — installs into your running VS Code
+
+After running, **reload VS Code** (Developer: Reload Window) to activate the new version.
+
+> **Note:** The version bump is intentionally `--no-git-tag-version` so it doesn't create a git tag or commit. Remember to set the version appropriately before committing.
 
 ## Project Structure
 
@@ -212,6 +230,3 @@ By contributing, you agree that your contributions will be licensed under the MI
 - Read the documentation in `README.md`
 
 Thank you for contributing! 🎉
-<!-- TRUNCATION-TEST-RETEST -->
-<!-- TRUNCATION-VERIFIED -->
-<!-- FI-CHAIN-VERIFIED -->

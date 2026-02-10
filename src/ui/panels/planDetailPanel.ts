@@ -13,7 +13,7 @@
 import * as vscode from 'vscode';
 import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState } from '../../plan';
 import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
-import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges } from '../../plan/metricsAggregator';
+import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges, formatTokenCount } from '../../plan/metricsAggregator';
 
 /**
  * Webview panel that shows a detailed view of a single Plan's execution.
@@ -567,7 +567,7 @@ export class planDetailPanel {
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
     // Build Mermaid diagram
-    const { diagram: mermaidDef, nodeTooltips } = this._buildMermaidDiagram(plan);
+    const { diagram: mermaidDef, nodeTooltips, edgeData } = this._buildMermaidDiagram(plan);
     
     // Build node data for click handling
     const nodeData: Record<string, { nodeId: string; planId: string; type: string; name: string; startedAt?: number; endedAt?: number; status: string; version: number }> = {};
@@ -820,9 +820,15 @@ export class planDetailPanel {
     .mermaid g[id*="TARGET_SOURCE"] .node,
     .mermaid g[id*="TARGET_MERGED"] .node { cursor: default; }  /* Branch nodes are not clickable */
     
-    /* Node labels are pre-truncated server-side; let Mermaid size the box */
+    /* Node labels are pre-truncated server-side; clip any residual overflow */
     .mermaid .node .nodeLabel {
       white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      display: block !important;
+    }
+    .mermaid .node foreignObject {
+      overflow: hidden !important;
     }
     
     /* Subgraph/cluster styling */
@@ -1112,6 +1118,36 @@ export class planDetailPanel {
       color: var(--vscode-descriptionForeground);
       padding-left: 2px;
     }
+    .plan-metrics-bar .model-breakdown {
+      width: 100%;
+      margin-top: 8px;
+    }
+    .plan-metrics-bar .model-breakdown-label {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      margin-bottom: 6px;
+    }
+    .plan-metrics-bar .model-breakdown-list {
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      padding: 8px 10px;
+    }
+    .plan-metrics-bar .model-row {
+      display: flex;
+      gap: 12px;
+      align-items: baseline;
+      padding: 2px 0;
+      font-size: 11px;
+      font-family: var(--vscode-editor-font-family), monospace;
+    }
+    .plan-metrics-bar .model-name {
+      font-weight: 600;
+      min-width: 140px;
+    }
+    .plan-metrics-bar .model-tokens {
+      color: var(--vscode-descriptionForeground);
+    }
     
     .actions {
       margin-top: 16px;
@@ -1280,6 +1316,15 @@ ${mermaidDef}
     const nodeData = ${JSON.stringify(nodeData)};
     const nodeTooltips = ${JSON.stringify(nodeTooltips)};
     const mermaidDef = ${JSON.stringify(mermaidDef)};
+    const edgeData = ${JSON.stringify(edgeData)};
+    
+    // Token count formatter for client-side model breakdown rendering
+    function formatTk(n) {
+      if (n === undefined || n === null) return '0';
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+      return String(n);
+    }
     
     mermaid.initialize({
       startOnLoad: false,
@@ -1301,16 +1346,14 @@ ${mermaidDef}
         const { svg } = await mermaid.render('mermaid-graph', mermaidDef);
         element.innerHTML = svg;
         
-        // Fix cluster label clipping: expand foreignObject width to fit text
-        const clusterLabels = element.querySelectorAll('.cluster-label');
-        clusterLabels.forEach(label => {
-          // Find the foreignObject (parent) and expand its width
+        // Fix label clipping for cluster/subgraph labels only.
+        // Node labels use CSS overflow:hidden + text-overflow:ellipsis instead.
+        element.querySelectorAll('.cluster-label').forEach(label => {
           let parent = label.parentElement;
           while (parent && parent.tagName !== 'foreignObject') {
             parent = parent.parentElement;
           }
           if (parent && parent.tagName === 'foreignObject') {
-            // Get actual text width and add padding
             const textEl = label.querySelector('.nodeLabel, span, div');
             if (textEl) {
               const textWidth = textEl.scrollWidth || textEl.offsetWidth || 200;
@@ -1320,7 +1363,6 @@ ${mermaidDef}
               }
             }
           }
-          // Also set overflow visible on the label itself
           label.style.overflow = 'visible';
           label.style.width = 'auto';
         });
@@ -1638,16 +1680,20 @@ ${mermaidDef}
           
           const text = textEl.textContent || '';
           if (text.includes('|')) {
-            // Update existing duration
+            // Update existing duration — pad back to original character count
+            // so the text never exceeds the pre-sized foreignObject width.
             const pipeIndex = text.lastIndexOf('|');
             if (pipeIndex > 0) {
-              const newText = text.substring(0, pipeIndex + 1) + ' ' + durationStr;
-              textEl.textContent = newText;
+              var origLen = text.length;
+              var core = text.substring(0, pipeIndex + 1) + ' ' + durationStr;
+              var padN = Math.max(0, origLen - core.length);
+              textEl.textContent = core + '\u2003'.repeat(padN);
             }
             break;
           } else if (text.length > 0) {
-            // No duration yet - add it (node just started running)
-            textEl.textContent = text + ' | ' + durationStr;
+            // No duration yet — strip trailing padding, then add duration
+            var trimmed = text.replace(/[\u2003\u00A0]+$/, '');
+            textEl.textContent = trimmed + ' | ' + durationStr;
             break;
           }
         }
@@ -1730,8 +1776,13 @@ ${mermaidDef}
               items.push('<span class="metric-item">📝 <span class="metric-value">' + planMetrics.codeChanges + '</span></span>');
             }
             var modelsHtml = '';
-            if (planMetrics.models) {
-              modelsHtml = '<div class="models-line">Models: ' + planMetrics.models + '</div>';
+            if (planMetrics.modelBreakdown && planMetrics.modelBreakdown.length > 0) {
+              var rows = planMetrics.modelBreakdown.map(function(m) {
+                var cached = m.cachedTokens ? ', ' + formatTk(m.cachedTokens) + ' cached' : '';
+                var reqs = m.premiumRequests !== undefined ? ' (' + m.premiumRequests + ' req)' : '';
+                return '<div class="model-row"><span class="model-name">' + m.model + '</span><span class="model-tokens">' + formatTk(m.inputTokens) + ' in, ' + formatTk(m.outputTokens) + ' out' + cached + reqs + '</span></div>';
+              }).join('');
+              modelsHtml = '<div class="model-breakdown"><div class="model-breakdown-label">Model Breakdown:</div><div class="model-breakdown-list">' + rows + '</div></div>';
             }
             metricsBar.innerHTML = '<span class="metrics-label">⚡ AI Usage:</span> ' + items.join(' ') + modelsHtml;
             metricsBar.style.display = '';
@@ -1887,6 +1938,58 @@ ${mermaidDef}
           console.warn('SVG node update failed: updated 0 of ' + totalNodes + ' nodes, requesting full refresh');
           vscode.postMessage({ type: 'refresh' });
           return;
+        }
+        
+        // Update edge colors based on source node status
+        // Mermaid renders edges as <path> elements inside .edgePaths children,
+        // in the same order as our edgeIndex tracking.
+        if (svgElement && edgeData && edgeData.length > 0) {
+          var edgePaths = svgElement.querySelectorAll('.edgePaths > *');
+          var edgeColors = {
+            succeeded: '#4ec9b0',
+            failed: '#f48771',
+            running: '#3794ff',
+            scheduled: '#3794ff',
+          };
+          var defaultEdgeColor = '#858585';
+          
+          for (var i = 0; i < edgeData.length; i++) {
+            var edge = edgeData[i];
+            var edgeEl = edgePaths[edge.index];
+            if (!edgeEl) continue;
+            
+            var pathEl = edgeEl.querySelector('path') || edgeEl;
+            
+            // Determine color from source node status
+            var sourceStatus = null;
+            if (edge.from === 'TARGET_SOURCE') {
+              // Base branch edge — always green
+              sourceStatus = 'succeeded';
+            } else {
+              // Find source node's current status from nodeData
+              var sourceData = nodeData[edge.from];
+              if (sourceData) sourceStatus = sourceData.status;
+            }
+            
+            // For leaf-to-target edges, color based on the leaf (source) status
+            var color = (sourceStatus && edgeColors[sourceStatus]) || defaultEdgeColor;
+            pathEl.style.stroke = color;
+            pathEl.style.strokeWidth = (sourceStatus === 'succeeded' || sourceStatus === 'failed') ? '2px' : '';
+            
+            // Switch dashed→solid once the source node leaves pending/ready
+            if (sourceStatus && sourceStatus !== 'pending' && sourceStatus !== 'ready') {
+              pathEl.style.strokeDasharray = 'none';
+            } else {
+              pathEl.style.strokeDasharray = ''; // restore Mermaid default (dashed)
+            }
+            
+            // Also color the marker/arrowhead if present
+            var marker = edgeEl.querySelector('defs marker path, marker path');
+            if (marker) {
+              marker.style.fill = color;
+              marker.style.stroke = color;
+            }
+          }
         }
         
         // Update plan duration counter data attributes
@@ -2216,13 +2319,15 @@ ${mermaidDef}
       result.codeChanges = formatCodeChanges(metrics.codeChanges);
     }
     if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
-      result.models = metrics.modelBreakdown
+      result.modelBreakdown = metrics.modelBreakdown
         .sort((a, b) => (b.premiumRequests ?? 0) - (a.premiumRequests ?? 0))
-        .map(m => {
-          const reqs = m.premiumRequests ?? 0;
-          return `${escapeHtml(m.model)} (${reqs} req)`;
-        })
-        .join(' · ');
+        .map(m => ({
+          model: m.model,
+          inputTokens: m.inputTokens ?? 0,
+          outputTokens: m.outputTokens ?? 0,
+          cachedTokens: m.cachedTokens ?? 0,
+          premiumRequests: m.premiumRequests ?? 0,
+        }));
     }
     return result;
   }
@@ -2255,13 +2360,21 @@ ${mermaidDef}
 
     let modelsLine = '';
     if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
-      const modelParts = metrics.modelBreakdown
+      const rows = metrics.modelBreakdown
         .sort((a, b) => (b.premiumRequests ?? 0) - (a.premiumRequests ?? 0))
         .map(m => {
-          const reqs = m.premiumRequests ?? 0;
-          return `${escapeHtml(m.model)} (${reqs} req)`;
-        });
-      modelsLine = `<div class="models-line">Models: ${modelParts.join(' · ')}</div>`;
+          const cached = m.cachedTokens ? `, ${escapeHtml(formatTokenCount(m.cachedTokens))} cached` : '';
+          const reqs = m.premiumRequests !== undefined ? ` (${m.premiumRequests} req)` : '';
+          return `<div class="model-row">
+            <span class="model-name">${escapeHtml(m.model)}</span>
+            <span class="model-tokens">${escapeHtml(formatTokenCount(m.inputTokens))} in, ${escapeHtml(formatTokenCount(m.outputTokens))} out${cached}${reqs}</span>
+          </div>`;
+        }).join('');
+      modelsLine = `
+      <div class="model-breakdown">
+        <div class="model-breakdown-label">Model Breakdown:</div>
+        <div class="model-breakdown-list">${rows}</div>
+      </div>`;
     }
 
     return `
@@ -2283,7 +2396,7 @@ ${mermaidDef}
    * @param plan - The Plan instance whose nodes form the DAG.
    * @returns An object containing the Mermaid diagram string and node tooltips.
    */
-  private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; nodeTooltips: Record<string, string> } {
+  private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; nodeTooltips: Record<string, string>; edgeData: Array<{ index: number; from: string; to: string; isLeafToTarget?: boolean }> } {
     const lines: string[] = ['flowchart LR'];
     
     // Maximum total character width for a node label (icon + name + duration).
@@ -2314,6 +2427,8 @@ ${mermaidDef}
     let edgeIndex = 0;
     const successEdges: number[] = [];
     const failedEdges: number[] = [];
+    // Edge data for client-side incremental edge coloring
+    const edgeData: Array<{ index: number; from: string; to: string; isLeafToTarget?: boolean }> = [];
     
     // Add base branch node if different from target
     if (showBaseBranch) {
@@ -2382,11 +2497,14 @@ ${mermaidDef}
         nodeTooltips[sanitizedId] = node.name;
       }
       
-      // Add trailing non-breaking spaces to prevent Mermaid SVG text clipping
-      // Use 10 spaces for generous padding to prevent foreignObject clipping
-      const nbsp = '\u00A0';
-      const nodePadding = nbsp.repeat(10);
-      lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}${nodePadding}"]`);
+      // Reserve space for the maximum timer format (e.g. "59m 59s") by
+      // padding with em-spaces (U+2003).  Em-spaces are proportional-font-safe
+      // — each is ~1 'M' wide — so the Mermaid foreignObject is pre-sized
+      // wide enough for the longest possible timer text.  On incremental
+      // updates the client pads back to this character count.
+      const emSp = '\u2003';
+      const TIMER_PAD = 6;
+      lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}${emSp.repeat(TIMER_PAD)}"]`);
       lines.push(`${indent}class ${sanitizedId} ${status}`);
       
       nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
@@ -2550,8 +2668,8 @@ ${mermaidDef}
         if (truncatedGroupName !== escapedName) {
           nodeTooltips[sanitizedGroupId] = displayName;
         }
-        const nbsp = '\u00A0'; // non-breaking space
-        const padding = nbsp.repeat(4); // extra padding to prevent cutoff
+        const emSp = '\u2003'; // em space — proportional-font-safe padding
+        const padding = emSp.repeat(4); // reserve width to prevent cutoff
         
         lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedGroupName}${groupDurationLabel}${padding}"]`);
         
@@ -2597,6 +2715,7 @@ ${mermaidDef}
         const entryIds = mapping ? mapping.entryIds : [rootId];
         for (const entryId of entryIds) {
           lines.push(`  TARGET_SOURCE --> ${entryId}`);
+          edgeData.push({ index: edgeIndex, from: 'TARGET_SOURCE', to: entryId });
           successEdges.push(edgeIndex++);
         }
       }
@@ -2612,7 +2731,10 @@ ${mermaidDef}
       
       for (const exit of fromExits) {
         for (const entry of toEntries) {
-          lines.push(`  ${exit} --> ${entry}`);
+          // Dashed edge while source is pending/ready; solid once scheduled+
+          const edgeStyle = (!edge.status || edge.status === 'pending' || edge.status === 'ready') ? '-.->' : '-->';
+          lines.push(`  ${exit} ${edgeStyle} ${entry}`);
+          edgeData.push({ index: edgeIndex, from: exit, to: entry });
           if (edge.status === 'succeeded') {
             successEdges.push(edgeIndex);
           } else if (edge.status === 'failed') {
@@ -2634,8 +2756,12 @@ ${mermaidDef}
         const exitIds = mapping ? mapping.exitIds : [leafId];
         for (const exitId of exitIds) {
           // Check if this leaf has been successfully merged to target
+          // Use either mergedToTarget flag or succeeded status as proxy, since
+          // the Mermaid diagram is rendered once and edge types can't be updated
+          // incrementally.  A succeeded leaf will have its RI merge completed.
           const leafState = leafnodeStates.get(exitId);
-          const isMerged = leafState?.mergedToTarget === true;
+          const isMerged = leafState?.mergedToTarget === true
+            || leafState?.status === 'succeeded';
           
           if (isMerged) {
             // Use solid line and mark as success edge
@@ -2645,6 +2771,7 @@ ${mermaidDef}
             // Use dotted line for pending merge
             lines.push(`  ${exitId} -.-> TARGET_DEST`);
           }
+          edgeData.push({ index: edgeIndex, from: exitId, to: 'TARGET_DEST', isLeafToTarget: true });
           edgeIndex++;
         }
       }
@@ -2658,7 +2785,7 @@ ${mermaidDef}
       lines.push(`  linkStyle ${failedEdges.join(',')} stroke:#f48771,stroke-width:2px`);
     }
     
-    return { diagram: lines.join('\n'), nodeTooltips };
+    return { diagram: lines.join('\n'), nodeTooltips, edgeData };
   }
   
   /**

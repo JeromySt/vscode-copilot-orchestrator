@@ -305,13 +305,21 @@ export async function initializeMcpServer(
     vscode.window.showInformationMessage(
       'Copilot Orchestrator MCP server is registered. Enable it in the MCP Servers panel to use plan/job tools with GitHub Copilot.',
       'Got it',
-      'Show MCP Servers'
-    ).then(choice => {
-      if (choice === 'Got it' || choice === 'Show MCP Servers') {
+      'Start MCP Server'
+    ).then(async choice => {
+      if (choice === 'Got it' || choice === 'Start MCP Server') {
         context.globalState.update(MCP_ENABLED_KEY, true);
       }
-      if (choice === 'Show MCP Servers') {
-        vscode.commands.executeCommand('workbench.action.chat.listMcpServers');
+      if (choice === 'Start MCP Server') {
+        try {
+          await vscode.commands.executeCommand(
+            'workbench.action.chat.startMcpServer',
+            'copilot-orchestrator.mcp-server'
+          );
+        } catch {
+          // Fallback: open the MCP server list if direct start isn't available
+          vscode.commands.executeCommand('workbench.action.chat.listMcpServers');
+        }
       }
     });
   }
