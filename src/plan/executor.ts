@@ -964,6 +964,7 @@ export class DefaultJobExecutor implements JobExecutor {
         contextFiles: spec.contextFiles,
         maxTurns: spec.maxTurns,
         sessionId, // Pass session ID for resumption
+        jobId: node.id,
         logOutput: (line: string) => this.logInfo(executionKey, phase, line),
         onProcess: (proc: any) => {
           // Track the Copilot CLI process for monitoring (CPU/memory/tree)
