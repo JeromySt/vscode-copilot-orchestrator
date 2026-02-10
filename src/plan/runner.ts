@@ -964,11 +964,15 @@ export class PlanRunner extends EventEmitter {
     const sm = this.stateMachines.get(planId);
     if (!plan || !sm) return false;
     
-    log.info(`Canceling Plan: ${planId}`);
+    const cancelStack = new Error().stack;
+    log.info(`Canceling Plan: ${planId}`, {
+      stack: cancelStack?.split('\n').slice(1, 5).join('\n'),
+    });
     
     // Cancel all running jobs in executor
     for (const [nodeId, state] of plan.nodeStates) {
       if (state.status === 'running' || state.status === 'scheduled') {
+        log.info(`Canceling node via executor`, { planId, nodeId, status: state.status });
         this.executor?.cancel(planId, nodeId);
       }
     }
@@ -977,6 +981,7 @@ export class PlanRunner extends EventEmitter {
     sm.cancelAll();
     
     // Clean up worktrees in background (since cancel is terminal, we don't need them)
+    log.info(`Starting cleanup of canceled Plan resources`, { planId });
     this.cleanupPlanResources(plan).catch(err => {
       log.error(`Failed to cleanup canceled Plan resources`, { planId, error: err.message });
     });
@@ -1031,6 +1036,7 @@ export class PlanRunner extends EventEmitter {
   private async cleanupPlanResources(plan: PlanInstance): Promise<void> {
     const repoPath = plan.repoPath;
     const cleanupErrors: string[] = [];
+    const cleanupStack = new Error().stack;
     
     // Collect all worktree paths from node states
     const worktreePaths: string[] = [];
@@ -1044,6 +1050,7 @@ export class PlanRunner extends EventEmitter {
     log.info(`Cleaning up Plan resources`, {
       planId: plan.id,
       worktrees: worktreePaths.length,
+      stack: cleanupStack?.split('\n').slice(1, 5).join('\n'),
     });
     
     // Remove worktrees (detached HEAD - no branches to clean up)

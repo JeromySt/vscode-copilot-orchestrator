@@ -433,6 +433,15 @@ export class DefaultJobExecutor implements JobExecutor {
     const execution = this.activeExecutions.get(executionKey);
     
     if (execution) {
+      // Capture call stack for debugging
+      const stack = new Error().stack;
+      log.warn(`Executor.cancel() called`, {
+        planId,
+        nodeId,
+        pid: execution.process?.pid,
+        stack: stack?.split('\n').slice(1, 5).join('\n'),
+      });
+
       execution.aborted = true;
       if (execution.process) {
         try {

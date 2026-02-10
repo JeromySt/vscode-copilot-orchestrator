@@ -151,6 +151,7 @@ function createAgentDelegatorAdapter(log: any) {
         sessionId,
         model,
         jobId,
+        timeout: 0,
         onOutput: logOutput ? (line) => {
           statsParser.feedLine(line);
           logOutput(`[copilot] ${line}`);
