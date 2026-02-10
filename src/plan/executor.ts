@@ -54,6 +54,21 @@ interface ActiveExecution {
 }
 
 /**
+ * Adapt a shell command for Windows PowerShell 5.x compatibility.
+ * Converts bash-style `&&` chains to PowerShell semicolons with
+ * `$?` error-propagation guards, and rewrites common Unix commands.
+ */
+function adaptCommandForPowerShell(command: string): string {
+  // Replace '&&' with '; if (!$?) { exit 1 }; ' for error-propagation semantics
+  let adapted = command.replace(/\s*&&\s*/g, '; if (!$?) { exit 1 }; ');
+
+  // Rewrite common Unix-style commands that don't work in PowerShell
+  adapted = adapted.replace(/\bls\s+-la\b/g, 'Get-ChildItem');
+
+  return adapted;
+}
+
+/**
  * Default {@link JobExecutor} implementation.
  *
  * Handles:
@@ -768,7 +783,7 @@ export class DefaultJobExecutor implements JobExecutor {
           // Platform default - use PowerShell on Windows for better compatibility
           if (isWindows) {
             shell = 'powershell.exe';
-            shellArgs = ['-NoProfile', '-NonInteractive', '-Command', spec.command];
+            shellArgs = ['-NoProfile', '-NonInteractive', '-Command', adaptCommandForPowerShell(spec.command)];
           } else {
             shell = '/bin/sh';
             shellArgs = ['-c', spec.command];
