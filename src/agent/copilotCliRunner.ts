@@ -374,9 +374,9 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
 
         if (effectiveCode !== 0) {
           const reason = signal
-            ? `Copilot CLI was killed by signal ${signal}`
+            ? `Copilot CLI was killed by signal ${signal} (PID ${proc.pid})`
             : `Copilot CLI exited with code ${effectiveCode}`;
-          this.logger.error(`[${label}] ${reason}`);
+          this.logger.error(`[${label}] ${reason}, code=${code}, signal=${signal}, sawTaskComplete=${sawTaskComplete}`);
           resolve({
             success: false,
             sessionId: capturedSessionId,

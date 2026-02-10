@@ -433,8 +433,10 @@ export class DefaultJobExecutor implements JobExecutor {
     const execution = this.activeExecutions.get(executionKey);
     
     if (execution) {
+      log.info(`Canceling execution: ${executionKey}, reason: cancel() called`);
       execution.aborted = true;
       if (execution.process) {
+        log.info(`Killing process PID ${execution.process.pid} for execution: ${executionKey}`);
         try {
           // Kill the process tree
           if (process.platform === 'win32') {
