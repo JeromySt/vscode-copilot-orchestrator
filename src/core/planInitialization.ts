@@ -9,6 +9,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as os from 'os';
 import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '../plan';
 import { ProcessMonitor } from '../process/processMonitor';
 import { StdioMcpServerManager } from '../mcp/mcpServerManager';
@@ -49,7 +50,7 @@ export function loadConfiguration(): ExtensionConfig {
     mcp: {
       enabled: mcpCfg.get<boolean>('enabled', true),
     },
-    maxParallel: rootCfg.get<number>('maxWorkers', 0) || 4,
+    maxParallel: rootCfg.get<number>('maxWorkers', 0) || os.cpus().length,
   };
 }
 
