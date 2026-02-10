@@ -212,3 +212,5 @@ By contributing, you agree that your contributions will be licensed under the MI
 - Read the documentation in `README.md`
 
 Thank you for contributing! 🎉
+<!-- FI-CHAIN-RETEST (2026-02-09) -->
+<!-- FI-CHAIN-VERIFIED -->
