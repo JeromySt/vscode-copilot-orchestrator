@@ -1350,8 +1350,8 @@ export class PlanRunner extends EventEmitter {
     
     // Capture log offsets before this attempt starts so we can extract
     // only the logs produced during this attempt when creating AttemptRecord.
-    const logMemoryOffset = this.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
-    const logFileOffset = this.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
+    let logMemoryOffset = this.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
+    let logFileOffset = this.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
     
     try {
       // Transition to running
@@ -1680,7 +1680,11 @@ export class PlanRunner extends EventEmitter {
               nodeState.error = undefined;
               nodeState.startedAt = Date.now();
               nodeState.attempts++;
-              
+
+              // Capture log offsets for the retry attempt so its logs are isolated
+              const retryLogMemoryOffset = this.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
+              const retryLogFileOffset = this.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
+
               // Execute with resumeFromPhase to skip already-passed phases
               const retryContext: ExecutionContext = {
                 plan,
@@ -1732,6 +1736,9 @@ export class PlanRunner extends EventEmitter {
                 if (retryResult.phaseMetrics) {
                   nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...retryResult.phaseMetrics };
                 }
+                // Update log offsets so the success record captures only retry logs
+                logMemoryOffset = retryLogMemoryOffset;
+                logFileOffset = retryLogFileOffset;
                 // Fall through to RI merge handling below
               } else {
                 // Auto-retry also failed — record it and transition to failed
@@ -1766,7 +1773,7 @@ export class PlanRunner extends EventEmitter {
                   stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
                   worktreePath: nodeState.worktreePath,
                   baseCommit: nodeState.baseCommit,
-                  logs: this.getNodeLogs(plan.id, node.id),
+                  logs: this.getNodeLogsFromOffset(plan.id, node.id, retryLogMemoryOffset, retryLogFileOffset),
                   workUsed: node.work,
                   metrics: nodeState.metrics,
                   phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,

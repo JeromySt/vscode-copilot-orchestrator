@@ -1574,11 +1574,27 @@ export class DefaultJobExecutor implements JobExecutor {
     }
     
     try {
-      const content = fs.readFileSync(logFile, 'utf8');
-      if (byteOffset <= 0) return content;
-      // Convert byte offset to string position via Buffer
-      const prefix = Buffer.from(content, 'utf8').subarray(0, byteOffset).toString('utf8');
-      return content.slice(prefix.length);
+      if (byteOffset <= 0) {
+        return fs.readFileSync(logFile, 'utf8');
+      }
+
+      const stats = fs.statSync(logFile);
+      const fileSize = stats.size;
+
+      if (byteOffset >= fileSize) {
+        return '';
+      }
+
+      const length = fileSize - byteOffset;
+      const buffer = Buffer.alloc(length);
+      const fd = fs.openSync(logFile, 'r');
+      try {
+        fs.readSync(fd, buffer, 0, length, byteOffset);
+      } finally {
+        fs.closeSync(fd);
+      }
+
+      return buffer.toString('utf8');
     } catch (err) {
       return `Error reading log file: ${err}`;
     }
