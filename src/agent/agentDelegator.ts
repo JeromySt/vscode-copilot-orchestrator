@@ -9,10 +9,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
 import { isCopilotCliAvailable } from './cliCheckCore';
 import { CopilotCliRunner, CopilotCliLogger } from './copilotCliRunner';
-import { CopilotStatsParser } from './copilotStatsParser';
 import { isValidModel } from './modelDiscovery';
 import * as git from '../git';
 import { TokenUsage, CopilotUsageMetrics } from '../plan/types';
@@ -259,227 +257,83 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       this.logger.log(`[${label}] Warning: Could not create Copilot log directory: ${e}`);
     }
 
-    // Write instructions file using the unified runner
-    const { filePath: instructionsFile, dirPath: instructionsDir } = cliRunner.writeInstructionsFile(
-      worktreePath,
-      taskDescription,
-      undefined, // No additional instructions
-      label,
-      jobId
-    );
+    this.logger.log(`[${label}] ${sessionId ? 'Resuming' : 'Starting new'} Copilot session...`);
 
-    // Build command using the unified runner
-    const copilotCmd = cliRunner.buildCommand({
-      task: 'Complete the task described in the instructions.',
+    // Track PID and early session ID for process callbacks
+    let spawnedPid: number | undefined;
+    let earlySessionId: string | undefined;
+
+    // Run via the unified CopilotCliRunner (handles instructions, spawn, stats parsing)
+    const result = await cliRunner.run({
+      cwd: worktreePath,
+      task: taskDescription,
+      label,
       sessionId,
       model,
       logDir: copilotLogDir,
       sharePath: sessionSharePath,
-    });
-    
-    this.logger.log(`[${label}] ${sessionId ? 'Resuming' : 'Starting new'} Copilot session...`);
-    
-    // Cleanup function using the unified runner
-    const cleanup = () => {
-      cliRunner.cleanupInstructionsFile(instructionsFile, instructionsDir, label);
-    };
-
-    return new Promise<DelegateResult>((resolve) => {
-      const proc = spawn(copilotCmd, [], {
-        cwd: worktreePath,
-        shell: true,
-      });
-
-      let capturedSessionId: string | undefined = sessionId;
-      const statsParser = new CopilotStatsParser();
-
-      // Notify process spawned
-      if (proc.pid) {
-        this.callbacks.onProcessSpawned?.(proc.pid);
-        this.logger.log(`[${label}] Copilot PID: ${proc.pid}`);
-      }
-
-      // Buffers to accumulate streaming output - flush after quiet period
-      let stdoutBuffer = '';
-      let stderrBuffer = '';
-      let stdoutFlushTimer: NodeJS.Timeout | null = null;
-      let stderrFlushTimer: NodeJS.Timeout | null = null;
-      const FLUSH_DELAY_MS = 3000; // Wait 3s of silence before flushing (Copilot streams tokens slowly)
-      
-      // Helper to log a line and check for session ID / completion marker
-      const logLine = (line: string) => {
+      jobId,
+      timeout: 0, // No timeout — agent work can run for a long time
+      onProcess: (proc) => {
+        if (proc.pid) {
+          spawnedPid = proc.pid;
+          this.callbacks.onProcessSpawned?.(proc.pid);
+          this.logger.log(`[${label}] Copilot PID: ${proc.pid}`);
+        }
+      },
+      onOutput: (line) => {
         this.logger.log(`[${label}] ${line}`);
-        
-        // Feed line to stats parser
-        statsParser.feedLine(line);
-        
-        // Try to extract session ID
-        if (!capturedSessionId) {
+
+        // Try to extract session ID from output for early callback notification
+        if (!earlySessionId) {
           const extracted = this.extractSessionId(line);
           if (extracted) {
-            capturedSessionId = extracted;
-            this.logger.log(`[${label}] ✓ Captured Copilot session ID: ${capturedSessionId}`);
-            this.callbacks.onSessionCaptured?.(capturedSessionId);
+            earlySessionId = extracted;
+            this.logger.log(`[${label}] ✓ Captured Copilot session ID: ${extracted}`);
+            this.callbacks.onSessionCaptured?.(extracted);
           }
         }
-      };
-      
-      // Helper to flush buffered content as complete lines
-      const flushBuffer = (buffer: string): string => {
-        const lines = buffer.split('\n');
-        // Log all complete lines (all but the last if incomplete)
-        for (let i = 0; i < lines.length - 1; i++) {
-          const line = lines[i].trim();
-          if (line) {
-            logLine(line);
-          }
-        }
-        // Return the incomplete last line for further buffering
-        const lastLine = lines[lines.length - 1];
-        // If buffer ended with newline, last element is empty - return it
-        return lastLine;
-      };
-
-      // Stream stdout - accumulate and flush after quiet period
-      proc.stdout?.on('data', (data: Buffer) => {
-        stdoutBuffer += data.toString();
-        
-        // Reset the flush timer on each new data
-        if (stdoutFlushTimer) {
-          clearTimeout(stdoutFlushTimer);
-        }
-        stdoutFlushTimer = setTimeout(() => {
-          if (stdoutBuffer.trim()) {
-            stdoutBuffer = flushBuffer(stdoutBuffer);
-            // Flush any remaining incomplete line too
-            if (stdoutBuffer.trim()) {
-              logLine(stdoutBuffer.trim());
-              stdoutBuffer = '';
-            }
-          }
-          stdoutFlushTimer = null;
-        }, FLUSH_DELAY_MS);
-      });
-
-      // Stream stderr - accumulate and flush after quiet period
-      proc.stderr?.on('data', (data: Buffer) => {
-        stderrBuffer += data.toString();
-        
-        // Reset the flush timer on each new data
-        if (stderrFlushTimer) {
-          clearTimeout(stderrFlushTimer);
-        }
-        stderrFlushTimer = setTimeout(() => {
-          if (stderrBuffer.trim()) {
-            stderrBuffer = flushBuffer(stderrBuffer);
-            // Flush any remaining incomplete line too
-            if (stderrBuffer.trim()) {
-              logLine(stderrBuffer.trim());
-              stderrBuffer = '';
-            }
-          }
-          stderrFlushTimer = null;
-        }, FLUSH_DELAY_MS);
-      });
-
-      proc.on('exit', async (code: number | null, signal: NodeJS.Signals | null) => {
-        // Clean up temp prompt file and instructions
-        cleanup();
-        
-        // Clear any pending flush timers
-        if (stdoutFlushTimer) clearTimeout(stdoutFlushTimer);
-        if (stderrFlushTimer) clearTimeout(stderrFlushTimer);
-        
-        // Flush any remaining buffered output
-        if (stdoutBuffer.trim()) {
-          logLine(stdoutBuffer.trim());
-        }
-        if (stderrBuffer.trim()) {
-          logLine(stderrBuffer.trim());
-        }
-        
-        // Notify process exited
-        if (proc.pid) {
-          this.callbacks.onProcessExited?.(proc.pid);
-        }
-
-        // Try to extract session ID from share file if not captured yet
-        if (!capturedSessionId) {
-          capturedSessionId = this.extractSessionFromFile(sessionSharePath, copilotLogDir, label);
-          if (capturedSessionId) {
-            this.callbacks.onSessionCaptured?.(capturedSessionId);
-          }
-        }
-
-        // Extract token usage from log files
-        const tokenUsage = await this.extractTokenUsage(copilotLogDir, model);
-
-        // Use parsed metrics from stdout, falling back to legacy log-based extraction
-        const parsedMetrics = statsParser.getMetrics();
-        let metrics: CopilotUsageMetrics | undefined;
-        if (parsedMetrics) {
-          metrics = parsedMetrics;
-          // Backfill legacy tokenUsage from model breakdown if available
-          if (!metrics.tokenUsage && metrics.modelBreakdown?.length) {
-            const totals = metrics.modelBreakdown.reduce(
-              (acc, m) => ({ input: acc.input + m.inputTokens, output: acc.output + m.outputTokens }),
-              { input: 0, output: 0 }
-            );
-            metrics.tokenUsage = {
-              inputTokens: totals.input,
-              outputTokens: totals.output,
-              totalTokens: totals.input + totals.output,
-              model: model || metrics.modelBreakdown[0].model,
-            };
-          }
-        } else if (tokenUsage) {
-          // Fallback: wrap legacy token usage in CopilotUsageMetrics
-          metrics = { durationMs: 0, tokenUsage };
-        }
-
-        // Detect "Task complete" marker in stdout to handle code=null as success
-        const taskCompleteDetected = stdoutBuffer.includes('Task complete') || stderrBuffer.includes('Task complete');
-        const effectiveCode = (code === null && taskCompleteDetected) ? 0 : code;
-
-        if (effectiveCode !== 0) {
-          const signalInfo = signal ? ` (signal: ${signal})` : '';
-          this.logger.log(`[${label}] Copilot exited with code ${code}${signalInfo}`);
-          resolve({
-            success: false,
-            sessionId: capturedSessionId,
-            error: `Copilot failed with exit code ${code}${signalInfo}`,
-            exitCode: code ?? undefined,
-            tokenUsage,
-            metrics,
-          });
-        } else {
-          if (code === null) {
-            this.logger.log(`[${label}] Copilot completed (exit code null coerced to 0 — task completion marker was present)`);
-          } else {
-            this.logger.log(`[${label}] Copilot completed successfully`);
-          }
-          resolve({
-            success: true,
-            sessionId: capturedSessionId,
-            exitCode: 0,
-            tokenUsage,
-            metrics,
-          });
-        }
-      });
-
-      proc.on('error', (err: Error) => {
-        cleanup();
-        this.logger.log(`[${label}] Copilot delegation failed: ${err}`);
-        if (proc.pid) {
-          this.callbacks.onProcessExited?.(proc.pid);
-        }
-        resolve({
-          success: false,
-          error: `Copilot CLI error: ${err.message}`
-        });
-      });
+      },
     });
+
+    // Process has exited — notify callback
+    if (spawnedPid) {
+      this.callbacks.onProcessExited?.(spawnedPid);
+    }
+
+    // Use the session captured by the runner, then early output capture, then file fallback
+    let capturedSessionId = result.sessionId || earlySessionId;
+
+    // Fallback: try to extract session ID from share file / log files
+    if (!capturedSessionId) {
+      capturedSessionId = this.extractSessionFromFile(sessionSharePath, copilotLogDir, label);
+      if (capturedSessionId) {
+        this.callbacks.onSessionCaptured?.(capturedSessionId);
+      }
+    }
+
+    // Use metrics from the runner (parsed from stdout via CopilotStatsParser)
+    let metrics: CopilotUsageMetrics | undefined = result.metrics;
+
+    // Legacy fallback: extract token usage from log files if no stdout metrics
+    if (!metrics) {
+      const tokenUsage = await this.extractTokenUsage(copilotLogDir, model);
+      if (tokenUsage) {
+        metrics = { durationMs: 0, tokenUsage };
+      }
+    }
+
+    // Legacy backfill: populate tokenUsage from modelBreakdown
+    const tokenUsage = metrics?.tokenUsage;
+
+    return {
+      success: result.success,
+      sessionId: capturedSessionId,
+      error: result.error,
+      exitCode: result.exitCode,
+      tokenUsage,
+      metrics,
+    };
   }
 
   /**

@@ -35,6 +35,7 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | 🔀 **Git Worktree Isolation** | Each agent works in its own worktree branch — zero conflicts, clean history |
 | 📊 **Interactive DAG Visualization** | See your entire plan as a live, zoomable Mermaid dependency graph |
 | ⚡ **Automated 7-Phase Pipeline** | Merge FI → Prechecks → AI Work → Commit → Postchecks → Merge RI → Cleanup |
+| 🔧 **Auto-Heal** | Failed phases automatically retried by a fresh AI agent with failure context |
 | 🤖 **20 Native MCP Tools** | Create and manage plans directly from GitHub Copilot Chat |
 | ⏸️ **Pause / Resume / Retry** | Pause running plans, resume later, or retry failed nodes with AI failure context |
 | 🔒 **Secure MCP Architecture** | Nonce-authenticated IPC ensures 1:1 pairing between VS Code and MCP stdio process |
@@ -201,6 +202,20 @@ On retry, the orchestrator provides the AI agent with **structured failure conte
 **Forward Integration on Resume/Retry:**
 - `resume()` and `retryNode(clearWorktree)` now fetch the latest remote refs (`git fetch --all`) before proceeding, ensuring worktrees reflect the current target branch state
 - `expectsNoChanges` nodes carry forward their base commit to maintain the forward integration chain, so leaf node reverse-integration merges include all accumulated ancestor changes
+
+### 🔧 Auto-Heal: AI-Assisted Failure Recovery
+
+When a **prechecks**, **work**, or **postchecks** phase fails due to a process or shell error, the orchestrator can automatically retry the failed phase using a fresh AI agent invocation — without restarting the entire node.
+
+**How it works:**
+1. The failed phase's exit code, error output, and original command are captured
+2. A new AI agent is given the failure context and asked to fix the issue
+3. If auto-heal succeeds, the node continues from where it left off
+4. If auto-heal also fails, the node transitions to `failed` with both attempts recorded
+
+**Per-phase replacement strategy:** Auto-heal replaces only the failed phase's work spec — other completed phases are preserved. This means a node that passed prechecks but failed during work won't re-run prechecks during auto-heal.
+
+Auto-heal attempts are tracked in the node's **attempt history** with `triggerType: 'auto-heal'`, visible in the node detail panel.
 
 ### 🛡️ Default Branch Protection
 
@@ -382,6 +397,7 @@ The orchestrator parses Copilot CLI output to extract AI usage metrics for each 
 - **API time** and **total session time**
 - **Code changes** — lines added / removed
 - **Per-model token breakdown** — input tokens, output tokens, cached tokens
+- **Per-phase breakdown** — metrics for each phase (prechecks, work, postchecks, merge-fi, merge-ri) captured independently and displayed in the phase breakdown section of the AI Usage card
 
 **Example CLI output parsed:**
 ```
@@ -634,6 +650,7 @@ For detailed architecture documentation, see [docs/ARCHITECTURE.md](docs/ARCHITE
 - **No external runtime** — Everything runs inside the VS Code extension
 - **Isolated execution** — Each node gets its own git worktree
 - **Thread-safe worktrees** — Per-repository mutex prevents git race conditions
+- **Serialized RI merges** — Async mutex ensures reverse-integration merges execute one at a time, preventing index.lock conflicts and silent commit overwrites when parallel leaf nodes complete simultaneously
 - **Event-driven UI** — Real-time updates via VS Code webview messaging
 - **Secure IPC** — Nonce-authenticated named pipes for MCP communication
 - **Crash-isolated MCP** — Stdio child process can crash without taking down VS Code

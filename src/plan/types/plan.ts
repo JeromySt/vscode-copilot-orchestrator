@@ -118,13 +118,15 @@ export interface NodeExecutionState {
 
   /**
    * Per-phase execution status for detailed UI display.
-   * Tracks prechecks, work, commit, postchecks phases individually.
+   * Tracks all 6 phases: merge-fi, prechecks, work, commit, postchecks, merge-ri.
    */
   stepStatuses?: {
+    'merge-fi'?: PhaseStatus;
     prechecks?: PhaseStatus;
     work?: PhaseStatus;
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
+    'merge-ri'?: PhaseStatus;
   };
   
   /**
@@ -176,6 +178,13 @@ export interface NodeExecutionState {
    * Captured from agent delegation results when available.
    */
   metrics?: CopilotUsageMetrics;
+
+  /**
+   * Per-phase AI usage metrics breakdown.
+   * Keys are phase names for which metrics are available:
+   * 'prechecks', 'work', 'commit', 'postchecks', 'merge-fi', 'merge-ri'.
+   */
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri', CopilotUsageMetrics>>;
 }
 
 /**
@@ -211,10 +220,12 @@ export interface AttemptRecord {
   
   /** Per-phase status at end of attempt */
   stepStatuses?: {
+    'merge-fi'?: PhaseStatus;
     prechecks?: PhaseStatus;
     work?: PhaseStatus;
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
+    'merge-ri'?: PhaseStatus;
   };
   
   /** Worktree path used in this attempt */
@@ -234,6 +245,9 @@ export interface AttemptRecord {
   
   /** Execution metrics captured during this attempt */
   metrics?: CopilotUsageMetrics;
+
+  /** Per-phase AI usage metrics breakdown */
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri', CopilotUsageMetrics>>;
 }
 
 // ============================================================================
@@ -478,10 +492,12 @@ export interface JobExecutionResult {
   workSummary?: JobWorkSummary;
   /** Per-phase status for UI display */
   stepStatuses?: {
+    'merge-fi'?: PhaseStatus;
     prechecks?: PhaseStatus;
     work?: PhaseStatus;
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
+    'merge-ri'?: PhaseStatus;
   };
   /** Copilot session ID captured during agent work (for session resumption) */
   copilotSessionId?: string;
@@ -491,6 +507,8 @@ export interface JobExecutionResult {
   exitCode?: number;
   /** Agent execution metrics (token usage, duration, turns, tool calls) */
   metrics?: CopilotUsageMetrics;
+  /** Per-phase metrics breakdown */
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri', CopilotUsageMetrics>>;
 }
 
 /**
@@ -526,10 +544,12 @@ export interface ExecutionContext {
   
   /** Previous step statuses to preserve (from failed attempt) */
   previousStepStatuses?: {
+    'merge-fi'?: PhaseStatus;
     prechecks?: PhaseStatus;
     work?: PhaseStatus;
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
+    'merge-ri'?: PhaseStatus;
   };
 }
 

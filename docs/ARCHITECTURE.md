@@ -208,6 +208,8 @@ prechecks → work → postchecks → commit
 - **Work** — Routed by `WorkSpec` type (see [Work Specification Types](#work-specification-types))
 - **Commit** — Validates work evidence, stages and commits changes in the worktree
 
+Each phase captures **AI usage metrics** independently (tokens, session time, code changes). The executor aggregates phase-level metrics into a total and returns a `phaseMetrics` record so the UI can display a per-phase breakdown.
+
 On retry, the executor can **skip completed phases** using `resumeFromPhase` and resume the Copilot session via captured session IDs.
 
 ### Work Specification Types
@@ -398,6 +400,8 @@ Each node maintains an `NodeExecutionState` record (`src/plan/types/plan.ts`):
 | `workSummary` | Commit stats and file changes |
 | `attempts` | Array of `AttemptRecord` for retry history |
 | `lastAttempt` | Most recent attempt with phase statuses |
+| `metrics` | Aggregate AI usage metrics for the node |
+| `phaseMetrics` | Per-phase AI usage breakdown (`merge-fi`, `prechecks`, `work`, `commit`, `postchecks`, `merge-ri`) |
 
 ### Group State Aggregation
 
@@ -452,16 +456,16 @@ The orchestrator discovers available LLM models at runtime by parsing `copilot -
 
 ### Token Usage Tracking
 
-After each agent job completes, the orchestrator extracts token usage from Copilot CLI logs.
+After each agent job completes, the orchestrator extracts token usage from Copilot CLI output using `CopilotStatsParser`. Metrics are captured per-phase (prechecks, work, postchecks, merge-fi, merge-ri) and aggregated for the node total.
 
 **Extracted Metrics:**
-- Input tokens
-- Output tokens
-- Model used
-- Estimated cost (based on public pricing)
+- Premium requests consumed
+- API time and total session time
+- Code changes (lines added/removed)
+- Per-model token breakdown (input, output, cached tokens)
 
 **Storage:**
-Metrics are stored in `NodeExecutionState.metrics` and persisted with the plan.
+Metrics are stored in `NodeExecutionState.metrics` (aggregate) and `NodeExecutionState.phaseMetrics` (per-phase breakdown), persisted with the plan.
 
 ---
 

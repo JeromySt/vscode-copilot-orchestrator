@@ -101,7 +101,9 @@ const workSpecObjectSchema = {
     args: { type: 'array', items: { type: 'string' } },
     shell: { type: 'string', enum: ['cmd', 'powershell', 'pwsh', 'bash', 'sh'] },
     instructions: { type: 'string' },
-    maxTurns: { type: 'number', minimum: 1, maximum: 100 }
+    model: { type: 'string', maxLength: 100 },
+    maxTurns: { type: 'number', minimum: 1, maximum: 100 },
+    resumeSession: { type: 'boolean' }
   },
   additionalProperties: false
 } as const;
@@ -146,7 +148,8 @@ const jobSchema = {
     instructions: { type: 'string', maxLength: 100000 },
     baseBranch: { type: 'string', maxLength: 200 },
     expects_no_changes: { type: 'boolean' },
-    group: { type: 'string', maxLength: 200 }
+    group: { type: 'string', maxLength: 200 },
+    model: { type: 'string', maxLength: 100 }
   },
   required: ['producer_id', 'task', 'dependencies'],
   additionalProperties: false

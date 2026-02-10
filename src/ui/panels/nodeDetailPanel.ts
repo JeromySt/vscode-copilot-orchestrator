@@ -76,7 +76,7 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
       const instructions = spec.instructions || '';
       const rendered = renderMarkdown(instructions, escapeHtml);
       const modelLabel = spec.model ? escapeHtml(spec.model) : 'unspecified';
-      return `<div class="work-type-badge agent">AGENT</div><div class="agent-model-label">${modelLabel}</div><div class="work-instructions">${rendered}</div>`;
+      return `<div class="work-type-badge agent">AGENT <span class="agent-model-suffix">— ${modelLabel}</span></div><div class="work-instructions">${rendered}</div>`;
     }
     default:
       return `<code>${escapeHtml(JSON.stringify(spec))}</code>`;
@@ -430,7 +430,9 @@ export class NodeDetailPanel {
         }
         break;
       case 'retryNode':
-        this._retryNode(message.planId, message.nodeId, message.resumeSession);
+        this._retryNode(message.planId, message.nodeId, message.resumeSession).catch(err => {
+          vscode.window.showErrorMessage(`Retry failed: ${err?.message || err}`);
+        });
         break;
       case 'forceFailNode':
         this._forceFailNode(message.planId, message.nodeId);
@@ -587,7 +589,7 @@ export class NodeDetailPanel {
 
     // Compute aggregated metrics across all attempts
     const nodeMetrics = getNodeMetrics(state);
-    const nodeMetricsHtml = nodeMetrics ? this._buildMetricsSummaryHtml(nodeMetrics) : '';
+    const nodeMetricsHtml = nodeMetrics ? this._buildMetricsSummaryHtml(nodeMetrics, state.phaseMetrics) : '';
 
     return `<!DOCTYPE html>
 <html>
@@ -1104,37 +1106,13 @@ export class NodeDetailPanel {
    *
    * @param state - The node's current execution state.
    * @returns A map of phase names (`'prechecks'`, `'work'`, `'commit'`, etc.)
-   *   to status strings (`'pending'`, `'running'`, `'succeeded'`, `'failed'`, `'skipped'`).
+   *   to status strings (`'pending'`, `'running'`, `'success'`, `'failed'`, `'skipped'`).
    */
   private _getPhaseStatus(state: NodeExecutionState): Record<string, string> {
-    // Use tracked stepStatuses if available (from executor)
-    if (state.stepStatuses) {
-      return {
-        prechecks: state.stepStatuses.prechecks || 'pending',
-        work: state.stepStatuses.work || 'pending',
-        commit: state.stepStatuses.commit || 'pending',
-        postchecks: state.stepStatuses.postchecks || 'pending',
-      };
-    }
+    // Always produce all 6 phases: merge-fi, prechecks, work, commit, postchecks, merge-ri.
+    // stepStatuses (from executor) covers prechecks/work/commit/postchecks.
+    // Merge phases are derived from lastAttempt.phase and error messages.
     
-    // For pending/ready nodes that have been retried, show the last attempt's phase statuses
-    if ((state.status === 'pending' || state.status === 'ready') && state.attemptHistory?.length) {
-      const lastAttempt = state.attemptHistory[state.attemptHistory.length - 1];
-      if (lastAttempt.stepStatuses) {
-        return {
-          prechecks: lastAttempt.stepStatuses.prechecks || 'pending',
-          work: lastAttempt.stepStatuses.work || 'pending',
-          commit: lastAttempt.stepStatuses.commit || 'pending',
-          postchecks: lastAttempt.stepStatuses.postchecks || 'pending',
-        };
-      }
-    }
-    
-    // Fallback: derive phase status from execution state and error message
-    const status = state.status;
-    const error = state.error || '';
-    
-    // Default all to pending
     const result: Record<string, string> = {
       'merge-fi': 'pending',
       prechecks: 'pending',
@@ -1144,47 +1122,82 @@ export class NodeDetailPanel {
       'merge-ri': 'pending',
     };
     
+    // Resolve executor stepStatuses: current state or last attempt for retried nodes
+    const ss = state.stepStatuses
+      || ((state.status === 'pending' || state.status === 'ready') && state.attemptHistory?.length
+        ? state.attemptHistory[state.attemptHistory.length - 1].stepStatuses
+        : undefined);
+    
+    if (ss) {
+      result.prechecks = ss.prechecks || 'pending';
+      result.work = ss.work || 'pending';
+      result.commit = ss.commit || 'pending';
+      result.postchecks = ss.postchecks || 'pending';
+    }
+    
+    const status = state.status;
+    const error = state.error || '';
+    const failedPhase = state.lastAttempt?.phase;
+    
     if (status === 'succeeded') {
-      // All phases succeeded
       result['merge-fi'] = 'success';
-      result.prechecks = 'success';
-      result.work = 'success';
-      result.commit = 'success';
-      result.postchecks = 'success';
-      result['merge-ri'] = 'success';
-    } else if (status === 'failed') {
-      // Determine which phase failed based on error message
-      if (error.includes('merge sources') || error.includes('Forward integration')) {
-        result['merge-fi'] = 'failed';
-      } else if (error.includes('Prechecks failed')) {
-        result['merge-fi'] = 'success';
-        result.prechecks = 'failed';
-      } else if (error.includes('Work failed')) {
-        result['merge-fi'] = 'success';
-        result.prechecks = 'success';
-        result.work = 'failed';
-      } else if (error.includes('Commit failed') || error.includes('produced no work')) {
-        result['merge-fi'] = 'success';
-        result.prechecks = 'success';
-        result.work = 'success';
-        result.commit = 'failed';
-      } else if (error.includes('Postchecks failed')) {
-        result['merge-fi'] = 'success';
+      if (!ss) {
         result.prechecks = 'success';
         result.work = 'success';
         result.commit = 'success';
-        result.postchecks = 'failed';
-      } else {
-        // Unknown error - assume work failed
+        result.postchecks = 'success';
+      }
+      result['merge-ri'] = 'success';
+    } else if (status === 'failed') {
+      // Check for merge-ri failure (via lastAttempt.phase or error message)
+      if (failedPhase === 'merge-ri' || error.includes('Reverse integration merge')) {
+        // All executor phases succeeded, RI merge failed
         result['merge-fi'] = 'success';
-        result.prechecks = 'success';
-        result.work = 'failed';
+        if (!ss) {
+          result.prechecks = 'success';
+          result.work = 'success';
+          result.commit = 'success';
+          result.postchecks = 'success';
+        }
+        result['merge-ri'] = 'failed';
+      } else if (failedPhase === 'merge-fi' || error.includes('merge sources') || error.includes('Forward integration')) {
+        result['merge-fi'] = 'failed';
+      } else if (!ss) {
+        // No stepStatuses — derive executor phases from error message
+        if (error.includes('Prechecks failed')) {
+          result['merge-fi'] = 'success';
+          result.prechecks = 'failed';
+        } else if (error.includes('Work failed')) {
+          result['merge-fi'] = 'success';
+          result.prechecks = 'success';
+          result.work = 'failed';
+        } else if (error.includes('Commit failed') || error.includes('produced no work')) {
+          result['merge-fi'] = 'success';
+          result.prechecks = 'success';
+          result.work = 'success';
+          result.commit = 'failed';
+        } else if (error.includes('Postchecks failed')) {
+          result['merge-fi'] = 'success';
+          result.prechecks = 'success';
+          result.work = 'success';
+          result.commit = 'success';
+          result.postchecks = 'failed';
+        } else {
+          // Unknown error - assume work failed
+          result['merge-fi'] = 'success';
+          result.prechecks = 'success';
+          result.work = 'failed';
+        }
+      } else {
+        // stepStatuses present, non-merge failure — merge-fi presumably succeeded
+        result['merge-fi'] = 'success';
       }
     } else if (status === 'running') {
-      // Running - can't tell exactly which phase, default to work
       result['merge-fi'] = 'success';
-      result.prechecks = 'success';
-      result.work = 'running';
+      if (!ss) {
+        result.prechecks = 'success';
+        result.work = 'running';
+      }
     }
     
     return result;
@@ -1352,10 +1365,12 @@ export class NodeDetailPanel {
       };
       
       const stepIndicators = `
+        ${stepIcon(attempt.stepStatuses?.['merge-fi'])}
         ${stepIcon(attempt.stepStatuses?.prechecks)}
         ${stepIcon(attempt.stepStatuses?.work)}
         ${stepIcon(attempt.stepStatuses?.commit)}
         ${stepIcon(attempt.stepStatuses?.postchecks)}
+        ${stepIcon(attempt.stepStatuses?.['merge-ri'])}
       `;
       
       const sessionHtml = attempt.copilotSessionId
@@ -1390,7 +1405,7 @@ export class NodeDetailPanel {
       const phaseTabsHtml = attempt.logs ? this._buildAttemptPhaseTabs(attempt) : '';
       
       // Build compact metrics row for this attempt
-      const attemptMetricsHtml = attempt.metrics ? this._buildAttemptMetricsHtml(attempt.metrics) : '';
+      const attemptMetricsHtml = attempt.metrics ? this._buildAttemptMetricsHtml(attempt.metrics, attempt.phaseMetrics) : '';
       
       return `
         <div class="attempt-card" data-attempt="${attempt.attemptNumber}">
@@ -1432,7 +1447,7 @@ export class NodeDetailPanel {
    * @param metrics - The aggregated CopilotUsageMetrics to display.
    * @returns HTML fragment string for the metrics card.
    */
-  private _buildMetricsSummaryHtml(metrics: CopilotUsageMetrics): string {
+  private _buildMetricsSummaryHtml(metrics: CopilotUsageMetrics, phaseMetrics?: Record<string, CopilotUsageMetrics>): string {
     const statsHtml: string[] = [];
     
     if (metrics.premiumRequests !== undefined) {
@@ -1466,11 +1481,52 @@ export class NodeDetailPanel {
         </div>`;
     }
     
+    // Per-phase AI usage breakdown
+    let phaseBreakdownHtml = '';
+    if (phaseMetrics && Object.keys(phaseMetrics).length > 0) {
+      const phaseLabels: Record<string, string> = {
+        'prechecks': '🔍 Prechecks',
+        'merge-fi': '↙↘ Merge FI',
+        'work': '⚙ Work',
+        'commit': '📝 Commit Review',
+        'postchecks': '✅ Postchecks',
+        'merge-ri': '↗↙ Merge RI',
+      };
+      const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
+      
+      const phaseRows = phaseOrder
+        .filter(phase => phaseMetrics[phase])
+        .map(phase => {
+          const pm = phaseMetrics[phase];
+          const parts: string[] = [];
+          if (pm.premiumRequests !== undefined) parts.push(`${pm.premiumRequests} req`);
+          if (pm.apiTimeSeconds !== undefined) parts.push(`${formatDurationSeconds(pm.apiTimeSeconds)} API`);
+          if (pm.sessionTimeSeconds !== undefined) parts.push(`${formatDurationSeconds(pm.sessionTimeSeconds)} session`);
+          if (pm.codeChanges) parts.push(`${formatCodeChanges(pm.codeChanges)}`);
+          
+          const modelInfo = pm.modelBreakdown?.map(b => escapeHtml(b.model)).join(', ') || '';
+          
+          return `<div class="phase-metrics-row">
+            <span class="phase-metrics-label">${phaseLabels[phase] || phase}</span>
+            <span class="phase-metrics-stats">${parts.join(' · ')}${modelInfo ? ` · ${modelInfo}` : ''}</span>
+          </div>`;
+        }).join('');
+      
+      if (phaseRows) {
+        phaseBreakdownHtml = `
+          <div class="phase-metrics-breakdown">
+            <div class="model-breakdown-label">Phase Breakdown:</div>
+            ${phaseRows}
+          </div>`;
+      }
+    }
+    
     return `
     <div class="section metrics-card">
       <h3>⚡ AI Usage</h3>
       <div class="metrics-stats-grid">${statsHtml.join('')}</div>
       ${modelBreakdownHtml}
+      ${phaseBreakdownHtml}
     </div>`;
   }
   
@@ -1480,34 +1536,81 @@ export class NodeDetailPanel {
    * @param metrics - The CopilotUsageMetrics for a single attempt.
    * @returns HTML fragment string for a compact metrics display.
    */
-  private _buildAttemptMetricsHtml(metrics: CopilotUsageMetrics): string {
-    const parts: string[] = [];
+  private _buildAttemptMetricsHtml(metrics: CopilotUsageMetrics, phaseMetrics?: Record<string, CopilotUsageMetrics>): string {
+    const statsHtml: string[] = [];
     
     if (metrics.premiumRequests !== undefined) {
-      parts.push(`🎫 ${metrics.premiumRequests} Premium req`);
+      statsHtml.push(`<div class="metrics-stat">🎫 ${formatPremiumRequests(metrics.premiumRequests)}</div>`);
     }
-    if (metrics.apiTimeSeconds !== undefined || metrics.sessionTimeSeconds !== undefined) {
-      const apiPart = metrics.apiTimeSeconds !== undefined ? `${formatDurationSeconds(metrics.apiTimeSeconds)} API` : '';
-      const sessionPart = metrics.sessionTimeSeconds !== undefined ? `${formatDurationSeconds(metrics.sessionTimeSeconds)} session` : '';
-      const timeParts = [apiPart, sessionPart].filter(Boolean).join(' / ');
-      parts.push(`⏱ ${timeParts}`);
+    if (metrics.apiTimeSeconds !== undefined) {
+      statsHtml.push(`<div class="metrics-stat">⏱ API: ${formatDurationSeconds(metrics.apiTimeSeconds)}</div>`);
+    }
+    if (metrics.sessionTimeSeconds !== undefined) {
+      statsHtml.push(`<div class="metrics-stat">🕐 Session: ${formatDurationSeconds(metrics.sessionTimeSeconds)}</div>`);
     }
     if (metrics.codeChanges) {
-      parts.push(`📝 ${formatCodeChanges(metrics.codeChanges)}`);
+      statsHtml.push(`<div class="metrics-stat">📝 Code: ${formatCodeChanges(metrics.codeChanges)}</div>`);
     }
     
-    let modelLine = '';
+    let modelBreakdownHtml = '';
     if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
-      modelLine = metrics.modelBreakdown.map(b => {
+      const rows = metrics.modelBreakdown.map(b => {
         const cached = b.cachedTokens ? `, ${formatTokenCount(b.cachedTokens)} cached` : '';
-        return `${escapeHtml(b.model)}: ${formatTokenCount(b.inputTokens)} in, ${formatTokenCount(b.outputTokens)} out${cached}`;
-      }).join('; ');
+        const reqs = b.premiumRequests !== undefined ? ` (${b.premiumRequests} req)` : '';
+        return `<div class="model-row">
+          <span class="model-name">${escapeHtml(b.model)}</span>
+          <span class="model-tokens">${formatTokenCount(b.inputTokens)} in, ${formatTokenCount(b.outputTokens)} out${cached}${reqs}</span>
+        </div>`;
+      }).join('');
+      
+      modelBreakdownHtml = `
+        <div class="model-breakdown">
+          <div class="model-breakdown-label">Model Breakdown:</div>
+          <div class="model-breakdown-list">${rows}</div>
+        </div>`;
+    }
+    
+    // Per-phase breakdown for this attempt
+    let phaseBreakdownHtml = '';
+    if (phaseMetrics && Object.keys(phaseMetrics).length > 1) {
+      const phaseLabels: Record<string, string> = {
+        'prechecks': '🔍 Prechecks',
+        'merge-fi': '↙↘ Merge FI',
+        'work': '⚙ Work',
+        'commit': '📝 Commit Review',
+        'postchecks': '✅ Postchecks',
+        'merge-ri': '↗↙ Merge RI',
+      };
+      const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
+      
+      const phaseRows = phaseOrder
+        .filter(phase => phaseMetrics[phase])
+        .map(phase => {
+          const pm = phaseMetrics[phase];
+          const parts: string[] = [];
+          if (pm.premiumRequests !== undefined) parts.push(`${pm.premiumRequests} req`);
+          if (pm.apiTimeSeconds !== undefined) parts.push(`${formatDurationSeconds(pm.apiTimeSeconds)} API`);
+          if (pm.codeChanges) parts.push(`${formatCodeChanges(pm.codeChanges)}`);
+          return `<div class="phase-metrics-row">
+            <span class="phase-metrics-label">${phaseLabels[phase] || phase}</span>
+            <span class="phase-metrics-stats">${parts.join(' · ')}</span>
+          </div>`;
+        }).join('');
+      
+      if (phaseRows) {
+        phaseBreakdownHtml = `
+          <div class="phase-metrics-breakdown">
+            <div class="model-breakdown-label">Phase Breakdown:</div>
+            ${phaseRows}
+          </div>`;
+      }
     }
     
     return `
-    <div class="attempt-metrics-compact">
-      <div class="attempt-metrics-row">${parts.join('  ')}</div>
-      ${modelLine ? `<div class="attempt-metrics-models">${modelLine}</div>` : ''}
+    <div class="attempt-metrics-card">
+      <div class="metrics-stats-grid">${statsHtml.join('')}</div>
+      ${modelBreakdownHtml}
+      ${phaseBreakdownHtml}
     </div>`;
   }
   
@@ -1728,18 +1831,10 @@ export class NodeDetailPanel {
       color: #63b3ed;
       border: 1px solid rgba(99, 179, 237, 0.3);
     }
-    .agent-model-label {
-      display: inline-block;
-      font-size: 12px;
-      font-weight: 600;
-      font-family: var(--vscode-editor-font-family), monospace;
-      color: #a78bfa;
-      background: rgba(167, 139, 250, 0.12);
-      border: 1px solid rgba(167, 139, 250, 0.25);
-      padding: 2px 8px;
-      border-radius: 3px;
-      margin-bottom: 6px;
-      margin-left: 4px;
+    .agent-model-suffix {
+      font-weight: 400;
+      font-size: 10px;
+      opacity: 0.85;
     }
     .work-type-badge.shell {
       background: rgba(72, 187, 120, 0.2);
@@ -2421,22 +2516,38 @@ export class NodeDetailPanel {
     .model-tokens {
       color: var(--vscode-descriptionForeground);
     }
-    /* Compact attempt-level metrics */
-    .attempt-metrics-compact {
+    /* Attempt-level metrics card (matches main metrics card style) */
+    .attempt-metrics-card {
       margin-top: 8px;
-      padding: 6px 8px;
+      padding: 8px 10px;
       background: color-mix(in srgb, var(--vscode-sideBar-background) 80%, var(--vscode-progressBar-background));
       border-radius: 4px;
+    }
+    .attempt-metrics-card .metrics-stats-grid {
+      margin-bottom: 8px;
+    }
+    .attempt-metrics-card .model-breakdown {
+      margin-top: 6px;
+    }
+    /* Phase breakdown */
+    .phase-metrics-breakdown {
+      margin-top: 8px;
+    }
+    .phase-metrics-row {
+      display: flex;
+      gap: 12px;
+      align-items: baseline;
+      padding: 2px 0;
       font-size: 11px;
     }
-    .attempt-metrics-row {
+    .phase-metrics-label {
+      font-weight: 600;
+      min-width: 120px;
       white-space: nowrap;
     }
-    .attempt-metrics-models {
-      margin-top: 3px;
+    .phase-metrics-stats {
       color: var(--vscode-descriptionForeground);
-      font-family: var(--vscode-editor-font-family), monospace;
-      font-size: 10px;
+      font-size: 11px;
     }
     `;
   }

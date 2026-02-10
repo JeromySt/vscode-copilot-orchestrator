@@ -223,6 +223,111 @@ suite('MCP Schema Validation', () => {
       assert.strictEqual(result.valid, false);
       assert.ok(result.error?.includes('dependencies'), `Error should mention 'dependencies': ${result.error}`);
     });
+
+    // -----------------------------------------------------------------------
+    // Model property validation
+    // -----------------------------------------------------------------------
+    test('accepts model property on job', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'Test Plan',
+        jobs: [{
+          producer_id: 'build',
+          task: 'Build the project',
+          dependencies: [],
+          work: '@agent Do something',
+          model: 'claude-haiku-4.5'
+        }]
+      });
+      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+    });
+
+    test('accepts model property on agent work spec object', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'Test Plan',
+        jobs: [{
+          producer_id: 'build',
+          task: 'Build the project',
+          dependencies: [],
+          work: {
+            type: 'agent',
+            instructions: '# Do something',
+            model: 'claude-sonnet-4'
+          }
+        }]
+      });
+      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+    });
+
+    test('accepts model on both job and work spec simultaneously', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'Test Plan',
+        jobs: [{
+          producer_id: 'build',
+          task: 'Build the project',
+          dependencies: [],
+          model: 'claude-haiku-4.5',
+          work: {
+            type: 'agent',
+            instructions: '# Do something',
+            model: 'claude-sonnet-4'
+          }
+        }]
+      });
+      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+    });
+
+    test('accepts resumeSession on agent work spec', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'Test Plan',
+        jobs: [{
+          producer_id: 'retry-job',
+          task: 'Retry with session',
+          dependencies: [],
+          work: {
+            type: 'agent',
+            instructions: '# Fix the issue',
+            resumeSession: true
+          }
+        }]
+      });
+      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+    });
+
+    test('accepts model with string work (not object)', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'Test Plan',
+        jobs: [{
+          producer_id: 'lint',
+          task: 'Lint the code',
+          dependencies: [],
+          work: 'npm run lint',
+          model: 'gpt-5-mini'
+        }]
+      });
+      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+    });
+
+    test('accepts plan with multiple jobs using different models', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'Multi-model Plan',
+        jobs: [
+          {
+            producer_id: 'fast-task',
+            task: 'Quick lint check',
+            dependencies: [],
+            work: '@agent Run lint',
+            model: 'claude-haiku-4.5'
+          },
+          {
+            producer_id: 'complex-task',
+            task: 'Complex refactoring',
+            dependencies: ['fast-task'],
+            work: { type: 'agent', instructions: '# Refactor auth', model: 'claude-opus-4.6' }
+          }
+        ]
+      });
+      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+    });
   });
 
   // =========================================================================

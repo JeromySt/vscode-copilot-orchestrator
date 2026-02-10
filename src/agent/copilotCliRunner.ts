@@ -16,6 +16,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import { isCopilotCliAvailable } from './cliCheckCore';
+import { CopilotStatsParser } from './copilotStatsParser';
+import type { CopilotUsageMetrics } from '../plan/types';
 
 // ============================================================================
 // TYPES
@@ -73,6 +75,8 @@ export interface CopilotRunResult {
   sessionId?: string;
   error?: string;
   exitCode?: number;
+  /** Usage metrics parsed from Copilot CLI stdout (premium requests, tokens, model breakdown, etc.) */
+  metrics?: CopilotUsageMetrics;
 }
 
 /**
@@ -286,10 +290,10 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       const proc = spawn(command, [], {
         cwd,
         shell: true,
-        timeout,
       });
       
       let capturedSessionId: string | undefined = sessionId;
+      const statsParser = new CopilotStatsParser();
 
       // Track whether Copilot printed its completion marker ("Task complete").
       // On Windows, shell:true spawns nested cmd.exe wrappers whose exit-code
@@ -321,6 +325,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
         text.split('\n').forEach(line => {
           if (line.trim()) {
             this.logger.debug(`[${label}] ${line.trim()}`);
+            statsParser.feedLine(line.trim());
             onOutput?.(line.trim());
             // Detect Copilot completion marker
             if (!sawTaskComplete && line.includes('Task complete')) {
@@ -337,6 +342,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
         text.split('\n').forEach(line => {
           if (line.trim()) {
             this.logger.debug(`[${label}] ${line.trim()}`);
+            statsParser.feedLine(line.trim());
             onOutput?.(line.trim());
           }
         });
@@ -350,6 +356,22 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
         // the completion marker was observed in stdout, treat null as 0.
         const effectiveCode = (code === null && signal === null && sawTaskComplete) ? 0 : code;
 
+        // Extract metrics parsed from stdout
+        const metrics = statsParser.getMetrics();
+        // Backfill legacy tokenUsage from model breakdown if available
+        if (metrics && !metrics.tokenUsage && metrics.modelBreakdown?.length) {
+          const totals = metrics.modelBreakdown.reduce(
+            (acc, m) => ({ input: acc.input + m.inputTokens, output: acc.output + m.outputTokens }),
+            { input: 0, output: 0 }
+          );
+          metrics.tokenUsage = {
+            inputTokens: totals.input,
+            outputTokens: totals.output,
+            totalTokens: totals.input + totals.output,
+            model: metrics.modelBreakdown[0].model,
+          };
+        }
+
         if (effectiveCode !== 0) {
           const reason = signal
             ? `Copilot CLI was killed by signal ${signal}`
@@ -360,6 +382,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
             sessionId: capturedSessionId,
             error: reason,
             exitCode: effectiveCode ?? undefined,
+            metrics,
           });
         } else {
           if (code === null) {
@@ -371,6 +394,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
             success: true,
             sessionId: capturedSessionId,
             exitCode: 0,
+            metrics,
           });
         }
       });
