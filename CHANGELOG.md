@@ -5,6 +5,20 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-02-10
+
+### Added
+- **Auto-Retry for SIGTERM-Killed Agents**: Agent work interrupted by external signals (SIGTERM, SIGKILL) is now automatically retried with the same agent spec, resuming from the failed phase
+- **Per-Attempt Log Isolation**: Execution logs are now captured per-attempt using memory and file offsets, so retry attempt records contain only their own logs instead of accumulating all previous attempts
+- **Logical CPU Count for maxParallel**: Default `maxParallel` now uses `os.cpus().length` (logical CPU count) instead of a hardcoded value of 4
+
+### Fixed
+- **SIGTERM Diagnostic Logging**: Enhanced error messages include PID, exit code, signal, and task-complete marker status for easier debugging of externally killed processes
+- **Cancel Stack Tracing**: `Executor.cancel()` and `PlanRunner.cancel()` now capture and log call stacks for diagnosing unexpected cancellations
+- **Step Status Callback**: `onStepStatusChange` is now called for all phase terminal states (success, failed, skipped) in the executor, ensuring the runner has accurate real-time phase status
+- **jobId Passed from Executor to Delegator**: The executor now forwards `node.id` as `jobId` when invoking the agent delegator
+- **Agent Timeout Disabled**: Agent delegator adapter now explicitly sets `timeout: 0` to prevent premature timeouts on long-running agent work
+
 ## [0.8.1] - 2026-02-10
 
 ### Fixed
