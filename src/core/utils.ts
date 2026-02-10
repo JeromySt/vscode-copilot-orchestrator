@@ -50,3 +50,7 @@ export async function existsAsync(p: string): Promise<boolean> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function cpuCountMinusOne(): number { const os = require('os'); const n: number = os.cpus()?.length || 2; return Math.max(1, n-1); }
+
+// FI-CHAIN-TEST-MARKER: This comment was added by the FI chain test plan.
+// If this comment appears in downstream nodes, the FI chain is working correctly.
+// Added: 2026-02-09
