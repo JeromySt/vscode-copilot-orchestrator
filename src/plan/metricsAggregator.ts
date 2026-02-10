@@ -10,7 +10,7 @@
  * @module plan/metricsAggregator
  */
 
-import { CopilotUsageMetrics, ModelUsageBreakdown, NodeExecutionState, AttemptRecord } from './types';
+import { CopilotUsageMetrics, ModelUsageBreakdown, NodeExecutionState } from './types';
 import type { PlanInstance } from './types';
 
 /**

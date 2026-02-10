@@ -13,7 +13,7 @@
 import * as vscode from 'vscode';
 import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState } from '../../plan';
 import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
-import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges, formatTokenCount } from '../../plan/metricsAggregator';
+import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges } from '../../plan/metricsAggregator';
 
 /**
  * Webview panel that shows a detailed view of a single Plan's execution.

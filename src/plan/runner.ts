@@ -1647,7 +1647,6 @@ export class PlanRunner extends EventEmitter {
               });
               this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: SUCCESS ==========');
               
-              executorSuccess = true;
               autoHealSucceeded = true;
               if (healResult.completedCommit) {
                 nodeState.completedCommit = healResult.completedCommit;

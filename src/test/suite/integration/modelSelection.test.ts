@@ -15,7 +15,6 @@ const cp = require('child_process');
 
 import {
   resetModelCache,
-  parseModelChoices,
 } from '../../../agent/modelDiscovery';
 import { getPlanToolDefinitions } from '../../../mcp/tools/planTools';
 import { PlanPersistence } from '../../../plan/persistence';
@@ -69,7 +68,10 @@ function fakeSpawnProc(exitCode: number | null = 0, stdoutData = '', stderrData 
   setTimeout(() => {
     if (stdoutData) proc.stdout.emit('data', Buffer.from(stdoutData));
     if (stderrData) proc.stderr.emit('data', Buffer.from(stderrData));
-    setTimeout(() => proc.emit('exit', exitCode), 10);
+    setTimeout(() => {
+      proc.emit('exit', exitCode);
+      proc.emit('close', exitCode);
+    }, 10);
   }, 10);
   return proc as ChildProcess;
 }

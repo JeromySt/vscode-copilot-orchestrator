@@ -448,11 +448,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
             metrics,
           });
         } else {
-          if (code === null) {
-            this.logger.log(`[${label}] Copilot completed (exit code null coerced to 0 — task completion marker was present)`);
-          } else {
-            this.logger.log(`[${label}] Copilot completed successfully`);
-          }
+          this.logger.log(`[${label}] Copilot completed successfully`);
           resolve({
             success: true,
             sessionId: capturedSessionId,
