@@ -1589,19 +1589,151 @@ export class PlanRunner extends EventEmitter {
             : failedPhase === 'postchecks' ? node.postchecks
             : node.work;
           const normalizedFailedSpec = normalizeWorkSpec(failedWorkSpec);
+          const isAgentWork = normalizedFailedSpec?.type === 'agent';
           const isNonAgentWork = normalizedFailedSpec && normalizedFailedSpec.type !== 'agent';
           const autoHealEnabled = node.autoHeal !== false; // default true
           
+          // Detect external interruption (SIGTERM, SIGKILL, etc.)
+          const wasExternallyKilled = result.error?.includes('killed by signal');
+          
           const phaseAlreadyHealed = nodeState.autoHealAttempted?.[failedPhase as 'prechecks' | 'work' | 'postchecks'];
-          if (isHealablePhase && isNonAgentWork && autoHealEnabled && !phaseAlreadyHealed) {
+          
+          // Auto-retry is allowed if:
+          // 1. Non-agent work (existing behavior - swap to agent)
+          // 2. Agent work that was externally killed (retry same agent)
+          const shouldAttemptAutoRetry = isHealablePhase && autoHealEnabled && !phaseAlreadyHealed &&
+            (isNonAgentWork || (isAgentWork && wasExternallyKilled));
+          
+          if (shouldAttemptAutoRetry) {
+            if (!nodeState.autoHealAttempted) nodeState.autoHealAttempted = {};
+            nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = true;
+            
+            if (isAgentWork && wasExternallyKilled) {
+              // Agent was interrupted - retry with same spec (don't swap to different agent spec)
+              log.info(`Auto-retry: agent was externally killed, retrying ${node.name} (phase: ${failedPhase})`, {
+                planId: plan.id,
+                nodeId: node.id,
+                signal: result.error,
+              });
+              
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '');
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-RETRY: AGENT INTERRUPTED, RETRYING ==========');
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', `Phase "${failedPhase}" agent was externally killed. Retrying same agent.`);
+              
+              // Reset state for the retry attempt
+              nodeState.error = undefined;
+              nodeState.startedAt = Date.now();
+              nodeState.attempts++;
+              
+              // Execute with resumeFromPhase to skip already-passed phases
+              const retryContext: ExecutionContext = {
+                plan,
+                node,
+                baseCommit: nodeState.baseCommit!,
+                worktreePath,
+                copilotSessionId: nodeState.copilotSessionId,
+                resumeFromPhase: failedPhase as ExecutionContext['resumeFromPhase'],
+                previousStepStatuses: nodeState.stepStatuses,
+                onProgress: (step) => {
+                  log.debug(`Auto-retry progress: ${node.name} - ${step}`);
+                },
+                onStepStatusChange: (phase, status) => {
+                  if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+                  (nodeState.stepStatuses as any)[phase] = status;
+                },
+              };
+              
+              const retryResult = await this.executor!.execute(retryContext);
+              
+              // Store step statuses from retry attempt
+              if (retryResult.stepStatuses) {
+                nodeState.stepStatuses = retryResult.stepStatuses;
+              }
+              
+              // Capture session ID from retry attempt
+              if (retryResult.copilotSessionId) {
+                nodeState.copilotSessionId = retryResult.copilotSessionId;
+              }
+              
+              if (retryResult.success) {
+                log.info(`Auto-retry succeeded for ${node.name}!`, {
+                  planId: plan.id,
+                  nodeId: node.id,
+                });
+                this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-RETRY: SUCCESS ==========');
+                
+                autoHealSucceeded = true;
+                if (retryResult.completedCommit) {
+                  nodeState.completedCommit = retryResult.completedCommit;
+                }
+                if (retryResult.workSummary) {
+                  nodeState.workSummary = retryResult.workSummary;
+                  this.appendWorkSummary(plan, retryResult.workSummary);
+                }
+                if (retryResult.metrics) {
+                  nodeState.metrics = retryResult.metrics;
+                }
+                if (retryResult.phaseMetrics) {
+                  nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...retryResult.phaseMetrics };
+                }
+                // Fall through to RI merge handling below
+              } else {
+                // Auto-retry also failed — record it and transition to failed
+                log.warn(`Auto-retry failed for ${node.name}`, {
+                  planId: plan.id,
+                  nodeId: node.id,
+                  error: retryResult.error,
+                });
+                this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-RETRY: FAILED ==========');
+                this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'error', `Auto-retry could not complete: ${retryResult.error}`);
+                
+                nodeState.error = `Auto-retry failed: ${retryResult.error}`;
+                
+                if (retryResult.metrics) {
+                  nodeState.metrics = retryResult.metrics;
+                }
+                if (retryResult.phaseMetrics) {
+                  nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...retryResult.phaseMetrics };
+                }
+                
+                // Record retry attempt in history
+                const retryAttempt: AttemptRecord = {
+                  attemptNumber: nodeState.attempts,
+                  triggerType: 'auto-heal',
+                  status: 'failed',
+                  startedAt: nodeState.startedAt || Date.now(),
+                  endedAt: Date.now(),
+                  failedPhase: retryResult.failedPhase,
+                  error: retryResult.error,
+                  exitCode: retryResult.exitCode,
+                  copilotSessionId: nodeState.copilotSessionId,
+                  stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
+                  worktreePath: nodeState.worktreePath,
+                  baseCommit: nodeState.baseCommit,
+                  logs: this.getNodeLogs(plan.id, node.id),
+                  workUsed: node.work,
+                  metrics: nodeState.metrics,
+                  phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
+                };
+                nodeState.attemptHistory = [...(nodeState.attemptHistory || []), retryAttempt];
+                
+                sm.transition(node.id, 'failed');
+                this.emit('nodeCompleted', plan.id, node.id, false);
+                
+                log.error(`Job failed (after auto-retry): ${node.name}`, {
+                  planId: plan.id,
+                  nodeId: node.id,
+                  error: retryResult.error,
+                });
+                return;
+              }
+            } else {
+            // Non-agent work failed — existing auto-heal logic (swap to agent)
             log.info(`Auto-heal: attempting AI-assisted fix for ${node.name} (phase: ${failedPhase})`, {
               planId: plan.id,
               nodeId: node.id,
               exitCode: result.exitCode,
             });
-            
-            if (!nodeState.autoHealAttempted) nodeState.autoHealAttempted = {};
-            nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = true;
             
             // Log the auto-heal attempt in the failed phase's log stream
             this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '');
@@ -1788,6 +1920,7 @@ export class PlanRunner extends EventEmitter {
                 error: healResult.error,
               });
               return;
+            }
             }
           } else {
             // No auto-heal — transition to failed normally
