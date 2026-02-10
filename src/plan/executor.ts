@@ -456,6 +456,7 @@ export class DefaultJobExecutor implements JobExecutor {
 
       execution.aborted = true;
       if (execution.process) {
+        log.info(`Killing process PID ${execution.process.pid} for execution: ${executionKey}`);
         try {
           // Kill the process tree
           if (process.platform === 'win32') {

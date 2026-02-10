@@ -151,7 +151,7 @@ function createAgentDelegatorAdapter(log: any) {
         sessionId,
         model,
         jobId,
-        timeout: 0,
+        timeout: 0, // No timeout — agent work can run for a long time
         onOutput: logOutput ? (line) => {
           statsParser.feedLine(line);
           logOutput(`[copilot] ${line}`);
