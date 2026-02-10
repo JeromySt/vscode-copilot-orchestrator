@@ -290,7 +290,6 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       const proc = spawn(command, [], {
         cwd,
         shell: true,
-        timeout,
       });
       
       let capturedSessionId: string | undefined = sessionId;

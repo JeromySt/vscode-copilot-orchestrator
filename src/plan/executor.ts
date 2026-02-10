@@ -198,9 +198,7 @@ export class DefaultJobExecutor implements JobExecutor {
           capturedSessionId = precheckResult.copilotSessionId;
         }
         if (precheckResult.metrics) {
-          capturedMetrics = capturedMetrics
-            ? aggregateMetrics([capturedMetrics, precheckResult.metrics])
-            : precheckResult.metrics;
+          capturedMetrics = precheckResult.metrics;
           phaseMetrics['prechecks'] = precheckResult.metrics;
         }
         
@@ -255,7 +253,9 @@ export class DefaultJobExecutor implements JobExecutor {
         
         // Capture agent execution metrics
         if (workResult.metrics) {
-          capturedMetrics = workResult.metrics;
+          capturedMetrics = capturedMetrics
+            ? aggregateMetrics([capturedMetrics, workResult.metrics])
+            : workResult.metrics;
           phaseMetrics['work'] = workResult.metrics;
         }
         

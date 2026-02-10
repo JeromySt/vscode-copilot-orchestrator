@@ -1326,6 +1326,13 @@ ${mermaidDef}
       return String(n);
     }
     
+    // HTML escape for user-provided values in innerHTML
+    function escHtml(s) {
+      var d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+    
     mermaid.initialize({
       startOnLoad: false,
       theme: 'dark',
@@ -1780,7 +1787,7 @@ ${mermaidDef}
               var rows = planMetrics.modelBreakdown.map(function(m) {
                 var cached = m.cachedTokens ? ', ' + formatTk(m.cachedTokens) + ' cached' : '';
                 var reqs = m.premiumRequests !== undefined ? ' (' + m.premiumRequests + ' req)' : '';
-                return '<div class="model-row"><span class="model-name">' + m.model + '</span><span class="model-tokens">' + formatTk(m.inputTokens) + ' in, ' + formatTk(m.outputTokens) + ' out' + cached + reqs + '</span></div>';
+                return '<div class="model-row"><span class="model-name">' + escHtml(m.model) + '</span><span class="model-tokens">' + formatTk(m.inputTokens) + ' in, ' + formatTk(m.outputTokens) + ' out' + cached + reqs + '</span></div>';
               }).join('');
               modelsHtml = '<div class="model-breakdown"><div class="model-breakdown-label">Model Breakdown:</div><div class="model-breakdown-list">' + rows + '</div></div>';
             }
@@ -2323,10 +2330,10 @@ ${mermaidDef}
         .sort((a, b) => (b.premiumRequests ?? 0) - (a.premiumRequests ?? 0))
         .map(m => ({
           model: m.model,
-          inputTokens: m.inputTokens ?? 0,
-          outputTokens: m.outputTokens ?? 0,
-          cachedTokens: m.cachedTokens ?? 0,
-          premiumRequests: m.premiumRequests ?? 0,
+          inputTokens: m.inputTokens,
+          outputTokens: m.outputTokens,
+          cachedTokens: m.cachedTokens,
+          premiumRequests: m.premiumRequests,
         }));
     }
     return result;

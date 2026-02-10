@@ -430,7 +430,9 @@ export class NodeDetailPanel {
         }
         break;
       case 'retryNode':
-        this._retryNode(message.planId, message.nodeId, message.resumeSession);
+        this._retryNode(message.planId, message.nodeId, message.resumeSession).catch(err => {
+          vscode.window.showErrorMessage(`Retry failed: ${err?.message || err}`);
+        });
         break;
       case 'forceFailNode':
         this._forceFailNode(message.planId, message.nodeId);
