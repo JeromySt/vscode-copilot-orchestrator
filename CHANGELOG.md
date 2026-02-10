@@ -5,7 +5,12 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.0] - Unreleased
+## [0.8.1] - 2026-02-10
+
+### Fixed
+- **jobId Propagation**: Fixed missing `jobId` parameter in `createAgentDelegatorAdapter`, ensuring the job identifier is correctly passed through to Copilot CLI agent invocations
+
+## [0.8.0] - 2026-02-10
 
 ### Added
 - **LLM Model Selection**: Dynamic model discovery from Copilot CLI, per-node model override via `model` property in plan/node specs, model name displayed on agent work badge in node detail panel
