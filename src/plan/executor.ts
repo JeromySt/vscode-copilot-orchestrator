@@ -206,6 +206,7 @@ export class DefaultJobExecutor implements JobExecutor {
         
         if (!precheckResult.success) {
           stepStatuses.prechecks = 'failed';
+          context.onStepStatusChange?.('prechecks', 'failed');
           return {
             success: false,
             error: `Prechecks failed: ${precheckResult.error}`,
@@ -218,8 +219,10 @@ export class DefaultJobExecutor implements JobExecutor {
           };
         }
         stepStatuses.prechecks = 'success';
+        context.onStepStatusChange?.('prechecks', 'success');
       } else {
         stepStatuses.prechecks = 'skipped';
+        context.onStepStatusChange?.('prechecks', 'skipped');
       }
       
       // Check if aborted
@@ -263,6 +266,7 @@ export class DefaultJobExecutor implements JobExecutor {
         
         if (!workResult.success) {
           stepStatuses.work = 'failed';
+          context.onStepStatusChange?.('work', 'failed');
           return {
             success: false,
             error: `Work failed: ${workResult.error}`,
@@ -275,6 +279,7 @@ export class DefaultJobExecutor implements JobExecutor {
           };
         }
         stepStatuses.work = 'success';
+        context.onStepStatusChange?.('work', 'success');
       } else {
         // No work command - this is unusual but not an error
         this.logInfo(executionKey, 'work', '========== WORK SECTION START ==========');
@@ -282,6 +287,7 @@ export class DefaultJobExecutor implements JobExecutor {
         this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
         log.warn(`Job ${node.name} has no work specified`);
         stepStatuses.work = 'skipped';
+        context.onStepStatusChange?.('work', 'skipped');
       }
       
       // Check if aborted
@@ -322,6 +328,7 @@ export class DefaultJobExecutor implements JobExecutor {
         
         if (!postcheckResult.success) {
           stepStatuses.postchecks = 'failed';
+          context.onStepStatusChange?.('postchecks', 'failed');
           return {
             success: false,
             error: `Postchecks failed: ${postcheckResult.error}`,
@@ -334,8 +341,10 @@ export class DefaultJobExecutor implements JobExecutor {
           };
         }
         stepStatuses.postchecks = 'success';
+        context.onStepStatusChange?.('postchecks', 'success');
       } else {
         stepStatuses.postchecks = 'skipped';
+        context.onStepStatusChange?.('postchecks', 'skipped');
       }
       
       // Check if aborted
@@ -374,8 +383,10 @@ export class DefaultJobExecutor implements JobExecutor {
           this.logInfo(executionKey, 'commit',
             'Commit found no evidence, but work was skipped (resuming). Succeeding without commit.');
           stepStatuses.commit = 'success';
+          context.onStepStatusChange?.('commit', 'success');
         } else {
           stepStatuses.commit = 'failed';
+          context.onStepStatusChange?.('commit', 'failed');
           return {
             success: false,
             error: `Commit failed: ${commitResult.error}`,
@@ -388,6 +399,7 @@ export class DefaultJobExecutor implements JobExecutor {
         }
       } else {
         stepStatuses.commit = 'success';
+        context.onStepStatusChange?.('commit', 'success');
       }
       
       // Get work summary
