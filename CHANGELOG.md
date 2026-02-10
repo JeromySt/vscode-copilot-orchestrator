@@ -10,18 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **LLM Model Selection**: Dynamic model discovery from Copilot CLI, per-node model override via `model` property in plan/node specs, model name displayed on agent work badge in node detail panel
 - **Copilot Usage Statistics**: CopilotStatsParser for parsing Copilot CLI summary output, rich AI Usage metrics card in node detail panel, compact metrics bar replacing token summary, metrics aggregation utility with per-model breakdowns (requests, input/output/cached tokens)
+- **Per-Phase Metrics Capture**: AI usage metrics (tokens, session, code changes) captured independently for prechecks, work, postchecks, merge-fi, and merge-ri phases — displayed in a Phase Breakdown section within the AI Usage card
+- **Auto-Heal**: Automatic AI-assisted retry for process/shell failures on prechecks, work, and postchecks phases — per-phase replacement strategy preserves completed phases
 - **AI Review for No-Change Commits**: When a node produces no file changes, an AI agent reviews execution logs to determine if "no changes" is legitimate before failing
 - **Forward Integration on Resume**: `git fetch` before `resume()` and `retryNode()` with `clearWorktree` to ensure worktrees use latest remote refs
 - **FI Chain Continuity**: `expectsNoChanges` nodes now carry forward their `baseCommit` as `completedCommit`, preventing downstream nodes from losing accumulated changes in the dependency chain
+- **Local Deployment Script**: `npm run deploy:local` command for quick local testing — bumps patch version, packages VSIX, and installs into VS Code
 
 ### Changed
-- **Mermaid Diagram Labels**: Group labels dynamically truncated based on widest descendant node width instead of arbitrary character limit
+- **Mermaid Diagram Labels**: Group and job node labels dynamically truncated based on widest descendant node width instead of arbitrary character limit
 - `resume()` and `retryNode()` are now async (callers must await)
+- **RI Merge Serialization**: Reverse-integration merges now execute through an async mutex, preventing concurrent `index.lock` conflicts and silent commit overwrites when parallel leaf nodes complete simultaneously
+- **Full Phase Tracking**: Step statuses now include `merge-fi` and `merge-ri` phases in addition to prechecks, work, commit, and postchecks
 
 ### Fixed
 - **Exit Code Null on Windows**: Handle `code=null` from nested `cmd.exe` chains when Copilot CLI makes git commits; detect "Task complete" marker to coerce to success
 - **Signal Capture**: Properly capture signal name when Copilot CLI process is killed
 - **FI Chain Break**: `expectsNoChanges` validation nodes (e.g., typecheck) no longer break the forward integration commit chain, which caused downstream leaf nodes to lose ancestor code changes during RI merge
+- **AI Review Parser**: Strips HTML/markdown formatting before matching JSON responses, preventing parse failures on Copilot CLI output with embedded formatting
+- **RI Merge Index Lock Retry**: Transient `index.lock` errors from VS Code's built-in git extension are retried with backoff
+- **AI Review Metrics Loss**: `reviewMetrics` no longer lost in the commit-phase error path when AI review determines no legitimate changes
+- **Auto-Heal Metrics Propagation**: Metrics from auto-heal phases are properly aggregated and displayed in the node detail panel
 
 ## [0.6.0] - 2026-02-XX
 
