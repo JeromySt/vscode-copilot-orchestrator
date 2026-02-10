@@ -1106,7 +1106,7 @@ export class NodeDetailPanel {
    *
    * @param state - The node's current execution state.
    * @returns A map of phase names (`'prechecks'`, `'work'`, `'commit'`, etc.)
-   *   to status strings (`'pending'`, `'running'`, `'succeeded'`, `'failed'`, `'skipped'`).
+   *   to status strings (`'pending'`, `'running'`, `'success'`, `'failed'`, `'skipped'`).
    */
   private _getPhaseStatus(state: NodeExecutionState): Record<string, string> {
     // Always produce all 6 phases: merge-fi, prechecks, work, commit, postchecks, merge-ri.
@@ -1492,7 +1492,7 @@ export class NodeDetailPanel {
         'postchecks': '✅ Postchecks',
         'merge-ri': '↗↙ Merge RI',
       };
-      const phaseOrder = ['prechecks', 'merge-fi', 'work', 'commit', 'postchecks', 'merge-ri'];
+      const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
       
       const phaseRows = phaseOrder
         .filter(phase => phaseMetrics[phase])
@@ -1581,7 +1581,7 @@ export class NodeDetailPanel {
         'postchecks': '✅ Postchecks',
         'merge-ri': '↗↙ Merge RI',
       };
-      const phaseOrder = ['prechecks', 'merge-fi', 'work', 'commit', 'postchecks', 'merge-ri'];
+      const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
       
       const phaseRows = phaseOrder
         .filter(phase => phaseMetrics[phase])

@@ -181,9 +181,10 @@ export interface NodeExecutionState {
 
   /**
    * Per-phase AI usage metrics breakdown.
-   * Keys are phase names: 'merge-fi', 'work', 'commit', 'merge-ri'.
+   * Keys are phase names for which metrics are available:
+   * 'prechecks', 'work', 'commit', 'postchecks', 'merge-fi', 'merge-ri'.
    */
-  phaseMetrics?: Record<string, CopilotUsageMetrics>;
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri', CopilotUsageMetrics>>;
 }
 
 /**
@@ -246,7 +247,7 @@ export interface AttemptRecord {
   metrics?: CopilotUsageMetrics;
 
   /** Per-phase AI usage metrics breakdown */
-  phaseMetrics?: Record<string, CopilotUsageMetrics>;
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri', CopilotUsageMetrics>>;
 }
 
 // ============================================================================
@@ -506,8 +507,8 @@ export interface JobExecutionResult {
   exitCode?: number;
   /** Agent execution metrics (token usage, duration, turns, tool calls) */
   metrics?: CopilotUsageMetrics;
-  /** Per-phase metrics breakdown (e.g. 'work', 'commit') */
-  phaseMetrics?: Record<string, CopilotUsageMetrics>;
+  /** Per-phase metrics breakdown */
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri', CopilotUsageMetrics>>;
 }
 
 /**

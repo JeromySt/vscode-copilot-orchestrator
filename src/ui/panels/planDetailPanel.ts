@@ -1321,7 +1321,7 @@ ${mermaidDef}
     // Token count formatter for client-side model breakdown rendering
     function formatTk(n) {
       if (n === undefined || n === null) return '0';
-      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'm';
       if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
       return String(n);
     }

@@ -1239,9 +1239,16 @@ export class DefaultJobExecutor implements JobExecutor {
 
       // Helper: strip HTML/markdown code fences so we can find JSON
       // that the agent may have wrapped in <pre><code> or ```json blocks.
-      const stripMarkup = (s: string) => s
-        .replace(/<\/?[^>]+>/g, '')          // strip HTML tags
-        .replace(/```(?:json)?\s*/g, '');    // strip markdown code fences
+      // Loop to handle nested/incomplete tag stripping (e.g. <scr<script>ipt>).
+      const stripMarkup = (s: string) => {
+        let result = s;
+        let prev: string;
+        do {
+          prev = result;
+          result = result.replace(/<\/?[^>]+>/g, '');
+        } while (result !== prev);
+        return result.replace(/```(?:json)?\s*/g, '');
+      };
 
       // Search for JSON response — try each line last-to-first (most likely location)
       for (let i = reviewLogs.length - 1; i >= 0; i--) {
