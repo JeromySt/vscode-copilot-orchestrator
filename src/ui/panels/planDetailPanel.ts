@@ -2235,7 +2235,7 @@ ${mermaidDef}
    */
   private _buildMetricsBarHtml(plan: PlanInstance): string {
     const metrics = getPlanMetrics(plan);
-    if (!metrics) { return ''; }
+    if (!metrics) { return '<div class="plan-metrics-bar" id="planMetricsBar" style="display:none;"></div>'; }
 
     const parts: string[] = [];
     if (metrics.premiumRequests !== undefined) {
@@ -2251,7 +2251,7 @@ ${mermaidDef}
       parts.push(`<span class="metric-item">📝 <span class="metric-value">${escapeHtml(formatCodeChanges(metrics.codeChanges))}</span></span>`);
     }
 
-    if (parts.length === 0) { return ''; }
+    if (parts.length === 0) { return '<div class="plan-metrics-bar" id="planMetricsBar" style="display:none;"></div>'; }
 
     let modelsLine = '';
     if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {

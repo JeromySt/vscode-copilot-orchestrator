@@ -217,6 +217,7 @@ function runCopilotHelp(): Promise<string> {
     const proc = cp.spawn('copilot', ['--help'], { shell: true });
     let stdout = '';
     let stderr = '';
+    let settled = false;
 
     proc.stdout?.on('data', (data: Buffer) => {
       stdout += data.toString();
@@ -227,18 +228,29 @@ function runCopilotHelp(): Promise<string> {
     });
 
     proc.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
       // Accept any exit code since --help may return non-zero on some systems
       resolve(stdout || stderr);
     });
 
     proc.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
       reject(err);
     });
 
     // Timeout after 10 seconds
-    setTimeout(() => {
-      proc.kill();
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      if (!proc.killed && proc.exitCode === null) {
+        proc.kill();
+      }
       reject(new Error('copilot --help timed out'));
     }, 10000);
+    (timeout as unknown as { unref?: () => void }).unref?.();
   });
 }

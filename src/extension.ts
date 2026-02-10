@@ -17,6 +17,7 @@ import {
   initializePlansView,
   registerPlanCommands,
 } from './core/planInitialization';
+import { registerUtilityCommands } from './commands';
 import { IMcpManager } from './interfaces/IMcpManager';
 import { ProcessMonitor } from './process/processMonitor';
 import { PlanRunner } from './plan';
@@ -74,6 +75,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Commands ───────────────────────────────────────────────────────────
   registerPlanCommands(context, planRunner);
+  registerUtilityCommands(context);
 
   // ── Complete ───────────────────────────────────────────────────────────
   extLog.info('Extension activated successfully');

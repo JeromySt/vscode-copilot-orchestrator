@@ -437,18 +437,27 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
           metrics = { durationMs: 0, tokenUsage };
         }
 
-        if (code !== 0) {
-          this.logger.log(`[${label}] Copilot exited with code ${code}`);
+        // Detect "Task complete" marker in stdout to handle code=null as success
+        const taskCompleteDetected = stdoutBuffer.includes('Task complete') || stderrBuffer.includes('Task complete');
+        const effectiveCode = (code === null && taskCompleteDetected) ? 0 : code;
+
+        if (effectiveCode !== 0) {
+          const signalInfo = signal ? ` (signal: ${signal})` : '';
+          this.logger.log(`[${label}] Copilot exited with code ${code}${signalInfo}`);
           resolve({
             success: false,
             sessionId: capturedSessionId,
-            error: `Copilot failed with exit code ${code}`,
+            error: `Copilot failed with exit code ${code}${signalInfo}`,
             exitCode: code ?? undefined,
             tokenUsage,
             metrics,
           });
         } else {
-          this.logger.log(`[${label}] Copilot completed successfully`);
+          if (code === null) {
+            this.logger.log(`[${label}] Copilot completed (exit code null coerced to 0 — task completion marker was present)`);
+          } else {
+            this.logger.log(`[${label}] Copilot completed successfully`);
+          }
           resolve({
             success: true,
             sessionId: capturedSessionId,
