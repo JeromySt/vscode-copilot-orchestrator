@@ -50,3 +50,5 @@ export async function existsAsync(p: string): Promise<boolean> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function cpuCountMinusOne(): number { const os = require('os'); const n: number = os.cpus()?.length || 2; return Math.max(1, n-1); }
+
+// FI-CHAIN-TEST: marker for forward integration chain test
