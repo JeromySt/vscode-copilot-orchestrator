@@ -1167,9 +1167,15 @@ export class DefaultJobExecutor implements JobExecutor {
         .filter(e => e.phase === 'commit' && e.message.includes('[ai-review]'))
         .map(e => e.message);
 
-      // Search for JSON response — try last lines first (most likely location)
+      // Helper: strip HTML/markdown code fences so we can find JSON
+      // that the agent may have wrapped in <pre><code> or ```json blocks.
+      const stripMarkup = (s: string) => s
+        .replace(/<\/?[^>]+>/g, '')          // strip HTML tags
+        .replace(/```(?:json)?\s*/g, '');    // strip markdown code fences
+
+      // Search for JSON response — try each line last-to-first (most likely location)
       for (let i = reviewLogs.length - 1; i >= 0; i--) {
-        const line = reviewLogs[i];
+        const line = stripMarkup(reviewLogs[i]);
         const jsonMatch = line.match(/\{[^{}]*"legitimate"\s*:\s*(true|false)[^{}]*\}/);
         if (jsonMatch) {
           try {
@@ -1181,6 +1187,22 @@ export class DefaultJobExecutor implements JobExecutor {
           } catch {
             // JSON parse failed, continue searching
           }
+        }
+      }
+
+      // The JSON may have been split across multiple log lines (e.g., long reason text).
+      // Concatenate all review lines, strip markup, and search the combined text.
+      const combined = stripMarkup(reviewLogs.join(' '));
+      const combinedMatch = combined.match(/\{\s*"legitimate"\s*:\s*(true|false)\s*,\s*"reason"\s*:\s*"([^"]*)"\s*\}/);
+      if (combinedMatch) {
+        try {
+          const parsed = JSON.parse(combinedMatch[0]) as { legitimate: boolean; reason: string };
+          return {
+            legitimate: parsed.legitimate === true,
+            reason: parsed.reason || (parsed.legitimate ? 'AI review approved' : 'AI review rejected'),
+          };
+        } catch {
+          // JSON parse failed
         }
       }
 
