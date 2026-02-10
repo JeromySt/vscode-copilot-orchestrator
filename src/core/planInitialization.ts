@@ -129,6 +129,7 @@ function createAgentDelegatorAdapter(log: any) {
       contextFiles?: string[];
       maxTurns?: number;
       sessionId?: string;
+      jobId?: string;
       logOutput?: (line: string) => void;
       onProcess?: (proc: any) => void;
     }): Promise<{
@@ -138,7 +139,7 @@ function createAgentDelegatorAdapter(log: any) {
       exitCode?: number;
       metrics?: CopilotUsageMetrics;
     }> {
-      const { task, instructions, worktreePath, sessionId, logOutput, onProcess, model } = options;
+      const { task, instructions, worktreePath, sessionId, logOutput, onProcess, model, jobId } = options;
       
       const statsParser = new CopilotStatsParser();
       
@@ -149,6 +150,7 @@ function createAgentDelegatorAdapter(log: any) {
         label: 'agent',
         sessionId,
         model,
+        jobId,
         onOutput: logOutput ? (line) => {
           statsParser.feedLine(line);
           logOutput(`[copilot] ${line}`);
