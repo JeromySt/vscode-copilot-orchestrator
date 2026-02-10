@@ -14,6 +14,11 @@ export {
   AgentSpec,
   WorkSpec,
   normalizeWorkSpec,
+  TokenUsage,
+  AgentExecutionMetrics,
+  ModelUsageBreakdown,
+  CodeChangeStats,
+  CopilotUsageMetrics,
 } from './specs';
 
 // Node types, status, and specifications

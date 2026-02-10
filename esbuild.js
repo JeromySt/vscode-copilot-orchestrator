@@ -4,6 +4,7 @@ const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
 async function main() {
+  // Main extension bundle
   const ctx = await esbuild.context({
     entryPoints: ['src/extension.ts'],
     bundle: true,
@@ -17,11 +18,26 @@ async function main() {
     logLevel: 'warning',
     plugins: [esbuildProblemMatcherPlugin]
   });
+
+  // MCP stdio server - separate entry point spawned as a child process
+  const stdioCtx = await esbuild.context({
+    entryPoints: ['src/mcp/stdio/server.ts'],
+    bundle: true,
+    format: 'cjs',
+    minify: production,
+    sourcemap: !production,
+    sourcesContent: false,
+    platform: 'node',
+    outfile: 'dist/mcp-stdio-server.js',
+    external: ['vscode'],
+    logLevel: 'warning',
+    plugins: [esbuildProblemMatcherPlugin]
+  });
   if (watch) {
-    await ctx.watch();
+    await Promise.all([ctx.watch(), stdioCtx.watch()]);
   } else {
-    await ctx.rebuild();
-    await ctx.dispose();
+    await Promise.all([ctx.rebuild(), stdioCtx.rebuild()]);
+    await Promise.all([ctx.dispose(), stdioCtx.dispose()]);
   }
 }
 

@@ -242,6 +242,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
     targetBranch: args.targetBranch,
     maxParallel: args.maxParallel,
     cleanUpSuccessfulWork: args.cleanUpSuccessfulWork,
+    startPaused: args.startPaused,
     jobs: [...rootJobs, ...groupJobs],
     // Note: groups are flattened into jobs, not stored separately
   };
@@ -307,18 +308,24 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
       nodeMapping[producerId] = nodeId;
     }
     
+    const isPaused = plan.isPaused === true;
+    const pauseNote = isPaused
+      ? ' Plan is PAUSED. Use resume_copilot_plan to start execution.'
+      : '';
+    
     return {
       success: true,
       planId: plan.id,
       name: plan.spec.name,
       baseBranch: plan.baseBranch,
       targetBranch: plan.targetBranch,
+      paused: isPaused,
       message: `Plan '${plan.spec.name}' created with ${plan.nodes.size} nodes. ` +
-               `Base: ${plan.baseBranch}, Target: ${plan.targetBranch}. ` +
+               `Base: ${plan.baseBranch}, Target: ${plan.targetBranch}.${pauseNote} ` +
                `Use planId '${plan.id}' to monitor progress.`,
       nodeMapping,
       status: {
-        status: 'pending',
+        status: isPaused ? 'paused' : 'pending',
         nodes: plan.nodes.size,
         roots: plan.roots.length,
         leaves: plan.leaves.length,
@@ -373,10 +380,16 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
       instructions: args.instructions,
       baseBranch,
       targetBranch,
+      startPaused: args.startPaused,
     });
     
     // Get the single node ID
     const nodeId = plan.roots[0];
+    
+    const isPaused = plan.isPaused === true;
+    const pauseNote = isPaused
+      ? ' Job is PAUSED. Use resume_copilot_plan to start execution.'
+      : '';
     
     return {
       success: true,
@@ -384,7 +397,8 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
       nodeId,
       baseBranch: plan.baseBranch,
       targetBranch: plan.targetBranch,
-      message: `Job '${args.name}' created. Base: ${plan.baseBranch}, Target: ${plan.targetBranch}. Use planId '${plan.id}' to monitor progress.`,
+      paused: isPaused,
+      message: `Job '${args.name}' created. Base: ${plan.baseBranch}, Target: ${plan.targetBranch}.${pauseNote} Use planId '${plan.id}' to monitor progress.`,
     };
   } catch (error: any) {
     return errorResult(error.message);
@@ -759,7 +773,7 @@ export async function handleResumePlan(args: any, ctx: PlanHandlerContext): Prom
   const fieldError = validateRequired(args, ['id']);
   if (fieldError) return fieldError;
   
-  const success = ctx.PlanRunner.resume(args.id);
+  const success = await ctx.PlanRunner.resume(args.id);
   
   return {
     success,
@@ -846,6 +860,8 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   // Build retry options from args
   const retryOptions = {
     newWork: args.newWork,
+    newPrechecks: args.newPrechecks,
+    newPostchecks: args.newPostchecks,
     clearWorktree: args.clearWorktree || false,
   };
   
@@ -854,7 +870,7 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   const errors: Array<{ id: string; error: string }> = [];
   
   for (const nodeId of nodeIdsToRetry) {
-    const result = ctx.PlanRunner.retryNode(args.id, nodeId, retryOptions);
+    const result = await ctx.PlanRunner.retryNode(args.id, nodeId, retryOptions);
     const node = plan.nodes.get(nodeId);
     
     if (result.success) {
@@ -865,7 +881,7 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   }
   
   // Resume the Plan if it was stopped
-  ctx.PlanRunner.resume(args.id);
+  await ctx.PlanRunner.resume(args.id);
   
   return {
     success: retriedNodes.length > 0,
@@ -950,18 +966,21 @@ export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): P
   }
   
   // Build retry options from args
-  const retryOptions = {    newWork: args.newWork,
+  const retryOptions = {
+    newWork: args.newWork,
+    newPrechecks: args.newPrechecks,
+    newPostchecks: args.newPostchecks,
     clearWorktree: args.clearWorktree || false,
   };
   
-  const result = ctx.PlanRunner.retryNode(args.planId, args.nodeId, retryOptions);
+  const result = await ctx.PlanRunner.retryNode(args.planId, args.nodeId, retryOptions);
   
   if (!result.success) {
     return errorResult(result.error || 'Retry failed');
   }
   
   // Resume the Plan if it was stopped
-  ctx.PlanRunner.resume(args.planId);
+  await ctx.PlanRunner.resume(args.planId);
   
   return {
     success: true,

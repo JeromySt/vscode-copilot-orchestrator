@@ -241,6 +241,7 @@ export function buildPlan(
       instructions: jobSpec.instructions,
       baseBranch: jobSpec.baseBranch,
       expectsNoChanges: jobSpec.expectsNoChanges,
+      autoHeal: jobSpec.autoHeal,
       group: jobSpec.group,
       groupId: resolvedGroupId,
       dependencies: [], // Will be resolved in second pass
@@ -457,6 +458,7 @@ export function buildSingleJobPlan(
     targetBranch?: string;
     repoPath?: string;
     expectsNoChanges?: boolean;
+    autoHeal?: boolean;
   },
   options?: {
     repoPath?: string;
@@ -480,6 +482,7 @@ export function buildSingleJobPlan(
       instructions: jobSpec.instructions,
       dependencies: [],
       expectsNoChanges: jobSpec.expectsNoChanges,
+      autoHeal: jobSpec.autoHeal,
     }],
   };
   

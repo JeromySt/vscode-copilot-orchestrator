@@ -88,6 +88,43 @@ plan or group ID is required for queries and control operations.
 | `retry_copilot_node` | Retry a specific failed node (global lookup, no plan ID needed) |
 | `get_copilot_node_failure_context` | Get failure context for a node (global lookup, no plan ID needed) |
 
+### Model Selection
+
+Both `create_copilot_plan` and `create_copilot_node` support a `model` property on each node, allowing you to choose which LLM runs the agent work. Models are dynamically discovered from the installed Copilot CLI and organized into three tiers:
+
+| Tier | Keywords | Use Case |
+|------|----------|----------|
+| **Fast** | `mini`, `haiku` | Simple tasks: lint checks, formatting, quick fixes |
+| **Standard** | `sonnet`, `gpt-5` | General-purpose work: feature implementation, tests |
+| **Premium** | `opus`, `max` | Complex reasoning: large refactors, architecture changes |
+
+The `model` property can be set at the node level or inside an agent work object:
+
+```json
+{
+  "nodes": [
+    {
+      "producer_id": "lint",
+      "task": "Run lint",
+      "work": "npm run lint",
+      "model": "claude-haiku-4.5"
+    },
+    {
+      "producer_id": "refactor",
+      "task": "Refactor auth module",
+      "work": {
+        "type": "agent",
+        "instructions": "# Refactor auth\n\n1. Extract token logic\n2. Add refresh support",
+        "model": "claude-opus-4.6"
+      },
+      "dependencies": ["lint"]
+    }
+  ]
+}
+```
+
+> **Note:** Available models are discovered at runtime via `copilot --help` and cached for one hour. The enum in the MCP tool schema always reflects the currently installed models.
+
 ## Default Branch Protection
 
 When the `baseBranch` is a **default branch** (e.g., `main` or `master`), the orchestrator
@@ -229,6 +266,29 @@ Copilot creates a job with agent work:
 ```
 
 The agent runs in an isolated git worktree and commits its changes.
+
+## Commit Validation
+
+### No-Change Commits and AI Review
+
+Some nodes legitimately produce no file changes — for example, a lint check that passes or a test suite that succeeds. The orchestrator handles this through two complementary mechanisms:
+
+1. **`expectsNoChanges: true`** — Explicitly declares that a node is not expected to produce file changes. When the node completes without modifications, it succeeds immediately without requiring a commit.
+
+2. **AI review** — When a node produces no changes and `expectsNoChanges` is not set, the orchestrator invokes an AI agent to review the execution logs and determine whether the absence of changes is legitimate (e.g., "all tests passed") or indicates a failure (e.g., the agent forgot to save files).
+
+These are evaluated in priority order: evidence files first, then `expectsNoChanges`, then AI review. This ensures validation nodes like type-checking or linting can be modeled naturally in a plan without false failures.
+
+### Usage Statistics
+
+Node execution captures AI usage metrics, which are visible in the node detail panel:
+
+- **Timing:** total duration, API time, session time
+- **Token usage:** input, output, and cached tokens per model
+- **Activity:** premium requests, agent turns, tool calls
+- **Code changes:** lines added and removed
+
+Metrics are aggregated across all phases (prechecks, work, postchecks) and broken down by model in the `modelBreakdown` array.
 
 ## Configuration
 

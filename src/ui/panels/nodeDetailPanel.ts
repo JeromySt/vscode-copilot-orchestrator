@@ -13,8 +13,9 @@
  */
 
 import * as vscode from 'vscode';
-import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord } from '../../plan';
+import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord, CopilotUsageMetrics } from '../../plan';
 import { escapeHtml, formatDuration, errorPageHtml, loadingPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
+import { getNodeMetrics, formatPremiumRequests, formatDurationSeconds, formatTokenCount, formatCodeChanges } from '../../plan/metricsAggregator';
 
 /**
  * Format a {@link WorkSpec} as a plain-text summary string.
@@ -74,7 +75,8 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
       // Render agent instructions as Markdown
       const instructions = spec.instructions || '';
       const rendered = renderMarkdown(instructions, escapeHtml);
-      return `<div class="work-type-badge agent">AGENT</div><div class="work-instructions">${rendered}</div>`;
+      const modelLabel = spec.model ? escapeHtml(spec.model) : 'unspecified';
+      return `<div class="work-type-badge agent">AGENT</div><div class="agent-model-label">${modelLabel}</div><div class="work-instructions">${rendered}</div>`;
     }
     default:
       return `<code>${escapeHtml(JSON.stringify(spec))}</code>`;
@@ -237,6 +239,7 @@ export class NodeDetailPanel {
   private _updateInterval?: NodeJS.Timeout;
   private _currentPhase: string | null = null;
   private _lastStatus: string | null = null;
+  private _lastWorktreeCleanedUp: boolean | undefined = undefined;
   
   /**
    * @param panel - The VS Code webview panel instance.
@@ -258,7 +261,16 @@ export class NodeDetailPanel {
     this._panel.webview.html = this._getLoadingHtml();
     
     // Initial render (deferred)
-    setImmediate(() => this._update());
+    setImmediate(() => {
+      // Set _lastStatus before first render to prevent the interval from
+      // immediately triggering a redundant full update that kills the
+      // client-side duration timer
+      const plan = this._planRunner.get(this._planId);
+      const state = plan?.nodeStates.get(this._nodeId);
+      this._lastStatus = state?.status || null;
+      this._lastWorktreeCleanedUp = state?.worktreeCleanedUp;
+      this._update();
+    });
     
     // Setup update interval for running nodes
     this._updateInterval = setInterval(() => {
@@ -280,6 +292,12 @@ export class NodeDetailPanel {
         // Send final log update
         if (this._currentPhase) {
           setTimeout(() => this._sendLog(this._currentPhase!), 100);
+        }
+      } else {
+        // Terminal state - check for worktree cleanup or other state changes
+        if (state?.worktreeCleanedUp !== this._lastWorktreeCleanedUp) {
+          this._lastWorktreeCleanedUp = state?.worktreeCleanedUp;
+          this._update();
         }
       }
     }, 500);
@@ -445,11 +463,11 @@ export class NodeDetailPanel {
    * @param resumeSession - If `true`, resume the existing agent session;
    *   if `false`, start a fresh session.
    */
-  private _retryNode(planId: string, nodeId: string, resumeSession: boolean) {
+  private async _retryNode(planId: string, nodeId: string, resumeSession: boolean) {
     // If resumeSession is false, provide an agent spec that clears the session
     const newWork = resumeSession ? undefined : { type: 'agent' as const, instructions: '', resumeSession: false };
     
-    const result = this._planRunner.retryNode(planId, nodeId, {
+    const result = await this._planRunner.retryNode(planId, nodeId, {
       newWork,
       clearWorktree: false,
     });
@@ -567,6 +585,10 @@ export class NodeDetailPanel {
       ? this._buildAttemptHistoryHtml(state)
       : '';
 
+    // Compute aggregated metrics across all attempts
+    const nodeMetrics = getNodeMetrics(state);
+    const nodeMetricsHtml = nodeMetrics ? this._buildMetricsSummaryHtml(nodeMetrics) : '';
+
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -621,7 +643,7 @@ export class NodeDetailPanel {
     </div>
     ${state.error ? `
     <div class="error-box">
-      <strong>Error:</strong> ${escapeHtml(state.error)}
+      <strong>Error:</strong> <span class="error-message">${escapeHtml(state.error)}</span>
       ${state.lastAttempt?.phase ? `<div class="error-phase">Failed in phase: <strong>${state.lastAttempt.phase}</strong></div>` : ''}
       ${state.lastAttempt?.exitCode !== undefined ? `<div class="error-phase">Exit code: <strong>${state.lastAttempt.exitCode}</strong></div>` : ''}
     </div>
@@ -662,6 +684,8 @@ export class NodeDetailPanel {
   </div>
   ` : ''}
   
+  ${nodeMetricsHtml}
+  
   <!-- Job Configuration -->
   <div class="section">
     <h3>Job Configuration</h3>
@@ -695,8 +719,6 @@ export class NodeDetailPanel {
   </div>
   
   ${workSummaryHtml}
-  
-
   
   <!-- Dependencies -->
   <div class="section">
@@ -802,7 +824,9 @@ export class NodeDetailPanel {
         } else if (action === 'retry-node-fresh') {
           vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
         } else if (action === 'force-fail-node') {
-          vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
+          if (confirm('Are you sure you want to force fail this node? This will mark it as failed and allow retry.')) {
+            vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
+          }
         }
       });
     });
@@ -1093,6 +1117,19 @@ export class NodeDetailPanel {
       };
     }
     
+    // For pending/ready nodes that have been retried, show the last attempt's phase statuses
+    if ((state.status === 'pending' || state.status === 'ready') && state.attemptHistory?.length) {
+      const lastAttempt = state.attemptHistory[state.attemptHistory.length - 1];
+      if (lastAttempt.stepStatuses) {
+        return {
+          prechecks: lastAttempt.stepStatuses.prechecks || 'pending',
+          work: lastAttempt.stepStatuses.work || 'pending',
+          commit: lastAttempt.stepStatuses.commit || 'pending',
+          postchecks: lastAttempt.stepStatuses.postchecks || 'pending',
+        };
+      }
+    }
+    
     // Fallback: derive phase status from execution state and error message
     const status = state.status;
     const error = state.error || '';
@@ -1327,7 +1364,7 @@ export class NodeDetailPanel {
       
       const errorHtml = attempt.error
         ? `<div class="attempt-error">
-            <strong>Error:</strong> ${escapeHtml(attempt.error)}
+            <strong>Error:</strong> <span class="error-message">${escapeHtml(attempt.error)}</span>
             ${attempt.failedPhase ? `<div style="margin-top: 4px;">Failed in phase: <strong>${attempt.failedPhase}</strong></div>` : ''}
             ${attempt.exitCode !== undefined ? `<div>Exit code: <strong>${attempt.exitCode}</strong></div>` : ''}
            </div>`
@@ -1338,18 +1375,29 @@ export class NodeDetailPanel {
         ? `<div class="attempt-context">
             ${attempt.baseCommit ? `<div class="attempt-meta-row"><strong>Base:</strong> <code>${attempt.baseCommit.slice(0, 8)}</code></div>` : ''}
             ${attempt.worktreePath ? `<div class="attempt-meta-row"><strong>Worktree:</strong> <code>${escapeHtml(attempt.worktreePath)}</code></div>` : ''}
-            ${attempt.workUsed ? `<div class="attempt-meta-row"><strong>Work:</strong> <code>${escapeHtml(formatWorkSpec(attempt.workUsed))}</code></div>` : ''}
+            ${attempt.workUsed ? `<div class="attempt-meta-row attempt-work-row"><strong>Work:</strong> <div class="attempt-work-content">${formatWorkSpecHtml(attempt.workUsed, escapeHtml)}</div></div>` : ''}
            </div>`
         : '';
       
+      // Trigger type badge
+      const triggerBadge = attempt.triggerType === 'auto-heal'
+        ? '<span class="trigger-badge auto-heal">🔧 Auto-Heal</span>'
+        : attempt.triggerType === 'retry'
+          ? '<span class="trigger-badge retry">🔄 Retry</span>'
+          : '';
+      
       // Build phase tabs for this attempt
       const phaseTabsHtml = attempt.logs ? this._buildAttemptPhaseTabs(attempt) : '';
+      
+      // Build compact metrics row for this attempt
+      const attemptMetricsHtml = attempt.metrics ? this._buildAttemptMetricsHtml(attempt.metrics) : '';
       
       return `
         <div class="attempt-card" data-attempt="${attempt.attemptNumber}">
           <div class="attempt-header" data-expanded="false">
             <div class="attempt-header-left">
               <span class="attempt-badge">#${attempt.attemptNumber}</span>
+              ${triggerBadge}
               <span class="step-indicators">${stepIndicators}</span>
               <span class="attempt-time">${timestamp}</span>
               <span class="attempt-duration">(${duration})</span>
@@ -1361,6 +1409,7 @@ export class NodeDetailPanel {
               <div class="attempt-meta-row"><strong>Status:</strong> <span class="status-${attempt.status}">${attempt.status}</span></div>
               ${sessionHtml}
             </div>
+            ${attemptMetricsHtml}
             ${contextHtml}
             ${errorHtml}
             ${phaseTabsHtml}
@@ -1375,6 +1424,91 @@ export class NodeDetailPanel {
       ${cards}
     </div>
     `;
+  }
+  
+  /**
+   * Build a prominent metrics summary card for aggregated node metrics.
+   *
+   * @param metrics - The aggregated CopilotUsageMetrics to display.
+   * @returns HTML fragment string for the metrics card.
+   */
+  private _buildMetricsSummaryHtml(metrics: CopilotUsageMetrics): string {
+    const statsHtml: string[] = [];
+    
+    if (metrics.premiumRequests !== undefined) {
+      statsHtml.push(`<div class="metrics-stat">🎫 ${formatPremiumRequests(metrics.premiumRequests)}</div>`);
+    }
+    if (metrics.apiTimeSeconds !== undefined) {
+      statsHtml.push(`<div class="metrics-stat">⏱ API: ${formatDurationSeconds(metrics.apiTimeSeconds)}</div>`);
+    }
+    if (metrics.sessionTimeSeconds !== undefined) {
+      statsHtml.push(`<div class="metrics-stat">🕐 Session: ${formatDurationSeconds(metrics.sessionTimeSeconds)}</div>`);
+    }
+    if (metrics.codeChanges) {
+      statsHtml.push(`<div class="metrics-stat">📝 Code: ${formatCodeChanges(metrics.codeChanges)}</div>`);
+    }
+    
+    let modelBreakdownHtml = '';
+    if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
+      const rows = metrics.modelBreakdown.map(b => {
+        const cached = b.cachedTokens ? `, ${formatTokenCount(b.cachedTokens)} cached` : '';
+        const reqs = b.premiumRequests !== undefined ? ` (${b.premiumRequests} req)` : '';
+        return `<div class="model-row">
+          <span class="model-name">${escapeHtml(b.model)}</span>
+          <span class="model-tokens">${formatTokenCount(b.inputTokens)} in, ${formatTokenCount(b.outputTokens)} out${cached}${reqs}</span>
+        </div>`;
+      }).join('');
+      
+      modelBreakdownHtml = `
+        <div class="model-breakdown">
+          <div class="model-breakdown-label">Model Breakdown:</div>
+          <div class="model-breakdown-list">${rows}</div>
+        </div>`;
+    }
+    
+    return `
+    <div class="section metrics-card">
+      <h3>⚡ AI Usage</h3>
+      <div class="metrics-stats-grid">${statsHtml.join('')}</div>
+      ${modelBreakdownHtml}
+    </div>`;
+  }
+  
+  /**
+   * Build a compact metrics row for an individual attempt.
+   *
+   * @param metrics - The CopilotUsageMetrics for a single attempt.
+   * @returns HTML fragment string for a compact metrics display.
+   */
+  private _buildAttemptMetricsHtml(metrics: CopilotUsageMetrics): string {
+    const parts: string[] = [];
+    
+    if (metrics.premiumRequests !== undefined) {
+      parts.push(`🎫 ${metrics.premiumRequests} Premium req`);
+    }
+    if (metrics.apiTimeSeconds !== undefined || metrics.sessionTimeSeconds !== undefined) {
+      const apiPart = metrics.apiTimeSeconds !== undefined ? `${formatDurationSeconds(metrics.apiTimeSeconds)} API` : '';
+      const sessionPart = metrics.sessionTimeSeconds !== undefined ? `${formatDurationSeconds(metrics.sessionTimeSeconds)} session` : '';
+      const timeParts = [apiPart, sessionPart].filter(Boolean).join(' / ');
+      parts.push(`⏱ ${timeParts}`);
+    }
+    if (metrics.codeChanges) {
+      parts.push(`📝 ${formatCodeChanges(metrics.codeChanges)}`);
+    }
+    
+    let modelLine = '';
+    if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
+      modelLine = metrics.modelBreakdown.map(b => {
+        const cached = b.cachedTokens ? `, ${formatTokenCount(b.cachedTokens)} cached` : '';
+        return `${escapeHtml(b.model)}: ${formatTokenCount(b.inputTokens)} in, ${formatTokenCount(b.outputTokens)} out${cached}`;
+      }).join('; ');
+    }
+    
+    return `
+    <div class="attempt-metrics-compact">
+      <div class="attempt-metrics-row">${parts.join('  ')}</div>
+      ${modelLine ? `<div class="attempt-metrics-models">${modelLine}</div>` : ''}
+    </div>`;
   }
   
   /**
@@ -1594,6 +1728,19 @@ export class NodeDetailPanel {
       color: #63b3ed;
       border: 1px solid rgba(99, 179, 237, 0.3);
     }
+    .agent-model-label {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--vscode-editor-font-family), monospace;
+      color: #a78bfa;
+      background: rgba(167, 139, 250, 0.12);
+      border: 1px solid rgba(167, 139, 250, 0.25);
+      padding: 2px 8px;
+      border-radius: 3px;
+      margin-bottom: 6px;
+      margin-left: 4px;
+    }
     .work-type-badge.shell {
       background: rgba(72, 187, 120, 0.2);
       color: #48bb78;
@@ -1699,6 +1846,15 @@ export class NodeDetailPanel {
       padding: 10px;
       margin-top: 12px;
       color: #f48771;
+    }
+    .error-message {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--vscode-editor-font-family), monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      display: block;
+      margin-top: 4px;
     }
     .error-phase {
       margin-top: 6px;
@@ -2055,6 +2211,21 @@ export class NodeDetailPanel {
       min-width: 20px;
       text-align: center;
     }
+    .trigger-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+    .trigger-badge.auto-heal {
+      background: rgba(255, 167, 38, 0.2);
+      color: #ffa726;
+    }
+    .trigger-badge.retry {
+      background: rgba(66, 165, 245, 0.2);
+      color: #42a5f5;
+    }
     .step-indicators {
       display: flex;
       gap: 4px;
@@ -2103,6 +2274,15 @@ export class NodeDetailPanel {
       color: #f48771;
       font-size: 11px;
     }
+    .attempt-error .error-message {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--vscode-editor-font-family), monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      display: block;
+      margin-top: 4px;
+    }
     .attempt-context {
       margin-top: 8px;
       padding: 8px;
@@ -2116,6 +2296,22 @@ export class NodeDetailPanel {
       border-radius: 2px;
       font-family: var(--vscode-editor-font-family);
       font-size: 10px;
+    }
+    .attempt-work-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .attempt-work-content {
+      margin-top: 4px;
+    }
+    .attempt-work-content .work-instructions {
+      font-size: 11px;
+      padding: 8px 12px;
+    }
+    .attempt-work-content .work-command {
+      font-size: 11px;
+      padding: 6px 10px;
     }
     /* Attempt phase tabs */
     .attempt-phases {
@@ -2175,6 +2371,72 @@ export class NodeDetailPanel {
       word-break: break-word;
       max-height: 300px;
       overflow: auto;
+    }
+    
+    /* AI Usage Metrics Card */
+    .metrics-card {
+      border: 1px solid var(--vscode-progressBar-background);
+      background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-progressBar-background));
+      border-radius: 8px;
+    }
+    .metrics-card h3 {
+      margin-top: 0;
+    }
+    .metrics-stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 16px;
+      margin-bottom: 12px;
+    }
+    .metrics-stat {
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .model-breakdown {
+      margin-top: 8px;
+    }
+    .model-breakdown-label {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      margin-bottom: 6px;
+    }
+    .model-breakdown-list {
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      padding: 8px 10px;
+    }
+    .model-row {
+      display: flex;
+      gap: 12px;
+      align-items: baseline;
+      padding: 2px 0;
+      font-size: 11px;
+      font-family: var(--vscode-editor-font-family), monospace;
+    }
+    .model-name {
+      font-weight: 600;
+      min-width: 140px;
+    }
+    .model-tokens {
+      color: var(--vscode-descriptionForeground);
+    }
+    /* Compact attempt-level metrics */
+    .attempt-metrics-compact {
+      margin-top: 8px;
+      padding: 6px 8px;
+      background: color-mix(in srgb, var(--vscode-sideBar-background) 80%, var(--vscode-progressBar-background));
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    .attempt-metrics-row {
+      white-space: nowrap;
+    }
+    .attempt-metrics-models {
+      margin-top: 3px;
+      color: var(--vscode-descriptionForeground);
+      font-family: var(--vscode-editor-font-family), monospace;
+      font-size: 10px;
     }
     `;
   }

@@ -7,7 +7,7 @@
  * @module plan/types/plan
  */
 
-import type { WorkSpec } from './specs';
+import type { WorkSpec, CopilotUsageMetrics } from './specs';
 import type { NodeStatus, JobNodeSpec, GroupSpec, PlanNode, JobNode } from './nodes';
 
 // ============================================================================
@@ -35,6 +35,9 @@ export interface PlanSpec {
   
   /** Whether to clean up worktrees after successful merges (default: true) */
   cleanUpSuccessfulWork?: boolean;
+  
+  /** Whether to create the plan in a paused state (default: true for plans, false for single jobs) */
+  startPaused?: boolean;
   
   /** Job nodes at the top level of this Plan */
   jobs: JobNodeSpec[];
@@ -137,6 +140,14 @@ export interface NodeExecutionState {
    * Cleared when new work is provided or worktree is reset.
    */
   resumeFromPhase?: 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
+
+  /**
+   * Tracks which phases have had an auto-heal attempt.
+   * Each phase gets at most one auto-heal attempt independently, so if
+   * prechecks is healed successfully and postchecks later fails, postchecks
+   * will still get its own auto-heal attempt.
+   */
+  autoHealAttempted?: Partial<Record<'prechecks' | 'work' | 'postchecks', boolean>>;
   
   /**
    * Details about the last execution attempt (for retry context).
@@ -159,6 +170,12 @@ export interface NodeExecutionState {
    * Each attempt captures the state and outcome of an execution try.
    */
   attemptHistory?: AttemptRecord[];
+  
+  /**
+   * Agent execution metrics (token usage, duration, turns, tool calls).
+   * Captured from agent delegation results when available.
+   */
+  metrics?: CopilotUsageMetrics;
 }
 
 /**
@@ -170,6 +187,9 @@ export interface AttemptRecord {
   
   /** Status of this attempt */
   status: 'succeeded' | 'failed' | 'canceled';
+  
+  /** What triggered this attempt */
+  triggerType?: 'initial' | 'auto-heal' | 'retry';
   
   /** When the attempt started */
   startedAt: number;
@@ -211,6 +231,9 @@ export interface AttemptRecord {
   
   /** Work spec used for this attempt (for reference) */
   workUsed?: WorkSpec;
+  
+  /** Execution metrics captured during this attempt */
+  metrics?: CopilotUsageMetrics;
 }
 
 // ============================================================================
@@ -466,6 +489,8 @@ export interface JobExecutionResult {
   failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri';
   /** Exit code from failed process */
   exitCode?: number;
+  /** Agent execution metrics (token usage, duration, turns, tool calls) */
+  metrics?: CopilotUsageMetrics;
 }
 
 /**
@@ -486,6 +511,9 @@ export interface ExecutionContext {
   
   /** Callback to report progress */
   onProgress?: (step: string) => void;
+  
+  /** Callback to report per-phase status changes (e.g. 'running', 'success', 'failed') */
+  onStepStatusChange?: (phase: string, status: PhaseStatus) => void;
   
   /** Abort signal for cancellation */
   abortSignal?: AbortSignal;
@@ -553,7 +581,10 @@ export interface EvidenceValidationResult {
   evidence?: EvidenceFile;
 
   /** How the node satisfied evidence requirements */
-  method?: 'file_changes' | 'evidence_file' | 'expects_no_changes' | 'none';
+  method?: 'file_changes' | 'evidence_file' | 'expects_no_changes' | 'ai_review' | 'none';
+
+  /** AI review summary when method is 'ai_review' */
+  aiReviewSummary?: string;
 }
 
 // ============================================================================

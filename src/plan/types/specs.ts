@@ -133,6 +133,83 @@ export interface AgentSpec {
 }
 
 /**
+ * Token usage metrics from an AI model invocation.
+ * @deprecated Use {@link ModelUsageBreakdown} and {@link CopilotUsageMetrics} instead.
+ */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  model: string;
+  estimatedCostUsd?: number;
+}
+
+/**
+ * Execution metrics captured during agent delegation.
+ * @deprecated Use {@link CopilotUsageMetrics} instead.
+ */
+export interface AgentExecutionMetrics {
+  tokenUsage?: TokenUsage;
+  durationMs: number;
+  turns?: number;
+  toolCalls?: number;
+}
+
+/**
+ * Per-model token usage breakdown from a Copilot CLI invocation.
+ */
+export interface ModelUsageBreakdown {
+  /** Model name (e.g. 'claude-opus-4.6', 'gpt-4.1') */
+  model: string;
+  /** Input tokens */
+  inputTokens: number;
+  /** Output tokens */
+  outputTokens: number;
+  /** Cached tokens (if reported) */
+  cachedTokens?: number;
+  /** Estimated premium requests for this model */
+  premiumRequests?: number;
+}
+
+/**
+ * Code change statistics from a Copilot CLI invocation.
+ */
+export interface CodeChangeStats {
+  /** Lines added */
+  linesAdded: number;
+  /** Lines removed */
+  linesRemoved: number;
+}
+
+/**
+ * Rich execution metrics captured from Copilot CLI output.
+ * Replaces the old TokenUsage / AgentExecutionMetrics.
+ */
+export interface CopilotUsageMetrics {
+  /** Total estimated premium requests */
+  premiumRequests?: number;
+  /** API time in seconds */
+  apiTimeSeconds?: number;
+  /** Total session time in seconds */
+  sessionTimeSeconds?: number;
+  /** Code change stats (+N -M) */
+  codeChanges?: CodeChangeStats;
+  /** Per-model usage breakdown */
+  modelBreakdown?: ModelUsageBreakdown[];
+  /** Wall-clock duration in milliseconds (measured by orchestrator) */
+  durationMs: number;
+  /** Number of agent turns/iterations */
+  turns?: number;
+  /** Number of tool calls */
+  toolCalls?: number;
+  /**
+   * Legacy token usage (backward compatibility).
+   * @deprecated Use {@link modelBreakdown} instead.
+   */
+  tokenUsage?: TokenUsage;
+}
+
+/**
  * Work specification - what to execute.
  * Can be:
  * - string: Legacy format, interpreted as shell command or "@agent ..." 

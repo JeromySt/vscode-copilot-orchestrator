@@ -430,6 +430,41 @@ Maps are serialized as `Record<string, T>` objects for JSON compatibility and re
 
 ---
 
+## Model Discovery
+
+### Dynamic Model Discovery
+
+The orchestrator discovers available LLM models at runtime by parsing `copilot --help` output. This ensures compatibility as Copilot CLI evolves.
+
+**Flow:**
+1. On extension activation, `discoverAvailableModels()` runs
+2. Parses `--model` choices from CLI help
+3. Caches results for 1 hour
+4. MCP tool schemas include discovered models as enum
+
+**Classification:**
+- Vendor: claude→anthropic, gpt→openai, gemini→google
+- Tier: mini/haiku→fast, opus/max→premium, default→standard
+
+---
+
+## Token Tracking
+
+### Token Usage Tracking
+
+After each agent job completes, the orchestrator extracts token usage from Copilot CLI logs.
+
+**Extracted Metrics:**
+- Input tokens
+- Output tokens
+- Model used
+- Estimated cost (based on public pricing)
+
+**Storage:**
+Metrics are stored in `NodeExecutionState.metrics` and persisted with the plan.
+
+---
+
 ## Extension Points and Interfaces
 
 All DI interfaces are defined in `src/interfaces/` and exported via `src/interfaces/index.ts`.

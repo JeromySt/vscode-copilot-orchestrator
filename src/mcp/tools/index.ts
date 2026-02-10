@@ -18,9 +18,9 @@ import { getNodeToolDefinitions } from './nodeTools';
  *
  * @returns Combined array of all {@link McpTool} definitions.
  */
-export function getAllToolDefinitions(): McpTool[] {
+export async function getAllToolDefinitions(): Promise<McpTool[]> {
   return [
-    ...getPlanToolDefinitions(),
-    ...getNodeToolDefinitions(),
+    ...(await getPlanToolDefinitions()),
+    ...(await getNodeToolDefinitions()),
   ];
 }

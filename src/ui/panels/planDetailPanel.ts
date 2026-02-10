@@ -13,6 +13,7 @@
 import * as vscode from 'vscode';
 import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState } from '../../plan';
 import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
+import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges } from '../../plan/metricsAggregator';
 
 /**
  * Webview panel that shows a detailed view of a single Plan's execution.
@@ -525,7 +526,8 @@ export class planDetailPanel {
       total,
       completed,
       startedAt: plan.startedAt,
-      endedAt: effectiveEndedAt
+      endedAt: effectiveEndedAt,
+      planMetrics: this._serializeMetrics(plan)
     });
   }
   
@@ -610,6 +612,7 @@ export class planDetailPanel {
     
     // Build work summary from node states
     const workSummaryHtml = this._buildWorkSummaryHtml(plan);
+    const metricsBarHtml = this._buildMetricsBarHtml(plan);
     
     return `<!DOCTYPE html>
 <html>
@@ -1081,6 +1084,35 @@ export class planDetailPanel {
     .job-stats .stat-modified { color: #dcdcaa; }
     .job-stats .stat-deleted { color: #f48771; }
     
+    .plan-metrics-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 12px;
+      background: var(--vscode-sideBar-background);
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .plan-metrics-bar .metrics-label {
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .plan-metrics-bar .metric-item {
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .plan-metrics-bar .metric-value {
+      font-family: var(--vscode-editor-font-family);
+      font-weight: 600;
+    }
+    .plan-metrics-bar .models-line {
+      width: 100%;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      padding-left: 2px;
+    }
+    
     .actions {
       margin-top: 16px;
       display: flex;
@@ -1174,6 +1206,8 @@ export class planDetailPanel {
            style="width: ${progress}%"></div>
     </div>
   </div>
+  
+  ${metricsBarHtml}
   
   <div id="mermaid-diagram">
     <div class="zoom-controls">
@@ -1636,7 +1670,7 @@ ${mermaidDef}
     // Handle incremental status updates without full re-render (preserves zoom/scroll)
     function handleStatusUpdate(msg) {
       try {
-        const { planStatus, nodeStatuses, counts, progress, total, completed, startedAt, endedAt } = msg;
+        const { planStatus, nodeStatuses, counts, progress, total, completed, startedAt, endedAt, planMetrics } = msg;
         
         // Update plan status badge
         const statusBadge = document.querySelector('.status-badge');
@@ -1676,6 +1710,32 @@ ${mermaidDef}
               value.textContent = (counts.pending || 0) + (counts.ready || 0);
             }
           });
+        }
+        
+        // Update metrics bar
+        if (planMetrics) {
+          const metricsBar = document.getElementById('planMetricsBar');
+          if (metricsBar) {
+            const items = [];
+            if (planMetrics.premiumRequests) {
+              items.push('<span class="metric-item">🎫 <span class="metric-value">' + planMetrics.premiumRequests + '</span></span>');
+            }
+            if (planMetrics.apiTime) {
+              items.push('<span class="metric-item">⏱ API: <span class="metric-value">' + planMetrics.apiTime + '</span></span>');
+            }
+            if (planMetrics.sessionTime) {
+              items.push('<span class="metric-item">🕐 Session: <span class="metric-value">' + planMetrics.sessionTime + '</span></span>');
+            }
+            if (planMetrics.codeChanges) {
+              items.push('<span class="metric-item">📝 <span class="metric-value">' + planMetrics.codeChanges + '</span></span>');
+            }
+            var modelsHtml = '';
+            if (planMetrics.models) {
+              modelsHtml = '<div class="models-line">Models: ' + planMetrics.models + '</div>';
+            }
+            metricsBar.innerHTML = '<span class="metrics-label">⚡ AI Usage:</span> ' + items.join(' ') + modelsHtml;
+            metricsBar.style.display = '';
+          }
         }
         
         // Update legend counts
@@ -2136,6 +2196,84 @@ ${mermaidDef}
   }
   
   /**
+   * Serialize plan metrics into a plain object for the webview statusUpdate message.
+   */
+  private _serializeMetrics(plan: PlanInstance): Record<string, unknown> | undefined {
+    const metrics = getPlanMetrics(plan);
+    if (!metrics) { return undefined; }
+
+    const result: Record<string, unknown> = {};
+    if (metrics.premiumRequests !== undefined) {
+      result.premiumRequests = formatPremiumRequests(metrics.premiumRequests);
+    }
+    if (metrics.apiTimeSeconds !== undefined) {
+      result.apiTime = formatDurationSeconds(metrics.apiTimeSeconds);
+    }
+    if (metrics.sessionTimeSeconds !== undefined) {
+      result.sessionTime = formatDurationSeconds(metrics.sessionTimeSeconds);
+    }
+    if (metrics.codeChanges) {
+      result.codeChanges = formatCodeChanges(metrics.codeChanges);
+    }
+    if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
+      result.models = metrics.modelBreakdown
+        .sort((a, b) => (b.premiumRequests ?? 0) - (a.premiumRequests ?? 0))
+        .map(m => {
+          const reqs = m.premiumRequests ?? 0;
+          return `${escapeHtml(m.model)} (${reqs} req)`;
+        })
+        .join(' · ');
+    }
+    return result;
+  }
+
+  /**
+   * Build a compact AI usage metrics bar from plan-level aggregate metrics.
+   *
+   * @param plan - The Plan instance to compute metrics for.
+   * @returns HTML string (empty if no metrics data is available).
+   */
+  private _buildMetricsBarHtml(plan: PlanInstance): string {
+    const metrics = getPlanMetrics(plan);
+    if (!metrics) { return '<div class="plan-metrics-bar" id="planMetricsBar" style="display:none;"></div>'; }
+
+    const parts: string[] = [];
+    if (metrics.premiumRequests !== undefined) {
+      parts.push(`<span class="metric-item">🎫 <span class="metric-value">${escapeHtml(formatPremiumRequests(metrics.premiumRequests))}</span></span>`);
+    }
+    if (metrics.apiTimeSeconds !== undefined) {
+      parts.push(`<span class="metric-item">⏱ API: <span class="metric-value">${escapeHtml(formatDurationSeconds(metrics.apiTimeSeconds))}</span></span>`);
+    }
+    if (metrics.sessionTimeSeconds !== undefined) {
+      parts.push(`<span class="metric-item">🕐 Session: <span class="metric-value">${escapeHtml(formatDurationSeconds(metrics.sessionTimeSeconds))}</span></span>`);
+    }
+    if (metrics.codeChanges) {
+      parts.push(`<span class="metric-item">📝 <span class="metric-value">${escapeHtml(formatCodeChanges(metrics.codeChanges))}</span></span>`);
+    }
+
+    if (parts.length === 0) { return '<div class="plan-metrics-bar" id="planMetricsBar" style="display:none;"></div>'; }
+
+    let modelsLine = '';
+    if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
+      const modelParts = metrics.modelBreakdown
+        .sort((a, b) => (b.premiumRequests ?? 0) - (a.premiumRequests ?? 0))
+        .map(m => {
+          const reqs = m.premiumRequests ?? 0;
+          return `${escapeHtml(m.model)} (${reqs} req)`;
+        });
+      modelsLine = `<div class="models-line">Models: ${modelParts.join(' · ')}</div>`;
+    }
+
+    return `
+    <div class="plan-metrics-bar" id="planMetricsBar">
+      <span class="metrics-label">⚡ AI Usage:</span>
+      ${parts.join('\n      ')}
+      ${modelsLine}
+    </div>
+    `;
+  }
+  
+  /**
    * Build a Mermaid flowchart definition for the Plan's node DAG.
    *
    * Recursively expands sub-plan nodes into subgraphs. Applies status-based
@@ -2234,12 +2372,14 @@ ${mermaidDef}
         durationLabel = ' | ' + formatDurationMs(duration);
       }
       
-      const displayLabel = this._truncateNodeLabel(label, durationLabel);
-      if (displayLabel !== label) {
-        nodeTooltips[sanitizedId] = label;
-      }
+      // Nodes are not truncated — they size their own Mermaid boxes.
+      const displayLabel = label;
       
-      lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);
+      // Add trailing non-breaking spaces to prevent Mermaid SVG text clipping
+      // Use 4 spaces to account for status icon width + duration label characters
+      const nbsp = '\u00A0';
+      const nodePadding = nbsp.repeat(4);
+      lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}${nodePadding}"]`);
       lines.push(`${indent}class ${sanitizedId} ${status}`);
       
       nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
@@ -2311,6 +2451,47 @@ ${mermaidDef}
         current.nodes = nodes;
       }
       
+      // Pre-compute rendered label width for each node (icon + name + duration)
+      // so that group labels can be truncated to the widest descendant node.
+      const nodeLabelWidths = new Map<string, number>();
+      for (const [nodeId, node] of d.nodes) {
+        const escapedName = this._escapeForMermaid(node.name);
+        const st = d.nodeStates.get(nodeId);
+        let dur = ' | --';
+        if (st?.startedAt) {
+          const endTime = st.endedAt || Date.now();
+          dur = ' | ' + formatDurationMs(endTime - st.startedAt);
+        }
+        // Total = icon(2) + name + duration (matches the formula in _truncateLabel)
+        nodeLabelWidths.set(nodeId, 2 + escapedName.length + dur.length);
+      }
+
+      // Recursively compute the max descendant-node label width for each group
+      const computeMaxGroupWidth = (treeNode: GroupTreeNode): number => {
+        let maxW = 0;
+        for (const { nodeId } of treeNode.nodes) {
+          const w = nodeLabelWidths.get(nodeId) || 0;
+          if (w > maxW) maxW = w;
+        }
+        for (const child of treeNode.children.values()) {
+          const w = computeMaxGroupWidth(child);
+          if (w > maxW) maxW = w;
+        }
+        return maxW;
+      };
+
+      const groupMaxWidths = new Map<string, number>();
+      const precomputeGroupWidths = (treeNode: GroupTreeNode, path: string) => {
+        groupMaxWidths.set(path, computeMaxGroupWidth(treeNode));
+        for (const [childName, child] of treeNode.children) {
+          const childPath = path ? `${path}/${childName}` : childName;
+          precomputeGroupWidths(child, childPath);
+        }
+      };
+      for (const [name, child] of groupTree.children) {
+        precomputeGroupWidths(child, name);
+      }
+
       // Recursively render group tree as nested subgraphs
       const renderGroupTree = (
         treeNode: GroupTreeNode,
@@ -2349,15 +2530,21 @@ ${mermaidDef}
         };
         const colors = groupColors[groupStatus] || groupColors.pending;
         
-        // For groups, use full path name without truncation (subgraphs have more room)
-        // Add trailing non-breaking spaces to give Mermaid extra room for text measurement
-        // (regular spaces may be collapsed/trimmed)
+        // Truncate group names based on the widest descendant node's rendered
+        // label width, so the group title never overflows its content box.
         const displayName = groupPath || treeNode.name;
         const escapedName = this._escapeForMermaid(displayName);
+        const maxWidth = groupMaxWidths.get(groupPath) || 0;
+        const truncatedGroupName = maxWidth > 0
+          ? this._truncateLabel(escapedName, groupDurationLabel, maxWidth)
+          : escapedName;
+        if (truncatedGroupName !== escapedName) {
+          nodeTooltips[sanitizedGroupId] = displayName;
+        }
         const nbsp = '\u00A0'; // non-breaking space
-        const padding = nbsp.repeat(6); // extra padding to prevent cutoff
+        const padding = nbsp.repeat(4); // extra padding to prevent cutoff
         
-        lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${escapedName}${groupDurationLabel}${padding}"]`);
+        lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedGroupName}${groupDurationLabel}${padding}"]`);
         
         const childIndent = currentIndent + '  ';
         
@@ -2508,22 +2695,16 @@ ${mermaidDef}
   }
 
   /**
-   * Maximum character length for a node label (name + duration) before truncation.
-   * Set to 45 to accommodate icon (2) + typical name (25) + duration (" | 00m 00s" = ~12).
-   */
-  private static readonly NODE_LABEL_MAX_LENGTH = 45;
-
-  /**
-   * Truncate a node name so that the combined label (name + duration suffix)
-   * stays within {@link NODE_LABEL_MAX_LENGTH} characters. When truncation
-   * occurs the name is trimmed and an ellipsis ('...') is appended.
+   * Truncate a label name so that the combined label (icon + name + duration)
+   * stays within the given `maxLen` characters. When truncation occurs the
+   * name is trimmed and an ellipsis ('...') is appended.
    *
-   * @param name - The escaped node name.
+   * @param name - The escaped display name.
    * @param durationLabel - The duration suffix (e.g., ' | 2m 34s'), may be empty.
+   * @param maxLen - Maximum total character count (icon(2) + name + duration).
    * @returns The (possibly truncated) name.
    */
-  private _truncateNodeLabel(name: string, durationLabel: string): string {
-    const maxLen = planDetailPanel.NODE_LABEL_MAX_LENGTH;
+  private _truncateLabel(name: string, durationLabel: string, maxLen: number): string {
     // +2 accounts for the status icon + space prefix ("✓ ")
     const totalLen = 2 + name.length + durationLabel.length;
     if (totalLen <= maxLen) {

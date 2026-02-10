@@ -488,7 +488,7 @@ export async function handleRetryGroup(args: any, ctx: PlanHandlerContext): Prom
     const errors: Array<{ id: string; error: string }> = [];
 
     for (const nodeId of nodeIdsToRetry) {
-      const result = ctx.PlanRunner.retryNode(args.group_id, nodeId, retryOptions);
+      const result = await ctx.PlanRunner.retryNode(args.group_id, nodeId, retryOptions);
       const node = plan.nodes.get(nodeId);
       if (result.success) {
         retriedNodes.push({ id: nodeId, name: node?.name || nodeId });
@@ -497,7 +497,7 @@ export async function handleRetryGroup(args: any, ctx: PlanHandlerContext): Prom
       }
     }
 
-    ctx.PlanRunner.resume(args.group_id);
+    await ctx.PlanRunner.resume(args.group_id);
 
     return {
       success: retriedNodes.length > 0,
@@ -536,9 +536,9 @@ export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promi
     }
 
     if (plan.nodes.has(nodeId)) {
-      const result = ctx.PlanRunner.retryNode(plan.id, nodeId, retryOptions);
+      const result = await ctx.PlanRunner.retryNode(plan.id, nodeId, retryOptions);
       if (result.success) {
-        ctx.PlanRunner.resume(plan.id);
+        await ctx.PlanRunner.resume(plan.id);
         return {
           success: true,
           message: `Retry initiated for node '${args.node_id}'.`,

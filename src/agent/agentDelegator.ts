@@ -11,7 +11,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { isCopilotCliAvailable } from './cliCheckCore';
+import { CopilotCliRunner, CopilotCliLogger } from './copilotCliRunner';
+import { CopilotStatsParser } from './copilotStatsParser';
+import { isValidModel } from './modelDiscovery';
 import * as git from '../git';
+import { TokenUsage, CopilotUsageMetrics } from '../plan/types';
 
 // ============================================================================
 // TYPES
@@ -37,6 +41,8 @@ export interface DelegateOptions {
   instructions?: string;
   /** Existing Copilot session ID to resume */
   sessionId?: string;
+  /** Model to use for the AI agent */
+  model?: string;
 }
 
 /**
@@ -51,6 +57,13 @@ export interface DelegateResult {
   error?: string;
   /** Exit code from the process */
   exitCode?: number;
+  /**
+   * Token usage metrics (if extracted from logs).
+   * @deprecated Use {@link metrics} instead.
+   */
+  tokenUsage?: TokenUsage;
+  /** Rich usage metrics parsed from Copilot CLI stdout */
+  metrics?: CopilotUsageMetrics;
 }
 
 /**
@@ -219,7 +232,21 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
    * Delegate task via GitHub Copilot CLI.
    */
   private async delegateViaCopilot(options: DelegateOptions): Promise<DelegateResult> {
-    const { jobId, taskDescription, label, worktreePath, sessionId } = options;
+    const { jobId, taskDescription, label, worktreePath, sessionId, model } = options;
+
+    // Validate model if provided
+    if (model && !await isValidModel(model)) {
+      this.logger.log(`[${label}] Warning: Model '${model}' not in discovered models`);
+    }
+
+    // Create CLI runner with logger adapter
+    const cliLogger: CopilotCliLogger = {
+      info: (msg) => this.logger.log(msg),
+      warn: (msg) => this.logger.log(msg),
+      error: (msg) => this.logger.log(msg),
+      debug: (msg) => this.logger.log(msg),
+    };
+    const cliRunner = new CopilotCliRunner(cliLogger);
 
     // Create job-specific directories for Copilot logs and session tracking
     const copilotJobDir = path.join(worktreePath, '.copilot-orchestrator');
@@ -232,24 +259,39 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       this.logger.log(`[${label}] Warning: Could not create Copilot log directory: ${e}`);
     }
 
-    // Build Copilot CLI command
-    let copilotCmd = `copilot -p ${JSON.stringify(taskDescription)} --stream off --allow-all-paths --allow-all-urls --allow-all-tools --log-dir ${JSON.stringify(copilotLogDir)} --log-level debug --share ${JSON.stringify(sessionSharePath)}`;
+    // Write instructions file using the unified runner
+    const { filePath: instructionsFile, dirPath: instructionsDir } = cliRunner.writeInstructionsFile(
+      worktreePath,
+      taskDescription,
+      undefined, // No additional instructions
+      label,
+      jobId
+    );
 
-    // Resume existing session if we have one
-    if (sessionId) {
-      this.logger.log(`[${label}] Resuming Copilot session: ${sessionId}`);
-      copilotCmd += ` --resume ${sessionId}`;
-    } else {
-      this.logger.log(`[${label}] Starting new Copilot session...`);
-    }
+    // Build command using the unified runner
+    const copilotCmd = cliRunner.buildCommand({
+      task: 'Complete the task described in the instructions.',
+      sessionId,
+      model,
+      logDir: copilotLogDir,
+      sharePath: sessionSharePath,
+    });
+    
+    this.logger.log(`[${label}] ${sessionId ? 'Resuming' : 'Starting new'} Copilot session...`);
+    
+    // Cleanup function using the unified runner
+    const cleanup = () => {
+      cliRunner.cleanupInstructionsFile(instructionsFile, instructionsDir, label);
+    };
 
     return new Promise<DelegateResult>((resolve) => {
       const proc = spawn(copilotCmd, [], {
         cwd: worktreePath,
-        shell: true
+        shell: true,
       });
 
       let capturedSessionId: string | undefined = sessionId;
+      const statsParser = new CopilotStatsParser();
 
       // Notify process spawned
       if (proc.pid) {
@@ -264,9 +306,12 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       let stderrFlushTimer: NodeJS.Timeout | null = null;
       const FLUSH_DELAY_MS = 3000; // Wait 3s of silence before flushing (Copilot streams tokens slowly)
       
-      // Helper to log a line and check for session ID
+      // Helper to log a line and check for session ID / completion marker
       const logLine = (line: string) => {
         this.logger.log(`[${label}] ${line}`);
+        
+        // Feed line to stats parser
+        statsParser.feedLine(line);
         
         // Try to extract session ID
         if (!capturedSessionId) {
@@ -337,7 +382,10 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
         }, FLUSH_DELAY_MS);
       });
 
-      proc.on('exit', (code: number | null) => {
+      proc.on('exit', async (code: number | null, signal: NodeJS.Signals | null) => {
+        // Clean up temp prompt file and instructions
+        cleanup();
+        
         // Clear any pending flush timers
         if (stdoutFlushTimer) clearTimeout(stdoutFlushTimer);
         if (stderrFlushTimer) clearTimeout(stderrFlushTimer);
@@ -363,25 +411,65 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
           }
         }
 
-        if (code !== 0) {
-          this.logger.log(`[${label}] Copilot exited with code ${code}`);
+        // Extract token usage from log files
+        const tokenUsage = await this.extractTokenUsage(copilotLogDir, model);
+
+        // Use parsed metrics from stdout, falling back to legacy log-based extraction
+        const parsedMetrics = statsParser.getMetrics();
+        let metrics: CopilotUsageMetrics | undefined;
+        if (parsedMetrics) {
+          metrics = parsedMetrics;
+          // Backfill legacy tokenUsage from model breakdown if available
+          if (!metrics.tokenUsage && metrics.modelBreakdown?.length) {
+            const totals = metrics.modelBreakdown.reduce(
+              (acc, m) => ({ input: acc.input + m.inputTokens, output: acc.output + m.outputTokens }),
+              { input: 0, output: 0 }
+            );
+            metrics.tokenUsage = {
+              inputTokens: totals.input,
+              outputTokens: totals.output,
+              totalTokens: totals.input + totals.output,
+              model: model || metrics.modelBreakdown[0].model,
+            };
+          }
+        } else if (tokenUsage) {
+          // Fallback: wrap legacy token usage in CopilotUsageMetrics
+          metrics = { durationMs: 0, tokenUsage };
+        }
+
+        // Detect "Task complete" marker in stdout to handle code=null as success
+        const taskCompleteDetected = stdoutBuffer.includes('Task complete') || stderrBuffer.includes('Task complete');
+        const effectiveCode = (code === null && taskCompleteDetected) ? 0 : code;
+
+        if (effectiveCode !== 0) {
+          const signalInfo = signal ? ` (signal: ${signal})` : '';
+          this.logger.log(`[${label}] Copilot exited with code ${code}${signalInfo}`);
           resolve({
             success: false,
             sessionId: capturedSessionId,
-            error: `Copilot failed with exit code ${code}`,
-            exitCode: code ?? undefined
+            error: `Copilot failed with exit code ${code}${signalInfo}`,
+            exitCode: code ?? undefined,
+            tokenUsage,
+            metrics,
           });
         } else {
-          this.logger.log(`[${label}] Copilot completed successfully`);
+          if (code === null) {
+            this.logger.log(`[${label}] Copilot completed (exit code null coerced to 0 — task completion marker was present)`);
+          } else {
+            this.logger.log(`[${label}] Copilot completed successfully`);
+          }
           resolve({
             success: true,
             sessionId: capturedSessionId,
-            exitCode: 0
+            exitCode: 0,
+            tokenUsage,
+            metrics,
           });
         }
       });
 
       proc.on('error', (err: Error) => {
+        cleanup();
         this.logger.log(`[${label}] Copilot delegation failed: ${err}`);
         if (proc.pid) {
           this.callbacks.onProcessExited?.(proc.pid);
@@ -392,6 +480,70 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
         });
       });
     });
+  }
+
+  /**
+   * Extract token usage from Copilot log files.
+   */
+  private async extractTokenUsage(logDir: string, model?: string): Promise<TokenUsage | undefined> {
+    try {
+      if (!fs.existsSync(logDir)) {
+        return undefined;
+      }
+
+      const logFiles = fs.readdirSync(logDir)
+        .filter(f => f.endsWith('.log'))
+        .map(f => ({
+          name: f,
+          time: fs.statSync(path.join(logDir, f)).mtime.getTime()
+        }))
+        .sort((a, b) => b.time - a.time);
+
+      if (logFiles.length === 0) {
+        return undefined;
+      }
+
+      const logContent = fs.readFileSync(path.join(logDir, logFiles[0].name), 'utf-8');
+
+      const patterns = [
+        /prompt_tokens["']?:\s*(\d+)/gi,
+        /completion_tokens["']?:\s*(\d+)/gi,
+        /input[_\s]tokens?["']?:\s*(\d+)/gi,
+        /output[_\s]tokens?["']?:\s*(\d+)/gi,
+      ];
+
+      let inputTokens = 0;
+      let outputTokens = 0;
+
+      // prompt_tokens / input_tokens → inputTokens
+      for (const pattern of [patterns[0], patterns[2]]) {
+        let match;
+        while ((match = pattern.exec(logContent)) !== null) {
+          inputTokens += parseInt(match[1], 10);
+        }
+      }
+
+      // completion_tokens / output_tokens → outputTokens
+      for (const pattern of [patterns[1], patterns[3]]) {
+        let match;
+        while ((match = pattern.exec(logContent)) !== null) {
+          outputTokens += parseInt(match[1], 10);
+        }
+      }
+
+      if (inputTokens === 0 && outputTokens === 0) {
+        return undefined;
+      }
+
+      return {
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+        model: model || 'unknown',
+      };
+    } catch (e) {
+      return undefined;
+    }
   }
 
   /**

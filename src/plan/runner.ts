@@ -15,7 +15,6 @@
 
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { spawn } from 'child_process';
 
 // Conditionally import vscode - may not be available in standalone processes
 let vscode: typeof import('vscode') | undefined;
@@ -56,6 +55,7 @@ import {
   nodePerformsWork,
   AttemptRecord,
   WorkSpec,
+  normalizeWorkSpec,
 } from './types';
 import { buildPlan, buildSingleJobPlan, PlanValidationError } from './builder';
 import { PlanStateMachine } from './stateMachine';
@@ -69,6 +69,7 @@ import {
   computeProgress,
 } from './helpers';
 import * as git from '../git';
+import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
 
 const log = Logger.for('plan-runner');
 
@@ -182,6 +183,10 @@ export interface PlanRunnerConfig {
 export interface RetryNodeOptions {
   /** New work spec to replace/augment original. Can be string, process, shell, or agent spec */
   newWork?: WorkSpec;
+  /** New prechecks spec to replace original */
+  newPrechecks?: WorkSpec | null;
+  /** New postchecks spec to replace original (use null to remove postchecks) */
+  newPostchecks?: WorkSpec | null;
   /** Reset worktree to base commit (default: false) */
   clearWorktree?: boolean;
 }
@@ -317,6 +322,12 @@ export class PlanRunner extends EventEmitter {
     // Store the Plan
     this.plans.set(plan.id, plan);
     
+    // Start paused by default (plans default to true, single jobs default to false)
+    const shouldPause = spec.startPaused !== undefined ? spec.startPaused : true;
+    if (shouldPause) {
+      plan.isPaused = true;
+    }
+    
     // Create state machine
     const sm = new PlanStateMachine(plan);
     this.setupStateMachineListeners(sm);
@@ -333,6 +344,7 @@ export class PlanRunner extends EventEmitter {
       nodes: plan.nodes.size,
       roots: plan.roots.length,
       leaves: plan.leaves.length,
+      paused: shouldPause,
     });
     
     return plan;
@@ -355,10 +367,17 @@ export class PlanRunner extends EventEmitter {
     baseBranch?: string;
     targetBranch?: string;
     expectsNoChanges?: boolean;
+    autoHeal?: boolean;
+    startPaused?: boolean;
   }): PlanInstance {
     const plan = buildSingleJobPlan(jobSpec, {
       repoPath: this.config.defaultRepoPath,
     });
+    
+    // Single jobs default to running (startPaused: false) unless explicitly paused
+    if (jobSpec.startPaused === true) {
+      plan.isPaused = true;
+    }
     
     // Store and setup
     this.plans.set(plan.id, plan);
@@ -1056,11 +1075,19 @@ export class PlanRunner extends EventEmitter {
    * @param planId - Plan identifier.
    * @returns `true` if the plan was found and resumed.
    */
-  resume(planId: string): boolean {
+  async resume(planId: string): Promise<boolean> {
     const plan = this.plans.get(planId);
     if (!plan) return false;
     
     log.info(`Resuming Plan: ${planId}`);
+    
+    // Fetch latest refs so worktrees created after resume use current branch state
+    try {
+      await git.repository.fetch(plan.repoPath, { all: true });
+      log.info(`Fetched latest refs for plan ${planId} before resuming`);
+    } catch (e: any) {
+      log.warn(`Git fetch failed before resume (continuing anyway): ${e.message}`);
+    }
     
     // Clear paused state if set
     if (plan.isPaused) {
@@ -1170,6 +1197,19 @@ export class PlanRunner extends EventEmitter {
       if (!plan.startedAt && status === 'running') {
         plan.startedAt = Date.now();
         this.emit('planStarted', plan);
+      }
+      
+      // Safety net: promote any pending nodes whose dependencies are now met.
+      // This handles edge cases like extension reload where persisted state
+      // saved 'pending' before the in-memory transition to 'ready'.
+      for (const [nodeId, state] of plan.nodeStates) {
+        if (state.status === 'pending') {
+          const node = plan.nodes.get(nodeId);
+          if (node && sm.areDependenciesMet(nodeId)) {
+            log.info(`Pump: promoting stuck pending node to ready: ${node.name}`);
+            sm.resetNodeToPending(nodeId);
+          }
+        }
       }
       
       // Get nodes to schedule - pass only actual job running count (sub-plans don't consume job slots)
@@ -1360,6 +1400,7 @@ export class PlanRunner extends EventEmitter {
       
       // Track whether executor succeeded (or was skipped for RI-only retry)
       let executorSuccess = false;
+      let autoHealSucceeded = false; // Track if success came from auto-heal
       
       // Check if resuming from merge-ri phase - skip executor entirely
       if (nodeState.resumeFromPhase === 'merge-ri') {
@@ -1383,6 +1424,10 @@ export class PlanRunner extends EventEmitter {
           onProgress: (step) => {
             log.debug(`Job progress: ${node.name} - ${step}`);
           },
+          onStepStatusChange: (phase, status) => {
+            if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+            (nodeState.stepStatuses as any)[phase] = status;
+          },
         };
         
         // Execute
@@ -1398,14 +1443,24 @@ export class PlanRunner extends EventEmitter {
           nodeState.copilotSessionId = result.copilotSessionId;
         }
         
+        // Store agent execution metrics
+        if (result.metrics) {
+          nodeState.metrics = result.metrics;
+        }
+        
         // Clear resumeFromPhase after execution (success or failure)
         nodeState.resumeFromPhase = undefined;
         
         if (result.success) {
           executorSuccess = true;
-          // Store completed commit
+          // Store completed commit.
+          // If the executor produced no commit (e.g., expectsNoChanges validation
+          // node), carry forward the baseCommit so downstream nodes in the FI
+          // chain still receive the correct parent commit.
           if (result.completedCommit) {
             nodeState.completedCommit = result.completedCommit;
+          } else if (!nodeState.completedCommit && nodeState.baseCommit) {
+            nodeState.completedCommit = nodeState.baseCommit;
           }
           
           // Store work summary on node state and aggregate to Plan
@@ -1429,6 +1484,7 @@ export class PlanRunner extends EventEmitter {
           // Record failed attempt in history
           const failedAttempt: AttemptRecord = {
             attemptNumber: nodeState.attempts,
+            triggerType: nodeState.attempts === 1 ? 'initial' : 'retry',
             status: 'failed',
             startedAt: nodeState.startedAt || Date.now(),
             endedAt: Date.now(),
@@ -1441,19 +1497,220 @@ export class PlanRunner extends EventEmitter {
             baseCommit: nodeState.baseCommit,
             logs: this.getNodeLogs(plan.id, node.id),
             workUsed: node.work,
+            metrics: nodeState.metrics,
           };
           nodeState.attemptHistory = [...(nodeState.attemptHistory || []), failedAttempt];
           
-          sm.transition(node.id, 'failed');
-          this.emit('nodeCompleted', plan.id, node.id, false);
+          // ============================================================
+          // AUTO-HEAL: Automatic AI-assisted retry for process/shell failures
+          // ============================================================
+          // If a process/shell phase failed and auto-heal is enabled,
+          // retry once by swapping ONLY the failed phase to a Copilot agent
+          // and resuming from that phase. Earlier phases that passed are
+          // skipped; later phases (including commit) run normally.
+          const failedPhase = result.failedPhase || 'work';
+          const isHealablePhase = ['prechecks', 'work', 'postchecks'].includes(failedPhase);
+          const failedWorkSpec = failedPhase === 'prechecks' ? node.prechecks
+            : failedPhase === 'postchecks' ? node.postchecks
+            : node.work;
+          const normalizedFailedSpec = normalizeWorkSpec(failedWorkSpec);
+          const isNonAgentWork = normalizedFailedSpec && normalizedFailedSpec.type !== 'agent';
+          const autoHealEnabled = node.autoHeal !== false; // default true
           
-          log.error(`Job failed: ${node.name}`, {
-            planId: plan.id,
-            nodeId: node.id,
-            phase: result.failedPhase || 'unknown',
-            error: result.error,
-          });
-          return;
+          const phaseAlreadyHealed = nodeState.autoHealAttempted?.[failedPhase as 'prechecks' | 'work' | 'postchecks'];
+          if (isHealablePhase && isNonAgentWork && autoHealEnabled && !phaseAlreadyHealed) {
+            log.info(`Auto-heal: attempting AI-assisted fix for ${node.name} (phase: ${failedPhase})`, {
+              planId: plan.id,
+              nodeId: node.id,
+              exitCode: result.exitCode,
+            });
+            
+            if (!nodeState.autoHealAttempted) nodeState.autoHealAttempted = {};
+            nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = true;
+            
+            // Log the auto-heal attempt in the failed phase's log stream
+            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '');
+            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: AI-ASSISTED FIX ATTEMPT ==========');
+            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', `Phase "${failedPhase}" failed. Delegating to Copilot agent to diagnose and fix.`);
+            
+            // Gather context the agent needs to diagnose and fix the failure:
+            // 1. The original command that was run
+            // 2. The full execution logs (stdout/stderr) from the failed phase
+            const originalCommand = (() => {
+              const spec = normalizeWorkSpec(failedWorkSpec);
+              if (!spec) return 'Unknown command';
+              if (spec.type === 'shell') return spec.command;
+              if (spec.type === 'process') return `${spec.executable} ${(spec.args || []).join(' ')}`;
+              return 'Unknown command';
+            })();
+            
+            // Get the execution logs for the failed phase — these contain
+            // the full stdout/stderr streams plus timing info
+            const phaseLogs = this.getNodeLogs(plan.id, node.id, failedPhase as ExecutionPhase);
+            // Truncate to last ~200 lines to avoid overwhelming the agent
+            const logLines = phaseLogs.split('\n');
+            const truncatedLogs = logLines.length > 200
+              ? `... (${logLines.length - 200} earlier lines omitted)\n` + logLines.slice(-200).join('\n')
+              : phaseLogs;
+            
+            const healSpec: WorkSpec = {
+              type: 'agent',
+              instructions: [
+                `# Auto-Heal: Fix Failed ${failedPhase} Phase`,
+                '',
+                `## Task Context`,
+                `This node's task: ${node.task || node.name}`,
+                '',
+                `## Original Command`,
+                '```',
+                originalCommand,
+                '```',
+                '',
+                `## Failure Details`,
+                `- Phase: ${failedPhase}`,
+                `- Exit code: ${result.exitCode ?? 'unknown'}`,
+                '',
+                `## Execution Logs`,
+                'The following are the full stdout/stderr logs from the failed execution:',
+                '',
+                '```',
+                truncatedLogs,
+                '```',
+                '',
+                `## Instructions`,
+                `1. Analyze the logs above to diagnose the root cause of the failure`,
+                `2. Fix the issue in the worktree (edit files, fix configs, etc.)`,
+                `3. Re-run the original command to verify it now passes:`,
+                '   ```',
+                `   ${originalCommand}`,
+                '   ```',
+              ].join('\n'),
+            };
+            
+            // Swap ONLY the failed phase to the agent, preserve the rest
+            const originalPrechecks = node.prechecks;
+            const originalWork = node.work;
+            const originalPostchecks = node.postchecks;
+            
+            if (failedPhase === 'prechecks') {
+              node.prechecks = healSpec;
+            } else if (failedPhase === 'work') {
+              node.work = healSpec;
+            } else if (failedPhase === 'postchecks') {
+              node.postchecks = healSpec;
+            }
+            
+            // Reset state for the heal attempt
+            nodeState.error = undefined;
+            nodeState.startedAt = Date.now();
+            nodeState.attempts++;
+            
+            // Execute with resumeFromPhase to skip already-passed phases
+            const healContext: ExecutionContext = {
+              plan,
+              node,
+              baseCommit: nodeState.baseCommit!,
+              worktreePath,
+              copilotSessionId: nodeState.copilotSessionId,
+              resumeFromPhase: failedPhase as ExecutionContext['resumeFromPhase'],
+              previousStepStatuses: nodeState.stepStatuses,
+              onProgress: (step) => {
+                log.debug(`Auto-heal progress: ${node.name} - ${step}`);
+              },
+              onStepStatusChange: (phase, status) => {
+                if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+                (nodeState.stepStatuses as any)[phase] = status;
+              },
+            };
+            
+            const healResult = await this.executor!.execute(healContext);
+            
+            // Restore original specs regardless of outcome
+            node.prechecks = originalPrechecks;
+            node.work = originalWork;
+            node.postchecks = originalPostchecks;
+            
+            // Store step statuses from heal attempt
+            if (healResult.stepStatuses) {
+              nodeState.stepStatuses = healResult.stepStatuses;
+            }
+            
+            // Capture session ID from heal attempt
+            if (healResult.copilotSessionId) {
+              nodeState.copilotSessionId = healResult.copilotSessionId;
+            }
+            
+            if (healResult.success) {
+              log.info(`Auto-heal succeeded for ${node.name}!`, {
+                planId: plan.id,
+                nodeId: node.id,
+              });
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: SUCCESS ==========');
+              
+              autoHealSucceeded = true;
+              if (healResult.completedCommit) {
+                nodeState.completedCommit = healResult.completedCommit;
+              }
+              if (healResult.workSummary) {
+                nodeState.workSummary = healResult.workSummary;
+                this.appendWorkSummary(plan, healResult.workSummary);
+              }
+              // Fall through to RI merge handling below
+            } else {
+              // Auto-heal also failed — record it and transition to failed
+              log.warn(`Auto-heal failed for ${node.name}`, {
+                planId: plan.id,
+                nodeId: node.id,
+                error: healResult.error,
+              });
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: FAILED ==========');
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'error', `Auto-heal could not fix the issue: ${healResult.error}`);
+              
+              nodeState.error = `Auto-heal failed: ${healResult.error}`;
+              
+              // Record heal attempt in history
+              const healAttempt: AttemptRecord = {
+                attemptNumber: nodeState.attempts,
+                triggerType: 'auto-heal',
+                status: 'failed',
+                startedAt: nodeState.startedAt || Date.now(),
+                endedAt: Date.now(),
+                failedPhase: healResult.failedPhase,
+                error: healResult.error,
+                exitCode: healResult.exitCode,
+                copilotSessionId: nodeState.copilotSessionId,
+                stepStatuses: nodeState.stepStatuses,
+                worktreePath: nodeState.worktreePath,
+                baseCommit: nodeState.baseCommit,
+                logs: this.getNodeLogs(plan.id, node.id),
+                workUsed: healSpec,
+                metrics: nodeState.metrics,
+              };
+              nodeState.attemptHistory = [...(nodeState.attemptHistory || []), healAttempt];
+              
+              sm.transition(node.id, 'failed');
+              this.emit('nodeCompleted', plan.id, node.id, false);
+              
+              log.error(`Job failed (after auto-heal): ${node.name}`, {
+                planId: plan.id,
+                nodeId: node.id,
+                error: healResult.error,
+              });
+              return;
+            }
+          } else {
+            // No auto-heal — transition to failed normally
+            sm.transition(node.id, 'failed');
+            this.emit('nodeCompleted', plan.id, node.id, false);
+            
+            log.error(`Job failed: ${node.name}`, {
+              planId: plan.id,
+              nodeId: node.id,
+              phase: result.failedPhase || 'unknown',
+              error: result.error,
+            });
+            return;
+          }
         }
       }
       
@@ -1484,11 +1741,10 @@ export class PlanRunner extends EventEmitter {
         
         log.info(`Merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
       } else if (isLeaf && plan.targetBranch && !nodeState.completedCommit) {
-        // Leaf node with no commit (e.g., expectsNoChanges) - nothing to merge to target
-        // Mark as "merged" so worktree cleanup can proceed
+        // Leaf node with no commit at all (no baseCommit either) - nothing to merge
         log.debug(`Leaf node ${node.name} has no commit to merge to ${plan.targetBranch} - marking as merged`);
         this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION ==========');
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', 'No commit to merge (expectsNoChanges or validation-only node)');
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', 'No commit to merge (validation-only root node)');
         this.execLog(plan.id, node.id, 'merge-ri', 'info', '==========================================');
         nodeState.mergedToTarget = true;
       } else if (isLeaf) {
@@ -1510,6 +1766,7 @@ export class PlanRunner extends EventEmitter {
         // Record failed attempt in history
         const riFailedAttempt: AttemptRecord = {
           attemptNumber: nodeState.attempts,
+          triggerType: autoHealSucceeded ? 'auto-heal' : (nodeState.attempts === 1 ? 'initial' : 'retry'),
           status: 'failed',
           startedAt: nodeState.startedAt || Date.now(),
           endedAt: Date.now(),
@@ -1522,6 +1779,7 @@ export class PlanRunner extends EventEmitter {
           completedCommit: nodeState.completedCommit, // Work was successful, so we have the commit
           logs: this.getNodeLogs(plan.id, node.id),
           workUsed: node.work,
+          metrics: nodeState.metrics,
         };
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), riFailedAttempt];
         
@@ -1538,6 +1796,7 @@ export class PlanRunner extends EventEmitter {
         // Record successful attempt in history
         const successAttempt: AttemptRecord = {
           attemptNumber: nodeState.attempts,
+          triggerType: autoHealSucceeded ? 'auto-heal' : (nodeState.attempts === 1 ? 'initial' : 'retry'),
           status: 'succeeded',
           startedAt: nodeState.startedAt || Date.now(),
           endedAt: Date.now(),
@@ -1547,6 +1806,7 @@ export class PlanRunner extends EventEmitter {
           baseCommit: nodeState.baseCommit,
           logs: this.getNodeLogs(plan.id, node.id),
           workUsed: node.work,
+          metrics: nodeState.metrics,
         };
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
         
@@ -1592,6 +1852,7 @@ export class PlanRunner extends EventEmitter {
       // Record failed attempt in history
       const errorAttempt: AttemptRecord = {
         attemptNumber: nodeState.attempts,
+        triggerType: nodeState.attempts === 1 ? 'initial' : 'retry',
         status: 'failed',
         startedAt: nodeState.startedAt || Date.now(),
         endedAt: Date.now(),
@@ -1603,6 +1864,7 @@ export class PlanRunner extends EventEmitter {
         baseCommit: nodeState.baseCommit,
         logs: this.getNodeLogs(plan.id, node.id),
         workUsed: node.work,
+        metrics: nodeState.metrics,
       };
       nodeState.attemptHistory = [...(nodeState.attemptHistory || []), errorAttempt];
       
@@ -2004,62 +2266,35 @@ export class PlanRunner extends EventEmitter {
   ): Promise<boolean> {
     const prefer = getConfig<string>('copilotOrchestrator.merge', 'prefer', 'theirs');
     
-    const mergeInstruction =
-      `@agent Resolve the current git merge conflict. ` +
+    const mergeTask =
+      `Resolve the current git merge conflict. ` +
       `We are merging '${sourceBranch}' into '${targetBranch}'. ` +
       `Prefer '${prefer}' changes when there are conflicts. ` +
       `Resolve all conflicts, stage the changes with 'git add', and commit with message '${commitMessage}'`;
     
-    const copilotCmd = `copilot -p ${JSON.stringify(mergeInstruction)} --stream off --allow-all-paths --allow-all-tools`;
-    
     log.info(`Running Copilot CLI to resolve conflicts...`, { cwd });
     
-    // Helper to log CLI output to execution logs
-    const logOutput = (line: string) => {
-      if (logContext && line.trim()) {
-        this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  [copilot] ${line.trim()}`);
-      }
+    const cliLogger: CopilotCliLogger = {
+      info: (msg) => log.info(msg),
+      warn: (msg) => log.warn(msg),
+      error: (msg) => log.error(msg),
+      debug: (msg) => log.debug(msg),
     };
     
-    const result = await new Promise<{ status: number | null }>((resolve) => {
-      const child = spawn(copilotCmd, [], {
-        cwd,
-        shell: true,
-        timeout: 300000, // 5 minute timeout
-      });
-      
-      // Capture stdout
-      child.stdout?.on('data', (data: Buffer) => {
-        const lines = data.toString().split('\n');
-        lines.forEach(line => {
-          log.debug(`[copilot] ${line}`);
-          logOutput(line);
-        });
-      });
-      
-      // Capture stderr
-      child.stderr?.on('data', (data: Buffer) => {
-        const lines = data.toString().split('\n');
-        lines.forEach(line => {
-          log.debug(`[copilot] ${line}`);
-          logOutput(line);
-        });
-      });
-      
-      child.on('close', (code) => {
-        resolve({ status: code });
-      });
-      
-      child.on('error', (err) => {
-        log.error('Copilot CLI spawn error', { error: err.message });
-        if (logContext) {
-          this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'error', `  [copilot] Error: ${err.message}`);
+    const runner = new CopilotCliRunner(cliLogger);
+    const result = await runner.run({
+      cwd,
+      task: mergeTask,
+      label: 'merge-conflict',
+      timeout: 300000,
+      onOutput: (line) => {
+        if (logContext && line.trim()) {
+          this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  [copilot] ${line.trim()}`);
         }
-        resolve({ status: 1 });
-      });
+      },
     });
     
-    return result.status === 0;
+    return result.success;
   }
   
   /**
@@ -2366,14 +2601,20 @@ export class PlanRunner extends EventEmitter {
       this.executor.cancel(planId, nodeId);
     }
     
-    // Force transition to failed state
-    nodeState.status = 'failed';
-    nodeState.endedAt = Date.now();
+    // Set error before transition so it's available in side-effect handlers
     nodeState.error = failReason;
     
-    // Increment version counters for UI change detection
-    nodeState.version = (nodeState.version || 0) + 1;
-    plan.stateVersion = (plan.stateVersion || 0) + 1;
+    // Use state machine transition to properly propagate failure
+    // This handles: status change, timestamps, version increments,
+    // blocking dependents, updating group state, and checking plan completion
+    const transitioned = sm.transition(nodeId, 'failed');
+    if (!transitioned) {
+      // Fallback: force it directly (should not happen for running/scheduled nodes)
+      nodeState.status = 'failed';
+      nodeState.endedAt = Date.now();
+      nodeState.version = (nodeState.version || 0) + 1;
+      plan.stateVersion = (plan.stateVersion || 0) + 1;
+    }
     
     // Note: attempts was already incremented when the node started running,
     // so we don't increment it again here
@@ -2396,6 +2637,7 @@ export class PlanRunner extends EventEmitter {
     
     nodeState.attemptHistory.push({
       attemptNumber: nodeState.attempts || 1,
+      triggerType: 'retry',
       startedAt: nodeState.startedAt || Date.now(),
       endedAt: Date.now(),
       status: 'failed',
@@ -2436,7 +2678,7 @@ export class PlanRunner extends EventEmitter {
    * @param options - Optional overrides (new work spec, worktree reset).
    * @returns `{ success: true }` if retry was initiated, or `{ success: false, error }`.
    */
-  retryNode(planId: string, nodeId: string, options?: RetryNodeOptions): { success: boolean; error?: string } {
+  async retryNode(planId: string, nodeId: string, options?: RetryNodeOptions): Promise<{ success: boolean; error?: string }> {
     const plan = this.plans.get(planId);
     if (!plan) {
       return { success: false, error: `Plan not found: ${planId}` };
@@ -2498,7 +2740,24 @@ export class PlanRunner extends EventEmitter {
         jobNode.work = newWork;
         nodeState.copilotSessionId = undefined;
       }
-    } else if (!options?.newWork && node.type === 'job') {
+    }
+    
+    // Handle new prechecks/postchecks if provided
+    if (node.type === 'job') {
+      const jobNode = node as JobNode;
+      if (options?.newPrechecks !== undefined) {
+        // null means remove prechecks entirely
+        jobNode.prechecks = options.newPrechecks === null ? undefined : options.newPrechecks;
+        log.info(`Updated prechecks for retry: ${node.name}`);
+      }
+      if (options?.newPostchecks !== undefined) {
+        // null means remove postchecks entirely
+        jobNode.postchecks = options.newPostchecks === null ? undefined : options.newPostchecks;
+        log.info(`Updated postchecks for retry: ${node.name}`);
+      }
+    }
+    
+    if (!options?.newWork && node.type === 'job') {
       // No new work provided - auto-generate failure-fixing instructions for agent jobs
       const jobNode = node as JobNode;
       const isAgentWork = typeof jobNode.work === 'string' 
@@ -2547,18 +2806,30 @@ Resume working in the existing worktree and session context.`;
     nodeState.endedAt = undefined;
     nodeState.startedAt = undefined;
     
-    // Determine if we should resume from failed phase or start fresh
+    // Determine if we should resume from the failed phase or start fresh.
+    //
+    // Rules:
+    //   - newWork or clearWorktree → always start fresh (work output changed)
+    //   - newPrechecks → start fresh (prechecks run before work)
+    //   - newPostchecks ONLY, failure was at postchecks → resume from postchecks
+    //   - nothing changed → resume from whichever phase failed
     const hasNewWork = !!options?.newWork;
-    const shouldResetPhases = hasNewWork || options?.clearWorktree;
+    const hasNewPrechecks = options?.newPrechecks !== undefined;
+    const hasNewPostchecks = options?.newPostchecks !== undefined;
+    const failedPhase = nodeState.lastAttempt?.phase;
+    const shouldResetPhases = hasNewWork || hasNewPrechecks || options?.clearWorktree;
     
     if (shouldResetPhases) {
       // Starting fresh - clear all phase progress
       nodeState.stepStatuses = undefined;
       nodeState.resumeFromPhase = undefined;
-      log.info(`Retry with fresh state (hasNewWork=${hasNewWork}, clearWorktree=${options?.clearWorktree})`);
+      log.info(`Retry with fresh state (hasNewWork=${hasNewWork}, hasNewPrechecks=${hasNewPrechecks}, clearWorktree=${options?.clearWorktree})`);
+    } else if (hasNewPostchecks && failedPhase === 'postchecks') {
+      // Only postchecks changed and failure was at postchecks - resume from postchecks
+      nodeState.resumeFromPhase = 'postchecks' as any;
+      log.info(`Retry resuming from postchecks (postchecks updated, failed phase was postchecks)`);
     } else {
       // Resuming - preserve step statuses and set resume point
-      const failedPhase = nodeState.lastAttempt?.phase;
       if (failedPhase) {
         nodeState.resumeFromPhase = failedPhase as any;
         log.info(`Retry resuming from phase: ${failedPhase}`);
@@ -2589,19 +2860,24 @@ Resume working in the existing worktree and session context.`;
         };
       }
       
+      // Fetch latest refs so the cleared worktree can be re-based on current branch state
+      try {
+        await git.repository.fetch(plan.repoPath, { all: true });
+        log.info(`Fetched latest refs before clearing worktree for node: ${node.name}`);
+      } catch (e: any) {
+        log.warn(`Git fetch failed before worktree clear (continuing anyway): ${e.message}`);
+      }
+      
       // Reset detached HEAD to base commit
-      const resetWorktree = async () => {
-        try {
-          if (nodeState.baseCommit && nodeState.worktreePath) {
-            log.info(`Resetting worktree to base commit: ${nodeState.baseCommit.slice(0, 8)}`);
-            await git.executor.execAsync(['reset', '--hard', nodeState.baseCommit], { cwd: nodeState.worktreePath });
-            await git.executor.execAsync(['clean', '-fd'], { cwd: nodeState.worktreePath });
-          }
-        } catch (e: any) {
-          log.warn(`Failed to reset worktree: ${e.message}`);
+      try {
+        if (nodeState.baseCommit && nodeState.worktreePath) {
+          log.info(`Resetting worktree to base commit: ${nodeState.baseCommit.slice(0, 8)}`);
+          await git.executor.execAsync(['reset', '--hard', nodeState.baseCommit], { cwd: nodeState.worktreePath });
+          await git.executor.execAsync(['clean', '-fd'], { cwd: nodeState.worktreePath });
         }
-      };
-      resetWorktree(); // Fire and forget
+      } catch (e: any) {
+        log.warn(`Failed to reset worktree: ${e.message}`);
+      }
     }
     
     // Clear plan.endedAt so it gets recalculated when the plan completes
@@ -2610,15 +2886,17 @@ Resume working in the existing worktree and session context.`;
       plan.endedAt = undefined;
     }
     
-    // Persist the reset state
-    this.persistence.save(plan);
-    
     // Check if ready to run (all dependencies succeeded)
     const readyNodes = sm.getReadyNodes();
     if (!readyNodes.includes(nodeId)) {
-      // Need to manually transition to ready since we reset
+      // Transition to ready/pending based on dependency state
       sm.resetNodeToPending(nodeId);
     }
+    
+    // Persist AFTER state transition so the saved status is 'ready' not 'pending'.
+    // This prevents a bug where extension reload between save and transition
+    // would leave the node stuck in 'pending' forever.
+    this.persistence.save(plan);
     
     // Ensure pump is running to process the node
     this.startPump();

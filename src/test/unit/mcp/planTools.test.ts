@@ -97,14 +97,14 @@ suite('MCP Plan Tool Definitions', () => {
   // getPlanToolDefinitions
   // =========================================================================
   suite('getPlanToolDefinitions', () => {
-    test('returns a non-empty array', () => {
-      const tools = getPlanToolDefinitions();
+    test('returns a non-empty array', async () => {
+      const tools = await getPlanToolDefinitions();
       assert.ok(Array.isArray(tools));
       assert.ok(tools.length > 0);
     });
 
-    test('all tools have required McpTool fields', () => {
-      const tools = getPlanToolDefinitions();
+    test('all tools have required McpTool fields', async () => {
+      const tools = await getPlanToolDefinitions();
       for (const tool of tools) {
         assert.ok(typeof tool.name === 'string', `Tool name should be string: ${tool.name}`);
         assert.ok(tool.name.length > 0, 'Tool name should be non-empty');
@@ -116,22 +116,22 @@ suite('MCP Plan Tool Definitions', () => {
       }
     });
 
-    test('tool names are unique', () => {
-      const tools = getPlanToolDefinitions();
+    test('tool names are unique', async () => {
+      const tools = await getPlanToolDefinitions();
       const names = tools.map(t => t.name);
       const uniqueNames = new Set(names);
       assert.strictEqual(names.length, uniqueNames.size, 'Tool names should be unique');
     });
 
-    test('contains creation tools', () => {
-      const tools = getPlanToolDefinitions();
+    test('contains creation tools', async () => {
+      const tools = await getPlanToolDefinitions();
       const names = tools.map(t => t.name);
       assert.ok(names.includes('create_copilot_plan'));
       assert.ok(names.includes('create_copilot_job'));
     });
 
-    test('contains status/query tools', () => {
-      const tools = getPlanToolDefinitions();
+    test('contains status/query tools', async () => {
+      const tools = await getPlanToolDefinitions();
       const names = tools.map(t => t.name);
       assert.ok(names.includes('get_copilot_plan_status'));
       assert.ok(names.includes('list_copilot_plans'));
@@ -140,8 +140,8 @@ suite('MCP Plan Tool Definitions', () => {
       assert.ok(names.includes('get_copilot_node_attempts'));
     });
 
-    test('contains control tools', () => {
-      const tools = getPlanToolDefinitions();
+    test('contains control tools', async () => {
+      const tools = await getPlanToolDefinitions();
       const names = tools.map(t => t.name);
       assert.ok(names.includes('cancel_copilot_plan'));
       assert.ok(names.includes('delete_copilot_plan'));
@@ -150,24 +150,24 @@ suite('MCP Plan Tool Definitions', () => {
       assert.ok(names.includes('get_copilot_plan_node_failure_context'));
     });
 
-    test('create_copilot_plan requires name and jobs', () => {
-      const tools = getPlanToolDefinitions();
+    test('create_copilot_plan requires name and jobs', async () => {
+      const tools = await getPlanToolDefinitions();
       const createPlan = tools.find(t => t.name === 'create_copilot_plan')!;
       assert.ok(createPlan.inputSchema.required);
       assert.ok(createPlan.inputSchema.required.includes('name'));
       assert.ok(createPlan.inputSchema.required.includes('jobs'));
     });
 
-    test('create_copilot_job requires name and task', () => {
-      const tools = getPlanToolDefinitions();
+    test('create_copilot_job requires name and task', async () => {
+      const tools = await getPlanToolDefinitions();
       const createJob = tools.find(t => t.name === 'create_copilot_job')!;
       assert.ok(createJob.inputSchema.required);
       assert.ok(createJob.inputSchema.required.includes('name'));
       assert.ok(createJob.inputSchema.required.includes('task'));
     });
 
-    test('get_copilot_plan_status requires id', () => {
-      const tools = getPlanToolDefinitions();
+    test('get_copilot_plan_status requires id', async () => {
+      const tools = await getPlanToolDefinitions();
       const tool = tools.find(t => t.name === 'get_copilot_plan_status')!;
       assert.ok(tool.inputSchema.required);
       assert.ok(tool.inputSchema.required.includes('id'));
@@ -178,9 +178,9 @@ suite('MCP Plan Tool Definitions', () => {
   // getAllToolDefinitions
   // =========================================================================
   suite('getAllToolDefinitions', () => {
-    test('includes plan tools and additional node tools', () => {
-      const all = getAllToolDefinitions();
-      const plan = getPlanToolDefinitions();
+    test('includes plan tools and additional node tools', async () => {
+      const all = await getAllToolDefinitions();
+      const plan = await getPlanToolDefinitions();
       // getAllToolDefinitions should include all plan tools plus any node tools
       assert.ok(all.length >= plan.length, 'should have at least as many tools as plan tools');
       const allNames = all.map(t => t.name);
