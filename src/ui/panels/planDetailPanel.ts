@@ -2383,9 +2383,9 @@ ${mermaidDef}
       }
       
       // Add trailing non-breaking spaces to prevent Mermaid SVG text clipping
-      // Use 4 spaces to account for status icon width + duration label characters
+      // Use 10 spaces for generous padding to prevent foreignObject clipping
       const nbsp = '\u00A0';
-      const nodePadding = nbsp.repeat(4);
+      const nodePadding = nbsp.repeat(10);
       lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}${nodePadding}"]`);
       lines.push(`${indent}class ${sanitizedId} ${status}`);
       
