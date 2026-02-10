@@ -474,6 +474,24 @@ export class DefaultJobExecutor implements JobExecutor {
   }
   
   /**
+   * Get the current size of the log file for a job execution.
+   *
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
+   * @returns File size in bytes, or 0 if no log file exists.
+   */
+  getLogFileSize(planId: string, nodeId: string): number {
+    const executionKey = `${planId}:${nodeId}`;
+    const logFile = this.getLogFilePath(executionKey);
+    if (!logFile || !fs.existsSync(logFile)) return 0;
+    try {
+      return fs.statSync(logFile).size;
+    } catch {
+      return 0;
+    }
+  }
+  
+  /**
    * Get OS-level process stats for a running execution.
    *
    * @param planId - Plan identifier.
@@ -1515,6 +1533,29 @@ export class DefaultJobExecutor implements JobExecutor {
     
     try {
       return fs.readFileSync(logFile, 'utf8');
+    } catch (err) {
+      return `Error reading log file: ${err}`;
+    }
+  }
+  
+  /**
+   * Read logs from file starting at a byte offset.
+   * Used to capture only the logs produced during the current attempt.
+   */
+  readLogsFromFileOffset(planId: string, nodeId: string, byteOffset: number): string {
+    const executionKey = `${planId}:${nodeId}`;
+    const logFile = this.getLogFilePath(executionKey);
+    
+    if (!logFile || !fs.existsSync(logFile)) {
+      return 'No log file found.';
+    }
+    
+    try {
+      const content = fs.readFileSync(logFile, 'utf8');
+      if (byteOffset <= 0) return content;
+      // Convert byte offset to string position via Buffer
+      const prefix = Buffer.from(content, 'utf8').subarray(0, byteOffset).toString('utf8');
+      return content.slice(prefix.length);
     } catch (err) {
       return `Error reading log file: ${err}`;
     }

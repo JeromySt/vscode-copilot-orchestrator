@@ -151,6 +151,15 @@ export interface JobExecutor {
   getLogsForPhase?(planId: string, nodeId: string, phase: ExecutionPhase): LogEntry[];
 
   /**
+   * Get the current size of the log file for a job execution.
+   *
+   * @param planId - Plan ID.
+   * @param nodeId - Node ID.
+   * @returns File size in bytes, or 0 if unavailable.
+   */
+  getLogFileSize?(planId: string, nodeId: string): number;
+
+  /**
    * Append a log entry to a job's execution log.
    *
    * @param planId  - Plan ID.
@@ -641,6 +650,41 @@ export class PlanRunner extends EventEmitter {
           const lines = fileContent.split('\n').filter((line: string) => line.includes(phaseMarker));
           return lines.length > 0 ? lines.join('\n') : `No logs for ${phase} phase.`;
         }
+        return fileContent;
+      }
+    }
+    
+    return 'No logs available.';
+  }
+  
+  /**
+   * Get execution logs for a node starting from a given offset.
+   *
+   * Used to capture only the logs produced during the current attempt,
+   * avoiding accumulation of logs from previous attempts.
+   *
+   * @param planId         - Plan identifier.
+   * @param nodeId         - Node identifier.
+   * @param memoryOffset   - Index into the in-memory log array to start from.
+   * @param fileByteOffset - Byte offset into the on-disk log file to start from.
+   * @returns Formatted log text for the current attempt only.
+   */
+  private getNodeLogsFromOffset(planId: string, nodeId: string, memoryOffset: number, fileByteOffset: number): string {
+    if (!this.executor) return 'No executor available.';
+    
+    // First try memory logs (sliced from offset)
+    if (this.executor.getLogs) {
+      const allLogs = this.executor.getLogs(planId, nodeId);
+      if (allLogs.length > 0) {
+        const sliced = allLogs.slice(memoryOffset);
+        return sliced.length > 0 ? formatLogEntries(sliced) : 'No logs available.';
+      }
+    }
+    
+    // Try reading from log file (from byte offset)
+    if ('readLogsFromFileOffset' in this.executor && typeof (this.executor as any).readLogsFromFileOffset === 'function') {
+      const fileContent = (this.executor as any).readLogsFromFileOffset(planId, nodeId, fileByteOffset) as string;
+      if (fileContent && !fileContent.startsWith('No log file')) {
         return fileContent;
       }
     }
@@ -1297,6 +1341,11 @@ export class PlanRunner extends EventEmitter {
       nodeId: node.id,
     });
     
+    // Capture log offsets before this attempt starts so we can extract
+    // only the logs produced during this attempt when creating AttemptRecord.
+    const logMemoryOffset = this.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
+    const logFileOffset = this.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
+    
     try {
       // Transition to running
       sm.transition(node.id, 'running');
@@ -1418,7 +1467,7 @@ export class PlanRunner extends EventEmitter {
               stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
               worktreePath: nodeState.worktreePath,
               baseCommit: nodeState.baseCommit,
-              logs: this.getNodeLogs(plan.id, node.id),
+              logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset),
               workUsed: node.work,
               metrics: nodeState.metrics,
               phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
@@ -1569,7 +1618,7 @@ export class PlanRunner extends EventEmitter {
             stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
             worktreePath: nodeState.worktreePath,
             baseCommit: nodeState.baseCommit,
-            logs: this.getNodeLogs(plan.id, node.id),
+            logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset),
             workUsed: node.work,
             metrics: nodeState.metrics,
             phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
@@ -1680,6 +1729,10 @@ export class PlanRunner extends EventEmitter {
             nodeState.startedAt = Date.now();
             nodeState.attempts++;
             
+            // Capture log offsets for the auto-heal attempt
+            const healLogMemoryOffset = this.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
+            const healLogFileOffset = this.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
+            
             // Execute with resumeFromPhase to skip already-passed phases
             const healContext: ExecutionContext = {
               plan,
@@ -1772,7 +1825,7 @@ export class PlanRunner extends EventEmitter {
                 stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
                 worktreePath: nodeState.worktreePath,
                 baseCommit: nodeState.baseCommit,
-                logs: this.getNodeLogs(plan.id, node.id),
+                logs: this.getNodeLogsFromOffset(plan.id, node.id, healLogMemoryOffset, healLogFileOffset),
                 workUsed: healSpec,
                 metrics: nodeState.metrics,
                 phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
@@ -1878,7 +1931,7 @@ export class PlanRunner extends EventEmitter {
           worktreePath: nodeState.worktreePath,
           baseCommit: nodeState.baseCommit,
           completedCommit: nodeState.completedCommit, // Work was successful, so we have the commit
-          logs: this.getNodeLogs(plan.id, node.id),
+          logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset),
           workUsed: node.work,
           metrics: nodeState.metrics,
           phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
@@ -1906,7 +1959,7 @@ export class PlanRunner extends EventEmitter {
           stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
           worktreePath: nodeState.worktreePath,
           baseCommit: nodeState.baseCommit,
-          logs: this.getNodeLogs(plan.id, node.id),
+          logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset),
           workUsed: node.work,
           metrics: nodeState.metrics,
           phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
@@ -1965,7 +2018,7 @@ export class PlanRunner extends EventEmitter {
         stepStatuses: nodeState.stepStatuses,
         worktreePath: nodeState.worktreePath,
         baseCommit: nodeState.baseCommit,
-        logs: this.getNodeLogs(plan.id, node.id),
+        logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset),
         workUsed: node.work,
         metrics: nodeState.metrics,
         phaseMetrics: nodeState.phaseMetrics,
