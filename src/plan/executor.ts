@@ -1568,34 +1568,34 @@ export class DefaultJobExecutor implements JobExecutor {
   readLogsFromFileOffset(planId: string, nodeId: string, byteOffset: number): string {
     const executionKey = `${planId}:${nodeId}`;
     const logFile = this.getLogFilePath(executionKey);
-    
-    if (!logFile || !fs.existsSync(logFile)) {
+
+    if (!logFile) {
       return 'No log file found.';
     }
-    
+
     try {
       if (byteOffset <= 0) {
         return fs.readFileSync(logFile, 'utf8');
       }
 
-      const stats = fs.statSync(logFile);
-      const fileSize = stats.size;
-
-      if (byteOffset >= fileSize) {
-        return '';
-      }
-
-      const length = fileSize - byteOffset;
-      const buffer = Buffer.alloc(length);
       const fd = fs.openSync(logFile, 'r');
       try {
+        const stats = fs.fstatSync(fd);
+        const fileSize = stats.size;
+
+        if (byteOffset >= fileSize) {
+          return '';
+        }
+
+        const length = fileSize - byteOffset;
+        const buffer = Buffer.alloc(length);
         fs.readSync(fd, buffer, 0, length, byteOffset);
+        return buffer.toString('utf8');
       } finally {
         fs.closeSync(fd);
       }
-
-      return buffer.toString('utf8');
-    } catch (err) {
+    } catch (err: any) {
+      if (err.code === 'ENOENT') return 'No log file found.';
       return `Error reading log file: ${err}`;
     }
   }
