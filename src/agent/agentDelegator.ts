@@ -401,6 +401,70 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
   }
 
   /**
+   * Extract token usage from Copilot log files.
+   */
+  private async extractTokenUsage(logDir: string, model?: string): Promise<TokenUsage | undefined> {
+    try {
+      if (!fs.existsSync(logDir)) {
+        return undefined;
+      }
+
+      const logFiles = fs.readdirSync(logDir)
+        .filter(f => f.endsWith('.log'))
+        .map(f => ({
+          name: f,
+          time: fs.statSync(path.join(logDir, f)).mtime.getTime()
+        }))
+        .sort((a, b) => b.time - a.time);
+
+      if (logFiles.length === 0) {
+        return undefined;
+      }
+
+      const logContent = fs.readFileSync(path.join(logDir, logFiles[0].name), 'utf-8');
+
+      const patterns = [
+        /prompt_tokens["']?:\s*(\d+)/gi,
+        /completion_tokens["']?:\s*(\d+)/gi,
+        /input[_\s]tokens?["']?:\s*(\d+)/gi,
+        /output[_\s]tokens?["']?:\s*(\d+)/gi,
+      ];
+
+      let inputTokens = 0;
+      let outputTokens = 0;
+
+      // prompt_tokens / input_tokens → inputTokens
+      for (const pattern of [patterns[0], patterns[2]]) {
+        let match;
+        while ((match = pattern.exec(logContent)) !== null) {
+          inputTokens += parseInt(match[1], 10);
+        }
+      }
+
+      // completion_tokens / output_tokens → outputTokens
+      for (const pattern of [patterns[1], patterns[3]]) {
+        let match;
+        while ((match = pattern.exec(logContent)) !== null) {
+          outputTokens += parseInt(match[1], 10);
+        }
+      }
+
+      if (inputTokens === 0 && outputTokens === 0) {
+        return undefined;
+      }
+
+      return {
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+        model: model || 'unknown',
+      };
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  /**
    * Extract session ID from a line of output.
    */
   private extractSessionId(line: string): string | undefined {
