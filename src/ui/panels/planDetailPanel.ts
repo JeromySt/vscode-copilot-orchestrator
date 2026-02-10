@@ -2286,6 +2286,10 @@ ${mermaidDef}
   private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; nodeTooltips: Record<string, string> } {
     const lines: string[] = ['flowchart LR'];
     
+    // Maximum total character width for a node label (icon + name + duration).
+    // Labels exceeding this are truncated with '...' and a hover tooltip.
+    const MAX_NODE_LABEL_CHARS = 40;
+    
     // Track full names for tooltip display when labels are truncated
     const nodeTooltips: Record<string, string> = {};
     
@@ -2372,8 +2376,11 @@ ${mermaidDef}
         durationLabel = ' | ' + formatDurationMs(duration);
       }
       
-      // Nodes are not truncated — they size their own Mermaid boxes.
-      const displayLabel = label;
+      // Truncate long node labels to keep the diagram compact.
+      const displayLabel = this._truncateLabel(label, durationLabel, MAX_NODE_LABEL_CHARS);
+      if (displayLabel !== label) {
+        nodeTooltips[sanitizedId] = node.name;
+      }
       
       // Add trailing non-breaking spaces to prevent Mermaid SVG text clipping
       // Use 4 spaces to account for status icon width + duration label characters
@@ -2463,7 +2470,9 @@ ${mermaidDef}
           dur = ' | ' + formatDurationMs(endTime - st.startedAt);
         }
         // Total = icon(2) + name + duration (matches the formula in _truncateLabel)
-        nodeLabelWidths.set(nodeId, 2 + escapedName.length + dur.length);
+        // Cap to MAX_NODE_LABEL_CHARS so group widths reflect truncated nodes.
+        const rawWidth = 2 + escapedName.length + dur.length;
+        nodeLabelWidths.set(nodeId, Math.min(rawWidth, MAX_NODE_LABEL_CHARS));
       }
 
       // Recursively compute the max descendant-node label width for each group
