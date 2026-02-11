@@ -1673,6 +1673,12 @@ export class PlanRunner extends EventEmitter {
           // Detect external interruption (SIGTERM, SIGKILL, etc.)
           const wasExternallyKilled = result.error?.includes('killed by signal');
           
+          // Debug logging for auto-retry decision
+          log.debug(`Auto-retry decision for ${node.name}: phase=${failedPhase}, isHealable=${isHealablePhase}, isAgentWork=${isAgentWork}, wasExternallyKilled=${wasExternallyKilled}, autoHealEnabled=${autoHealEnabled}, error="${result.error}"`, {
+            planId: plan.id,
+            nodeId: node.id,
+          });
+          
           const phaseAlreadyHealed = nodeState.autoHealAttempted?.[failedPhase as 'prechecks' | 'work' | 'postchecks'];
           
           // Auto-retry is allowed if:
@@ -1680,6 +1686,11 @@ export class PlanRunner extends EventEmitter {
           // 2. Agent work that was externally killed (retry same agent)
           const shouldAttemptAutoRetry = isHealablePhase && autoHealEnabled && !phaseAlreadyHealed &&
             (isNonAgentWork || (isAgentWork && wasExternallyKilled));
+          
+          log.debug(`Auto-retry shouldAttempt=${shouldAttemptAutoRetry}: isHealablePhase=${isHealablePhase}, autoHealEnabled=${autoHealEnabled}, phaseAlreadyHealed=${phaseAlreadyHealed}, isNonAgentWork=${isNonAgentWork}, (isAgentWork && wasExternallyKilled)=${isAgentWork && wasExternallyKilled}`, {
+            planId: plan.id,
+            nodeId: node.id,
+          });
           
           if (shouldAttemptAutoRetry) {
             if (!nodeState.autoHealAttempted) nodeState.autoHealAttempted = {};
