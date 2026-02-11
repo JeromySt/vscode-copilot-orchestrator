@@ -78,18 +78,14 @@ Agent instructions MUST be in Markdown format.`,
 1. STRING: Shell command like "npm run build" or "@agent Do something" for AI
 2. PROCESS OBJECT: { "type": "process", "executable": "node", "args": ["script.js"] }
 3. SHELL OBJECT: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one\\n2. Step two", "model": "${modelEnum[0]}" }
+4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "${modelEnum[0]}" }
 
 For process type, args is an array - no shell quoting needed.
 For shell type, shell can be: cmd, powershell, pwsh, bash, sh
-For agent type, use model to select an LLM. Available models: ${modelEnum.join(', ')}
+For agent type, model goes INSIDE the work object. Available models: ${modelEnum.join(', ')}
+Fast models (haiku/mini) for simple tasks, premium models (opus) for complex reasoning.
 
 Agent instructions MUST be in Markdown format with headers, numbered lists, bullet lists.`,
-                },
-                model: {
-                  type: 'string',
-                  enum: modelEnum,
-                  description: 'LLM model to use. Fast (mini/haiku) for simple tasks, premium (opus) for complex reasoning.',
                 },
                 prechecks: {
                   description: 'Validation before work'

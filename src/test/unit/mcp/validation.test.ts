@@ -227,7 +227,7 @@ suite('MCP Schema Validation', () => {
     // -----------------------------------------------------------------------
     // Model property validation
     // -----------------------------------------------------------------------
-    test('accepts model property on job', () => {
+    test('rejects model property at job level', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
@@ -238,7 +238,8 @@ suite('MCP Schema Validation', () => {
           model: 'claude-haiku-4.5'
         }]
       });
-      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+      assert.ok(!result.valid, 'Expected invalid when model is at job level');
+      assert.ok(result.error?.includes('model'), `Error should mention model: ${result.error}`);
     });
 
     test('accepts model property on agent work spec object', () => {
@@ -258,7 +259,7 @@ suite('MCP Schema Validation', () => {
       assert.ok(result.valid, `Expected valid, got: ${result.error}`);
     });
 
-    test('accepts model on both job and work spec simultaneously', () => {
+    test('rejects model at job level even when also in work spec', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
@@ -273,7 +274,7 @@ suite('MCP Schema Validation', () => {
           }
         }]
       });
-      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+      assert.ok(!result.valid, 'Expected invalid when model is at job level');
     });
 
     test('accepts resumeSession on agent work spec', () => {
@@ -293,7 +294,7 @@ suite('MCP Schema Validation', () => {
       assert.ok(result.valid, `Expected valid, got: ${result.error}`);
     });
 
-    test('accepts model with string work (not object)', () => {
+    test('rejects model at job level with string work', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
@@ -304,10 +305,11 @@ suite('MCP Schema Validation', () => {
           model: 'gpt-5-mini'
         }]
       });
-      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+      // model at job level is always invalid - it only belongs inside agent work spec
+      assert.ok(!result.valid, 'Expected invalid when model is at job level');
     });
 
-    test('accepts plan with multiple jobs using different models', () => {
+    test('accepts plan with multiple jobs using models inside work spec', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Multi-model Plan',
         jobs: [
@@ -315,8 +317,7 @@ suite('MCP Schema Validation', () => {
             producer_id: 'fast-task',
             task: 'Quick lint check',
             dependencies: [],
-            work: '@agent Run lint',
-            model: 'claude-haiku-4.5'
+            work: { type: 'agent', instructions: '# Run lint', model: 'claude-haiku-4.5' }
           },
           {
             producer_id: 'complex-task',
