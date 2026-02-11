@@ -110,15 +110,13 @@ suite('Model Selection Integration', () => {
       const planTool = tools.find(t => t.name === 'create_copilot_plan');
       assert.ok(planTool, 'create_copilot_plan tool should exist');
 
-      // model enum should be on jobs items properties
+      // model enum is no longer at job level — it's inside agent work objects
+      // Verify the tool description references available models
       const jobsSchema = planTool.inputSchema.properties.jobs;
       assert.ok(jobsSchema, 'jobs property should exist');
+      // model should NOT be on job items (it was moved to agent work spec)
       const modelProp = jobsSchema.items?.properties?.model;
-      assert.ok(modelProp, 'model property should exist on job items');
-      assert.ok(Array.isArray(modelProp.enum), 'model should have an enum array');
-      assert.ok(modelProp.enum.includes('gpt-5'), 'enum should include gpt-5');
-      assert.ok(modelProp.enum.includes('claude-sonnet-4.5'), 'enum should include claude-sonnet-4.5');
-      assert.strictEqual(modelProp.enum.length, 6, 'enum should have 6 models');
+      assert.ok(!modelProp, 'model property should NOT exist on job items (only in agent work spec)');
     });
 
     test('getPlanToolDefinitions uses fallback when discovery fails', async () => {
@@ -129,10 +127,9 @@ suite('Model Selection Integration', () => {
       const planTool = tools.find(t => t.name === 'create_copilot_plan');
       assert.ok(planTool);
 
+      // model should NOT be on job items (only in agent work spec)
       const modelProp = planTool.inputSchema.properties.jobs.items?.properties?.model;
-      assert.ok(modelProp);
-      // Fallback defaults
-      assert.deepStrictEqual(modelProp.enum, ['gpt-5', 'claude-sonnet-4.5']);
+      assert.ok(!modelProp, 'model property should NOT exist on job items');
     });
   });
 
