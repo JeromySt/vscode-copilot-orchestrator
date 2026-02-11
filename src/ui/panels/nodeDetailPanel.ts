@@ -437,6 +437,11 @@ export class NodeDetailPanel {
       case 'forceFailNode':
         this._forceFailNode(message.planId, message.nodeId);
         break;
+      case 'openLogFile':
+        if (message.path) {
+          vscode.commands.executeCommand('vscode.open', vscode.Uri.file(message.path));
+        }
+        break;
     }
   }
   
@@ -500,15 +505,27 @@ export class NodeDetailPanel {
   private async _sendLog(phase: string) {
     const plan = this._planRunner.get(this._planId);
     const node = plan?.nodes.get(this._nodeId);
-    if (!node) return;
+    
+    // Always send a response - never leave webview hanging
+    if (!plan || !node) {
+      this._panel.webview.postMessage({
+        type: 'logContent',
+        phase,
+        content: 'Plan or node not found.',
+        logFilePath: undefined,
+      });
+      return;
+    }
     
     // Get logs from executor (works for both jobs and sub-plan nodes)
     const logs = this._planRunner.getNodeLogs(this._planId, this._nodeId, phase as any);
+    const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId);
     
     this._panel.webview.postMessage({
       type: 'logContent',
       phase,
-      content: logs || 'No logs available for this phase.'
+      content: logs || 'No logs available for this phase.',
+      logFilePath,
     });
   }
   
@@ -715,6 +732,7 @@ export class NodeDetailPanel {
     <div class="phase-tabs">
       ${this._buildPhaseTabs(phaseStatus, state.status === 'running')}
     </div>
+    <div class="log-file-path" id="logFilePath" style="display: none;" title="Click to open in editor"></div>
     <div class="log-viewer" id="logViewer">
       <div class="log-placeholder">Select a phase tab to view logs</div>
     </div>
@@ -925,6 +943,21 @@ export class NodeDetailPanel {
         const wasAtBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 50;
         
         viewer.innerHTML = '<pre class="log-content" tabindex="0">' + escapeHtml(msg.content) + '</pre>';
+        
+        // Update log file path display
+        const logFilePathEl = document.getElementById('logFilePath');
+        if (logFilePathEl) {
+          if (msg.logFilePath) {
+            logFilePathEl.textContent = '📄 ' + msg.logFilePath;
+            logFilePathEl.setAttribute('data-path', msg.logFilePath);
+            logFilePathEl.style.display = 'block';
+            logFilePathEl.onclick = function() {
+              vscode.postMessage({ type: 'openLogFile', path: msg.logFilePath });
+            };
+          } else {
+            logFilePathEl.style.display = 'none';
+          }
+        }
         
         // Only auto-scroll if user was already at bottom (respect manual scrolling)
         if (wasAtBottom) {
@@ -2030,6 +2063,25 @@ export class NodeDetailPanel {
     .phase-tab.phase-failed .phase-icon { color: #f48771; }
     .phase-tab.phase-running .phase-icon { color: #3794ff; animation: pulse 1s infinite; }
     @keyframes pulse { 50% { opacity: 0.5; } }
+    
+    /* Log File Path */
+    .log-file-path {
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 11px;
+      padding: 6px 10px;
+      margin-bottom: 4px;
+      background: var(--vscode-textBlockQuote-background);
+      border-radius: 4px;
+      color: var(--vscode-textLink-foreground);
+      cursor: pointer;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .log-file-path:hover {
+      text-decoration: underline;
+      background: var(--vscode-textBlockQuote-border);
+    }
     
     /* Log Viewer */
     .log-viewer {

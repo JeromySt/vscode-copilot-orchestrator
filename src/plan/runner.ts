@@ -160,6 +160,15 @@ export interface JobExecutor {
   getLogFileSize?(planId: string, nodeId: string): number;
 
   /**
+   * Get the file path for the log file of a job execution.
+   *
+   * @param planId - Plan ID.
+   * @param nodeId - Node ID.
+   * @returns Absolute path to the log file, or undefined if unavailable.
+   */
+  getLogFilePath?(planId: string, nodeId: string): string | undefined;
+
+  /**
    * Append a log entry to a job's execution log.
    *
    * @param planId  - Plan ID.
@@ -655,6 +664,18 @@ export class PlanRunner extends EventEmitter {
     }
     
     return 'No logs available.';
+  }
+  
+  /**
+   * Get the file path for a node's execution log.
+   *
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
+   * @returns Absolute path to the log file, or undefined if unavailable.
+   */
+  getNodeLogFilePath(planId: string, nodeId: string): string | undefined {
+    if (!this.executor?.getLogFilePath) return undefined;
+    return this.executor.getLogFilePath(planId, nodeId);
   }
   
   /**

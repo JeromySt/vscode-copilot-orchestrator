@@ -504,7 +504,7 @@ export class DefaultJobExecutor implements JobExecutor {
    */
   getLogFileSize(planId: string, nodeId: string): number {
     const executionKey = `${planId}:${nodeId}`;
-    const logFile = this.getLogFilePath(executionKey);
+    const logFile = this.getLogFilePathByKey(executionKey);
     if (!logFile || !fs.existsSync(logFile)) return 0;
     try {
       return fs.statSync(logFile).size;
@@ -1509,9 +1509,30 @@ export class DefaultJobExecutor implements JobExecutor {
   // ============================================================================
   
   /**
-   * Get or create log file path for an execution
+   * Get or create log file path for an execution.
+   * 
+   * @param planId - Plan identifier.
+   * @param nodeId - Node identifier.
+   * @returns Absolute path to the log file, or undefined if no storage path.
    */
-  private getLogFilePath(executionKey: string): string | undefined {
+  getLogFilePath(planId: string, nodeId: string): string | undefined {
+    if (!this.storagePath) return undefined;
+    
+    const executionKey = `${planId}:${nodeId}`;
+    let logFile = this.logFiles.get(executionKey);
+    if (!logFile) {
+      const logsDir = path.join(this.storagePath, 'logs');
+      const safeKey = executionKey.replace(/[^a-zA-Z0-9-_]/g, '_');
+      logFile = path.join(logsDir, `${safeKey}.log`);
+      this.logFiles.set(executionKey, logFile);
+    }
+    return logFile;
+  }
+
+  /**
+   * Internal method to get log file path from execution key.
+   */
+  private getLogFilePathByKey(executionKey: string): string | undefined {
     if (!this.storagePath) return undefined;
     
     let logFile = this.logFiles.get(executionKey);
@@ -1528,7 +1549,7 @@ export class DefaultJobExecutor implements JobExecutor {
    * Append a log entry to file
    */
   private appendToLogFile(executionKey: string, entry: LogEntry): void {
-    const logFile = this.getLogFilePath(executionKey);
+    const logFile = this.getLogFilePathByKey(executionKey);
     if (!logFile) return;
     
     try {
@@ -1548,7 +1569,7 @@ export class DefaultJobExecutor implements JobExecutor {
    */
   readLogsFromFile(planId: string, nodeId: string): string {
     const executionKey = `${planId}:${nodeId}`;
-    const logFile = this.getLogFilePath(executionKey);
+    const logFile = this.getLogFilePathByKey(executionKey);
     
     if (!logFile || !fs.existsSync(logFile)) {
       return 'No log file found.';
@@ -1567,7 +1588,7 @@ export class DefaultJobExecutor implements JobExecutor {
    */
   readLogsFromFileOffset(planId: string, nodeId: string, byteOffset: number): string {
     const executionKey = `${planId}:${nodeId}`;
-    const logFile = this.getLogFilePath(executionKey);
+    const logFile = this.getLogFilePathByKey(executionKey);
 
     if (!logFile) {
       return 'No log file found.';
