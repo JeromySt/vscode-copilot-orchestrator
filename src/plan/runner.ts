@@ -1673,10 +1673,11 @@ export class PlanRunner extends EventEmitter {
           // Detect external interruption (SIGTERM, SIGKILL, etc.)
           const wasExternallyKilled = result.error?.includes('killed by signal');
           
-          // Debug logging for auto-retry decision
-          log.debug(`Auto-retry decision for ${node.name}: phase=${failedPhase}, isHealable=${isHealablePhase}, isAgentWork=${isAgentWork}, wasExternallyKilled=${wasExternallyKilled}, autoHealEnabled=${autoHealEnabled}, error="${result.error}"`, {
+          // INFO logging for auto-retry decision (visible in logs)
+          log.info(`Auto-retry decision for ${node.name}: phase=${failedPhase}, isHealable=${isHealablePhase}, isAgentWork=${isAgentWork}, wasExternallyKilled=${wasExternallyKilled}, autoHealEnabled=${autoHealEnabled}`, {
             planId: plan.id,
             nodeId: node.id,
+            error: result.error,
           });
           
           const phaseAlreadyHealed = nodeState.autoHealAttempted?.[failedPhase as 'prechecks' | 'work' | 'postchecks'];
@@ -1687,10 +1688,13 @@ export class PlanRunner extends EventEmitter {
           const shouldAttemptAutoRetry = isHealablePhase && autoHealEnabled && !phaseAlreadyHealed &&
             (isNonAgentWork || (isAgentWork && wasExternallyKilled));
           
-          log.debug(`Auto-retry shouldAttempt=${shouldAttemptAutoRetry}: isHealablePhase=${isHealablePhase}, autoHealEnabled=${autoHealEnabled}, phaseAlreadyHealed=${phaseAlreadyHealed}, isNonAgentWork=${isNonAgentWork}, (isAgentWork && wasExternallyKilled)=${isAgentWork && wasExternallyKilled}`, {
+          log.info(`Auto-retry shouldAttempt=${shouldAttemptAutoRetry}: isHealablePhase=${isHealablePhase}, autoHealEnabled=${autoHealEnabled}, phaseAlreadyHealed=${phaseAlreadyHealed}, isNonAgentWork=${isNonAgentWork}, isAgentWork=${isAgentWork}`, {
             planId: plan.id,
             nodeId: node.id,
           });
+          
+          // Persist plan state BEFORE auto-retry to capture failure record
+          this.persistence.save(plan);
           
           if (shouldAttemptAutoRetry) {
             if (!nodeState.autoHealAttempted) nodeState.autoHealAttempted = {};
