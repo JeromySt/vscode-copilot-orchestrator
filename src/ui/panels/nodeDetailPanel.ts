@@ -14,6 +14,7 @@
 
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord, CopilotUsageMetrics } from '../../plan';
 import { escapeHtml, formatDuration, errorPageHtml, loadingPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 import { getNodeMetrics, formatPremiumRequests, formatDurationSeconds, formatTokenCount, formatCodeChanges } from '../../plan/metricsAggregator';
@@ -550,7 +551,7 @@ export class NodeDetailPanel {
         this._forceFailNode(message.planId, message.nodeId);
         break;
       case 'openLogFile':
-        if (message.path) {
+        if (message.path && path.isAbsolute(message.path) && fs.existsSync(message.path)) {
           vscode.commands.executeCommand('vscode.open', vscode.Uri.file(message.path));
         }
         break;
@@ -1553,23 +1554,8 @@ export class NodeDetailPanel {
           ? '<span class="trigger-badge retry">🔄 Retry</span>'
           : '';
       
-      // Build phase tabs for this attempt - prefer logs from file if available
+      // Use in-memory logs; log file is opened on demand via clickable path
       let attemptLogs = attempt.logs || '';
-      
-      // Always try to read from log file if we have a path - the in-memory logs may be empty
-      // after a restart or if they were never captured
-      if (attempt.logFilePath) {
-        try {
-          if (fs.existsSync(attempt.logFilePath)) {
-            const fileContent = fs.readFileSync(attempt.logFilePath, 'utf8');
-            if (fileContent && fileContent.length > 0) {
-              attemptLogs = fileContent;
-            }
-          }
-        } catch (e) {
-          // Ignore read errors, fall back to in-memory logs
-        }
-      }
       const phaseTabsHtml = attemptLogs ? this._buildAttemptPhaseTabs({ ...attempt, logs: attemptLogs }) : '';
       
       // Build compact metrics row for this attempt

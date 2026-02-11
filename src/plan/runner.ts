@@ -2381,7 +2381,7 @@ export class PlanRunner extends EventEmitter {
           completedCommit,
           targetBranch,
           `Plan ${plan.spec.name}: merge ${node.name} (commit ${completedCommit.slice(0, 8)})`,
-          { planId: plan.id, nodeId: node.id, phase: 'merge-ri' }
+          { planId: plan.id, nodeId: node.id, phase: 'merge-ri', attemptNumber }
         );
         
         if (resolved.success) {
@@ -2636,7 +2636,7 @@ export class PlanRunner extends EventEmitter {
             sourceCommit,
             'HEAD',
             `Merge parent commit ${shortSha} for job ${node.name}`,
-            { planId: plan.id, nodeId: node.id, phase: 'merge-fi' }
+            { planId: plan.id, nodeId: node.id, phase: 'merge-fi', attemptNumber }
           );
           
           if (!cliResult.success) {
@@ -2708,7 +2708,7 @@ export class PlanRunner extends EventEmitter {
     sourceBranch: string,
     targetBranch: string,
     commitMessage: string,
-    logContext?: { planId: string; nodeId: string; phase: ExecutionPhase }
+    logContext?: { planId: string; nodeId: string; phase: ExecutionPhase; attemptNumber?: number }
   ): Promise<{ success: boolean; sessionId?: string; metrics?: CopilotUsageMetrics }> {
     const prefer = getConfig<string>('copilotOrchestrator.merge', 'prefer', 'theirs');
     
@@ -2720,7 +2720,7 @@ export class PlanRunner extends EventEmitter {
     
     log.info(`Running Copilot CLI to resolve conflicts...`, { cwd });
     if (logContext) {
-      this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  Running Copilot CLI to resolve conflicts...`);
+      this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  Running Copilot CLI to resolve conflicts...`, logContext.attemptNumber);
     }
     
     const cliLogger: CopilotCliLogger = {
@@ -2738,7 +2738,7 @@ export class PlanRunner extends EventEmitter {
       timeout: 300000,
       onOutput: (line) => {
         if (logContext && line.trim()) {
-          this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  [copilot] ${line.trim()}`);
+          this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  [copilot] ${line.trim()}`, logContext.attemptNumber);
         }
       },
     });
@@ -2746,12 +2746,12 @@ export class PlanRunner extends EventEmitter {
     // Log the CLI result details
     if (logContext) {
       if (result.sessionId) {
-        this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  Copilot session: ${result.sessionId}`);
+        this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  Copilot session: ${result.sessionId}`, logContext.attemptNumber);
       }
       if (!result.success) {
-        this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'error', `  Copilot CLI error: ${result.error || 'unknown'}`);
+        this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'error', `  Copilot CLI error: ${result.error || 'unknown'}`, logContext.attemptNumber);
         if (result.exitCode !== undefined) {
-          this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'error', `  Exit code: ${result.exitCode}`);
+          this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'error', `  Exit code: ${result.exitCode}`, logContext.attemptNumber);
         }
       }
     }
@@ -2774,7 +2774,7 @@ export class PlanRunner extends EventEmitter {
     sourceCommit: string,
     targetBranch: string,
     commitMessage: string,
-    logContext?: { planId: string; nodeId: string; phase: ExecutionPhase }
+    logContext?: { planId: string; nodeId: string; phase: ExecutionPhase; attemptNumber?: number }
   ): Promise<{ success: boolean; metrics?: CopilotUsageMetrics }> {
     // Capture user's current state
     const originalBranch = await git.branches.currentOrNull(repoPath);

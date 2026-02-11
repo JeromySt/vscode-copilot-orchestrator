@@ -769,21 +769,22 @@ export class DefaultJobExecutor implements JobExecutor {
       let stderr = '';
       let timeoutHandle: NodeJS.Timeout | undefined;
       
-      // Set timeout - use max safe setTimeout value (~24 days) if not specified
-      // JavaScript setTimeout max is 2^31-1 ms = 2,147,483,647 ms (~24.8 days)
-      const effectiveTimeout = spec.timeout || 2147483647;
-      timeoutHandle = setTimeout(() => {
-        this.logError(executionKey, phase, `Process timed out after ${effectiveTimeout}ms (PID: ${proc.pid})`);
-        try {
-          if (process.platform === 'win32') {
-            spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
-          } else {
-            proc.kill('SIGTERM');
-          }
-        } catch (e) { /* ignore */ }
-      }, effectiveTimeout);
-      
-      proc.stdout?.setEncoding('utf8');
+      // Set timeout only when explicitly specified (> 0)
+      // Omitting timer when no timeout prevents keeping the event loop alive unnecessarily
+      const effectiveTimeout = spec.timeout && spec.timeout > 0
+        ? Math.min(spec.timeout, 2147483647) : 0;
+      if (effectiveTimeout > 0) {
+        timeoutHandle = setTimeout(() => {
+          this.logError(executionKey, phase, `Process timed out after ${effectiveTimeout}ms (PID: ${proc.pid})`);
+          try {
+            if (process.platform === 'win32') {
+              spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
+            } else {
+              proc.kill('SIGTERM');
+            }
+          } catch (e) { /* ignore */ }
+        }, effectiveTimeout);
+      }
       proc.stderr?.setEncoding('utf8');
       
       proc.stdout?.on('data', (data: string) => {
@@ -902,19 +903,21 @@ export class DefaultJobExecutor implements JobExecutor {
       let stderr = '';
       let timeoutHandle: NodeJS.Timeout | undefined;
       
-      // Set timeout - use max safe setTimeout value (~24 days) if not specified
-      // JavaScript setTimeout max is 2^31-1 ms = 2,147,483,647 ms (~24.8 days)
-      const effectiveTimeout = spec.timeout || 2147483647;
-      timeoutHandle = setTimeout(() => {
-        this.logError(executionKey, phase, `Shell command timed out after ${effectiveTimeout}ms (PID: ${proc.pid})`);
-        try {
-          if (process.platform === 'win32') {
-            spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
-          } else {
-            proc.kill('SIGTERM');
-          }
-        } catch (e) { /* ignore */ }
-      }, effectiveTimeout);
+      // Set timeout only when explicitly specified (> 0)
+      const effectiveTimeout = spec.timeout && spec.timeout > 0
+        ? Math.min(spec.timeout, 2147483647) : 0;
+      if (effectiveTimeout > 0) {
+        timeoutHandle = setTimeout(() => {
+          this.logError(executionKey, phase, `Shell command timed out after ${effectiveTimeout}ms (PID: ${proc.pid})`);
+          try {
+            if (process.platform === 'win32') {
+              spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
+            } else {
+              proc.kill('SIGTERM');
+            }
+          } catch (e) { /* ignore */ }
+        }, effectiveTimeout);
+      }
       
       proc.stdout?.setEncoding('utf8');
       proc.stderr?.setEncoding('utf8');

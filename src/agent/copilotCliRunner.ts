@@ -297,9 +297,9 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       let timeoutHandle: NodeJS.Timeout | undefined;
       let wasKilledByTimeout = false;
       
-      // Set up timeout - use max safe setTimeout value (~24 days) if 0
-      // JavaScript setTimeout max is 2^31-1 ms = 2,147,483,647 ms (~24.8 days)
-      const effectiveTimeout = timeout === 0 ? 2147483647 : timeout;
+      // Set up timeout only when explicitly requested (> 0)
+      // timeout === 0 means no timeout (agent work can run indefinitely)
+      const effectiveTimeout = timeout > 0 ? Math.min(timeout, 2147483647) : 0;
       if (effectiveTimeout > 0) {
         timeoutHandle = setTimeout(() => {
           wasKilledByTimeout = true;
