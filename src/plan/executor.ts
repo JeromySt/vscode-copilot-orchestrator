@@ -267,6 +267,7 @@ export class DefaultJobExecutor implements JobExecutor {
         if (!workResult.success) {
           stepStatuses.work = 'failed';
           context.onStepStatusChange?.('work', 'failed');
+          log.info(`[executor.execute] Returning failure: ${workResult.error}`, { planId: plan.id, nodeId: node.id });
           return {
             success: false,
             error: `Work failed: ${workResult.error}`,

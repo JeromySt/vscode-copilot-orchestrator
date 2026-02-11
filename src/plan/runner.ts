@@ -1572,7 +1572,9 @@ export class PlanRunner extends EventEmitter {
         };
         
         // Execute
+        log.info(`[executeNode] Starting executor.execute for ${node.name}`, { planId: plan.id, nodeId: node.id });
         const result = await this.executor!.execute(context);
+        log.info(`[executeNode] Executor returned: success=${result.success}, error=${result.error?.slice(0, 100) || 'none'}`, { planId: plan.id, nodeId: node.id });
         
         // Store step statuses for UI display
         if (result.stepStatuses) {
@@ -1599,6 +1601,7 @@ export class PlanRunner extends EventEmitter {
         
         if (result.success) {
           executorSuccess = true;
+          log.info(`[executeNode] Executor succeeded for ${node.name}`, { planId: plan.id, nodeId: node.id });
           // Store completed commit.
           // If the executor produced no commit (e.g., expectsNoChanges validation
           // node), carry forward the baseCommit so downstream nodes in the FI
@@ -1616,6 +1619,7 @@ export class PlanRunner extends EventEmitter {
           }
         } else {
           // Executor failed - handle the failure
+          log.info(`[executeNode] Executor FAILED for ${node.name}, entering failure path`, { planId: plan.id, nodeId: node.id, error: result.error });
           nodeState.error = result.error;
           
           // Store lastAttempt for retry context
