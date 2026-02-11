@@ -5,6 +5,24 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-02-11
+
+### Added
+- **Per-Attempt Log Files**: Each execution attempt now writes to a separate log file (`{planId}_{nodeId}_{attemptNumber}.log`), with `AttemptRecord.logFilePath` tracking the file path per attempt
+- **Log File Path in UI**: Node detail panel displays a clickable log file path above the log viewer, opening the file directly in VS Code
+- **SIGTERM Diagnostic Tracing**: Detailed tracing logs at executor entry/exit and runner failure paths to diagnose where execution blocks on SIGTERM
+- **Auto-Retry Diagnostic Logging**: Debug/info-level log messages showing why auto-retry is or isn't triggered for failed phases
+
+### Changed
+- **Work Spec Display**: Enhanced work spec formatting in the node detail panel with bordered code blocks, shell type badges, and long commands formatted with line breaks at semicolons and pipes
+- **Model Schema**: Removed `model` from job-level schema — model selection is only valid inside `AgentSpec` work objects, not at the job level where it was silently ignored
+
+### Fixed
+- **Log Viewer Reliability**: `_sendLog` now always posts a `logContent` message to the webview, preventing the viewer from getting stuck on missing responses
+- **setTimeout Overflow**: Capped timer values to safe maximum (2,147,483,647 ms) to prevent Node.js overflow errors
+- **Auto-Retry Persistence**: Plan state is now persisted BEFORE auto-retry execution to ensure failure state is captured even if SIGTERM occurs during retry
+- **Attempt Log Isolation**: Attempt history phase tabs now correctly read logs from per-attempt files instead of accumulating all previous attempts
+
 ## [0.8.5] - 2026-02-10
 
 ### Added
