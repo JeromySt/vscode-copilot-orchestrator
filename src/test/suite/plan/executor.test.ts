@@ -209,6 +209,7 @@ suite('DefaultJobExecutor', () => {
         node: { id: 'n1', name: 'Job', type: 'job' as const, dependencies: [], dependents: [] } as any,
         worktreePath: '/nonexistent/worktree/path',
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.success, false);
@@ -239,6 +240,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       // May succeed or fail in commit phase, but work should be skipped
@@ -262,6 +264,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
         resumeFromPhase: 'postchecks' as any,
         previousStepStatuses: { prechecks: 'success' as const, work: 'success' as const },
       };
@@ -293,6 +296,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.stepStatuses?.prechecks, 'success');
@@ -309,6 +313,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.success, false);
@@ -337,6 +342,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.stepStatuses?.work, 'success');
@@ -353,6 +359,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.success, false);
@@ -381,6 +388,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.stepStatuses?.postchecks, 'success');
@@ -398,6 +406,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.success, false);
@@ -416,6 +425,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       // Process should execute 'echo hello'
@@ -434,6 +444,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
         onProgress: (msg: string) => progresses.push(msg),
       };
       await executor.execute(context);
@@ -462,6 +473,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit,
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.success, true);
@@ -493,6 +505,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit,
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.success, true);
@@ -520,6 +533,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit,
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.success, false);
@@ -540,6 +554,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.success, false);
@@ -575,6 +590,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit,
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.success, true);
@@ -596,6 +612,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.success, false);
@@ -617,6 +634,7 @@ suite('DefaultJobExecutor', () => {
         } as any,
         worktreePath: tmp,
         baseCommit: 'abc123',
+        attemptNumber: 1,
       };
       const result = await executor.execute(context);
       assert.strictEqual(result.success, false);

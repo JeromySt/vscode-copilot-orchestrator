@@ -164,9 +164,10 @@ export interface JobExecutor {
    *
    * @param planId - Plan ID.
    * @param nodeId - Node ID.
+   * @param attemptNumber - Optional 1-based attempt number for specific attempt's log.
    * @returns Absolute path to the log file, or undefined if unavailable.
    */
-  getLogFilePath?(planId: string, nodeId: string): string | undefined;
+  getLogFilePath?(planId: string, nodeId: string, attemptNumber?: number): string | undefined;
 
   /**
    * Append a log entry to a job's execution log.
@@ -176,8 +177,9 @@ export interface JobExecutor {
    * @param phase   - Current execution phase.
    * @param type    - Log level.
    * @param message - Log message text.
+   * @param attemptNumber - Optional attempt number for per-attempt log files.
    */
-  log?(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void;
+  log?(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string, attemptNumber?: number): void;
 }
 
 /**
@@ -276,9 +278,9 @@ export class PlanRunner extends EventEmitter {
   /**
    * Log a message to the executor (helper for merge operations)
    */
-  private execLog(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void {
+  private execLog(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string, attemptNumber?: number): void {
     if (this.executor?.log) {
-      this.executor.log(planId, nodeId, phase, type, message);
+      this.executor.log(planId, nodeId, phase, type, message, attemptNumber);
     }
   }
   
@@ -632,9 +634,10 @@ export class PlanRunner extends EventEmitter {
    * @param planId - Plan identifier.
    * @param nodeId - Node identifier.
    * @param phase  - Phase to filter by, or `'all'` / `undefined` for everything.
+   * @param attemptNumber - Optional attempt number for per-attempt log files.
    * @returns Formatted log text.
    */
-  getNodeLogs(planId: string, nodeId: string, phase?: 'all' | ExecutionPhase): string {
+  getNodeLogs(planId: string, nodeId: string, phase?: 'all' | ExecutionPhase, attemptNumber?: number): string {
     if (!this.executor) return 'No executor available.';
     
     // First try memory logs
@@ -649,9 +652,9 @@ export class PlanRunner extends EventEmitter {
       return formatLogEntries(logs);
     }
     
-    // Try reading from log file
+    // Try reading from log file (use attempt number if provided)
     if ('readLogsFromFile' in this.executor && typeof (this.executor as any).readLogsFromFile === 'function') {
-      const fileContent = (this.executor as any).readLogsFromFile(planId, nodeId);
+      const fileContent = (this.executor as any).readLogsFromFile(planId, nodeId, attemptNumber);
       if (fileContent && !fileContent.startsWith('No log file')) {
         // Filter by phase if requested
         if (phase && phase !== 'all') {
@@ -673,9 +676,9 @@ export class PlanRunner extends EventEmitter {
    * @param nodeId - Node identifier.
    * @returns Absolute path to the log file, or undefined if unavailable.
    */
-  getNodeLogFilePath(planId: string, nodeId: string): string | undefined {
+  getNodeLogFilePath(planId: string, nodeId: string, attemptNumber?: number): string | undefined {
     if (!this.executor?.getLogFilePath) return undefined;
-    return this.executor.getLogFilePath(planId, nodeId);
+    return this.executor.getLogFilePath(planId, nodeId, attemptNumber);
   }
   
   /**
@@ -688,9 +691,10 @@ export class PlanRunner extends EventEmitter {
    * @param nodeId         - Node identifier.
    * @param memoryOffset   - Index into the in-memory log array to start from.
    * @param fileByteOffset - Byte offset into the on-disk log file to start from.
+   * @param attemptNumber  - Optional attempt number for per-attempt log files.
    * @returns Formatted log text for the current attempt only.
    */
-  private getNodeLogsFromOffset(planId: string, nodeId: string, memoryOffset: number, fileByteOffset: number): string {
+  private getNodeLogsFromOffset(planId: string, nodeId: string, memoryOffset: number, fileByteOffset: number, attemptNumber?: number): string {
     if (!this.executor) return 'No executor available.';
     
     // First try memory logs (sliced from offset)
@@ -704,7 +708,7 @@ export class PlanRunner extends EventEmitter {
     
     // Try reading from log file (from byte offset)
     if ('readLogsFromFileOffset' in this.executor && typeof (this.executor as any).readLogsFromFileOffset === 'function') {
-      const fileContent = (this.executor as any).readLogsFromFileOffset(planId, nodeId, fileByteOffset) as string;
+      const fileContent = (this.executor as any).readLogsFromFileOffset(planId, nodeId, fileByteOffset, attemptNumber) as string;
       if (fileContent && !fileContent.startsWith('No log file')) {
         return fileContent;
       }
@@ -1421,7 +1425,7 @@ export class PlanRunner extends EventEmitter {
         );
       } catch (wtError: any) {
         // Worktree creation is part of FI phase - log and set correct phase
-        this.execLog(plan.id, node.id, 'merge-fi', 'error', `Failed to create worktree: ${wtError.message}`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'error', `Failed to create worktree: ${wtError.message}`, nodeState.attempts);
         if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
         nodeState.stepStatuses['merge-fi'] = 'failed';
         const fiError = new Error(wtError.message) as Error & { failedPhase: string };
@@ -1451,33 +1455,33 @@ export class PlanRunner extends EventEmitter {
           ? baseCommitish.slice(0, 8) 
           : baseCommitish;
         
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE START ==========');
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE START ==========', nodeState.attempts);
         
         // Log the worktree base dependency with its work summary
         const baseDep = dependencyInfoMap.get(baseCommits[0]);
         if (baseDep) {
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', '');
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `[Worktree Base] ${baseDep.nodeName}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Commit: ${baseShort} (from dependency "${baseDep.nodeName}")`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', '', nodeState.attempts);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `[Worktree Base] ${baseDep.nodeName}`, nodeState.attempts);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Commit: ${baseShort} (from dependency "${baseDep.nodeName}")`, nodeState.attempts);
           
           // Show work summary from the dependency node
-          this.logDependencyWorkSummary(plan.id, node.id, baseDep.workSummary);
+          this.logDependencyWorkSummary(plan.id, node.id, baseDep.workSummary, nodeState.attempts);
         } else {
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${baseShort} (from dependency)`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${baseShort} (from dependency)`, nodeState.attempts);
         }
         
         if (additionalSources.length > 0) {
           log.info(`Merging ${additionalSources.length} additional source commits for job ${node.name}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', '');
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging ${additionalSources.length} additional source commit(s) into worktree...`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', '', nodeState.attempts);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging ${additionalSources.length} additional source commit(s) into worktree...`, nodeState.attempts);
           
           const mergeSuccess = await this.mergeSourcesIntoWorktree(
-            plan, node, worktreePath, additionalSources, dependencyInfoMap
+            plan, node, worktreePath, additionalSources, dependencyInfoMap, nodeState.attempts
           );
           
           if (!mergeSuccess) {
-            this.execLog(plan.id, node.id, 'merge-fi', 'error', 'Forward integration merge FAILED');
-            this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========');
+            this.execLog(plan.id, node.id, 'merge-fi', 'error', 'Forward integration merge FAILED', nodeState.attempts);
+            this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========', nodeState.attempts);
             if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
             nodeState.stepStatuses['merge-fi'] = 'failed';
             nodeState.error = 'Failed to merge sources from dependencies';
@@ -1495,7 +1499,8 @@ export class PlanRunner extends EventEmitter {
               stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
               worktreePath: nodeState.worktreePath,
               baseCommit: nodeState.baseCommit,
-              logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset),
+              logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
+              logFilePath: this.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
               workUsed: node.work,
               metrics: nodeState.metrics,
               phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
@@ -1504,16 +1509,17 @@ export class PlanRunner extends EventEmitter {
             
             sm.transition(node.id, 'failed');
             this.emit('nodeCompleted', plan.id, node.id, false);
+            this.persistence.save(plan);
             return;
           }
           
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', '');
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Forward integration merge succeeded');
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', '', nodeState.attempts);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Forward integration merge succeeded', nodeState.attempts);
         } else {
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', '');
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Single dependency - no additional merges needed');
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', '', nodeState.attempts);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Single dependency - no additional merges needed', nodeState.attempts);
         }
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========');
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========', nodeState.attempts);
         if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
         nodeState.stepStatuses['merge-fi'] = 'success';
         
@@ -1523,18 +1529,18 @@ export class PlanRunner extends EventEmitter {
       } else if (node.dependencies.length > 0) {
         // Has dependencies but none produced commits (all expectsNoChanges)
         // Still need to acknowledge consumption so those worktrees can be cleaned up
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========');
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${plan.baseBranch} (dependencies have no commits to merge)`);
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '===========================================');
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========', nodeState.attempts);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${plan.baseBranch} (dependencies have no commits to merge)`, nodeState.attempts);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '===========================================', nodeState.attempts);
         if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
         nodeState.stepStatuses['merge-fi'] = 'success';
         
         await this.acknowledgeConsumption(plan, sm, node);
       } else {
         // Root node - no dependencies
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========');
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${plan.baseBranch} (root node, no dependencies)`);
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '===========================================');
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========', nodeState.attempts);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${plan.baseBranch} (root node, no dependencies)`, nodeState.attempts);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '===========================================', nodeState.attempts);
         if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
         nodeState.stepStatuses['merge-fi'] = 'success';
       }
@@ -1546,7 +1552,7 @@ export class PlanRunner extends EventEmitter {
       // Check if resuming from merge-ri phase - skip executor entirely
       if (nodeState.resumeFromPhase === 'merge-ri') {
         log.info(`Resuming from merge-ri phase - skipping executor for ${node.name}`);
-        this.execLog(plan.id, node.id, 'work', 'info', '========== WORK PHASES (SKIPPED - RESUMING FROM RI) ==========');
+        this.execLog(plan.id, node.id, 'work', 'info', '========== WORK PHASES (SKIPPED - RESUMING FROM RI) ==========', nodeState.attempts);
         // The completedCommit is already set from the previous successful work phase
         executorSuccess = true;
         // Clear resumeFromPhase since we're handling the retry now
@@ -1559,6 +1565,7 @@ export class PlanRunner extends EventEmitter {
           node,
           baseCommit: nodeState.baseCommit!,
           worktreePath,
+          attemptNumber: nodeState.attempts,
           copilotSessionId: nodeState.copilotSessionId, // Pass existing session for resumption
           resumeFromPhase: nodeState.resumeFromPhase, // Resume from failed phase
           previousStepStatuses: nodeState.stepStatuses, // Preserve completed phase statuses
@@ -1650,7 +1657,8 @@ export class PlanRunner extends EventEmitter {
             stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
             worktreePath: nodeState.worktreePath,
             baseCommit: nodeState.baseCommit,
-            logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset),
+            logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
+            logFilePath: this.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
             workUsed: node.work,
             metrics: nodeState.metrics,
             phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
@@ -1712,9 +1720,9 @@ export class PlanRunner extends EventEmitter {
                 signal: result.error,
               });
               
-              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '');
-              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-RETRY: AGENT INTERRUPTED, RETRYING ==========');
-              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', `Phase "${failedPhase}" agent was externally killed. Retrying same agent.`);
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '', nodeState.attempts);
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-RETRY: AGENT INTERRUPTED, RETRYING ==========', nodeState.attempts);
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', `Phase "${failedPhase}" agent was externally killed. Retrying same agent.`, nodeState.attempts);
               
               // Reset state for the retry attempt
               nodeState.error = undefined;
@@ -1731,6 +1739,7 @@ export class PlanRunner extends EventEmitter {
                 node,
                 baseCommit: nodeState.baseCommit!,
                 worktreePath,
+                attemptNumber: nodeState.attempts,
                 copilotSessionId: nodeState.copilotSessionId,
                 resumeFromPhase: failedPhase as ExecutionContext['resumeFromPhase'],
                 previousStepStatuses: nodeState.stepStatuses,
@@ -1760,7 +1769,7 @@ export class PlanRunner extends EventEmitter {
                   planId: plan.id,
                   nodeId: node.id,
                 });
-                this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-RETRY: SUCCESS ==========');
+                this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-RETRY: SUCCESS ==========', nodeState.attempts);
                 
                 autoHealSucceeded = true;
                 if (retryResult.completedCommit) {
@@ -1787,8 +1796,8 @@ export class PlanRunner extends EventEmitter {
                   nodeId: node.id,
                   error: retryResult.error,
                 });
-                this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-RETRY: FAILED ==========');
-                this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'error', `Auto-retry could not complete: ${retryResult.error}`);
+                this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-RETRY: FAILED ==========', nodeState.attempts);
+                this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'error', `Auto-retry could not complete: ${retryResult.error}`, nodeState.attempts);
                 
                 nodeState.error = `Auto-retry failed: ${retryResult.error}`;
                 
@@ -1813,7 +1822,8 @@ export class PlanRunner extends EventEmitter {
                   stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
                   worktreePath: nodeState.worktreePath,
                   baseCommit: nodeState.baseCommit,
-                  logs: this.getNodeLogsFromOffset(plan.id, node.id, retryLogMemoryOffset, retryLogFileOffset),
+                  logs: this.getNodeLogsFromOffset(plan.id, node.id, retryLogMemoryOffset, retryLogFileOffset, nodeState.attempts),
+                  logFilePath: this.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
                   workUsed: node.work,
                   metrics: nodeState.metrics,
                   phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
@@ -1828,6 +1838,7 @@ export class PlanRunner extends EventEmitter {
                   nodeId: node.id,
                   error: retryResult.error,
                 });
+                this.persistence.save(plan);
                 return;
               }
             } else {
@@ -1839,9 +1850,9 @@ export class PlanRunner extends EventEmitter {
             });
             
             // Log the auto-heal attempt in the failed phase's log stream
-            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '');
-            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: AI-ASSISTED FIX ATTEMPT ==========');
-            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', `Phase "${failedPhase}" failed. Delegating to Copilot agent to diagnose and fix.`);
+            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '', nodeState.attempts);
+            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: AI-ASSISTED FIX ATTEMPT ==========', nodeState.attempts);
+            this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', `Phase "${failedPhase}" failed. Delegating to Copilot agent to diagnose and fix.`, nodeState.attempts);
             
             // Gather context the agent needs to diagnose and fix the failure:
             // 1. The original command that was run
@@ -1925,6 +1936,7 @@ export class PlanRunner extends EventEmitter {
               node,
               baseCommit: nodeState.baseCommit!,
               worktreePath,
+              attemptNumber: nodeState.attempts,
               copilotSessionId: nodeState.copilotSessionId,
               resumeFromPhase: failedPhase as ExecutionContext['resumeFromPhase'],
               previousStepStatuses: nodeState.stepStatuses,
@@ -1959,7 +1971,7 @@ export class PlanRunner extends EventEmitter {
                 planId: plan.id,
                 nodeId: node.id,
               });
-              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: SUCCESS ==========');
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: SUCCESS ==========', nodeState.attempts);
               
               autoHealSucceeded = true;
               if (healResult.completedCommit) {
@@ -1984,8 +1996,8 @@ export class PlanRunner extends EventEmitter {
                 nodeId: node.id,
                 error: healResult.error,
               });
-              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: FAILED ==========');
-              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'error', `Auto-heal could not fix the issue: ${healResult.error}`);
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: FAILED ==========', nodeState.attempts);
+              this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'error', `Auto-heal could not fix the issue: ${healResult.error}`, nodeState.attempts);
               
               nodeState.error = `Auto-heal failed: ${healResult.error}`;
               
@@ -2011,7 +2023,8 @@ export class PlanRunner extends EventEmitter {
                 stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
                 worktreePath: nodeState.worktreePath,
                 baseCommit: nodeState.baseCommit,
-                logs: this.getNodeLogsFromOffset(plan.id, node.id, healLogMemoryOffset, healLogFileOffset),
+                logs: this.getNodeLogsFromOffset(plan.id, node.id, healLogMemoryOffset, healLogFileOffset, nodeState.attempts),
+                logFilePath: this.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
                 workUsed: healSpec,
                 metrics: nodeState.metrics,
                 phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
@@ -2026,6 +2039,7 @@ export class PlanRunner extends EventEmitter {
                 nodeId: node.id,
                 error: healResult.error,
               });
+              this.persistence.save(plan);
               return;
             }
             }
@@ -2040,6 +2054,7 @@ export class PlanRunner extends EventEmitter {
               phase: result.failedPhase || 'unknown',
               error: result.error,
             });
+            this.persistence.save(plan);
             return;
           }
         }
@@ -2055,38 +2070,38 @@ export class PlanRunner extends EventEmitter {
       
       if (isLeaf && plan.targetBranch && nodeState.completedCommit) {
         log.info(`Initiating merge to target: ${node.name} -> ${plan.targetBranch}`);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========');
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Merging completed commit ${nodeState.completedCommit.slice(0, 8)} to ${plan.targetBranch}`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========', nodeState.attempts);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Merging completed commit ${nodeState.completedCommit.slice(0, 8)} to ${plan.targetBranch}`, nodeState.attempts);
         
         // Serialize RI merges via mutex to prevent:
         // 1. Git index.lock conflicts (stash/reset/checkout all acquire the lock)
         // 2. Logical races where concurrent merges read the same target tip,
         //    creating divergent commits that overwrite each other
         const mergeSuccess = await this.withRiMergeLock(() =>
-          this.mergeLeafToTarget(plan, node, nodeState.completedCommit!)
+          this.mergeLeafToTarget(plan, node, nodeState.completedCommit!, nodeState.attempts)
         );
         nodeState.mergedToTarget = mergeSuccess;
         
         if (mergeSuccess) {
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`);
+          this.execLog(plan.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`, nodeState.attempts);
           if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
           nodeState.stepStatuses['merge-ri'] = 'success';
         } else {
           riMergeFailed = true;
           if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
           nodeState.stepStatuses['merge-ri'] = 'failed';
-          this.execLog(plan.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED - worktree preserved for manual retry`);
+          this.execLog(plan.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED - worktree preserved for manual retry`, nodeState.attempts);
           log.warn(`Leaf ${node.name} work succeeded but RI merge to ${plan.targetBranch} failed - treating as node failure`);
         }
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========');
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========', nodeState.attempts);
         
         log.info(`Merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
       } else if (isLeaf && plan.targetBranch && !nodeState.completedCommit) {
         // Leaf node with no commit at all (no baseCommit either) - nothing to merge
         log.debug(`Leaf node ${node.name} has no commit to merge to ${plan.targetBranch} - marking as merged`);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION ==========');
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', 'No commit to merge (validation-only root node)');
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', '==========================================');
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION ==========', nodeState.attempts);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', 'No commit to merge (validation-only root node)', nodeState.attempts);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', '==========================================', nodeState.attempts);
         nodeState.mergedToTarget = true;
       } else if (isLeaf) {
         log.debug(`Skipping merge: isLeaf=${isLeaf}, hasTargetBranch=${!!plan.targetBranch}, hasCompletedCommit=${!!nodeState.completedCommit}`);
@@ -2118,7 +2133,8 @@ export class PlanRunner extends EventEmitter {
           worktreePath: nodeState.worktreePath,
           baseCommit: nodeState.baseCommit,
           completedCommit: nodeState.completedCommit, // Work was successful, so we have the commit
-          logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset),
+          logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
+          logFilePath: this.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
           workUsed: node.work,
           metrics: nodeState.metrics,
           phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
@@ -2146,7 +2162,8 @@ export class PlanRunner extends EventEmitter {
           stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
           worktreePath: nodeState.worktreePath,
           baseCommit: nodeState.baseCommit,
-          logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset),
+          logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
+          logFilePath: this.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
           workUsed: node.work,
           metrics: nodeState.metrics,
           phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
@@ -2205,7 +2222,8 @@ export class PlanRunner extends EventEmitter {
         stepStatuses: nodeState.stepStatuses,
         worktreePath: nodeState.worktreePath,
         baseCommit: nodeState.baseCommit,
-        logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset),
+        logs: this.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
+        logFilePath: this.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
         workUsed: node.work,
         metrics: nodeState.metrics,
         phaseMetrics: nodeState.phaseMetrics,
@@ -2270,7 +2288,8 @@ export class PlanRunner extends EventEmitter {
   private async mergeLeafToTarget(
     plan: PlanInstance,
     node: PlanNode,
-    completedCommit: string
+    completedCommit: string,
+    attemptNumber?: number
   ): Promise<boolean> {
     if (!plan.targetBranch) return true; // No target = nothing to merge = success
     
@@ -2285,7 +2304,7 @@ export class PlanRunner extends EventEmitter {
       // =========================================================================
       // FAST PATH: Use git merge-tree (no checkout needed, no worktree conflicts)
       // =========================================================================
-      this.execLog(plan.id, node.id, 'merge-ri', 'info', `Using git merge-tree for conflict-free merge...`);
+      this.execLog(plan.id, node.id, 'merge-ri', 'info', `Using git merge-tree for conflict-free merge...`, attemptNumber);
       
       const mergeTreeResult = await git.merge.mergeWithoutCheckout({
         source: completedCommit,
@@ -2293,13 +2312,13 @@ export class PlanRunner extends EventEmitter {
         repoPath,
         log: s => {
           log.debug(s);
-          this.execLog(plan.id, node.id, 'merge-ri', 'stdout', s);
+          this.execLog(plan.id, node.id, 'merge-ri', 'stdout', s, attemptNumber);
         }
       });
       
       if (mergeTreeResult.success && mergeTreeResult.treeSha) {
         log.info(`Fast path: conflict-free merge via merge-tree`);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ No conflicts detected`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ No conflicts detected`, attemptNumber);
         
         // Create the merge commit from the tree
         const targetSha = await git.repository.resolveRef(targetBranch, repoPath);
@@ -2314,12 +2333,12 @@ export class PlanRunner extends EventEmitter {
         );
         
         log.debug(`Created merge commit: ${newCommit.slice(0, 8)}`);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Created merge commit: ${newCommit.slice(0, 8)}`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Created merge commit: ${newCommit.slice(0, 8)}`, attemptNumber);
         
         // Update the target branch to point to the new commit
         // We need to handle the case where target branch is checked out elsewhere
         await this.updateBranchRef(repoPath, targetBranch, newCommit);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Updated ${targetBranch} to ${newCommit.slice(0, 8)}`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Updated ${targetBranch} to ${newCommit.slice(0, 8)}`, attemptNumber);
         
         log.info(`Merged leaf ${node.name} to ${targetBranch}`, {
           commit: completedCommit.slice(0, 8),
@@ -2331,13 +2350,13 @@ export class PlanRunner extends EventEmitter {
         
         if (pushOnSuccess) {
           try {
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', `Pushing ${targetBranch} to origin...`);
+            this.execLog(plan.id, node.id, 'merge-ri', 'info', `Pushing ${targetBranch} to origin...`, attemptNumber);
             await git.repository.push(repoPath, { branch: targetBranch, log: s => log.debug(s) });
             log.info(`Pushed ${targetBranch} to origin`);
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ Pushed to origin`);
+            this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ Pushed to origin`, attemptNumber);
           } catch (pushError: any) {
             log.warn(`Push failed: ${pushError.message}`);
-            this.execLog(plan.id, node.id, 'merge-ri', 'error', `Push failed: ${pushError.message}`);
+            this.execLog(plan.id, node.id, 'merge-ri', 'error', `Push failed: ${pushError.message}`, attemptNumber);
             // Push failure doesn't mean merge failed - the commit is local
           }
         }
@@ -2352,9 +2371,9 @@ export class PlanRunner extends EventEmitter {
         log.info(`Merge has conflicts, using Copilot CLI to resolve`, {
           conflictFiles: mergeTreeResult.conflictFiles,
         });
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `⚠ Merge has conflicts`);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `  Conflicts: ${mergeTreeResult.conflictFiles?.join(', ')}`);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `  Invoking Copilot CLI to resolve...`);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `⚠ Merge has conflicts`, attemptNumber);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `  Conflicts: ${mergeTreeResult.conflictFiles?.join(', ')}`, attemptNumber);
+        this.execLog(plan.id, node.id, 'merge-ri', 'info', `  Invoking Copilot CLI to resolve...`, attemptNumber);
         
         // Fall back to main repo merge with Copilot CLI resolution
         const resolved = await this.mergeWithConflictResolution(
@@ -2366,7 +2385,7 @@ export class PlanRunner extends EventEmitter {
         );
         
         if (resolved.success) {
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ Conflict resolved by Copilot CLI`);
+          this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ Conflict resolved by Copilot CLI`, attemptNumber);
           
           // Aggregate CLI metrics from merge conflict resolution into node metrics
           if (resolved.metrics) {
@@ -2381,14 +2400,14 @@ export class PlanRunner extends EventEmitter {
             }
           }
         } else {
-          this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Copilot CLI failed to resolve conflict`);
+          this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Copilot CLI failed to resolve conflict`, attemptNumber);
         }
         
         return resolved.success;
       }
       
       log.error(`Merge-tree failed: ${mergeTreeResult.error}`);
-      this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Merge-tree failed: ${mergeTreeResult.error}`);
+      this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Merge-tree failed: ${mergeTreeResult.error}`, attemptNumber);
       return false;
       
     } catch (error: any) {
@@ -2396,7 +2415,7 @@ export class PlanRunner extends EventEmitter {
         node: node.name,
         error: error.message,
       });
-      this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Exception: ${error.message}`);
+      this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Exception: ${error.message}`, attemptNumber);
       return false;
     }
   }
@@ -2479,10 +2498,11 @@ export class PlanRunner extends EventEmitter {
   private logDependencyWorkSummary(
     planId: string,
     nodeId: string,
-    workSummary: JobWorkSummary | undefined
+    workSummary: JobWorkSummary | undefined,
+    attemptNumber?: number
   ): void {
     if (!workSummary) {
-      this.execLog(planId, nodeId, 'merge-fi', 'info', '  (No work summary available)');
+      this.execLog(planId, nodeId, 'merge-fi', 'info', '  (No work summary available)', attemptNumber);
       return;
     }
     
@@ -2490,19 +2510,19 @@ export class PlanRunner extends EventEmitter {
     if (commitDetails.length === 0) {
       // Fall back to summary counts if no commit details
       this.execLog(planId, nodeId, 'merge-fi', 'info', 
-        `  Work: ${workSummary.commits} commit(s), +${workSummary.filesAdded} ~${workSummary.filesModified} -${workSummary.filesDeleted}`);
+        `  Work: ${workSummary.commits} commit(s), +${workSummary.filesAdded} ~${workSummary.filesModified} -${workSummary.filesDeleted}`, attemptNumber);
       return;
     }
     
-    this.execLog(planId, nodeId, 'merge-fi', 'info', `  Commits (${commitDetails.length}):`);
+    this.execLog(planId, nodeId, 'merge-fi', 'info', `  Commits (${commitDetails.length}):`, attemptNumber);
     
     for (const commit of commitDetails) {
-      this.execLog(planId, nodeId, 'merge-fi', 'info', `    ${commit.shortHash} ${commit.message}`);
+      this.execLog(planId, nodeId, 'merge-fi', 'info', `    ${commit.shortHash} ${commit.message}`, attemptNumber);
       
       // Show file change summary
       const summary = this.summarizeCommitFiles(commit);
       if (summary) {
-        this.execLog(planId, nodeId, 'merge-fi', 'info', `           ${summary}`);
+        this.execLog(planId, nodeId, 'merge-fi', 'info', `           ${summary}`, attemptNumber);
       }
     }
   }
@@ -2561,7 +2581,8 @@ export class PlanRunner extends EventEmitter {
     node: JobNode,
     worktreePath: string,
     additionalSources: string[],
-    dependencyInfoMap: Map<string, DependencyInfo>
+    dependencyInfoMap: Map<string, DependencyInfo>,
+    attemptNumber?: number
   ): Promise<boolean> {
     if (additionalSources.length === 0) {
       return true;
@@ -2576,16 +2597,16 @@ export class PlanRunner extends EventEmitter {
       log.debug(`Merging commit ${shortSha} into worktree at ${worktreePath}`);
       
       // Log dependency info before merging
-      this.execLog(plan.id, node.id, 'merge-fi', 'info', '');
+      this.execLog(plan.id, node.id, 'merge-fi', 'info', '', attemptNumber);
       if (depInfo) {
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `[Merge Source] ${depInfo.nodeName}`);
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Commit: ${shortSha} (from dependency "${depInfo.nodeName}")`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `[Merge Source] ${depInfo.nodeName}`, attemptNumber);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Commit: ${shortSha} (from dependency "${depInfo.nodeName}")`, attemptNumber);
         
         // Show work summary from the dependency node
-        this.logDependencyWorkSummary(plan.id, node.id, depInfo.workSummary);
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '  Merging into worktree...');
+        this.logDependencyWorkSummary(plan.id, node.id, depInfo.workSummary, attemptNumber);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', '  Merging into worktree...', attemptNumber);
       } else {
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging source commit ${shortSha}...`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging source commit ${shortSha}...`, attemptNumber);
       }
       
       try {
@@ -2600,14 +2621,14 @@ export class PlanRunner extends EventEmitter {
         
         if (mergeResult.success) {
           log.debug(`Merge of commit ${shortSha} succeeded`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ✓ Merged successfully`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ✓ Merged successfully`, attemptNumber);
         } else if (mergeResult.hasConflicts) {
           log.info(`Merge conflict for commit ${shortSha}, using Copilot CLI to resolve`, {
             conflicts: mergeResult.conflictFiles,
           });
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ⚠ Merge conflict detected`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `    Conflicts: ${mergeResult.conflictFiles?.join(', ')}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `    Invoking Copilot CLI to resolve...`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ⚠ Merge conflict detected`, attemptNumber);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `    Conflicts: ${mergeResult.conflictFiles?.join(', ')}`, attemptNumber);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `    Invoking Copilot CLI to resolve...`, attemptNumber);
           
           // Use Copilot CLI to resolve conflicts
           const cliResult = await this.resolveMergeConflictWithCopilot(
@@ -2620,13 +2641,13 @@ export class PlanRunner extends EventEmitter {
           
           if (!cliResult.success) {
             log.error(`Copilot CLI failed to resolve merge conflict for commit ${shortSha}`);
-            this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Copilot CLI failed to resolve conflict`);
+            this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Copilot CLI failed to resolve conflict`, attemptNumber);
             await git.merge.abort(worktreePath, s => log.debug(s));
             return false;
           }
           
           log.info(`Merge conflict resolved by Copilot CLI for commit ${shortSha}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ✓ Conflict resolved by Copilot CLI`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ✓ Conflict resolved by Copilot CLI`, attemptNumber);
           
           // Aggregate CLI metrics from FI merge conflict resolution into node metrics
           if (cliResult.metrics) {
@@ -2644,12 +2665,12 @@ export class PlanRunner extends EventEmitter {
           }
         } else {
           log.error(`Merge failed for commit ${shortSha}: ${mergeResult.error}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Merge failed: ${mergeResult.error}`);
+          this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Merge failed: ${mergeResult.error}`, attemptNumber);
           return false;
         }
       } catch (error: any) {
         log.error(`Exception merging commit ${shortSha}: ${error.message}`);
-        this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Exception: ${error.message}`);
+        this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Exception: ${error.message}`, attemptNumber);
         return false;
       }
     }
@@ -3089,6 +3110,7 @@ export class PlanRunner extends EventEmitter {
       worktreePath: nodeState.worktreePath,
       baseCommit: nodeState.baseCommit,
       logs,
+      logFilePath: this.getNodeLogFilePath(planId, nodeId, nodeState.attempts || 1),
       workUsed: node.type === 'job' ? (node as JobNode).work : undefined,
     });
     

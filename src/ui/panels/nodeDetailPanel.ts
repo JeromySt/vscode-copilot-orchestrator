@@ -13,9 +13,44 @@
  */
 
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord, CopilotUsageMetrics } from '../../plan';
 import { escapeHtml, formatDuration, errorPageHtml, loadingPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 import { getNodeMetrics, formatPremiumRequests, formatDurationSeconds, formatTokenCount, formatCodeChanges } from '../../plan/metricsAggregator';
+
+/**
+ * Truncate a log file path for display, keeping the drive letter,
+ * an ellipsis, and the filename with attempt number visible.
+ * Full path is preserved in the title attribute for tooltip.
+ *
+ * @param filePath - The full log file path.
+ * @returns A truncated display string like "C:\...\filename_1.log"
+ */
+function truncateLogPath(filePath: string): string {
+  if (!filePath) return '';
+  
+  // Get the filename (last part of the path)
+  const separator = filePath.includes('\\') ? '\\' : '/';
+  const parts = filePath.split(separator);
+  const filename = parts[parts.length - 1];
+  
+  // Get the drive letter or first folder
+  const prefix = parts[0] + separator;
+  
+  // Truncate the filename too if it's a UUID-based log file
+  // Pattern: {planId}_{nodeId}_{attempt}.log -> {first8}....{last12}_N.log
+  let truncatedFilename = filename;
+  const logMatch = filename.match(/^([a-f0-9]{8})-[a-f0-9-]+_[a-f0-9-]+-([a-f0-9]{12})_(\d+\.log)$/i);
+  if (logMatch) {
+    truncatedFilename = `${logMatch[1]}....${logMatch[2]}_${logMatch[3]}`;
+  }
+  
+  // If the path is short enough, return as-is
+  if (filePath.length <= 50) return filePath;
+  
+  // Truncate the middle
+  return `${prefix}....${separator}${truncatedFilename}`;
+}
 
 /**
  * Format a {@link WorkSpec} as a plain-text summary string.
@@ -54,33 +89,110 @@ function formatWorkSpec(spec: WorkSpec | undefined): string {
  * @param escapeHtml - HTML escaping function for sanitizing user-supplied text.
  * @returns An HTML fragment string, or empty string if the spec is undefined.
  */
+/**
+ * Get a display-friendly shell type name for the badge.
+ */
+function getShellDisplayName(shell: string | undefined): { name: string; lang: string } {
+  if (!shell) return { name: 'Shell', lang: 'shell' };
+  const lower = shell.toLowerCase();
+  if (lower.includes('powershell')) return { name: 'PowerShell', lang: 'powershell' };
+  if (lower.includes('pwsh')) return { name: 'PowerShell', lang: 'powershell' };
+  if (lower.includes('bash')) return { name: 'Bash', lang: 'bash' };
+  if (lower.includes('zsh')) return { name: 'Zsh', lang: 'bash' };
+  if (lower.includes('cmd')) return { name: 'CMD', lang: 'batch' };
+  if (lower.includes('sh')) return { name: 'Shell', lang: 'shell' };
+  return { name: shell, lang: 'shell' };
+}
+
 function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) => string): string {
   if (!spec) return '';
   
   if (typeof spec === 'string') {
-    return `<code class="work-command">${escapeHtml(spec)}</code>`;
+    return `<div class="work-code-block">
+      <div class="work-code-header"><span class="work-lang-badge">Command</span></div>
+      <pre class="work-code"><code>${escapeHtml(spec)}</code></pre>
+    </div>`;
   }
   
   switch (spec.type) {
     case 'process': {
       const args = spec.args?.join(' ') || '';
       const cmd = `${spec.executable} ${args}`.trim();
-      return `<div class="work-type-badge process">process</div><code class="work-command">${escapeHtml(cmd)}</code>`;
+      return `<div class="work-code-block">
+        <div class="work-code-header"><span class="work-lang-badge process">Process</span></div>
+        <pre class="work-code"><code>${escapeHtml(cmd)}</code></pre>
+      </div>`;
     }
     case 'shell': {
-      const shellLabel = spec.shell || 'shell';
-      return `<div class="work-type-badge shell">${escapeHtml(shellLabel)}</div><code class="work-command">${escapeHtml(spec.command)}</code>`;
+      const { name } = getShellDisplayName(spec.shell);
+      // Format long commands with line breaks for readability
+      const formattedCmd = formatShellCommand(spec.command);
+      return `<div class="work-code-block">
+        <div class="work-code-header"><span class="work-lang-badge shell">${escapeHtml(name)}</span></div>
+        <pre class="work-code"><code>${escapeHtml(formattedCmd)}</code></pre>
+      </div>`;
     }
     case 'agent': {
       // Render agent instructions as Markdown
       const instructions = spec.instructions || '';
       const rendered = renderMarkdown(instructions, escapeHtml);
       const modelLabel = spec.model ? escapeHtml(spec.model) : 'unspecified';
-      return `<div class="work-type-badge agent">AGENT <span class="agent-model-suffix">— ${modelLabel}</span></div><div class="work-instructions">${rendered}</div>`;
+      return `<div class="work-code-block agent-block">
+        <div class="work-code-header"><span class="work-lang-badge agent">Agent</span><span class="agent-model">${modelLabel}</span></div>
+        <div class="work-instructions">${rendered}</div>
+      </div>`;
     }
     default:
-      return `<code>${escapeHtml(JSON.stringify(spec))}</code>`;
+      return `<div class="work-code-block">
+        <div class="work-code-header"><span class="work-lang-badge">Config</span></div>
+        <pre class="work-code"><code>${escapeHtml(JSON.stringify(spec, null, 2))}</code></pre>
+      </div>`;
   }
+}
+
+/**
+ * Format a shell command for better readability.
+ * Breaks long commands at semicolons and pipes for multi-line display.
+ */
+function formatShellCommand(cmd: string): string {
+  if (!cmd || cmd.length < 80) return cmd;
+  
+  // Replace semicolons with semicolon + newline (but preserve quoted strings)
+  // Simple approach: break at ; and | that aren't inside quotes
+  let result = '';
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let indent = '  ';
+  
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    const prevCh = i > 0 ? cmd[i - 1] : '';
+    
+    if (ch === "'" && prevCh !== '\\' && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+    } else if (ch === '"' && prevCh !== '\\' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+    }
+    
+    if (!inSingleQuote && !inDoubleQuote) {
+      // Break after ; or | followed by space or command
+      if (ch === ';' || ch === '|') {
+        result += ch;
+        // Skip any following whitespace
+        while (i + 1 < cmd.length && cmd[i + 1] === ' ') {
+          i++;
+        }
+        if (i + 1 < cmd.length) {
+          result += '\n' + indent;
+        }
+        continue;
+      }
+    }
+    
+    result += ch;
+  }
+  
+  return result;
 }
 
 /**
@@ -505,6 +617,7 @@ export class NodeDetailPanel {
   private async _sendLog(phase: string) {
     const plan = this._planRunner.get(this._planId);
     const node = plan?.nodes.get(this._nodeId);
+    const state = plan?.nodeStates.get(this._nodeId);
     
     // Always send a response - never leave webview hanging
     if (!plan || !node) {
@@ -517,9 +630,12 @@ export class NodeDetailPanel {
       return;
     }
     
+    // Get the current attempt number for per-attempt log files
+    const attemptNumber = state?.attempts || 1;
+    
     // Get logs from executor (works for both jobs and sub-plan nodes)
-    const logs = this._planRunner.getNodeLogs(this._planId, this._nodeId, phase as any);
-    const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId);
+    const logs = this._planRunner.getNodeLogs(this._planId, this._nodeId, phase as any, attemptNumber);
+    const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, attemptNumber);
     
     this._panel.webview.postMessage({
       type: 'logContent',
@@ -599,6 +715,9 @@ export class NodeDetailPanel {
       ? this._buildWorkSummaryHtml(state.workSummary)
       : '';
     
+    // Get log file path for this node (use current attempt number)
+    const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, state.attempts || 1);
+
     // Build attempt history HTML (only if multiple attempts)
     const attemptHistoryHtml = (state.attemptHistory && state.attemptHistory.length > 0)
       ? this._buildAttemptHistoryHtml(state)
@@ -732,7 +851,7 @@ export class NodeDetailPanel {
     <div class="phase-tabs">
       ${this._buildPhaseTabs(phaseStatus, state.status === 'running')}
     </div>
-    <div class="log-file-path" id="logFilePath" style="display: none;" title="Click to open in editor"></div>
+    ${logFilePath ? `<div class="log-file-path" id="logFilePath" data-path="${escapeHtml(logFilePath)}" title="${escapeHtml(logFilePath)}">📄 ${escapeHtml(truncateLogPath(logFilePath))}</div>` : ''}
     <div class="log-viewer" id="logViewer">
       <div class="log-placeholder">Select a phase tab to view logs</div>
     </div>
@@ -829,6 +948,16 @@ export class NodeDetailPanel {
       el.addEventListener('click', () => {
         const sessionId = el.getAttribute('data-session');
         vscode.postMessage({ type: 'copyToClipboard', text: sessionId });
+      });
+    });
+    
+    // Log file path click handler
+    document.querySelectorAll('.log-file-path').forEach(el => {
+      el.addEventListener('click', () => {
+        const path = el.getAttribute('data-path');
+        if (path) {
+          vscode.postMessage({ type: 'openLogFile', path });
+        }
       });
     });
     
@@ -943,21 +1072,6 @@ export class NodeDetailPanel {
         const wasAtBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 50;
         
         viewer.innerHTML = '<pre class="log-content" tabindex="0">' + escapeHtml(msg.content) + '</pre>';
-        
-        // Update log file path display
-        const logFilePathEl = document.getElementById('logFilePath');
-        if (logFilePathEl) {
-          if (msg.logFilePath) {
-            logFilePathEl.textContent = '📄 ' + msg.logFilePath;
-            logFilePathEl.setAttribute('data-path', msg.logFilePath);
-            logFilePathEl.style.display = 'block';
-            logFilePathEl.onclick = function() {
-              vscode.postMessage({ type: 'openLogFile', path: msg.logFilePath });
-            };
-          } else {
-            logFilePathEl.style.display = 'none';
-          }
-        }
         
         // Only auto-scroll if user was already at bottom (respect manual scrolling)
         if (wasAtBottom) {
@@ -1418,11 +1532,16 @@ export class NodeDetailPanel {
            </div>`
         : '';
       
-      // Context details (worktree, base commit, work used)
-      const contextHtml = (attempt.worktreePath || attempt.baseCommit || attempt.workUsed) 
+      // Context details (worktree, base commit, work used, log file)
+      const attemptLogFileHtml = attempt.logFilePath 
+        ? `<div class="attempt-meta-row"><strong>Log:</strong> <span class="log-file-path" data-path="${escapeHtml(attempt.logFilePath)}" title="${escapeHtml(attempt.logFilePath)}">📄 ${escapeHtml(truncateLogPath(attempt.logFilePath))}</span></div>`
+        : '';
+      
+      const contextHtml = (attempt.worktreePath || attempt.baseCommit || attempt.workUsed || attempt.logFilePath) 
         ? `<div class="attempt-context">
             ${attempt.baseCommit ? `<div class="attempt-meta-row"><strong>Base:</strong> <code>${attempt.baseCommit.slice(0, 8)}</code></div>` : ''}
             ${attempt.worktreePath ? `<div class="attempt-meta-row"><strong>Worktree:</strong> <code>${escapeHtml(attempt.worktreePath)}</code></div>` : ''}
+            ${attemptLogFileHtml}
             ${attempt.workUsed ? `<div class="attempt-meta-row attempt-work-row"><strong>Work:</strong> <div class="attempt-work-content">${formatWorkSpecHtml(attempt.workUsed, escapeHtml)}</div></div>` : ''}
            </div>`
         : '';
@@ -1434,8 +1553,24 @@ export class NodeDetailPanel {
           ? '<span class="trigger-badge retry">🔄 Retry</span>'
           : '';
       
-      // Build phase tabs for this attempt
-      const phaseTabsHtml = attempt.logs ? this._buildAttemptPhaseTabs(attempt) : '';
+      // Build phase tabs for this attempt - prefer logs from file if available
+      let attemptLogs = attempt.logs || '';
+      
+      // Always try to read from log file if we have a path - the in-memory logs may be empty
+      // after a restart or if they were never captured
+      if (attempt.logFilePath) {
+        try {
+          if (fs.existsSync(attempt.logFilePath)) {
+            const fileContent = fs.readFileSync(attempt.logFilePath, 'utf8');
+            if (fileContent && fileContent.length > 0) {
+              attemptLogs = fileContent;
+            }
+          }
+        } catch (e) {
+          // Ignore read errors, fall back to in-memory logs
+        }
+      }
+      const phaseTabsHtml = attemptLogs ? this._buildAttemptPhaseTabs({ ...attempt, logs: attemptLogs }) : '';
       
       // Build compact metrics row for this attempt
       const attemptMetricsHtml = attempt.metrics ? this._buildAttemptMetricsHtml(attempt.metrics, attempt.phaseMetrics) : '';
@@ -1465,7 +1600,7 @@ export class NodeDetailPanel {
         </div>
       `;
     }).join('');
-    
+
     return `
     <div class="section">
       <h3>Attempt History (${attempts.length})</h3>
@@ -1850,6 +1985,84 @@ export class NodeDetailPanel {
       flex-direction: column;
       gap: 8px;
     }
+    
+    /* Code block container */
+    .work-code-block {
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--vscode-editor-background);
+    }
+    .work-code-block.agent-block {
+      background: var(--vscode-textCodeBlock-background);
+    }
+    
+    /* Code block header with language badge */
+    .work-code-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: var(--vscode-sideBarSectionHeader-background);
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    
+    /* Language/type badge */
+    .work-lang-badge {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(128, 128, 128, 0.2);
+      color: var(--vscode-descriptionForeground);
+    }
+    .work-lang-badge.shell {
+      background: rgba(72, 187, 120, 0.2);
+      color: #48bb78;
+    }
+    .work-lang-badge.process {
+      background: rgba(237, 137, 54, 0.2);
+      color: #ed8936;
+    }
+    .work-lang-badge.agent {
+      background: rgba(99, 179, 237, 0.2);
+      color: #63b3ed;
+    }
+    
+    /* Agent model label */
+    .agent-model {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      font-style: italic;
+    }
+    
+    /* Code content area */
+    .work-code {
+      margin: 0;
+      padding: 12px 16px;
+      background: var(--vscode-editor-background);
+      font-family: var(--vscode-editor-font-family), 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .work-code code {
+      font-family: inherit;
+      background: none;
+      padding: 0;
+    }
+    
+    /* Agent instructions (markdown content) */
+    .work-instructions {
+      padding: 12px 16px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    
+    /* Legacy badge styles (keep for backward compat) */
     .work-type-badge {
       display: inline-block;
       font-size: 10px;
@@ -1859,43 +2072,9 @@ export class NodeDetailPanel {
       border-radius: 3px;
       margin-bottom: 6px;
     }
-    .work-type-badge.agent {
-      background: rgba(99, 179, 237, 0.2);
-      color: #63b3ed;
-      border: 1px solid rgba(99, 179, 237, 0.3);
-    }
-    .agent-model-suffix {
-      font-weight: 400;
-      font-size: 10px;
-      opacity: 0.85;
-    }
-    .work-type-badge.shell {
-      background: rgba(72, 187, 120, 0.2);
-      color: #48bb78;
-      border: 1px solid rgba(72, 187, 120, 0.3);
-    }
-    .work-type-badge.process {
-      background: rgba(237, 137, 54, 0.2);
-      color: #ed8936;
-      border: 1px solid rgba(237, 137, 54, 0.3);
-    }
-    .work-command {
-      display: block;
-      background: var(--vscode-textCodeBlock-background);
-      padding: 8px 12px;
-      border-radius: 4px;
-      font-family: var(--vscode-editor-font-family), monospace;
-      font-size: 12px;
-      word-break: break-word;
-      white-space: pre-wrap;
-    }
-    .work-instructions {
-      background: var(--vscode-textCodeBlock-background);
-      padding: 12px 16px;
-      border-radius: 6px;
-      font-size: 13px;
-      line-height: 1.6;
-    }
+    .work-type-badge.agent { background: rgba(99, 179, 237, 0.2); color: #63b3ed; }
+    .work-type-badge.shell { background: rgba(72, 187, 120, 0.2); color: #48bb78; }
+    .work-type-badge.process { background: rgba(237, 137, 54, 0.2); color: #ed8936; }
     .work-instructions p, .work-instructions .md-para {
       margin: 0 0 8px 0;
     }
@@ -2077,6 +2256,9 @@ export class NodeDetailPanel {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      max-width: 100%;
+      display: block;
+      box-sizing: border-box;
     }
     .log-file-path:hover {
       text-decoration: underline;
@@ -2436,6 +2618,7 @@ export class NodeDetailPanel {
       background: var(--vscode-sideBar-background);
       border-radius: 4px;
       font-size: 11px;
+      overflow: hidden;
     }
     .attempt-context code {
       background: rgba(255, 255, 255, 0.05);

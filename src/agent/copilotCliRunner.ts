@@ -294,6 +294,25 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       
       let capturedSessionId: string | undefined = sessionId;
       const statsParser = new CopilotStatsParser();
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      let wasKilledByTimeout = false;
+      
+      // Set up timeout - use max safe setTimeout value (~24 days) if 0
+      // JavaScript setTimeout max is 2^31-1 ms = 2,147,483,647 ms (~24.8 days)
+      const effectiveTimeout = timeout === 0 ? 2147483647 : timeout;
+      if (effectiveTimeout > 0) {
+        timeoutHandle = setTimeout(() => {
+          wasKilledByTimeout = true;
+          this.logger.error(`[${label}] Process timed out after ${effectiveTimeout}ms, killing PID ${proc.pid}`);
+          try {
+            if (process.platform === 'win32') {
+              spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
+            } else {
+              proc.kill('SIGTERM');
+            }
+          } catch (e) { /* ignore */ }
+        }, effectiveTimeout);
+      }
 
       // Track whether Copilot printed its completion marker ("Task complete").
       // On Windows, shell:true spawns nested cmd.exe wrappers whose exit-code
@@ -351,6 +370,11 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       
       // Handle exit
       proc.on('exit', (code, signal) => {
+        // Clear timeout if set
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+        
         // On Windows, nested cmd.exe wrapper chains can exit with
         // code=null & signal=null even after a normal completion.  When
         // the completion marker was observed in stdout, treat null as 0.
@@ -373,9 +397,15 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
         }
 
         if (effectiveCode !== 0) {
-          const reason = signal
-            ? `Copilot CLI was killed by signal ${signal} (PID ${proc.pid})`
-            : `Copilot CLI exited with code ${effectiveCode}`;
+          // Determine the reason for failure
+          let reason: string;
+          if (wasKilledByTimeout) {
+            reason = `Copilot CLI killed by signal TIMEOUT after ${effectiveTimeout}ms (PID ${proc.pid})`;
+          } else if (signal) {
+            reason = `Copilot CLI was killed by signal ${signal} (PID ${proc.pid})`;
+          } else {
+            reason = `Copilot CLI exited with code ${effectiveCode}`;
+          }
           this.logger.error(`[${label}] ${reason}, code=${code}, signal=${signal}, sawTaskComplete=${sawTaskComplete}`);
           resolve({
             success: false,
@@ -401,6 +431,9 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       
       // Handle spawn error
       proc.on('error', (err) => {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
         this.logger.error(`[${label}] Copilot CLI error: ${err.message}`);
         resolve({
           success: false,

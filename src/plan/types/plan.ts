@@ -240,6 +240,9 @@ export interface AttemptRecord {
   /** Logs captured during this attempt (stored as string to reduce memory) */
   logs?: string;
   
+  /** Path to the log file for this attempt (separate file per attempt) */
+  logFilePath?: string;
+  
   /** Work spec used for this attempt (for reference) */
   workUsed?: WorkSpec;
   
@@ -526,6 +529,9 @@ export interface ExecutionContext {
   
   /** Worktree path (detached HEAD mode - no branch) */
   worktreePath: string;
+  
+  /** 1-based attempt number for this execution */
+  attemptNumber: number;
   
   /** Callback to report progress */
   onProgress?: (step: string) => void;
