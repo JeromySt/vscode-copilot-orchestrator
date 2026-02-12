@@ -11,7 +11,7 @@
  */
 
 import * as vscode from 'vscode';
-import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState } from '../../plan';
+import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState, computeMergedLeafWorkSummary } from '../../plan';
 import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges, formatTokenCount } from '../../plan/metricsAggregator';
 
@@ -232,7 +232,12 @@ export class planDetailPanel {
       return;
     }
     
-    const summary = plan.workSummary;
+    // Use filtered summary for plans with target branch.
+    // Only shows work from leaf nodes that have been merged to target, ensuring
+    // the summary reflects actual integrated work rather than all work performed.
+    const summary = plan.targetBranch 
+      ? computeMergedLeafWorkSummary(plan, plan.nodeStates) || plan.workSummary
+      : plan.workSummary;
     
     // Build job details HTML
     let jobDetailsHtml = '';
@@ -258,9 +263,12 @@ export class planDetailPanel {
     }
     
     // Create the webview panel
+    const panelTitle = plan.targetBranch 
+      ? `Work Summary: ${plan.spec.name} (Merged to ${plan.targetBranch})`
+      : `Work Summary: ${plan.spec.name}`;
     const panel = vscode.window.createWebviewPanel(
       'workSummary',
-      `Work Summary: ${plan.spec.name}`,
+      panelTitle,
       vscode.ViewColumn.Beside,
       { enableScripts: false }
     );
@@ -388,7 +396,7 @@ export class planDetailPanel {
   </style>
 </head>
 <body>
-  <h1>📊 Work Summary: ${escapeHtml(plan.spec.name)}</h1>
+  <h1>📊 Work Summary: ${escapeHtml(plan.spec.name)}${plan.targetBranch ? ` (Merged to ${escapeHtml(plan.targetBranch)})` : ''}</h1>
   
   <div class="overview-grid">
     <div class="overview-stat">
@@ -2212,72 +2220,50 @@ ${mermaidDef}
    * @returns HTML fragment string, or empty string if no work has been performed.
    */
   private _buildWorkSummaryHtml(plan: PlanInstance): string {
-    // Count totals across all nodes
-    let totalCommits = 0;
-    let totalAdded = 0;
-    let totalModified = 0;
-    let totalDeleted = 0;
+    // Use filtered summary for plans with target branch.
+    // Only shows work from leaf nodes that have been merged to target, ensuring
+    // the summary reflects actual integrated work rather than all work performed.
+    let workSummary = plan.targetBranch 
+      ? computeMergedLeafWorkSummary(plan, plan.nodeStates)
+      : plan.workSummary;
     
-    const jobSummaries: Array<{
-      nodeId: string;
-      name: string;
-      commits: number;
-      added: number;
-      modified: number;
-      deleted: number;
-    }> = [];
-    
-    for (const [nodeId, node] of plan.nodes) {
-      if (node.type !== 'job') continue;
-      
-      const state = plan.nodeStates.get(nodeId);
-      if (!state || state.status !== 'succeeded') continue;
-      
-      const ws = state.workSummary;
-      if (!ws) continue;
-      
-      const commits = ws.commits || 0;
-      const added = ws.filesAdded || 0;
-      const modified = ws.filesModified || 0;
-      const deleted = ws.filesDeleted || 0;
-      
-      totalCommits += commits;
-      totalAdded += added;
-      totalModified += modified;
-      totalDeleted += deleted;
-      
-      if (commits > 0 || added > 0 || modified > 0 || deleted > 0) {
-        jobSummaries.push({
-          nodeId,
-          name: node.name,
-          commits,
-          added,
-          modified,
-          deleted,
-        });
-      }
+    // Fall back to plan.workSummary if filtered result is undefined
+    if (!workSummary) {
+      workSummary = plan.workSummary;
     }
+    
+    // Don't show if no work summary exists
+    if (!workSummary) {
+      return '';
+    }
+    
+    const totalCommits = workSummary.totalCommits || 0;
+    const totalAdded = workSummary.totalFilesAdded || 0;
+    const totalModified = workSummary.totalFilesModified || 0;
+    const totalDeleted = workSummary.totalFilesDeleted || 0;
     
     // Don't show if no work done
     if (totalCommits === 0 && totalAdded === 0 && totalModified === 0 && totalDeleted === 0) {
       return '';
     }
     
-    const jobSummariesHtml = jobSummaries.map(j => `
+    const jobSummariesHtml = workSummary.jobSummaries.map(j => `
       <div class="job-summary" data-node-id="${j.nodeId}">
-        <span class="job-name">${escapeHtml(j.name)}</span>
+        <span class="job-name">${escapeHtml(j.nodeName)}</span>
         <span class="job-stats">
           <span class="stat-commits">${j.commits} commits</span>
-          <span class="stat-added">+${j.added}</span>
-          <span class="stat-modified">~${j.modified}</span>
-          <span class="stat-deleted">-${j.deleted}</span>
+          <span class="stat-added">+${j.filesAdded}</span>
+          <span class="stat-modified">~${j.filesModified}</span>
+          <span class="stat-deleted">-${j.filesDeleted}</span>
         </span>
       </div>
     `).join('');
     
+    const titleSuffix = plan.targetBranch ? ` (Merged to ${escapeHtml(plan.targetBranch)})` : '';
+    
     return `
     <div class="work-summary">
-      <h3>Work Summary</h3>
+      <h3>Work Summary${titleSuffix}</h3>
       <div class="work-summary-grid">
         <div class="work-stat">
           <div class="work-stat-value">${totalCommits}</div>
@@ -2296,7 +2282,7 @@ ${mermaidDef}
           <div class="work-stat-label">Deleted</div>
         </div>
       </div>
-      ${jobSummaries.length > 0 ? `
+      ${workSummary.jobSummaries.length > 0 ? `
       <div class="job-summaries">
         ${jobSummariesHtml}
       </div>

@@ -403,6 +403,8 @@ Each node maintains an `NodeExecutionState` record (`src/plan/types/plan.ts`):
 | `metrics` | Aggregate AI usage metrics for the node |
 | `phaseMetrics` | Per-phase AI usage breakdown (`merge-fi`, `prechecks`, `work`, `commit`, `postchecks`, `merge-ri`) |
 
+**Work Summary Behavior:** When a plan has a `targetBranch` configured, the plan detail panel filters the work summary to show only commits from leaf nodes that have successfully merged to the target branch (`mergedToTarget === true`). This ensures the displayed work summary reflects actual integrated work rather than all work performed across the plan. The summary updates dynamically as nodes complete their merge operations.
+
 ### Group State Aggregation
 
 Groups provide visual hierarchy without affecting execution. Each `GroupExecutionState` aggregates from its direct children:
