@@ -72,6 +72,7 @@ import {
 import * as git from '../git';
 import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
 import { aggregateMetrics } from './metricsAggregator';
+import { powerManager } from '../core/powerManager';
 
 const log = Logger.for('plan-runner');
 
@@ -255,6 +256,11 @@ export class PlanRunner extends EventEmitter {
    * (including all prior RI merges) and creates its commit on top.
    */
   private riMergeMutex: Promise<void> = Promise.resolve();
+  
+  /**
+   * Wake lock cleanup function - prevents system sleep during plan execution
+   */
+  private wakeLockCleanup?: () => void;
   
   constructor(config: PlanRunnerConfig) {
     super();
@@ -1018,6 +1024,9 @@ export class PlanRunner extends EventEmitter {
     this.persistence.save(plan);
     this.emit('planUpdated', planId);
     
+    // Update wake lock in case this was the last running plan
+    this.updateWakeLock().catch(err => log.warn('Failed to update wake lock', { error: err }));
+    
     return true;
   }
   
@@ -1057,6 +1066,9 @@ export class PlanRunner extends EventEmitter {
     
     // Persist
     this.persistence.save(plan);
+    
+    // Update wake lock in case this was the last running plan
+    this.updateWakeLock().catch(err => log.warn('Failed to update wake lock', { error: err }));
     
     return true;
   }
@@ -1256,6 +1268,40 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
+   * Check if any plan is currently running
+   */
+  private hasRunningPlans(): boolean {
+    for (const plan of this.plans.values()) {
+      const sm = this.stateMachines.get(plan.id);
+      const status = sm?.computePlanStatus();
+      if (status === 'running') return true;
+    }
+    return false;
+  }
+  
+  /**
+   * Update wake lock state based on running plans
+   */
+  private async updateWakeLock(): Promise<void> {
+    const hasRunning = this.hasRunningPlans();
+    
+    if (hasRunning && !this.wakeLockCleanup) {
+      // Acquire wake lock
+      try {
+        this.wakeLockCleanup = await powerManager.acquireWakeLock('Copilot Plan execution in progress');
+        log.info('Acquired wake lock - system sleep prevented');
+      } catch (e) {
+        log.warn('Failed to acquire wake lock', { error: e });
+      }
+    } else if (!hasRunning && this.wakeLockCleanup) {
+      // Release wake lock
+      this.wakeLockCleanup();
+      this.wakeLockCleanup = undefined;
+      log.info('Released wake lock - system sleep allowed');
+    }
+  }
+  
+  /**
    * Main pump loop - called periodically to advance Plan execution
    */
   private async pump(): Promise<void> {
@@ -1306,6 +1352,8 @@ export class PlanRunner extends EventEmitter {
       if (!plan.startedAt && status === 'running') {
         plan.startedAt = Date.now();
         this.emit('planStarted', plan);
+        // Acquire wake lock when plan starts running
+        this.updateWakeLock().catch(err => log.warn('Failed to update wake lock', { error: err }));
       }
       
       // Safety net: promote any pending nodes whose dependencies are now met.
@@ -3439,6 +3487,8 @@ Resume working in the existing worktree and session context.`;
       const plan = this.plans.get(event.planId);
       if (plan) {
         this.emit('planCompleted', plan, event.status);
+        // Update wake lock in case this was the last running plan
+        this.updateWakeLock().catch(err => log.warn('Failed to update wake lock', { error: err }));
       }
     });
   }

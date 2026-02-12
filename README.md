@@ -618,6 +618,24 @@ Enable granular logging for troubleshooting:
 
 ---
 
+## System Behavior
+
+### Sleep Prevention
+
+While Copilot Plans are actively running, the extension automatically prevents your system from going to sleep or hibernating. This ensures long-running plans complete successfully without interruption.
+
+- **Windows**: Uses `SetThreadExecutionState` API
+- **macOS**: Uses `caffeinate` command
+- **Linux**: Uses `systemd-inhibit` when available
+
+Sleep prevention is automatically released when:
+- All plans complete (success or failure)
+- Plans are cancelled
+- Plans are paused
+- VS Code is closed
+
+---
+
 ## Architecture
 
 For detailed architecture documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
