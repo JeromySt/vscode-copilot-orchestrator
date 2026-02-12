@@ -40,6 +40,7 @@ import { DefaultEvidenceValidator } from './evidenceValidator';
 import { aggregateMetrics } from './metricsAggregator';
 import type { IEvidenceValidator } from '../interfaces';
 import { ensureOrchestratorDirs } from '../core';
+import { parseAiReviewResult } from './aiReviewUtils';
 
 const log = Logger.for('job-executor');
 
@@ -1350,52 +1351,16 @@ export class DefaultJobExecutor implements JobExecutor {
         .filter(e => e.phase === 'commit' && e.message.includes('[ai-review]'))
         .map(e => e.message);
 
-      // Helper: strip HTML/markdown code fences so we can find JSON
-      // that the agent may have wrapped in <pre><code> or ```json blocks.
-      // Loop to handle nested/incomplete tag stripping (e.g. <scr<script>ipt>).
-      const stripMarkup = (s: string) => {
-        let result = s;
-        let prev: string;
-        do {
-          prev = result;
-          result = result.replace(/<\/?[^>]+>/g, '');
-        } while (result !== prev);
-        return result.replace(/```(?:json)?\s*/g, '');
-      };
-
-      // Search for JSON response — try each line last-to-first (most likely location)
-      for (let i = reviewLogs.length - 1; i >= 0; i--) {
-        const line = stripMarkup(reviewLogs[i]);
-        const jsonMatch = line.match(/\{[^{}]*"legitimate"\s*:\s*(true|false)[^{}]*\}/);
-        if (jsonMatch) {
-          try {
-            const parsed = JSON.parse(jsonMatch[0]) as { legitimate: boolean; reason: string };
-            return {
-              legitimate: parsed.legitimate === true,
-              reason: parsed.reason || (parsed.legitimate ? 'AI review approved' : 'AI review rejected'),
-              metrics: reviewMetrics,
-            };
-          } catch {
-            // JSON parse failed, continue searching
-          }
-        }
-      }
-
-      // The JSON may have been split across multiple log lines (e.g., long reason text).
-      // Concatenate all review lines, strip markup, and search the combined text.
-      const combined = stripMarkup(reviewLogs.join(' '));
-      const combinedMatch = combined.match(/\{\s*"legitimate"\s*:\s*(true|false)\s*,\s*"reason"\s*:\s*"([^"]*)"\s*\}/);
-      if (combinedMatch) {
-        try {
-          const parsed = JSON.parse(combinedMatch[0]) as { legitimate: boolean; reason: string };
-          return {
-            legitimate: parsed.legitimate === true,
-            reason: parsed.reason || (parsed.legitimate ? 'AI review approved' : 'AI review rejected'),
-            metrics: reviewMetrics,
-          };
-        } catch {
-          // JSON parse failed
-        }
+      // Use extracted utility function to parse the AI review result
+      const reviewInput = reviewLogs.join('\n');
+      const parsed = parseAiReviewResult(reviewInput);
+      
+      if (parsed) {
+        return {
+          legitimate: parsed.legitimate,
+          reason: parsed.reason,
+          metrics: reviewMetrics,
+        };
       }
 
       // Couldn't parse a structured response — fall through
