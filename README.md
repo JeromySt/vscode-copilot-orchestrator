@@ -238,6 +238,32 @@ The extension provides live visibility into every running agent:
 
 ---
 
+## Session Management
+
+### Copilot Session Isolation
+Each job's Copilot CLI sessions are stored within the worktree's `.orchestrator/.copilot/` directory. This provides:
+
+- **Automatic cleanup**: Sessions are removed when the worktree is cleaned up
+- **No history pollution**: Sessions don't appear in VS Code's Copilot session history
+- **Job isolation**: Each job has independent session state
+
+### Gitignore Management
+The orchestrator automatically ensures `.gitignore` includes entries for temporary files:
+
+```gitignore
+# Copilot Orchestrator temporary files
+.worktrees
+.orchestrator
+```
+
+This is added automatically when:
+- A new plan is created
+- A worktree is set up for a job
+
+This prevents orchestrator temporary files from being accidentally committed.
+
+---
+
 ## MCP Architecture & Security
 
 The Copilot Orchestrator integrates with GitHub Copilot Chat via the **Model Context Protocol (MCP)**. Unlike simple HTTP-based MCP servers, the orchestrator uses a **secure child-process architecture with authenticated IPC** — ensuring that only the VS Code instance that spawned the MCP server can communicate with it.

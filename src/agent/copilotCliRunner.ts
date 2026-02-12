@@ -65,6 +65,22 @@ export interface CopilotRunOptions {
   
   /** Unique job/node ID to disambiguate instructions files across concurrent jobs */
   jobId?: string;
+  
+  /**
+   * Custom config directory for Copilot CLI.
+   * 
+   * When provided, Copilot CLI stores session state, configuration, and logs in this
+   * directory instead of the default user home directory. This enables:
+   * 
+   * - **Session Isolation**: Each job's sessions are stored in its worktree's `.orchestrator/.copilot/`
+   *   directory, preventing cross-job session pollution
+   * - **No History Pollution**: Sessions don't appear in VS Code's global Copilot session history
+   * - **Automatic Cleanup**: Session files are removed when the worktree is cleaned up
+   * - **Multi-Job Concurrency**: Multiple jobs can run Copilot CLI simultaneously without conflicts
+   * 
+   * Typical value: `{worktreePath}/.orchestrator/.copilot`
+   */
+  configDir?: string;
 }
 
 /**
@@ -163,6 +179,7 @@ export class CopilotCliRunner {
       model,
       logDir,
       sharePath,
+      configDir: options.configDir,
     });
     
     this.logger.info(`[${label}] Running: ${copilotCmd.substring(0, 100)}...`);
@@ -248,10 +265,17 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     model?: string;
     logDir?: string;
     sharePath?: string;
+    configDir?: string;
   }): string {
-    const { task, sessionId, model, logDir, sharePath } = options;
+    const { task, sessionId, model, logDir, sharePath, configDir } = options;
     
     let cmd = `copilot -p ${JSON.stringify(task)} --stream off --allow-all-paths --allow-all-urls --allow-all-tools`;
+    
+    // Store all Copilot state in worktree's .orchestrator directory
+    // This isolates sessions from user's history and auto-cleans on worktree removal
+    if (configDir) {
+      cmd += ` --config-dir ${JSON.stringify(configDir)}`;
+    }
     
     if (model) {
       cmd += ` --model ${model}`;

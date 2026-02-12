@@ -44,6 +44,7 @@ export * as branches from './branches';
 export * as worktrees from './worktrees';
 export * as merge from './merge';
 export * as repository from './repository';
+export * as gitignore from './gitignore';
 
 // Re-export commonly used types
 export type { GitLogger, CommandResult, ExecuteOptions } from './executor';

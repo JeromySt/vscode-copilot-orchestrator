@@ -356,6 +356,11 @@ export class PlanRunner extends EventEmitter {
       repoPath: spec.repoPath || this.config.defaultRepoPath,
     });
     
+    // Ensure main repo's .gitignore includes orchestrator temp files
+    git.gitignore.ensureGitignoreEntries(plan.repoPath).catch((err: any) => {
+      log.warn(`Failed to update main repo .gitignore: ${err.message}`);
+    });
+    
     // Store the Plan
     this.plans.set(plan.id, plan);
     
@@ -1446,6 +1451,18 @@ export class PlanRunner extends EventEmitter {
         nodeState.baseCommit = timing.baseCommit;
         if (timing.totalMs > 500) {
           log.warn(`Slow worktree creation for ${node.name} took ${timing.totalMs}ms`);
+        }
+        
+        // Ensure .gitignore includes orchestrator temp files
+        try {
+          const modified = await git.gitignore.ensureGitignoreEntries(worktreePath);
+          if (modified) {
+            log.debug(`Updated .gitignore in worktree: ${worktreePath}`);
+            // Stage the gitignore change so it's included in the work commit
+            await git.executor.execAsync(['add', '.gitignore'], { cwd: worktreePath });
+          }
+        } catch (err: any) {
+          log.warn(`Failed to update .gitignore: ${err.message}`);
         }
       }
       

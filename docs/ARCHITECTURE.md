@@ -310,6 +310,36 @@ graph LR
 - `git/core/worktrees.ts` — Low-level worktree CRUD with **per-repository mutex** serialization to prevent race conditions
 - `git/core/executor.ts` — Async git command execution (`execAsync()`, `execAsyncOrThrow()`)
 
+### Worktree Directory Structure
+
+Each job worktree contains orchestrator-specific directories:
+
+```
+{worktreePath}/
+  .orchestrator/              # Orchestrator state (gitignored)
+    .copilot/                 # Copilot CLI config directory
+      session-state/          # Session data
+      config.json             # Per-job config
+    evidence/                 # Work evidence files
+  .gitignore                  # Auto-updated to include .orchestrator
+  ... (repository files)
+```
+
+#### Gitignore Auto-Update
+
+When worktrees are created, the orchestrator ensures `.gitignore` contains:
+- `.worktrees` - The worktree root directory
+- `.orchestrator` - Per-worktree orchestrator state
+
+This change is staged automatically so it's included in the job's commit.
+
+#### Session Storage
+
+Copilot CLI sessions are stored per-worktree using `--config-dir`:
+- Sessions don't appear in user's VS Code session history
+- Sessions are automatically cleaned when worktree is removed
+- Each job has isolated session state
+
 ### Merge Strategies
 
 Two merge strategies are available:
