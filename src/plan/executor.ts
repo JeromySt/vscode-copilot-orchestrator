@@ -124,6 +124,23 @@ export class DefaultJobExecutor implements JobExecutor {
   }
   
   /**
+   * Get the isolated Copilot CLI config directory path.
+   * Ensures the directory exists before returning.
+   * 
+   * @returns Path to the isolated .copilot-cli config directory
+   */
+  private getCopilotConfigDir(): string {
+    if (!this.storagePath) {
+      throw new Error('Storage path not configured. Call setStoragePath() first.');
+    }
+    const configDir = path.join(this.storagePath, '.copilot-cli');
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
+    return configDir;
+  }
+  
+  /**
    * Execute a job node: runs prechecks → work → postchecks → commit.
    *
    * Each phase is logged with section markers. If any phase fails, the
@@ -1002,6 +1019,9 @@ export class DefaultJobExecutor implements JobExecutor {
     }
     
     try {
+      // Get isolated config directory for Copilot CLI sessions
+      const configDir = this.getCopilotConfigDir();
+      
       const result = await this.agentDelegator.delegate({
         task: spec.instructions,
         instructions: node.instructions || spec.context,
@@ -1011,6 +1031,7 @@ export class DefaultJobExecutor implements JobExecutor {
         maxTurns: spec.maxTurns,
         sessionId, // Pass session ID for resumption
         jobId: node.id,
+        configDir, // Isolate sessions from user's history
         logOutput: (line: string) => this.logInfo(executionKey, phase, line),
         onProcess: (proc: any) => {
           // Track the Copilot CLI process for monitoring (CPU/memory/tree)
@@ -1256,11 +1277,15 @@ export class DefaultJobExecutor implements JobExecutor {
 
       this.logInfo(executionKey, 'commit', '========== AI REVIEW: NO-CHANGE ASSESSMENT ==========');
 
+      // Get isolated config directory for Copilot CLI sessions
+      const configDir = this.getCopilotConfigDir();
+
       // Use a lightweight, fast model for the review
       const result = await this.agentDelegator.delegate({
         task: reviewPrompt,
         worktreePath,
         model: 'claude-haiku-4.5',
+        configDir, // Isolate sessions from user's history
         logOutput: (line: string) => this.logInfo(executionKey, 'commit', `[ai-review] ${line}`),
         onProcess: () => {}, // No need to track this short-lived process
       });

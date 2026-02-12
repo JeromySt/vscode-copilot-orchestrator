@@ -65,6 +65,9 @@ export interface CopilotRunOptions {
   
   /** Unique job/node ID to disambiguate instructions files across concurrent jobs */
   jobId?: string;
+  
+  /** Custom config directory for Copilot CLI (isolates sessions from user's history) */
+  configDir?: string;
 }
 
 /**
@@ -138,6 +141,7 @@ export class CopilotCliRunner {
       onProcess,
       timeout = 300000, // 5 minutes default
       skipInstructionsFile = false,
+      configDir,
     } = options;
     
     // Check if Copilot CLI is available
@@ -163,6 +167,7 @@ export class CopilotCliRunner {
       model,
       logDir,
       sharePath,
+      configDir,
     });
     
     this.logger.info(`[${label}] Running: ${copilotCmd.substring(0, 100)}...`);
@@ -248,10 +253,16 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     model?: string;
     logDir?: string;
     sharePath?: string;
+    configDir?: string;
   }): string {
-    const { task, sessionId, model, logDir, sharePath } = options;
+    const { task, sessionId, model, logDir, sharePath, configDir } = options;
     
     let cmd = `copilot -p ${JSON.stringify(task)} --stream off --allow-all-paths --allow-all-urls --allow-all-tools`;
+    
+    // Use isolated config directory to prevent sessions from appearing in VS Code history
+    if (configDir) {
+      cmd += ` --config-dir ${JSON.stringify(configDir)}`;
+    }
     
     if (model) {
       cmd += ` --model ${model}`;
