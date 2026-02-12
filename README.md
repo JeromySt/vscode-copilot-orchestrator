@@ -478,6 +478,50 @@ to the user registration form
 
 ---
 
+## Security
+
+### Agent Folder Restrictions
+
+By default, AI agents are restricted to only access files within their assigned worktree folder. This provides isolation between concurrent jobs and prevents unintended file modifications.
+
+#### Default Behavior
+- Agents can only read/write files in their worktree
+- Access to parent directories or other worktrees is denied
+- This applies to all `type: 'agent'` work specifications
+
+#### Adding Additional Folders
+
+When a job needs access to shared resources (libraries, configs, etc.), specify `allowedFolders`:
+
+```json
+{
+  "producer_id": "build-feature",
+  "task": "Build the new feature",
+  "work": {
+    "type": "agent",
+    "instructions": "Implement the feature using shared utilities",
+    "allowedFolders": [
+      "/path/to/shared/libs",
+      "/path/to/config"
+    ]
+  },
+  "dependencies": []
+}
+```
+
+#### MCP API
+
+The `create_copilot_plan` and `create_copilot_job` tools accept `allowedFolders` in the work specification:
+
+```markdown
+**allowedFolders** (optional, string[]):
+  Additional folder paths the agent is allowed to access beyond the worktree.
+  Specify absolute paths.
+  Default: [] (agent restricted to worktree only)
+```
+
+---
+
 ## Example Prompts for Copilot Chat
 
 Once the MCP server is running, you can talk to Copilot in natural language. Here are prompts that work well — from simple single jobs to complex multi-node plans.

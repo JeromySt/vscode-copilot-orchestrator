@@ -68,6 +68,29 @@ export interface CopilotRunOptions {
   
   /** Custom config directory for Copilot CLI (isolates sessions from user's history) */
   configDir?: string;
+
+  /**
+   * Additional folders the agent is allowed to access (beyond cwd/worktree).
+   * 
+   * **Security Consideration**: By default, the Copilot CLI runs sandboxed to the
+   * working directory (cwd). This prevents agents from modifying files outside the
+   * current worktree, ensuring isolation between concurrent jobs.
+   * 
+   * Specify absolute paths here to grant access to shared resources. Each path
+   * is passed to Copilot CLI via `--allow-paths` flag.
+   * 
+   * **Principle of Least Privilege**: Only add folders that the agent truly needs
+   * for the task at hand.
+   * 
+   * @example
+   * ```typescript
+   * allowedFolders: [
+   *   '/repo/shared/libs',
+   *   '/repo/shared/config'
+   * ]
+   * ```
+   */
+  allowedFolders?: string[];
 }
 
 /**
@@ -168,6 +191,8 @@ export class CopilotCliRunner {
       logDir,
       sharePath,
       configDir,
+      cwd,
+      allowedFolders: options.allowedFolders,
     });
     
     this.logger.info(`[${label}] Running: ${copilotCmd.substring(0, 100)}...`);
@@ -254,10 +279,39 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     logDir?: string;
     sharePath?: string;
     configDir?: string;
+    cwd?: string;
+    allowedFolders?: string[];
   }): string {
-    const { task, sessionId, model, logDir, sharePath, configDir } = options;
+    const { task, sessionId, model, logDir, sharePath, configDir, cwd, allowedFolders } = options;
     
-    let cmd = `copilot -p ${JSON.stringify(task)} --stream off --allow-all-paths --allow-all-urls --allow-all-tools`;
+    // Build allowed paths list: worktree + any additional folders
+    const allowedPaths: string[] = [];
+    if (cwd) {
+      allowedPaths.push(cwd);
+    }
+    if (allowedFolders && allowedFolders.length > 0) {
+      // Validate and normalize paths
+      for (const folder of allowedFolders) {
+        const normalized = path.resolve(folder);
+        if (fs.existsSync(normalized)) {
+          allowedPaths.push(normalized);
+        } else {
+          this.logger.warn(`Allowed folder does not exist: ${folder}`);
+        }
+      }
+    }
+    
+    // Build --allow-paths argument
+    let pathsArg: string;
+    if (allowedPaths.length === 0) {
+      // Fallback: if no paths specified, allow current directory only
+      pathsArg = '--allow-paths .';
+    } else {
+      // Use multiple --allow-paths flags for each path
+      pathsArg = allowedPaths.map(p => `--allow-paths ${JSON.stringify(p)}`).join(' ');
+    }
+    
+    let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-urls --allow-all-tools`;
     
     // Use isolated config directory to prevent sessions from appearing in VS Code history
     if (configDir) {
