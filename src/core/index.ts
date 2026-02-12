@@ -18,3 +18,4 @@ export {
   InstanceRegistration,
   GlobalCapacityRegistry,
 } from './globalCapacity';
+export * from './orphanedWorktreeCleanup';

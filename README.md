@@ -704,6 +704,26 @@ Sleep prevention is automatically released when:
 - Plans are paused
 - VS Code is closed
 
+### Automatic Cleanup
+
+#### Orphaned Worktree Cleanup
+
+When the extension starts, it automatically scans for orphaned worktree directories that are no longer associated with any active plan. These can accumulate when:
+- Plans are deleted while worktrees still exist
+- The extension crashes during execution
+- VS Code is closed while jobs are running
+
+Orphaned directories in `.worktrees/` are cleaned up asynchronously on startup.
+
+##### Disable Auto-Cleanup
+
+To disable automatic cleanup, add this to your VS Code settings:
+
+```json
+{
+  "copilotOrchestrator.cleanupOrphanedWorktrees": false
+}
+```
 ---
 
 ## Architecture

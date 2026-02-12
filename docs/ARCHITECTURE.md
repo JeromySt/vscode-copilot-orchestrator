@@ -310,6 +310,30 @@ graph LR
 - `git/core/worktrees.ts` — Low-level worktree CRUD with **per-repository mutex** serialization to prevent race conditions
 - `git/core/executor.ts` — Async git command execution (`execAsync()`, `execAsyncOrThrow()`)
 
+### Orphaned Worktree Cleanup (`src/core/orphanedWorktreeCleanup.ts`)
+
+Detects and removes stale worktree directories on extension activation.
+
+**Detection Logic:**
+A worktree directory is considered "orphaned" if:
+1. It exists in `.worktrees/` folder
+2. It's NOT registered with git (`git worktree list` doesn't include it)
+3. It's NOT tracked by any active plan's `nodeStates.worktreePath`
+
+**Activation Flow:**
+1. Extension activates
+2. Plans loaded from persistence
+3. After 2-second delay, trigger async cleanup
+4. Scan all repo paths (from plans + workspace folders)
+5. Remove orphaned directories
+6. Log results (show message if ≥3 cleaned)
+
+**Safety:**
+- Never removes directories tracked by active plans
+- Never removes git-registered worktrees
+- Continues on individual failures
+- Runs asynchronously (doesn't block startup)
+
 ### Merge Strategies
 
 Two merge strategies are available:

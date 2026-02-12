@@ -147,6 +147,11 @@
           "default": ".worktrees",
           "description": "Directory name for git worktrees (relative to repository root)"
         },
+        "copilotOrchestrator.cleanupOrphanedWorktrees": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically clean up orphaned worktree directories on extension startup"
+        },
         "copilotOrchestrator.maxConcurrentJobs": {
           "type": "number",
           "default": 0,
