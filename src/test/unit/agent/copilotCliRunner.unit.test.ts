@@ -62,7 +62,7 @@ suite('CopilotCliRunner', () => {
       });
       
       assert.ok(cmd.includes('--stream off'), 'Command should include --stream off');
-      assert.ok(cmd.includes('--allow-all-paths'), 'Command should include --allow-all-paths');
+      assert.ok(cmd.includes('--allow-paths'), 'Command should include --allow-paths');
       assert.ok(cmd.includes('--allow-all-urls'), 'Command should include --allow-all-urls');
       assert.ok(cmd.includes('--allow-all-tools'), 'Command should include --allow-all-tools');
     });

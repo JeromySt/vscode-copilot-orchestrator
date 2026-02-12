@@ -41,6 +41,10 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | 🔒 **Secure MCP Architecture** | Nonce-authenticated IPC ensures 1:1 pairing between VS Code and MCP stdio process |
 | 🛡️ **Default Branch Protection** | Auto-creates feature branches when targeting main/master — never writes to default |
 | 📡 **Live Process Monitoring** | Real-time CPU, memory, and process tree visibility for every running agent |
+| 💤 **Sleep Prevention** | Automatically prevents system sleep during plan execution (Windows, macOS, Linux) |
+| 🌐 **Multi-Instance Coordination** | Global job capacity limits across all VS Code instances on the same machine |
+| 🧹 **Auto Worktree Cleanup** | Orphaned worktree directories are automatically detected and removed on startup |
+| 📂 **Agent Folder Security** | Agents are sandboxed to their worktree; opt-in `allowedFolders` for shared access |
 
 ---
 

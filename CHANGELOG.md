@@ -5,6 +5,28 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-02-12
+
+### Added
+- **Sleep Prevention**: Automatically prevents system sleep/hibernate during active plan execution on Windows (`SetThreadExecutionState`), macOS (`caffeinate`), and Linux (`systemd-inhibit`)
+- **Global Job Capacity Coordination**: Enforces a global maximum of concurrent jobs across all VS Code instances using a file-based registry with heartbeat monitoring — prevents system overload when running multiple workspaces
+- **Orphaned Worktree Cleanup**: Automatically detects and removes stale worktree directories on extension startup that are no longer tracked by git or active plans
+- **Worktree-Local Session Storage**: Copilot CLI sessions are now stored per-worktree in `.orchestrator/.copilot/`, preventing session history pollution and enabling clean multi-job concurrency
+- **Gitignore Auto-Management**: Automatically ensures `.gitignore` includes `.worktrees` and `.orchestrator` entries when worktrees are created
+- **Agent Folder Security (`allowedFolders`)**: New `allowedFolders` option restricts Copilot CLI agent access to specified directories via `--allow-paths`, following the principle of least privilege
+- **Merged Leaf Work Summary**: Plan detail view now shows only work from merged leaf nodes — providing an accurate summary of work actually integrated into the target branch
+- **Schema Validation Enhancements**: Added `allowedFolders` validation (max 20 items, 500-char paths) and `startPaused` boolean to MCP tool schemas
+
+### Fixed
+- **Metrics Double-Counting**: Fixed `metricsAggregator` to use `attemptHistory` as authoritative source, avoiding inflated metrics when plans are loaded from JSON persistence
+- **Process Stats Key Mismatch**: Fixed executor process stats tracking to use consistent keys across start/update/cleanup lifecycle
+- **Group Name Display in Mermaid**: Fixed group name rendering in Mermaid DAG diagrams to properly display user-defined group labels instead of internal IDs
+
+### Changed
+- **Plan Detail Panel Rendering**: Uses state hashing to skip redundant full re-renders; preserves zoom/scroll position on incremental updates
+- **Plans View**: Shows global job count and active instance count when multi-instance coordination is active
+- **Status Bar**: Updated to reflect global capacity information
+
 ## [0.9.0] - 2026-02-11
 
 ### Added
