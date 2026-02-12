@@ -7,7 +7,7 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { EventEmitter } from 'events';
-import type { PlanInstance, JobNode, NodeExecutionState } from '../../../plan/types';
+import type { PlanInstance, JobNode, NodeExecutionState, NodeTransitionEvent } from '../../../plan/types';
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
@@ -169,7 +169,14 @@ function createMockRunner(): MockRunner {
     });
     
     // Emit events
-    this.emit('nodeTransition', planId, nodeId, 'running', 'failed');
+    const transitionEvent: NodeTransitionEvent = {
+      planId,
+      nodeId,
+      from: 'running',
+      to: 'failed',
+      timestamp: Date.now()
+    };
+    this.emit('nodeTransition', transitionEvent);
     this.emit('nodeUpdated', planId, nodeId);
     this.emit('planUpdated', planId);
     
@@ -269,7 +276,12 @@ suite('Force Fail Node', () => {
       const result = runner.forceFailNode(plan.id, 'test-node');
       
       assert.strictEqual(result.success, true);
-      assert.ok(nodeTransitionSpy.calledWith(plan.id, 'test-node', 'running', 'failed'));
+      assert.ok(nodeTransitionSpy.calledOnce);
+      const transitionEvent = nodeTransitionSpy.getCall(0).args[0];
+      assert.strictEqual(transitionEvent.planId, plan.id);
+      assert.strictEqual(transitionEvent.nodeId, 'test-node');
+      assert.strictEqual(transitionEvent.from, 'running');
+      assert.strictEqual(transitionEvent.to, 'failed');
       assert.ok(nodeUpdatedSpy.calledWith(plan.id, 'test-node'));
       assert.ok(planUpdatedSpy.calledWith(plan.id));
     });

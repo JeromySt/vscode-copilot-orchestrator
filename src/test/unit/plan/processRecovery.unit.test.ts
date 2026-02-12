@@ -16,6 +16,7 @@ import {
   PlanSpec,
   JobNode,
   NodeExecutionState,
+  NodeTransitionEvent,
 } from '../../../plan/types';
 
 // ---------------------------------------------------------------------------
@@ -127,7 +128,15 @@ class MockPlanRunner extends events.EventEmitter {
           nodeState.pid = undefined;  // Clear the stale PID
           nodeState.version++; // Increment version for UI updates
           
-          // Emit event for node crashed
+          // Emit transition and completion events
+          const transitionEvent: NodeTransitionEvent = {
+            planId: plan.id,
+            nodeId,
+            from: 'running',
+            to: 'failed',
+            timestamp: Date.now()
+          };
+          this.emit('nodeTransition', transitionEvent);
           this.emit('nodeCompleted', plan.id, nodeId, false);
         } else if (!nodeState.pid) {
           // Running but no PID tracked (old state) - also mark as crashed
@@ -137,7 +146,15 @@ class MockPlanRunner extends events.EventEmitter {
           nodeState.endedAt = Date.now();
           nodeState.version++; // Increment version for UI updates
           
-          // Emit event for node crashed  
+          // Emit transition and completion events
+          const transitionEvent: NodeTransitionEvent = {
+            planId: plan.id,
+            nodeId,
+            from: 'running',
+            to: 'failed',
+            timestamp: Date.now()
+          };
+          this.emit('nodeTransition', transitionEvent);
           this.emit('nodeCompleted', plan.id, nodeId, false);
         }
         // If process IS running, leave it - the process monitor should re-attach
@@ -273,6 +290,28 @@ suite('Process Recovery on Re-Init', () => {
       
       assert.ok(eventListener.calledOnce);
       assert.ok(eventListener.calledWith(plan.id, 'node-0', false));
+    });
+    
+    test('should emit nodeTransition event for crashed nodes', async () => {
+      const plan = createTestPlan(1);
+      const nodeState = plan.nodeStates.get('node-0')!;
+      nodeState.status = 'running';
+      nodeState.pid = 999999999;  // Non-existent PID
+      
+      mockProcessMonitor.isRunning.withArgs(999999999).returns(false);
+      
+      const eventListener = sinon.spy();
+      runner.on('nodeTransition', eventListener);
+      
+      await runner.recoverRunningNodes(plan);
+      
+      assert.ok(eventListener.calledOnce);
+      const transitionEvent = eventListener.getCall(0).args[0];
+      assert.strictEqual(transitionEvent.planId, plan.id);
+      assert.strictEqual(transitionEvent.nodeId, 'node-0');
+      assert.strictEqual(transitionEvent.from, 'running');
+      assert.strictEqual(transitionEvent.to, 'failed');
+      assert.ok(transitionEvent.timestamp);
     });
     
     test('should persist state after marking crashed', async () => {

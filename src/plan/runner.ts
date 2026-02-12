@@ -357,7 +357,15 @@ export class PlanRunner extends EventEmitter {
           nodeState.pid = undefined;  // Clear the stale PID
           nodeState.version++; // Increment version for UI updates
           
-          // Emit completion event
+          // Emit transition and completion events
+          const transitionEvent: NodeTransitionEvent = {
+            planId: plan.id,
+            nodeId,
+            from: 'running',
+            to: 'failed',
+            timestamp: Date.now()
+          };
+          this.emit('nodeTransition', transitionEvent);
           this.emit('nodeCompleted', plan.id, nodeId, false);
         } else if (!nodeState.pid) {
           // Running but no PID tracked (old state) - also mark as crashed
@@ -368,7 +376,15 @@ export class PlanRunner extends EventEmitter {
           nodeState.endedAt = Date.now();
           nodeState.version++; // Increment version for UI updates
           
-          // Emit completion event
+          // Emit transition and completion events
+          const transitionEvent: NodeTransitionEvent = {
+            planId: plan.id,
+            nodeId,
+            from: 'running',
+            to: 'failed',
+            timestamp: Date.now()
+          };
+          this.emit('nodeTransition', transitionEvent);
           this.emit('nodeCompleted', plan.id, nodeId, false);
         }
         // If process IS running, leave it - the process monitor should re-attach
@@ -3414,7 +3430,14 @@ export class PlanRunner extends EventEmitter {
     });
     
     // Emit events
-    this.emit('nodeTransition', planId, nodeId, 'running', 'failed');
+    const transitionEvent: NodeTransitionEvent = {
+      planId,
+      nodeId,
+      from: 'running',
+      to: 'failed',
+      timestamp: Date.now()
+    };
+    this.emit('nodeTransition', transitionEvent);
     this.emit('nodeUpdated', planId, nodeId);
     this.emit('planUpdated', planId);
     
