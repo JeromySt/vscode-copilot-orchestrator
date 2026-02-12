@@ -305,16 +305,22 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       // Validate and normalize paths — must be absolute for security
       for (const folder of allowedFolders) {
         if (!path.isAbsolute(folder)) {
-          this.logger.warn(`Skipping relative allowed folder (must be absolute): ${folder}`);
+          this.logger.warn(`[SECURITY] Skipping relative allowed folder (must be absolute): ${folder}`);
           continue;
         }
         const normalized = path.resolve(folder);
         if (fs.existsSync(normalized)) {
           allowedPaths.push(normalized);
         } else {
-          this.logger.warn(`Allowed folder does not exist: ${folder}`);
+          this.logger.warn(`[SECURITY] Allowed folder does not exist: ${folder}`);
         }
       }
+    }
+    
+    // Log final allowed directories for security audit
+    this.logger.info(`[SECURITY] Copilot CLI allowed directories (${allowedPaths.length}):`);
+    for (const p of allowedPaths) {
+      this.logger.info(`[SECURITY]   - ${p}`);
     }
     
     // Build --add-dir arguments to grant file access to specific directories
@@ -322,8 +328,11 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     // This is different from --allow-all-paths which disables ALL path verification
     let pathsArg: string;
     if (allowedPaths.length === 0) {
-      // Fallback: if no paths specified, allow current directory only
-      pathsArg = '--add-dir .';
+      // Security: require explicit cwd even when none specified
+      // Using "." is ambiguous - always use the actual working directory
+      const fallbackPath = cwd || process.cwd();
+      this.logger.warn(`[SECURITY] No allowed paths specified, using explicit cwd: ${fallbackPath}`);
+      pathsArg = `--add-dir ${JSON.stringify(fallbackPath)}`;
     } else {
       // Use multiple --add-dir flags for each path
       pathsArg = allowedPaths.map(p => `--add-dir ${JSON.stringify(p)}`).join(' ');
