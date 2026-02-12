@@ -302,8 +302,12 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       allowedPaths.push(cwd);
     }
     if (allowedFolders && allowedFolders.length > 0) {
-      // Validate and normalize paths
+      // Validate and normalize paths — must be absolute for security
       for (const folder of allowedFolders) {
+        if (!path.isAbsolute(folder)) {
+          this.logger.warn(`Skipping relative allowed folder (must be absolute): ${folder}`);
+          continue;
+        }
         const normalized = path.resolve(folder);
         if (fs.existsSync(normalized)) {
           allowedPaths.push(normalized);
@@ -326,12 +330,6 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-urls --allow-all-tools`;
     
     // Use isolated config directory to prevent sessions from appearing in VS Code history
-    if (configDir) {
-      cmd += ` --config-dir ${JSON.stringify(configDir)}`;
-    }
-    
-    // Store all Copilot state in worktree's .orchestrator directory
-    // This isolates sessions from user's history and auto-cleans on worktree removal
     if (configDir) {
       cmd += ` --config-dir ${JSON.stringify(configDir)}`;
     }

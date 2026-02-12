@@ -263,6 +263,7 @@ export class PlanRunner extends EventEmitter {
    * Wake lock cleanup function - prevents system sleep during plan execution
    */
   private wakeLockCleanup?: () => void;
+  private _acquiringWakeLock = false;
   
   constructor(config: PlanRunnerConfig) {
     super();
@@ -1310,13 +1311,16 @@ export class PlanRunner extends EventEmitter {
   private async updateWakeLock(): Promise<void> {
     const hasRunning = this.hasRunningPlans();
     
-    if (hasRunning && !this.wakeLockCleanup) {
-      // Acquire wake lock
+    if (hasRunning && !this.wakeLockCleanup && !this._acquiringWakeLock) {
+      // Acquire wake lock (guard against concurrent calls)
+      this._acquiringWakeLock = true;
       try {
         this.wakeLockCleanup = await powerManager.acquireWakeLock('Copilot Plan execution in progress');
         log.info('Acquired wake lock - system sleep prevented');
       } catch (e) {
         log.warn('Failed to acquire wake lock', { error: e });
+      } finally {
+        this._acquiringWakeLock = false;
       }
     } else if (!hasRunning && this.wakeLockCleanup) {
       // Release wake lock

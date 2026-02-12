@@ -215,7 +215,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     const globalStats = this._planRunner.getGlobalStats();
     
     // Get global capacity stats
-    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats();
+    // Get global capacity stats (catch to avoid unhandled rejections from timers/events)
+    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
     
     this._view.webview.postMessage({
       type: 'update',

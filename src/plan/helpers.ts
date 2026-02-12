@@ -346,10 +346,9 @@ export function computeMergedLeafWorkSummary(
   }
 
   // Filter job summaries to only include merged leaf nodes
+  const leafSet = new Set(plan.leaves);
   const filteredJobSummaries = plan.workSummary.jobSummaries.filter((jobSummary) => {
-    // Check if this is a leaf node
-    const isLeaf = plan.leaves.includes(jobSummary.nodeId);
-    if (!isLeaf) {
+    if (!leafSet.has(jobSummary.nodeId)) {
       return false;
     }
 

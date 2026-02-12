@@ -85,7 +85,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   
   // Cleanup on deactivation
   context.subscriptions.push({
-    dispose: () => globalCapacityManager.shutdown()
+    dispose: () => { void globalCapacityManager.shutdown().catch(e => extLog.error('Failed to shutdown global capacity manager', { error: e })); }
   });
 
   // ── MCP Server (stdio transport via IPC) ───────────────────────────────
@@ -216,11 +216,9 @@ export function deactivate(): void {
   }
   
   // Shutdown global capacity manager
-  try {
-    globalCapacity?.shutdown();
-  } catch (e) {
+  void globalCapacity?.shutdown().catch((e: unknown) => {
     console.error('Failed to shutdown global capacity manager:', e);
-  }
+  });
   
   // Note: mcpManager.stop() is also called by subscriptions.dispose(),
   // but it's idempotent so calling it here for safety is fine

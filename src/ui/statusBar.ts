@@ -43,7 +43,7 @@ export function attachStatusBar(context: vscode.ExtensionContext, planRunner: Pl
     });
     
     // Get global capacity stats
-    const globalStats = await planRunner.getGlobalCapacityStats();
+    const globalStats = await planRunner.getGlobalCapacityStats().catch(() => null);
     
     if (runningPlans.length > 0) {
       // Count running nodes across all Plans

@@ -442,7 +442,7 @@ export class planDetailPanel {
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
     
     // Get global capacity stats
-    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats();
+    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
     
     // Reset hashes to force next _update to also do full render
     this._lastStateVersion = -1;
@@ -472,9 +472,9 @@ export class planDetailPanel {
     const totalNodes = recursiveCounts.totalNodes;
     
     // Get global capacity stats
-    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats();
+    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
     
-    // Build node status map for incremental updates (includes version for efficient updates)
+    // Build node status mapfor incremental updates (includes version for efficient updates)
     const nodeStatuses: Record<string, { status: string; version: number; startedAt?: number; endedAt?: number }> = {};
     for (const [nodeId, state] of plan.nodeStates) {
       const sanitizedId = this._sanitizeId(nodeId);
@@ -2712,7 +2712,7 @@ ${mermaidDef}
           : escapedName;
         // Show full path in tooltip for nested groups or when truncated
         if (truncatedGroupName !== escapedName || groupPath.includes('/')) {
-          nodeTooltips[sanitizedGroupId] = truncatedGroupName !== escapedName ? displayName : groupPath;
+          nodeTooltips[sanitizedGroupId] = groupPath.includes('/') ? groupPath : displayName;
         }
         const emSp = '\u2003'; // em space — proportional-font-safe padding
         const padding = emSp.repeat(4); // reserve width to prevent cutoff
