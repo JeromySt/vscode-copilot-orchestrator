@@ -65,6 +65,21 @@ export interface DelegateOptions {
    * ```
    */
   allowedFolders?: string[];
+  /**
+   * Config directory for Copilot CLI.
+   * 
+   * Stores sessions and configuration in a worktree-local directory instead of the user's
+   * home directory. This enables:
+   * 
+   * - **Worktree-Local Storage**: Session state and configuration are scoped to this job's
+   *   worktree, enabling multiple concurrent jobs without conflicts
+   * - **Job Isolation**: Each delegated task has its own isolated session state
+   * - **Clean Shutdown**: When the worktree is cleaned up, all session files are automatically
+   *   removed with it
+   * 
+   * Typical value: `{worktreePath}/.orchestrator/.copilot`
+   */
+  configDir?: string;
 }
 
 /**
@@ -270,6 +285,15 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
     };
     const cliRunner = new CopilotCliRunner(cliLogger);
 
+    // Store Copilot config/sessions in worktree's .orchestrator directory
+    // This ensures session state is cleaned up when worktree is removed
+    const copilotConfigDir = path.join(worktreePath, '.orchestrator', '.copilot');
+    
+    // Ensure directory exists
+    if (!fs.existsSync(copilotConfigDir)) {
+      fs.mkdirSync(copilotConfigDir, { recursive: true });
+    }
+
     // Create job-specific directories for Copilot logs and session tracking
     const copilotJobDir = path.join(worktreePath, '.copilot-orchestrator');
     const copilotLogDir = path.join(copilotJobDir, 'logs');
@@ -303,6 +327,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       model,
       logDir: copilotLogDir,
       sharePath: sessionSharePath,
+      configDir: copilotConfigDir,
       jobId,
       allowedFolders,  // NEW: pass through to CLI runner
       timeout: 0, // No timeout — agent work can run for a long time

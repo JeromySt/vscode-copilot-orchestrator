@@ -44,6 +44,7 @@ export * as worktrees from './core/worktrees';
 export * as merge from './core/merge';
 export * as repository from './core/repository';
 export * as executor from './core/executor';
+export * as gitignore from './core/gitignore';
 
 // =============================================================================
 // Orchestrator API
