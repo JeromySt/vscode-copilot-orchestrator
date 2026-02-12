@@ -549,10 +549,7 @@ export class NodeDetailPanel {
         break;
       case 'forceFailNode':
         // Use message params if provided, otherwise fall back to instance variables
-        const ffPlanId = message.planId || this._planId;
-        const ffNodeId = message.nodeId || this._nodeId;
-        console.log('Received forceFailNode message:', { messagePlanId: message.planId, messageNodeId: message.nodeId, instancePlanId: this._planId, instanceNodeId: this._nodeId });
-        this._forceFailNode(ffPlanId, ffNodeId);
+        this._forceFailNode(message.planId || this._planId, message.nodeId || this._nodeId);
         break;
       case 'openLogFile':
         if (message.path && path.isAbsolute(message.path) && fs.existsSync(message.path)) {
@@ -569,9 +566,7 @@ export class NodeDetailPanel {
    * @param nodeId - The node to force fail.
    */
   private _forceFailNode(planId: string, nodeId: string) {
-    console.log('_forceFailNode called with:', { planId, nodeId });
     const result = this._planRunner.forceFailNode(planId, nodeId, 'Force failed via UI - process may have crashed');
-    console.log('forceFailNode result:', result);
     
     if (result.success) {
       vscode.window.showInformationMessage('Node force failed. You can now retry it.');
@@ -982,14 +977,11 @@ export class NodeDetailPanel {
       const planId = PLAN_ID;
       const nodeId = NODE_ID;
       
-      console.log('Retry button clicked:', { action, planId, nodeId });
-      
       if (action === 'retry-node') {
         vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: true });
       } else if (action === 'retry-node-fresh') {
         vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
       } else if (action === 'force-fail-node') {
-        console.log('Force fail button clicked, sending message...');
         vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
       }
     });
