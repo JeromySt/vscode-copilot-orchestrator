@@ -50,3 +50,5 @@ yarn-error.log*
 # Copilot Orchestrator
 .orchestrator/
 .worktrees/
+.worktrees
+.orchestrator

@@ -712,8 +712,10 @@ export class NodeDetailPanel {
     const initialPhase = this._getInitialPhase(phaseStatus, state.status);
     
     // Build work summary HTML
+    // For leaf nodes, pass aggregated work summary to show total merged work
+    const isLeaf = plan.leaves.includes(this._nodeId);
     const workSummaryHtml = state.workSummary 
-      ? this._buildWorkSummaryHtml(state.workSummary)
+      ? this._buildWorkSummaryHtml(state.workSummary, state.aggregatedWorkSummary, isLeaf)
       : '';
     
     // Get log file path for this node (use current attempt number)
@@ -1460,14 +1462,48 @@ export class NodeDetailPanel {
    * {@link commitDetailsHtml} template helpers.
    *
    * @param ws - The job work summary data.
+   * @param aggregated - Optional aggregated work summary for leaf nodes (includes upstream).
+   * @param isLeaf - Whether this is a leaf node in the plan.
    * @returns HTML fragment string, or empty string if no data.
    */
-  private _buildWorkSummaryHtml(ws: JobWorkSummary): string {
+  private _buildWorkSummaryHtml(ws: JobWorkSummary, aggregated?: JobWorkSummary, isLeaf?: boolean): string {
     if (!ws || (ws.commits === 0 && ws.filesAdded === 0 && ws.filesModified === 0 && ws.filesDeleted === 0)) {
       return '';
     }
     
     const commitsHtml = commitDetailsHtml(ws.commitDetails || []);
+    
+    // Build aggregated work section for leaf nodes if different from job work
+    let aggregatedHtml = '';
+    if (isLeaf && aggregated && aggregated !== ws) {
+      const aggAdded = aggregated.filesAdded || 0;
+      const aggModified = aggregated.filesModified || 0;
+      const aggDeleted = aggregated.filesDeleted || 0;
+      
+      // Only show if aggregated stats differ or are meaningful
+      if (aggAdded !== ws.filesAdded || aggModified !== ws.filesModified || aggDeleted !== ws.filesDeleted) {
+        aggregatedHtml = `
+        <div class="work-summary-section aggregated">
+          <h4>📦 Total Work Merged to Target</h4>
+          <div class="work-summary-stats aggregated-stats">
+            <div class="work-stat added">
+              <div class="work-stat-value">+${aggAdded}</div>
+              <div class="work-stat-label">Added</div>
+            </div>
+            <div class="work-stat modified">
+              <div class="work-stat-value">~${aggModified}</div>
+              <div class="work-stat-label">Modified</div>
+            </div>
+            <div class="work-stat deleted">
+              <div class="work-stat-value">-${aggDeleted}</div>
+              <div class="work-stat-label">Deleted</div>
+            </div>
+          </div>
+          <p class="work-summary-desc">Includes all upstream dependency work</p>
+        </div>
+        `;
+      }
+    }
     
     return `
     <div class="section">
@@ -1477,6 +1513,7 @@ export class NodeDetailPanel {
       </div>
       ${ws.description ? `<div class="work-summary-desc">${escapeHtml(ws.description)}</div>` : ''}
       ${commitsHtml}
+      ${aggregatedHtml}
     </div>
     `;
   }
@@ -2324,6 +2361,23 @@ export class NodeDetailPanel {
       margin-top: 12px;
       font-style: italic;
       color: var(--vscode-descriptionForeground);
+    }
+    
+    /* Aggregated Work Summary */
+    .work-summary-section.aggregated {
+      border-top: 1px solid var(--vscode-panel-border);
+      margin-top: 16px;
+      padding-top: 16px;
+      opacity: 0.9;
+    }
+    .work-summary-section.aggregated h4 {
+      color: var(--vscode-descriptionForeground);
+      font-weight: normal;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+    .work-summary-stats.aggregated-stats {
+      opacity: 0.95;
     }
     
     /* Commit Details */

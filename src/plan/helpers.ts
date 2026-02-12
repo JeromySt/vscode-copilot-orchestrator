@@ -347,15 +347,26 @@ export function computeMergedLeafWorkSummary(
 
   // Filter job summaries to only include merged leaf nodes
   const leafSet = new Set(plan.leaves);
-  const filteredJobSummaries = plan.workSummary.jobSummaries.filter((jobSummary) => {
+  const filteredJobSummaries: JobWorkSummary[] = [];
+  
+  for (const jobSummary of plan.workSummary.jobSummaries) {
     if (!leafSet.has(jobSummary.nodeId)) {
-      return false;
+      continue;
     }
 
     // Check if it has been merged to target
     const nodeState = nodeStates.get(jobSummary.nodeId);
-    return nodeState?.mergedToTarget === true;
-  });
+    if (nodeState?.mergedToTarget !== true) {
+      continue;
+    }
+    
+    // Use aggregatedWorkSummary if available, otherwise fall back to workSummary
+    if (nodeState.aggregatedWorkSummary) {
+      filteredJobSummaries.push(nodeState.aggregatedWorkSummary);
+    } else {
+      filteredJobSummaries.push(jobSummary);
+    }
+  }
 
   // If no jobs match the filter, return undefined
   if (filteredJobSummaries.length === 0) {

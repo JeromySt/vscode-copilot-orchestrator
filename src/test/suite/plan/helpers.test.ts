@@ -551,5 +551,115 @@ suite('Plan Helpers', () => {
       const result = computeMergedLeafWorkSummary(plan, nodeStates);
       assert.strictEqual(result, undefined);
     });
+
+    test('uses aggregatedWorkSummary when available', () => {
+      const workSummary = {
+        totalCommits: 1,
+        totalFilesAdded: 1,
+        totalFilesModified: 0,
+        totalFilesDeleted: 0,
+        jobSummaries: [
+          { nodeId: 'leaf1', nodeName: 'Job1', commits: 1, filesAdded: 1, filesModified: 0, filesDeleted: 0, description: 'job work' },
+        ],
+      };
+      const plan = createTestPlan(['leaf1'], workSummary, 'main');
+      
+      // Node has aggregatedWorkSummary (shows total DAG work)
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['leaf1', {
+          status: 'succeeded',
+          version: 1,
+          attempts: 1,
+          mergedToTarget: true,
+          workSummary: { nodeId: 'leaf1', nodeName: 'Job1', commits: 1, filesAdded: 1, filesModified: 0, filesDeleted: 0, description: 'job work' },
+          aggregatedWorkSummary: { nodeId: 'leaf1', nodeName: 'Job1', commits: 5, filesAdded: 10, filesModified: 3, filesDeleted: 1, description: 'aggregated work' }
+        }],
+      ]);
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.ok(result);
+      // Should use aggregated (10 files) not job-specific (1 file)
+      assert.strictEqual(result.totalFilesAdded, 10);
+      assert.strictEqual(result.totalFilesModified, 3);
+      assert.strictEqual(result.totalFilesDeleted, 1);
+      assert.strictEqual(result.totalCommits, 5);
+      assert.strictEqual(result.jobSummaries.length, 1);
+      assert.strictEqual(result.jobSummaries[0].description, 'aggregated work');
+    });
+
+    test('prefers aggregatedWorkSummary over workSummary when both present', () => {
+      const workSummary = {
+        totalCommits: 20,
+        totalFilesAdded: 20,
+        totalFilesModified: 20,
+        totalFilesDeleted: 20,
+        jobSummaries: [
+          { nodeId: 'leaf1', nodeName: 'Job1', commits: 10, filesAdded: 10, filesModified: 10, filesDeleted: 10, description: 'wrong' },
+          { nodeId: 'leaf2', nodeName: 'Job2', commits: 10, filesAdded: 10, filesModified: 10, filesDeleted: 10, description: 'wrong' },
+        ],
+      };
+      const plan = createTestPlan(['leaf1', 'leaf2'], workSummary, 'main');
+      
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['leaf1', {
+          status: 'succeeded',
+          version: 1,
+          attempts: 1,
+          mergedToTarget: true,
+          workSummary: { nodeId: 'leaf1', nodeName: 'Job1', commits: 10, filesAdded: 10, filesModified: 10, filesDeleted: 10, description: 'wrong' },
+          aggregatedWorkSummary: { nodeId: 'leaf1', nodeName: 'Job1', commits: 3, filesAdded: 5, filesModified: 2, filesDeleted: 1, description: 'correct1' }
+        }],
+        ['leaf2', {
+          status: 'succeeded',
+          version: 1,
+          attempts: 1,
+          mergedToTarget: true,
+          workSummary: { nodeId: 'leaf2', nodeName: 'Job2', commits: 10, filesAdded: 10, filesModified: 10, filesDeleted: 10, description: 'wrong' },
+          aggregatedWorkSummary: { nodeId: 'leaf2', nodeName: 'Job2', commits: 2, filesAdded: 3, filesModified: 1, filesDeleted: 0, description: 'correct2' }
+        }],
+      ]);
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.ok(result);
+      // Should use aggregated summaries from nodeStates
+      assert.strictEqual(result.totalCommits, 5); // 3 + 2
+      assert.strictEqual(result.totalFilesAdded, 8); // 5 + 3
+      assert.strictEqual(result.totalFilesModified, 3); // 2 + 1
+      assert.strictEqual(result.totalFilesDeleted, 1); // 1 + 0
+      assert.strictEqual(result.jobSummaries.length, 2);
+    });
+
+    test('falls back to workSummary when aggregatedWorkSummary not present', () => {
+      const workSummary = {
+        totalCommits: 2,
+        totalFilesAdded: 3,
+        totalFilesModified: 1,
+        totalFilesDeleted: 0,
+        jobSummaries: [
+          { nodeId: 'leaf1', nodeName: 'Job1', commits: 2, filesAdded: 3, filesModified: 1, filesDeleted: 0, description: 'fallback' },
+        ],
+      };
+      const plan = createTestPlan(['leaf1'], workSummary, 'main');
+      
+      // Node without aggregatedWorkSummary
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['leaf1', {
+          status: 'succeeded',
+          version: 1,
+          attempts: 1,
+          mergedToTarget: true,
+          workSummary: { nodeId: 'leaf1', nodeName: 'Job1', commits: 2, filesAdded: 3, filesModified: 1, filesDeleted: 0, description: 'fallback' },
+          // No aggregatedWorkSummary
+        }],
+      ]);
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.ok(result);
+      // Should fall back to workSummary
+      assert.strictEqual(result.totalCommits, 2);
+      assert.strictEqual(result.totalFilesAdded, 3);
+      assert.strictEqual(result.totalFilesModified, 1);
+      assert.strictEqual(result.totalFilesDeleted, 0);
+    });
   });
 });

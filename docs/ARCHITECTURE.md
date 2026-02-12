@@ -452,12 +452,34 @@ Each node maintains an `NodeExecutionState` record (`src/plan/types/plan.ts`):
 | `scheduledAt` / `startedAt` / `endedAt` | Phase timestamps |
 | `worktreePath` | Path to the node's isolated worktree |
 | `workSummary` | Commit stats and file changes |
+| `aggregatedWorkSummary` | Total work being merged to targetBranch (leaf nodes only) |
 | `attempts` | Array of `AttemptRecord` for retry history |
 | `lastAttempt` | Most recent attempt with phase statuses |
 | `metrics` | Aggregate AI usage metrics for the node |
 | `phaseMetrics` | Per-phase AI usage breakdown (`merge-fi`, `prechecks`, `work`, `commit`, `postchecks`, `merge-ri`) |
 
 **Work Summary Behavior:** When a plan has a `targetBranch` configured, the plan detail panel filters the work summary to show only commits from leaf nodes that have successfully merged to the target branch (`mergedToTarget === true`). This ensures the displayed work summary reflects actual integrated work rather than all work performed across the plan. The summary updates dynamically as nodes complete their merge operations.
+
+### Aggregated Work Summary
+
+Leaf nodes that merge to `targetBranch` have two work summaries:
+
+1. **`workSummary`**: Work done by this specific job (commits from baseCommit to completedCommit)
+2. **`aggregatedWorkSummary`**: Total work being merged to targetBranch (commits from baseBranch to completedCommit)
+
+The aggregated summary includes all upstream dependency work accumulated through FI (Forward Integration) merges. This is important for:
+
+- No-op leaf nodes that only aggregate upstream work
+- Accurately representing what's being merged to targetBranch
+- Plan work summary views that show "merged work"
+
+Example DAG:
+```
+A (3 files) → B (2 files) → C (leaf, 0 files)
+```
+
+- C's `workSummary`: 0 files (no changes)
+- C's `aggregatedWorkSummary`: 5 files (A's 3 + B's 2 merged through FI)
 
 ### Group State Aggregation
 

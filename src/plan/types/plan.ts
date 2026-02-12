@@ -95,6 +95,22 @@ export interface NodeExecutionState {
   /** Work summary (files changed, commits) - set on success */
   workSummary?: JobWorkSummary;
   
+  /**
+   * Aggregated work summary for leaf nodes.
+   * Captures the total diff from baseBranch to completedCommit,
+   * including all upstream dependency work accumulated through FI merges.
+   * Only populated for leaf nodes after successful execution.
+   * This represents the total work that will be merged to targetBranch.
+   * 
+   * Unlike `workSummary` (which shows baseCommit → completedCommit for this node only),
+   * `aggregatedWorkSummary` shows baseBranch → completedCommit across the entire DAG path.
+   * 
+   * Example: For DAG A → B → C (leaf), if A adds 3 files and B adds 2 files:
+   * - C's `workSummary`: 0 files (no changes made by C)
+   * - C's `aggregatedWorkSummary`: 5 files (A's 3 + B's 2, merged through FI)
+   */
+  aggregatedWorkSummary?: JobWorkSummary;
+  
   /** 
    * Whether this leaf node's commit was successfully merged to targetBranch.
    * Only set for leaf nodes when targetBranch is specified.

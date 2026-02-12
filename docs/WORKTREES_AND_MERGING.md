@@ -131,6 +131,16 @@ would break: Code Change B's FI would miss Code Change A's work because the Type
 
 When a leaf node completes and the plan has a `targetBranch`, the node's completed commit is merged to the target branch.
 
+#### Aggregated Work for RI Merge
+
+When a leaf node merges to targetBranch (RI phase), the work being merged includes all commits from the DAG path:
+
+- Root node's changes (from baseBranch tip)
+- All intermediate node changes (via FI merges)
+- Leaf node's own changes
+
+This is captured in `nodeState.aggregatedWorkSummary` and displayed in the Plan work summary view.
+
 **Fast path (`git merge-tree`):**
 ```bash
 # Compute merge result as a tree object (no checkout needed)
