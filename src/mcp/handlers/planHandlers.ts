@@ -11,6 +11,7 @@ import {
   JobNodeSpec, 
   GroupSpec,
 } from '../../plan/types';
+import { validateAllowedFolders, validateAllowedUrls } from '../validation';
 import {
   PlanHandlerContext,
   errorResult,
@@ -287,6 +288,18 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
   if (!validation.valid || !validation.spec) {
     return errorResult(validation.error || 'Invalid input');
   }
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
+  }
   
   try {
     validation.spec.repoPath = ctx.workspacePath;
@@ -364,6 +377,18 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
   
   if (!args.task) {
     return errorResult('Job must have a task');
+  }
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
   }
   
   try {
@@ -833,6 +858,18 @@ export async function handleDeletePlan(args: any, ctx: PlanHandlerContext): Prom
 export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['id']);
   if (fieldError) return fieldError;
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
+  }
   
   const planResult = lookupPlan(ctx, args.id, 'getPlan');
   if (isError(planResult)) return planResult;
@@ -950,6 +987,18 @@ export async function handleGetNodeFailureContext(args: any, ctx: PlanHandlerCon
 export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['planId', 'nodeId']);
   if (fieldError) return fieldError;
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
+  }
   
   const planResult = lookupPlan(ctx, args.planId, 'getPlan');
   if (isError(planResult)) return planResult;

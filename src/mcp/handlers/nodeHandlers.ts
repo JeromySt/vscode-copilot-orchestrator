@@ -13,6 +13,7 @@ import {
   JobNodeSpec,
   PlanSpec,
 } from '../../plan/types';
+import { validateAllowedFolders, validateAllowedUrls } from '../validation';
 import { PRODUCER_ID_PATTERN } from '../tools/planTools';
 import {
   PlanHandlerContext,
@@ -118,6 +119,18 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
   const validation = validateNodeSpecs(args.nodes);
   if (!validation.valid || !validation.specs) {
     return errorResult(validation.error || 'Invalid input');
+  }
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
   }
 
   try {
@@ -521,6 +534,18 @@ export async function handleRetryGroup(args: any, ctx: PlanHandlerContext): Prom
 export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['node_id']);
   if (fieldError) return fieldError;
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
+  }
 
   const retryOptions = {
     newWork: args.newWork,
