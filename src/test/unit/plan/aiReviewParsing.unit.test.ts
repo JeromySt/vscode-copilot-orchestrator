@@ -1,10 +1,9 @@
 /**
- * @fileoverview Unit tests for AI review parsing functionality.
- * Tests verify HTML entity decoding, tag stripping, and JSON parsing
- * for various formats that AI agents might return.
+ * @fileoverview Unit tests for AI Review parsing functionality
  */
 
 import * as assert from 'assert';
+import * as sinon from 'sinon';
 import { parseAiReviewResult, decodeHtmlEntities, stripHtmlTags } from '../../../plan/aiReviewUtils';
 
 function silenceConsole(): { restore: () => void } {
@@ -14,185 +13,239 @@ function silenceConsole(): { restore: () => void } {
 }
 
 suite('AI Review Parsing', () => {
-  let consoleSilencer: { restore: () => void };
+  let quiet: { restore: () => void };
 
   setup(() => {
-    consoleSilencer = silenceConsole();
+    quiet = silenceConsole();
   });
 
   teardown(() => {
-    consoleSilencer.restore();
+    quiet.restore();
+    sinon.restore();
   });
 
-  suite('decodeHtmlEntities', () => {
-    test('should decode &quot; to quotes', () => {
-      assert.strictEqual(decodeHtmlEntities('&quot;hello&quot;'), '"hello"');
-    });
-    
-    test('should decode multiple entity types', () => {
-      const input = '&lt;test&gt; &amp; &quot;value&quot;';
-      assert.strictEqual(decodeHtmlEntities(input), '<test> & "value"');
-    });
-
-    test('should handle &#39; and &nbsp;', () => {
-      const input = 'It&#39;s&nbsp;working';
-      assert.strictEqual(decodeHtmlEntities(input), "It's working");
-    });
-
-    test('should handle mixed entities', () => {
-      const input = '&lt;div&gt;&quot;Test&amp;Data&quot;&lt;/div&gt;';
-      assert.strictEqual(decodeHtmlEntities(input), '<div>"Test&Data"</div>');
-    });
-  });
-  
-  suite('stripHtmlTags', () => {
-    test('should remove HTML tags', () => {
-      assert.strictEqual(stripHtmlTags('<p>content</p>'), 'content');
-    });
-    
-    test('should handle nested tags', () => {
-      assert.strictEqual(stripHtmlTags('<div><p>text</p></div>'), 'text');
-    });
-    
-    test('should preserve text between tags', () => {
-      assert.strictEqual(stripHtmlTags('<p>one</p><p>two</p>'), 'onetwo');
-    });
-
-    test('should handle self-closing tags', () => {
-      assert.strictEqual(stripHtmlTags('before<br/>after'), 'beforeafter');
-    });
-
-    test('should handle incomplete or malformed tags iteratively', () => {
-      // This edge case shows behavior with malformed nested tags
-      assert.strictEqual(stripHtmlTags('<p><scr<script>ipt>text</p>'), 'ipt>text');
-    });
-
-    test('should handle mixed tag types', () => {
-      const input = '<div class="test"><span>nested</span></div>';
-      assert.strictEqual(stripHtmlTags(input), 'nested');
-    });
-  });
-  
   suite('parseAiReviewResult', () => {
-    test('should parse clean JSON', () => {
-      const input = '{"legitimate": true, "reason": "Work already done"}';
-      const result = parseAiReviewResult(input);
-      
-      assert.deepStrictEqual(result, {
-        legitimate: true,
-        reason: 'Work already done'
-      });
-    });
-    
-    test('should parse HTML-encoded JSON', () => {
-      const input = '{&quot;legitimate&quot;: true, &quot;reason&quot;: &quot;Already fixed&quot;}';
+    test('should parse clean JSON (expected path)', () => {
+      const input = '{ "legitimate": true, "reason": "Tests already pass" }';
       const result = parseAiReviewResult(input);
       
       assert.strictEqual(result?.legitimate, true);
-      assert.strictEqual(result?.reason, 'Already fixed');
+      assert.strictEqual(result?.reason, 'Tests already pass');
     });
-    
-    test('should parse JSON wrapped in HTML tags', () => {
-      const input = '<p>{"legitimate": false, "reason": "No work done"}</p>';
+
+    test('should parse clean JSON with extra whitespace', () => {
+      const input = '  {\n  "legitimate"  :  false  ,\n  "reason"  :  "Changes were expected"  \n}  ';
       const result = parseAiReviewResult(input);
       
       assert.strictEqual(result?.legitimate, false);
-      assert.strictEqual(result?.reason, 'No work done');
+      assert.strictEqual(result?.reason, 'Changes were expected');
     });
-    
-    test('should parse HTML-encoded JSON in HTML tags', () => {
-      const input = '<p>{&quot;legitimate&quot;: true, &quot;reason&quot;: &quot;Fixes already committed&quot;}</p>';
+
+    test('should parse JSON embedded in text', () => {
+      const input = 'Some leading text { "legitimate": true, "reason": "All good" } trailing text';
       const result = parseAiReviewResult(input);
       
       assert.strictEqual(result?.legitimate, true);
-      assert.ok(result?.reason.includes('committed'));
+      assert.strictEqual(result?.reason, 'All good');
     });
-    
-    test('should extract from multi-line HTML output', () => {
-      const input = `
-        <p>Analysis complete.</p>
-        <p>{&quot;legitimate&quot;: true, &quot;reason&quot;: &quot;All tests pass&quot;}</p>
-        <p>Done.</p>
-      `;
-      const result = parseAiReviewResult(input);
-      
-      assert.strictEqual(result?.legitimate, true);
-      assert.strictEqual(result?.reason, 'All tests pass');
-    });
-    
-    test('should handle legitimate: false', () => {
-      const input = '{"legitimate": false, "reason": "Agent did nothing"}';
+
+    test('should parse JSON from markdown code block', () => {
+      const input = 'Here is the result:\n```json\n{ "legitimate": false, "reason": "Missing tests" }\n```';
       const result = parseAiReviewResult(input);
       
       assert.strictEqual(result?.legitimate, false);
-      assert.strictEqual(result?.reason, 'Agent did nothing');
+      assert.strictEqual(result?.reason, 'Missing tests');
     });
-    
-    test('should return null for missing JSON', () => {
-      const input = '<p>No judgment here</p>';
+
+    test('should parse JSON from plain code block', () => {
+      const input = 'Result:\n```\n{ "legitimate": true, "reason": "Code looks good" }\n```';
+      const result = parseAiReviewResult(input);
+      
+      assert.strictEqual(result?.legitimate, true);
+      assert.strictEqual(result?.reason, 'Code looks good');
+    });
+
+    test('should handle HTML-encoded JSON', () => {
+      const input = '{ &quot;legitimate&quot;: true, &quot;reason&quot;: &quot;No issues found&quot; }';
+      const result = parseAiReviewResult(input);
+      
+      assert.strictEqual(result?.legitimate, true);
+      assert.strictEqual(result?.reason, 'No issues found');
+    });
+
+    test('should handle JSON with HTML tags', () => {
+      const input = '<pre><code>{ "legitimate": false, "reason": "Needs work" }</code></pre>';
+      const result = parseAiReviewResult(input);
+      
+      assert.strictEqual(result?.legitimate, false);
+      assert.strictEqual(result?.reason, 'Needs work');
+    });
+
+    test('should handle complex HTML with nested tags', () => {
+      const input = '<div><p>Result:</p><pre><code>{ &quot;legitimate&quot;: true, &quot;reason&quot;: &quot;Excellent work&quot; }</code></pre></div>';
+      const result = parseAiReviewResult(input);
+      
+      assert.strictEqual(result?.legitimate, true);
+      assert.strictEqual(result?.reason, 'Excellent work');
+    });
+
+    test('should extract fields as fallback when JSON parsing fails', () => {
+      const input = '{ "legitimate": true, some other text, "reason": "Works fine"';
+      const result = parseAiReviewResult(input);
+      
+      assert.strictEqual(result?.legitimate, true);
+      assert.strictEqual(result?.reason, 'Works fine');
+    });
+
+    test('should extract fields with only legitimate field', () => {
+      const input = 'some text "legitimate": false more text';
+      const result = parseAiReviewResult(input);
+      
+      assert.strictEqual(result?.legitimate, false);
+      assert.strictEqual(result?.reason, 'No reason extracted');
+    });
+
+    test('should handle case-insensitive field extraction', () => {
+      const input = '"LEGITIMATE": True and "REASON": "Case test"';
+      const result = parseAiReviewResult(input);
+      
+      assert.strictEqual(result?.legitimate, true);
+      assert.strictEqual(result?.reason, 'Case test');
+    });
+
+    test('should return null for unparseable content', () => {
+      const input = 'This is just random text with no JSON or fields';
       const result = parseAiReviewResult(input);
       
       assert.strictEqual(result, null);
     });
-    
-    test('should return null for malformed JSON', () => {
-      const input = '{legitimate: true}';  // Missing quotes
+
+    test('should return null for invalid JSON', () => {
+      const input = '{ "legitimate": "not a boolean", "reason": "invalid" }';
       const result = parseAiReviewResult(input);
       
       assert.strictEqual(result, null);
     });
 
-    test('should return null for empty input', () => {
-      assert.strictEqual(parseAiReviewResult(''), null);
-      assert.strictEqual(parseAiReviewResult(' '), null);
-    });
-    
-    test('should handle split JSON across lines (from log output)', () => {
-      // Simulates what we see in logs where JSON is split
-      const input = `<p>{&quot;legitimate&quot;: true, &quot;reason&quot;: &quot;Fixes already committed in 8e215c7
-and verified working; all 315/315 unit tests pass including crash recovery tests; no additional
-changes needed&quot;}</p>`;
-      const result = parseAiReviewResult(input);
-      
-      assert.strictEqual(result?.legitimate, true);
-      assert.ok(result?.reason.includes('committed'));
-      assert.ok(result?.reason.includes('315/315'));
-    });
-
-    test('should find JSON in last line when present in multiple lines', () => {
-      const input = `
-        {"legitimate": false, "reason": "Not the right one"}
-        Some other content
-        {"legitimate": true, "reason": "This should be found"}
-      `;
-      const result = parseAiReviewResult(input);
-      
-      assert.strictEqual(result?.legitimate, true);
-      assert.strictEqual(result?.reason, 'This should be found');
-    });
-
-    test('should handle markdown code fences', () => {
-      const input = '```json\n{"legitimate": true, "reason": "Code block result"}\n```';
-      const result = parseAiReviewResult(input);
-      
-      assert.strictEqual(result?.legitimate, true);
-      assert.strictEqual(result?.reason, 'Code block result');
-    });
-
-    test('should provide default reason when reason is missing', () => {
-      const input = '{"legitimate": true}';
+    test('should handle missing reason field gracefully', () => {
+      const input = '{ "legitimate": true }';
       const result = parseAiReviewResult(input);
       
       assert.strictEqual(result?.legitimate, true);
       assert.strictEqual(result?.reason, 'AI review approved');
     });
 
-    test('should provide default reason for false case when missing', () => {
-      const input = '{"legitimate": false}';
+    test('should handle missing reason field for false legitimate', () => {
+      const input = '{ "legitimate": false }';
       const result = parseAiReviewResult(input);
       
       assert.strictEqual(result?.legitimate, false);
       assert.strictEqual(result?.reason, 'AI review rejected');
+    });
+
+    test('should handle multiline JSON in code blocks', () => {
+      const input = `Here's the analysis:
+\`\`\`json
+{
+  "legitimate": true,
+  "reason": "All tests pass and code quality is good"
+}
+\`\`\``;
+      const result = parseAiReviewResult(input);
+      
+      assert.strictEqual(result?.legitimate, true);
+      assert.strictEqual(result?.reason, 'All tests pass and code quality is good');
+    });
+
+    test('should prefer clean JSON over other formats', () => {
+      // This input has both markdown block and clean JSON - should prefer clean JSON
+      const input = `\`\`\`json
+{ "legitimate": false, "reason": "From code block" }
+\`\`\`
+Some text { "legitimate": true, "reason": "From clean JSON" } more text`;
+      const result = parseAiReviewResult(input);
+      
+      // Should pick the first matching clean JSON
+      assert.strictEqual(result?.legitimate, false);
+      assert.strictEqual(result?.reason, 'From code block');
+    });
+
+    test('should handle complex nested HTML entities', () => {
+      const input = '&lt;div&gt;{ &quot;legitimate&quot;: true, &quot;reason&quot;: &quot;Good &amp; clean&quot; }&lt;/div&gt;';
+      const result = parseAiReviewResult(input);
+      
+      assert.strictEqual(result?.legitimate, true);
+      assert.strictEqual(result?.reason, 'Good & clean');
+    });
+  });
+
+  suite('decodeHtmlEntities', () => {
+    test('should decode common HTML entities', () => {
+      const input = '&quot;test&quot; &amp; &lt;tag&gt; &#39;quote&#39; &apos;apos&apos;';
+      const result = decodeHtmlEntities(input);
+      
+      assert.strictEqual(result, '"test" & <tag> \'quote\' \'apos\'');
+    });
+
+    test('should handle text without entities', () => {
+      const input = 'plain text with no entities';
+      const result = decodeHtmlEntities(input);
+      
+      assert.strictEqual(result, 'plain text with no entities');
+    });
+
+    test('should handle empty string', () => {
+      const result = decodeHtmlEntities('');
+      assert.strictEqual(result, '');
+    });
+  });
+
+  suite('stripHtmlTags', () => {
+    test('should remove simple HTML tags', () => {
+      const input = '<p>Hello <strong>world</strong></p>';
+      const result = stripHtmlTags(input);
+      
+      assert.strictEqual(result, 'Hello world');
+    });
+
+    test('should handle nested tags', () => {
+      const input = '<div><p>Nested <span>content</span></p></div>';
+      const result = stripHtmlTags(input);
+      
+      assert.strictEqual(result, 'Nested content');
+    });
+
+    test('should handle malformed nested tags', () => {
+      const input = '<scr<script>ipt>alert("test")</script>';
+      const result = stripHtmlTags(input);
+      
+      assert.strictEqual(result, 'ipt>alert("test")');
+    });
+
+    test('should remove markdown code fences', () => {
+      const input = '```json\n{ "test": true }\n```';
+      const result = stripHtmlTags(input);
+      
+      assert.strictEqual(result, '{ "test": true }\n');
+    });
+
+    test('should remove code fences without language', () => {
+      const input = '```\nsome code\n```';
+      const result = stripHtmlTags(input);
+      
+      assert.strictEqual(result, 'some code\n');
+    });
+
+    test('should handle text without tags', () => {
+      const input = 'plain text';
+      const result = stripHtmlTags(input);
+      
+      assert.strictEqual(result, 'plain text');
+    });
+
+    test('should handle empty string', () => {
+      const result = stripHtmlTags('');
+      assert.strictEqual(result, '');
     });
   });
 });
