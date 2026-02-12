@@ -10,3 +10,4 @@ export { detectWorkspace, Detected } from './detector';
 export { ensureDir, readJSON, writeJSON, cpuCountMinusOne } from './utils';
 export * from './planInitialization';
 export { Logger, ComponentLogger } from './logger';
+export * from './orphanedWorktreeCleanup';
