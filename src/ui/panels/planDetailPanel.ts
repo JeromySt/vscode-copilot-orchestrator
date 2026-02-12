@@ -2666,14 +2666,15 @@ ${mermaidDef}
         
         // Truncate group names based on the widest descendant node's rendered
         // label width, so the group title never overflows its content box.
-        const displayName = groupPath || treeNode.name;
+        const displayName = treeNode.name;
         const escapedName = this._escapeForMermaid(displayName);
         const maxWidth = groupMaxWidths.get(groupPath) || 0;
         const truncatedGroupName = maxWidth > 0
           ? this._truncateLabel(escapedName, groupDurationLabel, maxWidth)
           : escapedName;
-        if (truncatedGroupName !== escapedName) {
-          nodeTooltips[sanitizedGroupId] = displayName;
+        // Show full path in tooltip for nested groups or when truncated
+        if (truncatedGroupName !== escapedName || groupPath.includes('/')) {
+          nodeTooltips[sanitizedGroupId] = truncatedGroupName !== escapedName ? displayName : groupPath;
         }
         const emSp = '\u2003'; // em space — proportional-font-safe padding
         const padding = emSp.repeat(4); // reserve width to prevent cutoff
