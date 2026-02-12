@@ -165,16 +165,16 @@ suite('OrchestratorFileWatcher', () => {
   });
 
   suite('file deletion handling', () => {
-    test('extracts plan ID from valid UUID filename', () => {
+    test('extracts plan ID from valid UUID filename', async () => {
       const watcher = new OrchestratorFileWatcher('/workspace', deleteCallback);
       
       // Simulate file deletion
       const planId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
-      const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/${planId}.json`);
+      const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/plan-${planId}.json`);
       mockWatcher.simulateDelete(uri);
 
       // Advance timers past debounce
-      clock.tick(150);
+      await clock.tickAsync(150);
 
       assert.ok(deleteCallback.calledOnce, 'delete callback should be called');
       assert.ok(deleteCallback.calledWith(planId), 
@@ -183,38 +183,38 @@ suite('OrchestratorFileWatcher', () => {
       watcher.dispose();
     });
 
-    test('ignores non-UUID filenames', () => {
+    test('ignores non-UUID filenames', async () => {
       const watcher = new OrchestratorFileWatcher('/workspace', deleteCallback);
       
       // Simulate deletion of non-UUID file
-      const uri = vscode.Uri.file('/workspace/.orchestrator/plans/not-a-uuid.json');
+      const uri = vscode.Uri.file('/workspace/.orchestrator/plans/plan-not-a-uuid.json');
       mockWatcher.simulateDelete(uri);
 
-      clock.tick(150);
+      await clock.tickAsync(150);
 
       assert.ok(deleteCallback.notCalled, 'delete callback should not be called for non-UUID files');
       
       watcher.dispose();
     });
 
-    test('debounces rapid successive events', () => {
+    test('debounces rapid successive events', async () => {
       const watcher = new OrchestratorFileWatcher('/workspace', deleteCallback);
       
       const planId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
-      const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/${planId}.json`);
+      const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/plan-${planId}.json`);
 
       // Fire multiple delete events rapidly
       mockWatcher.simulateDelete(uri);
-      clock.tick(50);
+      await clock.tickAsync(50);
       mockWatcher.simulateDelete(uri);
-      clock.tick(50);
+      await clock.tickAsync(50);
       mockWatcher.simulateDelete(uri);
 
       // Still within debounce window
       assert.ok(deleteCallback.notCalled, 'callback should not fire within debounce window');
 
       // Advance past debounce
-      clock.tick(150);
+      await clock.tickAsync(150);
 
       // Should only fire once
       assert.strictEqual(deleteCallback.callCount, 1, 'callback should fire only once after debounce');
@@ -223,16 +223,16 @@ suite('OrchestratorFileWatcher', () => {
       watcher.dispose();
     });
 
-    test('handles multiple different plan deletions independently', () => {
+    test('handles multiple different plan deletions independently', async () => {
       const watcher = new OrchestratorFileWatcher('/workspace', deleteCallback);
 
       const plan1 = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
       const plan2 = 'a1b2c3d4-5678-90ab-cdef-1234567890ab';
 
-      mockWatcher.simulateDelete(vscode.Uri.file(`/workspace/.orchestrator/plans/${plan1}.json`));
-      mockWatcher.simulateDelete(vscode.Uri.file(`/workspace/.orchestrator/plans/${plan2}.json`));
+      mockWatcher.simulateDelete(vscode.Uri.file(`/workspace/.orchestrator/plans/plan-${plan1}.json`));
+      mockWatcher.simulateDelete(vscode.Uri.file(`/workspace/.orchestrator/plans/plan-${plan2}.json`));
 
-      clock.tick(150);
+      await clock.tickAsync(150);
 
       assert.strictEqual(deleteCallback.callCount, 2, 'callback should be called twice for different plans');
       assert.ok(deleteCallback.calledWith(plan1), 'callback should be called with first plan ID');
@@ -243,15 +243,15 @@ suite('OrchestratorFileWatcher', () => {
   });
 
   suite('file creation handling', () => {
-    test('calls create callback when provided', () => {
+    test('calls create callback when provided', async () => {
       const watcher = new OrchestratorFileWatcher('/workspace', deleteCallback, createCallback);
       
       const planId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
-      const filePath = `/workspace/.orchestrator/plans/${planId}.json`;
+      const filePath = `/workspace/.orchestrator/plans/plan-${planId}.json`;
       const uri = vscode.Uri.file(filePath);
 
       mockWatcher.simulateCreate(uri);
-      clock.tick(150);
+      await clock.tickAsync(150);
 
       assert.ok(createCallback.calledOnce, 'create callback should be called');
       assert.ok(createCallback.calledWith(planId, filePath), 
@@ -260,36 +260,36 @@ suite('OrchestratorFileWatcher', () => {
       watcher.dispose();
     });
 
-    test('ignores non-UUID filenames for creation', () => {
+    test('ignores non-UUID filenames for creation', async () => {
       const watcher = new OrchestratorFileWatcher('/workspace', deleteCallback, createCallback);
 
-      const uri = vscode.Uri.file('/workspace/.orchestrator/plans/not-a-uuid.json');
+      const uri = vscode.Uri.file('/workspace/.orchestrator/plans/plan-not-a-uuid.json');
       mockWatcher.simulateCreate(uri);
-      clock.tick(150);
+      await clock.tickAsync(150);
 
       assert.ok(createCallback.notCalled, 'create callback should not be called for non-UUID files');
       
       watcher.dispose();
     });
 
-    test('debounces creation events', () => {
+    test('debounces creation events', async () => {
       const watcher = new OrchestratorFileWatcher('/workspace', deleteCallback, createCallback);
       
       const planId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
-      const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/${planId}.json`);
+      const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/plan-${planId}.json`);
 
       // Fire multiple create events rapidly
       mockWatcher.simulateCreate(uri);
-      clock.tick(50);
+      await clock.tickAsync(50);
       mockWatcher.simulateCreate(uri);
-      clock.tick(50);
+      await clock.tickAsync(50);
       mockWatcher.simulateCreate(uri);
 
       // Still within debounce window
       assert.ok(createCallback.notCalled, 'callback should not fire within debounce window');
 
       // Advance past debounce
-      clock.tick(150);
+      await clock.tickAsync(150);
 
       // Should only fire once
       assert.strictEqual(createCallback.callCount, 1, 'callback should fire only once after debounce');
@@ -299,18 +299,18 @@ suite('OrchestratorFileWatcher', () => {
   });
 
   suite('disposal', () => {
-    test('disposes watcher and clears timers', () => {
+    test('disposes watcher and clears timers', async () => {
       const watcher = new OrchestratorFileWatcher('/workspace', deleteCallback);
       
       // Start a debounce timer
       const planId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
-      const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/${planId}.json`);
+      const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/plan-${planId}.json`);
       mockWatcher.simulateDelete(uri);
 
       // Dispose before timer fires
       watcher.dispose();
 
-      clock.tick(150);
+      await clock.tickAsync(150);
 
       // Callback should not fire after dispose
       assert.ok(deleteCallback.notCalled, 'callback should not fire after disposal');
@@ -331,7 +331,7 @@ suite('OrchestratorFileWatcher', () => {
   });
 
   suite('UUID validation', () => {
-    test('accepts valid UUID formats', () => {
+    test('accepts valid UUID formats', async () => {
       const watcher = new OrchestratorFileWatcher('/workspace', deleteCallback);
 
       const validUuids = [
@@ -342,11 +342,11 @@ suite('OrchestratorFileWatcher', () => {
       ];
 
       for (const uuid of validUuids) {
-        const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/${uuid}.json`);
+        const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/plan-${uuid}.json`);
         mockWatcher.simulateDelete(uri);
       }
 
-      clock.tick(150);
+      await clock.tickAsync(150);
 
       assert.strictEqual(deleteCallback.callCount, validUuids.length, 
         'all valid UUIDs should trigger callbacks');
@@ -354,7 +354,7 @@ suite('OrchestratorFileWatcher', () => {
       watcher.dispose();
     });
 
-    test('rejects invalid UUID formats', () => {
+    test('rejects invalid UUID formats', async () => {
       const watcher = new OrchestratorFileWatcher('/workspace', deleteCallback);
 
       const invalidFormats = [
@@ -368,11 +368,11 @@ suite('OrchestratorFileWatcher', () => {
       ];
 
       for (const invalid of invalidFormats) {
-        const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/${invalid}.json`);
+        const uri = vscode.Uri.file(`/workspace/.orchestrator/plans/plan-${invalid}.json`);
         mockWatcher.simulateDelete(uri);
       }
 
-      clock.tick(150);
+      await clock.tickAsync(150);
 
       assert.ok(deleteCallback.notCalled, 'invalid UUID formats should not trigger callbacks');
       
