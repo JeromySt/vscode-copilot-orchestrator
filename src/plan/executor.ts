@@ -602,6 +602,7 @@ export class DefaultJobExecutor implements JobExecutor {
    * @returns Array of process stats in the same order as input (missing entries omitted).
    */
   async getAllProcessStats(nodeKeys: Array<{ planId: string; nodeId: string; nodeName: string }>): Promise<Array<{
+    planId: string;
     nodeId: string;
     nodeName: string;
     pid: number | null;
@@ -621,6 +622,7 @@ export class DefaultJobExecutor implements JobExecutor {
     }
     
     const results: Array<{
+      planId: string;
       nodeId: string;
       nodeName: string;
       pid: number | null;
@@ -646,7 +648,7 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Handle agent work without a process yet
       if (execution.isAgentWork && !execution.process?.pid) {
-        results.push({ nodeId, nodeName, pid: null, running: true, tree: [], duration, isAgentWork: true });
+        results.push({ planId, nodeId, nodeName, pid: null, running: true, tree: [], duration, isAgentWork: true });
         continue;
       }
       
@@ -668,8 +670,8 @@ export class DefaultJobExecutor implements JobExecutor {
       }
       
       if (running || pid) {
-        // Include isAgentWork flag for UI display hints
-        results.push({ nodeId, nodeName, pid, running, tree, duration, isAgentWork: execution.isAgentWork });
+        // Include planId and isAgentWork flag for proper mapping and UI display hints
+        results.push({ planId, nodeId, nodeName, pid, running, tree, duration, isAgentWork: execution.isAgentWork });
       }
     }
     
