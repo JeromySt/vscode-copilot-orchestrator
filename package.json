@@ -117,6 +117,12 @@
           "id": "orchestrator.plansView",
           "name": "Plans",
           "type": "webview"
+        },
+        {
+          "id": "copilotOrchestratorPlans",
+          "name": "Plans Overview",
+          "type": "tree",
+          "when": "false"
         }
       ]
     },

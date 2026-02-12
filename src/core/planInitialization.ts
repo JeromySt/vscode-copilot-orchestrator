@@ -356,6 +356,11 @@ export function initializePlansView(
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
   );
+
+  // Initialize TreeView for badge functionality
+  const { PlanTreeViewManager } = require('../ui/planTreeProvider');
+  const treeViewManager = new PlanTreeViewManager(planRunner);
+  treeViewManager.createTreeView(context);
   
   log.info('Plans view initialized');
 }
