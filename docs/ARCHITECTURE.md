@@ -310,6 +310,60 @@ graph LR
 - `git/core/worktrees.ts` — Low-level worktree CRUD with **per-repository mutex** serialization to prevent race conditions
 - `git/core/executor.ts` — Async git command execution (`execAsync()`, `execAsyncOrThrow()`)
 
+### Orphaned Worktree Cleanup (`src/core/orphanedWorktreeCleanup.ts`)
+
+Detects and removes stale worktree directories on extension activation.
+
+**Detection Logic:**
+A worktree directory is considered "orphaned" if:
+1. It exists in `.worktrees/` folder
+2. It's NOT registered with git (`git worktree list` doesn't include it)
+3. It's NOT tracked by any active plan's `nodeStates.worktreePath`
+
+**Activation Flow:**
+1. Extension activates
+2. Plans loaded from persistence
+3. After 2-second delay, trigger async cleanup
+4. Scan all repo paths (from plans + workspace folders)
+5. Remove orphaned directories
+6. Log results (show message if ≥3 cleaned)
+
+**Safety:**
+- Never removes directories tracked by active plans
+- Never removes git-registered worktrees
+- Continues on individual failures
+- Runs asynchronously (doesn't block startup)
+
+### Worktree Directory Structure
+
+Each job worktree contains orchestrator-specific directories:
+
+```
+{worktreePath}/
+  .orchestrator/              # Orchestrator state (gitignored)
+    .copilot/                 # Copilot CLI config directory
+      session-state/          # Session data
+      config.json             # Per-job config
+    evidence/                 # Work evidence files
+  .gitignore                  # Auto-updated to include .orchestrator
+  ... (repository files)
+```
+
+#### Gitignore Auto-Update
+
+When worktrees are created, the orchestrator ensures `.gitignore` contains:
+- `.worktrees` - The worktree root directory
+- `.orchestrator` - Per-worktree orchestrator state
+
+This change is staged automatically so it's included in the job's commit.
+
+#### Session Storage
+
+Copilot CLI sessions are stored per-worktree using `--config-dir`:
+- Sessions don't appear in user's VS Code session history
+- Sessions are automatically cleaned when worktree is removed
+- Each job has isolated session state
+
 ### Merge Strategies
 
 Two merge strategies are available:
@@ -403,6 +457,8 @@ Each node maintains an `NodeExecutionState` record (`src/plan/types/plan.ts`):
 | `metrics` | Aggregate AI usage metrics for the node |
 | `phaseMetrics` | Per-phase AI usage breakdown (`merge-fi`, `prechecks`, `work`, `commit`, `postchecks`, `merge-ri`) |
 
+**Work Summary Behavior:** When a plan has a `targetBranch` configured, the plan detail panel filters the work summary to show only commits from leaf nodes that have successfully merged to the target branch (`mergedToTarget === true`). This ensures the displayed work summary reflects actual integrated work rather than all work performed across the plan. The summary updates dynamically as nodes complete their merge operations.
+
 ### Group State Aggregation
 
 Groups provide visual hierarchy without affecting execution. Each `GroupExecutionState` aggregates from its direct children:
@@ -469,6 +525,29 @@ Metrics are stored in `NodeExecutionState.metrics` (aggregate) and `NodeExecutio
 
 ---
 
+## Power Management
+
+### Power Management (`src/core/powerManager.ts`)
+
+Prevents system sleep during plan execution to ensure reliability:
+
+- **Reference-counted wake locks** — Multiple plans can hold locks simultaneously; system only sleeps when all locks are released
+- **Cross-platform implementation** — Automatically selects the appropriate mechanism based on the operating system
+  - **Windows**: `SetThreadExecutionState` API called periodically via PowerShell
+  - **macOS**: `caffeinate` command with flags to prevent system, display, and disk sleep
+  - **Linux**: `systemd-inhibit` with fallback to `xdg-screensaver` if systemd is unavailable
+- **Automatic cleanup** — Wake locks are released when plans complete, are cancelled, or when VS Code closes
+- **Error resilience** — If platform-specific methods fail, the extension logs a warning but continues operation gracefully
+
+**Lifecycle:**
+1. PlanRunner calls `powerManager.acquireWakeLock(reason)` when a plan starts
+2. Platform-specific process is spawned to actively maintain wake lock
+3. On plan completion/cancellation, the cleanup function is called
+4. Process is terminated and resources are freed
+5. On extension deactivation, `releaseAll()` terminates all remaining processes
+
+---
+
 ## Extension Points and Interfaces
 
 All DI interfaces are defined in `src/interfaces/` and exported via `src/interfaces/index.ts`.
@@ -528,6 +607,62 @@ runner.setExecutor(new RemoteExecutor());
 **Custom MCP tools**: Add tool definitions in `src/mcp/tools/`, handler functions in `src/mcp/handlers/`, and wire them in the switch statement in `src/mcp/handler.ts`.
 
 **Custom work spec**: Extend the `WorkSpec` union type in `src/plan/types/specs.ts` and add routing logic in `DefaultJobExecutor.runWorkSpec()`.
+
+---
+
+## Security Model
+
+### Agent Sandbox
+
+Agent jobs run in isolated worktree folders. The Copilot CLI is invoked with `--allow-paths` restricted to:
+1. The job's worktree folder (always included)
+2. Any additional folders specified in `allowedFolders`
+
+This prevents:
+- Cross-job file access
+- Modification of repository root
+- Access to system files
+
+**Default Isolation**: When no `allowedFolders` are specified, agents can only read/write files within their assigned worktree. This provides baseline security for concurrent job execution without requiring explicit allowlisting.
+
+**Opt-in Sharing**: Teams can grant agents access to shared resources (libraries, configs, shared tools) by explicitly listing paths in `allowedFolders` within the work specification. This follows a principle of least privilege — sharing is explicit, not implicit.
+
+### Global Capacity Coordination (`src/core/globalCapacity.ts`)
+
+Coordinates job capacity across multiple VS Code instances:
+
+#### Registry File
+
+Location: `{globalStorageUri}/capacity-registry.json`
+
+```json
+{
+  "version": 1,
+  "globalMaxParallel": 16,
+  "instances": [
+    {
+      "instanceId": "abc123def456",
+      "processId": 12345,
+      "runningJobs": 3,
+      "lastHeartbeat": 1234567890,
+      "activePlans": ["plan-uuid-1"]
+    }
+  ]
+}
+```
+
+#### Coordination Flow
+
+1. On activation: Register instance with unique ID
+2. Every 5 seconds: Update heartbeat, clean stale instances
+3. Before scheduling: Check global capacity across all instances
+4. On deactivation: Unregister instance
+
+#### Failure Modes
+
+- **Registry file locked**: Retry with exponential backoff
+- **Corrupt registry**: Reset to empty state
+- **Coordination unavailable**: Fall back to local counting
 
 ---
 

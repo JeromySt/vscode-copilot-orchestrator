@@ -563,6 +563,7 @@ suite('DefaultJobExecutor', () => {
 
     test('runs agent work with delegator', async () => {
       const tmp = makeTmpDir();
+      executor.setStoragePath(tmp);
       const { execSync } = require('child_process');
       try {
         execSync('git init', { cwd: tmp, stdio: 'ignore' });

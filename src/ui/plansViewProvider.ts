@@ -165,7 +165,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
    * status counts, filters out sub-plans (shown under their parents), and sends an
    * `update` message to the webview. Top-level Plans are sorted newest-first.
    */
-  refresh() {
+  async refresh() {
     if (!this._view) return;
     
     const Plans = this._planRunner.getAll();
@@ -214,12 +214,23 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     // Get global execution stats
     const globalStats = this._planRunner.getGlobalStats();
     
+    // Get global capacity stats
+    // Get global capacity stats (catch to avoid unhandled rejections from timers/events)
+    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
+    
     this._view.webview.postMessage({
       type: 'update',
       Plans: topLevelPlans,
       total: topLevelPlans.length,
       running: topLevelPlans.filter(d => d.status === 'running').length,
       globalStats,
+      globalCapacity: globalCapacityStats ? {
+        thisInstanceJobs: globalCapacityStats.thisInstanceJobs,
+        totalGlobalJobs: globalCapacityStats.totalGlobalJobs,
+        globalMaxParallel: globalCapacityStats.globalMaxParallel,
+        activeInstances: globalCapacityStats.activeInstances,
+        instanceDetails: globalCapacityStats.instanceDetails
+      } : null,
     });
   }
   
@@ -354,12 +365,46 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     .action-btn:hover {
       background: var(--vscode-button-secondaryHoverBackground);
     }
+    .global-capacity-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      margin-bottom: 10px;
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .capacity-label {
+      font-weight: 600;
+    }
+    .capacity-jobs {
+      color: var(--vscode-foreground);
+    }
+    .capacity-instances {
+      color: var(--vscode-descriptionForeground);
+      cursor: help;
+    }
+    .capacity-instances.multiple {
+      color: var(--vscode-charts-yellow);
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
   <div class="header">
     <h3>Plans</h3>
     <span class="pill" id="badge">0 total</span>
+  </div>
+  <div class="global-capacity-bar" id="globalCapacityBar" style="display: none;">
+    <span class="capacity-label">Global Capacity:</span>
+    <span class="capacity-jobs">
+      <span id="globalRunningJobs">0</span>/<span id="globalMaxParallel">16</span> jobs
+    </span>
+    <span class="capacity-instances" title="VS Code instances using orchestrator">
+      <span id="activeInstances">1</span> instance(s)
+    </span>
   </div>
   <div class="global-stats" id="globalStats" style="display: none; margin-bottom: 10px; padding: 6px 8px; background: var(--vscode-editor-inactiveSelectionBackground); border-radius: 4px; font-size: 11px;">
     <span>Jobs: <span id="runningJobs">0</span>/<span id="maxParallel">8</span></span>
@@ -434,8 +479,34 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       
       const Plans = ev.data.Plans || [];
       const globalStats = ev.data.globalStats;
+      const globalCapacity = ev.data.globalCapacity;
       
       document.getElementById('badge').textContent = Plans.length + ' total';
+      
+      // Update global capacity display
+      const capacityBarEl = document.getElementById('globalCapacityBar');
+      if (globalCapacity && (globalCapacity.totalGlobalJobs > 0 || globalCapacity.activeInstances > 1)) {
+        capacityBarEl.style.display = 'flex';
+        document.getElementById('globalRunningJobs').textContent = globalCapacity.totalGlobalJobs;
+        document.getElementById('globalMaxParallel').textContent = globalCapacity.globalMaxParallel;
+        document.getElementById('activeInstances').textContent = globalCapacity.activeInstances;
+        
+        // Highlight if multiple instances
+        const instancesEl = document.querySelector('.capacity-instances');
+        instancesEl.classList.toggle('multiple', globalCapacity.activeInstances > 1);
+        
+        // Build tooltip with instance details
+        if (globalCapacity.instanceDetails && globalCapacity.instanceDetails.length > 0) {
+          const tooltip = globalCapacity.instanceDetails
+            .map(i => (i.isCurrentInstance ? '→ ' : '  ') + 'Instance: ' + i.runningJobs + ' jobs')
+            .join('\\n');
+          instancesEl.title = tooltip;
+        } else {
+          instancesEl.title = 'VS Code instances using orchestrator';
+        }
+      } else {
+        capacityBarEl.style.display = 'none';
+      }
       
       // Update global stats
       const statsEl = document.getElementById('globalStats');

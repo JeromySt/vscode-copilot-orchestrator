@@ -41,6 +41,10 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | 🔒 **Secure MCP Architecture** | Nonce-authenticated IPC ensures 1:1 pairing between VS Code and MCP stdio process |
 | 🛡️ **Default Branch Protection** | Auto-creates feature branches when targeting main/master — never writes to default |
 | 📡 **Live Process Monitoring** | Real-time CPU, memory, and process tree visibility for every running agent |
+| 💤 **Sleep Prevention** | Automatically prevents system sleep during plan execution (Windows, macOS, Linux) |
+| 🌐 **Multi-Instance Coordination** | Global job capacity limits across all VS Code instances on the same machine |
+| 🧹 **Auto Worktree Cleanup** | Orphaned worktree directories are automatically detected and removed on startup |
+| 📂 **Agent Folder Security** | Agents are sandboxed to their worktree; opt-in `allowedFolders` for shared access |
 
 ---
 
@@ -235,6 +239,32 @@ The extension provides live visibility into every running agent:
 - **Process tree** — See every spawned process (powershell, node, git) with PIDs
 - **Resource usage** — CPU percentage and memory consumption per process
 - **Aggregate stats** — Total processes, CPU, and memory across all running nodes
+
+---
+
+## Session Management
+
+### Copilot Session Isolation
+Each job's Copilot CLI sessions are stored within the worktree's `.orchestrator/.copilot/` directory. This provides:
+
+- **Automatic cleanup**: Sessions are removed when the worktree is cleaned up
+- **No history pollution**: Sessions don't appear in VS Code's Copilot session history
+- **Job isolation**: Each job has independent session state
+
+### Gitignore Management
+The orchestrator automatically ensures `.gitignore` includes entries for temporary files:
+
+```gitignore
+# Copilot Orchestrator temporary files
+.worktrees
+.orchestrator
+```
+
+This is added automatically when:
+- A new plan is created
+- A worktree is set up for a job
+
+This prevents orchestrator temporary files from being accidentally committed.
 
 ---
 
@@ -478,6 +508,50 @@ to the user registration form
 
 ---
 
+## Security
+
+### Agent Folder Restrictions
+
+By default, AI agents are restricted to only access files within their assigned worktree folder. This provides isolation between concurrent jobs and prevents unintended file modifications.
+
+#### Default Behavior
+- Agents can only read/write files in their worktree
+- Access to parent directories or other worktrees is denied
+- This applies to all `type: 'agent'` work specifications
+
+#### Adding Additional Folders
+
+When a job needs access to shared resources (libraries, configs, etc.), specify `allowedFolders`:
+
+```json
+{
+  "producer_id": "build-feature",
+  "task": "Build the new feature",
+  "work": {
+    "type": "agent",
+    "instructions": "Implement the feature using shared utilities",
+    "allowedFolders": [
+      "/path/to/shared/libs",
+      "/path/to/config"
+    ]
+  },
+  "dependencies": []
+}
+```
+
+#### MCP API
+
+The `create_copilot_plan` and `create_copilot_job` tools accept `allowedFolders` in the work specification:
+
+```markdown
+**allowedFolders** (optional, string[]):
+  Additional folder paths the agent is allowed to access beyond the worktree.
+  Specify absolute paths.
+  Default: [] (agent restricted to worktree only)
+```
+
+---
+
 ## Example Prompts for Copilot Chat
 
 Once the MCP server is running, you can talk to Copilot in natural language. Here are prompts that work well — from simple single jobs to complex multi-node plans.
@@ -616,6 +690,70 @@ Enable granular logging for troubleshooting:
 | `copilotOrchestrator.logging.debug.ui` | UI panels and webview messaging |
 | `copilotOrchestrator.logging.debug.extension` | Extension lifecycle events |
 
+### Multi-Instance Coordination
+
+The Copilot Orchestrator enforces a global limit on concurrent jobs across **ALL VS Code instances** on your machine. This protects your system from being overwhelmed when running multiple workspaces.
+
+**Default limit: 16 concurrent jobs globally**
+
+Configure via VS Code settings:
+```json
+"copilot-orchestrator.globalMaxParallel": 16
+```
+
+#### Instance Awareness
+
+The Plans view shows:
+- **Global Jobs**: Total jobs running across all instances
+- **Active Instances**: Number of VS Code windows using the orchestrator
+
+If jobs are pending, check if other instances are consuming capacity.
+
+#### How It Works
+
+- Each VS Code instance registers with a shared capacity coordinator
+- Job counts are synchronized via a file-based registry
+- Stale instances (crashed/closed) are automatically cleaned up
+- Graceful degradation if coordination fails (falls back to per-instance limits)
+
+---
+
+## System Behavior
+
+### Sleep Prevention
+
+While Copilot Plans are actively running, the extension automatically prevents your system from going to sleep or hibernating. This ensures long-running plans complete successfully without interruption.
+
+- **Windows**: Uses `SetThreadExecutionState` API
+- **macOS**: Uses `caffeinate` command
+- **Linux**: Uses `systemd-inhibit` when available
+
+Sleep prevention is automatically released when:
+- All plans complete (success or failure)
+- Plans are cancelled
+- Plans are paused
+- VS Code is closed
+
+### Automatic Cleanup
+
+#### Orphaned Worktree Cleanup
+
+When the extension starts, it automatically scans for orphaned worktree directories that are no longer associated with any active plan. These can accumulate when:
+- Plans are deleted while worktrees still exist
+- The extension crashes during execution
+- VS Code is closed while jobs are running
+
+Orphaned directories in `.worktrees/` are cleaned up asynchronously on startup.
+
+##### Disable Auto-Cleanup
+
+To disable automatic cleanup, add this to your VS Code settings:
+
+```json
+{
+  "copilotOrchestrator.cleanupOrphanedWorktrees": false
+}
+```
 ---
 
 ## Architecture

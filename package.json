@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -147,10 +147,22 @@
           "default": ".worktrees",
           "description": "Directory name for git worktrees (relative to repository root)"
         },
+        "copilotOrchestrator.cleanupOrphanedWorktrees": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically clean up orphaned worktree directories on extension startup"
+        },
         "copilotOrchestrator.maxConcurrentJobs": {
           "type": "number",
           "default": 0,
           "description": "Maximum concurrent jobs (0 = auto, based on CPU count minus 1). Plans do not count against this limit."
+        },
+        "copilotOrchestrator.globalMaxParallel": {
+          "type": "number",
+          "default": 16,
+          "minimum": 1,
+          "maximum": 32,
+          "description": "Maximum concurrent jobs across all VS Code instances"
         },
         "copilotOrchestrator.copilotCli.required": {
           "type": "boolean",

@@ -35,6 +35,7 @@ export {
   computeEffectiveEndedAt,
   createEmptyWorkSummary,
   appendWorkSummary,
+  computeMergedLeafWorkSummary,
 } from './helpers';
 
 // Executor

@@ -265,7 +265,7 @@ suite('metricsAggregator', () => {
 			assert.strictEqual(result!.durationMs, 800);
 		});
 
-		test('includes state.metrics when different from latest attempt', () => {
+		test('ignores state.metrics when attemptHistory exists (prevents double-counting after deserialization)', () => {
 			const state = makeNodeState({
 				attemptHistory: [
 					{
@@ -281,11 +281,12 @@ suite('metricsAggregator', () => {
 
 			const result = getNodeMetrics(state);
 			assert.ok(result);
-			assert.strictEqual(result!.premiumRequests, 3);
-			assert.strictEqual(result!.durationMs, 300);
+			// Only attemptHistory metrics should be counted (state.metrics is ignored)
+			assert.strictEqual(result!.premiumRequests, 1);
+			assert.strictEqual(result!.durationMs, 100);
 		});
 
-		test('handles attempt history with no metrics', () => {
+		test('returns undefined when attempt history exists but has no metrics', () => {
 			const state = makeNodeState({
 				attemptHistory: [
 					{
@@ -299,8 +300,101 @@ suite('metricsAggregator', () => {
 			});
 
 			const result = getNodeMetrics(state);
+			// When attemptHistory exists, state.metrics is ignored (even if attemptHistory has no metrics)
+			assert.strictEqual(result, undefined);
+		});
+
+		test('prevents double-counting after JSON deserialization (separate object instances)', () => {
+			// Simulate loading plan from disk: attemptHistory and state.metrics have identical VALUES
+			// but are separate object instances (not ===)
+			const originalMetrics = makeMetrics({ premiumRequests: 5, durationMs: 1000, sessionTimeSeconds: 10 });
+			const state = makeNodeState({
+				attemptHistory: [
+					{
+						attemptNumber: 1,
+						status: 'succeeded',
+						startedAt: 0,
+						endedAt: 100,
+						metrics: makeMetrics({ premiumRequests: 5, durationMs: 1000, sessionTimeSeconds: 10 }),
+					},
+				],
+				metrics: JSON.parse(JSON.stringify(originalMetrics)), // Simulate deserialization
+			});
+
+			const result = getNodeMetrics(state);
 			assert.ok(result);
-			assert.strictEqual(result!.premiumRequests, 2);
+			// Should only count attemptHistory metrics once, not double-count state.metrics
+			assert.strictEqual(result!.premiumRequests, 5);
+			assert.strictEqual(result!.durationMs, 1000);
+			assert.strictEqual(result!.sessionTimeSeconds, 10);
+		});
+
+		// Additional tests as per task instructions
+		test('getNodeMetrics does not double-count with single attempt', () => {
+			const metrics = { durationMs: 1000, sessionTimeSeconds: 100 };
+			const state: NodeExecutionState = {
+				status: 'succeeded',
+				version: 1,
+				attempts: 1,
+				metrics,
+				attemptHistory: [{
+					attemptNumber: 1,
+					status: 'succeeded',
+					startedAt: 0,
+					endedAt: 1000,
+					metrics // Same object reference
+				}]
+			};
+			const result = getNodeMetrics(state);
+			assert.strictEqual(result?.sessionTimeSeconds, 100); // NOT 200
+		});
+
+		test('getNodeMetrics does not double-count after JSON round-trip', () => {
+			const originalState = {
+				status: 'succeeded' as const,
+				version: 1,
+				attempts: 1,
+				metrics: { durationMs: 1000, sessionTimeSeconds: 100 },
+				attemptHistory: [{
+					attemptNumber: 1,
+					status: 'succeeded' as const,
+					startedAt: 0,
+					endedAt: 1000,
+					metrics: { durationMs: 1000, sessionTimeSeconds: 100 }
+				}]
+			};
+			// Simulate JSON round-trip (creates new object instances)
+			const state = JSON.parse(JSON.stringify(originalState));
+			const result = getNodeMetrics(state);
+			assert.strictEqual(result?.sessionTimeSeconds, 100); // NOT 200
+		});
+
+		test('getNodeMetrics correctly sums multiple attempts', () => {
+			const state: NodeExecutionState = {
+				status: 'succeeded',
+				version: 1,
+				attempts: 2,
+				metrics: { durationMs: 2000, sessionTimeSeconds: 200 },
+				attemptHistory: [
+					{ attemptNumber: 1, status: 'failed', startedAt: 0, endedAt: 1000, metrics: { durationMs: 1000, sessionTimeSeconds: 100 } },
+					{ attemptNumber: 2, status: 'succeeded', startedAt: 1000, endedAt: 3000, metrics: { durationMs: 2000, sessionTimeSeconds: 200 } }
+				]
+			};
+			const result = getNodeMetrics(state);
+			// Should sum both attempts: 100 + 200 = 300, NOT 100 + 200 + 200 = 500
+			assert.strictEqual(result?.sessionTimeSeconds, 300);
+		});
+
+		test('getNodeMetrics handles legacy data without attemptHistory', () => {
+			const state: NodeExecutionState = {
+				status: 'succeeded',
+				version: 1,
+				attempts: 1,
+				metrics: { durationMs: 1000, sessionTimeSeconds: 100 }
+				// No attemptHistory
+			};
+			const result = getNodeMetrics(state);
+			assert.strictEqual(result?.sessionTimeSeconds, 100);
 		});
 	});
 
@@ -332,6 +426,45 @@ suite('metricsAggregator', () => {
 			assert.ok(result);
 			assert.strictEqual(result!.premiumRequests, 5);
 			assert.strictEqual(result!.durationMs, 300);
+		});
+
+		test('getPlanMetrics correctly sums multiple nodes without double-counting', () => {
+			// Test plan-level aggregation with nodes that have attemptHistory
+			const plan = {
+				nodeStates: new Map([
+					['n1', makeNodeState({
+						metrics: { durationMs: 1000, sessionTimeSeconds: 100 },
+						attemptHistory: [{
+							attemptNumber: 1,
+							status: 'succeeded',
+							startedAt: 0,
+							endedAt: 1000,
+							metrics: { durationMs: 1000, sessionTimeSeconds: 100 }
+						}]
+					})],
+					['n2', makeNodeState({
+						metrics: { durationMs: 2000, sessionTimeSeconds: 200 },
+						attemptHistory: [
+							{ attemptNumber: 1, status: 'failed', startedAt: 0, endedAt: 1000, metrics: { durationMs: 800, sessionTimeSeconds: 80 } },
+							{ attemptNumber: 2, status: 'succeeded', startedAt: 1000, endedAt: 3000, metrics: { durationMs: 2000, sessionTimeSeconds: 200 } }
+						]
+					})],
+					['n3', makeNodeState({
+						metrics: { durationMs: 500, sessionTimeSeconds: 50 }
+						// No attemptHistory (legacy data)
+					})],
+				]),
+			} as unknown as PlanInstance;
+
+			const result = getPlanMetrics(plan);
+			assert.ok(result);
+			// n1: 100 (single attempt, no double-count)
+			// n2: 80 + 200 = 280 (two attempts, no double-count)
+			// n3: 50 (legacy data)
+			// Total: 100 + 280 + 50 = 430
+			assert.strictEqual(result!.sessionTimeSeconds, 430);
+			// Duration: n1=1000, n2=800+2000=2800, n3=500 => 4300
+			assert.strictEqual(result!.durationMs, 4300);
 		});
 	});
 

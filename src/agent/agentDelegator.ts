@@ -41,6 +41,45 @@ export interface DelegateOptions {
   sessionId?: string;
   /** Model to use for the AI agent */
   model?: string;
+  
+  /**
+   * Additional folder paths the agent is allowed to access beyond the worktree.
+   * 
+   * **Security Consideration**: By default, the agent is sandboxed to only access
+   * files within `worktreePath`. This provides isolation between concurrent jobs
+   * and prevents unintended modifications to other areas of the repository.
+   * 
+   * Specify absolute paths here to grant access to shared resources (e.g., shared
+   * libraries, config files, build tools). Each path is validated and passed to
+   * the Copilot CLI via the `--allow-paths` flag.
+   * 
+   * **Principle of Least Privilege**: Only add folders that this delegation truly
+   * needs for its specific task.
+   * 
+   * @example
+   * ```typescript
+   * allowedFolders: [
+   *   '/repo/shared/utilities',
+   *   '/repo/shared/styles'
+   * ]
+   * ```
+   */
+  allowedFolders?: string[];
+  /**
+   * Config directory for Copilot CLI.
+   * 
+   * Stores sessions and configuration in a worktree-local directory instead of the user's
+   * home directory. This enables:
+   * 
+   * - **Worktree-Local Storage**: Session state and configuration are scoped to this job's
+   *   worktree, enabling multiple concurrent jobs without conflicts
+   * - **Job Isolation**: Each delegated task has its own isolated session state
+   * - **Clean Shutdown**: When the worktree is cleaned up, all session files are automatically
+   *   removed with it
+   * 
+   * Typical value: `{worktreePath}/.orchestrator/.copilot`
+   */
+  configDir?: string;
 }
 
 /**
@@ -230,7 +269,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
    * Delegate task via GitHub Copilot CLI.
    */
   private async delegateViaCopilot(options: DelegateOptions): Promise<DelegateResult> {
-    const { jobId, taskDescription, label, worktreePath, sessionId, model } = options;
+    const { jobId, taskDescription, label, worktreePath, sessionId, model, allowedFolders } = options;
 
     // Validate model if provided
     if (model && !await isValidModel(model)) {
@@ -246,6 +285,15 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
     };
     const cliRunner = new CopilotCliRunner(cliLogger);
 
+    // Store Copilot config/sessions in worktree's .orchestrator directory
+    // This ensures session state is cleaned up when worktree is removed
+    const copilotConfigDir = path.join(worktreePath, '.orchestrator', '.copilot');
+    
+    // Ensure directory exists
+    if (!fs.existsSync(copilotConfigDir)) {
+      fs.mkdirSync(copilotConfigDir, { recursive: true });
+    }
+
     // Create job-specific directories for Copilot logs and session tracking
     const copilotJobDir = path.join(worktreePath, '.copilot-orchestrator');
     const copilotLogDir = path.join(copilotJobDir, 'logs');
@@ -258,6 +306,13 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
     }
 
     this.logger.log(`[${label}] ${sessionId ? 'Resuming' : 'Starting new'} Copilot session...`);
+
+    // Log security configuration
+    if (allowedFolders && allowedFolders.length > 0) {
+      this.logger.log(`[${label}] Agent allowed folders: ${allowedFolders.join(', ')}`);
+    } else {
+      this.logger.log(`[${label}] Agent restricted to worktree: ${worktreePath}`);
+    }
 
     // Track PID and early session ID for process callbacks
     let spawnedPid: number | undefined;
@@ -272,7 +327,9 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       model,
       logDir: copilotLogDir,
       sharePath: sessionSharePath,
+      configDir: copilotConfigDir,
       jobId,
+      allowedFolders,  // NEW: pass through to CLI runner
       timeout: 0, // No timeout — agent work can run for a long time
       onProcess: (proc) => {
         if (proc.pid) {

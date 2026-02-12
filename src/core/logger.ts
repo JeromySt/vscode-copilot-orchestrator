@@ -45,7 +45,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 /**
  * Components that can have logging enabled
  */
-export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler' | 'plan' | 'plan-runner' | 'plan-state' | 'plan-persistence' | 'job-executor' | 'init';
+export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler' | 'plan' | 'plan-runner' | 'plan-state' | 'plan-persistence' | 'job-executor' | 'init' | 'global-capacity';
 
 /**
  * Debug configuration per component
@@ -65,6 +65,7 @@ interface DebugConfig {
   'plan-persistence': boolean;
   'job-executor': boolean;
   init: boolean;
+  'global-capacity': boolean;
 }
 
 /**
@@ -91,7 +92,8 @@ export class Logger {
     'plan-state': false,
     'plan-persistence': false,
     'job-executor': false,
-    init: false
+    init: false,
+    'global-capacity': false
   };
   private configListener: { dispose: () => void } | undefined;
 
@@ -178,6 +180,7 @@ export class Logger {
       'plan-persistence': config.get<boolean>('debug.plan-persistence', false),
       'job-executor': config.get<boolean>('debug.job-executor', false),
       init: config.get<boolean>('debug.init', false),
+      'global-capacity': config.get<boolean>('debug.global-capacity', false),
     };
   }
 

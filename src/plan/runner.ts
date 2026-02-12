@@ -63,6 +63,7 @@ import { PlanStateMachine } from './stateMachine';
 import { PlanScheduler } from './scheduler';
 import { PlanPersistence } from './persistence';
 import { Logger } from '../core/logger';
+import { GlobalCapacityManager, GlobalCapacityStats } from '../core/globalCapacity';
 import {
   formatLogEntries,
   appendWorkSummary as appendWorkSummaryHelper,
@@ -72,6 +73,7 @@ import {
 import * as git from '../git';
 import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
 import { aggregateMetrics } from './metricsAggregator';
+import { powerManager } from '../core/powerManager';
 
 const log = Logger.for('plan-runner');
 
@@ -240,6 +242,7 @@ export class PlanRunner extends EventEmitter {
   private pumpTimer?: NodeJS.Timeout;
   private config: PlanRunnerConfig;
   private isRunning = false;
+  private globalCapacity?: GlobalCapacityManager;
   
   /**
    * Mutex for serializing Reverse Integration (RI) merges.
@@ -255,6 +258,12 @@ export class PlanRunner extends EventEmitter {
    * (including all prior RI merges) and creates its commit on top.
    */
   private riMergeMutex: Promise<void> = Promise.resolve();
+  
+  /**
+   * Wake lock cleanup function - prevents system sleep during plan execution
+   */
+  private wakeLockCleanup?: () => void;
+  private _acquiringWakeLock = false;
   
   constructor(config: PlanRunnerConfig) {
     super();
@@ -273,6 +282,15 @@ export class PlanRunner extends EventEmitter {
    */
   setExecutor(executor: JobExecutor): void {
     this.executor = executor;
+  }
+  
+  /**
+   * Set the global capacity manager for cross-instance coordination.
+   * 
+   * @param manager - The global capacity manager instance
+   */
+  setGlobalCapacityManager(manager: GlobalCapacityManager): void {
+    this.globalCapacity = manager;
   }
   
   /**
@@ -335,6 +353,15 @@ export class PlanRunner extends EventEmitter {
     }
   }
   
+  /**
+   * Get global capacity statistics for UI display.
+   * 
+   * @returns Global capacity stats or null if global capacity is not enabled
+   */
+  async getGlobalCapacityStats(): Promise<GlobalCapacityStats | null> {
+    return (await this.globalCapacity?.getStats()) || null;
+  }
+  
   // ============================================================================
   // Plan CREATION
   // ============================================================================
@@ -354,6 +381,11 @@ export class PlanRunner extends EventEmitter {
     // Build the Plan
     const plan = buildPlan(spec, {
       repoPath: spec.repoPath || this.config.defaultRepoPath,
+    });
+    
+    // Ensure main repo's .gitignore includes orchestrator temp files
+    git.gitignore.ensureGitignoreEntries(plan.repoPath).catch((err: any) => {
+      log.warn(`Failed to update main repo .gitignore: ${err.message}`);
     });
     
     // Store the Plan
@@ -1018,6 +1050,9 @@ export class PlanRunner extends EventEmitter {
     this.persistence.save(plan);
     this.emit('planUpdated', planId);
     
+    // Update wake lock in case this was the last running plan
+    this.updateWakeLock().catch(err => log.warn('Failed to update wake lock', { error: err }));
+    
     return true;
   }
   
@@ -1057,6 +1092,9 @@ export class PlanRunner extends EventEmitter {
     
     // Persist
     this.persistence.save(plan);
+    
+    // Update wake lock in case this was the last running plan
+    this.updateWakeLock().catch(err => log.warn('Failed to update wake lock', { error: err }));
     
     return true;
   }
@@ -1256,6 +1294,43 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
+   * Check if any plan is currently running
+   */
+  private hasRunningPlans(): boolean {
+    for (const plan of this.plans.values()) {
+      const sm = this.stateMachines.get(plan.id);
+      const status = sm?.computePlanStatus();
+      if (status === 'running') return true;
+    }
+    return false;
+  }
+  
+  /**
+   * Update wake lock state based on running plans
+   */
+  private async updateWakeLock(): Promise<void> {
+    const hasRunning = this.hasRunningPlans();
+    
+    if (hasRunning && !this.wakeLockCleanup && !this._acquiringWakeLock) {
+      // Acquire wake lock (guard against concurrent calls)
+      this._acquiringWakeLock = true;
+      try {
+        this.wakeLockCleanup = await powerManager.acquireWakeLock('Copilot Plan execution in progress');
+        log.info('Acquired wake lock - system sleep prevented');
+      } catch (e) {
+        log.warn('Failed to acquire wake lock', { error: e });
+      } finally {
+        this._acquiringWakeLock = false;
+      }
+    } else if (!hasRunning && this.wakeLockCleanup) {
+      // Release wake lock
+      this.wakeLockCleanup();
+      this.wakeLockCleanup = undefined;
+      log.info('Released wake lock - system sleep allowed');
+    }
+  }
+  
+  /**
    * Main pump loop - called periodically to advance Plan execution
    */
   private async pump(): Promise<void> {
@@ -1263,26 +1338,43 @@ export class PlanRunner extends EventEmitter {
       return; // Can't do anything without an executor
     }
     
-    // Count total running jobs across all Plans
-    let globalRunning = 0;
+    // Count local running jobs and collect active plan IDs
+    let localRunning = 0;
+    const activePlanIds: string[] = [];
+    
     for (const [planId, plan] of this.plans) {
       const sm = this.stateMachines.get(planId);
       if (!sm) continue;
+      
+      const status = sm.computePlanStatus();
+      if (status === 'running') {
+        activePlanIds.push(planId);
+      }
       
       for (const [nodeId, state] of plan.nodeStates) {
         if (state.status === 'running' || state.status === 'scheduled') {
           const node = plan.nodes.get(nodeId);
           if (node && nodePerformsWork(node)) {
-            globalRunning++;
+            localRunning++;
           }
         }
       }
     }
     
+    // Update global registry with our current count
+    if (this.globalCapacity) {
+      await this.globalCapacity.updateRunningJobs(localRunning, activePlanIds);
+    }
+    
+    // Get global running count (includes other instances)
+    const globalRunning = this.globalCapacity 
+      ? await this.globalCapacity.getTotalGlobalRunning()
+      : localRunning;
+    
     // Log overall status periodically (only if there are active Plans)
     const totalPlans = this.plans.size;
     if (totalPlans > 0) {
-      log.debug(`Pump: ${totalPlans} Plans, ${globalRunning} jobs running`);
+      log.debug(`Pump: ${totalPlans} Plans, ${globalRunning} jobs running (${localRunning} local)`);
     }
     
     // Process each Plan
@@ -1306,6 +1398,8 @@ export class PlanRunner extends EventEmitter {
       if (!plan.startedAt && status === 'running') {
         plan.startedAt = Date.now();
         this.emit('planStarted', plan);
+        // Acquire wake lock when plan starts running
+        this.updateWakeLock().catch(err => log.warn('Failed to update wake lock', { error: err }));
       }
       
       // Safety net: promote any pending nodes whose dependencies are now met.
@@ -1342,9 +1436,6 @@ export class PlanRunner extends EventEmitter {
         
         // Mark as scheduled
         sm.transition(nodeId, 'scheduled');
-        
-        // Count against global limit
-        globalRunning++;
         
         // Execute job node
         this.executeJobNode(plan, sm, node);
@@ -1446,6 +1537,18 @@ export class PlanRunner extends EventEmitter {
         nodeState.baseCommit = timing.baseCommit;
         if (timing.totalMs > 500) {
           log.warn(`Slow worktree creation for ${node.name} took ${timing.totalMs}ms`);
+        }
+        
+        // Ensure .gitignore includes orchestrator temp files
+        try {
+          const modified = await git.gitignore.ensureGitignoreEntries(worktreePath);
+          if (modified) {
+            log.debug(`Updated .gitignore in worktree: ${worktreePath}`);
+            // Stage the gitignore change so it's included in the work commit
+            await git.executor.execAsync(['add', '.gitignore'], { cwd: worktreePath });
+          }
+        } catch (err: any) {
+          log.warn(`Failed to update .gitignore: ${err.message}`);
         }
       }
       
@@ -3439,6 +3542,8 @@ Resume working in the existing worktree and session context.`;
       const plan = this.plans.get(event.planId);
       if (plan) {
         this.emit('planCompleted', plan, event.status);
+        // Update wake lock in case this was the last running plan
+        this.updateWakeLock().catch(err => log.warn('Failed to update wake lock', { error: err }));
       }
     });
   }

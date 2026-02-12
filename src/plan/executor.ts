@@ -83,6 +83,7 @@ function adaptCommandForPowerShell(command: string): string {
  */
 export class DefaultJobExecutor implements JobExecutor {
   private activeExecutions = new Map<string, ActiveExecution>();
+  private activeExecutionsByNode = new Map<string, string>(); // planId:nodeId -> full execution key with attempt
   private executionLogs = new Map<string, LogEntry[]>();
   private logFiles = new Map<string, string>(); // execution key -> log file path
   private agentDelegator?: any; // IAgentDelegator interface
@@ -124,6 +125,23 @@ export class DefaultJobExecutor implements JobExecutor {
   }
   
   /**
+   * Get the isolated Copilot CLI config directory path.
+   * Ensures the directory exists before returning.
+   * 
+   * @returns Path to the isolated .copilot-cli config directory
+   */
+  private getCopilotConfigDir(): string {
+    if (!this.storagePath) {
+      throw new Error('Storage path not configured. Call setStoragePath() first.');
+    }
+    const configDir = path.join(this.storagePath, '.copilot-cli');
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
+    return configDir;
+  }
+  
+  /**
    * Execute a job node: runs prechecks → work → postchecks → commit.
    *
    * Each phase is logged with section markers. If any phase fails, the
@@ -144,6 +162,9 @@ export class DefaultJobExecutor implements JobExecutor {
       aborted: false,
     };
     this.activeExecutions.set(executionKey, execution);
+    // Also track by node key for easy lookup without attempt number
+    const nodeKey = `${plan.id}:${node.id}`;
+    this.activeExecutionsByNode.set(nodeKey, executionKey);
     this.executionLogs.set(executionKey, []);
     
     // Track per-phase statuses and captured session ID
@@ -433,6 +454,8 @@ export class DefaultJobExecutor implements JobExecutor {
       };
     } finally {
       this.activeExecutions.delete(executionKey);
+      const nodeKey = `${plan.id}:${node.id}`;
+      this.activeExecutionsByNode.delete(nodeKey);
     }
   }
   
@@ -443,7 +466,10 @@ export class DefaultJobExecutor implements JobExecutor {
    * @param nodeId - Node identifier.
    */
   cancel(planId: string, nodeId: string): void {
-    const executionKey = `${planId}:${nodeId}`;
+    const nodeKey = `${planId}:${nodeId}`;
+    const executionKey = this.activeExecutionsByNode.get(nodeKey);
+    if (!executionKey) return;
+    
     const execution = this.activeExecutions.get(executionKey);
     
     if (execution) {
@@ -529,7 +555,11 @@ export class DefaultJobExecutor implements JobExecutor {
     duration: number | null;
     isAgentWork?: boolean;
   }> {
-    const executionKey = `${planId}:${nodeId}`;
+    const nodeKey = `${planId}:${nodeId}`;
+    const executionKey = this.activeExecutionsByNode.get(nodeKey);
+    if (!executionKey) {
+      return { pid: null, running: false, tree: [], duration: null };
+    }
     const execution = this.activeExecutions.get(executionKey);
     
     if (!execution) {
@@ -601,7 +631,11 @@ export class DefaultJobExecutor implements JobExecutor {
     }> = [];
     
     for (const { planId, nodeId, nodeName } of nodeKeys) {
-      const executionKey = `${planId}:${nodeId}`;
+      const nodeKey = `${planId}:${nodeId}`;
+      const executionKey = this.activeExecutionsByNode.get(nodeKey);
+      if (!executionKey) {
+        continue;
+      }
       const execution = this.activeExecutions.get(executionKey);
       
       if (!execution) {
@@ -650,8 +684,8 @@ export class DefaultJobExecutor implements JobExecutor {
    * @returns `true` if the execution is tracked and not yet finished.
    */
   isActive(planId: string, nodeId: string): boolean {
-    const executionKey = `${planId}:${nodeId}`;
-    return this.activeExecutions.has(executionKey);
+    const nodeKey = `${planId}:${nodeId}`;
+    return this.activeExecutionsByNode.has(nodeKey);
   }
   
   /**
@@ -1000,8 +1034,14 @@ export class DefaultJobExecutor implements JobExecutor {
     if (sessionId) {
       this.logInfo(executionKey, phase, `Resuming Copilot session: ${sessionId}`);
     }
+    if (spec.allowedFolders && spec.allowedFolders.length > 0) {
+      this.logInfo(executionKey, phase, `Agent allowed folders: ${spec.allowedFolders.join(', ')}`);
+    }
     
     try {
+      // Get isolated config directory for Copilot CLI sessions
+      const configDir = this.getCopilotConfigDir();
+      
       const result = await this.agentDelegator.delegate({
         task: spec.instructions,
         instructions: node.instructions || spec.context,
@@ -1011,6 +1051,8 @@ export class DefaultJobExecutor implements JobExecutor {
         maxTurns: spec.maxTurns,
         sessionId, // Pass session ID for resumption
         jobId: node.id,
+        configDir, // Isolate sessions from user's history
+        allowedFolders: spec.allowedFolders,  // Pass through allowed folders
         logOutput: (line: string) => this.logInfo(executionKey, phase, line),
         onProcess: (proc: any) => {
           // Track the Copilot CLI process for monitoring (CPU/memory/tree)
@@ -1256,11 +1298,15 @@ export class DefaultJobExecutor implements JobExecutor {
 
       this.logInfo(executionKey, 'commit', '========== AI REVIEW: NO-CHANGE ASSESSMENT ==========');
 
+      // Get isolated config directory for Copilot CLI sessions
+      const configDir = this.getCopilotConfigDir();
+
       // Use a lightweight, fast model for the review
       const result = await this.agentDelegator.delegate({
         task: reviewPrompt,
         worktreePath,
         model: 'claude-haiku-4.5',
+        configDir, // Isolate sessions from user's history
         logOutput: (line: string) => this.logInfo(executionKey, 'commit', `[ai-review] ${line}`),
         onProcess: () => {}, // No need to track this short-lived process
       });

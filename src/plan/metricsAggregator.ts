@@ -106,21 +106,16 @@ export function aggregateMetrics(metrics: CopilotUsageMetrics[]): CopilotUsageMe
 export function getNodeMetrics(state: NodeExecutionState): CopilotUsageMetrics | undefined {
 	const allMetrics: CopilotUsageMetrics[] = [];
 
-	// Collect attempt history metrics
-	if (state.attemptHistory) {
+	// Collect attempt history metrics (authoritative source)
+	if (state.attemptHistory && state.attemptHistory.length > 0) {
 		for (const attempt of state.attemptHistory) {
 			if (attempt.metrics) {
 				allMetrics.push(attempt.metrics);
 			}
 		}
-	}
-
-	// Add current metrics, but avoid double-counting if it matches the latest attempt
-	if (state.metrics) {
-		const latestAttempt = state.attemptHistory?.[state.attemptHistory.length - 1];
-		if (!latestAttempt || latestAttempt.metrics !== state.metrics) {
-			allMetrics.push(state.metrics);
-		}
+	} else if (state.metrics) {
+		// Only use state.metrics if there's no attempt history (fallback for legacy data)
+		allMetrics.push(state.metrics);
 	}
 
 	if (allMetrics.length === 0) {
