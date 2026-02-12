@@ -236,8 +236,13 @@ export class planDetailPanel {
     // Only shows work from leaf nodes that have been merged to target, ensuring
     // the summary reflects actual integrated work rather than all work performed.
     const summary = plan.targetBranch 
-      ? computeMergedLeafWorkSummary(plan, plan.nodeStates) || plan.workSummary
+      ? computeMergedLeafWorkSummary(plan, plan.nodeStates)
       : plan.workSummary;
+    
+    if (!summary) {
+      vscode.window.showInformationMessage('No work has been merged to target branch yet.');
+      return;
+    }
     
     // Build job details HTML
     let jobDetailsHtml = '';
@@ -2272,19 +2277,13 @@ ${mermaidDef}
    * @returns HTML fragment string, or empty string if no work has been performed.
    */
   private _buildWorkSummaryHtml(plan: PlanInstance): string {
-    // Use filtered summary for plans with target branch.
-    // Only shows work from leaf nodes that have been merged to target, ensuring
-    // the summary reflects actual integrated work rather than all work performed.
-    let workSummary = plan.targetBranch 
+    // For plans WITH targetBranch: only show merged leaf work (no fallback)
+    // For plans WITHOUT targetBranch: show all completed work
+    const workSummary = plan.targetBranch 
       ? computeMergedLeafWorkSummary(plan, plan.nodeStates)
       : plan.workSummary;
     
-    // Fall back to plan.workSummary if filtered result is undefined
-    if (!workSummary) {
-      workSummary = plan.workSummary;
-    }
-    
-    // Don't show if no work summary exists
+    // If no work summary (either because no targetBranch work or no work at all), return empty
     if (!workSummary) {
       return '';
     }
