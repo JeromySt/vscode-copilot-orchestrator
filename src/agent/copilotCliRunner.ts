@@ -317,14 +317,16 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       }
     }
     
-    // Build --allow-paths argument
+    // Build --add-dir arguments to grant file access to specific directories
+    // Note: --add-dir adds directories to the allowed list (can be used multiple times)
+    // This is different from --allow-all-paths which disables ALL path verification
     let pathsArg: string;
     if (allowedPaths.length === 0) {
       // Fallback: if no paths specified, allow current directory only
-      pathsArg = '--allow-paths .';
+      pathsArg = '--add-dir .';
     } else {
-      // Use multiple --allow-paths flags for each path
-      pathsArg = allowedPaths.map(p => `--allow-paths ${JSON.stringify(p)}`).join(' ');
+      // Use multiple --add-dir flags for each path
+      pathsArg = allowedPaths.map(p => `--add-dir ${JSON.stringify(p)}`).join(' ');
     }
     
     let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-urls --allow-all-tools`;
