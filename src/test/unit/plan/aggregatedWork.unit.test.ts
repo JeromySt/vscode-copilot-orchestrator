@@ -6,7 +6,7 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { DefaultJobExecutor } from '../../../plan/executor';
 import type { JobNode } from '../../../plan/types';
-import * as git from '../../../git';
+// git module used transitively via executor
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };

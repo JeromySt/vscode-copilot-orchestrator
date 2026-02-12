@@ -42,7 +42,7 @@ suite('PlanRunner - aggregatedWorkSummary integration', () => {
     // the runner should call executor.computeAggregatedWorkSummary()
     // and store the result in nodeState.aggregatedWorkSummary
     
-    const node: JobNode = {
+    const _node: JobNode = {
       id: 'leaf1',
       producerId: 'leaf1',
       name: 'Leaf Job',
@@ -90,7 +90,7 @@ suite('PlanRunner - aggregatedWorkSummary integration', () => {
     // have aggregatedWorkSummary computed, as they don't represent
     // final merge targets
     
-    const node: JobNode = {
+    const _node: JobNode = {
       id: 'intermediate',
       producerId: 'intermediate',
       name: 'Intermediate Job',
@@ -115,7 +115,7 @@ suite('PlanRunner - aggregatedWorkSummary integration', () => {
     // aggregatedWorkSummary should be undefined for non-leaf
     const aggregatedSummary = undefined;
     
-    assert.ok(workSummary !== undefined, 'Non-leaf should have workSummary');
+    assert.ok(workSummary, 'Non-leaf should have workSummary');
     assert.strictEqual(aggregatedSummary, undefined, 'Non-leaf should not have aggregatedWorkSummary');
   });
 
@@ -125,7 +125,7 @@ suite('PlanRunner - aggregatedWorkSummary integration', () => {
     // its aggregatedWorkSummary should still show the accumulated upstream work
     // that would be merged to targetBranch
     
-    const node: JobNode = {
+    const _node: JobNode = {
       id: 'validator',
       producerId: 'validator',
       name: 'Validation Job',
@@ -212,22 +212,25 @@ suite('PlanRunner - aggregatedWorkSummary integration', () => {
     assert.strictEqual(shouldCompute, true, 'All preconditions met');
     
     // Test missing worktreePath
+    const noWorktree = { isLeaf: true, hasWorktreePath: false, hasCompletedCommit: true };
     assert.strictEqual(
-      true && false && true,  // isLeaf && !hasWorktreePath && hasCompletedCommit
+      noWorktree.isLeaf && noWorktree.hasWorktreePath && noWorktree.hasCompletedCommit,
       false,
       'Should not compute when worktreePath missing'
     );
     
     // Test missing completedCommit
+    const noCommit = { isLeaf: true, hasWorktreePath: true, hasCompletedCommit: false };
     assert.strictEqual(
-      true && true && false,  // isLeaf && hasWorktreePath && !hasCompletedCommit
+      noCommit.isLeaf && noCommit.hasWorktreePath && noCommit.hasCompletedCommit,
       false,
       'Should not compute when completedCommit missing'
     );
     
     // Test non-leaf
+    const nonLeaf = { isLeaf: false, hasWorktreePath: true, hasCompletedCommit: true };
     assert.strictEqual(
-      false && true && true,  // !isLeaf && hasWorktreePath && hasCompletedCommit
+      nonLeaf.isLeaf && nonLeaf.hasWorktreePath && nonLeaf.hasCompletedCommit,
       false,
       'Should not compute for non-leaf nodes'
     );
@@ -243,7 +246,7 @@ suite('PlanRunner - aggregatedWorkSummary integration', () => {
     // This is used by computeMergedLeafWorkSummary to show the user
     // what total changes are being merged to the target branch
     
-    const upstreamWork = {
+    const _upstreamWork = {
       commits: 5,
       filesAdded: 10,
       filesModified: 5,
