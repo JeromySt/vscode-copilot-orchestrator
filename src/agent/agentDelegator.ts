@@ -66,6 +66,27 @@ export interface DelegateOptions {
    */
   allowedFolders?: string[];
   /**
+   * Additional URLs the agent is allowed to access.
+   * 
+   * **Security Consideration**: By default, the agent has no network access.
+   * This provides isolation and prevents unintended network requests.
+   * 
+   * Specify URLs here to grant network access to specific domains/endpoints.
+   * Each URL is validated and passed to the Copilot CLI via the `--allow-url` flag.
+   * 
+   * **Principle of Least Privilege**: Only add URLs that this delegation truly
+   * needs for its specific task.
+   * 
+   * @example
+   * ```typescript
+   * allowedUrls: [
+   *   'https://api.github.com',
+   *   'https://registry.npmjs.org'
+   * ]
+   * ```
+   */
+  allowedUrls?: string[];
+  /**
    * Config directory for Copilot CLI.
    * 
    * Stores sessions and configuration in a worktree-local directory instead of the user's
@@ -269,7 +290,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
    * Delegate task via GitHub Copilot CLI.
    */
   private async delegateViaCopilot(options: DelegateOptions): Promise<DelegateResult> {
-    const { jobId, taskDescription, label, worktreePath, sessionId, model, allowedFolders } = options;
+    const { jobId, taskDescription, label, worktreePath, sessionId, model, allowedFolders, allowedUrls } = options;
 
     // Validate model if provided
     if (model && !await isValidModel(model)) {
@@ -330,6 +351,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       configDir: copilotConfigDir,
       jobId,
       allowedFolders,  // NEW: pass through to CLI runner
+      allowedUrls,     // NEW: pass through to CLI runner
       timeout: 0, // No timeout — agent work can run for a long time
       onProcess: (proc) => {
         if (proc.pid) {

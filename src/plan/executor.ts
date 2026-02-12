@@ -1039,6 +1039,9 @@ export class DefaultJobExecutor implements JobExecutor {
     if (spec.allowedFolders && spec.allowedFolders.length > 0) {
       this.logInfo(executionKey, phase, `Agent allowed folders: ${spec.allowedFolders.join(', ')}`);
     }
+    if (spec.allowedUrls && spec.allowedUrls.length > 0) {
+      this.logInfo(executionKey, phase, `Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);
+    }
     
     try {
       // Get isolated config directory for Copilot CLI sessions
@@ -1055,6 +1058,7 @@ export class DefaultJobExecutor implements JobExecutor {
         jobId: node.id,
         configDir, // Isolate sessions from user's history
         allowedFolders: spec.allowedFolders,  // Pass through allowed folders
+        allowedUrls: spec.allowedUrls,        // Pass through allowed URLs
         logOutput: (line: string) => this.logInfo(executionKey, phase, line),
         onProcess: (proc: any) => {
           // Track the Copilot CLI process for monitoring (CPU/memory/tree)
