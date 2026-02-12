@@ -13,8 +13,9 @@ import {
   createEmptyWorkSummary,
   appendWorkSummary,
   mergeWorkSummary,
+  computeMergedLeafWorkSummary,
 } from '../../../plan/helpers';
-import { NodeExecutionState, LogEntry, JobWorkSummary, ExecutionPhase } from '../../../plan/types';
+import { NodeExecutionState, LogEntry, JobWorkSummary, ExecutionPhase, PlanInstance } from '../../../plan/types';
 
 suite('Plan Helpers', () => {
   // =========================================================================
@@ -330,6 +331,225 @@ suite('Plan Helpers', () => {
       parent.totalCommits = 5;
       const result = mergeWorkSummary(parent, undefined);
       assert.strictEqual(result.totalCommits, 5);
+    });
+  });
+
+  // =========================================================================
+  // computeMergedLeafWorkSummary
+  // =========================================================================
+
+  suite('computeMergedLeafWorkSummary', () => {
+    // Helper to create a minimal PlanInstance for testing
+    function createTestPlan(
+      leaves: string[],
+      workSummary: any,
+      targetBranch?: string
+    ): PlanInstance {
+      return {
+        id: 'test-plan',
+        leaves,
+        workSummary,
+        targetBranch,
+        // Other required fields (minimal stubs)
+        spec: { name: 'test', jobs: [] },
+        nodes: new Map(),
+        producerIdToNodeId: new Map(),
+        roots: [],
+        nodeStates: new Map(),
+        groups: new Map(),
+        groupStates: new Map(),
+        groupPathToId: new Map(),
+        repoPath: '/test',
+        baseBranch: 'main',
+        worktreeRoot: '/test/worktrees',
+        createdAt: Date.now(),
+        stateVersion: 0,
+        cleanUpSuccessfulWork: true,
+        maxParallel: 4,
+      } as PlanInstance;
+    }
+
+    test('returns undefined when plan has no work summary', () => {
+      const plan = createTestPlan(['n1'], undefined);
+      const nodeStates = new Map<string, NodeExecutionState>();
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.strictEqual(result, undefined);
+    });
+
+    test('returns undefined when work summary has no job summaries', () => {
+      const plan = createTestPlan(['n1'], createEmptyWorkSummary());
+      const nodeStates = new Map<string, NodeExecutionState>();
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.strictEqual(result, undefined);
+    });
+
+    test('returns full work summary when no target branch', () => {
+      const workSummary = {
+        totalCommits: 5,
+        totalFilesAdded: 3,
+        totalFilesModified: 2,
+        totalFilesDeleted: 1,
+        jobSummaries: [
+          { nodeId: 'n1', nodeName: 'Job1', commits: 5, filesAdded: 3, filesModified: 2, filesDeleted: 1, description: 'test' },
+        ],
+      };
+      const plan = createTestPlan(['n1'], workSummary, undefined);
+      const nodeStates = new Map<string, NodeExecutionState>();
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.strictEqual(result, workSummary);
+    });
+
+    test('filters out non-leaf nodes', () => {
+      const workSummary = {
+        totalCommits: 7,
+        totalFilesAdded: 5,
+        totalFilesModified: 3,
+        totalFilesDeleted: 2,
+        jobSummaries: [
+          { nodeId: 'n1', nodeName: 'Job1', commits: 3, filesAdded: 2, filesModified: 1, filesDeleted: 0, description: 'leaf' },
+          { nodeId: 'n2', nodeName: 'Job2', commits: 4, filesAdded: 3, filesModified: 2, filesDeleted: 2, description: 'non-leaf' },
+        ],
+      };
+      const plan = createTestPlan(['n1'], workSummary, 'main');
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['n1', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: true }],
+        ['n2', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: true }],
+      ]);
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.ok(result);
+      assert.strictEqual(result.totalCommits, 3);
+      assert.strictEqual(result.totalFilesAdded, 2);
+      assert.strictEqual(result.totalFilesModified, 1);
+      assert.strictEqual(result.totalFilesDeleted, 0);
+      assert.strictEqual(result.jobSummaries.length, 1);
+      assert.strictEqual(result.jobSummaries[0].nodeId, 'n1');
+    });
+
+    test('filters out leaf nodes not merged to target', () => {
+      const workSummary = {
+        totalCommits: 7,
+        totalFilesAdded: 5,
+        totalFilesModified: 3,
+        totalFilesDeleted: 2,
+        jobSummaries: [
+          { nodeId: 'n1', nodeName: 'Job1', commits: 3, filesAdded: 2, filesModified: 1, filesDeleted: 0, description: 'merged' },
+          { nodeId: 'n2', nodeName: 'Job2', commits: 4, filesAdded: 3, filesModified: 2, filesDeleted: 2, description: 'not merged' },
+        ],
+      };
+      const plan = createTestPlan(['n1', 'n2'], workSummary, 'main');
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['n1', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: true }],
+        ['n2', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: false }],
+      ]);
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.ok(result);
+      assert.strictEqual(result.totalCommits, 3);
+      assert.strictEqual(result.totalFilesAdded, 2);
+      assert.strictEqual(result.jobSummaries.length, 1);
+      assert.strictEqual(result.jobSummaries[0].nodeId, 'n1');
+    });
+
+    test('returns undefined when no leaf nodes are merged', () => {
+      const workSummary = {
+        totalCommits: 4,
+        totalFilesAdded: 3,
+        totalFilesModified: 2,
+        totalFilesDeleted: 2,
+        jobSummaries: [
+          { nodeId: 'n1', nodeName: 'Job1', commits: 4, filesAdded: 3, filesModified: 2, filesDeleted: 2, description: 'not merged' },
+        ],
+      };
+      const plan = createTestPlan(['n1'], workSummary, 'main');
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['n1', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: false }],
+      ]);
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.strictEqual(result, undefined);
+    });
+
+    test('includes multiple merged leaf nodes', () => {
+      const workSummary = {
+        totalCommits: 10,
+        totalFilesAdded: 8,
+        totalFilesModified: 5,
+        totalFilesDeleted: 3,
+        jobSummaries: [
+          { nodeId: 'n1', nodeName: 'Job1', commits: 3, filesAdded: 2, filesModified: 1, filesDeleted: 0, description: 'leaf1' },
+          { nodeId: 'n2', nodeName: 'Job2', commits: 4, filesAdded: 3, filesModified: 2, filesDeleted: 1, description: 'leaf2' },
+          { nodeId: 'n3', nodeName: 'Job3', commits: 3, filesAdded: 3, filesModified: 2, filesDeleted: 2, description: 'leaf3' },
+        ],
+      };
+      const plan = createTestPlan(['n1', 'n2', 'n3'], workSummary, 'main');
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['n1', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: true }],
+        ['n2', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: true }],
+        ['n3', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: true }],
+      ]);
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.ok(result);
+      assert.strictEqual(result.totalCommits, 10);
+      assert.strictEqual(result.totalFilesAdded, 8);
+      assert.strictEqual(result.totalFilesModified, 5);
+      assert.strictEqual(result.totalFilesDeleted, 3);
+      assert.strictEqual(result.jobSummaries.length, 3);
+    });
+
+    test('handles mixed leaf and non-leaf, merged and unmerged', () => {
+      const workSummary = {
+        totalCommits: 20,
+        totalFilesAdded: 15,
+        totalFilesModified: 10,
+        totalFilesDeleted: 5,
+        jobSummaries: [
+          { nodeId: 'n1', nodeName: 'Job1', commits: 5, filesAdded: 4, filesModified: 3, filesDeleted: 1, description: 'leaf merged' },
+          { nodeId: 'n2', nodeName: 'Job2', commits: 5, filesAdded: 4, filesModified: 3, filesDeleted: 1, description: 'non-leaf merged' },
+          { nodeId: 'n3', nodeName: 'Job3', commits: 5, filesAdded: 4, filesModified: 2, filesDeleted: 2, description: 'leaf not merged' },
+          { nodeId: 'n4', nodeName: 'Job4', commits: 5, filesAdded: 3, filesModified: 2, filesDeleted: 1, description: 'leaf merged' },
+        ],
+      };
+      const plan = createTestPlan(['n1', 'n3', 'n4'], workSummary, 'main');
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['n1', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: true }],
+        ['n2', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: true }],
+        ['n3', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: false }],
+        ['n4', { status: 'succeeded', version: 1, attempts: 1, mergedToTarget: true }],
+      ]);
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.ok(result);
+      assert.strictEqual(result.totalCommits, 10);
+      assert.strictEqual(result.totalFilesAdded, 7);
+      assert.strictEqual(result.totalFilesModified, 5);
+      assert.strictEqual(result.totalFilesDeleted, 2);
+      assert.strictEqual(result.jobSummaries.length, 2);
+      assert.strictEqual(result.jobSummaries[0].nodeId, 'n1');
+      assert.strictEqual(result.jobSummaries[1].nodeId, 'n4');
+    });
+
+    test('handles node state without mergedToTarget field', () => {
+      const workSummary = {
+        totalCommits: 3,
+        totalFilesAdded: 2,
+        totalFilesModified: 1,
+        totalFilesDeleted: 0,
+        jobSummaries: [
+          { nodeId: 'n1', nodeName: 'Job1', commits: 3, filesAdded: 2, filesModified: 1, filesDeleted: 0, description: 'leaf' },
+        ],
+      };
+      const plan = createTestPlan(['n1'], workSummary, 'main');
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['n1', { status: 'succeeded', version: 1, attempts: 1 }], // no mergedToTarget field
+      ]);
+      
+      const result = computeMergedLeafWorkSummary(plan, nodeStates);
+      assert.strictEqual(result, undefined);
     });
   });
 });
