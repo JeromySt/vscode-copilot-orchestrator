@@ -11,6 +11,7 @@ import {
   JobNodeSpec, 
   GroupSpec,
 } from '../../plan/types';
+import { computeMergedLeafWorkSummary } from '../../plan';
 import {
   PlanHandlerContext,
   errorResult,
@@ -487,6 +488,11 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
   // Get effective endedAt recursively including child plans
   const effectiveEndedAt = ctx.PlanRunner.getEffectiveEndedAt(plan.id) || plan.endedAt;
   
+  // Use merged-leaf-only workSummary when targetBranch is set
+  const workSummary = plan.targetBranch
+    ? computeMergedLeafWorkSummary(plan, plan.nodeStates)
+    : plan.workSummary;
+  
   return {
     success: true,
     planId: plan.id,
@@ -499,7 +505,8 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
     createdAt: plan.createdAt,
     startedAt: plan.startedAt,
     endedAt: effectiveEndedAt,
-    workSummary: plan.workSummary,
+    // Only include workSummary if there's actually merged work to show
+    ...(workSummary && { workSummary }),
   };
 }
 
