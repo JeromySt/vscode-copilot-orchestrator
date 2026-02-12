@@ -448,10 +448,128 @@ export const addNodeSchema = {
   additionalProperties: false
 } as const;
 
+// ============================================================================
+// NODE-CENTRIC TOOL SCHEMAS
+// ============================================================================
+
+/**
+ * Schema for create_copilot_node input
+ */
+export const createNodeSchema = {
+  $id: 'create_copilot_node',
+  type: 'object',
+  properties: {
+    nodes: {
+      type: 'array',
+      items: jobSchema,
+      minItems: 1,
+      maxItems: 100
+    },
+    base_branch: { type: 'string', maxLength: 200 },
+    target_branch: { type: 'string', maxLength: 200 },
+    max_parallel: { type: 'number', minimum: 1, maximum: 32 },
+    clean_up_successful_work: { type: 'boolean' }
+  },
+  required: ['nodes'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for get_copilot_node input
+ */
+export const getNodeSchema = {
+  $id: 'get_copilot_node',
+  type: 'object',
+  properties: {
+    node_id: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['node_id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for list_copilot_nodes input
+ */
+export const listNodesSchema = {
+  $id: 'list_copilot_nodes',
+  type: 'object',
+  properties: {
+    group_id: { type: 'string', maxLength: 100 },
+    status: {
+      type: 'string',
+      enum: ['pending', 'ready', 'scheduled', 'running', 'succeeded', 'failed', 'blocked', 'canceled']
+    },
+    group_name: { type: 'string', maxLength: 200 }
+  },
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for retry_copilot_node input (node-centric, no planId)
+ */
+export const retryNodeCentricSchema = {
+  $id: 'retry_copilot_node',
+  type: 'object',
+  properties: {
+    node_id: { type: 'string', minLength: 1, maxLength: 100 },
+    newWork: {
+      oneOf: [
+        { type: 'string', maxLength: 50000 },
+        workSpecObjectSchema
+      ]
+    },
+    newPrechecks: {
+      oneOf: [
+        { type: 'string', maxLength: 10000 },
+        { type: 'null' },
+        workSpecObjectSchema
+      ]
+    },
+    newPostchecks: {
+      oneOf: [
+        { type: 'string', maxLength: 10000 },
+        { type: 'null' },
+        workSpecObjectSchema
+      ]
+    },
+    clearWorktree: { type: 'boolean' }
+  },
+  required: ['node_id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for force_fail_copilot_node input
+ */
+export const forceFailNodeSchema = {
+  $id: 'force_fail_copilot_node',
+  type: 'object',
+  properties: {
+    node_id: { type: 'string', minLength: 1, maxLength: 100 },
+    reason: { type: 'string', maxLength: 1000 }
+  },
+  required: ['node_id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for get_copilot_node_failure_context input (node-centric)
+ */
+export const getNodeFailureContextSchema = {
+  $id: 'get_copilot_node_failure_context',
+  type: 'object',
+  properties: {
+    node_id: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['node_id'],
+  additionalProperties: false
+} as const;
+
 /**
  * All schemas indexed by tool name
  */
 export const schemas: Record<string, object> = {
+  // Existing plan tools
   create_copilot_plan: createPlanSchema,
   create_copilot_job: createJobSchema,
   get_copilot_plan_status: getPlanStatusSchema,
@@ -465,4 +583,12 @@ export const schemas: Record<string, object> = {
   retry_copilot_plan_node: retryNodeSchema,
   get_copilot_plan_node_failure_context: getFailureContextSchema,
   add_copilot_node: addNodeSchema,
+  
+  // Node-centric tools (NEW)
+  create_copilot_node: createNodeSchema,
+  get_copilot_node: getNodeSchema,
+  list_copilot_nodes: listNodesSchema,
+  retry_copilot_node: retryNodeCentricSchema,
+  force_fail_copilot_node: forceFailNodeSchema,
+  get_copilot_node_failure_context: getNodeFailureContextSchema,
 };
