@@ -14,6 +14,7 @@ import {
   LogEntry,
   JobWorkSummary,
   WorkSummary,
+  PlanInstance,
 } from './types';
 
 // ============================================================================
@@ -300,4 +301,83 @@ export function mergeWorkSummary(
   ws.jobSummaries.push(...child.jobSummaries);
   
   return ws;
+}
+
+/**
+ * Compute a work summary containing only work from leaf nodes that have
+ * successfully merged to targetBranch.
+ * 
+ * This function filters the plan's aggregated work summary to include only
+ * jobs from leaf nodes where `mergedToTarget === true`. This provides users
+ * with an accurate view of work that has actually been integrated into the
+ * target branch, rather than all work performed across the plan.
+ * 
+ * **Dynamic behavior:** This function should be called at render time since
+ * `mergedToTarget` changes as nodes complete their merge operations.
+ * 
+ * **Backward compatibility:** When the plan has no targetBranch specified,
+ * returns the full workSummary unchanged.
+ * 
+ * @param plan - The plan instance containing work summary and leaf node IDs.
+ * @param nodeStates - Map of node IDs to their execution states (needed for mergedToTarget status).
+ * @returns A filtered WorkSummary with only merged leaf work, or undefined if no work summary exists.
+ * 
+ * @example
+ * ```typescript
+ * // In a UI render function:
+ * const mergedWork = computeMergedLeafWorkSummary(plan, plan.nodeStates);
+ * if (mergedWork) {
+ *   console.log(`${mergedWork.totalCommits} commits merged to target`);
+ * }
+ * ```
+ */
+export function computeMergedLeafWorkSummary(
+  plan: PlanInstance,
+  nodeStates: Map<string, NodeExecutionState>
+): WorkSummary | undefined {
+  // If no work summary exists, return undefined
+  if (!plan.workSummary || plan.workSummary.jobSummaries.length === 0) {
+    return undefined;
+  }
+
+  // If no target branch, return full work summary (backward compatible)
+  if (!plan.targetBranch) {
+    return plan.workSummary;
+  }
+
+  // Filter job summaries to only include merged leaf nodes
+  const filteredJobSummaries = plan.workSummary.jobSummaries.filter((jobSummary) => {
+    // Check if this is a leaf node
+    const isLeaf = plan.leaves.includes(jobSummary.nodeId);
+    if (!isLeaf) {
+      return false;
+    }
+
+    // Check if it has been merged to target
+    const nodeState = nodeStates.get(jobSummary.nodeId);
+    return nodeState?.mergedToTarget === true;
+  });
+
+  // If no jobs match the filter, return undefined
+  if (filteredJobSummaries.length === 0) {
+    return undefined;
+  }
+
+  // Recompute aggregate totals from filtered summaries
+  const filteredSummary: WorkSummary = {
+    totalCommits: 0,
+    totalFilesAdded: 0,
+    totalFilesModified: 0,
+    totalFilesDeleted: 0,
+    jobSummaries: filteredJobSummaries,
+  };
+
+  for (const jobSummary of filteredJobSummaries) {
+    filteredSummary.totalCommits += jobSummary.commits;
+    filteredSummary.totalFilesAdded += jobSummary.filesAdded;
+    filteredSummary.totalFilesModified += jobSummary.filesModified;
+    filteredSummary.totalFilesDeleted += jobSummary.filesDeleted;
+  }
+
+  return filteredSummary;
 }
