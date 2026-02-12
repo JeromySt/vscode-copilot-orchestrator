@@ -5,6 +5,17 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-02-12
+
+### Added
+- **Aggregated Work Summary**: Leaf nodes now track cumulative work across the entire DAG chain via `aggregatedWorkSummary`, capturing the total diff from base branch through all upstream FI merges — shows the complete picture of what will be reverse-integrated to the target branch
+- **URL Security (`allowedUrls`)**: Agents are now blocked from all network access by default. Explicit URL allowlisting via `allowedUrls` in the agent work spec grants access to specific domains/endpoints (passed via `--allow-url` flags), applying the principle of least privilege
+- **Aggregated Work Summary UI**: Node detail panel displays aggregated work summary for leaf nodes, showing total files added/modified/deleted across the full dependency chain
+
+### Changed
+- **Default Network Policy**: Replaced `--allow-all-urls` with explicit URL allowlisting — agents must declare required URLs in their work spec
+- **Node Detail Panel**: Enhanced work summary display to differentiate between node-level and aggregated (chain-level) work summaries
+
 ## [0.9.1] - 2026-02-12
 
 ### Added
