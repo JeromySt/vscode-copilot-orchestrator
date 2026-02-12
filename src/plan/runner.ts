@@ -2168,6 +2168,33 @@ export class PlanRunner extends EventEmitter {
             // Get security settings from the original failed spec
             const originalAgentSpec = normalizedFailedSpec?.type === 'agent' ? normalizedFailedSpec : null;
 
+            // Build allowedFolders - always include worktree, plus inherit from work spec
+            const allowedFolders: string[] = [worktreePath];
+            const allowedUrls: string[] = [];
+            
+            // Inherit from work spec if it's an agent
+            const normalizedWorkSpec = normalizeWorkSpec(node.work);
+            if (normalizedWorkSpec?.type === 'agent') {
+              if (normalizedWorkSpec.allowedFolders) {
+                allowedFolders.push(...normalizedWorkSpec.allowedFolders);
+              }
+              if (normalizedWorkSpec.allowedUrls) {
+                allowedUrls.push(...normalizedWorkSpec.allowedUrls);
+              }
+            }
+            
+            // Also inherit from original failed spec if it was an agent
+            if (originalAgentSpec?.allowedFolders) {
+              allowedFolders.push(...originalAgentSpec.allowedFolders);
+            }
+            if (originalAgentSpec?.allowedUrls) {
+              allowedUrls.push(...originalAgentSpec.allowedUrls);
+            }
+            
+            // Deduplicate
+            const uniqueFolders = [...new Set(allowedFolders)];
+            const uniqueUrls = [...new Set(allowedUrls)];
+
             const healSpec: WorkSpec = {
               type: 'agent',
               instructions: [
@@ -2200,10 +2227,9 @@ export class PlanRunner extends EventEmitter {
                 `   ${originalCommand}`,
                 '   ```',
               ].join('\n'),
-              // Inherit allowed folders/URLs from original spec (if any)
-              // This ensures auto-heal has same access as the original work
-              allowedFolders: originalAgentSpec?.allowedFolders,
-              allowedUrls: originalAgentSpec?.allowedUrls,
+              // Always include worktree, inherit from work spec and original failed spec
+              allowedFolders: uniqueFolders.length > 0 ? uniqueFolders : undefined,
+              allowedUrls: uniqueUrls.length > 0 ? uniqueUrls : undefined,
             };
             
             // Swap ONLY the failed phase to the agent, preserve the rest
