@@ -469,6 +469,29 @@ Metrics are stored in `NodeExecutionState.metrics` (aggregate) and `NodeExecutio
 
 ---
 
+## Power Management
+
+### Power Management (`src/core/powerManager.ts`)
+
+Prevents system sleep during plan execution to ensure reliability:
+
+- **Reference-counted wake locks** — Multiple plans can hold locks simultaneously; system only sleeps when all locks are released
+- **Cross-platform implementation** — Automatically selects the appropriate mechanism based on the operating system
+  - **Windows**: `SetThreadExecutionState` API called periodically via PowerShell
+  - **macOS**: `caffeinate` command with flags to prevent system, display, and disk sleep
+  - **Linux**: `systemd-inhibit` with fallback to `xdg-screensaver` if systemd is unavailable
+- **Automatic cleanup** — Wake locks are released when plans complete, are cancelled, or when VS Code closes
+- **Error resilience** — If platform-specific methods fail, the extension logs a warning but continues operation gracefully
+
+**Lifecycle:**
+1. PlanRunner calls `powerManager.acquireWakeLock(reason)` when a plan starts
+2. Platform-specific process is spawned to actively maintain wake lock
+3. On plan completion/cancellation, the cleanup function is called
+4. Process is terminated and resources are freed
+5. On extension deactivation, `releaseAll()` terminates all remaining processes
+
+---
+
 ## Extension Points and Interfaces
 
 All DI interfaces are defined in `src/interfaces/` and exported via `src/interfaces/index.ts`.

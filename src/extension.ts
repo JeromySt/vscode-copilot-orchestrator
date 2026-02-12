@@ -91,6 +91,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
  * Cleans up resources and persists state when the extension is unloaded.
  */
 export function deactivate(): void {
+  // Release all wake locks
+  const { powerManager } = require('./core/powerManager');
+  powerManager.releaseAll();
+  
   // Persist state synchronously before shutdown
   try {
     planRunner?.persistSync();
