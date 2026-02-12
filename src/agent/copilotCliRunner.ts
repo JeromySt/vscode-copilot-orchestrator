@@ -538,6 +538,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       const proc = spawn(command, [], {
         cwd,
         shell: true,
+        env: { ...process.env, NODE_OPTIONS: '' },
       });
       
       let capturedSessionId: string | undefined = sessionId;
