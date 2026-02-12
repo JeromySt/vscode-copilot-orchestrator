@@ -15,15 +15,18 @@ function silenceConsole(): { restore: () => void } {
   return { restore() { Object.assign(console, orig); } };
 }
 
-// Mock minimal PlanRunner structure for testing
+// Mock minimal PlanRunner structure for testing - matches current implementation
 interface MockRunner extends EventEmitter {
   plans: Map<string, PlanInstance>;
-  stateMachines: Map<string, { transition: sinon.SinonStub }>;
-  executor: { cancel: sinon.SinonStub } | null;
-  persistence: { save: sinon.SinonStub };
-  getNodeLogs: sinon.SinonStub;
-  getNodeLogFilePath: sinon.SinonStub;
-  forceFailNode(planId: string, nodeId: string, reason?: string): { success: boolean; error?: string };
+  forceFailNode(planId: string, nodeId: string): Promise<void>;
+  savePlan(planId: string): Promise<void>;
+  emitNodeTransition(event: {
+    planId: string;
+    nodeId: string;
+    previousStatus: any;
+    newStatus: any;
+    reason: string;
+  }): void;
 }
 
 function createTestNode(): JobNode {
@@ -76,107 +79,71 @@ function createTestPlan(): PlanInstance {
 function createMockRunner(): MockRunner {
   const runner = new EventEmitter() as MockRunner;
   runner.plans = new Map();
-  runner.stateMachines = new Map();
-  runner.executor = { cancel: sinon.stub() };
-  runner.persistence = { save: sinon.stub() };
-  runner.getNodeLogs = sinon.stub().returns('test logs');
-  runner.getNodeLogFilePath = sinon.stub().returns('/path/to/logs');
   
-  // Mock forceFailNode implementation based on the actual implementation
-  runner.forceFailNode = function(planId: string, nodeId: string, reason?: string): { success: boolean; error?: string } {
+  // Mock the actual forceFailNode implementation from PlanRunner
+  runner.forceFailNode = async function(planId: string, nodeId: string): Promise<void> {
     const plan = this.plans.get(planId);
     if (!plan) {
-      return { success: false, error: `Plan not found: ${planId}` };
+      throw new Error(`Plan ${planId} not found`);
     }
     
     const node = plan.nodes.get(nodeId);
     if (!node) {
-      return { success: false, error: `Node not found: ${nodeId}` };
+      throw new Error(`Node ${nodeId} not found in plan ${planId}`);
     }
     
     const nodeState = plan.nodeStates.get(nodeId);
     if (!nodeState) {
-      return { success: false, error: `Node state not found: ${nodeId}` };
+      throw new Error(`Node state ${nodeId} not found in plan ${planId}`);
     }
     
-    // Allow force fail for running, scheduled, pending states
-    const allowedStates = ['running', 'scheduled', 'pending'];
-    if (!allowedStates.includes(nodeState.status)) {
-      return { success: false, error: `Cannot force fail node in ${nodeState.status} state. Force fail is only allowed for nodes that are ${allowedStates.join(', ')}.` };
+    // Kill any running process for this node
+    if (nodeState.pid) {
+      try {
+        process.kill(nodeState.pid, 'SIGTERM');
+      } catch (e) {
+        // Process may already be dead - that's fine
+      }
     }
     
-    const sm = this.stateMachines.get(planId);
-    if (!sm) {
-      return { success: false, error: `State machine not found for Plan: ${planId}` };
+    // Update node state - ALWAYS force to failed
+    const previousStatus = nodeState.status;
+    nodeState.status = 'failed';
+    nodeState.error = 'Manually failed by user (Force Fail)';
+    nodeState.forceFailed = true;  // Flag for UI to show differently
+    nodeState.pid = undefined;  // Clear PID
+    
+    // Increment attempts if it was running (counts as a failed attempt)
+    if (previousStatus === 'running') {
+      nodeState.attempts = (nodeState.attempts || 0) + 1;
     }
     
-    const failReason = reason || 'Force failed by user (process may have crashed)';
+    // Set end time
+    nodeState.endedAt = Date.now();
+    nodeState.version = (nodeState.version || 0) + 1;
+    plan.stateVersion = (plan.stateVersion || 0) + 1;
     
-    // Cancel any active execution
-    if (this.executor) {
-      this.executor.cancel(planId, nodeId);
-    }
+    // CRITICAL: Persist immediately
+    await this.savePlan(planId);
     
-    // Set error and update state
-    nodeState.error = failReason;
-    
-    // Use state machine transition - the mock should update the status
-    const transitioned = sm.transition(nodeId, 'failed');
-    if (transitioned) {
-      // Mock state machine transition updates the status
-      nodeState.status = 'failed';
-      nodeState.endedAt = Date.now();
-      nodeState.version = (nodeState.version || 0) + 1;
-      plan.stateVersion = (plan.stateVersion || 0) + 1;
-    } else {
-      // Fallback: force it directly
-      nodeState.status = 'failed';
-      nodeState.endedAt = Date.now();
-      nodeState.version = (nodeState.version || 0) + 1;
-      plan.stateVersion = (plan.stateVersion || 0) + 1;
-    }
-    
-    // Update last attempt info
-    nodeState.lastAttempt = {
-      phase: 'work',
-      startTime: nodeState.startedAt || Date.now(),
-      endTime: Date.now(),
-      error: failReason,
-    };
-    
-    // Add to attempt history
-    if (!nodeState.attemptHistory) {
-      nodeState.attemptHistory = [];
-    }
-    
-    const logs = this.getNodeLogs(planId, nodeId);
-    
-    nodeState.attemptHistory.push({
-      attemptNumber: nodeState.attempts || 1,
-      triggerType: 'retry',
-      startedAt: nodeState.startedAt || Date.now(),
-      endedAt: Date.now(),
-      status: 'failed',
-      failedPhase: 'work',
-      error: failReason,
-      copilotSessionId: nodeState.copilotSessionId,
-      stepStatuses: nodeState.stepStatuses,
-      worktreePath: nodeState.worktreePath,
-      baseCommit: nodeState.baseCommit,
-      logs,
-      logFilePath: this.getNodeLogFilePath(planId, nodeId, nodeState.attempts || 1),
-      workUsed: node.type === 'job' ? (node as JobNode).work : undefined,
+    // CRITICAL: Emit event for UI update
+    this.emitNodeTransition({
+      planId,
+      nodeId,
+      previousStatus,
+      newStatus: 'failed',
+      reason: 'force-failed'
     });
-    
-    // Emit events
-    this.emit('nodeTransition', planId, nodeId, 'running', 'failed');
-    this.emit('nodeUpdated', planId, nodeId);
-    this.emit('planUpdated', planId);
-    
-    // Persist the updated state
-    this.persistence.save(plan);
-    
-    return { success: true };
+  };
+  
+  // Mock savePlan method
+  runner.savePlan = sinon.stub().resolves();
+  
+  // Mock emitNodeTransition method
+  runner.emitNodeTransition = function(event) {
+    this.emit('nodeTransition', event.planId, event.nodeId, event.previousStatus, event.newStatus);
+    this.emit('nodeUpdated', event.planId, event.nodeId);
+    this.emit('planUpdated', event.planId);
   };
   
   return runner;
@@ -196,67 +163,89 @@ suite('Force Fail Node', () => {
     sinon.restore();
   });
 
-  suite('Runner.forceFailNode', () => {
-    test('should change node status to failed', () => {
-      // Setup: Create a plan with a running node
+  suite('forceFailNode', () => {
+    test('should fail a running node', async () => {
+      const plan = createTestPlan();
+      const node = plan.nodes.get('test-node')!;
+      const nodeState = plan.nodeStates.get('test-node')!;
+      nodeState.status = 'running';
+      nodeState.attempts = 1;
+      
+      runner.plans.set(plan.id, plan);
+      
+      await runner.forceFailNode(plan.id, node.id);
+      
+      assert.strictEqual(nodeState.status, 'failed');
+      assert.strictEqual(nodeState.error, 'Manually failed by user (Force Fail)');
+      assert.strictEqual(nodeState.attempts, 2);  // Incremented
+    });
+    
+    test('should fail a node on attempt 3', async () => {
+      const plan = createTestPlan();
+      const node = plan.nodes.get('test-node')!;
+      const nodeState = plan.nodeStates.get('test-node')!;
+      nodeState.status = 'running';
+      nodeState.attempts = 3;
+      
+      runner.plans.set(plan.id, plan);
+      
+      await runner.forceFailNode(plan.id, node.id);
+      
+      assert.strictEqual(nodeState.status, 'failed');
+      assert.strictEqual(nodeState.attempts, 4);
+    });
+    
+    test('should kill running process', async () => {
+      const plan = createTestPlan();
+      const node = plan.nodes.get('test-node')!;
+      const nodeState = plan.nodeStates.get('test-node')!;
+      nodeState.status = 'running';
+      nodeState.pid = 12345;
+      
+      const killSpy = sinon.spy(process, 'kill');
+      runner.plans.set(plan.id, plan);
+      
+      await runner.forceFailNode(plan.id, node.id);
+      
+      assert.ok(killSpy.calledWith(12345, 'SIGTERM'));
+      assert.strictEqual(nodeState.pid, undefined);
+    });
+    
+    test('should handle missing process gracefully', async () => {
+      const plan = createTestPlan();
+      const node = plan.nodes.get('test-node')!;
+      const nodeState = plan.nodeStates.get('test-node')!;
+      nodeState.status = 'running';
+      nodeState.pid = 99999;
+      
+      sinon.stub(process, 'kill').throws(new Error('ESRCH'));
+      runner.plans.set(plan.id, plan);
+      
+      // Should not throw
+      await runner.forceFailNode(plan.id, node.id);
+      assert.strictEqual(nodeState.status, 'failed');
+    });
+    
+    test('should persist state after force fail', async () => {
       const plan = createTestPlan();
       const node = plan.nodes.get('test-node')!;
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'running';
       
       runner.plans.set(plan.id, plan);
-      runner.stateMachines.set(plan.id, { transition: sinon.stub().returns(true) });
       
-      // Act: Force fail the node
-      const result = runner.forceFailNode(plan.id, node.id);
+      await runner.forceFailNode(plan.id, node.id);
       
-      // Assert: Node should be failed
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(nodeState.status, 'failed');
-      assert.ok(nodeState.error);
-      assert.ok(nodeState.error!.includes('Force failed'));
+      assert.ok((runner.savePlan as sinon.SinonStub).calledWith(plan.id));
     });
     
-    test('should use custom reason when provided', () => {
+    test('should emit nodeTransition event', async () => {
       const plan = createTestPlan();
+      const node = plan.nodes.get('test-node')!;
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'running';
       
       runner.plans.set(plan.id, plan);
-      runner.stateMachines.set(plan.id, { transition: sinon.stub().returns(true) });
-      
-      const customReason = 'Manually failed for testing';
-      const result = runner.forceFailNode(plan.id, 'test-node', customReason);
-      
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(nodeState.error, customReason);
-    });
-    
-    test('should increment state versions', () => {
-      const plan = createTestPlan();
-      const nodeState = plan.nodeStates.get('test-node')!;
-      nodeState.status = 'running';
-      nodeState.version = 1;
-      plan.stateVersion = 5;
-      
-      runner.plans.set(plan.id, plan);
-      // Mock state machine transition failing to test fallback
-      runner.stateMachines.set(plan.id, { transition: sinon.stub().returns(false) });
-      
-      const result = runner.forceFailNode(plan.id, 'test-node');
-      
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(nodeState.version, 2);
-      assert.strictEqual(plan.stateVersion, 6);
-    });
-    
-    test('should emit plan update events', () => {
-      const plan = createTestPlan();
-      const nodeState = plan.nodeStates.get('test-node')!;
-      nodeState.status = 'running';
-      
-      runner.plans.set(plan.id, plan);
-      runner.stateMachines.set(plan.id, { transition: sinon.stub().returns(true) });
       
       const nodeTransitionSpy = sinon.spy();
       const nodeUpdatedSpy = sinon.spy();
@@ -266,154 +255,162 @@ suite('Force Fail Node', () => {
       runner.on('nodeUpdated', nodeUpdatedSpy);
       runner.on('planUpdated', planUpdatedSpy);
       
-      const result = runner.forceFailNode(plan.id, 'test-node');
+      await runner.forceFailNode(plan.id, node.id);
       
-      assert.strictEqual(result.success, true);
-      assert.ok(nodeTransitionSpy.calledWith(plan.id, 'test-node', 'running', 'failed'));
-      assert.ok(nodeUpdatedSpy.calledWith(plan.id, 'test-node'));
+      assert.ok(nodeTransitionSpy.calledWith(plan.id, node.id, 'running', 'failed'));
+      assert.ok(nodeUpdatedSpy.calledWith(plan.id, node.id));
       assert.ok(planUpdatedSpy.calledWith(plan.id));
     });
     
-    test('should persist state to disk', () => {
+    test('should work on already failed node (no-op for attempts)', async () => {
       const plan = createTestPlan();
+      const node = plan.nodes.get('test-node')!;
       const nodeState = plan.nodeStates.get('test-node')!;
-      nodeState.status = 'running';
-      
-      runner.plans.set(plan.id, plan);
-      runner.stateMachines.set(plan.id, { transition: sinon.stub().returns(true) });
-      
-      const result = runner.forceFailNode(plan.id, 'test-node');
-      
-      assert.strictEqual(result.success, true);
-      assert.ok(runner.persistence.save.calledWith(plan));
-    });
-    
-    test('should cancel active execution', () => {
-      const plan = createTestPlan();
-      const nodeState = plan.nodeStates.get('test-node')!;
-      nodeState.status = 'running';
-      
-      runner.plans.set(plan.id, plan);
-      runner.stateMachines.set(plan.id, { transition: sinon.stub().returns(true) });
-      
-      const result = runner.forceFailNode(plan.id, 'test-node');
-      
-      assert.strictEqual(result.success, true);
-      assert.ok(runner.executor!.cancel.calledWith(plan.id, 'test-node'));
-    });
-    
-    test('should update attempt history', () => {
-      const plan = createTestPlan();
-      const nodeState = plan.nodeStates.get('test-node')!;
-      nodeState.status = 'running';
+      nodeState.status = 'failed';
       nodeState.attempts = 2;
-      nodeState.startedAt = Date.now() - 1000;
       
       runner.plans.set(plan.id, plan);
-      runner.stateMachines.set(plan.id, { transition: sinon.stub().returns(true) });
       
-      const result = runner.forceFailNode(plan.id, 'test-node');
+      await runner.forceFailNode(plan.id, node.id);
       
-      assert.strictEqual(result.success, true);
-      assert.ok(nodeState.attemptHistory);
-      assert.strictEqual(nodeState.attemptHistory.length, 1);
-      
-      const attempt = nodeState.attemptHistory[0];
-      assert.strictEqual(attempt.attemptNumber, 2);
-      assert.strictEqual(attempt.status, 'failed');
-      assert.strictEqual(attempt.failedPhase, 'work');
-      assert.ok(attempt.error!.includes('Force failed'));
+      assert.strictEqual(nodeState.status, 'failed');
+      assert.strictEqual(nodeState.attempts, 2);  // Not incremented again
     });
     
-    test('should throw if plan not found', () => {
-      const result = runner.forceFailNode('nonexistent', 'node');
+    test('should set forceFailed flag', async () => {
+      const plan = createTestPlan();
+      const node = plan.nodes.get('test-node')!;
+      const nodeState = plan.nodeStates.get('test-node')!;
+      nodeState.status = 'running';
       
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error);
-      assert.ok(result.error.includes('Plan not found'));
+      runner.plans.set(plan.id, plan);
+      
+      await runner.forceFailNode(plan.id, node.id);
+      
+      assert.strictEqual(nodeState.forceFailed, true);
+    });
+
+    test('should throw if plan not found', async () => {
+      await assert.rejects(
+        async () => runner.forceFailNode('nonexistent', 'node'),
+        /Plan nonexistent not found/
+      );
     });
     
-    test('should throw if node not found', () => {
+    test('should throw if node not found', async () => {
       const plan = createTestPlan();
       runner.plans.set(plan.id, plan);
       
-      const result = runner.forceFailNode(plan.id, 'nonexistent');
-      
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error);
-      assert.ok(result.error.includes('Node not found'));
+      await assert.rejects(
+        async () => runner.forceFailNode(plan.id, 'nonexistent'),
+        /Node nonexistent not found in plan/
+      );
     });
     
-    test('should throw if node state not found', () => {
+    test('should throw if node state not found', async () => {
       const plan = createTestPlan();
       // Remove node state to simulate missing state
       plan.nodeStates.delete('test-node');
       runner.plans.set(plan.id, plan);
       
-      const result = runner.forceFailNode(plan.id, 'test-node');
-      
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error);
-      assert.ok(result.error.includes('Node state not found'));
+      await assert.rejects(
+        async () => runner.forceFailNode(plan.id, 'test-node'),
+        /Node state test-node not found in plan/
+      );
     });
-    
-    test('should throw if state machine not found', () => {
+
+    test('should increment state versions', async () => {
       const plan = createTestPlan();
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'running';
+      nodeState.version = 1;
+      plan.stateVersion = 5;
       
       runner.plans.set(plan.id, plan);
-      // Don't set state machine to simulate missing state machine
       
-      const result = runner.forceFailNode(plan.id, 'test-node');
+      await runner.forceFailNode(plan.id, 'test-node');
       
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error);
-      assert.ok(result.error.includes('State machine not found'));
+      assert.strictEqual(nodeState.version, 2);
+      assert.strictEqual(plan.stateVersion, 6);
     });
-    
-    test('should reject nodes not in allowed states', () => {
+
+    test('should set endedAt timestamp', async () => {
       const plan = createTestPlan();
       const nodeState = plan.nodeStates.get('test-node')!;
-      nodeState.status = 'succeeded'; // Not an allowed state
+      nodeState.status = 'running';
+      nodeState.endedAt = undefined;
       
       runner.plans.set(plan.id, plan);
-      runner.stateMachines.set(plan.id, { transition: sinon.stub().returns(true) });
       
-      const result = runner.forceFailNode(plan.id, 'test-node');
+      await runner.forceFailNode(plan.id, 'test-node');
       
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error);
-      assert.ok(result.error.includes('Cannot force fail node in succeeded state'));
-      assert.ok(result.error.includes('running, scheduled, pending'));
+      assert.ok(nodeState.endedAt);
+      assert.ok(nodeState.endedAt! <= Date.now());
     });
-    
-    test('should allow force fail for scheduled nodes', () => {
-      const plan = createTestPlan();
-      const nodeState = plan.nodeStates.get('test-node')!;
-      nodeState.status = 'scheduled';
-      
-      runner.plans.set(plan.id, plan);
-      runner.stateMachines.set(plan.id, { transition: sinon.stub().returns(true) });
-      
-      const result = runner.forceFailNode(plan.id, 'test-node');
-      
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(nodeState.status, 'failed');
-    });
-    
-    test('should allow force fail for pending nodes', () => {
+
+    test('should work for non-running nodes', async () => {
       const plan = createTestPlan();
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'pending';
+      nodeState.attempts = 1;
       
       runner.plans.set(plan.id, plan);
-      runner.stateMachines.set(plan.id, { transition: sinon.stub().returns(true) });
       
-      const result = runner.forceFailNode(plan.id, 'test-node');
+      await runner.forceFailNode(plan.id, 'test-node');
       
-      assert.strictEqual(result.success, true);
       assert.strictEqual(nodeState.status, 'failed');
+      assert.strictEqual(nodeState.attempts, 1);  // Not incremented for non-running
+      assert.strictEqual(nodeState.forceFailed, true);
+    });
+  });
+  suite('UI Message Handler', () => {
+    test('should call forceFailNode when message received', async () => {
+      const plan = createTestPlan();
+      runner.plans.set(plan.id, plan);
+      
+      const forceFailSpy = sinon.spy(runner, 'forceFailNode');
+      
+      // Create a simple mock panel that handles messages like the actual nodeDetailPanel
+      const panel = {
+        _planRunner: runner,
+        async handleMessage(message: any) {
+          if (message.type === 'forceFailNode') {
+            await this._planRunner.forceFailNode(message.planId, message.nodeId);
+          }
+        }
+      };
+      
+      // Simulate message from webview
+      await panel.handleMessage({ type: 'forceFailNode', planId: plan.id, nodeId: 'test-node' });
+      
+      assert.ok(forceFailSpy.calledWith(plan.id, 'test-node'));
+    });
+
+    test('should handle forceFailNode message with fallback parameters', async () => {
+      const plan = createTestPlan();
+      runner.plans.set(plan.id, plan);
+      
+      const forceFailSpy = sinon.spy(runner, 'forceFailNode');
+      
+      // Mock panel with instance variables for fallback
+      const panel = {
+        _planRunner: runner,
+        _planId: plan.id,
+        _nodeId: 'test-node',
+        async handleMessage(message: any) {
+          if (message.type === 'forceFailNode') {
+            // Use message params if provided, otherwise fall back to instance variables
+            const planId = message.planId || this._planId;
+            const nodeId = message.nodeId || this._nodeId;
+            await this._planRunner.forceFailNode(planId, nodeId);
+          }
+        }
+      };
+      
+      // Simulate message from webview without explicit parameters
+      await panel.handleMessage({ type: 'forceFailNode' });
+      
+      assert.ok(forceFailSpy.calledWith(plan.id, 'test-node'));
     });
   });
 });
