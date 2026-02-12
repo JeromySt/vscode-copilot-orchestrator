@@ -21,6 +21,7 @@ import {
   resolveBaseBranch,
   resolveTargetBranch,
 } from './utils';
+import { validateAgentModels } from '../validation';
 
 // ============================================================================
 // VALIDATION
@@ -118,6 +119,12 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
   const validation = validateNodeSpecs(args.nodes);
   if (!validation.valid || !validation.specs) {
     return errorResult(validation.error || 'Invalid input');
+  }
+
+  // Validate agent model names
+  const modelValidation = await validateAgentModels(args, 'create_copilot_node');
+  if (!modelValidation.valid) {
+    return { success: false, error: modelValidation.error };
   }
 
   try {
@@ -521,6 +528,14 @@ export async function handleRetryGroup(args: any, ctx: PlanHandlerContext): Prom
 export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['node_id']);
   if (fieldError) return fieldError;
+
+  // Validate agent model names in newWork if provided
+  if (args.newWork) {
+    const modelValidation = await validateAgentModels(args, 'retry_copilot_node');
+    if (!modelValidation.valid) {
+      return { success: false, error: modelValidation.error };
+    }
+  }
 
   const retryOptions = {
     newWork: args.newWork,

@@ -21,6 +21,7 @@ import {
   resolveBaseBranch,
   resolveTargetBranch,
 } from './utils';
+import { validateAgentModels } from '../validation';
 
 // ============================================================================
 // GROUP FLATTENING
@@ -288,6 +289,12 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
     return errorResult(validation.error || 'Invalid input');
   }
   
+  // Validate agent model names
+  const modelValidation = await validateAgentModels(args, 'create_copilot_plan');
+  if (!modelValidation.valid) {
+    return { success: false, error: modelValidation.error };
+  }
+  
   try {
     validation.spec.repoPath = ctx.workspacePath;
     const repoPath = ctx.workspacePath;
@@ -364,6 +371,12 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
   
   if (!args.task) {
     return errorResult('Job must have a task');
+  }
+  
+  // Validate agent model names
+  const modelValidation = await validateAgentModels(args, 'create_copilot_job');
+  if (!modelValidation.valid) {
+    return { success: false, error: modelValidation.error };
   }
   
   try {
@@ -834,6 +847,14 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   const fieldError = validateRequired(args, ['id']);
   if (fieldError) return fieldError;
   
+  // Validate agent model names in newWork if provided
+  if (args.newWork) {
+    const modelValidation = await validateAgentModels(args, 'retry_copilot_plan');
+    if (!modelValidation.valid) {
+      return { success: false, error: modelValidation.error };
+    }
+  }
+  
   const planResult = lookupPlan(ctx, args.id, 'getPlan');
   if (isError(planResult)) return planResult;
   const plan = planResult;
@@ -950,6 +971,14 @@ export async function handleGetNodeFailureContext(args: any, ctx: PlanHandlerCon
 export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['planId', 'nodeId']);
   if (fieldError) return fieldError;
+  
+  // Validate agent model names in newWork if provided
+  if (args.newWork) {
+    const modelValidation = await validateAgentModels(args, 'retry_copilot_plan_node');
+    if (!modelValidation.valid) {
+      return { success: false, error: modelValidation.error };
+    }
+  }
   
   const planResult = lookupPlan(ctx, args.planId, 'getPlan');
   if (isError(planResult)) return planResult;

@@ -9,6 +9,7 @@
 
 import Ajv, { ErrorObject, ValidateFunction } from 'ajv';
 import { schemas } from './schemas';
+import { getCachedModels } from '../../agent/modelDiscovery';
 
 // ============================================================================
 // VALIDATOR SINGLETON
@@ -219,4 +220,96 @@ export function hasSchema(toolName: string): boolean {
  */
 export function getRegisteredTools(): string[] {
   return [...validators.keys()];
+}
+
+// ============================================================================
+// MODEL VALIDATION
+// ============================================================================
+
+/**
+ * Recursively extract all model values from work specifications in input args.
+ */
+function extractModelValues(obj: any, path: string = ''): Array<{ value: string; path: string }> {
+  const models: Array<{ value: string; path: string }> = [];
+  
+  if (!obj || typeof obj !== 'object') {
+    return models;
+  }
+  
+  // Check if current object is an agent work spec with a model
+  if (obj.type === 'agent' && typeof obj.model === 'string') {
+    models.push({ value: obj.model, path: path ? `${path}.model` : 'model' });
+  }
+  
+  // Recursively search in arrays and objects
+  for (const [key, value] of Object.entries(obj)) {
+    const currentPath = path ? `${path}.${key}` : key;
+    
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        const itemPath = `${currentPath}[${i}]`;
+        models.push(...extractModelValues(value[i], itemPath));
+      }
+    } else if (value && typeof value === 'object') {
+      models.push(...extractModelValues(value, currentPath));
+    }
+  }
+  
+  return models;
+}
+
+/**
+ * Validate that all model names in agent work specifications are valid.
+ * 
+ * @param args - The MCP tool arguments to validate
+ * @param toolName - The tool name for error formatting
+ * @returns Validation result indicating success or failure with detailed error message
+ */
+export async function validateAgentModels(args: any, toolName: string): Promise<ValidationResult> {
+  try {
+    const modelReferences = extractModelValues(args);
+    
+    if (modelReferences.length === 0) {
+      // No models to validate
+      return { valid: true };
+    }
+    
+    // Get available models
+    const modelDiscovery = await getCachedModels();
+    const validModelIds = modelDiscovery.models.map(m => m.id);
+    
+    if (validModelIds.length === 0) {
+      return {
+        valid: false,
+        error: `Model validation failed: No models available from GitHub Copilot CLI. Please check your CLI installation and authentication.`,
+      };
+    }
+    
+    // Check each model reference
+    const invalidModels: Array<{ value: string; path: string }> = [];
+    
+    for (const { value, path } of modelReferences) {
+      if (!validModelIds.includes(value)) {
+        invalidModels.push({ value, path });
+      }
+    }
+    
+    if (invalidModels.length > 0) {
+      const errors = invalidModels.map(({ value, path }) => 
+        `Invalid model '${value}' at field '${path}'`
+      );
+      
+      return {
+        valid: false,
+        error: `Model validation failed for '${toolName}':\n- ${errors.join('\n- ')}\n\nValid models: ${validModelIds.join(', ')}`,
+      };
+    }
+    
+    return { valid: true };
+  } catch (error: any) {
+    return {
+      valid: false,
+      error: `Model validation error: ${error.message || 'Unknown error during model validation'}`,
+    };
+  }
 }
