@@ -610,15 +610,15 @@ export async function handleForceFailNode(args: any, ctx: PlanHandlerContext): P
     }
 
     if (plan.nodes.has(nodeId)) {
-      const result = ctx.PlanRunner.forceFailNode(plan.id, nodeId, args.reason);
-      if (result.success) {
+      try {
+        await ctx.PlanRunner.forceFailNode(plan.id, nodeId);
         return {
           success: true,
           message: `Node '${args.node_id}' has been force failed. It can now be retried.`,
           groupId: plan.id,
         };
-      } else {
-        return errorResult(result.error || 'Failed to force fail node');
+      } catch (error) {
+        return errorResult((error as Error)?.message || 'Failed to force fail node');
       }
     }
   }

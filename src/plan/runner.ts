@@ -3311,136 +3311,93 @@ export class PlanRunner extends EventEmitter {
   // ============================================================================
   
   /**
-   * Force a stuck running node to failed state.
-   *
-   * Use this when a job's process has crashed but the node is still
-   * showing as "running". This allows the node to be retried.
-   *
-   * @param planId  - Plan ID.
-   * @param nodeId  - Node ID to force fail.
-   * @param reason  - Optional reason for the forced failure.
-   * @returns `{ success: true }` if force fail succeeded, or `{ success: false, error }`.
+   * Force a node to fail immediately, enabling retry.
+   * This must ALWAYS work regardless of current state.
    */
-  forceFailNode(planId: string, nodeId: string, reason?: string): { success: boolean; error?: string } {
+  public async forceFailNode(planId: string, nodeId: string): Promise<void> {
     const plan = this.plans.get(planId);
     if (!plan) {
-      return { success: false, error: `Plan not found: ${planId}` };
+      throw new Error(`Plan ${planId} not found`);
     }
     
     const node = plan.nodes.get(nodeId);
     if (!node) {
-      return { success: false, error: `Node not found: ${nodeId}` };
+      throw new Error(`Node ${nodeId} not found in plan ${planId}`);
     }
     
     const nodeState = plan.nodeStates.get(nodeId);
     if (!nodeState) {
-      return { success: false, error: `Node state not found: ${nodeId}` };
+      throw new Error(`Node state ${nodeId} not found in plan ${planId}`);
     }
     
-    // Allow force fail for more states that might indicate stuck nodes
-    const allowedStates = ['running', 'scheduled', 'pending'];
-    if (!allowedStates.includes(nodeState.status)) {
-      return { success: false, error: `Cannot force fail node in ${nodeState.status} state. Force fail is only allowed for nodes that are ${allowedStates.join(', ')}.` };
+    log.info(`Force failing node ${nodeId} (current status: ${nodeState.status}, attempts: ${nodeState.attempts})`);
+    
+    // Kill any running process for this node
+    if (nodeState.pid) {
+      try {
+        process.kill(nodeState.pid, 'SIGTERM');
+        log.info(`Killed process ${nodeState.pid} for node ${nodeId}`);
+      } catch (e) {
+        // Process may already be dead - that's fine
+        log.debug(`Could not kill process ${nodeState.pid}: ${e}`);
+      }
     }
     
-    const sm = this.stateMachines.get(planId);
-    if (!sm) {
-      return { success: false, error: `State machine not found for Plan: ${planId}` };
+    // Update node state - ALWAYS force to failed
+    const previousStatus = nodeState.status;
+    nodeState.status = 'failed';
+    nodeState.error = 'Manually failed by user (Force Fail)';
+    nodeState.forceFailed = true;  // Flag for UI to show differently
+    nodeState.pid = undefined;  // Clear PID
+    
+    // Increment attempts if it was running (counts as a failed attempt)
+    if (previousStatus === 'running') {
+      nodeState.attempts = (nodeState.attempts || 0) + 1;
     }
     
-    const failReason = reason || 'Force failed by user (process may have crashed)';
+    // Set end time
+    nodeState.endedAt = Date.now();
+    nodeState.version = (nodeState.version || 0) + 1;
+    plan.stateVersion = (plan.stateVersion || 0) + 1;
     
-    log.info(`Force failing stuck node: ${node.name}`, {
+    // CRITICAL: Persist immediately
+    await this.savePlan(planId);
+    
+    // CRITICAL: Emit event for UI update
+    this.emitNodeTransition({
       planId,
       nodeId,
-      previousStatus: nodeState.status,
-      reason: failReason,
+      previousStatus,
+      newStatus: 'failed',
+      reason: 'force-failed'
     });
     
-    // Cancel any active execution tracking
-    if (this.executor) {
-      this.executor.cancel(planId, nodeId);
+    log.info(`Node ${nodeId} force failed successfully. New status: ${nodeState.status}`);
+  }
+
+  /**
+   * Save plan state to persistence layer.
+   */
+  private async savePlan(planId: string): Promise<void> {
+    const plan = this.plans.get(planId);
+    if (plan) {
+      this.persistence.save(plan);
     }
-    
-    // Set error before transition so it's available in side-effect handlers
-    nodeState.error = failReason;
-    
-    // Use state machine transition to properly propagate failure
-    // This handles: status change, timestamps, version increments,
-    // blocking dependents, updating group state, and checking plan completion
-    console.log('[DEBUG] Force fail state machine transition - BEFORE:', {
-      nodeId,
-      status: nodeState.status,
-      version: nodeState.version,
-      planStateVersion: plan.stateVersion
-    });
-    
-    const transitioned = sm.transition(nodeId, 'failed');
-    
-    console.log('[DEBUG] Force fail state machine transition - AFTER:', {
-      nodeId,
-      transitioned,
-      status: nodeState.status,
-      version: nodeState.version,
-      planStateVersion: plan.stateVersion
-    });
-    
-    if (!transitioned) {
-      console.log('[DEBUG] State machine transition failed, using fallback');
-      // Fallback: force it directly (should not happen for running/scheduled nodes)
-      nodeState.status = 'failed';
-      nodeState.endedAt = Date.now();
-      nodeState.version = (nodeState.version || 0) + 1;
-      plan.stateVersion = (plan.stateVersion || 0) + 1;
-    }
-    
-    // Note: attempts was already incremented when the node started running,
-    // so we don't increment it again here
-    
-    // Update last attempt info
-    nodeState.lastAttempt = {
-      phase: 'work',
-      startTime: nodeState.startedAt || Date.now(),
-      endTime: Date.now(),
-      error: failReason,
-    };
-    
-    // Add to attempt history with execution logs preserved
-    if (!nodeState.attemptHistory) {
-      nodeState.attemptHistory = [];
-    }
-    
-    // Get any logs that were captured before the crash
-    const logs = this.getNodeLogs(planId, nodeId);
-    
-    nodeState.attemptHistory.push({
-      attemptNumber: nodeState.attempts || 1,
-      triggerType: 'retry',
-      startedAt: nodeState.startedAt || Date.now(),
-      endedAt: Date.now(),
-      status: 'failed',
-      failedPhase: 'work',
-      error: failReason,
-      copilotSessionId: nodeState.copilotSessionId,
-      stepStatuses: nodeState.stepStatuses,
-      worktreePath: nodeState.worktreePath,
-      baseCommit: nodeState.baseCommit,
-      logs,
-      logFilePath: this.getNodeLogFilePath(planId, nodeId, nodeState.attempts || 1),
-      workUsed: node.type === 'job' ? (node as JobNode).work : undefined,
-    });
-    
-    // Emit events
-    this.emit('nodeTransition', planId, nodeId, 'running', 'failed');
-    this.emit('nodeUpdated', planId, nodeId);
-    this.emit('planUpdated', planId);
-    
-    // Persist the updated state
-    console.log('[DEBUG] Persisting force fail state changes');
-    this.persistence.save(plan);
-    
-    console.log('[DEBUG] Force fail completed successfully for node:', nodeId);
-    return { success: true };
+  }
+
+  /**
+   * Emit node transition event for UI updates.
+   */
+  private emitNodeTransition(event: {
+    planId: string;
+    nodeId: string;
+    previousStatus: NodeStatus;
+    newStatus: NodeStatus;
+    reason: string;
+  }): void {
+    this.emit('nodeTransition', event.planId, event.nodeId, event.previousStatus, event.newStatus);
+    this.emit('nodeUpdated', event.planId, event.nodeId);
+    this.emit('planUpdated', event.planId);
   }
 
   // ============================================================================

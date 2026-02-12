@@ -549,7 +549,9 @@ export class NodeDetailPanel {
         break;
       case 'forceFailNode':
         // Use message params if provided, otherwise fall back to instance variables
-        this._forceFailNode(message.planId || this._planId, message.nodeId || this._nodeId);
+        this._forceFailNode(message.planId || this._planId, message.nodeId || this._nodeId).catch(err => {
+          vscode.window.showErrorMessage(`Force fail failed: ${err?.message || err}`);
+        });
         break;
       case 'openLogFile':
         if (message.path && path.isAbsolute(message.path) && fs.existsSync(message.path)) {
@@ -565,43 +567,14 @@ export class NodeDetailPanel {
    * @param planId - The Plan containing the node.
    * @param nodeId - The node to force fail.
    */
-  private _forceFailNode(planId: string, nodeId: string) {
-    // Get fresh state before attempting force fail for debugging
-    const plan = this._planRunner.get(planId);
-    const nodeState = plan?.nodeStates.get(nodeId);
-    
-    console.log('[DEBUG] Force fail attempt:', { 
-      planId, 
-      nodeId, 
-      currentStatus: nodeState?.status,
-      attempts: nodeState?.attempts,
-      startedAt: nodeState?.startedAt,
-      version: nodeState?.version 
-    });
-    
-    const result = this._planRunner.forceFailNode(planId, nodeId, 'Force failed via UI - process may have crashed');
-    
-    // Get state after the call to see if it changed
-    const planAfter = this._planRunner.get(planId);
-    const nodeStateAfter = planAfter?.nodeStates.get(nodeId);
-    
-    console.log('[DEBUG] Force fail result:', result);
-    console.log('[DEBUG] Node state after force fail:', {
-      status: nodeStateAfter?.status,
-      attempts: nodeStateAfter?.attempts,
-      error: nodeStateAfter?.error,
-      version: nodeStateAfter?.version,
-      endedAt: nodeStateAfter?.endedAt
-    });
-    
-    if (result.success) {
-      vscode.window.showInformationMessage('Node force failed. You can now retry it.');
-      console.log('[DEBUG] Force fail succeeded, calling _update() to refresh UI');
+  private async _forceFailNode(planId: string, nodeId: string) {
+    try {
+      await this._planRunner.forceFailNode(planId, nodeId);
+      // Refresh panel after successful force fail
       this._update();
-    } else {
-      const errorMsg = `Force fail failed: ${result.error || 'Unknown error'}`;
-      console.error('[DEBUG] Force fail failed:', errorMsg);
-      vscode.window.showErrorMessage(errorMsg);
+      vscode.window.showInformationMessage(`Node force failed. You can now retry.`);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to force fail: ${error}`);
     }
   }
 
