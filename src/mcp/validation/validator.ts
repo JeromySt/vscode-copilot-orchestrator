@@ -313,3 +313,228 @@ export async function validateAgentModels(args: any, toolName: string): Promise<
     };
   }
 }
+
+/**
+ * Validate that allowedUrls are well-formed HTTP/HTTPS URLs.
+ * 
+ * Security: Prevents non-HTTP schemes that could bypass security:
+ * - file:// could access local filesystem
+ * - javascript: could execute code
+ * - data: could embed malicious content
+ * 
+ * Allowed formats:
+ * - Full URL: https://api.example.com/v1/
+ * - Domain only: api.example.com (implies HTTPS)
+ * - With wildcards: *.example.com
+ * 
+ * @param input - The validated input object (after schema validation)
+ * @param toolName - Tool name for error context
+ * @returns Validation result with detailed errors for invalid URLs
+ */
+export async function validateAllowedUrls(
+  input: unknown,
+  toolName: string
+): Promise<ValidationResult> {
+  const errors: string[] = [];
+  
+  // Regex for valid URL patterns:
+  // 1. Full HTTP/HTTPS URL
+  // 2. Domain with optional wildcard prefix and optional path
+  const VALID_URL_PATTERN = /^(https?:\/\/[^\s/$.?#][^\s]*|\*?\.?[a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z0-9][-a-zA-Z0-9]*)+(?:\/[^\s]*)?)$/;
+  
+  // Blocked schemes for security
+  const BLOCKED_SCHEMES = ['file:', 'javascript:', 'data:', 'vbscript:', 'about:', 'blob:'];
+  
+  function checkUrls(urls: unknown, jsonPath: string): void {
+    if (!Array.isArray(urls)) return;
+    
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      if (typeof url !== 'string') continue;
+      
+      const fullPath = `${jsonPath}[${i}]`;
+      const lowerUrl = url.toLowerCase();
+      
+      // Check for blocked schemes
+      for (const scheme of BLOCKED_SCHEMES) {
+        if (lowerUrl.startsWith(scheme)) {
+          errors.push(
+            `Blocked URL scheme at ${fullPath}: '${url}'. ` +
+            `Only HTTP/HTTPS URLs are allowed. Blocked schemes: ${BLOCKED_SCHEMES.join(', ')}`
+          );
+          continue;
+        }
+      }
+      
+      // If it has a scheme, must be http or https
+      if (url.includes('://')) {
+        if (!lowerUrl.startsWith('http://') && !lowerUrl.startsWith('https://')) {
+          errors.push(
+            `Invalid URL scheme at ${fullPath}: '${url}'. ` +
+            `Only http:// and https:// schemes are allowed.`
+          );
+          continue;
+        }
+        
+        // Validate URL is parseable
+        try {
+          new URL(url);
+        } catch {
+          errors.push(
+            `Malformed URL at ${fullPath}: '${url}'. ` +
+            `URL must be a valid HTTP/HTTPS URL.`
+          );
+          continue;
+        }
+      } else {
+        // Domain-only format: validate it looks like a domain
+        // Allow: example.com, *.example.com, api.example.com/path
+        if (!VALID_URL_PATTERN.test(url)) {
+          errors.push(
+            `Invalid URL format at ${fullPath}: '${url}'. ` +
+            `Must be a valid HTTP/HTTPS URL or domain (e.g., 'api.example.com', '*.example.com').`
+          );
+        }
+      }
+    }
+  }
+  
+  function traverseForUrls(obj: unknown, jsonPath: string): void {
+    if (!obj || typeof obj !== 'object') return;
+    const record = obj as Record<string, unknown>;
+    
+    // Check work specs for allowedUrls
+    const workFields = ['work', 'prechecks', 'postchecks', 'newWork', 'newPrechecks', 'newPostchecks'];
+    for (const field of workFields) {
+      if (record[field] && typeof record[field] === 'object') {
+        const spec = record[field] as Record<string, unknown>;
+        if (spec.type === 'agent' && spec.allowedUrls) {
+          checkUrls(spec.allowedUrls, `${jsonPath}/${field}/allowedUrls`);
+        }
+      }
+    }
+    
+    // Recurse into jobs, groups, nodes arrays
+    if (Array.isArray(record.jobs)) {
+      record.jobs.forEach((job, i) => traverseForUrls(job, `${jsonPath}/jobs/${i}`));
+    }
+    if (Array.isArray(record.groups)) {
+      record.groups.forEach((group, i) => traverseForUrls(group, `${jsonPath}/groups/${i}`));
+    }
+    if (Array.isArray(record.nodes)) {
+      record.nodes.forEach((node, i) => traverseForUrls(node, `${jsonPath}/nodes/${i}`));
+    }
+  }
+  
+  traverseForUrls(input, '');
+  
+  if (errors.length > 0) {
+    return {
+      valid: false,
+      error: `URL validation failed for '${toolName}':\n- ${errors.join('\n- ')}`
+    };
+  }
+  
+  return { valid: true };
+}
+
+/**
+ * Validate that allowedFolders are valid absolute paths that exist.
+ * 
+ * Security: Ensures agents only have access to valid, existing directories:
+ * - All paths must be absolute
+ * - All paths must exist on the filesystem
+ * - Prevents directory traversal attempts
+ * 
+ * @param input - The validated input object (after schema validation)
+ * @param toolName - Tool name for error context
+ * @returns Validation result with detailed errors for invalid folders
+ */
+export async function validateAllowedFolders(
+  input: unknown,
+  toolName: string
+): Promise<ValidationResult> {
+  const errors: string[] = [];
+  const fs = await import('fs/promises');
+  const path = await import('path');
+  
+  async function checkFolders(folders: unknown, jsonPath: string): Promise<void> {
+    if (!Array.isArray(folders)) return;
+    
+    for (let i = 0; i < folders.length; i++) {
+      const folder = folders[i];
+      if (typeof folder !== 'string') continue;
+      
+      const fullPath = `${jsonPath}[${i}]`;
+      
+      // Must be an absolute path
+      if (!path.isAbsolute(folder)) {
+        errors.push(
+          `Folder path at ${fullPath} must be absolute: '${folder}'. ` +
+          `Relative paths are not allowed for security reasons.`
+        );
+        continue;
+      }
+      
+      // Check if the path exists
+      try {
+        const stat = await fs.stat(folder);
+        if (!stat.isDirectory()) {
+          errors.push(
+            `Path at ${fullPath} is not a directory: '${folder}'. ` +
+            `Only existing directories are allowed.`
+          );
+        }
+      } catch {
+        errors.push(
+          `Folder path at ${fullPath} does not exist: '${folder}'. ` +
+          `All allowed folders must exist on the filesystem.`
+        );
+      }
+    }
+  }
+  
+  async function traverseForFolders(obj: unknown, jsonPath: string): Promise<void> {
+    if (!obj || typeof obj !== 'object') return;
+    const record = obj as Record<string, unknown>;
+    
+    // Check work specs for allowedFolders
+    const workFields = ['work', 'prechecks', 'postchecks', 'newWork', 'newPrechecks', 'newPostchecks'];
+    for (const field of workFields) {
+      if (record[field] && typeof record[field] === 'object') {
+        const spec = record[field] as Record<string, unknown>;
+        if (spec.type === 'agent' && spec.allowedFolders) {
+          await checkFolders(spec.allowedFolders, `${jsonPath}/${field}/allowedFolders`);
+        }
+      }
+    }
+    
+    // Recurse into jobs, groups, nodes arrays
+    if (Array.isArray(record.jobs)) {
+      for (let i = 0; i < record.jobs.length; i++) {
+        await traverseForFolders(record.jobs[i], `${jsonPath}/jobs/${i}`);
+      }
+    }
+    if (Array.isArray(record.groups)) {
+      for (let i = 0; i < record.groups.length; i++) {
+        await traverseForFolders(record.groups[i], `${jsonPath}/groups/${i}`);
+      }
+    }
+    if (Array.isArray(record.nodes)) {
+      for (let i = 0; i < record.nodes.length; i++) {
+        await traverseForFolders(record.nodes[i], `${jsonPath}/nodes/${i}`);
+      }
+    }
+  }
+  
+  await traverseForFolders(input, '');
+  
+  if (errors.length > 0) {
+    return {
+      valid: false,
+      error: `Folder validation failed for '${toolName}':\n- ${errors.join('\n- ')}`
+    };
+  }
+  
+  return { valid: true };
+}

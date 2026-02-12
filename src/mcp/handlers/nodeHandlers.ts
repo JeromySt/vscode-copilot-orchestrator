@@ -13,6 +13,7 @@ import {
   JobNodeSpec,
   PlanSpec,
 } from '../../plan/types';
+import { validateAllowedFolders, validateAllowedUrls, validateAgentModels } from '../validation';
 import { PRODUCER_ID_PATTERN } from '../tools/planTools';
 import {
   PlanHandlerContext,
@@ -21,7 +22,6 @@ import {
   resolveBaseBranch,
   resolveTargetBranch,
 } from './utils';
-import { validateAgentModels } from '../validation';
 
 // ============================================================================
 // VALIDATION
@@ -125,6 +125,18 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
   const modelValidation = await validateAgentModels(args, 'create_copilot_node');
   if (!modelValidation.valid) {
     return { success: false, error: modelValidation.error };
+  }
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
   }
 
   try {
@@ -535,6 +547,18 @@ export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promi
     if (!modelValidation.valid) {
       return { success: false, error: modelValidation.error };
     }
+  }
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
   }
 
   const retryOptions = {
