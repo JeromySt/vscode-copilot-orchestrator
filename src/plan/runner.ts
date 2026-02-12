@@ -63,6 +63,7 @@ import { PlanStateMachine } from './stateMachine';
 import { PlanScheduler } from './scheduler';
 import { PlanPersistence } from './persistence';
 import { Logger } from '../core/logger';
+import { GlobalCapacityManager, GlobalCapacityStats } from '../core/globalCapacity';
 import {
   formatLogEntries,
   appendWorkSummary as appendWorkSummaryHelper,
@@ -241,6 +242,7 @@ export class PlanRunner extends EventEmitter {
   private pumpTimer?: NodeJS.Timeout;
   private config: PlanRunnerConfig;
   private isRunning = false;
+  private globalCapacity?: GlobalCapacityManager;
   
   /**
    * Mutex for serializing Reverse Integration (RI) merges.
@@ -279,6 +281,15 @@ export class PlanRunner extends EventEmitter {
    */
   setExecutor(executor: JobExecutor): void {
     this.executor = executor;
+  }
+  
+  /**
+   * Set the global capacity manager for cross-instance coordination.
+   * 
+   * @param manager - The global capacity manager instance
+   */
+  setGlobalCapacityManager(manager: GlobalCapacityManager): void {
+    this.globalCapacity = manager;
   }
   
   /**
@@ -339,6 +350,15 @@ export class PlanRunner extends EventEmitter {
     for (const plan of this.plans.values()) {
       this.persistence.saveSync(plan);
     }
+  }
+  
+  /**
+   * Get global capacity statistics for UI display.
+   * 
+   * @returns Global capacity stats or null if global capacity is not enabled
+   */
+  async getGlobalCapacityStats(): Promise<GlobalCapacityStats | null> {
+    return this.globalCapacity?.getStats() || null;
   }
   
   // ============================================================================
@@ -1309,26 +1329,43 @@ export class PlanRunner extends EventEmitter {
       return; // Can't do anything without an executor
     }
     
-    // Count total running jobs across all Plans
-    let globalRunning = 0;
+    // Count local running jobs and collect active plan IDs
+    let localRunning = 0;
+    const activePlanIds: string[] = [];
+    
     for (const [planId, plan] of this.plans) {
       const sm = this.stateMachines.get(planId);
       if (!sm) continue;
+      
+      const status = sm.computePlanStatus();
+      if (status === 'running') {
+        activePlanIds.push(planId);
+      }
       
       for (const [nodeId, state] of plan.nodeStates) {
         if (state.status === 'running' || state.status === 'scheduled') {
           const node = plan.nodes.get(nodeId);
           if (node && nodePerformsWork(node)) {
-            globalRunning++;
+            localRunning++;
           }
         }
       }
     }
     
+    // Update global registry with our current count
+    if (this.globalCapacity) {
+      await this.globalCapacity.updateRunningJobs(localRunning, activePlanIds);
+    }
+    
+    // Get global running count (includes other instances)
+    const globalRunning = this.globalCapacity 
+      ? await this.globalCapacity.getTotalGlobalRunning()
+      : localRunning;
+    
     // Log overall status periodically (only if there are active Plans)
     const totalPlans = this.plans.size;
     if (totalPlans > 0) {
-      log.debug(`Pump: ${totalPlans} Plans, ${globalRunning} jobs running`);
+      log.debug(`Pump: ${totalPlans} Plans, ${globalRunning} jobs running (${localRunning} local)`);
     }
     
     // Process each Plan
@@ -1390,9 +1427,6 @@ export class PlanRunner extends EventEmitter {
         
         // Mark as scheduled
         sm.transition(nodeId, 'scheduled');
-        
-        // Count against global limit
-        globalRunning++;
         
         // Execute job node
         this.executeJobNode(plan, sm, node);
