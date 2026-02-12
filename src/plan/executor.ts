@@ -83,6 +83,7 @@ function adaptCommandForPowerShell(command: string): string {
  */
 export class DefaultJobExecutor implements JobExecutor {
   private activeExecutions = new Map<string, ActiveExecution>();
+  private activeExecutionsByNode = new Map<string, string>(); // planId:nodeId -> full execution key with attempt
   private executionLogs = new Map<string, LogEntry[]>();
   private logFiles = new Map<string, string>(); // execution key -> log file path
   private agentDelegator?: any; // IAgentDelegator interface
@@ -144,6 +145,9 @@ export class DefaultJobExecutor implements JobExecutor {
       aborted: false,
     };
     this.activeExecutions.set(executionKey, execution);
+    // Also track by node key for easy lookup without attempt number
+    const nodeKey = `${plan.id}:${node.id}`;
+    this.activeExecutionsByNode.set(nodeKey, executionKey);
     this.executionLogs.set(executionKey, []);
     
     // Track per-phase statuses and captured session ID
@@ -433,6 +437,8 @@ export class DefaultJobExecutor implements JobExecutor {
       };
     } finally {
       this.activeExecutions.delete(executionKey);
+      const nodeKey = `${plan.id}:${node.id}`;
+      this.activeExecutionsByNode.delete(nodeKey);
     }
   }
   
@@ -443,7 +449,10 @@ export class DefaultJobExecutor implements JobExecutor {
    * @param nodeId - Node identifier.
    */
   cancel(planId: string, nodeId: string): void {
-    const executionKey = `${planId}:${nodeId}`;
+    const nodeKey = `${planId}:${nodeId}`;
+    const executionKey = this.activeExecutionsByNode.get(nodeKey);
+    if (!executionKey) return;
+    
     const execution = this.activeExecutions.get(executionKey);
     
     if (execution) {
@@ -529,7 +538,11 @@ export class DefaultJobExecutor implements JobExecutor {
     duration: number | null;
     isAgentWork?: boolean;
   }> {
-    const executionKey = `${planId}:${nodeId}`;
+    const nodeKey = `${planId}:${nodeId}`;
+    const executionKey = this.activeExecutionsByNode.get(nodeKey);
+    if (!executionKey) {
+      return { pid: null, running: false, tree: [], duration: null };
+    }
     const execution = this.activeExecutions.get(executionKey);
     
     if (!execution) {
@@ -601,7 +614,11 @@ export class DefaultJobExecutor implements JobExecutor {
     }> = [];
     
     for (const { planId, nodeId, nodeName } of nodeKeys) {
-      const executionKey = `${planId}:${nodeId}`;
+      const nodeKey = `${planId}:${nodeId}`;
+      const executionKey = this.activeExecutionsByNode.get(nodeKey);
+      if (!executionKey) {
+        continue;
+      }
       const execution = this.activeExecutions.get(executionKey);
       
       if (!execution) {
@@ -650,8 +667,8 @@ export class DefaultJobExecutor implements JobExecutor {
    * @returns `true` if the execution is tracked and not yet finished.
    */
   isActive(planId: string, nodeId: string): boolean {
-    const executionKey = `${planId}:${nodeId}`;
-    return this.activeExecutions.has(executionKey);
+    const nodeKey = `${planId}:${nodeId}`;
+    return this.activeExecutionsByNode.has(nodeKey);
   }
   
   /**
