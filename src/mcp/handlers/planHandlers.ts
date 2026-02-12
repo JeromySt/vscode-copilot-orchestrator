@@ -1077,3 +1077,76 @@ export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): P
     clearWorktree: retryOptions.clearWorktree,
   };
 }
+
+/**
+ * Handle the `update_copilot_plan_node` MCP tool call.
+ *
+ * Updates a node's job specification and resets execution as needed.
+ * Any provided stage (prechecks, work, postchecks) will replace the existing
+ * definition and reset execution to re-run from that stage.
+ *
+ * @param args - Must contain `planId`, `nodeId`. At least one of `prechecks`, 
+ *               `work`, `postchecks` must be provided. Optional `resetToStage`.
+ * @param ctx  - Handler context.
+ * @returns `{ success, message, ... }`.
+ */
+export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): Promise<any> {
+  const fieldError = validateRequired(args, ['planId', 'nodeId']);
+  if (fieldError) return fieldError;
+
+  // Validate at least one stage is provided
+  if (!args.prechecks && !args.work && !args.postchecks) {
+    return errorResult('At least one stage update (prechecks, work, postchecks) must be provided');
+  }
+
+  // Validate allowedFolders paths exist in any provided stages
+  const folderValidation = await validateAllowedFolders(args, 'update_copilot_plan_node');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS in any provided stages
+  const urlValidation = await validateAllowedUrls(args, 'update_copilot_plan_node');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
+  }
+  
+  // Validate agent model names in any provided stages
+  const modelValidation = await validateAgentModels(args, 'update_copilot_plan_node');
+  if (!modelValidation.valid) {
+    return { success: false, error: modelValidation.error };
+  }
+  
+  const planResult = lookupPlan(ctx, args.planId, 'getPlan');
+  if (isError(planResult)) return planResult;
+  const plan = planResult;
+  
+  const nodeResult = lookupNode(plan, args.nodeId);
+  if (isError(nodeResult)) return nodeResult;
+  const { node } = nodeResult;
+  
+  // Build update parameters from args
+  const updates = {
+    work: args.work,
+    prechecks: args.prechecks,
+    postchecks: args.postchecks,
+    resetToStage: args.resetToStage,
+  };
+  
+  await ctx.PlanRunner.updateNode(args.planId, args.nodeId, updates);
+  
+  // Resume the Plan if it was stopped
+  await ctx.PlanRunner.resume(args.planId);
+  
+  return {
+    success: true,
+    message: `Updated node "${node.name}"`,
+    planId: args.planId,
+    nodeId: args.nodeId,
+    nodeName: node.name,
+    hasNewPrechecks: !!args.prechecks,
+    hasNewWork: !!args.work,
+    hasNewPostchecks: !!args.postchecks,
+    resetToStage: updates.resetToStage || 'auto-detected',
+  };
+}

@@ -566,6 +566,42 @@ export const getNodeFailureContextSchema = {
 } as const;
 
 /**
+ * Schema for update_copilot_plan_node input
+ */
+export const updateCopilotPlanNodeSchema = {
+  $id: 'update_copilot_plan_node',
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    nodeId: { type: 'string', minLength: 1, maxLength: 100 },
+    prechecks: {
+      oneOf: [
+        { type: 'string', maxLength: 10000 },
+        workSpecObjectSchema
+      ]
+    },
+    work: {
+      oneOf: [
+        { type: 'string', maxLength: 50000 },
+        workSpecObjectSchema
+      ]
+    },
+    postchecks: {
+      oneOf: [
+        { type: 'string', maxLength: 10000 },
+        workSpecObjectSchema
+      ]
+    },
+    resetToStage: {
+      type: 'string',
+      enum: ['prechecks', 'work', 'postchecks']
+    }
+  },
+  required: ['planId', 'nodeId'],
+  additionalProperties: false
+} as const;
+
+/**
  * All schemas indexed by tool name
  */
 export const schemas: Record<string, object> = {
@@ -591,4 +627,5 @@ export const schemas: Record<string, object> = {
   retry_copilot_node: retryNodeCentricSchema,
   force_fail_copilot_node: forceFailNodeSchema,
   get_copilot_node_failure_context: getNodeFailureContextSchema,
+  update_copilot_plan_node: updateCopilotPlanNodeSchema,
 };

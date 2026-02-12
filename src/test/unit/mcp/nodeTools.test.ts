@@ -158,6 +158,47 @@ suite('MCP Node Tool Definitions', () => {
   });
 
   // =========================================================================
+  // update_copilot_plan_node SCHEMA
+  // =========================================================================
+  suite('update_copilot_plan_node schema', () => {
+    test('is included in node tools', async () => {
+      const tools = await getNodeToolDefinitions();
+      const tool = tools.find(t => t.name === 'update_copilot_plan_node');
+      assert.ok(tool, 'update_copilot_plan_node tool should be included');
+    });
+
+    test('requires planId and nodeId', async () => {
+      const tools = await getNodeToolDefinitions();
+      const tool = tools.find(t => t.name === 'update_copilot_plan_node')!;
+      assert.ok(tool.inputSchema.required?.includes('planId'));
+      assert.ok(tool.inputSchema.required?.includes('nodeId'));
+    });
+
+    test('has optional stage properties', async () => {
+      const tools = await getNodeToolDefinitions();
+      const tool = tools.find(t => t.name === 'update_copilot_plan_node')!;
+      const properties = tool.inputSchema.properties as any;
+      assert.ok(properties.prechecks, 'should have prechecks property');
+      assert.ok(properties.work, 'should have work property');
+      assert.ok(properties.postchecks, 'should have postchecks property');
+      
+      // These should not be required since at least one must be provided
+      assert.ok(!tool.inputSchema.required?.includes('prechecks'));
+      assert.ok(!tool.inputSchema.required?.includes('work'));
+      assert.ok(!tool.inputSchema.required?.includes('postchecks'));
+    });
+
+    test('has resetToStage enum property', async () => {
+      const tools = await getNodeToolDefinitions();
+      const tool = tools.find(t => t.name === 'update_copilot_plan_node')!;
+      const properties = tool.inputSchema.properties as any;
+      assert.ok(properties.resetToStage, 'should have resetToStage property');
+      assert.strictEqual(properties.resetToStage.type, 'string');
+      assert.deepStrictEqual(properties.resetToStage.enum, ['prechecks', 'work', 'postchecks']);
+    });
+  });
+
+  // =========================================================================
   // getAllToolDefinitions AGGREGATION
   // =========================================================================
   suite('getAllToolDefinitions', () => {

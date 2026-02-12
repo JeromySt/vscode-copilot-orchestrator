@@ -23,7 +23,7 @@ export { PlanScheduler, SchedulerOptions } from './scheduler';
 export { PlanPersistence } from './persistence';
 
 // Runner
-export { PlanRunner, PlanRunnerConfig, PlanRunnerEvents, JobExecutor, RetryNodeOptions } from './runner';
+export { PlanRunner, PlanRunnerConfig, PlanRunnerEvents, JobExecutor, RetryNodeOptions, UpdateNodeOptions } from './runner';
 
 // Helpers
 export {

@@ -34,6 +34,7 @@ import {
   handleRetryPlan,
   handleGetNodeFailureContext,
   handleRetryPlanNode,
+  handleUpdatePlanNode,
   handleCreateNode,
   handleGetNode,
   handleListNodes,
@@ -282,6 +283,10 @@ export class McpHandler implements IMcpRequestRouter {
         
       case 'retry_copilot_plan_node':
         result = await handleRetryPlanNode(args || {}, this.context);
+        break;
+        
+      case 'update_copilot_plan_node':
+        result = await handleUpdatePlanNode(args || {}, this.context);
         break;
         
       // --- New node-centric tools ---

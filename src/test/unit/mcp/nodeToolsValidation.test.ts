@@ -253,6 +253,91 @@ suite('Node Tool Schema Validation', () => {
   });
   
   // =========================================================================
+  // update_copilot_plan_node Validation
+  // =========================================================================
+  suite('update_copilot_plan_node', () => {
+    test('requires planId and nodeId', () => {
+      const result = validateInput('update_copilot_plan_node', {});
+      
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes("Missing required field 'planId'") || result.error?.includes("Missing required field 'nodeId'"), 
+                `Error should mention missing required fields: ${result.error}`);
+    });
+
+    test('accepts valid minimal input with work', () => {
+      const result = validateInput('update_copilot_plan_node', {
+        planId: 'plan-123',
+        nodeId: 'node-456',
+        work: 'npm test'
+      });
+      
+      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+    });
+
+    test('accepts all stage updates', () => {
+      const result = validateInput('update_copilot_plan_node', {
+        planId: 'plan-123',
+        nodeId: 'node-456',
+        prechecks: 'npm run lint',
+        work: { type: 'agent', instructions: '# Test task' },
+        postchecks: { type: 'shell', command: 'echo done', shell: 'bash' }
+      });
+      
+      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+    });
+
+    test('accepts resetToStage parameter', () => {
+      const result = validateInput('update_copilot_plan_node', {
+        planId: 'plan-123',
+        nodeId: 'node-456',
+        work: 'npm test',
+        resetToStage: 'work'
+      });
+      
+      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+    });
+
+    test('rejects invalid resetToStage values', () => {
+      const result = validateInput('update_copilot_plan_node', {
+        planId: 'plan-123',
+        nodeId: 'node-456',
+        work: 'npm test',
+        resetToStage: 'invalid-stage'
+      });
+      
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes('resetToStage'), `Error should mention resetToStage: ${result.error}`);
+    });
+
+    test('accepts valid resetToStage values', () => {
+      const stages = ['prechecks', 'work', 'postchecks'];
+      
+      for (const stage of stages) {
+        const result = validateInput('update_copilot_plan_node', {
+          planId: 'plan-123',
+          nodeId: 'node-456',
+          work: 'npm test',
+          resetToStage: stage
+        });
+        
+        assert.ok(result.valid, `Stage '${stage}' should be valid, got: ${result.error}`);
+      }
+    });
+
+    test('rejects unknown properties', () => {
+      const result = validateInput('update_copilot_plan_node', {
+        planId: 'plan-123',
+        nodeId: 'node-456',
+        work: 'npm test',
+        unknownProp: 'invalid'
+      });
+      
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes("Unknown property 'unknownProp'"), `Error should mention 'unknownProp': ${result.error}`);
+    });
+  });
+  
+  // =========================================================================
   // get_copilot_node_failure_context Validation
   // =========================================================================
   suite('get_copilot_node_failure_context', () => {

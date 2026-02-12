@@ -236,6 +236,24 @@ export interface RetryNodeOptions {
 }
 
 /**
+ * Options for updating a node (any state)
+ */
+/**
+ * Options for updating node specs (used in legacy methods).
+ * @deprecated Use direct parameter object in updateNode method instead.
+ */
+export interface UpdateNodeOptions {
+  /** New work spec to replace original */
+  newWork?: WorkSpec;
+  /** New prechecks spec to replace original */
+  newPrechecks?: WorkSpec;
+  /** New postchecks spec to replace original */
+  newPostchecks?: WorkSpec;
+  /** Explicitly reset execution to start from this stage */
+  resetToStage?: 'prechecks' | 'work' | 'postchecks';
+}
+
+/**
  * Central orchestrator for Plan execution.
  *
  * Combines plan building, state-machine management, scheduling, executor
@@ -3715,6 +3733,151 @@ Resume working in the existing worktree and session context.`;
     this.emit('nodeRetry', planId, nodeId);
     
     return { success: true };
+  }
+  
+  /**
+   * Update a node's stages (prechecks, work, postchecks) and reset execution.
+   *
+   * Updates the job specification for the given node. Any provided stage will
+   * replace the existing definition and reset execution to re-run from that stage.
+   *
+   * @param planId  - Plan ID.
+   * @param nodeId  - Node ID to update.
+   * @param updates - Update configuration with new specs and optional reset stage.
+   * @returns Void - throws on error.
+   */
+  public async updateNode(
+    planId: string,
+    nodeId: string,
+    updates: {
+      prechecks?: WorkSpec;
+      work?: WorkSpec;
+      postchecks?: WorkSpec;
+      resetToStage?: 'prechecks' | 'work' | 'postchecks';
+    }
+  ): Promise<void> {
+    const plan = this.plans.get(planId);
+    if (!plan) throw new Error(`Plan ${planId} not found`);
+    
+    const node = plan.nodes.get(nodeId);
+    if (!node) throw new Error(`Node ${nodeId} not found`);
+    
+    const nodeState = plan.nodeStates.get(nodeId);
+    if (!nodeState) throw new Error(`Node state ${nodeId} not found`);
+    
+    // Determine which stage to reset to
+    let resetTo: 'prechecks' | 'work' | 'postchecks' | null = updates.resetToStage || null;
+    
+    // If no explicit reset, find earliest updated stage
+    if (!resetTo) {
+      if (updates.prechecks) resetTo = 'prechecks';
+      else if (updates.work) resetTo = 'work';
+      else if (updates.postchecks) resetTo = 'postchecks';
+    }
+    
+    // Apply spec updates to job node
+    if (node.type === 'job') {
+      const jobNode = node as JobNode;
+      
+      if (updates.prechecks) {
+        jobNode.prechecks = updates.prechecks;
+        log.info(`Updated prechecks for node: ${node.name}`);
+      }
+      if (updates.work) {
+        jobNode.work = updates.work;
+        log.info(`Updated work for node: ${node.name}`);
+      }
+      if (updates.postchecks) {
+        jobNode.postchecks = updates.postchecks;
+        log.info(`Updated postchecks for node: ${node.name}`);
+      }
+    }
+    
+    // Reset execution state based on resetTo
+    if (resetTo) {
+      this.resetNodeExecutionState(node, nodeState, resetTo);
+      
+      // Clear plan.endedAt so it gets recalculated when the plan completes
+      if (plan.endedAt) {
+        plan.endedAt = undefined;
+      }
+      
+      // Check if ready to run (all dependencies succeeded)
+      const sm = this.stateMachines.get(planId);
+      if (sm) {
+        const readyNodes = sm.getReadyNodes();
+        if (!readyNodes.includes(nodeId)) {
+          // Transition to ready/pending based on dependency state
+          sm.resetNodeToPending(nodeId);
+        }
+      }
+      
+      // Ensure pump is running to process the node
+      this.startPump();
+    }
+    
+    // Persist and emit
+    this.persistence.save(plan);
+    this.emit('planUpdate', planId, 'node-updated');
+    
+    log.info(`Node ${nodeId} updated, execution reset to ${resetTo} stage`);
+  }
+
+  /**
+   * Reset a node's execution state from a specific stage onwards.
+   * 
+   * @param node - The plan node.
+   * @param nodeState - The node's execution state.
+   * @param resetTo - The stage to reset from ('prechecks', 'work', or 'postchecks').
+   */
+  private resetNodeExecutionState(
+    node: PlanNode,
+    nodeState: NodeExecutionState,
+    resetTo: 'prechecks' | 'work' | 'postchecks'
+  ): void {
+    const stageOrder = ['prechecks', 'work', 'postchecks'];
+    const resetIndex = stageOrder.indexOf(resetTo);
+    
+    // Clear success markers for resetTo stage and all subsequent stages
+    if (nodeState.stepStatuses) {
+      // Map user-facing stages to internal step status phases
+      const phaseMapping = {
+        'prechecks': ['prechecks', 'work', 'commit', 'postchecks', 'merge-ri'],
+        'work': ['work', 'commit', 'postchecks', 'merge-ri'], 
+        'postchecks': ['postchecks', 'merge-ri']
+      };
+      
+      const phasesToClear = phaseMapping[resetTo] || [];
+      for (const phase of phasesToClear) {
+        if (nodeState.stepStatuses[phase as keyof typeof nodeState.stepStatuses]) {
+          nodeState.stepStatuses[phase as keyof typeof nodeState.stepStatuses] = undefined;
+        }
+      }
+    }
+    
+    // Set status back to pending (or running if plan is active)
+    nodeState.status = 'pending';
+    nodeState.error = undefined;
+    nodeState.endedAt = undefined;
+    nodeState.startedAt = undefined;
+    
+    // Clear phase-specific state
+    if (resetTo === 'prechecks' || resetTo === 'work') {
+      nodeState.completedCommit = undefined;
+      nodeState.workSummary = undefined;
+    }
+    if (resetTo === 'prechecks') {
+      // Clear all phase outputs when resetting to prechecks
+      nodeState.aggregatedWorkSummary = undefined;
+    }
+    
+    // Set resume point 
+    nodeState.resumeFromPhase = resetTo as any;
+    
+    // Increment attempts
+    nodeState.attempts = (nodeState.attempts || 0) + 1;
+    
+    log.info(`Reset node execution state for ${node.name} from stage: ${resetTo}`);
   }
   
   /**
