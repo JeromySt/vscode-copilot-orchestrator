@@ -152,6 +152,13 @@
           "default": 0,
           "description": "Maximum concurrent jobs (0 = auto, based on CPU count minus 1). Plans do not count against this limit."
         },
+        "copilotOrchestrator.globalMaxParallel": {
+          "type": "number",
+          "default": 16,
+          "minimum": 1,
+          "maximum": 32,
+          "description": "Maximum concurrent jobs across all VS Code instances"
+        },
         "copilotOrchestrator.copilotCli.required": {
           "type": "boolean",
           "default": true,

@@ -421,7 +421,7 @@ export class planDetailPanel {
    * Force a full HTML re-render, bypassing the state hash check.
    * Used when the webview requests a refresh (e.g., after an error).
    */
-  private _forceFullRefresh() {
+  private async _forceFullRefresh() {
     const plan = this._planRunner.get(this._planId);
     if (!plan) {
       this._panel.webview.html = this._getErrorHtml('Plan not found');
@@ -433,19 +433,22 @@ export class planDetailPanel {
     const recursiveCounts = this._planRunner.getRecursiveStatusCounts(this._planId);
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
     
+    // Get global capacity stats
+    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats();
+    
     // Reset hashes to force next _update to also do full render
     this._lastStateVersion = -1;
     this._lastStructureHash = '';
     this._isFirstRender = true;
     
-    this._panel.webview.html = this._getHtml(plan, status, recursiveCounts.counts, effectiveEndedAt, recursiveCounts.totalNodes);
+    this._panel.webview.html = this._getHtml(plan, status, recursiveCounts.counts, effectiveEndedAt, recursiveCounts.totalNodes, globalCapacityStats);
   }
 
   /**
    * Re-render the panel HTML if the Plan state has changed since the last render.
    * Uses a JSON state hash to skip redundant re-renders.
    */
-  private _update() {
+  private async _update() {
     const plan = this._planRunner.get(this._planId);
     if (!plan) {
       this._panel.webview.html = this._getErrorHtml('Plan not found');
@@ -459,6 +462,9 @@ export class planDetailPanel {
     const recursiveCounts = this._planRunner.getRecursiveStatusCounts(this._planId);
     const counts = recursiveCounts.counts;
     const totalNodes = recursiveCounts.totalNodes;
+    
+    // Get global capacity stats
+    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats();
     
     // Build node status map for incremental updates (includes version for efficient updates)
     const nodeStatuses: Record<string, { status: string; version: number; startedAt?: number; endedAt?: number }> = {};
@@ -506,7 +512,7 @@ export class planDetailPanel {
       this._isFirstRender = false;
       // Compute effective endedAt from node data for accurate duration
       const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
-      this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt, totalNodes);
+      this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt, totalNodes, globalCapacityStats);
       return;
     }
     
@@ -527,7 +533,12 @@ export class planDetailPanel {
       completed,
       startedAt: plan.startedAt,
       endedAt: effectiveEndedAt,
-      planMetrics: this._serializeMetrics(plan)
+      planMetrics: this._serializeMetrics(plan),
+      globalCapacity: globalCapacityStats ? {
+        activeInstances: globalCapacityStats.activeInstances,
+        totalGlobalJobs: globalCapacityStats.totalGlobalJobs,
+        globalMaxParallel: globalCapacityStats.globalMaxParallel
+      } : null
     });
   }
   
@@ -553,6 +564,7 @@ export class planDetailPanel {
    * @param effectiveEndedAt - Optional override for the Plan's end timestamp
    *   (accounts for still-running child Plans).
    * @param totalNodes - Total node count recursively including child plans.
+   * @param globalCapacityStats - Optional global capacity statistics.
    * @returns Full HTML document string.
    */
   private _getHtml(
@@ -560,7 +572,8 @@ export class planDetailPanel {
     status: string,
     counts: Record<NodeStatus, number>,
     effectiveEndedAt?: number,
-    totalNodes?: number
+    totalNodes?: number,
+    globalCapacityStats?: { thisInstanceJobs: number; totalGlobalJobs: number; globalMaxParallel: number; activeInstances: number } | null
   ): string {
     const total = totalNodes ?? plan.nodes.size;
     const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
@@ -699,6 +712,17 @@ export class planDetailPanel {
     .branch-label {
       color: var(--vscode-descriptionForeground);
       font-size: 11px;
+    }
+    
+    .capacity-info {
+      display: flex;
+      align-items: center;
+      padding: 8px 14px;
+      margin-bottom: 16px;
+      background: var(--vscode-editor-inactiveSelectionBackground);
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--vscode-descriptionForeground);
     }
     
     .stats {
@@ -1213,6 +1237,11 @@ export class planDetailPanel {
   </div>
   ` : ''}
   
+  <div class="capacity-info" id="capacityInfo" style="display: none;">
+    <span>🖥️ <span id="instanceCount">1</span> instance(s)</span>
+    <span style="margin-left: 16px;">⚡ <span id="globalJobs">0</span>/<span id="globalMax">16</span> global jobs</span>
+  </div>
+  
   <div class="stats">
     <div class="stat">
       <div class="stat-value">${total}</div>
@@ -1317,6 +1346,16 @@ ${mermaidDef}
     const nodeTooltips = ${JSON.stringify(nodeTooltips)};
     const mermaidDef = ${JSON.stringify(mermaidDef)};
     const edgeData = ${JSON.stringify(edgeData)};
+    const initialGlobalCapacity = ${JSON.stringify(globalCapacityStats)};
+    
+    // Initialize capacity info
+    if (initialGlobalCapacity && (initialGlobalCapacity.totalGlobalJobs > 0 || initialGlobalCapacity.activeInstances > 1)) {
+      const capacityInfoEl = document.getElementById('capacityInfo');
+      capacityInfoEl.style.display = 'flex';
+      document.getElementById('instanceCount').textContent = initialGlobalCapacity.activeInstances;
+      document.getElementById('globalJobs').textContent = initialGlobalCapacity.totalGlobalJobs;
+      document.getElementById('globalMax').textContent = initialGlobalCapacity.globalMaxParallel;
+    }
     
     // Token count formatter for client-side model breakdown rendering
     function formatTk(n) {
@@ -1723,7 +1762,20 @@ ${mermaidDef}
     // Handle incremental status updates without full re-render (preserves zoom/scroll)
     function handleStatusUpdate(msg) {
       try {
-        const { planStatus, nodeStatuses, counts, progress, total, completed, startedAt, endedAt, planMetrics } = msg;
+        const { planStatus, nodeStatuses, counts, progress, total, completed, startedAt, endedAt, planMetrics, globalCapacity } = msg;
+        
+        // Update global capacity info
+        if (globalCapacity) {
+          const capacityInfoEl = document.getElementById('capacityInfo');
+          if (globalCapacity.totalGlobalJobs > 0 || globalCapacity.activeInstances > 1) {
+            capacityInfoEl.style.display = 'flex';
+            document.getElementById('instanceCount').textContent = globalCapacity.activeInstances;
+            document.getElementById('globalJobs').textContent = globalCapacity.totalGlobalJobs;
+            document.getElementById('globalMax').textContent = globalCapacity.globalMaxParallel;
+          } else {
+            capacityInfoEl.style.display = 'none';
+          }
+        }
         
         // Update plan status badge
         const statusBadge = document.querySelector('.status-badge');

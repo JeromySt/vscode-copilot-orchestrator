@@ -34,13 +34,16 @@ export function attachStatusBar(context: vscode.ExtensionContext, planRunner: Pl
   item.command = 'orchestrator.refreshPlans';
   item.show();
   
-  const iv = setInterval(() => {
+  const iv = setInterval(async () => {
     const plans = planRunner.getAll();
     const runningPlans = plans.filter(plan => {
       const sm = planRunner.getStateMachine(plan.id);
       const status = sm?.computePlanStatus();
       return status === 'running';
     });
+    
+    // Get global capacity stats
+    const globalStats = await planRunner.getGlobalCapacityStats();
     
     if (runningPlans.length > 0) {
       // Count running nodes across all Plans
@@ -51,9 +54,18 @@ export function attachStatusBar(context: vscode.ExtensionContext, planRunner: Pl
         }
       }
       item.text = `Orchestrator: ${runningPlans.length} Plan${runningPlans.length > 1 ? 's' : ''} (${runningNodes} jobs)`;
+      
+      // Check if we're at global capacity limit
+      if (globalStats && globalStats.totalGlobalJobs >= globalStats.globalMaxParallel) {
+        item.text += ' (global limit)';
+        item.tooltip = `Global job limit reached (${globalStats.activeInstances} instance${globalStats.activeInstances > 1 ? 's' : ''})`;
+      } else {
+        item.tooltip = 'Copilot Orchestrator';
+      }
     } else {
       const total = plans.length;
       item.text = total > 0 ? `Orchestrator: ${total} Plan${total > 1 ? 's' : ''}` : 'Orchestrator: idle';
+      item.tooltip = 'Copilot Orchestrator';
     }
   }, 1000);
   

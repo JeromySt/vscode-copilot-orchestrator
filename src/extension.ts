@@ -17,6 +17,7 @@ import {
   initializePlansView,
   registerPlanCommands,
 } from './core/planInitialization';
+import { GlobalCapacityManager } from './core/globalCapacity';
 import { registerUtilityCommands } from './commands';
 import { IMcpManager } from './interfaces/IMcpManager';
 import { ProcessMonitor } from './process/processMonitor';
@@ -35,6 +36,9 @@ let processMonitor: ProcessMonitor | undefined;
 
 /** Plan Runner - retained for shutdown persistence */
 let planRunner: PlanRunner | undefined;
+
+/** Global Capacity Manager - retained for cleanup */
+let globalCapacity: GlobalCapacityManager | undefined;
 
 // ============================================================================
 // ACTIVATION
@@ -67,6 +71,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   processMonitor = pm;
   planRunner = runner;
 
+  // ── Global Capacity Manager ────────────────────────────────────────────
+  const globalMaxParallel = vscode.workspace.getConfiguration('copilotOrchestrator').get<number>('globalMaxParallel', 16);
+  const globalCapacityManager = new GlobalCapacityManager(context.globalStorageUri.fsPath);
+  await globalCapacityManager.initialize();
+  await globalCapacityManager.setGlobalMaxParallel(globalMaxParallel);
+  planRunner.setGlobalCapacityManager(globalCapacityManager);
+  globalCapacity = globalCapacityManager;
+  
+  // Cleanup on deactivation
+  context.subscriptions.push({
+    dispose: () => globalCapacityManager.shutdown()
+  });
+
   // ── MCP Server (stdio transport via IPC) ───────────────────────────────
   mcpManager = await initializeMcpServer(context, planRunner, config.mcp);
 
@@ -96,6 +113,13 @@ export function deactivate(): void {
     planRunner?.persistSync();
   } catch (e) {
     console.error('Failed to persist state on deactivate:', e);
+  }
+  
+  // Shutdown global capacity manager
+  try {
+    globalCapacity?.shutdown();
+  } catch (e) {
+    console.error('Failed to shutdown global capacity manager:', e);
   }
   
   // Note: mcpManager.stop() is also called by subscriptions.dispose(),

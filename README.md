@@ -616,6 +616,32 @@ Enable granular logging for troubleshooting:
 | `copilotOrchestrator.logging.debug.ui` | UI panels and webview messaging |
 | `copilotOrchestrator.logging.debug.extension` | Extension lifecycle events |
 
+### Multi-Instance Coordination
+
+The Copilot Orchestrator enforces a global limit on concurrent jobs across **ALL VS Code instances** on your machine. This protects your system from being overwhelmed when running multiple workspaces.
+
+**Default limit: 16 concurrent jobs globally**
+
+Configure via VS Code settings:
+```json
+"copilot-orchestrator.globalMaxParallel": 16
+```
+
+#### Instance Awareness
+
+The Plans view shows:
+- **Global Jobs**: Total jobs running across all instances
+- **Active Instances**: Number of VS Code windows using the orchestrator
+
+If jobs are pending, check if other instances are consuming capacity.
+
+#### How It Works
+
+- Each VS Code instance registers with a shared capacity coordinator
+- Job counts are synchronized via a file-based registry
+- Stale instances (crashed/closed) are automatically cleaned up
+- Graceful degradation if coordination fails (falls back to per-instance limits)
+
 ---
 
 ## Architecture

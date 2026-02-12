@@ -531,6 +531,45 @@ runner.setExecutor(new RemoteExecutor());
 
 ---
 
+### Global Capacity Coordination (`src/core/globalCapacity.ts`)
+
+Coordinates job capacity across multiple VS Code instances:
+
+#### Registry File
+
+Location: `{globalStorageUri}/capacity-registry.json`
+
+```json
+{
+  "version": 1,
+  "globalMaxParallel": 16,
+  "instances": [
+    {
+      "instanceId": "abc123def456",
+      "processId": 12345,
+      "runningJobs": 3,
+      "lastHeartbeat": 1234567890,
+      "activePlans": ["plan-uuid-1"]
+    }
+  ]
+}
+```
+
+#### Coordination Flow
+
+1. On activation: Register instance with unique ID
+2. Every 5 seconds: Update heartbeat, clean stale instances
+3. Before scheduling: Check global capacity across all instances
+4. On deactivation: Unregister instance
+
+#### Failure Modes
+
+- **Registry file locked**: Retry with exponential backoff
+- **Corrupt registry**: Reset to empty state
+- **Coordination unavailable**: Fall back to local counting
+
+---
+
 ## Configuration
 
 Key VS Code settings (prefix `copilotOrchestrator`):
