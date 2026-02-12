@@ -3259,8 +3259,10 @@ export class PlanRunner extends EventEmitter {
       return { success: false, error: `Node state not found: ${nodeId}` };
     }
     
-    if (nodeState.status !== 'running' && nodeState.status !== 'scheduled') {
-      return { success: false, error: `Node is not running or scheduled (current: ${nodeState.status})` };
+    // Allow force fail for more states that might indicate stuck nodes
+    const allowedStates = ['running', 'scheduled', 'pending'];
+    if (!allowedStates.includes(nodeState.status)) {
+      return { success: false, error: `Cannot force fail node in ${nodeState.status} state. Force fail is only allowed for nodes that are ${allowedStates.join(', ')}.` };
     }
     
     const sm = this.stateMachines.get(planId);

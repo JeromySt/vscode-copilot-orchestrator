@@ -566,13 +566,23 @@ export class NodeDetailPanel {
    * @param nodeId - The node to force fail.
    */
   private _forceFailNode(planId: string, nodeId: string) {
+    // Get fresh state before attempting force fail for debugging
+    const plan = this._planRunner.get(planId);
+    const nodeState = plan?.nodeStates.get(nodeId);
+    
+    console.log('Force fail attempt:', { planId, nodeId, currentStatus: nodeState?.status });
+    
     const result = this._planRunner.forceFailNode(planId, nodeId, 'Force failed via UI - process may have crashed');
+    
+    console.log('Force fail result:', result);
     
     if (result.success) {
       vscode.window.showInformationMessage('Node force failed. You can now retry it.');
       this._update();
     } else {
-      vscode.window.showErrorMessage(`Force fail failed: ${result.error}`);
+      const errorMsg = `Force fail failed: ${result.error || 'Unknown error'}`;
+      console.error(errorMsg);
+      vscode.window.showErrorMessage(errorMsg);
     }
   }
 
@@ -800,7 +810,7 @@ export class NodeDetailPanel {
       </button>
     </div>
     ` : ''}
-    ${(state.status === 'running' || state.status === 'scheduled') ? `
+    ${(state.status === 'running' || state.status === 'scheduled' || state.status === 'pending') ? `
     <div class="force-fail-section">
       <p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 8px;">
         If the process has crashed or is stuck, you can force fail this node to enable retry.
