@@ -987,7 +987,9 @@ export class NodeDetailPanel {
       } else if (action === 'retry-node-fresh') {
         vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
       } else if (action === 'force-fail-node') {
-        vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
+        if (confirm('Force-fail this node? This will mark it as failed and may affect downstream nodes.')) {
+          vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
+        }
       }
     });
     

@@ -469,6 +469,14 @@ suite('CopilotCliRunner - URL Security', () => {
       );
     });
 
+    test('allows $ in URL paths/params (e.g., OData $top)', () => {
+      const runner = createRunner();
+      assert.strictEqual(
+        runner.sanitizeUrl('https://api.example.com/odata?$top=10'),
+        'https://api.example.com/odata?$top=10'
+      );
+    });
+
     test('rejects shell metacharacters - backslash escape', () => {
       const runner = createRunner();
       assert.strictEqual(runner.sanitizeUrl('https://example.com\\evil'), null);

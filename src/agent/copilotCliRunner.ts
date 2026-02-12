@@ -338,10 +338,9 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     }
 
     // Reject shell metacharacters that could enable command injection
-    // even inside JSON.stringify quotes (backtick, $(), etc.)
-    // Note: & is allowed in URL query strings but dangerous as shell separator;
-    // we reject only unambiguous injection patterns (&&, ;, |, backtick, $())
-    if (/[`$|;\n\r\\]/.test(trimmed)) {
+    // Blocks: backtick, $( (subshell), |, ;, newlines, backslash
+    // Note: single & is allowed for URL query params; && is blocked separately below
+    if (/[`|;\n\r\\]/.test(trimmed) || /\$\(/.test(trimmed)) {
       this.logger.warn(`[SECURITY] Rejected URL containing shell metacharacters: ${trimmed.substring(0, 50)}`);
       return null;
     }
@@ -442,10 +441,6 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       this.logger.warn(`[SECURITY] No allowed paths specified, using explicit cwd: ${fallbackPath}`);
       pathsArg = `--add-dir ${JSON.stringify(fallbackPath)}`;
     } else {
-      this.logger.info(`[SECURITY] Copilot CLI allowed directories (${allowedPaths.length}):`);
-      for (const p of allowedPaths) {
-        this.logger.info(`[SECURITY]   - ${p}`);
-      }
       // Use multiple --add-dir flags for each path
       pathsArg = allowedPaths.map(p => `--add-dir ${JSON.stringify(p)}`).join(' ');
     }
