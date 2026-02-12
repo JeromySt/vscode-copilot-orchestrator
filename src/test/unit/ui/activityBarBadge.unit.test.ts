@@ -31,6 +31,13 @@ class MockPlanRunner {
     return this.mockPlans.filter(plan => plan.status === status);
   }
 
+  getStateMachine(planId: string) {
+    const plan = this.mockPlans.find(p => p.id === planId);
+    return plan ? {
+      computePlanStatus: () => plan.status
+    } : undefined;
+  }
+
   setMockPlans(plans: Array<{ id: string; status: string }>) {
     this.mockPlans = plans;
   }

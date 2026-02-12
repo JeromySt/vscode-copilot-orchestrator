@@ -361,6 +361,7 @@ export function initializePlansView(
   const { PlanTreeViewManager } = require('../ui/planTreeProvider');
   const treeViewManager = new PlanTreeViewManager(planRunner);
   treeViewManager.createTreeView(context);
+  context.subscriptions.push(treeViewManager);
   
   log.info('Plans view initialized');
 }
