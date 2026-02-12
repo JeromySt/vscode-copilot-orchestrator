@@ -710,19 +710,25 @@ export class DefaultJobExecutor implements JobExecutor {
       this.executionLogs.set(executionKey, []);
     }
     
-    const entry: LogEntry = {
-      timestamp: Date.now(),
-      phase,
-      type,
-      message,
-    };
-    
+    const timestamp = Date.now();
     const logs = this.executionLogs.get(executionKey);
-    if (logs) {
-      logs.push(entry);
-    }
     
-    this.appendToLogFile(executionKey, entry);
+    // Handle multi-line messages - create separate entry for each line
+    const lines = message.split('\n');
+    for (const line of lines) {
+      const entry: LogEntry = {
+        timestamp,
+        phase,
+        type,
+        message: line,
+      };
+      
+      if (logs) {
+        logs.push(entry);
+      }
+      
+      this.appendToLogFile(executionKey, entry);
+    }
   }
 
   // ============================================================================
@@ -1794,50 +1800,68 @@ export class DefaultJobExecutor implements JobExecutor {
     type: 'stdout' | 'stderr',
     message: string
   ): void {
-    const entry: LogEntry = {
-      timestamp: Date.now(),
-      phase,
-      type,
-      message,
-    };
-    
+    const timestamp = Date.now();
     const logs = this.executionLogs.get(executionKey);
-    if (logs) {
-      logs.push(entry);
-    }
     
-    this.appendToLogFile(executionKey, entry);
+    // Handle multi-line messages - create separate entry for each line
+    const lines = message.split('\n');
+    for (const line of lines) {
+      const entry: LogEntry = {
+        timestamp,
+        phase,
+        type,
+        message: line,
+      };
+      
+      if (logs) {
+        logs.push(entry);
+      }
+      
+      this.appendToLogFile(executionKey, entry);
+    }
   }
   
   private logInfo(executionKey: string, phase: ExecutionPhase, message: string): void {
-    const entry: LogEntry = {
-      timestamp: Date.now(),
-      phase,
-      type: 'info',
-      message,
-    };
-    
+    const timestamp = Date.now();
     const logs = this.executionLogs.get(executionKey);
-    if (logs) {
-      logs.push(entry);
-    }
     
-    this.appendToLogFile(executionKey, entry);
+    // Handle multi-line messages - create separate entry for each line
+    const lines = message.split('\n');
+    for (const line of lines) {
+      const entry: LogEntry = {
+        timestamp,
+        phase,
+        type: 'info',
+        message: line,
+      };
+      
+      if (logs) {
+        logs.push(entry);
+      }
+      
+      this.appendToLogFile(executionKey, entry);
+    }
   }
   
   private logError(executionKey: string, phase: ExecutionPhase, message: string): void {
-    const entry: LogEntry = {
-      timestamp: Date.now(),
-      phase,
-      type: 'error',
-      message,
-    };
-    
+    const timestamp = Date.now();
     const logs = this.executionLogs.get(executionKey);
-    if (logs) {
-      logs.push(entry);
-    }
     
-    this.appendToLogFile(executionKey, entry);
+    // Handle multi-line messages - create separate entry for each line
+    const lines = message.split('\n');
+    for (const line of lines) {
+      const entry: LogEntry = {
+        timestamp,
+        phase,
+        type: 'error',
+        message: line,
+      };
+      
+      if (logs) {
+        logs.push(entry);
+      }
+      
+      this.appendToLogFile(executionKey, entry);
+    }
   }
 }
