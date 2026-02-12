@@ -309,6 +309,85 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
   }
   
   /**
+   * Sanitize and validate a URL string from untrusted user input.
+   * Returns the sanitized URL or null if the input is invalid/dangerous.
+   *
+   * Defends against:
+   * - Command injection via shell metacharacters (backticks, $(), ;, |, &, newlines)
+   * - Argument injection via strings starting with -
+   * - Non-URL strings that could bypass allowlisting intent
+   * - Control characters and null bytes
+   */
+  sanitizeUrl(raw: string): string | null {
+    if (!raw || typeof raw !== 'string') {
+      this.logger.warn(`[SECURITY] Rejected URL: empty or non-string input`);
+      return null;
+    }
+
+    // Strip leading/trailing whitespace
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) {
+      this.logger.warn(`[SECURITY] Rejected URL: empty after trim`);
+      return null;
+    }
+
+    // Reject control characters and null bytes (command injection vectors)
+    if (/[\x00-\x1f\x7f]/.test(trimmed)) {
+      this.logger.warn(`[SECURITY] Rejected URL containing control characters`);
+      return null;
+    }
+
+    // Reject shell metacharacters that could enable command injection
+    // even inside JSON.stringify quotes (backtick, $(), etc.)
+    // Note: & is allowed in URL query strings but dangerous as shell separator;
+    // we reject only unambiguous injection patterns (&&, ;, |, backtick, $())
+    if (/[`$|;\n\r\\]/.test(trimmed)) {
+      this.logger.warn(`[SECURITY] Rejected URL containing shell metacharacters: ${trimmed.substring(0, 50)}`);
+      return null;
+    }
+
+    // Reject && (shell AND operator) — single & is allowed for URL query params
+    if (trimmed.includes('&&')) {
+      this.logger.warn(`[SECURITY] Rejected URL containing '&&' shell operator: ${trimmed.substring(0, 50)}`);
+      return null;
+    }
+
+    // Reject argument injection (strings starting with -)
+    if (trimmed.startsWith('-')) {
+      this.logger.warn(`[SECURITY] Rejected URL starting with dash (argument injection): ${trimmed.substring(0, 50)}`);
+      return null;
+    }
+
+    // Must be a valid URL or a wildcard domain pattern (*.example.com)
+    // Try parsing as URL first
+    const isWildcard = trimmed.startsWith('*.');
+    const urlToTest = isWildcard ? `https://${trimmed.slice(2)}` : trimmed;
+
+    // For non-wildcard URLs, require a scheme (http/https) or treat as hostname
+    let parsed: URL;
+    try {
+      parsed = new URL(urlToTest.includes('://') ? urlToTest : `https://${urlToTest}`);
+    } catch {
+      this.logger.warn(`[SECURITY] Rejected URL: invalid URL format: ${trimmed.substring(0, 50)}`);
+      return null;
+    }
+
+    // Only allow http and https schemes
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      this.logger.warn(`[SECURITY] Rejected URL with disallowed scheme: ${parsed.protocol}`);
+      return null;
+    }
+
+    // Reject URLs with embedded credentials (userinfo)
+    if (parsed.username || parsed.password) {
+      this.logger.warn(`[SECURITY] Rejected URL containing embedded credentials`);
+      return null;
+    }
+
+    return trimmed;
+  }
+
+  /**
    * Build the Copilot CLI command string.
    * Public so callers with custom execution needs can build standardized commands.
    */
@@ -373,21 +452,34 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     
     // Build --allow-url arguments for explicit URL access
     // Note: By default, no URLs are allowed (secure by default)
+    // SECURITY: allowedUrls originate from untrusted user input (MCP server / agent workSpec)
+    // and must be sanitized to prevent command injection and bypass attacks
     let urlsArg = '';
     if (allowedUrls && allowedUrls.length > 0) {
-      // Log allowed URLs for security audit
-      this.logger.info(`[SECURITY] Copilot CLI allowed URLs (${allowedUrls.length}):`);
-      for (const url of allowedUrls) {
-        // Redact query/fragment from logged URLs to avoid leaking tokens
-        try {
-          const parsed = new URL(url);
-          this.logger.info(`[SECURITY]   - ${parsed.origin}${parsed.pathname}`);
-        } catch {
-          this.logger.info(`[SECURITY]   - ${url.split('?')[0].split('#')[0]}`);
+      const sanitizedUrls: string[] = [];
+      for (const rawUrl of allowedUrls) {
+        const validated = this.sanitizeUrl(rawUrl);
+        if (validated) {
+          sanitizedUrls.push(validated);
         }
       }
-      // Build --allow-url flags
-      urlsArg = allowedUrls.map(u => `--allow-url ${JSON.stringify(u)}`).join(' ');
+      
+      if (sanitizedUrls.length > 0) {
+        // Log allowed URLs for security audit (redact query/fragment)
+        this.logger.info(`[SECURITY] Copilot CLI allowed URLs (${sanitizedUrls.length} of ${allowedUrls.length} passed validation):`);
+        for (const url of sanitizedUrls) {
+          try {
+            const parsed = new URL(url);
+            this.logger.info(`[SECURITY]   - ${parsed.origin}${parsed.pathname}`);
+          } catch {
+            this.logger.info(`[SECURITY]   - ${url.split('?')[0].split('#')[0]}`);
+          }
+        }
+        // Build --allow-url flags
+        urlsArg = sanitizedUrls.map(u => `--allow-url ${JSON.stringify(u)}`).join(' ');
+      } else {
+        this.logger.warn(`[SECURITY] All ${allowedUrls.length} provided URLs failed validation — network access disabled`);
+      }
     } else {
       this.logger.info(`[SECURITY] Copilot CLI allowed URLs: none (network access disabled)`);
     }
