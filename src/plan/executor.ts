@@ -1278,54 +1278,60 @@ export class DefaultJobExecutor implements JobExecutor {
         return 'Unknown work type';
       })();
 
-      const reviewPrompt = [
-        '# No-Change Review: Was This Outcome Expected?',
-        '',
-        '## Context',
-        `A plan node completed its work phase successfully, but produced NO file changes.`,
-        `The commit phase needs to determine: is this a legitimate "no-op" or a failure?`,
-        '',
-        '## Node Details',
-        `- **Name**: ${node.name}`,
-        `- **Task**: ${node.task}`,
-        `- **Work**: ${workDesc}`,
-        '',
-        '## Execution Logs',
-        '```',
-        truncatedLogs,
-        '```',
-        '',
-        '## Your Judgment',
-        'Based on the logs above, determine ONE of:',
-        '',
-        '1. **LEGITIMATE**: The work ran correctly but no file changes were needed.',
-        '   Examples: tests already pass, linter found no issues, files were already',
-        '   created by a dependency, agent verified work was already done.',
-        '',
-        '2. **UNEXPECTED**: The work should have produced changes but didn\'t.',
-        '   Examples: agent said it would write files but didn\'t, command silently',
-        '   failed, work was not attempted.',
-        '',
-        '## CRITICAL: Response Format',
-        'You MUST write your answer as a single-line JSON object on the LAST LINE',
-        'of your output. No markdown fences, no extra text after it.',
-        '',
-        'Format: {"legitimate": true|false, "reason": "brief explanation"}',
-        '',
-        'Example last line:',
-        '{"legitimate": true, "reason": "Tests already existed and all 24 passed — no changes needed"}',
-      ].join('\n');
+      const taskDescription = `Node: ${node.name}\nTask: ${node.task}\nWork: ${workDesc}`;
 
       this.logInfo(executionKey, 'commit', '========== AI REVIEW: NO-CHANGE ASSESSMENT ==========');
 
       // Get isolated config directory for Copilot CLI sessions
       const configDir = this.getCopilotConfigDir();
 
-      // Use a lightweight, fast model for the review
+      // Use standard agent invocation pattern - pass the full instructions content
+      // as the instructions parameter so CopilotCliRunner writes the proper file
+      const aiInstructions = `# AI Review: No-Change Assessment
+
+## Task
+You are reviewing the execution logs of an agent that completed without making file changes.
+Determine if this is a legitimate outcome or if the agent failed to do its work.
+
+## Original Task Description
+${taskDescription}
+
+## Execution Logs
+\`\`\`
+${truncatedLogs}
+\`\`\`
+
+## Your Response
+**IMPORTANT: Respond ONLY with a JSON object. No markdown, no explanation, no HTML.**
+
+Analyze the logs and respond with exactly this format:
+\`\`\`json
+{"legitimate": true, "reason": "Brief explanation why no changes were needed"}
+\`\`\`
+OR
+\`\`\`json
+{"legitimate": false, "reason": "Brief explanation of what went wrong"}
+\`\`\`
+
+### Legitimate No-Change Scenarios
+- Work was already completed in a prior commit/dependency
+- Task was verification/analysis only (no changes expected)
+- Agent correctly determined no changes were needed
+
+### NOT Legitimate (should return false)
+- Agent encountered errors and gave up
+- Agent misunderstood the task
+- Agent claimed success without evidence
+- Logs show the agent didn't attempt the work
+
+**YOUR RESPONSE (JSON ONLY):**`;
+
       const result = await this.agentDelegator.delegate({
-        task: reviewPrompt,
+        task: 'Complete the task described in the instructions.',
+        instructions: aiInstructions, // Pass instructions content to be written to file
         worktreePath,
         model: 'claude-haiku-4.5',
+        jobId: node.id, // Use node.id for proper file naming
         configDir, // Isolate sessions from user's history
         logOutput: (line: string) => this.logInfo(executionKey, 'commit', `[ai-review] ${line}`),
         onProcess: () => {}, // No need to track this short-lived process
@@ -1360,6 +1366,13 @@ export class DefaultJobExecutor implements JobExecutor {
           prev = result;
           result = result.replace(/<\/?[^>]+>/g, '');
         } while (result !== prev);
+        // Also decode HTML entities like &quot;
+        result = result
+          .replace(/&quot;/g, '"')
+          .replace(/&apos;/g, "'")
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&amp;/g, '&');
         return result.replace(/```(?:json)?\s*/g, '');
       };
 
