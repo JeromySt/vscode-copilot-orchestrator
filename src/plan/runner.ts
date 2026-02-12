@@ -236,24 +236,6 @@ export interface RetryNodeOptions {
 }
 
 /**
- * Options for updating a node (any state)
- */
-/**
- * Options for updating node specs (used in legacy methods).
- * @deprecated Use direct parameter object in updateNode method instead.
- */
-export interface UpdateNodeOptions {
-  /** New work spec to replace original */
-  newWork?: WorkSpec;
-  /** New prechecks spec to replace original */
-  newPrechecks?: WorkSpec;
-  /** New postchecks spec to replace original */
-  newPostchecks?: WorkSpec;
-  /** Explicitly reset execution to start from this stage */
-  resetToStage?: 'prechecks' | 'work' | 'postchecks';
-}
-
-/**
  * Central orchestrator for Plan execution.
  *
  * Combines plan building, state-machine management, scheduling, executor
@@ -375,15 +357,7 @@ export class PlanRunner extends EventEmitter {
           nodeState.pid = undefined;  // Clear the stale PID
           nodeState.version++; // Increment version for UI updates
           
-          // Emit transition and completion events
-          const transitionEvent: NodeTransitionEvent = {
-            planId: plan.id,
-            nodeId,
-            from: 'running',
-            to: 'failed',
-            timestamp: Date.now()
-          };
-          this.emit('nodeTransition', transitionEvent);
+          // Emit completion event
           this.emit('nodeCompleted', plan.id, nodeId, false);
         } else if (!nodeState.pid) {
           // Running but no PID tracked (old state) - also mark as crashed
@@ -394,15 +368,7 @@ export class PlanRunner extends EventEmitter {
           nodeState.endedAt = Date.now();
           nodeState.version++; // Increment version for UI updates
           
-          // Emit transition and completion events
-          const transitionEvent: NodeTransitionEvent = {
-            planId: plan.id,
-            nodeId,
-            from: 'running',
-            to: 'failed',
-            timestamp: Date.now()
-          };
-          this.emit('nodeTransition', transitionEvent);
+          // Emit completion event
           this.emit('nodeCompleted', plan.id, nodeId, false);
         }
         // If process IS running, leave it - the process monitor should re-attach
@@ -2186,33 +2152,6 @@ export class PlanRunner extends EventEmitter {
             // Get security settings from the original failed spec
             const originalAgentSpec = normalizedFailedSpec?.type === 'agent' ? normalizedFailedSpec : null;
 
-            // Build allowedFolders - always include worktree, plus inherit from work spec
-            const allowedFolders: string[] = [worktreePath];
-            const allowedUrls: string[] = [];
-            
-            // Inherit from work spec if it's an agent
-            const normalizedWorkSpec = normalizeWorkSpec(node.work);
-            if (normalizedWorkSpec?.type === 'agent') {
-              if (normalizedWorkSpec.allowedFolders) {
-                allowedFolders.push(...normalizedWorkSpec.allowedFolders);
-              }
-              if (normalizedWorkSpec.allowedUrls) {
-                allowedUrls.push(...normalizedWorkSpec.allowedUrls);
-              }
-            }
-            
-            // Also inherit from original failed spec if it was an agent
-            if (originalAgentSpec?.allowedFolders) {
-              allowedFolders.push(...originalAgentSpec.allowedFolders);
-            }
-            if (originalAgentSpec?.allowedUrls) {
-              allowedUrls.push(...originalAgentSpec.allowedUrls);
-            }
-            
-            // Deduplicate
-            const uniqueFolders = [...new Set(allowedFolders)];
-            const uniqueUrls = [...new Set(allowedUrls)];
-
             const healSpec: WorkSpec = {
               type: 'agent',
               instructions: [
@@ -2245,9 +2184,10 @@ export class PlanRunner extends EventEmitter {
                 `   ${originalCommand}`,
                 '   ```',
               ].join('\n'),
-              // Always include worktree, inherit from work spec and original failed spec
-              allowedFolders: uniqueFolders.length > 0 ? uniqueFolders : undefined,
-              allowedUrls: uniqueUrls.length > 0 ? uniqueUrls : undefined,
+              // Inherit allowed folders/URLs from original spec (if any)
+              // This ensures auto-heal has same access as the original work
+              allowedFolders: originalAgentSpec?.allowedFolders,
+              allowedUrls: originalAgentSpec?.allowedUrls,
             };
             
             // Swap ONLY the failed phase to the agent, preserve the rest
@@ -3371,124 +3311,93 @@ export class PlanRunner extends EventEmitter {
   // ============================================================================
   
   /**
-   * Force a stuck running node to failed state.
-   *
-   * Use this when a job's process has crashed but the node is still
-   * showing as "running". This allows the node to be retried.
-   *
-   * @param planId  - Plan ID.
-   * @param nodeId  - Node ID to force fail.
-   * @param reason  - Optional reason for the forced failure.
-   * @returns `{ success: true }` if force fail succeeded, or `{ success: false, error }`.
+   * Force a node to fail immediately, enabling retry.
+   * This must ALWAYS work regardless of current state.
    */
-  forceFailNode(planId: string, nodeId: string, reason?: string): { success: boolean; error?: string } {
+  public async forceFailNode(planId: string, nodeId: string): Promise<void> {
     const plan = this.plans.get(planId);
     if (!plan) {
-      return { success: false, error: `Plan not found: ${planId}` };
+      throw new Error(`Plan ${planId} not found`);
     }
     
     const node = plan.nodes.get(nodeId);
     if (!node) {
-      return { success: false, error: `Node not found: ${nodeId}` };
+      throw new Error(`Node ${nodeId} not found in plan ${planId}`);
     }
     
     const nodeState = plan.nodeStates.get(nodeId);
     if (!nodeState) {
-      return { success: false, error: `Node state not found: ${nodeId}` };
+      throw new Error(`Node state ${nodeId} not found in plan ${planId}`);
     }
     
-    // Allow force fail for more states that might indicate stuck nodes
-    const allowedStates = ['running', 'scheduled', 'pending'];
-    if (!allowedStates.includes(nodeState.status)) {
-      return { success: false, error: `Cannot force fail node in ${nodeState.status} state. Force fail is only allowed for nodes that are ${allowedStates.join(', ')}.` };
+    log.info(`Force failing node ${nodeId} (current status: ${nodeState.status}, attempts: ${nodeState.attempts})`);
+    
+    // Kill any running process for this node
+    if (nodeState.pid) {
+      try {
+        process.kill(nodeState.pid, 'SIGTERM');
+        log.info(`Killed process ${nodeState.pid} for node ${nodeId}`);
+      } catch (e) {
+        // Process may already be dead - that's fine
+        log.debug(`Could not kill process ${nodeState.pid}: ${e}`);
+      }
     }
     
-    const sm = this.stateMachines.get(planId);
-    if (!sm) {
-      return { success: false, error: `State machine not found for Plan: ${planId}` };
+    // Update node state - ALWAYS force to failed
+    const previousStatus = nodeState.status;
+    nodeState.status = 'failed';
+    nodeState.error = 'Manually failed by user (Force Fail)';
+    nodeState.forceFailed = true;  // Flag for UI to show differently
+    nodeState.pid = undefined;  // Clear PID
+    
+    // Increment attempts if it was running (counts as a failed attempt)
+    if (previousStatus === 'running') {
+      nodeState.attempts = (nodeState.attempts || 0) + 1;
     }
     
-    const failReason = reason || 'Force failed by user (process may have crashed)';
+    // Set end time
+    nodeState.endedAt = Date.now();
+    nodeState.version = (nodeState.version || 0) + 1;
+    plan.stateVersion = (plan.stateVersion || 0) + 1;
     
-    log.info(`Force failing stuck node: ${node.name}`, {
+    // CRITICAL: Persist immediately
+    await this.savePlan(planId);
+    
+    // CRITICAL: Emit event for UI update
+    this.emitNodeTransition({
       planId,
       nodeId,
-      previousStatus: nodeState.status,
-      reason: failReason,
+      previousStatus,
+      newStatus: 'failed',
+      reason: 'force-failed'
     });
     
-    // Cancel any active execution tracking
-    if (this.executor) {
-      this.executor.cancel(planId, nodeId);
+    log.info(`Node ${nodeId} force failed successfully. New status: ${nodeState.status}`);
+  }
+
+  /**
+   * Save plan state to persistence layer.
+   */
+  private async savePlan(planId: string): Promise<void> {
+    const plan = this.plans.get(planId);
+    if (plan) {
+      this.persistence.save(plan);
     }
-    
-    // Set error before transition so it's available in side-effect handlers
-    nodeState.error = failReason;
-    
-    // Use state machine transition to properly propagate failure
-    // This handles: status change, timestamps, version increments,
-    // blocking dependents, updating group state, and checking plan completion
-    const transitioned = sm.transition(nodeId, 'failed');
-    if (!transitioned) {
-      // Fallback: force it directly (should not happen for running/scheduled nodes)
-      nodeState.status = 'failed';
-      nodeState.endedAt = Date.now();
-      nodeState.version = (nodeState.version || 0) + 1;
-      plan.stateVersion = (plan.stateVersion || 0) + 1;
-    }
-    
-    // Note: attempts was already incremented when the node started running,
-    // so we don't increment it again here
-    
-    // Update last attempt info
-    nodeState.lastAttempt = {
-      phase: 'work',
-      startTime: nodeState.startedAt || Date.now(),
-      endTime: Date.now(),
-      error: failReason,
-    };
-    
-    // Add to attempt history with execution logs preserved
-    if (!nodeState.attemptHistory) {
-      nodeState.attemptHistory = [];
-    }
-    
-    // Get any logs that were captured before the crash
-    const logs = this.getNodeLogs(planId, nodeId);
-    
-    nodeState.attemptHistory.push({
-      attemptNumber: nodeState.attempts || 1,
-      triggerType: 'retry',
-      startedAt: nodeState.startedAt || Date.now(),
-      endedAt: Date.now(),
-      status: 'failed',
-      failedPhase: 'work',
-      error: failReason,
-      copilotSessionId: nodeState.copilotSessionId,
-      stepStatuses: nodeState.stepStatuses,
-      worktreePath: nodeState.worktreePath,
-      baseCommit: nodeState.baseCommit,
-      logs,
-      logFilePath: this.getNodeLogFilePath(planId, nodeId, nodeState.attempts || 1),
-      workUsed: node.type === 'job' ? (node as JobNode).work : undefined,
-    });
-    
-    // Emit events
-    const transitionEvent: NodeTransitionEvent = {
-      planId,
-      nodeId,
-      from: 'running',
-      to: 'failed',
-      timestamp: Date.now()
-    };
-    this.emit('nodeTransition', transitionEvent);
-    this.emit('nodeUpdated', planId, nodeId);
-    this.emit('planUpdated', planId);
-    
-    // Persist the updated state
-    this.persistence.save(plan);
-    
-    return { success: true };
+  }
+
+  /**
+   * Emit node transition event for UI updates.
+   */
+  private emitNodeTransition(event: {
+    planId: string;
+    nodeId: string;
+    previousStatus: NodeStatus;
+    newStatus: NodeStatus;
+    reason: string;
+  }): void {
+    this.emit('nodeTransition', event.planId, event.nodeId, event.previousStatus, event.newStatus);
+    this.emit('nodeUpdated', event.planId, event.nodeId);
+    this.emit('planUpdated', event.planId);
   }
 
   // ============================================================================
@@ -3733,151 +3642,6 @@ Resume working in the existing worktree and session context.`;
     this.emit('nodeRetry', planId, nodeId);
     
     return { success: true };
-  }
-  
-  /**
-   * Update a node's stages (prechecks, work, postchecks) and reset execution.
-   *
-   * Updates the job specification for the given node. Any provided stage will
-   * replace the existing definition and reset execution to re-run from that stage.
-   *
-   * @param planId  - Plan ID.
-   * @param nodeId  - Node ID to update.
-   * @param updates - Update configuration with new specs and optional reset stage.
-   * @returns Void - throws on error.
-   */
-  public async updateNode(
-    planId: string,
-    nodeId: string,
-    updates: {
-      prechecks?: WorkSpec;
-      work?: WorkSpec;
-      postchecks?: WorkSpec;
-      resetToStage?: 'prechecks' | 'work' | 'postchecks';
-    }
-  ): Promise<void> {
-    const plan = this.plans.get(planId);
-    if (!plan) throw new Error(`Plan ${planId} not found`);
-    
-    const node = plan.nodes.get(nodeId);
-    if (!node) throw new Error(`Node ${nodeId} not found`);
-    
-    const nodeState = plan.nodeStates.get(nodeId);
-    if (!nodeState) throw new Error(`Node state ${nodeId} not found`);
-    
-    // Determine which stage to reset to
-    let resetTo: 'prechecks' | 'work' | 'postchecks' | null = updates.resetToStage || null;
-    
-    // If no explicit reset, find earliest updated stage
-    if (!resetTo) {
-      if (updates.prechecks) resetTo = 'prechecks';
-      else if (updates.work) resetTo = 'work';
-      else if (updates.postchecks) resetTo = 'postchecks';
-    }
-    
-    // Apply spec updates to job node
-    if (node.type === 'job') {
-      const jobNode = node as JobNode;
-      
-      if (updates.prechecks) {
-        jobNode.prechecks = updates.prechecks;
-        log.info(`Updated prechecks for node: ${node.name}`);
-      }
-      if (updates.work) {
-        jobNode.work = updates.work;
-        log.info(`Updated work for node: ${node.name}`);
-      }
-      if (updates.postchecks) {
-        jobNode.postchecks = updates.postchecks;
-        log.info(`Updated postchecks for node: ${node.name}`);
-      }
-    }
-    
-    // Reset execution state based on resetTo
-    if (resetTo) {
-      this.resetNodeExecutionState(node, nodeState, resetTo);
-      
-      // Clear plan.endedAt so it gets recalculated when the plan completes
-      if (plan.endedAt) {
-        plan.endedAt = undefined;
-      }
-      
-      // Check if ready to run (all dependencies succeeded)
-      const sm = this.stateMachines.get(planId);
-      if (sm) {
-        const readyNodes = sm.getReadyNodes();
-        if (!readyNodes.includes(nodeId)) {
-          // Transition to ready/pending based on dependency state
-          sm.resetNodeToPending(nodeId);
-        }
-      }
-      
-      // Ensure pump is running to process the node
-      this.startPump();
-    }
-    
-    // Persist and emit
-    this.persistence.save(plan);
-    this.emit('planUpdate', planId, 'node-updated');
-    
-    log.info(`Node ${nodeId} updated, execution reset to ${resetTo} stage`);
-  }
-
-  /**
-   * Reset a node's execution state from a specific stage onwards.
-   * 
-   * @param node - The plan node.
-   * @param nodeState - The node's execution state.
-   * @param resetTo - The stage to reset from ('prechecks', 'work', or 'postchecks').
-   */
-  private resetNodeExecutionState(
-    node: PlanNode,
-    nodeState: NodeExecutionState,
-    resetTo: 'prechecks' | 'work' | 'postchecks'
-  ): void {
-    const stageOrder = ['prechecks', 'work', 'postchecks'];
-    const resetIndex = stageOrder.indexOf(resetTo);
-    
-    // Clear success markers for resetTo stage and all subsequent stages
-    if (nodeState.stepStatuses) {
-      // Map user-facing stages to internal step status phases
-      const phaseMapping = {
-        'prechecks': ['prechecks', 'work', 'commit', 'postchecks', 'merge-ri'],
-        'work': ['work', 'commit', 'postchecks', 'merge-ri'], 
-        'postchecks': ['postchecks', 'merge-ri']
-      };
-      
-      const phasesToClear = phaseMapping[resetTo] || [];
-      for (const phase of phasesToClear) {
-        if (nodeState.stepStatuses[phase as keyof typeof nodeState.stepStatuses]) {
-          nodeState.stepStatuses[phase as keyof typeof nodeState.stepStatuses] = undefined;
-        }
-      }
-    }
-    
-    // Set status back to pending (or running if plan is active)
-    nodeState.status = 'pending';
-    nodeState.error = undefined;
-    nodeState.endedAt = undefined;
-    nodeState.startedAt = undefined;
-    
-    // Clear phase-specific state
-    if (resetTo === 'prechecks' || resetTo === 'work') {
-      nodeState.completedCommit = undefined;
-      nodeState.workSummary = undefined;
-    }
-    if (resetTo === 'prechecks') {
-      // Clear all phase outputs when resetting to prechecks
-      nodeState.aggregatedWorkSummary = undefined;
-    }
-    
-    // Set resume point 
-    nodeState.resumeFromPhase = resetTo as any;
-    
-    // Increment attempts
-    nodeState.attempts = (nodeState.attempts || 0) + 1;
-    
-    log.info(`Reset node execution state for ${node.name} from stage: ${resetTo}`);
   }
   
   /**

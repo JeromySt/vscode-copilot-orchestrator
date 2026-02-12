@@ -162,6 +162,12 @@ export interface NodeExecutionState {
   pid?: number;
   
   /**
+   * Flag indicating this node was manually force-failed by the user.
+   * Used by UI to show different styling/messaging for user-initiated failures.
+   */
+  forceFailed?: boolean;
+  
+  /**
    * Phase to resume from on retry.
    * Set when a node fails and is retried - allows skipping already-completed phases.
    * Cleared when new work is provided or worktree is reset.
