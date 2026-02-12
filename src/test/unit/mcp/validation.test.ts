@@ -514,4 +514,184 @@ suite('MCP Schema Validation', () => {
       assert.ok(result.valid);
     });
   });
+
+  // =========================================================================
+  // WorkSpec Schema - allowedFolders
+  // =========================================================================
+  suite('WorkSpec Schema - allowedFolders', () => {
+    test('accepts valid allowedFolders array', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'test-plan',
+        jobs: [{
+          producer_id: 'test-job',
+          task: 'Do something',
+          work: {
+            type: 'agent',
+            instructions: 'Build feature',
+            allowedFolders: ['/shared/libs', '/config']
+          },
+          dependencies: []
+        }]
+      });
+      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+    });
+
+    test('rejects too many allowedFolders', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'test-plan',
+        jobs: [{
+          producer_id: 'test-job',
+          task: 'Do something',
+          work: {
+            type: 'agent',
+            instructions: 'Build feature',
+            allowedFolders: Array(25).fill('/some/path') // Over limit of 20
+          },
+          dependencies: []
+        }]
+      });
+      assert.ok(!result.valid, 'Expected invalid when allowedFolders exceeds maxItems');
+      assert.ok(result.error?.includes('too many'), `Error should mention 'too many': ${result.error}`);
+    });
+
+    test('accepts allowedFolders at schema maxItems limit (20)', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'test-plan',
+        jobs: [{
+          producer_id: 'test-job',
+          task: 'Do something',
+          work: {
+            type: 'agent',
+            instructions: 'Build feature',
+            allowedFolders: Array(20).fill('/some/path')
+          },
+          dependencies: []
+        }]
+      });
+      assert.ok(result.valid, `Expected valid with 20 allowedFolders, got: ${result.error}`);
+    });
+
+    test('rejects allowedFolders with excessively long paths', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'test-plan',
+        jobs: [{
+          producer_id: 'test-job',
+          task: 'Do something',
+          work: {
+            type: 'agent',
+            instructions: 'Build feature',
+            allowedFolders: ['/' + 'a'.repeat(600)] // Exceeds maxLength of 500
+          },
+          dependencies: []
+        }]
+      });
+      assert.ok(!result.valid, 'Expected invalid when path exceeds maxLength');
+      assert.ok(result.error?.includes('too long'), `Error should mention 'too long': ${result.error}`);
+    });
+
+    test('accepts allowedFolders at path maxLength limit (500)', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'test-plan',
+        jobs: [{
+          producer_id: 'test-job',
+          task: 'Do something',
+          work: {
+            type: 'agent',
+            instructions: 'Build feature',
+            allowedFolders: ['/' + 'a'.repeat(498)] // Exactly 500 chars
+          },
+          dependencies: []
+        }]
+      });
+      assert.ok(result.valid, `Expected valid with 500-char path, got: ${result.error}`);
+    });
+
+    test('allowedFolders only applies to agent type work', () => {
+      // Test that allowedFolders is not allowed on shell type
+      const result = validateInput('create_copilot_plan', {
+        name: 'test-plan',
+        jobs: [{
+          producer_id: 'shell-job',
+          task: 'Run shell command',
+          work: {
+            type: 'shell',
+            shell: 'bash',
+            command: 'echo test',
+            allowedFolders: ['/some/path']
+          },
+          dependencies: []
+        }]
+      });
+      // The schema allows allowedFolders on the work object, but it's ignored for shell type
+      // So this should still be valid (schema doesn't enforce type-specific constraints)
+      assert.ok(result.valid, `Expected valid (allowedFolders ignored for shell), got: ${result.error}`);
+    });
+
+    test('accepts empty allowedFolders array', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'test-plan',
+        jobs: [{
+          producer_id: 'test-job',
+          task: 'Do something',
+          work: {
+            type: 'agent',
+            instructions: 'Build feature',
+            allowedFolders: []
+          },
+          dependencies: []
+        }]
+      });
+      assert.ok(result.valid, `Expected valid with empty allowedFolders, got: ${result.error}`);
+    });
+
+    test('accepts missing allowedFolders property', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'test-plan',
+        jobs: [{
+          producer_id: 'test-job',
+          task: 'Do something',
+          work: {
+            type: 'agent',
+            instructions: 'Build feature'
+          },
+          dependencies: []
+        }]
+      });
+      assert.ok(result.valid, `Expected valid without allowedFolders, got: ${result.error}`);
+    });
+
+    test('rejects non-array allowedFolders', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'test-plan',
+        jobs: [{
+          producer_id: 'test-job',
+          task: 'Do something',
+          work: {
+            type: 'agent',
+            instructions: 'Build feature',
+            allowedFolders: '/single/path' // Should be array, not string
+          },
+          dependencies: []
+        }]
+      });
+      assert.ok(!result.valid, 'Expected invalid when allowedFolders is not an array');
+    });
+
+    test('rejects non-string items in allowedFolders array', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'test-plan',
+        jobs: [{
+          producer_id: 'test-job',
+          task: 'Do something',
+          work: {
+            type: 'agent',
+            instructions: 'Build feature',
+            allowedFolders: ['/valid/path', 123, '/another/path'] // Contains number
+          },
+          dependencies: []
+        }]
+      });
+      assert.ok(!result.valid, 'Expected invalid when allowedFolders contains non-string');
+    });
+  });
 });

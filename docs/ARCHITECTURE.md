@@ -531,6 +531,25 @@ runner.setExecutor(new RemoteExecutor());
 
 ---
 
+## Security Model
+
+### Agent Sandbox
+
+Agent jobs run in isolated worktree folders. The Copilot CLI is invoked with `--allow-paths` restricted to:
+1. The job's worktree folder (always included)
+2. Any additional folders specified in `allowedFolders`
+
+This prevents:
+- Cross-job file access
+- Modification of repository root
+- Access to system files
+
+**Default Isolation**: When no `allowedFolders` are specified, agents can only read/write files within their assigned worktree. This provides baseline security for concurrent job execution without requiring explicit allowlisting.
+
+**Opt-in Sharing**: Teams can grant agents access to shared resources (libraries, configs, shared tools) by explicitly listing paths in `allowedFolders` within the work specification. This follows a principle of least privilege — sharing is explicit, not implicit.
+
+---
+
 ## Configuration
 
 Key VS Code settings (prefix `copilotOrchestrator`):

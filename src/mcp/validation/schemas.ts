@@ -30,6 +30,8 @@ export interface WorkSpec {
   shell?: 'cmd' | 'powershell' | 'pwsh' | 'bash' | 'sh';
   instructions?: string;
   maxTurns?: number;
+  /** Additional folder paths the agent is allowed to access beyond the worktree */
+  allowedFolders?: string[];
 }
 
 /**
@@ -103,7 +105,12 @@ const workSpecObjectSchema = {
     instructions: { type: 'string' },
     model: { type: 'string', maxLength: 100 },
     maxTurns: { type: 'number', minimum: 1, maximum: 100 },
-    resumeSession: { type: 'boolean' }
+    resumeSession: { type: 'boolean' },
+    allowedFolders: {
+      type: 'array',
+      items: { type: 'string', maxLength: 500 },
+      maxItems: 20
+    }
   },
   additionalProperties: false
 } as const;

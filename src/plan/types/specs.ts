@@ -130,6 +130,30 @@ export interface AgentSpec {
   
   /** Resume existing Copilot session if available (default: true) */
   resumeSession?: boolean;
+  
+  /**
+   * Additional folder paths the agent is allowed to access beyond the worktree.
+   * 
+   * **Security Consideration**: By default, agents are sandboxed to only access files
+   * within their assigned worktree folder. This prevents cross-job interference and
+   * unintended modifications to shared repository areas.
+   * 
+   * Specify absolute paths here to grant agents access to shared resources
+   * (e.g., shared libraries, config files, build tools). Each path becomes
+   * an allowed access point passed to the Copilot CLI via `--allow-paths`.
+   * 
+   * **Principle of Least Privilege**: Only add folders that the agent truly needs.
+   * 
+   * @example
+   * ```typescript
+   * allowedFolders: [
+   *   '/path/to/shared/libs',
+   *   '/path/to/config',
+   *   '/path/to/build-tools'
+   * ]
+   * ```
+   */
+  allowedFolders?: string[];
 }
 
 /**

@@ -1000,6 +1000,9 @@ export class DefaultJobExecutor implements JobExecutor {
     if (sessionId) {
       this.logInfo(executionKey, phase, `Resuming Copilot session: ${sessionId}`);
     }
+    if (spec.allowedFolders && spec.allowedFolders.length > 0) {
+      this.logInfo(executionKey, phase, `Agent allowed folders: ${spec.allowedFolders.join(', ')}`);
+    }
     
     try {
       const result = await this.agentDelegator.delegate({
@@ -1011,6 +1014,7 @@ export class DefaultJobExecutor implements JobExecutor {
         maxTurns: spec.maxTurns,
         sessionId, // Pass session ID for resumption
         jobId: node.id,
+        allowedFolders: spec.allowedFolders,  // NEW: pass through
         logOutput: (line: string) => this.logInfo(executionKey, phase, line),
         onProcess: (proc: any) => {
           // Track the Copilot CLI process for monitoring (CPU/memory/tree)
