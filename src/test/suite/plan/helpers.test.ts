@@ -15,7 +15,7 @@ import {
   mergeWorkSummary,
   computeMergedLeafWorkSummary,
 } from '../../../plan/helpers';
-import { NodeExecutionState, LogEntry, JobWorkSummary, ExecutionPhase, PlanInstance } from '../../../plan/types';
+import { NodeExecutionState, LogEntry, JobWorkSummary, PlanInstance } from '../../../plan/types';
 
 suite('Plan Helpers', () => {
   // =========================================================================

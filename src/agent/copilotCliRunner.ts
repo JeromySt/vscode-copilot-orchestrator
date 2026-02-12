@@ -177,7 +177,6 @@ export class CopilotCliRunner {
       onProcess,
       timeout = 300000, // 5 minutes default
       skipInstructionsFile = false,
-      configDir,
     } = options;
     
     // Check if Copilot CLI is available

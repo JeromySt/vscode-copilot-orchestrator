@@ -358,7 +358,7 @@ export class PlanRunner extends EventEmitter {
    * @returns Global capacity stats or null if global capacity is not enabled
    */
   async getGlobalCapacityStats(): Promise<GlobalCapacityStats | null> {
-    return this.globalCapacity?.getStats() || null;
+    return (await this.globalCapacity?.getStats()) || null;
   }
   
   // ============================================================================

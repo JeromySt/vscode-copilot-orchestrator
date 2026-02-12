@@ -14,8 +14,7 @@ suite('GlobalCapacityManager', () => {
 
   setup(async () => {
     // Create unique temp directory for each test
-    tempDir = path.join(os.tmpdir(), `global-capacity-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    fs.mkdirSync(tempDir, { recursive: true });
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'global-capacity-test-'));
     manager = new GlobalCapacityManager(tempDir);
   });
 
@@ -357,7 +356,7 @@ suite('GlobalCapacityManager', () => {
       manager.getAvailableCapacity()
     ];
     
-    const results = await Promise.all(operations);
+    await Promise.all(operations);
     
     // Verify we got valid results (no crashes or corrupted data)
     const finalStats = await manager.getStats();

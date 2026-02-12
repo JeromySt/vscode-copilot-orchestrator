@@ -23,7 +23,7 @@
  * @module core/powerManager
  */
 
-import { spawn, ChildProcess, execFile } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import * as os from 'os';
 import { Logger } from './logger';
 

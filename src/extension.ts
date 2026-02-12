@@ -25,7 +25,7 @@ import { IMcpManager } from './interfaces/IMcpManager';
 import { ProcessMonitor } from './process/processMonitor';
 import { PlanRunner } from './plan';
 import { Logger } from './core/logger';
-import { cleanupOrphanedWorktrees, CleanupResult } from './core/orphanedWorktreeCleanup';
+import { cleanupOrphanedWorktrees } from './core/orphanedWorktreeCleanup';
 import type { PlanInstance } from './plan/types/plan';
 
 // ============================================================================
