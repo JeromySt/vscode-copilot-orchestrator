@@ -2086,6 +2086,9 @@ export class PlanRunner extends EventEmitter {
               ? `... (${logLines.length - 200} earlier lines omitted)\n` + logLines.slice(-200).join('\n')
               : phaseLogs;
             
+            // Get security settings from the original failed spec
+            const originalAgentSpec = normalizedFailedSpec?.type === 'agent' ? normalizedFailedSpec : null;
+
             const healSpec: WorkSpec = {
               type: 'agent',
               instructions: [
@@ -2118,6 +2121,10 @@ export class PlanRunner extends EventEmitter {
                 `   ${originalCommand}`,
                 '   ```',
               ].join('\n'),
+              // Inherit allowed folders/URLs from original spec (if any)
+              // This ensures auto-heal has same access as the original work
+              allowedFolders: originalAgentSpec?.allowedFolders,
+              allowedUrls: originalAgentSpec?.allowedUrls,
             };
             
             // Swap ONLY the failed phase to the agent, preserve the rest

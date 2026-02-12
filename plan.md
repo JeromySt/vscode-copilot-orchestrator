@@ -1,50 +1,41 @@
-# Task: Integrate File Watcher with PlanRunner
+# Worktree Path Debugging Plan
 
-## Overview
-Add `OrchestratorFileWatcher` to `PlanRunner` to detect when plan files are externally deleted (e.g., by `git clean -dfx`) and update in-memory state accordingly.
+## Issue Analysis
+The logs show "Permission denied" when the agent tries to read files in the worktree. The worktree should always be in allowed paths.
 
-## Changes Required
+## Key Findings
+1. **Call chain is correct**: executor → agentDelegator → copilotCliRunner
+   - executor passes `worktreePath` 
+   - agentDelegator passes `worktreePath` as `cwd`
+   - copilotCliRunner adds `cwd` to `allowedPaths`
 
-1. **Add import** for `OrchestratorFileWatcher` from `'../core'`
-2. **Add private member** `_fileWatcher` to store the watcher instance
-3. **Initialize in constructor** to watch for external plan deletions
-4. **Add handler method** `_handleExternalPlanDeletion` to process deletion events
-5. **Update disposal** to clean up the watcher
-6. **Handle running plan cancellation** edge case with optional `skipPersist` parameter
+2. **Root cause identified**:
+   - cwd (worktree path) was added without path normalization
+   - cwd was added without existence check
+   - allowedFolders get normalized with `path.resolve()` but cwd didn't
 
-## Key Considerations
+## Solution Applied
+Added normalization and existence validation for the cwd path, similar to allowedFolders.
 
-- The file watcher needs the workspace path (parent of `.orchestrator/plans/`)
-- Use `config.storagePath` which should be `.orchestrator` directory 
-- Need to extract workspace path from `storagePath` (remove `/plans` suffix if present)
-- Reuse existing `cancel()` method logic but avoid persistence since file is gone
-- Fire `planDeleted` event to notify UI
-- Show user notification about external deletion
+## Implementation Complete ✅
+1. **Modified `buildCommand` in `copilotCliRunner.ts`**:
+   - Added path normalization: `const normalizedCwd = path.resolve(cwd);`
+   - Added existence check: `fs.existsSync(normalizedCwd)`
+   - Added debug logging for worktree path addition
+   - Added error logging if worktree doesn't exist (but still add to prevent fallback)
 
-## Implementation Status
-- [x] Step 1: Add import
-- [x] Step 2: Add private member
-- [x] Step 3: Initialize in constructor  
-- [x] Step 4: Add handler method
-- [x] Step 5: Update disposal
-- [x] Step 6: Handle cancellation edge case
+2. **Added debug logging**:
+   - Track worktree path being added: `[SECURITY] Added worktree to allowed paths: ${normalizedCwd}`
+   - Log final command for troubleshooting: `[SECURITY] Final Copilot command: ${cmd}`
 
 ## Changes Made
+- Lines 408-419: Enhanced cwd handling with normalization and validation
+- Line 413: Added debug logging for successful worktree addition  
+- Line 415: Added error logging for missing worktree
+- Line 518: Added debug logging for final command
 
-1. **Added import**: `import { OrchestratorFileWatcher } from '../core';`
-2. **Added private member**: `private readonly _fileWatcher: OrchestratorFileWatcher;`
-3. **Initialized in constructor**: 
-   - Extract workspace path from `config.storagePath`
-   - Create file watcher instance with deletion callback
-4. **Added handler method**: `_handleExternalPlanDeletion()`
-   - Check if plan exists in memory
-   - Cancel running plan if needed (without persistence)
-   - Remove from memory state
-   - Fire `planDeleted` event
-   - Show user notification
-5. **Updated disposal**: Added `_fileWatcher.dispose()` to `shutdown()` method
-6. **Updated cancel method**: Added optional `{ skipPersist?: boolean }` parameter
-
-## Testing
-- TypeScript compilation passes without errors
-- All changes follow existing code patterns and conventions
+## Expected Result
+- The worktree path should now be properly normalized before being added to allowedPaths
+- Debug logs should show the exact path being used
+- This should resolve "Permission denied" issues when accessing worktree files
+- Logs will now clearly show if the worktree path exists and how it's being passed to Copilot CLI

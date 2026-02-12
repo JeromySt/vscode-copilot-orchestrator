@@ -406,7 +406,16 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     // Build allowed paths list: worktree + any additional folders
     const allowedPaths: string[] = [];
     if (cwd) {
-      allowedPaths.push(cwd);
+      // Normalize and validate the working directory path (usually the worktree)
+      const normalizedCwd = path.resolve(cwd);
+      if (fs.existsSync(normalizedCwd)) {
+        allowedPaths.push(normalizedCwd);
+        this.logger.debug(`[SECURITY] Added worktree to allowed paths: ${normalizedCwd}`);
+      } else {
+        this.logger.error(`[SECURITY] Working directory does not exist: ${cwd} (normalized: ${normalizedCwd})`);
+        // Still add it to prevent fallback to process.cwd(), but log the issue
+        allowedPaths.push(normalizedCwd);
+      }
     }
     if (allowedFolders && allowedFolders.length > 0) {
       // Validate and normalize paths — must be absolute for security
@@ -504,6 +513,9 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     if (sessionId) {
       cmd += ` --resume ${sessionId}`;
     }
+    
+    // Debug log the final command for troubleshooting
+    this.logger.debug(`[SECURITY] Final Copilot command: ${cmd}`);
     
     return cmd;
   }
