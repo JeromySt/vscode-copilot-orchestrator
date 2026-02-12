@@ -795,7 +795,8 @@ export class NodeDetailPanel {
     </div>
     ${state.error ? `
     <div class="error-box">
-      <strong>Error:</strong> <span class="error-message">${escapeHtml(state.error)}</span>
+      <strong>${state.failureReason === 'crashed' ? 'Crashed:' : 'Error:'}</strong> 
+      <span class="error-message ${state.failureReason === 'crashed' ? 'crashed' : ''}">${escapeHtml(state.error)}</span>
       ${state.lastAttempt?.phase ? `<div class="error-phase">Failed in phase: <strong>${state.lastAttempt.phase}</strong></div>` : ''}
       ${state.lastAttempt?.exitCode !== undefined ? `<div class="error-phase">Exit code: <strong>${state.lastAttempt.exitCode}</strong></div>` : ''}
     </div>
@@ -2210,6 +2211,14 @@ export class NodeDetailPanel {
       line-height: 1.5;
       display: block;
       margin-top: 4px;
+    }
+    .error-message.crashed {
+      background: rgba(255, 100, 0, 0.1);
+      border: 1px solid rgba(255, 100, 0, 0.3);
+      border-radius: 4px;
+      padding: 4px 8px;
+      color: #ff6400;
+      font-weight: 500;
     }
     .error-phase {
       margin-top: 6px;

@@ -195,6 +195,7 @@ export class DefaultJobExecutor implements JobExecutor {
           error: `Worktree does not exist: ${worktreePath}`,
           stepStatuses,
           failedPhase: 'prechecks',
+          pid: execution.process?.pid,
         };
       }
       
@@ -239,6 +240,7 @@ export class DefaultJobExecutor implements JobExecutor {
             exitCode: precheckResult.exitCode,
             metrics: capturedMetrics,
             phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+            pid: execution.process?.pid,
           };
         }
         stepStatuses.prechecks = 'success';
@@ -250,7 +252,7 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Check if aborted
       if (execution.aborted) {
-        return { success: false, error: 'Execution canceled', stepStatuses };
+        return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };
       }
       
       // Run main work (skip if resuming from later phase)
@@ -300,6 +302,7 @@ export class DefaultJobExecutor implements JobExecutor {
             exitCode: workResult.exitCode,
             metrics: capturedMetrics,
             phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+            pid: execution.process?.pid,
           };
         }
         stepStatuses.work = 'success';
@@ -316,7 +319,7 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Check if aborted
       if (execution.aborted) {
-        return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
+        return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId, pid: execution.process?.pid };
       }
       
       // Run postchecks (skip if resuming from later phase)
@@ -362,6 +365,7 @@ export class DefaultJobExecutor implements JobExecutor {
             exitCode: postcheckResult.exitCode,
             metrics: capturedMetrics,
             phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+            pid: execution.process?.pid,
           };
         }
         stepStatuses.postchecks = 'success';
@@ -419,6 +423,7 @@ export class DefaultJobExecutor implements JobExecutor {
             failedPhase: 'commit',
             metrics: capturedMetrics,
             phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+            pid: execution.process?.pid,
           };
         }
       } else {
@@ -441,6 +446,7 @@ export class DefaultJobExecutor implements JobExecutor {
         copilotSessionId: capturedSessionId,
         metrics: capturedMetrics,
         phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+        pid: execution.process?.pid,
       };
       
     } catch (error: any) {
@@ -452,6 +458,7 @@ export class DefaultJobExecutor implements JobExecutor {
         copilotSessionId: capturedSessionId,
         metrics: capturedMetrics,
         phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+        pid: execution.process?.pid,
       };
     } finally {
       this.activeExecutions.delete(executionKey);

@@ -16,6 +16,7 @@
 import * as path from 'path';
 import { EventEmitter } from 'events';
 import { OrchestratorFileWatcher } from '../core';
+import { ProcessMonitor } from '../process';
 
 // Conditionally import vscode - may not be available in standalone processes
 let vscode: typeof import('vscode') | undefined;
@@ -263,6 +264,7 @@ export class PlanRunner extends EventEmitter {
   private isRunning = false;
   private globalCapacity?: GlobalCapacityManager;
   private readonly _fileWatcher: OrchestratorFileWatcher;
+  private readonly processMonitor = new ProcessMonitor();
   
   /**
    * Mutex for serializing Reverse Integration (RI) merges.
@@ -333,6 +335,48 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
+   * Recover nodes that were running when the extension restarted.
+   * 
+   * When the extension restarts, nodes that were in "running" state may have
+   * their processes terminated. This method checks if processes are still alive
+   * and marks crashed nodes as failed.
+   * 
+   * @param plan - Plan to recover running nodes for
+   */
+  private async recoverRunningNodes(plan: PlanInstance): Promise<void> {
+    for (const [nodeId, nodeState] of plan.nodeStates.entries()) {
+      if (nodeState.status === 'running') {
+        // Check if the process is still alive
+        if (nodeState.pid && !this.processMonitor.isRunning(nodeState.pid)) {
+          // Process died unexpectedly - mark as crashed
+          log.warn(`Node ${nodeId} process (PID ${nodeState.pid}) not found - marking as crashed`);
+          nodeState.status = 'failed';
+          nodeState.error = `Process crashed or was terminated unexpectedly (PID: ${nodeState.pid})`;
+          nodeState.failureReason = 'crashed';
+          nodeState.endedAt = Date.now();
+          nodeState.pid = undefined;  // Clear the stale PID
+          nodeState.version++; // Increment version for UI updates
+          
+          // Emit completion event
+          this.emit('nodeCompleted', plan.id, nodeId, false);
+        } else if (!nodeState.pid) {
+          // Running but no PID tracked (old state) - also mark as crashed
+          log.warn(`Node ${nodeId} was running but has no PID - marking as crashed`);
+          nodeState.status = 'failed';
+          nodeState.error = 'Extension reloaded while node was running (no process tracking)';
+          nodeState.failureReason = 'crashed';
+          nodeState.endedAt = Date.now();
+          nodeState.version++; // Increment version for UI updates
+          
+          // Emit completion event
+          this.emit('nodeCompleted', plan.id, nodeId, false);
+        }
+        // If process IS running, leave it - the process monitor should re-attach
+      }
+    }
+  }
+
+  /**
    * Initialize the runner — loads persisted Plans from disk and starts
    * the periodic pump loop that advances execution.
    *
@@ -344,6 +388,9 @@ export class PlanRunner extends EventEmitter {
     // Load persisted Plans
     const loadedPlans = this.persistence.loadAll();
     for (const plan of loadedPlans) {
+      // Validate and recover running nodes before setting up state machines
+      await this.recoverRunningNodes(plan);
+      
       this.plans.set(plan.id, plan);
       const sm = new PlanStateMachine(plan);
       this.setupStateMachineListeners(sm);
@@ -351,6 +398,11 @@ export class PlanRunner extends EventEmitter {
     }
     
     log.info(`Loaded ${loadedPlans.length} Plans from persistence`);
+    
+    // Persist any recovery changes
+    for (const plan of this.plans.values()) {
+      this.persistence.save(plan);
+    }
     
     // Start the pump
     this.startPump();
@@ -1696,6 +1748,9 @@ export class PlanRunner extends EventEmitter {
             };
             nodeState.attemptHistory = [...(nodeState.attemptHistory || []), fiFailedAttempt];
             
+            // Clear process ID since execution is complete
+            nodeState.pid = undefined;
+            
             sm.transition(node.id, 'failed');
             this.emit('nodeCompleted', plan.id, node.id, false);
             this.persistence.save(plan);
@@ -1790,6 +1845,11 @@ export class PlanRunner extends EventEmitter {
         // Store per-phase metrics breakdown
         if (result.phaseMetrics) {
           nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...result.phaseMetrics };
+        }
+        
+        // Store process ID for crash detection
+        if (result.pid) {
+          nodeState.pid = result.pid;
         }
         
         // Clear resumeFromPhase after execution (success or failure)
@@ -2042,6 +2102,9 @@ export class PlanRunner extends EventEmitter {
                 };
                 nodeState.attemptHistory = [...(nodeState.attemptHistory || []), retryAttempt];
                 
+                // Clear process ID since execution is complete
+                nodeState.pid = undefined;
+                
                 sm.transition(node.id, 'failed');
                 this.emit('nodeCompleted', plan.id, node.id, false);
                 
@@ -2250,6 +2313,9 @@ export class PlanRunner extends EventEmitter {
               };
               nodeState.attemptHistory = [...(nodeState.attemptHistory || []), healAttempt];
               
+              // Clear process ID since execution is complete
+              nodeState.pid = undefined;
+              
               sm.transition(node.id, 'failed');
               this.emit('nodeCompleted', plan.id, node.id, false);
               
@@ -2264,6 +2330,9 @@ export class PlanRunner extends EventEmitter {
             }
           } else {
             // No auto-heal — transition to failed normally
+            // Clear process ID since execution is complete
+            nodeState.pid = undefined;
+            
             sm.transition(node.id, 'failed');
             this.emit('nodeCompleted', plan.id, node.id, false);
             
@@ -2360,6 +2429,9 @@ export class PlanRunner extends EventEmitter {
         };
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), riFailedAttempt];
         
+        // Clear process ID since execution is complete
+        nodeState.pid = undefined;
+        
         sm.transition(node.id, 'failed');
         this.emit('nodeCompleted', plan.id, node.id, false);
         
@@ -2388,6 +2460,9 @@ export class PlanRunner extends EventEmitter {
           phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
         };
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
+        
+        // Clear process ID since execution is complete
+        nodeState.pid = undefined;
         
         sm.transition(node.id, 'succeeded');
         this.emit('nodeCompleted', plan.id, node.id, true);
@@ -2448,6 +2523,9 @@ export class PlanRunner extends EventEmitter {
         phaseMetrics: nodeState.phaseMetrics,
       };
       nodeState.attemptHistory = [...(nodeState.attemptHistory || []), errorAttempt];
+      
+      // Clear process ID since execution is complete
+      nodeState.pid = undefined;
       
       sm.transition(node.id, 'failed');
       this.emit('nodeCompleted', plan.id, node.id, false);
