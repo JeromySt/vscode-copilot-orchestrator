@@ -639,7 +639,7 @@ runner.setExecutor(new RemoteExecutor());
 Agent jobs run in isolated worktree folders with restricted file system and network access:
 
 #### File System Access
-The Copilot CLI is invoked with `--allow-paths` restricted to:
+The Copilot CLI is invoked with `--add-dir` restricted to:
 1. The job's worktree folder (always included)
 2. Any additional folders specified in `allowedFolders`
 

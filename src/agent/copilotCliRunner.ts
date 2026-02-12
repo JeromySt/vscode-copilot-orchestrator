@@ -363,6 +363,10 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       this.logger.warn(`[SECURITY] No allowed paths specified, using explicit cwd: ${fallbackPath}`);
       pathsArg = `--add-dir ${JSON.stringify(fallbackPath)}`;
     } else {
+      this.logger.info(`[SECURITY] Copilot CLI allowed directories (${allowedPaths.length}):`);
+      for (const p of allowedPaths) {
+        this.logger.info(`[SECURITY]   - ${p}`);
+      }
       // Use multiple --add-dir flags for each path
       pathsArg = allowedPaths.map(p => `--add-dir ${JSON.stringify(p)}`).join(' ');
     }
@@ -374,7 +378,13 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       // Log allowed URLs for security audit
       this.logger.info(`[SECURITY] Copilot CLI allowed URLs (${allowedUrls.length}):`);
       for (const url of allowedUrls) {
-        this.logger.info(`[SECURITY]   - ${url}`);
+        // Redact query/fragment from logged URLs to avoid leaking tokens
+        try {
+          const parsed = new URL(url);
+          this.logger.info(`[SECURITY]   - ${parsed.origin}${parsed.pathname}`);
+        } catch {
+          this.logger.info(`[SECURITY]   - ${url.split('?')[0].split('#')[0]}`);
+        }
       }
       // Build --allow-url flags
       urlsArg = allowedUrls.map(u => `--allow-url ${JSON.stringify(u)}`).join(' ');

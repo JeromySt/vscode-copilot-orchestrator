@@ -915,10 +915,10 @@ export class NodeDetailPanel {
   
   <script>
     const vscode = acquireVsCodeApi();
-    const PLAN_ID = '${plan.id}';
-    const NODE_ID = '${node.id}';
-    let currentPhase = ${this._currentPhase ? `'${this._currentPhase}'` : 'null'};
-    const initialPhase = ${initialPhase ? `'${initialPhase}'` : 'null'};
+    const PLAN_ID = ${JSON.stringify(plan.id)};
+    const NODE_ID = ${JSON.stringify(node.id)};
+    let currentPhase = ${this._currentPhase ? JSON.stringify(this._currentPhase) : 'null'};
+    const initialPhase = ${initialPhase ? JSON.stringify(initialPhase) : 'null'};
     
     // Global Ctrl+C handler for copying selected text in webview
     document.addEventListener('keydown', function(e) {
@@ -951,6 +951,7 @@ export class NodeDetailPanel {
     
     // Session ID copy handler - using event delegation for dynamic content
     document.body.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element)) return;
       const target = e.target.closest('.session-id');
       if (target) {
         const sessionId = target.getAttribute('data-session');
@@ -960,6 +961,7 @@ export class NodeDetailPanel {
     
     // Log file path click handler - using event delegation
     document.body.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element)) return;
       const target = e.target.closest('.log-file-path');
       if (target) {
         const path = target.getAttribute('data-path');
@@ -971,6 +973,7 @@ export class NodeDetailPanel {
     
     // Retry button handlers - using event delegation for dynamic content
     document.body.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element)) return;
       const btn = e.target.closest('.retry-btn');
       if (!btn) return;
       
@@ -990,6 +993,7 @@ export class NodeDetailPanel {
     
     // Attempt card toggle handlers - using event delegation
     document.body.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element)) return;
       const header = e.target.closest('.attempt-header');
       if (!header) return;
       
@@ -1474,11 +1478,13 @@ export class NodeDetailPanel {
    * @returns HTML fragment string, or empty string if no data.
    */
   private _buildWorkSummaryHtml(ws: JobWorkSummary, aggregated?: JobWorkSummary, isLeaf?: boolean): string {
-    if (!ws || (ws.commits === 0 && ws.filesAdded === 0 && ws.filesModified === 0 && ws.filesDeleted === 0)) {
+    const hasNodeWork = ws && (ws.commits > 0 || ws.filesAdded > 0 || ws.filesModified > 0 || ws.filesDeleted > 0);
+    const hasAggregatedWork = isLeaf && aggregated && (aggregated.commits > 0 || aggregated.filesAdded > 0 || aggregated.filesModified > 0 || aggregated.filesDeleted > 0);
+    if (!hasNodeWork && !hasAggregatedWork) {
       return '';
     }
     
-    const commitsHtml = commitDetailsHtml(ws.commitDetails || []);
+    const commitsHtml = commitDetailsHtml(ws?.commitDetails || []);
     
     // Build aggregated work section for leaf nodes if different from job work
     let aggregatedHtml = '';

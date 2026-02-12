@@ -1612,7 +1612,7 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Get diff stats from baseBranch to HEAD
       const diffResult = await git.executor.execAsync(
-        ['diff', '--stat', '--name-status', `${baseBranchCommit}..${headCommit}`],
+        ['diff', '--name-status', `${baseBranchCommit}..${headCommit}`],
         { cwd: worktreePath }
       );
       
