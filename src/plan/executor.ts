@@ -39,6 +39,7 @@ import * as git from '../git';
 import { DefaultEvidenceValidator } from './evidenceValidator';
 import { aggregateMetrics } from './metricsAggregator';
 import type { IEvidenceValidator } from '../interfaces';
+import { ensureOrchestratorDirs } from '../core';
 
 const log = Logger.for('job-executor');
 
@@ -1713,6 +1714,12 @@ export class DefaultJobExecutor implements JobExecutor {
     if (!logFile) return;
     
     try {
+      // Guard against deleted directories (storagePath is workspacePath/.orchestrator)
+      if (this.storagePath) {
+        const workspacePath = path.resolve(this.storagePath, '..');
+        ensureOrchestratorDirs(workspacePath);
+      }
+      
       const time = new Date(entry.timestamp).toISOString();
       const prefix = entry.type === 'stderr' ? '[ERR]' : 
                      entry.type === 'error' ? '[ERROR]' :

@@ -1128,28 +1128,35 @@ export class PlanRunner extends EventEmitter {
    * @returns `true` if the plan existed and was deleted.
    */
   delete(planId: string): boolean {
-    const plan = this.plans.get(planId);
-    if (!plan) return false;
+    // 1. Clear in-memory state FIRST (ensures UI updates)
+    const hadPlan = this.plans.has(planId);
+    if (!hadPlan) return false;
     
+    const plan = this.plans.get(planId)!;
     log.info(`Deleting Plan: ${planId}`);
     
     // Cancel if running
     this.cancel(planId);
     
-    // Clean up worktrees and branches in background
-    this.cleanupPlanResources(plan).catch(err => {
-      log.error(`Failed to cleanup Plan resources`, { planId, error: err.message });
-    });
-    
-    // Remove from memory
+    // Remove from memory immediately
     this.plans.delete(planId);
     this.stateMachines.delete(planId);
     
-    // Remove from persistence
-    this.persistence.delete(planId);
-    
-    // Notify listeners
+    // 2. Fire event (UI will update even if FS fails)
     this.emit('planDeleted', planId);
+    
+    // 3. Attempt FS cleanup (ignore if already gone)
+    try {
+      this.persistence.delete(planId);
+    } catch (err) {
+      // Log unexpected errors but don't throw
+      log.warn(`Failed to delete plan file: ${err}`);
+    }
+    
+    // 4. Clean up worktrees and other resources (best effort)
+    this.cleanupPlanResources(plan).catch(err => {
+      log.error(`Failed to cleanup Plan resources`, { planId, error: err.message });
+    });
     
     return true;
   }

@@ -20,6 +20,7 @@ import {
   GroupExecutionState,
 } from './types';
 import { Logger } from '../core/logger';
+import { ensureOrchestratorDirs } from '../core';
 
 const log = Logger.for('plan-persistence');
 
@@ -94,6 +95,9 @@ export class PlanPersistence {
    */
   constructor(storagePath: string) {
     this.storagePath = storagePath;
+    // Derive workspace path from storage path (storagePath is workspacePath/.orchestrator/plans)
+    const workspacePath = path.resolve(storagePath, '../..');
+    ensureOrchestratorDirs(workspacePath);  // Initial setup
     this.ensureStorageDir();
   }
   
@@ -119,6 +123,10 @@ export class PlanPersistence {
    */
   save(plan: PlanInstance): void {
     try {
+      // Guard against deleted directories
+      const workspacePath = path.resolve(this.storagePath, '../..');
+      ensureOrchestratorDirs(workspacePath);
+      
       const serialized = this.serialize(plan);
       const filePath = this.getPlanFilePath(plan.id);
       fs.writeFileSync(filePath, JSON.stringify(serialized, null, 2));
@@ -442,6 +450,10 @@ export class PlanPersistence {
     }
     
     index.plans[planId] = { name, createdAt };
+    
+    // Guard against deleted directories
+    const workspacePath = path.resolve(this.storagePath, '../..');
+    ensureOrchestratorDirs(workspacePath);
     fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
   }
   
@@ -455,6 +467,10 @@ export class PlanPersistence {
     try {
       const index: PlanIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
       delete index.plans[planId];
+      
+      // Guard against deleted directories
+      const workspacePath = path.resolve(this.storagePath, '../..');
+      ensureOrchestratorDirs(workspacePath);
       fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
     } catch {
       // Ignore errors
