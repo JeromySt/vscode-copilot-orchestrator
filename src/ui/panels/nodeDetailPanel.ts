@@ -570,18 +570,37 @@ export class NodeDetailPanel {
     const plan = this._planRunner.get(planId);
     const nodeState = plan?.nodeStates.get(nodeId);
     
-    console.log('Force fail attempt:', { planId, nodeId, currentStatus: nodeState?.status });
+    console.log('[DEBUG] Force fail attempt:', { 
+      planId, 
+      nodeId, 
+      currentStatus: nodeState?.status,
+      attempts: nodeState?.attempts,
+      startedAt: nodeState?.startedAt,
+      version: nodeState?.version 
+    });
     
     const result = this._planRunner.forceFailNode(planId, nodeId, 'Force failed via UI - process may have crashed');
     
-    console.log('Force fail result:', result);
+    // Get state after the call to see if it changed
+    const planAfter = this._planRunner.get(planId);
+    const nodeStateAfter = planAfter?.nodeStates.get(nodeId);
+    
+    console.log('[DEBUG] Force fail result:', result);
+    console.log('[DEBUG] Node state after force fail:', {
+      status: nodeStateAfter?.status,
+      attempts: nodeStateAfter?.attempts,
+      error: nodeStateAfter?.error,
+      version: nodeStateAfter?.version,
+      endedAt: nodeStateAfter?.endedAt
+    });
     
     if (result.success) {
       vscode.window.showInformationMessage('Node force failed. You can now retry it.');
+      console.log('[DEBUG] Force fail succeeded, calling _update() to refresh UI');
       this._update();
     } else {
       const errorMsg = `Force fail failed: ${result.error || 'Unknown error'}`;
-      console.error(errorMsg);
+      console.error('[DEBUG] Force fail failed:', errorMsg);
       vscode.window.showErrorMessage(errorMsg);
     }
   }

@@ -3368,8 +3368,25 @@ export class PlanRunner extends EventEmitter {
     // Use state machine transition to properly propagate failure
     // This handles: status change, timestamps, version increments,
     // blocking dependents, updating group state, and checking plan completion
+    console.log('[DEBUG] Force fail state machine transition - BEFORE:', {
+      nodeId,
+      status: nodeState.status,
+      version: nodeState.version,
+      planStateVersion: plan.stateVersion
+    });
+    
     const transitioned = sm.transition(nodeId, 'failed');
+    
+    console.log('[DEBUG] Force fail state machine transition - AFTER:', {
+      nodeId,
+      transitioned,
+      status: nodeState.status,
+      version: nodeState.version,
+      planStateVersion: plan.stateVersion
+    });
+    
     if (!transitioned) {
+      console.log('[DEBUG] State machine transition failed, using fallback');
       // Fallback: force it directly (should not happen for running/scheduled nodes)
       nodeState.status = 'failed';
       nodeState.endedAt = Date.now();
@@ -3419,8 +3436,10 @@ export class PlanRunner extends EventEmitter {
     this.emit('planUpdated', planId);
     
     // Persist the updated state
+    console.log('[DEBUG] Persisting force fail state changes');
     this.persistence.save(plan);
     
+    console.log('[DEBUG] Force fail completed successfully for node:', nodeId);
     return { success: true };
   }
 
