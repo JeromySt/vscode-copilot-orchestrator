@@ -19,3 +19,4 @@ export {
   GlobalCapacityRegistry,
 } from './globalCapacity';
 export * from './orphanedWorktreeCleanup';
+export { OrchestratorFileWatcher, PlanFileDeletedCallback, PlanFileCreatedCallback } from './orchestratorFileWatcher';

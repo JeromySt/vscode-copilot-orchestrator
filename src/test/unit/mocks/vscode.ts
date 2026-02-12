@@ -6,6 +6,12 @@
  */
 
 // ---------------------------------------------------------------------------
+// Event type
+// ---------------------------------------------------------------------------
+
+export type Event<T> = (listener: (e: T) => any, thisArgs?: any, disposables?: Disposable[]) => Disposable;
+
+// ---------------------------------------------------------------------------
 // Disposable
 // ---------------------------------------------------------------------------
 
@@ -65,7 +71,7 @@ export class Uri {
   readonly path: string;
   readonly query: string;
   readonly fragment: string;
-  readonly fsPath: string;
+  fsPath: string; // Make this mutable
 
   private constructor(scheme: string, authority: string, path: string, query: string, fragment: string) {
     this.scheme = scheme;
@@ -77,7 +83,10 @@ export class Uri {
   }
 
   static file(fsPath: string): Uri {
-    return new Uri('file', '', fsPath.replace(/\\/g, '/'), '', '');
+    const normalizedPath = fsPath.replace(/\\/g, '/');
+    const uri = new Uri('file', '', normalizedPath, '', '');
+    uri.fsPath = fsPath; // Preserve the original fsPath
+    return uri;
   }
 
   static parse(value: string): Uri {
@@ -220,7 +229,48 @@ function createMockConfiguration(): Record<string, unknown> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// RelativePattern
+// ---------------------------------------------------------------------------
+
+export class RelativePattern {
+  readonly baseUri: Uri;
+
+  constructor(public base: string | Uri, public pattern: string) {
+    this.baseUri = typeof base === 'string' ? Uri.file(base) : base;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// workspace
+// ---------------------------------------------------------------------------
+
 const onDidChangeConfigurationEmitter = new EventEmitter<{ affectsConfiguration: (section: string) => boolean }>();
+
+// ---------------------------------------------------------------------------
+// FileSystemWatcher
+// ---------------------------------------------------------------------------
+
+export class FileSystemWatcher {
+  private _onDidCreateEmitter = new EventEmitter<Uri>();
+  private _onDidChangeEmitter = new EventEmitter<Uri>();
+  private _onDidDeleteEmitter = new EventEmitter<Uri>();
+
+  readonly onDidCreate = this._onDidCreateEmitter.event;
+  readonly onDidChange = this._onDidChangeEmitter.event;
+  readonly onDidDelete = this._onDidDeleteEmitter.event;
+
+  // Mock methods for triggering events in tests
+  _fireCreate(uri: Uri): void { this._onDidCreateEmitter.fire(uri); }
+  _fireChange(uri: Uri): void { this._onDidChangeEmitter.fire(uri); }
+  _fireDelete(uri: Uri): void { this._onDidDeleteEmitter.fire(uri); }
+
+  dispose(): void {
+    this._onDidCreateEmitter.dispose();
+    this._onDidChangeEmitter.dispose();
+    this._onDidDeleteEmitter.dispose();
+  }
+}
 
 export const workspace = {
   getConfiguration: (_section?: string) => createMockConfiguration(),
@@ -230,6 +280,9 @@ export const workspace = {
     readFile: async (_uri: Uri) => new Uint8Array(),
     writeFile: async (_uri: Uri, _content: Uint8Array) => {},
     stat: async (_uri: Uri) => ({ type: 1, ctime: 0, mtime: 0, size: 0 }),
+  },
+  createFileSystemWatcher: (_pattern: string | RelativePattern): FileSystemWatcher => {
+    return new FileSystemWatcher();
   },
 };
 

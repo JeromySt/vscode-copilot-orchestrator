@@ -15,6 +15,7 @@
 
 import * as path from 'path';
 import { EventEmitter } from 'events';
+import { OrchestratorFileWatcher } from '../core';
 
 // Conditionally import vscode - may not be available in standalone processes
 let vscode: typeof import('vscode') | undefined;
@@ -261,6 +262,7 @@ export class PlanRunner extends EventEmitter {
   private config: PlanRunnerConfig;
   private isRunning = false;
   private globalCapacity?: GlobalCapacityManager;
+  private readonly _fileWatcher: OrchestratorFileWatcher;
   
   /**
    * Mutex for serializing Reverse Integration (RI) merges.
@@ -290,6 +292,16 @@ export class PlanRunner extends EventEmitter {
       globalMaxParallel: config.maxParallel || 8,
     });
     this.persistence = new PlanPersistence(config.storagePath);
+    
+    // Watch for external plan file deletions
+    // Extract workspace path from storagePath (remove 'plans' suffix if present)
+    const workspacePath = config.storagePath.endsWith('plans') 
+      ? path.dirname(config.storagePath)
+      : config.storagePath;
+    this._fileWatcher = new OrchestratorFileWatcher(
+      workspacePath,
+      (planId) => this._handleExternalPlanDeletion(planId)
+    );
   }
   
   /**
@@ -357,6 +369,9 @@ export class PlanRunner extends EventEmitter {
     for (const plan of this.plans.values()) {
       this.persistence.save(plan);
     }
+    
+    // Dispose file watcher
+    this._fileWatcher.dispose();
     
     this.isRunning = false;
   }
@@ -1081,9 +1096,10 @@ export class PlanRunner extends EventEmitter {
    * and clean up all worktrees since canceled plans cannot be resumed.
    *
    * @param planId - Plan identifier.
+   * @param options - Optional cancellation options
    * @returns `true` if the plan was found and cancellation initiated.
    */
-  cancel(planId: string): boolean {
+  cancel(planId: string, options?: { skipPersist?: boolean }): boolean {
     const plan = this.plans.get(planId);
     const sm = this.stateMachines.get(planId);
     if (!plan || !sm) return false;
@@ -1110,15 +1126,58 @@ export class PlanRunner extends EventEmitter {
       log.error(`Failed to cleanup canceled Plan resources`, { planId, error: err.message });
     });
     
-    // Persist
-    this.persistence.save(plan);
+    // Persist (unless skipped, e.g., when file is already deleted)
+    if (!options?.skipPersist) {
+      this.persistence.save(plan);
+    }
     
     // Update wake lock in case this was the last running plan
     this.updateWakeLock().catch(err => log.warn('Failed to update wake lock', { error: err }));
     
     return true;
   }
-  
+
+  /**
+   * Handle external deletion of a plan file.
+   * 
+   * Called by the file watcher when a plan JSON is deleted from the
+   * filesystem (e.g., by `git clean -dfx`).
+   * 
+   * @param planId - ID of the deleted plan
+   */
+  private _handleExternalPlanDeletion(planId: string): void {
+    const plan = this.plans.get(planId);
+    if (!plan) {
+      // Plan wasn't in memory, nothing to do
+      log.debug(`External deletion of unknown plan: ${planId}`);
+      return;
+    }
+    
+    log.warn(`Plan ${planId} ("${plan.spec.name}") was deleted externally`);
+    
+    // Get state machine to check plan status
+    const sm = this.stateMachines.get(planId);
+    if (sm && sm.computePlanStatus() === 'running') {
+      log.warn(`Canceling running plan due to external file deletion`);
+      // Cancel without trying to persist (file is already gone)
+      this.cancel(planId, { skipPersist: true });
+    }
+    
+    // Remove from in-memory state
+    this.plans.delete(planId);
+    this.stateMachines.delete(planId);
+    
+    // Fire deletion event (UI will update)
+    this.emit('planDeleted', planId);
+    
+    // Show notification to user
+    if (vscode) {
+      vscode.window.showWarningMessage(
+        `Plan "${plan.spec.name}" was deleted externally and has been removed.`
+      );
+    }
+  }
+
   /**
    * Delete a Plan and clean up all associated resources (worktrees, logs, child plans).
    *
