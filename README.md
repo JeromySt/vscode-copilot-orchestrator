@@ -550,6 +550,44 @@ The `create_copilot_plan` and `create_copilot_job` tools accept `allowedFolders`
   Default: [] (agent restricted to worktree only)
 ```
 
+### Network Access (URLs)
+
+**By default, agents have NO network access.** This prevents data exfiltration and unauthorized API calls.
+
+To grant access to specific URLs or domains, use `allowedUrls`:
+
+```typescript
+work: {
+  type: 'agent',
+  instructions: '...',
+  allowedUrls: [
+    'https://api.github.com',
+    'https://registry.npmjs.org',
+    'internal-api.company.com'
+  ]
+}
+```
+
+**Supported URL formats:**
+- Full URLs: `https://api.example.com/v1/endpoint`
+- Domains: `api.example.com` (allows all paths)
+- Subdomains: `*.example.com` (allows all subdomains)
+
+#### MCP API
+
+The `create_copilot_plan` and `create_copilot_job` tools accept `allowedUrls` in the work specification:
+
+```markdown
+**allowedUrls** (optional, string[]):
+  URLs or URL patterns the agent is allowed to access.
+  Specify full URLs, domains, or wildcard patterns.
+  Default: [] (no network access)
+```
+
+### Principle of Least Privilege
+
+Always specify the minimum required access. Avoid broad patterns when specific URLs suffice.
+
 ---
 
 ## Example Prompts for Copilot Chat

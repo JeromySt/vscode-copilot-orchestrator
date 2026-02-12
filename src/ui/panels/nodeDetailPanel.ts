@@ -548,7 +548,8 @@ export class NodeDetailPanel {
         });
         break;
       case 'forceFailNode':
-        this._forceFailNode(message.planId, message.nodeId);
+        // Use message params if provided, otherwise fall back to instance variables
+        this._forceFailNode(message.planId || this._planId, message.nodeId || this._nodeId);
         break;
       case 'openLogFile':
         if (message.path && path.isAbsolute(message.path) && fs.existsSync(message.path)) {
@@ -712,8 +713,10 @@ export class NodeDetailPanel {
     const initialPhase = this._getInitialPhase(phaseStatus, state.status);
     
     // Build work summary HTML
+    // For leaf nodes, pass aggregated work summary to show total merged work
+    const isLeaf = plan.leaves.includes(this._nodeId);
     const workSummaryHtml = state.workSummary 
-      ? this._buildWorkSummaryHtml(state.workSummary)
+      ? this._buildWorkSummaryHtml(state.workSummary, state.aggregatedWorkSummary, isLeaf)
       : '';
     
     // Get log file path for this node (use current attempt number)
@@ -912,8 +915,10 @@ export class NodeDetailPanel {
   
   <script>
     const vscode = acquireVsCodeApi();
-    let currentPhase = ${this._currentPhase ? `'${this._currentPhase}'` : 'null'};
-    const initialPhase = ${initialPhase ? `'${initialPhase}'` : 'null'};
+    const PLAN_ID = ${JSON.stringify(plan.id)};
+    const NODE_ID = ${JSON.stringify(node.id)};
+    let currentPhase = ${this._currentPhase ? JSON.stringify(this._currentPhase) : 'null'};
+    const initialPhase = ${initialPhase ? JSON.stringify(initialPhase) : 'null'};
     
     // Global Ctrl+C handler for copying selected text in webview
     document.addEventListener('keydown', function(e) {
@@ -944,91 +949,101 @@ export class NodeDetailPanel {
       vscode.postMessage({ type: 'refresh' });
     }
     
-    // Session ID copy handler
-    document.querySelectorAll('.session-id').forEach(el => {
-      el.addEventListener('click', () => {
-        const sessionId = el.getAttribute('data-session');
+    // Session ID copy handler - using event delegation for dynamic content
+    document.body.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element)) return;
+      const target = e.target.closest('.session-id');
+      if (target) {
+        const sessionId = target.getAttribute('data-session');
         vscode.postMessage({ type: 'copyToClipboard', text: sessionId });
-      });
+      }
     });
     
-    // Log file path click handler
-    document.querySelectorAll('.log-file-path').forEach(el => {
-      el.addEventListener('click', () => {
-        const path = el.getAttribute('data-path');
+    // Log file path click handler - using event delegation
+    document.body.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element)) return;
+      const target = e.target.closest('.log-file-path');
+      if (target) {
+        const path = target.getAttribute('data-path');
         if (path) {
           vscode.postMessage({ type: 'openLogFile', path });
         }
-      });
+      }
     });
     
-    // Retry button handlers
-    document.querySelectorAll('.retry-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const action = btn.getAttribute('data-action');
-        const planId = btn.getAttribute('data-plan-id');
-        const nodeId = btn.getAttribute('data-node-id');
-        
-        if (action === 'retry-node') {
-          vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: true });
-        } else if (action === 'retry-node-fresh') {
-          vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
-        } else if (action === 'force-fail-node') {
-          if (confirm('Are you sure you want to force fail this node? This will mark it as failed and allow retry.')) {
-            vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
+    // Retry button handlers - using event delegation for dynamic content
+    document.body.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element)) return;
+      const btn = e.target.closest('.retry-btn');
+      if (!btn) return;
+      
+      const action = btn.getAttribute('data-action');
+      // Use global constants for planId/nodeId - more reliable than data attributes
+      const planId = PLAN_ID;
+      const nodeId = NODE_ID;
+      
+      if (action === 'retry-node') {
+        vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: true });
+      } else if (action === 'retry-node-fresh') {
+        vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
+      } else if (action === 'force-fail-node') {
+        if (confirm('Force-fail this node? This will mark it as failed and may affect downstream nodes.')) {
+          vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
+        }
+      }
+    });
+    
+    // Attempt card toggle handlers - using event delegation
+    document.body.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element)) return;
+      const header = e.target.closest('.attempt-header');
+      if (!header) return;
+      
+      const card = header.closest('.attempt-card');
+      const body = card.querySelector('.attempt-body');
+      const chevron = header.querySelector('.chevron');
+      const isExpanded = header.getAttribute('data-expanded') === 'true';
+      
+      if (isExpanded) {
+        body.style.display = 'none';
+        chevron.classList.remove('expanded');
+        chevron.textContent = '▶';
+        header.setAttribute('data-expanded', 'false');
+      } else {
+        body.style.display = 'block';
+        chevron.classList.add('expanded');
+        chevron.textContent = '▼';
+        header.setAttribute('data-expanded', 'true');
+      }
+    });
+    
+    // Attempt phase tab click handlers - using event delegation
+    document.body.addEventListener('click', (e) => {
+      const tab = e.target.closest('.attempt-phase-tab');
+      if (!tab) return;
+      
+      e.stopPropagation();
+      const phase = tab.getAttribute('data-phase');
+      const attemptNum = tab.getAttribute('data-attempt');
+      const phasesContainer = tab.closest('.attempt-phases');
+      
+      // Update active tab
+      phasesContainer.querySelectorAll('.attempt-phase-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      
+      // Get logs data from the JSON script element
+      const dataEl = phasesContainer.querySelector('.attempt-logs-data[data-attempt="' + attemptNum + '"]');
+      if (dataEl) {
+        try {
+          const logsData = JSON.parse(dataEl.textContent);
+          const viewer = phasesContainer.querySelector('.attempt-log-viewer[data-attempt="' + attemptNum + '"]');
+          if (viewer && logsData[phase]) {
+            viewer.textContent = logsData[phase];
           }
+        } catch (err) {
+          console.error('Failed to parse attempt logs data:', err);
         }
-      });
-    });
-    
-    // Attempt card toggle handlers
-    document.querySelectorAll('.attempt-header').forEach(header => {
-      header.addEventListener('click', () => {
-        const card = header.closest('.attempt-card');
-        const body = card.querySelector('.attempt-body');
-        const chevron = header.querySelector('.chevron');
-        const isExpanded = header.getAttribute('data-expanded') === 'true';
-        
-        if (isExpanded) {
-          body.style.display = 'none';
-          chevron.classList.remove('expanded');
-          chevron.textContent = '▶';
-          header.setAttribute('data-expanded', 'false');
-        } else {
-          body.style.display = 'block';
-          chevron.classList.add('expanded');
-          chevron.textContent = '▼';
-          header.setAttribute('data-expanded', 'true');
-        }
-      });
-    });
-    
-    // Attempt phase tab click handlers
-    document.querySelectorAll('.attempt-phase-tab').forEach(tab => {
-      tab.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const phase = tab.getAttribute('data-phase');
-        const attemptNum = tab.getAttribute('data-attempt');
-        const phasesContainer = tab.closest('.attempt-phases');
-        
-        // Update active tab
-        phasesContainer.querySelectorAll('.attempt-phase-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        
-        // Get logs data from the JSON script element
-        const dataEl = phasesContainer.querySelector('.attempt-logs-data[data-attempt="' + attemptNum + '"]');
-        if (dataEl) {
-          try {
-            const logsData = JSON.parse(dataEl.textContent);
-            const viewer = phasesContainer.querySelector('.attempt-log-viewer[data-attempt="' + attemptNum + '"]');
-            if (viewer && logsData[phase]) {
-              viewer.textContent = logsData[phase];
-            }
-          } catch (err) {
-            console.error('Failed to parse attempt logs data:', err);
-          }
-        }
-      });
+      }
     });
     
     function selectPhase(phase) {
@@ -1460,14 +1475,50 @@ export class NodeDetailPanel {
    * {@link commitDetailsHtml} template helpers.
    *
    * @param ws - The job work summary data.
+   * @param aggregated - Optional aggregated work summary for leaf nodes (includes upstream).
+   * @param isLeaf - Whether this is a leaf node in the plan.
    * @returns HTML fragment string, or empty string if no data.
    */
-  private _buildWorkSummaryHtml(ws: JobWorkSummary): string {
-    if (!ws || (ws.commits === 0 && ws.filesAdded === 0 && ws.filesModified === 0 && ws.filesDeleted === 0)) {
+  private _buildWorkSummaryHtml(ws: JobWorkSummary, aggregated?: JobWorkSummary, isLeaf?: boolean): string {
+    const hasNodeWork = ws && (ws.commits > 0 || ws.filesAdded > 0 || ws.filesModified > 0 || ws.filesDeleted > 0);
+    const hasAggregatedWork = isLeaf && aggregated && (aggregated.commits > 0 || aggregated.filesAdded > 0 || aggregated.filesModified > 0 || aggregated.filesDeleted > 0);
+    if (!hasNodeWork && !hasAggregatedWork) {
       return '';
     }
     
-    const commitsHtml = commitDetailsHtml(ws.commitDetails || []);
+    const commitsHtml = commitDetailsHtml(ws?.commitDetails || []);
+    
+    // Build aggregated work section for leaf nodes if different from job work
+    let aggregatedHtml = '';
+    if (isLeaf && aggregated && aggregated !== ws) {
+      const aggAdded = aggregated.filesAdded || 0;
+      const aggModified = aggregated.filesModified || 0;
+      const aggDeleted = aggregated.filesDeleted || 0;
+      
+      // Only show if aggregated stats differ or are meaningful
+      if (aggAdded !== ws.filesAdded || aggModified !== ws.filesModified || aggDeleted !== ws.filesDeleted) {
+        aggregatedHtml = `
+        <div class="work-summary-section aggregated">
+          <h4>📦 Total Work Merged to Target</h4>
+          <div class="work-summary-stats aggregated-stats">
+            <div class="work-stat added">
+              <div class="work-stat-value">+${aggAdded}</div>
+              <div class="work-stat-label">Added</div>
+            </div>
+            <div class="work-stat modified">
+              <div class="work-stat-value">~${aggModified}</div>
+              <div class="work-stat-label">Modified</div>
+            </div>
+            <div class="work-stat deleted">
+              <div class="work-stat-value">-${aggDeleted}</div>
+              <div class="work-stat-label">Deleted</div>
+            </div>
+          </div>
+          <p class="work-summary-desc">Includes all upstream dependency work</p>
+        </div>
+        `;
+      }
+    }
     
     return `
     <div class="section">
@@ -1477,6 +1528,7 @@ export class NodeDetailPanel {
       </div>
       ${ws.description ? `<div class="work-summary-desc">${escapeHtml(ws.description)}</div>` : ''}
       ${commitsHtml}
+      ${aggregatedHtml}
     </div>
     `;
   }
@@ -2324,6 +2376,23 @@ export class NodeDetailPanel {
       margin-top: 12px;
       font-style: italic;
       color: var(--vscode-descriptionForeground);
+    }
+    
+    /* Aggregated Work Summary */
+    .work-summary-section.aggregated {
+      border-top: 1px solid var(--vscode-panel-border);
+      margin-top: 16px;
+      padding-top: 16px;
+      opacity: 0.9;
+    }
+    .work-summary-section.aggregated h4 {
+      color: var(--vscode-descriptionForeground);
+      font-weight: normal;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+    .work-summary-stats.aggregated-stats {
+      opacity: 0.95;
     }
     
     /* Commit Details */

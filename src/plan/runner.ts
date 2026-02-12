@@ -182,6 +182,24 @@ export interface JobExecutor {
    * @param attemptNumber - Optional attempt number for per-attempt log files.
    */
   log?(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string, attemptNumber?: number): void;
+
+  /**
+   * Compute aggregated work summary from baseBranch to current HEAD.
+   * This captures ALL work accumulated through the DAG, not just this job's work.
+   * Used for leaf nodes to show total work being merged to targetBranch.
+   *
+   * @param node - The job node.
+   * @param worktreePath - Path to the worktree.
+   * @param baseBranch - Base branch name (e.g., 'main' or 'origin/main').
+   * @param repoPath - Path to the main repository.
+   * @returns Aggregated work summary.
+   */
+  computeAggregatedWorkSummary?(
+    node: JobNode,
+    worktreePath: string,
+    baseBranch: string,
+    repoPath: string
+  ): Promise<JobWorkSummary>;
 }
 
 /**
@@ -931,9 +949,11 @@ export class PlanRunner extends EventEmitter {
     if (nodeKeys.length > 0 && 'getAllProcessStats' in this.executor) {
       try {
         const stats = await (this.executor as any).getAllProcessStats(nodeKeys);
-        for (let i = 0; i < stats.length; i++) {
-          const key = `${nodeKeys[i].planId}:${nodeKeys[i].nodeId}`;
-          processStats.set(key, stats[i]);
+        // Use planId/nodeId from each result to build map key
+        // (results may skip entries when executions aren't found, so index doesn't match input)
+        for (const stat of stats) {
+          const key = `${stat.planId}:${stat.nodeId}`;
+          processStats.set(key, stat);
         }
       } catch {
         // Fallback: individual fetches
@@ -1726,6 +1746,29 @@ export class PlanRunner extends EventEmitter {
           if (result.workSummary) {
             nodeState.workSummary = result.workSummary;
             this.appendWorkSummary(plan, result.workSummary);
+          }
+          
+          // For leaf nodes, also compute aggregated work summary
+          // This shows total diff from baseBranch to completedCommit
+          const isLeaf = plan.leaves.includes(node.id);
+          if (isLeaf && nodeState.worktreePath && nodeState.completedCommit && this.executor) {
+            const worktreePath = nodeState.worktreePath;
+            const executor = this.executor;
+            const method = executor.computeAggregatedWorkSummary;
+            if (method) {
+              try {
+                const aggregated = await method.call(executor, node, worktreePath, plan.baseBranch, plan.repoPath);
+                nodeState.aggregatedWorkSummary = aggregated;
+                log.info(`Computed aggregated work summary for leaf node ${node.name}`, {
+                  commits: aggregated.commits,
+                  filesAdded: aggregated.filesAdded,
+                  filesModified: aggregated.filesModified,
+                  filesDeleted: aggregated.filesDeleted,
+                });
+              } catch (error: any) {
+                log.warn(`Failed to compute aggregated work summary for ${node.name}: ${error.message}`);
+              }
+            }
           }
         } else {
           // Executor failed - handle the failure

@@ -602,6 +602,7 @@ export class DefaultJobExecutor implements JobExecutor {
    * @returns Array of process stats in the same order as input (missing entries omitted).
    */
   async getAllProcessStats(nodeKeys: Array<{ planId: string; nodeId: string; nodeName: string }>): Promise<Array<{
+    planId: string;
     nodeId: string;
     nodeName: string;
     pid: number | null;
@@ -621,6 +622,7 @@ export class DefaultJobExecutor implements JobExecutor {
     }
     
     const results: Array<{
+      planId: string;
       nodeId: string;
       nodeName: string;
       pid: number | null;
@@ -646,7 +648,7 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Handle agent work without a process yet
       if (execution.isAgentWork && !execution.process?.pid) {
-        results.push({ nodeId, nodeName, pid: null, running: true, tree: [], duration, isAgentWork: true });
+        results.push({ planId, nodeId, nodeName, pid: null, running: true, tree: [], duration, isAgentWork: true });
         continue;
       }
       
@@ -668,8 +670,8 @@ export class DefaultJobExecutor implements JobExecutor {
       }
       
       if (running || pid) {
-        // Include isAgentWork flag for UI display hints
-        results.push({ nodeId, nodeName, pid, running, tree, duration, isAgentWork: execution.isAgentWork });
+        // Include planId and isAgentWork flag for proper mapping and UI display hints
+        results.push({ planId, nodeId, nodeName, pid, running, tree, duration, isAgentWork: execution.isAgentWork });
       }
     }
     
@@ -1037,6 +1039,9 @@ export class DefaultJobExecutor implements JobExecutor {
     if (spec.allowedFolders && spec.allowedFolders.length > 0) {
       this.logInfo(executionKey, phase, `Agent allowed folders: ${spec.allowedFolders.join(', ')}`);
     }
+    if (spec.allowedUrls && spec.allowedUrls.length > 0) {
+      this.logInfo(executionKey, phase, `Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);
+    }
     
     try {
       // Get isolated config directory for Copilot CLI sessions
@@ -1053,6 +1058,7 @@ export class DefaultJobExecutor implements JobExecutor {
         jobId: node.id,
         configDir, // Isolate sessions from user's history
         allowedFolders: spec.allowedFolders,  // Pass through allowed folders
+        allowedUrls: spec.allowedUrls,        // Pass through allowed URLs
         logOutput: (line: string) => this.logInfo(executionKey, phase, line),
         onProcess: (proc: any) => {
           // Track the Copilot CLI process for monitoring (CPU/memory/tree)
@@ -1554,6 +1560,104 @@ export class DefaultJobExecutor implements JobExecutor {
       filesDeleted: 0,
       description: node.task,
     };
+  }
+  
+  /**
+   * Compute aggregated work summary from baseBranch to current HEAD.
+   * This captures ALL work accumulated through the DAG, not just this job's work.
+   * Used for leaf nodes to show total work being merged to targetBranch.
+   * 
+   * The aggregated summary includes:
+   * - All commits from baseBranch to the node's completedCommit
+   * - All upstream dependency work merged through FI (Forward Integration)
+   * - The node's own work (if any)
+   * 
+   * This differs from `workSummary` which only shows the node's direct changes
+   * (baseCommit to completedCommit). For example, in a DAG like A → B → C (leaf),
+   * where A adds 3 files and B adds 2 files, C's aggregatedWorkSummary will
+   * show 5 files even if C itself makes no changes.
+   * 
+   * @param node - The job node to compute aggregated summary for.
+   * @param worktreePath - Path to the node's worktree.
+   * @param baseBranch - Base branch to diff from (e.g., 'origin/main').
+   * @param repoPath - Repository root path.
+   * @returns Aggregated work summary with total commit count and file changes.
+   */
+  async computeAggregatedWorkSummary(
+    node: JobNode,
+    worktreePath: string,
+    baseBranch: string,
+    repoPath: string
+  ): Promise<JobWorkSummary> {
+    try {
+      // Get HEAD commit of the worktree
+      const headCommit = await git.worktrees.getHeadCommit(worktreePath);
+      if (!headCommit) {
+        log.warn('No HEAD commit in worktree for aggregated summary');
+        return this.emptyWorkSummary(node);
+      }
+      
+      // Resolve baseBranch to commit SHA (may be remote ref like origin/main)
+      const baseBranchResult = await git.executor.execAsync(
+        ['rev-parse', baseBranch],
+        { cwd: repoPath }
+      );
+      
+      if (!baseBranchResult.success || !baseBranchResult.stdout.trim()) {
+        log.warn(`Failed to resolve baseBranch ${baseBranch}`);
+        return this.emptyWorkSummary(node);
+      }
+      
+      const baseBranchCommit = baseBranchResult.stdout.trim();
+      
+      // Get diff stats from baseBranch to HEAD
+      const diffResult = await git.executor.execAsync(
+        ['diff', '--name-status', `${baseBranchCommit}..${headCommit}`],
+        { cwd: worktreePath }
+      );
+      
+      let filesAdded = 0;
+      let filesModified = 0;
+      let filesDeleted = 0;
+      
+      if (diffResult.success) {
+        const lines = diffResult.stdout.split('\n').filter(l => l.trim());
+        
+        for (const line of lines) {
+          const parts = line.split('\t');
+          if (parts.length >= 2) {
+            const status = parts[0];
+            
+            if (status === 'A') filesAdded++;
+            else if (status === 'M') filesModified++;
+            else if (status === 'D') filesDeleted++;
+          }
+        }
+      }
+      
+      // Get commit count from baseBranch to HEAD
+      const commitCountResult = await git.executor.execAsync(
+        ['rev-list', '--count', `${baseBranchCommit}..${headCommit}`],
+        { cwd: worktreePath }
+      );
+      
+      const commits = commitCountResult.success 
+        ? parseInt(commitCountResult.stdout.trim(), 10) || 0
+        : 0;
+      
+      return {
+        nodeId: node.id,
+        nodeName: node.name,
+        commits,
+        filesAdded,
+        filesModified,
+        filesDeleted,
+        description: `Aggregated work from ${baseBranch}`,
+      };
+    } catch (error: any) {
+      log.warn(`Failed to compute aggregated work summary: ${error.message}`);
+      return this.emptyWorkSummary(node);
+    }
   }
   
   // ============================================================================

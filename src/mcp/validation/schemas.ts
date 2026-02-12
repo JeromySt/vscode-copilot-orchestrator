@@ -32,6 +32,8 @@ export interface WorkSpec {
   maxTurns?: number;
   /** Additional folder paths the agent is allowed to access beyond the worktree */
   allowedFolders?: string[];
+  /** URLs or URL patterns the agent is allowed to access */
+  allowedUrls?: string[];
 }
 
 /**
@@ -110,6 +112,12 @@ const workSpecObjectSchema = {
       type: 'array',
       items: { type: 'string', maxLength: 500 },
       maxItems: 20
+    },
+    allowedUrls: {
+      type: 'array',
+      items: { type: 'string', maxLength: 500 },
+      maxItems: 50,
+      description: 'URLs or URL patterns the agent is allowed to access. Default: none (no network access).'
     }
   },
   additionalProperties: false
