@@ -949,9 +949,11 @@ export class PlanRunner extends EventEmitter {
     if (nodeKeys.length > 0 && 'getAllProcessStats' in this.executor) {
       try {
         const stats = await (this.executor as any).getAllProcessStats(nodeKeys);
-        for (let i = 0; i < stats.length; i++) {
-          const key = `${nodeKeys[i].planId}:${nodeKeys[i].nodeId}`;
-          processStats.set(key, stats[i]);
+        // Use planId/nodeId from each result to build map key
+        // (results may skip entries when executions aren't found, so index doesn't match input)
+        for (const stat of stats) {
+          const key = `${stat.planId}:${stat.nodeId}`;
+          processStats.set(key, stat);
         }
       } catch {
         // Fallback: individual fetches

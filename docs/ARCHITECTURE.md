@@ -636,14 +636,24 @@ runner.setExecutor(new RemoteExecutor());
 
 ### Agent Sandbox
 
-Agent jobs run in isolated worktree folders. The Copilot CLI is invoked with `--allow-paths` restricted to:
+Agent jobs run in isolated worktree folders with restricted file system and network access:
+
+#### File System Access
+The Copilot CLI is invoked with `--allow-paths` restricted to:
 1. The job's worktree folder (always included)
 2. Any additional folders specified in `allowedFolders`
+
+#### Network Access
+By default, agents have no network access. URLs are allowed via:
+1. Specific URLs or domains in `allowedUrls`
+2. Each URL becomes an `--allow-url` flag to Copilot CLI
 
 This prevents:
 - Cross-job file access
 - Modification of repository root
 - Access to system files
+- Data exfiltration via unauthorized network requests
+- Malicious API calls
 
 **Default Isolation**: When no `allowedFolders` are specified, agents can only read/write files within their assigned worktree. This provides baseline security for concurrent job execution without requiring explicit allowlisting.
 

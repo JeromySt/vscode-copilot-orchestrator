@@ -154,6 +154,33 @@ export interface AgentSpec {
    * ```
    */
   allowedFolders?: string[];
+  
+  /**
+   * URLs or URL patterns the agent is allowed to access.
+   *
+   * **Security Consideration**: By default, agents cannot access any remote URLs.
+   * This prevents data exfiltration and unauthorized network access during job execution.
+   *
+   * Specify URLs or domains here to grant network access. Each entry becomes
+   * an allowed endpoint passed to the Copilot CLI via `--allow-url`.
+   *
+   * **Supported Formats**:
+   * - Full URL: `https://api.example.com/v1/`
+   * - Domain only: `api.example.com` (allows all paths on that domain)
+   * - With wildcards: `*.example.com` (allows all subdomains)
+   *
+   * **Principle of Least Privilege**: Only add URLs that the agent truly needs.
+   *
+   * @example
+   * ```typescript
+   * allowedUrls: [
+   *   'https://api.github.com',
+   *   'https://registry.npmjs.org',
+   *   'internal-api.company.com'
+   * ]
+   * ```
+   */
+  allowedUrls?: string[];
 }
 
 /**

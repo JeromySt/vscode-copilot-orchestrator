@@ -90,7 +90,7 @@ export interface CopilotRunOptions {
    * current worktree, ensuring isolation between concurrent jobs.
    * 
    * Specify absolute paths here to grant access to shared resources. Each path
-   * is passed to Copilot CLI via `--allow-paths` flag.
+   * is passed to Copilot CLI via `--add-dir` flag.
    * 
    * **Principle of Least Privilege**: Only add folders that the agent truly needs
    * for the task at hand.
@@ -104,6 +104,33 @@ export interface CopilotRunOptions {
    * ```
    */
   allowedFolders?: string[];
+  
+  /**
+   * URLs or URL patterns the agent is allowed to access.
+   *
+   * **Security Consideration**: By default, agents cannot access any remote URLs.
+   * This prevents data exfiltration and unauthorized network access during job execution.
+   *
+   * Specify URLs or domains here to grant network access. Each entry becomes
+   * an allowed endpoint passed to the Copilot CLI via `--allow-url`.
+   *
+   * **Supported Formats**:
+   * - Full URL: `https://api.example.com/v1/`
+   * - Domain only: `api.example.com` (allows all paths on that domain)
+   * - With wildcards: `*.example.com` (allows all subdomains)
+   *
+   * **Principle of Least Privilege**: Only add URLs that the agent truly needs.
+   *
+   * @example
+   * ```typescript
+   * allowedUrls: [
+   *   'https://api.github.com',
+   *   'https://registry.npmjs.org',
+   *   'internal-api.company.com'
+   * ]
+   * ```
+   */
+  allowedUrls?: string[];
 }
 
 /**
@@ -205,6 +232,7 @@ export class CopilotCliRunner {
       configDir: options.configDir,
       cwd,
       allowedFolders: options.allowedFolders,
+      allowedUrls: options.allowedUrls,
     });
     
     this.logger.info(`[${label}] Running: ${copilotCmd.substring(0, 100)}...`);
@@ -293,8 +321,9 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     configDir?: string;
     cwd?: string;
     allowedFolders?: string[];
+    allowedUrls?: string[];
   }): string {
-    const { task, sessionId, model, logDir, sharePath, configDir, cwd, allowedFolders } = options;
+    const { task, sessionId, model, logDir, sharePath, configDir, cwd, allowedFolders, allowedUrls } = options;
     
     // Build allowed paths list: worktree + any additional folders
     const allowedPaths: string[] = [];
@@ -305,29 +334,58 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       // Validate and normalize paths — must be absolute for security
       for (const folder of allowedFolders) {
         if (!path.isAbsolute(folder)) {
-          this.logger.warn(`Skipping relative allowed folder (must be absolute): ${folder}`);
+          this.logger.warn(`[SECURITY] Skipping relative allowed folder (must be absolute): ${folder}`);
           continue;
         }
         const normalized = path.resolve(folder);
         if (fs.existsSync(normalized)) {
           allowedPaths.push(normalized);
         } else {
-          this.logger.warn(`Allowed folder does not exist: ${folder}`);
+          this.logger.warn(`[SECURITY] Allowed folder does not exist: ${folder}`);
         }
       }
     }
     
-    // Build --allow-paths argument
-    let pathsArg: string;
-    if (allowedPaths.length === 0) {
-      // Fallback: if no paths specified, allow current directory only
-      pathsArg = '--allow-paths .';
-    } else {
-      // Use multiple --allow-paths flags for each path
-      pathsArg = allowedPaths.map(p => `--allow-paths ${JSON.stringify(p)}`).join(' ');
+    // Log final allowed directories for security audit
+    this.logger.info(`[SECURITY] Copilot CLI allowed directories (${allowedPaths.length}):`);
+    for (const p of allowedPaths) {
+      this.logger.info(`[SECURITY]   - ${p}`);
     }
     
-    let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-urls --allow-all-tools`;
+    // Build --add-dir arguments to grant file access to specific directories
+    // Note: --add-dir adds directories to the allowed list (can be used multiple times)
+    // This is different from --allow-all-paths which disables ALL path verification
+    let pathsArg: string;
+    if (allowedPaths.length === 0) {
+      // Security: require explicit cwd even when none specified
+      // Using "." is ambiguous - always use the actual working directory
+      const fallbackPath = cwd || process.cwd();
+      this.logger.warn(`[SECURITY] No allowed paths specified, using explicit cwd: ${fallbackPath}`);
+      pathsArg = `--add-dir ${JSON.stringify(fallbackPath)}`;
+    } else {
+      // Use multiple --add-dir flags for each path
+      pathsArg = allowedPaths.map(p => `--add-dir ${JSON.stringify(p)}`).join(' ');
+    }
+    
+    // Build --allow-url arguments for explicit URL access
+    // Note: By default, no URLs are allowed (secure by default)
+    let urlsArg = '';
+    if (allowedUrls && allowedUrls.length > 0) {
+      // Log allowed URLs for security audit
+      this.logger.info(`[SECURITY] Copilot CLI allowed URLs (${allowedUrls.length}):`);
+      for (const url of allowedUrls) {
+        this.logger.info(`[SECURITY]   - ${url}`);
+      }
+      // Build --allow-url flags
+      urlsArg = allowedUrls.map(u => `--allow-url ${JSON.stringify(u)}`).join(' ');
+    } else {
+      this.logger.info(`[SECURITY] Copilot CLI allowed URLs: none (network access disabled)`);
+    }
+    
+    let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-tools`;
+    if (urlsArg) {
+      cmd += ` ${urlsArg}`;
+    }
     
     // Use isolated config directory to prevent sessions from appearing in VS Code history
     if (configDir) {

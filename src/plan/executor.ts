@@ -602,6 +602,7 @@ export class DefaultJobExecutor implements JobExecutor {
    * @returns Array of process stats in the same order as input (missing entries omitted).
    */
   async getAllProcessStats(nodeKeys: Array<{ planId: string; nodeId: string; nodeName: string }>): Promise<Array<{
+    planId: string;
     nodeId: string;
     nodeName: string;
     pid: number | null;
@@ -621,6 +622,7 @@ export class DefaultJobExecutor implements JobExecutor {
     }
     
     const results: Array<{
+      planId: string;
       nodeId: string;
       nodeName: string;
       pid: number | null;
@@ -646,7 +648,7 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Handle agent work without a process yet
       if (execution.isAgentWork && !execution.process?.pid) {
-        results.push({ nodeId, nodeName, pid: null, running: true, tree: [], duration, isAgentWork: true });
+        results.push({ planId, nodeId, nodeName, pid: null, running: true, tree: [], duration, isAgentWork: true });
         continue;
       }
       
@@ -668,8 +670,8 @@ export class DefaultJobExecutor implements JobExecutor {
       }
       
       if (running || pid) {
-        // Include isAgentWork flag for UI display hints
-        results.push({ nodeId, nodeName, pid, running, tree, duration, isAgentWork: execution.isAgentWork });
+        // Include planId and isAgentWork flag for proper mapping and UI display hints
+        results.push({ planId, nodeId, nodeName, pid, running, tree, duration, isAgentWork: execution.isAgentWork });
       }
     }
     
@@ -1037,6 +1039,9 @@ export class DefaultJobExecutor implements JobExecutor {
     if (spec.allowedFolders && spec.allowedFolders.length > 0) {
       this.logInfo(executionKey, phase, `Agent allowed folders: ${spec.allowedFolders.join(', ')}`);
     }
+    if (spec.allowedUrls && spec.allowedUrls.length > 0) {
+      this.logInfo(executionKey, phase, `Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);
+    }
     
     try {
       // Get isolated config directory for Copilot CLI sessions
@@ -1053,6 +1058,7 @@ export class DefaultJobExecutor implements JobExecutor {
         jobId: node.id,
         configDir, // Isolate sessions from user's history
         allowedFolders: spec.allowedFolders,  // Pass through allowed folders
+        allowedUrls: spec.allowedUrls,        // Pass through allowed URLs
         logOutput: (line: string) => this.logInfo(executionKey, phase, line),
         onProcess: (proc: any) => {
           // Track the Copilot CLI process for monitoring (CPU/memory/tree)

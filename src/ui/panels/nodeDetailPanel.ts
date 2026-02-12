@@ -548,7 +548,8 @@ export class NodeDetailPanel {
         });
         break;
       case 'forceFailNode':
-        this._forceFailNode(message.planId, message.nodeId);
+        // Use message params if provided, otherwise fall back to instance variables
+        this._forceFailNode(message.planId || this._planId, message.nodeId || this._nodeId);
         break;
       case 'openLogFile':
         if (message.path && path.isAbsolute(message.path) && fs.existsSync(message.path)) {
@@ -914,6 +915,8 @@ export class NodeDetailPanel {
   
   <script>
     const vscode = acquireVsCodeApi();
+    const PLAN_ID = '${plan.id}';
+    const NODE_ID = '${node.id}';
     let currentPhase = ${this._currentPhase ? `'${this._currentPhase}'` : 'null'};
     const initialPhase = ${initialPhase ? `'${initialPhase}'` : 'null'};
     
@@ -946,91 +949,95 @@ export class NodeDetailPanel {
       vscode.postMessage({ type: 'refresh' });
     }
     
-    // Session ID copy handler
-    document.querySelectorAll('.session-id').forEach(el => {
-      el.addEventListener('click', () => {
-        const sessionId = el.getAttribute('data-session');
+    // Session ID copy handler - using event delegation for dynamic content
+    document.body.addEventListener('click', (e) => {
+      const target = e.target.closest('.session-id');
+      if (target) {
+        const sessionId = target.getAttribute('data-session');
         vscode.postMessage({ type: 'copyToClipboard', text: sessionId });
-      });
+      }
     });
     
-    // Log file path click handler
-    document.querySelectorAll('.log-file-path').forEach(el => {
-      el.addEventListener('click', () => {
-        const path = el.getAttribute('data-path');
+    // Log file path click handler - using event delegation
+    document.body.addEventListener('click', (e) => {
+      const target = e.target.closest('.log-file-path');
+      if (target) {
+        const path = target.getAttribute('data-path');
         if (path) {
           vscode.postMessage({ type: 'openLogFile', path });
         }
-      });
+      }
     });
     
-    // Retry button handlers
-    document.querySelectorAll('.retry-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const action = btn.getAttribute('data-action');
-        const planId = btn.getAttribute('data-plan-id');
-        const nodeId = btn.getAttribute('data-node-id');
-        
-        if (action === 'retry-node') {
-          vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: true });
-        } else if (action === 'retry-node-fresh') {
-          vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
-        } else if (action === 'force-fail-node') {
-          if (confirm('Are you sure you want to force fail this node? This will mark it as failed and allow retry.')) {
-            vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
+    // Retry button handlers - using event delegation for dynamic content
+    document.body.addEventListener('click', (e) => {
+      const btn = e.target.closest('.retry-btn');
+      if (!btn) return;
+      
+      const action = btn.getAttribute('data-action');
+      // Use global constants for planId/nodeId - more reliable than data attributes
+      const planId = PLAN_ID;
+      const nodeId = NODE_ID;
+      
+      if (action === 'retry-node') {
+        vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: true });
+      } else if (action === 'retry-node-fresh') {
+        vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
+      } else if (action === 'force-fail-node') {
+        vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
+      }
+    });
+    
+    // Attempt card toggle handlers - using event delegation
+    document.body.addEventListener('click', (e) => {
+      const header = e.target.closest('.attempt-header');
+      if (!header) return;
+      
+      const card = header.closest('.attempt-card');
+      const body = card.querySelector('.attempt-body');
+      const chevron = header.querySelector('.chevron');
+      const isExpanded = header.getAttribute('data-expanded') === 'true';
+      
+      if (isExpanded) {
+        body.style.display = 'none';
+        chevron.classList.remove('expanded');
+        chevron.textContent = '▶';
+        header.setAttribute('data-expanded', 'false');
+      } else {
+        body.style.display = 'block';
+        chevron.classList.add('expanded');
+        chevron.textContent = '▼';
+        header.setAttribute('data-expanded', 'true');
+      }
+    });
+    
+    // Attempt phase tab click handlers - using event delegation
+    document.body.addEventListener('click', (e) => {
+      const tab = e.target.closest('.attempt-phase-tab');
+      if (!tab) return;
+      
+      e.stopPropagation();
+      const phase = tab.getAttribute('data-phase');
+      const attemptNum = tab.getAttribute('data-attempt');
+      const phasesContainer = tab.closest('.attempt-phases');
+      
+      // Update active tab
+      phasesContainer.querySelectorAll('.attempt-phase-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      
+      // Get logs data from the JSON script element
+      const dataEl = phasesContainer.querySelector('.attempt-logs-data[data-attempt="' + attemptNum + '"]');
+      if (dataEl) {
+        try {
+          const logsData = JSON.parse(dataEl.textContent);
+          const viewer = phasesContainer.querySelector('.attempt-log-viewer[data-attempt="' + attemptNum + '"]');
+          if (viewer && logsData[phase]) {
+            viewer.textContent = logsData[phase];
           }
+        } catch (err) {
+          console.error('Failed to parse attempt logs data:', err);
         }
-      });
-    });
-    
-    // Attempt card toggle handlers
-    document.querySelectorAll('.attempt-header').forEach(header => {
-      header.addEventListener('click', () => {
-        const card = header.closest('.attempt-card');
-        const body = card.querySelector('.attempt-body');
-        const chevron = header.querySelector('.chevron');
-        const isExpanded = header.getAttribute('data-expanded') === 'true';
-        
-        if (isExpanded) {
-          body.style.display = 'none';
-          chevron.classList.remove('expanded');
-          chevron.textContent = '▶';
-          header.setAttribute('data-expanded', 'false');
-        } else {
-          body.style.display = 'block';
-          chevron.classList.add('expanded');
-          chevron.textContent = '▼';
-          header.setAttribute('data-expanded', 'true');
-        }
-      });
-    });
-    
-    // Attempt phase tab click handlers
-    document.querySelectorAll('.attempt-phase-tab').forEach(tab => {
-      tab.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const phase = tab.getAttribute('data-phase');
-        const attemptNum = tab.getAttribute('data-attempt');
-        const phasesContainer = tab.closest('.attempt-phases');
-        
-        // Update active tab
-        phasesContainer.querySelectorAll('.attempt-phase-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        
-        // Get logs data from the JSON script element
-        const dataEl = phasesContainer.querySelector('.attempt-logs-data[data-attempt="' + attemptNum + '"]');
-        if (dataEl) {
-          try {
-            const logsData = JSON.parse(dataEl.textContent);
-            const viewer = phasesContainer.querySelector('.attempt-log-viewer[data-attempt="' + attemptNum + '"]');
-            if (viewer && logsData[phase]) {
-              viewer.textContent = logsData[phase];
-            }
-          } catch (err) {
-            console.error('Failed to parse attempt logs data:', err);
-          }
-        }
-      });
+      }
     });
     
     function selectPhase(phase) {
