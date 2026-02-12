@@ -1,12 +1,15 @@
 /**
  * @fileoverview AI Review Utilities
  * 
- * Utilities for parsing AI review responses in various formats.
- * Provides robust parsing that handles clean JSON, markdown code blocks,
- * HTML-encoded content, and field extraction as fallback.
+ * Utilities for parsing AI review responses in various formats and generating
+ * review instruction files. Provides robust parsing that handles clean JSON, 
+ * markdown code blocks, HTML-encoded content, and field extraction as fallback.
  * 
  * @module plan/aiReviewUtils
  */
+
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Result of AI review parsing
@@ -113,4 +116,70 @@ export function stripHtmlTags(text: string): string {
   result = result.replace(/```(?:json)?\s*/g, '').replace(/```/g, '');
   
   return result;
+}
+
+/**
+ * Write AI review instructions file to the standard location.
+ * Creates the instructions content that prompts for JSON-only responses
+ * for reviewing agent execution logs.
+ * 
+ * @param worktreePath Path to the worktree directory
+ * @param nodeId The node ID for file naming
+ * @param executionLogs The execution logs to include in instructions
+ * @param taskDescription Brief task description for context
+ * @returns Path to the written instructions file
+ */
+export async function writeAiReviewInstructions(
+  worktreePath: string,
+  nodeId: string,
+  executionLogs: string,
+  taskDescription: string
+): Promise<string> {
+  const instructionsDir = path.join(worktreePath, '.github', 'instructions');
+  await fs.promises.mkdir(instructionsDir, { recursive: true });
+  
+  const fileName = `orchestrator-ai-review-${nodeId}.instructions.md`;
+  const instructionsPath = path.join(instructionsDir, fileName);
+  
+  const instructionsContent = `# AI Review: No-Change Assessment
+
+## Task
+You are reviewing the execution logs of an agent that completed without making file changes.
+Determine if this is a legitimate outcome or if the agent failed to do its work.
+
+## Original Task Description
+${taskDescription}
+
+## Execution Logs
+\`\`\`
+${executionLogs}
+\`\`\`
+
+## Your Response
+**IMPORTANT: Respond ONLY with a JSON object. No markdown, no explanation, no HTML.**
+
+Analyze the logs and respond with exactly this format:
+\`\`\`json
+{"legitimate": true, "reason": "Brief explanation why no changes were needed"}
+\`\`\`
+OR
+\`\`\`json
+{"legitimate": false, "reason": "Brief explanation of what went wrong"}
+\`\`\`
+
+### Legitimate No-Change Scenarios
+- Work was already completed in a prior commit/dependency
+- Task was verification/analysis only (no changes expected)
+- Agent correctly determined no changes were needed
+
+### NOT Legitimate (should return false)
+- Agent encountered errors and gave up
+- Agent misunderstood the task
+- Agent claimed success without evidence
+- Logs show the agent didn't attempt the work
+
+**YOUR RESPONSE (JSON ONLY):**`;
+
+  await fs.promises.writeFile(instructionsPath, instructionsContent, 'utf-8');
+  return instructionsPath;
 }
