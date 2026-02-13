@@ -88,13 +88,14 @@ export function parseAiReviewResult(output: string): AiReviewResult | null {
  * @returns Decoded text
  */
 export function decodeHtmlEntities(text: string): string {
+  // Decode &amp; last to avoid double-unescaping (e.g., &amp;lt; -> &lt; -> <)
   return text
     .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'");
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
 }
 
 /**

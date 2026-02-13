@@ -153,6 +153,6 @@ suite('BranchChangeWatcher', () => {
     // This would require mocking VS Code Git extension API
     // Implementation depends on how the watcher is structured
     const _watcher = new BranchChangeWatcher(mockLogger);
-    assert.ok(_watcher !== undefined);
+    assert.ok(_watcher);
   });
 });

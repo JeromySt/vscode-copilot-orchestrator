@@ -35,7 +35,13 @@ suite('PlanRunner External Deletion Handling', () => {
   teardown(async () => {
     quiet.restore();
     await runner.shutdown();
-    fs.rmSync(workspacePath, { recursive: true, force: true });
+    // Small delay to let file watcher dispose fully on macOS
+    await new Promise(resolve => setTimeout(resolve, 50));
+    try {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors in CI
+    }
   });
   
   test('removes plan from memory when file is externally deleted', async () => {

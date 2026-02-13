@@ -15,14 +15,14 @@ function stripMarkup(s: string): string {
   } while (result !== prev);
   // Remove markdown code fences
   result = result.replace(/```(?:json)?\s*/g, '');
-  // Decode common HTML entities
+  // Decode common HTML entities (&amp; last to avoid double-unescaping)
   result = result
     .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ');
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&');
   return result;
 }
 
