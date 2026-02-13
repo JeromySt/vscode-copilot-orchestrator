@@ -1,0 +1,2 @@
+done
+auto-heal-attempted: postchecks command is hardcoded to exit 1 and cannot be fixed
