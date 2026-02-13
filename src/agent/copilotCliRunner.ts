@@ -459,8 +459,8 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     // SECURITY: allowedUrls originate from untrusted user input (MCP server / agent workSpec)
     // and must be sanitized to prevent command injection and bypass attacks
     let urlsArg = '';
+    const sanitizedUrls: string[] = [];
     if (allowedUrls && allowedUrls.length > 0) {
-      const sanitizedUrls: string[] = [];
       for (const rawUrl of allowedUrls) {
         const validated = this.sanitizeUrl(rawUrl);
         if (validated) {
@@ -489,8 +489,27 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     }
     
     let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-tools`;
+    
+    // SECURITY: Network access control
+    // --allow-all-tools implicitly grants url(*) which would allow ALL network access.
+    // Per copilot CLI docs, --deny-tool takes precedence over --allow-all-tools.
+    // Strategy:
+    //   1. Always deny blanket URL access: --deny-tool "url()"
+    //   2. For each allowed URL, explicitly permit it: --allow-tool "url(<domain>)"
+    //   3. Also pass --allow-url for the URL permission layer
+    // This ensures URL access is denied by default and only allowed for specific domains.
+    cmd += ` --deny-tool "url()"`;
     if (urlsArg) {
-      cmd += ` ${urlsArg}`;
+      // Add per-URL tool permissions alongside the URL allowlist
+      const urlToolArgs = sanitizedUrls.map(u => {
+        try {
+          const parsed = new URL(u.startsWith('http') ? u : `https://${u}`);
+          return `--allow-tool "url(${parsed.hostname})"`;
+        } catch {
+          return `--allow-tool "url(${u})"`;
+        }
+      }).join(' ');
+      cmd += ` ${urlToolArgs} ${urlsArg}`;
     }
     
     // Use isolated config directory to prevent sessions from appearing in VS Code history
