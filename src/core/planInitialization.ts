@@ -20,6 +20,7 @@ import { Logger } from './logger';
 import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
 import { CopilotStatsParser } from '../agent/copilotStatsParser';
 import { IMcpManager } from '../interfaces/IMcpManager';
+import type { IConfigProvider } from '../interfaces/IConfigProvider';
 import type { CopilotUsageMetrics } from '../plan/types';
 import * as git from '../git';
 
@@ -41,9 +42,20 @@ export interface ExtensionConfig {
 }
 
 /**
- * Load extension configuration from VS Code settings
+ * Load extension configuration from VS Code settings.
+ *
+ * @param configProvider - Optional injected config provider. Falls back to direct vscode API.
  */
-export function loadConfiguration(): ExtensionConfig {
+export function loadConfiguration(configProvider?: IConfigProvider): ExtensionConfig {
+  if (configProvider) {
+    return {
+      mcp: {
+        enabled: configProvider.getConfig('copilotOrchestrator.mcp', 'enabled', true),
+      },
+      maxParallel: configProvider.getConfig('copilotOrchestrator', 'maxWorkers', 0) || os.cpus().length,
+    };
+  }
+
   const mcpCfg = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
   const rootCfg = vscode.workspace.getConfiguration('copilotOrchestrator');
 

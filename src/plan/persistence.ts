@@ -450,7 +450,10 @@ export class PlanPersistence {
     
     if (fs.existsSync(indexPath)) {
       try {
-        index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+        const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+        if (parsed && typeof parsed.plans === 'object') {
+          index = parsed;
+        }
       } catch {
         // Start fresh if corrupted
       }

@@ -86,13 +86,27 @@ graph TB
 
 ```
 src/
-├── extension.ts              # Activation, DI composition root
+├── extension.ts              # Extension activation and lifecycle
+├── composition.ts            # Production DI composition root
+├── compositionTest.ts        # Test DI composition root
 ├── agent/                    # Copilot CLI delegation
 ├── commands/                 # VS Code command registrations
-├── core/                     # Logger, config, plan initialization (DI)
+├── core/                     # Core infrastructure
+│   ├── container.ts          # Symbol-based DI container
+│   ├── tokens.ts             # Service registration tokens
+│   ├── logger.ts             # Centralized logging with per-component debug
+│   ├── globalCapacity.ts     # Cross-instance job coordination
+│   └── powerManager.ts       # Sleep prevention during execution
 ├── git/                      # Git operations (worktrees, merges, branches)
 │   └── core/                 # Low-level git command modules
-├── interfaces/               # DI interfaces
+├── interfaces/               # DI interface definitions
+│   ├── IConfigProvider.ts    # VS Code configuration abstraction
+│   ├── IDialogService.ts     # VS Code dialog operations
+│   ├── IProcessMonitor.ts    # Process monitoring interface
+│   └── ...                   # Other service interfaces
+├── vscode/                   # VS Code API adapters
+│   ├── adapters.ts           # Production VS Code implementations
+│   └── testAdapters.ts       # Mock implementations for testing
 ├── mcp/                      # MCP server, tools, handlers, transports
 │   ├── handlers/             # Business logic for MCP tool calls
 │   ├── ipc/                  # Inter-process communication bridge
@@ -100,13 +114,167 @@ src/
 │   ├── tools/                # MCP tool definitions (schemas)
 │   └── validation/           # Ajv-based input validation
 ├── plan/                     # DAG execution engine
+│   ├── phases/               # Execution phase handlers (prechecks, work, etc.)
 │   └── types/                # Type definitions (nodes, plans, specs)
 ├── process/                  # OS process monitoring
 ├── types/                    # Shared types (config, job, process)
 └── ui/                       # VS Code UI components
     ├── panels/               # Webview panels (plan detail, node detail)
-    └── templates/            # HTML/CSS templates for webviews
+    └── templates/            # HTML/CSS template functions
+        ├── planDetail/       # Plan detail panel templates
+        └── nodeDetail/       # Node detail panel templates
 ```
+
+### Dependency Injection Architecture
+
+Copilot Orchestrator uses a Symbol-based dependency injection container to manage service lifecycle, enable testability, and provide clean separation of concerns.
+
+#### Core DI Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| **ServiceContainer** | `src/core/container.ts` | Type-safe DI container with Symbol tokens |
+| **Tokens** | `src/core/tokens.ts` | Symbol-based service registration keys |
+| **Production Root** | `src/composition.ts` | Wires real implementations for production |
+| **Test Root** | `src/compositionTest.ts` | Wires mock implementations for testing |
+
+#### Service Registration Patterns
+
+```typescript
+// Singleton services (shared state)
+container.registerSingleton<ILogger>(Tokens.ILogger, (c) => {
+  const logger = Logger.initialize(context);
+  logger.setConfigProvider(c.resolve(Tokens.IConfigProvider));
+  return logger;
+});
+
+// Transient services (new instance per resolve)
+container.register<IEvidenceValidator>(
+  Tokens.IEvidenceValidator,
+  () => new DefaultEvidenceValidator()
+);
+```
+
+#### VS Code API Abstraction
+
+The DI layer provides clean abstractions over VS Code APIs:
+
+```mermaid
+graph TB
+    subgraph "Production"
+        VP[VsCodeConfigProvider]
+        VD[VsCodeDialogService]
+        VC[VsCodeClipboardService]
+    end
+    
+    subgraph "Testing"
+        MP[MockConfigProvider]
+        MD[MockDialogService] 
+        MC[MockClipboardService]
+    end
+    
+    subgraph "Interfaces"
+        ICP[IConfigProvider]
+        IDS[IDialogService]
+        ICS[IClipboardService]
+    end
+    
+    VP -.-> ICP
+    VD -.-> IDS
+    VC -.-> ICS
+    
+    MP -.-> ICP
+    MD -.-> IDS
+    MC -.-> ICS
+```
+
+**Benefits:**
+- **Testability**: Mock adapters provide controllable test doubles
+- **Isolation**: No direct vscode module coupling in business logic
+- **Type Safety**: Symbol tokens prevent registration/resolution errors
+- **Scoping**: Child containers enable isolated subsystem testing
+
+### Template Architecture
+
+UI panels use a template-based architecture for clean separation of presentation and logic:
+
+#### Template Organization
+
+```
+src/ui/templates/
+├── planDetail/              # Plan detail panel templates
+│   ├── headerTemplate.ts    # Plan status and controls
+│   ├── controlsTemplate.ts  # Action buttons
+│   ├── dagTemplate.ts       # Mermaid DAG visualization
+│   ├── nodeCardTemplate.ts  # Individual node cards
+│   ├── summaryTemplate.ts   # Work summary display
+│   ├── scriptsTemplate.ts   # Script elements
+│   └── index.ts             # Barrel exports
+└── nodeDetail/              # Node detail panel templates
+    ├── headerTemplate.ts    # Node status header
+    ├── actionButtons.ts     # Node action controls
+    ├── processTree.ts       # Process monitoring display
+    ├── logViewer.ts         # Log output formatting
+    ├── attempts.ts          # Retry attempt history
+    ├── config.ts            # Configuration display
+    ├── metrics.ts           # Usage metrics display
+    ├── scripts.ts           # Script elements
+    └── index.ts             # Barrel exports
+```
+
+#### Template Pattern
+
+Templates are pure functions that take data and return HTML strings:
+
+```typescript
+export function headerTemplate(data: HeaderData): string {
+  return `
+    <div class="header">
+      <h1>${escapeHtml(data.title)}</h1>
+      <span class="status ${data.status}">${data.status.toUpperCase()}</span>
+    </div>
+  `;
+}
+```
+
+#### Controller Pattern
+
+Controllers handle webview messages and coordinate with services via dependency injection:
+
+```typescript
+export class PlanDetailController {
+  constructor(
+    private readonly dialogService: IDialogService,
+    private readonly planRunner: IPlanRunner
+  ) {}
+
+  handleMessage(message: WebviewMessage): Promise<any> {
+    switch (message.command) {
+      case 'cancelPlan':
+        return this.handleCancelPlan(message.planId);
+      // ... other handlers
+    }
+  }
+
+  private async handleCancelPlan(planId: string): Promise<void> {
+    const confirmed = await this.dialogService.showWarning(
+      'Are you sure you want to cancel this plan?',
+      { modal: true },
+      'Yes', 'No'
+    );
+    
+    if (confirmed === 'Yes') {
+      this.planRunner.cancel(planId);
+    }
+  }
+}
+```
+
+**Template Benefits:**
+- **Zero vscode imports**: Pure functions can be unit tested easily
+- **Reusable components**: Templates can be composed and shared
+- **Separation of concerns**: Logic in controllers, presentation in templates
+- **Type safety**: Strongly typed template data interfaces
 
 ### PlanRunner — Central Orchestrator
 

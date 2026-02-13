@@ -92,6 +92,13 @@ export interface MergeTreeOptions {
  * This is the fastest way to merge when there are no conflicts, as it
  * doesn't require creating a worktree or modifying any working directory.
  * 
+ * Algorithm:
+ * 1. Execute `git merge-tree --write-tree <target> <source>`
+ * 2. If exit code 0: Parse tree SHA from stdout (conflict-free merge)
+ * 3. If exit code 1 with CONFLICT markers: Parse conflict files from output
+ * 4. If command not found: Return error for Git < 2.38
+ * 5. Otherwise: Return unexpected error
+ * 
  * @param options - Merge tree options
  * @returns Merge result with tree SHA if conflict-free
  */
@@ -100,13 +107,15 @@ export async function mergeWithoutCheckout(options: MergeTreeOptions): Promise<M
   
   log?.(`[merge-tree] Computing merge of '${source}' into '${target}'`);
   
-  // Use git merge-tree --write-tree (Git 2.38+)
-  // This computes the merge entirely in the object store
+  // Step 1: Execute merge-tree command
+  // --write-tree computes merge and returns tree SHA (Git 2.38+)
+  // This operates entirely on git objects, no working directory modification
   const result = await execAsync(
     ['merge-tree', '--write-tree', target, source],
     { cwd: repoPath }
   );
   
+  // Step 2: Handle success case (exit code 0)
   if (result.success) {
     const treeSha = result.stdout.trim();
     log?.(`[merge-tree] ✓ Merge computed successfully, tree: ${treeSha.slice(0, 8)}`);
@@ -118,17 +127,28 @@ export async function mergeWithoutCheckout(options: MergeTreeOptions): Promise<M
     };
   }
   
-  // Check if it's a conflict (exit code 1 with conflict info)
-  // merge-tree outputs conflict info to stdout
+  // Step 3: Handle merge conflicts (exit code 1 with CONFLICT output)
+  // Git merge-tree outputs conflict information to stdout in human-readable format
+  // Example output lines:
+  //   "CONFLICT (content): Merge conflict in src/file.js"
+  //   "CONFLICT (modify/delete): src/deleted.js deleted in HEAD and modified in branch"
   if (result.stdout.includes('CONFLICT') || result.stderr.includes('CONFLICT')) {
-    // Parse conflict files from output
     const conflictFiles: string[] = [];
     const lines = result.stdout.split('\n');
+    
+    // Parse each line looking for conflict descriptions
     for (const line of lines) {
-      // Format: "CONFLICT (content): Merge conflict in <file>"
+      // Extract filename from conflict description
+      // Regex captures filename after "Merge conflict in " or similar patterns
       const match = line.match(/CONFLICT.*?:\s*Merge conflict in\s+(.+)/);
       if (match) {
         conflictFiles.push(match[1].trim());
+      }
+      
+      // Handle modify/delete conflicts with different format
+      const modifyDeleteMatch = line.match(/CONFLICT \(modify\/delete\):\s*(.+?)\s+deleted in/);
+      if (modifyDeleteMatch) {
+        conflictFiles.push(modifyDeleteMatch[1].trim());
       }
     }
     
@@ -137,27 +157,31 @@ export async function mergeWithoutCheckout(options: MergeTreeOptions): Promise<M
       success: false,
       hasConflicts: true,
       conflictFiles,
-      error: 'Merge conflicts detected'
+      error: `Merge conflicts in: ${conflictFiles.join(', ')}`
     };
   }
   
-  // Check for "merge-tree" command not found (old git version)
-  if (result.stderr.includes('is not a git command') || result.stderr.includes('unknown option')) {
+  // Step 4: Handle unsupported git version
+  // merge-tree --write-tree was added in Git 2.38.0
+  if (result.stderr.includes('is not a git command') || 
+      result.stderr.includes('unknown option') ||
+      result.stderr.includes('unrecognized option')) {
     log?.(`[merge-tree] ✗ git merge-tree --write-tree not available (requires Git 2.38+)`);
     return {
       success: false,
       hasConflicts: false,
       conflictFiles: [],
-      error: 'git merge-tree --write-tree requires Git 2.38+'
+      error: 'git merge-tree --write-tree requires Git 2.38 or later'
     };
   }
   
+  // Step 5: Handle unexpected errors
   log?.(`[merge-tree] ✗ Merge failed: ${result.stderr}`);
   return {
     success: false,
     hasConflicts: false,
     conflictFiles: [],
-    error: result.stderr || 'Merge computation failed'
+    error: result.stderr || 'Merge computation failed for unknown reason'
   };
 }
 

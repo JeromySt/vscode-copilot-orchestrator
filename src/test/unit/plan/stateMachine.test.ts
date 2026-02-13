@@ -577,6 +577,8 @@ suite('PlanStateMachine', () => {
     test('getEffectiveEndedAt falls back to plan.endedAt', () => {
       const plan = buildPlan([['a', []]]);
       plan.endedAt = 7777;
+      // Put node in terminal state so computePlanStatus doesn't return 'pending'
+      plan.nodeStates.get('a')!.status = 'succeeded';
       const sm = new PlanStateMachine(plan);
       assert.strictEqual(sm.getEffectiveEndedAt(), 7777);
     });
@@ -585,6 +587,8 @@ suite('PlanStateMachine', () => {
       const plan = buildPlan([['a', []]]);
       plan.endedAt = 5000;
       plan.nodeStates.get('a')!.endedAt = 9000;
+      // Put node in terminal state so computePlanStatus doesn't return 'pending'
+      plan.nodeStates.get('a')!.status = 'succeeded';
       const sm = new PlanStateMachine(plan);
       assert.strictEqual(sm.getEffectiveEndedAt(), 9000);
     });

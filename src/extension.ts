@@ -29,10 +29,17 @@ import { cleanupOrphanedWorktrees } from './core/orphanedWorktreeCleanup';
 import { BranchChangeWatcher } from './git/branchWatcher';
 import { ensureOrchestratorGitIgnore } from './git/core/gitignore';
 import type { PlanInstance } from './plan/types/plan';
+import { createContainer } from './composition';
+import * as Tokens from './core/tokens';
+import type { ServiceContainer } from './core/container';
+import type { IConfigProvider } from './interfaces';
 
 // ============================================================================
 // MODULE STATE
 // ============================================================================
+
+/** DI container - retained for service resolution */
+let container: ServiceContainer | undefined;
 
 /** MCP Server Manager - retained for cleanup */
 let mcpManager: IMcpManager | undefined;
@@ -63,13 +70,18 @@ let globalCapacity: GlobalCapacityManager | undefined;
  * @param context - VS Code extension context
  */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  // ── DI Container ───────────────────────────────────────────────────────
+  container = createContainer(context);
+
   // ── Logger ─────────────────────────────────────────────────────────────
-  const log = Logger.initialize(context);
+  // Resolve from container — this initializes Logger and wires its IConfigProvider
+  container.resolve<Logger>(Tokens.ILogger);
   const extLog = Logger.for('extension');
   extLog.info('Extension activating...');
 
   // ── Configuration ──────────────────────────────────────────────────────
-  const config = loadConfiguration();
+  const configProvider = container.resolve<IConfigProvider>(Tokens.IConfigProvider);
+  const config = loadConfiguration(configProvider);
   extLog.debug('Configuration loaded', config);
 
   // ── Plan Runner ─────────────────────────────────────────────────────────

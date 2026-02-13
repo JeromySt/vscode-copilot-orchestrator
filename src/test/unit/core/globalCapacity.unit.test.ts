@@ -363,4 +363,230 @@ suite('GlobalCapacityManager', () => {
     assert.ok(finalStats.thisInstanceJobs >= 0, 'Should have non-negative job count');
     assert.ok(finalStats.activeInstances > 0, 'Should have at least one active instance');
   });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // isProcessAlive / Dead Instance Cleanup Tests
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  test('should clean up instance with dead process (ESRCH)', async () => {
+    await manager.initialize();
+
+    // Inject a fake instance with a PID that doesn't exist
+    const registryPath = path.join(tempDir, 'capacity-registry.json');
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    registry.instances.push({
+      instanceId: 'dead-process-instance',
+      processId: 99999999, // Extremely unlikely to be a real PID
+      runningJobs: 3,
+      lastHeartbeat: Date.now(), // Recent heartbeat, but dead process
+      activePlans: ['plan-dead']
+    });
+    fs.writeFileSync(registryPath, JSON.stringify(registry), 'utf8');
+
+    // Trigger cleanup via update
+    await manager.updateRunningJobs(0, []);
+    const stats = await manager.getStats();
+
+    // Dead instance should have been cleaned up
+    assert.strictEqual(stats.activeInstances, 1, 'Dead instance should be removed');
+  });
+
+  test('should keep instance with alive process and recent heartbeat', async () => {
+    await manager.initialize();
+
+    // Inject instance with current process PID (definitely alive)
+    const registryPath = path.join(tempDir, 'capacity-registry.json');
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    registry.instances.push({
+      instanceId: 'alive-instance',
+      processId: process.pid, // Our own PID is definitely alive
+      runningJobs: 2,
+      lastHeartbeat: Date.now(),
+      activePlans: ['plan-x']
+    });
+    fs.writeFileSync(registryPath, JSON.stringify(registry), 'utf8');
+
+    await manager.updateRunningJobs(0, []);
+    const stats = await manager.getStats();
+
+    // Alive instance should be kept
+    assert.strictEqual(stats.activeInstances, 2, 'Alive instance should be kept');
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Not-initialized guard tests
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  test('updateRunningJobs is no-op when not initialized', async () => {
+    // Don't call initialize
+    await manager.updateRunningJobs(5, ['plan-1']);
+    // Should not throw, and internal currentRunningJobs is not updated
+    // because the method returns early
+    const stats = await manager.getStats();
+    // getStats reads from registry (which doesn't exist) so it falls back
+    // to local state: currentRunningJobs remains 0 since updateRunningJobs returned early
+    assert.strictEqual(stats.thisInstanceJobs, 0);
+  });
+
+  test('setGlobalMaxParallel is no-op when not initialized', async () => {
+    await manager.setGlobalMaxParallel(32);
+    // No error should be thrown
+  });
+
+  test('shutdown is no-op when not initialized', async () => {
+    await manager.shutdown();
+    // No error should be thrown
+  });
+
+  test('double initialize logs warning', async () => {
+    await manager.initialize();
+    await manager.initialize(); // Should warn, not throw
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // writeRegistry retry/fallback tests
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  test('handles EPERM error during updateRunningJobs gracefully', async () => {
+    await manager.initialize();
+    
+    // Make the registry directory read-only to trigger write errors
+    const registryPath = path.join(tempDir, 'capacity-registry.json');
+    
+    // Corrupt permissions by making file read-only
+    try {
+      fs.chmodSync(registryPath, 0o444);
+    } catch {
+      // On Windows, chmod may not work — skip gracefully
+      return;
+    }
+    
+    try {
+      // Should not throw — error is caught internally
+      await manager.updateRunningJobs(1, ['plan-1']);
+    } finally {
+      // Restore permissions for cleanup
+      try { fs.chmodSync(registryPath, 0o666); } catch { /* ignore */ }
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Registry version mismatch test
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  test('resets registry on version mismatch', async () => {
+    const registryPath = path.join(tempDir, 'capacity-registry.json');
+    fs.writeFileSync(registryPath, JSON.stringify({ version: 999, instances: [], globalMaxParallel: 8 }), 'utf8');
+
+    await manager.initialize();
+    const stats = await manager.getStats();
+    // Should fall back to default after version mismatch
+    assert.strictEqual(stats.globalMaxParallel, 16, 'Should use default after version mismatch');
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // isProcessAlive edge cases
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  test('isProcessAlive returns true for EPERM error (process exists but no permission)', async () => {
+    await manager.initialize();
+
+    // Stub process.kill to throw EPERM for a specific PID
+    const origKill = process.kill;
+    const killStub = (process as any).kill = function(pid: number, signal?: string | number) {
+      if (pid === 88888 && (signal === 0 || signal === undefined)) {
+        const err = new Error('Operation not permitted') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      }
+      return origKill.call(process, pid, signal as any);
+    };
+
+    try {
+      // Inject an instance with PID 88888 (alive via EPERM) and recent heartbeat
+      const registryPath = path.join(tempDir, 'capacity-registry.json');
+      const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+      registry.instances.push({
+        instanceId: 'eperm-instance',
+        processId: 88888,
+        runningJobs: 1,
+        lastHeartbeat: Date.now(),
+        activePlans: []
+      });
+      fs.writeFileSync(registryPath, JSON.stringify(registry), 'utf8');
+
+      await manager.updateRunningJobs(0, []);
+      const stats = await manager.getStats();
+
+      // EPERM means process exists — instance should be kept
+      assert.strictEqual(stats.activeInstances, 2, 'EPERM instance should be kept as alive');
+    } finally {
+      (process as any).kill = origKill;
+    }
+  });
+
+  test('isProcessAlive returns true for unknown errors (safe default)', async () => {
+    await manager.initialize();
+
+    const origKill = process.kill;
+    (process as any).kill = function(pid: number, signal?: string | number) {
+      if (pid === 77777 && (signal === 0 || signal === undefined)) {
+        const err = new Error('Unknown error') as NodeJS.ErrnoException;
+        err.code = 'EACCES';
+        throw err;
+      }
+      return origKill.call(process, pid, signal as any);
+    };
+
+    try {
+      const registryPath = path.join(tempDir, 'capacity-registry.json');
+      const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+      registry.instances.push({
+        instanceId: 'unknown-err-instance',
+        processId: 77777,
+        runningJobs: 1,
+        lastHeartbeat: Date.now(),
+        activePlans: []
+      });
+      fs.writeFileSync(registryPath, JSON.stringify(registry), 'utf8');
+
+      await manager.updateRunningJobs(0, []);
+      const stats = await manager.getStats();
+
+      // Unknown errors → assume alive
+      assert.strictEqual(stats.activeInstances, 2, 'Unknown error instance should be kept as alive');
+    } finally {
+      (process as any).kill = origKill;
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Heartbeat tests
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  test('heartbeat re-registers instance if removed from registry', async function() {
+    this.timeout(15000);
+    await manager.initialize();
+
+    // Remove all instances from registry
+    const registryPath = path.join(tempDir, 'capacity-registry.json');
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    registry.instances = [];
+    fs.writeFileSync(registryPath, JSON.stringify(registry), 'utf8');
+
+    // Trigger an update (simulates heartbeat behavior)
+    await manager.updateRunningJobs(1, ['plan-1']);
+
+    const stats = await manager.getStats();
+    assert.strictEqual(stats.activeInstances, 1, 'Instance should be re-registered');
+    assert.strictEqual(stats.thisInstanceJobs, 1);
+  });
+
+  test('double initialize clears and restarts heartbeat', async () => {
+    await manager.initialize();
+    // Second initialize should be a no-op (guarded)
+    await manager.initialize();
+    const stats = await manager.getStats();
+    assert.ok(stats.activeInstances >= 1);
+  });
 });

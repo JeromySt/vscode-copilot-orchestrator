@@ -25,6 +25,14 @@ export { PlanPersistence } from './persistence';
 // Runner
 export { PlanRunner, PlanRunnerConfig, PlanRunnerEvents, JobExecutor, RetryNodeOptions } from './runner';
 
+// Sub-modules
+export { PlanLifecycleManager, PlanRunnerState } from './planLifecycle';
+export { NodeManager } from './nodeManager';
+export { ExecutionPump } from './executionPump';
+export { PlanEventEmitter } from './planEvents';
+export { PlanConfigManager } from './configManager';
+export { JobExecutionEngine } from './executionEngine';
+
 // Helpers
 export {
   formatLogEntry,

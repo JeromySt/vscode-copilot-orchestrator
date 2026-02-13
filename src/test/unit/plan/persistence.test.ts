@@ -16,6 +16,9 @@ import {
   PlanNode,
   JobNode,
   NodeExecutionState,
+  GroupInstance,
+  GroupExecutionState,
+  GroupInfo,
 } from '../../../plan/types';
 
 // ---------------------------------------------------------------------------
@@ -334,6 +337,83 @@ suite('PlanPersistence', () => {
       fs.writeFileSync(path.join(dir, 'plans-index.json'), 'NOT_JSON');
       assert.deepStrictEqual(persistence.listplanIds(), []);
     });
+
+    test('handles missing index directory gracefully', () => {
+      // Create persistence pointing to a non-existent directory
+      const dir = '/nonexistent/dir';
+      const persistence = new PlanPersistence(dir);
+      assert.deepStrictEqual(persistence.listplanIds(), []);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Groups serialization/deserialization
+  // -----------------------------------------------------------------------
+  
+  suite('groups support', () => {
+    test('preserves groups through serialization', () => {
+      const dir = makeTmpDir();
+      const persistence = new PlanPersistence(dir);
+      const plan = makePlan();
+      
+      // Add some groups
+      const group1: GroupInstance = {
+        id: 'g1',
+        name: 'Backend',
+        path: 'backend',
+        nodeIds: ['node-1'],
+        allNodeIds: ['node-1'],
+        totalNodes: 1,
+        childGroupIds: []
+      };
+      plan.groups.set('g1', group1);
+      plan.groupPathToId.set('backend', 'g1');
+      
+      const groupState1: GroupExecutionState = {
+        status: 'pending',
+        version: 0,
+        runningCount: 0,
+        succeededCount: 0,
+        failedCount: 0,
+        blockedCount: 0,
+        canceledCount: 0
+      };
+      plan.groupStates.set('g1', groupState1);
+      
+      persistence.save(plan);
+      const loaded = persistence.load(plan.id)!;
+      
+      assert.strictEqual(loaded.groups.size, 1);
+      const loadedGroup = loaded.groups.get('g1')!;
+      assert.strictEqual(loadedGroup.name, 'Backend');
+      assert.strictEqual(loadedGroup.path, 'backend');
+      assert.strictEqual(loadedGroup.totalNodes, 1);
+      
+      assert.strictEqual(loaded.groupStates.size, 1);
+      const loadedGroupState = loaded.groupStates.get('g1')!;
+      assert.strictEqual(loadedGroupState.status, 'pending');
+      
+      assert.strictEqual(loaded.groupPathToId.size, 1);
+      assert.strictEqual(loaded.groupPathToId.get('backend'), 'g1');
+    });
+
+    test('handles empty groups gracefully', () => {
+      const dir = makeTmpDir();
+      const persistence = new PlanPersistence(dir);
+      const plan = makePlan();
+      
+      // Ensure groups are empty
+      plan.groups.clear();
+      plan.groupStates.clear();
+      plan.groupPathToId.clear();
+      
+      persistence.save(plan);
+      const loaded = persistence.load(plan.id)!;
+      
+      assert.strictEqual(loaded.groups.size, 0);
+      assert.strictEqual(loaded.groupStates.size, 0);
+      assert.strictEqual(loaded.groupPathToId.size, 0);
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -505,6 +585,162 @@ suite('PlanPersistence', () => {
       const loaded = persistence.load(plan.id)!;
       assert.ok(loaded);
       assert.strictEqual(loaded.id, plan.id);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Additional error conditions and edge cases
+  // -----------------------------------------------------------------------
+
+  suite('additional error handling', () => {
+    test('save handles filesystem errors gracefully', () => {
+      // Use a non-existent deeply nested path that can't be auto-created
+      const dir = makeTmpDir();
+      const badDir = path.join(dir, 'x'.repeat(300), 'plans');
+      
+      // Force construction without auto-mkdir by catching the constructor error
+      let persistence: PlanPersistence;
+      try {
+        persistence = new PlanPersistence(badDir);
+      } catch {
+        // On some OSes the constructor itself may throw - that's fine
+        return;
+      }
+      
+      const plan = makePlan();
+      assert.throws(() => {
+        persistence.save(plan);
+      });
+    });
+
+    test('delete returns false for non-existent plan', () => {
+      const dir = makeTmpDir();
+      const persistence = new PlanPersistence(dir);
+      
+      const result = persistence.delete('nonexistent');
+      assert.strictEqual(result, false);
+    });
+
+    test('delete handles filesystem errors gracefully', () => {
+      const dir = makeTmpDir();
+      const persistence = new PlanPersistence(dir);
+      const plan = makePlan();
+      
+      persistence.save(plan);
+      
+      // Remove the storage directory to cause delete error
+      fs.rmSync(dir, { recursive: true, force: true });
+      
+      const result = persistence.delete(plan.id);
+      assert.strictEqual(result, false);
+    });
+
+    test('loadAll handles directory read errors gracefully', () => {
+      const dir = makeTmpDir();
+      const persistence = new PlanPersistence(dir);
+      const plan = makePlan();
+      persistence.save(plan);
+      
+      // Remove directory to cause read error
+      fs.rmSync(dir, { recursive: true, force: true });
+      
+      const result = persistence.loadAll();
+      assert.deepStrictEqual(result, []);
+    });
+
+    test('updateIndex handles existing index with malformed content', () => {
+      const dir = makeTmpDir();
+      const persistence = new PlanPersistence(dir);
+      
+      // Create malformed index file
+      fs.writeFileSync(path.join(dir, 'plans-index.json'), '{"bad": "structure"}');
+      
+      // This should still succeed by recreating the index
+      const plan = makePlan();
+      persistence.save(plan);
+      
+      const ids = persistence.listplanIds();
+      assert.ok(ids.includes(plan.id));
+    });
+
+    test('handles serialization of plan with undefined optional fields', () => {
+      const dir = makeTmpDir();
+      const persistence = new PlanPersistence(dir);
+      const plan = makePlan();
+      
+      // Explicitly set optional fields to undefined
+      plan.parentPlanId = undefined;
+      plan.parentNodeId = undefined;
+      plan.targetBranch = undefined;
+      plan.startedAt = undefined;
+      plan.endedAt = undefined;
+      plan.workSummary = undefined;
+      plan.isPaused = undefined;
+      
+      persistence.save(plan);
+      const loaded = persistence.load(plan.id)!;
+      
+      assert.ok(loaded);
+      assert.strictEqual(loaded.parentPlanId, undefined);
+      assert.strictEqual(loaded.targetBranch, undefined);
+      assert.strictEqual(loaded.startedAt, undefined);
+    });
+
+    test('preserves node fields through serialization', () => {
+      const dir = makeTmpDir();
+      const persistence = new PlanPersistence(dir);
+      const plan = makePlan();
+      
+      // Add a job node with all optional fields
+      const nodeId = 'full-node';
+      const fullNode: JobNode = {
+        id: nodeId,
+        producerId: 'full-job',
+        name: 'Full Job',
+        type: 'job',
+        task: 'Complete task',
+        work: 'npm run build',
+        prechecks: 'npm test',
+        postchecks: 'npm run lint',
+        instructions: 'Be careful',
+        baseBranch: 'develop',
+        expectsNoChanges: true,
+        autoHeal: true,
+        group: 'test-group',
+        dependencies: ['node-1'],
+        dependents: []
+      };
+      plan.nodes.set(nodeId, fullNode);
+      plan.nodeStates.set(nodeId, { status: 'pending', version: 0, attempts: 0 });
+      
+      persistence.save(plan);
+      const loaded = persistence.load(plan.id)!;
+      
+      const loadedNode = loaded.nodes.get(nodeId) as JobNode;
+      assert.ok(loadedNode);
+      assert.strictEqual(loadedNode.work, 'npm run build');
+      assert.strictEqual(loadedNode.prechecks, 'npm test');
+      assert.strictEqual(loadedNode.postchecks, 'npm run lint');
+      assert.strictEqual(loadedNode.instructions, 'Be careful');
+      assert.strictEqual(loadedNode.baseBranch, 'develop');
+      assert.strictEqual(loadedNode.expectsNoChanges, true);
+      assert.strictEqual(loadedNode.autoHeal, true);
+      assert.strictEqual(loadedNode.group, 'test-group');
+    });
+
+    test('constructor handles .orchestrator directory auto-creation', () => {
+      const baseDir = makeTmpDir();
+      const plansDir = path.join(baseDir, '.orchestrator', 'plans');
+      
+      // Verify directory doesn't exist initially
+      assert.ok(!fs.existsSync(plansDir));
+      
+      // Create persistence instance - should auto-create directories
+      new PlanPersistence(plansDir);
+      
+      // Verify directories were created
+      assert.ok(fs.existsSync(plansDir));
+      assert.ok(fs.existsSync(path.join(baseDir, '.orchestrator')));
     });
   });
 });

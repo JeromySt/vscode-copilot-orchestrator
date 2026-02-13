@@ -51,14 +51,14 @@ suite('Copilot CLI Runner - Folder Security', () => {
     quiet.restore();
   });
 
-  test('buildCommand uses --allow-paths instead of --allow-all-paths', () => {
+  test('buildCommand uses --add-dir instead of --allow-all-paths', () => {
     const runner = new CopilotCliRunner();
     const cmd = runner.buildCommand({
       task: 'test task',
       cwd: __dirname  // Use real path that exists
     });
     
-    assert.ok(cmd.includes('--allow-paths'), 'Command should include --allow-paths');
+    assert.ok(cmd.includes('--add-dir'), 'Command should include --add-dir');
     assert.ok(!cmd.includes('--allow-all-paths'), 'Command should NOT include --allow-all-paths');
   });
 
@@ -103,10 +103,10 @@ suite('Copilot CLI Runner - Folder Security', () => {
     
     // Should only include worktree
     assert.ok(cmd.includes(JSON.stringify(testPath)), 'Command should include worktree path');
-    // Count occurrences of --allow-paths (should be 1 for just the worktree)
-    const matches = cmd.match(/--allow-paths/g);
-    assert.ok(matches, 'Should have --allow-paths flag');
-    assert.strictEqual(matches!.length, 1, 'Should have exactly one --allow-paths flag');
+    // Count occurrences of --add-dir (should be 1 for just the worktree)
+    const matches = cmd.match(/--add-dir/g);
+    assert.ok(matches, 'Should have --add-dir flag');
+    assert.strictEqual(matches!.length, 1, 'Should have exactly one --add-dir flag');
   });
 
   test('buildCommand filters out non-existent paths', () => {
@@ -135,9 +135,8 @@ suite('Copilot CLI Runner - Folder Security', () => {
       task: 'test task'
     });
     
-    // Should use fallback: --allow-paths .
-    assert.ok(cmd.includes('--allow-paths'), 'Command should include --allow-paths');
-    assert.ok(cmd.includes('--allow-paths .'), 'Command should use current directory as fallback');
+    // Should use fallback with explicit cwd via --add-dir
+    assert.ok(cmd.includes('--add-dir'), 'Command should include --add-dir');
   });
 
   test('buildCommand includes all standard flags', () => {
@@ -150,11 +149,11 @@ suite('Copilot CLI Runner - Folder Security', () => {
     assert.ok(cmd.includes('copilot'), 'Command should start with copilot');
     assert.ok(cmd.includes('-p'), 'Command should include -p flag');
     assert.ok(cmd.includes('--stream off'), 'Command should include --stream off');
-    assert.ok(cmd.includes('--allow-all-urls'), 'Command should include --allow-all-urls');
+    assert.ok(cmd.includes('--add-dir'), 'Command should include --add-dir');
     assert.ok(cmd.includes('--allow-all-tools'), 'Command should include --allow-all-tools');
   });
 
-  test('buildCommand with multiple allowedFolders uses multiple --allow-paths flags', () => {
+  test('buildCommand with multiple allowedFolders uses multiple --add-dir flags', () => {
     const runner = new CopilotCliRunner();
     const worktreePath = __dirname;
     const srcPath = path.resolve(__dirname, '..', '..', '..');
@@ -166,9 +165,9 @@ suite('Copilot CLI Runner - Folder Security', () => {
       allowedFolders: [srcPath, testPath]
     });
     
-    // Count occurrences of --allow-paths (should be 3: worktree + 2 additional)
-    const matches = cmd.match(/--allow-paths/g);
-    assert.ok(matches, 'Should have --allow-paths flags');
-    assert.strictEqual(matches!.length, 3, 'Should have three --allow-paths flags (worktree + 2 additional)');
+    // Count occurrences of --add-dir (should be 3: worktree + 2 additional)
+    const matches = cmd.match(/--add-dir/g);
+    assert.ok(matches, 'Should have --add-dir flags');
+    assert.strictEqual(matches!.length, 3, 'Should have three --add-dir flags (worktree + 2 additional)');
   });
 });
