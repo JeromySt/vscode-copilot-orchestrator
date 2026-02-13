@@ -547,8 +547,22 @@ export class NodeDetailPanel {
           vscode.window.showErrorMessage(`Retry failed: ${err?.message || err}`);
         });
         break;
+      case 'confirmForceFailNode':
+        // Show VS Code native confirmation dialog (browser confirm() doesn't work in webviews)
+        vscode.window.showWarningMessage(
+          'Force-fail this node? This will mark it as failed and may affect downstream nodes.',
+          { modal: true },
+          'Force Fail'
+        ).then(choice => {
+          if (choice === 'Force Fail') {
+            this._forceFailNode(message.planId || this._planId, message.nodeId || this._nodeId).catch(err => {
+              vscode.window.showErrorMessage(`Force fail failed: ${err?.message || err}`);
+            });
+          }
+        });
+        break;
       case 'forceFailNode':
-        // Use message params if provided, otherwise fall back to instance variables
+        // Direct force fail without confirmation (for programmatic use)
         this._forceFailNode(message.planId || this._planId, message.nodeId || this._nodeId).catch(err => {
           vscode.window.showErrorMessage(`Force fail failed: ${err?.message || err}`);
         });
@@ -574,6 +588,7 @@ export class NodeDetailPanel {
       this._update();
       vscode.window.showInformationMessage(`Node force failed. You can now retry.`);
     } catch (error) {
+      console.log('forceFailNode failed:', error);  // Debug
       vscode.window.showErrorMessage(`Failed to force fail: ${error}`);
     }
   }
@@ -990,9 +1005,8 @@ export class NodeDetailPanel {
       } else if (action === 'retry-node-fresh') {
         vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
       } else if (action === 'force-fail-node') {
-        if (confirm('Force-fail this node? This will mark it as failed and may affect downstream nodes.')) {
-          vscode.postMessage({ type: 'forceFailNode', planId, nodeId });
-        }
+        // Request confirmation from extension (browser confirm() doesn't work in webviews)
+        vscode.postMessage({ type: 'confirmForceFailNode', planId, nodeId });
       }
     });
     
