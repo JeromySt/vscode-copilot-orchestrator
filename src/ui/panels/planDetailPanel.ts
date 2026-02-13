@@ -88,8 +88,11 @@ export class planDetailPanel {
     // Initial render
     this._update();
     
-    // Subscribe to pulse for periodic updates
-    this._pulseSubscription = this._pulse.onPulse(() => this._update());
+    // Subscribe to pulse for periodic updates + forward pulse to webview
+    this._pulseSubscription = this._pulse.onPulse(() => {
+      this._panel.webview.postMessage({ type: 'pulse' });
+      this._update();
+    });
     
     // Handle panel disposal
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);

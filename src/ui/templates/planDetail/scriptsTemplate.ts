@@ -46,7 +46,48 @@ export function renderPlanScripts(data: PlanScriptsData): string {
     const mermaidDef = ${JSON.stringify(data.mermaidDef)};
     const edgeData = ${JSON.stringify(data.edgeData)};
     const initialGlobalCapacity = ${JSON.stringify(data.globalCapacityStats)};
-    
+
+    // ── Inline EventBus ──────────────────────────────────────────────────
+    const EventBus = (function() {
+      function EB() { this._h = new Map(); }
+      EB.prototype.on = function(topic, fn) {
+        var set = this._h.get(topic);
+        if (!set) { set = new Set(); this._h.set(topic, set); }
+        set.add(fn);
+        var active = true;
+        var self = this;
+        return { get isActive() { return active; }, topic: topic, unsubscribe: function() {
+          if (!active) return; active = false;
+          var s = self._h.get(topic); if (s) { s.delete(fn); if (s.size === 0) self._h.delete(topic); }
+        }};
+      };
+      EB.prototype.emit = function(topic, data) {
+        var set = this._h.get(topic);
+        if (!set) return;
+        var snapshot = Array.from(set);
+        for (var i = 0; i < snapshot.length; i++) snapshot[i](data);
+      };
+      EB.prototype.clear = function(topic) {
+        if (topic !== undefined) this._h.delete(topic); else this._h.clear();
+      };
+      return EB;
+    })();
+
+    // Well-known topics
+    var Topics = {
+      PULSE: 'extension:pulse',
+      NODE_STATE_CHANGE: 'node:state',
+      PLAN_STATE_CHANGE: 'plan:state',
+      PROCESS_STATS: 'node:process-stats',
+      STATUS_UPDATE: 'extension:statusUpdate'
+    };
+
+    // Global bus instance
+    var bus = new EventBus();
+
+    // ── Process stats pulse counter ──────────────────────────────────────
+    var _processStatsPulseCount = 0;
+
     // Initialize capacity info
     if (initialGlobalCapacity && (initialGlobalCapacity.totalGlobalJobs > 0 || initialGlobalCapacity.activeInstances > 1)) {
       const capacityInfoEl = document.getElementById('capacityInfo');
@@ -370,19 +411,8 @@ export function renderPlanScripts(data: PlanScriptsData): string {
       }
     }
     
-    // Update duration every second if running
+    // Initial duration update
     updateDurationCounter();
-    
-    // Clear any existing timers to prevent duplicates
-    if (window.durationTimer) {
-      clearInterval(window.durationTimer);
-    }
-    if (window.nodeTimer) {
-      clearInterval(window.nodeTimer);
-    }
-    
-    // Set up persistent timers
-    window.durationTimer = setInterval(updateDurationCounter, 1000);
     
     // Update node durations in SVG for running nodes
     function updateNodeDurations() {
@@ -455,17 +485,32 @@ export function renderPlanScripts(data: PlanScriptsData): string {
       }
     }
     
-    // Update node durations every second
-    window.nodeTimer = setInterval(updateNodeDurations, 1000);
+    // Subscribe to PULSE for duration updates (replaces setInterval)
+    bus.on(Topics.PULSE, function() {
+      updateDurationCounter();
+      updateNodeDurations();
+    });
     
-    // Handle messages from extension (incremental updates, process stats)
-    window.addEventListener('message', event => {
-      const msg = event.data;
+    // Route postMessage from extension into EventBus topics
+    window.addEventListener('message', function(event) {
+      var msg = event.data;
       if (msg.type === 'allProcessStats') {
-        renderAllProcesses(msg.rootJobs);
+        bus.emit(Topics.PROCESS_STATS, msg);
       } else if (msg.type === 'statusUpdate') {
-        handleStatusUpdate(msg);
+        bus.emit(Topics.STATUS_UPDATE, msg);
+      } else if (msg.type === 'pulse') {
+        bus.emit(Topics.PULSE);
       }
+    });
+
+    // Subscribe to STATUS_UPDATE topic
+    bus.on(Topics.STATUS_UPDATE, function(msg) {
+      handleStatusUpdate(msg);
+    });
+
+    // Subscribe to PROCESS_STATS topic
+    bus.on(Topics.PROCESS_STATS, function(msg) {
+      renderAllProcesses(msg.rootJobs);
     });
     
     // Handle incremental status updates without full re-render (preserves zoom/scroll)
@@ -794,17 +839,9 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           }
         }
         
-        // Trigger duration updates to ensure timers are working
+        // Trigger duration updates immediately
         updateDurationCounter();
         updateNodeDurations();
-        
-        // Ensure timers are active (restart if needed)
-        if (!window.durationTimer) {
-          window.durationTimer = setInterval(updateDurationCounter, 1000);
-        }
-        if (!window.nodeTimer) {
-          window.nodeTimer = setInterval(updateNodeDurations, 1000);
-        }
       } catch (err) {
         console.error('handleStatusUpdate error:', err);
         // On error, request a full refresh
@@ -959,13 +996,16 @@ export function renderPlanScripts(data: PlanScriptsData): string {
       return div.innerHTML;
     }
     
-    // Poll for process stats if running
+    // Poll for process stats via PULSE (every 2nd pulse ≈ 2s)
     const processesSection = document.getElementById('processesSection');
     if (processesSection) {
       vscode.postMessage({ type: 'getAllProcessStats' });
-      setInterval(() => {
-        vscode.postMessage({ type: 'getAllProcessStats' });
-      }, 2000);
+      bus.on(Topics.PULSE, function() {
+        _processStatsPulseCount++;
+        if (_processStatsPulseCount % 2 === 0) {
+          vscode.postMessage({ type: 'getAllProcessStats' });
+        }
+      });
     }
   </script>`;
 }

@@ -400,6 +400,9 @@ export class NodeDetailPanel {
     
     // Subscribe to pulse for periodic state checks
     this._pulseSubscription = this._pulse.onPulse(() => {
+      // Forward pulse to webview for DurationCounter ticking
+      this._panel.webview.postMessage({ type: 'pulse' });
+
       const plan = this._planRunner.get(this._planId);
       const state = plan?.nodeStates.get(this._nodeId);
       if (state?.status === 'running' || state?.status === 'scheduled') {
@@ -408,16 +411,18 @@ export class NodeDetailPanel {
           this._lastStatus = state.status;
           this._update();
         } else if (this._currentPhase) {
-          // Just refresh the current log view
+          // Push log lines on arrival
           this._sendLog(this._currentPhase);
         }
+        // Push process stats on each pulse while active
+        this._sendProcessStats();
       } else if (this._lastStatus === 'running' || this._lastStatus === 'scheduled') {
         // Transitioned from running to terminal - do full update
         this._lastStatus = state?.status || null;
         this._update();
         // Send final log update
         if (this._currentPhase) {
-          setTimeout(() => this._sendLog(this._currentPhase!), 100);
+          this._sendLog(this._currentPhase);
         }
       } else {
         // Terminal state - check for worktree cleanup or other state changes

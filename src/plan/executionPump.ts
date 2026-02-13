@@ -67,9 +67,20 @@ export class ExecutionPump {
    */
   startPump(): void {
     if (this.pumpTimer) return;
+    this.schedulePump();
+    this.log.debug('Pump started', { interval: this.state.config.pumpInterval || 1000 });
+  }
+
+  /** Schedule the next pump tick using setTimeout (avoids stacking). */
+  private schedulePump(): void {
     const interval = this.state.config.pumpInterval || 1000;
-    this.pumpTimer = setInterval(() => this.pump(), interval);
-    this.log.debug('Pump started', { interval });
+    this.pumpTimer = setTimeout(() => {
+      this.pump().finally(() => {
+        if (this.pumpTimer !== undefined) {
+          this.schedulePump();
+        }
+      });
+    }, interval);
   }
 
   /**
@@ -77,7 +88,7 @@ export class ExecutionPump {
    */
   stopPump(): void {
     if (this.pumpTimer) {
-      clearInterval(this.pumpTimer);
+      clearTimeout(this.pumpTimer);
       this.pumpTimer = undefined;
       this.log.debug('Pump stopped');
     }

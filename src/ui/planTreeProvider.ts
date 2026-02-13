@@ -143,7 +143,6 @@ export class PlanTreeViewManager {
   private treeView: vscode.TreeView<PlanTreeItem> | undefined;
   private treeDataProvider: PlanTreeDataProvider;
   private _pulseSubscription: PulseDisposable | undefined;
-  private readonly DURATION_REFRESH_INTERVAL = 1000;  // 1 second
 
   constructor(private planRunner: PlanRunner, private _pulse: IPulseEmitter) {
     this.treeDataProvider = new PlanTreeDataProvider(planRunner);

@@ -129,7 +129,7 @@ suite('Node Detail Scripts Template', () => {
 
     test('includes log content message handler', () => {
       const script = webviewScripts(baseConfig);
-      assert.ok(script.includes("msg.type === 'logContent'"));
+      assert.ok(script.includes("'logContent'"));
       assert.ok(script.includes('lastLogContent'));
     });
 
@@ -147,7 +147,7 @@ suite('Node Detail Scripts Template', () => {
 
     test('includes process tree rendering', () => {
       const script = webviewScripts(baseConfig);
-      assert.ok(script.includes('function renderProcessTree(stats)'));
+      assert.ok(script.includes('initProcessTree'));
       assert.ok(script.includes('processTree'));
       assert.ok(script.includes('processTreeTitle'));
     });
@@ -169,11 +169,11 @@ suite('Node Detail Scripts Template', () => {
       assert.ok(script.includes("type: 'getProcessStats'"));
     });
 
-    test('includes duration timer for running status', () => {
+    test('includes duration timer driven by pulse events', () => {
       const script = webviewScripts({ ...baseConfig, nodeStatus: 'running' });
       assert.ok(script.includes('duration-timer'));
-      assert.ok(script.includes('nodeDurationTimer'));
-      assert.ok(script.includes('"running"'));
+      assert.ok(script.includes('T.PULSE'));
+      assert.ok(script.includes('formatDuration'));
     });
 
     test('includes escapeHtml client-side function', () => {
@@ -192,9 +192,11 @@ suite('Node Detail Scripts Template', () => {
       assert.ok(script.includes('node\\"special'));
     });
 
-    test('sets nodeStatus in duration timer section', () => {
+    test('routes messages to EventBus topics', () => {
       const script = webviewScripts({ ...baseConfig, nodeStatus: 'succeeded' });
-      assert.ok(script.includes('"succeeded"'));
+      assert.ok(script.includes('bus.emit'));
+      assert.ok(script.includes('T.LOG_UPDATE'));
+      assert.ok(script.includes('T.PROCESS_STATS'));
     });
 
     test('includes keyboard shortcuts for log viewer', () => {
