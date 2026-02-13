@@ -138,9 +138,9 @@ function createAgentDelegatorAdapter(log: any) {
 /**
  * Initialize the Plan Runner and executor
  */
-export function initializePlanRunner(
+export async function initializePlanRunner(
   context: vscode.ExtensionContext
-): { planRunner: PlanRunner; executor: DefaultJobExecutor; processMonitor: ProcessMonitor } {
+): Promise<{ planRunner: PlanRunner; executor: DefaultJobExecutor; processMonitor: ProcessMonitor }> {
   log.info('Initializing Plan Runner...');
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
@@ -180,10 +180,13 @@ export function initializePlanRunner(
     });
   }
   
-  // Initialize (load persisted Plans)
-  planRunner.initialize().catch(err => {
-    log.error('Failed to initialize Plan Runner', { error: err.message });
-  });
+  // Initialize (load persisted Plans) - MUST complete before creating tree view
+  try {
+    await planRunner.initialize();
+    log.info('Plan Runner initialized', { storagePath, workspacePath });
+  } catch (err) {
+    log.error('Failed to initialize Plan Runner', { error: err instanceof Error ? err.message : String(err) });
+  }
   
   // Register cleanup
   context.subscriptions.push({
@@ -196,8 +199,6 @@ export function initializePlanRunner(
       }
     }
   });
-  
-  log.info('Plan Runner initialized', { storagePath, workspacePath });
   
   return { planRunner, executor, processMonitor };
 }
@@ -318,7 +319,7 @@ export function initializePlansView(
     vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
   );
 
-  // Initialize TreeView for badge functionality
+  // Initialize TreeView for badge functionality - AFTER plan recovery is complete
   const { PlanTreeViewManager } = require('../ui/planTreeProvider');
   const treeViewManager = new PlanTreeViewManager(planRunner);
   treeViewManager.createTreeView(context);

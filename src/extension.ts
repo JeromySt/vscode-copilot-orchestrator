@@ -73,7 +73,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   extLog.debug('Configuration loaded', config);
 
   // ── Plan Runner ─────────────────────────────────────────────────────────
-  const { planRunner: runner, processMonitor: pm } = initializePlanRunner(context);
+  const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context);
   processMonitor = pm;
   planRunner = runner;
 
