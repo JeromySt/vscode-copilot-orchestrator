@@ -5,6 +5,13 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.5] - 2026-02-13
+
+### Fixed
+- **Force Fail**: Use VS Code native confirmation dialog, properly kill processes on Windows, only show button for running nodes
+- **Node Update**: Reject `update_copilot_plan_node` on running or completed nodes to prevent corrupting in-progress work
+- **GlobalCapacity Registry**: Fix EPERM error spam when registry file is locked or inaccessible
+
 ## [0.9.4] - 2026-02-13
 
 ### Changed

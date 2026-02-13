@@ -1138,7 +1138,7 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
   }
   
   // Check if node has already completed successfully - cannot update completed nodes
-  if (nodeState?.status === 'completed') {
+  if (nodeState?.status === 'succeeded') {
     return errorResult(`Node "${jobNode.name}" has already completed successfully and cannot be updated.`);
   }
   
