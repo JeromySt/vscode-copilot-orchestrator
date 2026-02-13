@@ -15,6 +15,7 @@ import { Logger } from '../core/logger';
 import * as branches from './core/branches';
 import * as worktrees from './core/worktrees';
 import * as repository from './core/repository';
+import { ensureGitignoreEntries } from './core/gitignore';
 import { execAsync, GitLogger } from './core/executor';
 
 const log = Logger.for('git');
@@ -111,7 +112,7 @@ export async function createJobWorktree(options: JobWorktreeOptions): Promise<st
   const logFn = logger || ((msg: string) => log.debug(msg));
   
   // Ensure orchestrator directories are in .gitignore
-  await ensureGitignorePatterns(repoPath, [worktreeRoot, '.orchestrator'], logFn);
+  await ensureGitignoreEntries(repoPath, [worktreeRoot, '.orchestrator'], logFn);
   
   // Fetch latest changes (does not affect working directory)
   logFn('[git] Fetching latest changes...');
@@ -255,50 +256,6 @@ export async function squashMerge(
     logFn('[git] ✓ Squash merge completed');
   } else {
     logFn('[git] ✓ No changes to commit (branches already in sync)');
-  }
-}
-
-// =============================================================================
-// Gitignore Management
-// =============================================================================
-
-/**
- * Ensure specified patterns are in .gitignore.
- */
-export async function ensureGitignorePatterns(
-  repoPath: string,
-  patterns: string[],
-  logger?: GitLogger
-): Promise<void> {
-  const gitignorePath = path.join(repoPath, '.gitignore');
-  
-  try {
-    let content = '';
-    try {
-      content = await fs.promises.readFile(gitignorePath, 'utf-8');
-    } catch {
-      // File doesn't exist
-    }
-    
-    let modified = false;
-    const linesToAdd: string[] = [];
-    
-    for (const pattern of patterns) {
-      const normalizedPattern = pattern.startsWith('/') ? pattern : `/${pattern}`;
-      if (!content.includes(pattern)) {
-        linesToAdd.push(normalizedPattern);
-        modified = true;
-      }
-    }
-    
-    if (modified) {
-      const separator = content.endsWith('\n') || content === '' ? '' : '\n';
-      const newContent = content + separator + '# Copilot Orchestrator\n' + linesToAdd.join('\n') + '\n';
-      await fs.promises.writeFile(gitignorePath, newContent, 'utf-8');
-      logger?.('[git] Updated .gitignore with orchestrator patterns');
-    }
-  } catch (e) {
-    logger?.(`[git] Warning: Could not update .gitignore: ${e}`);
   }
 }
 

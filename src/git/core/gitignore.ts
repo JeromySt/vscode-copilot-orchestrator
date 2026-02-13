@@ -6,6 +6,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import type { GitLogger } from './executor';
 
 /**
  * Ensure .gitignore contains required entries for orchestrator temporary files.
@@ -22,11 +23,13 @@ import * as fs from 'fs';
  * 
  * @param repoPath - Path to the repository (worktree or main repo)
  * @param entries - Entries to ensure are present (default: ['.worktrees', '.orchestrator'])
+ * @param logger - Optional logger for status messages
  * @returns true if gitignore was modified, false if already up-to-date
  */
 export async function ensureGitignoreEntries(
   repoPath: string,
-  entries: string[] = ['.worktrees', '.orchestrator']
+  entries: string[] = ['.worktrees', '.orchestrator'],
+  logger?: GitLogger
 ): Promise<boolean> {
   const gitignorePath = path.join(repoPath, '.gitignore');
   
@@ -70,6 +73,43 @@ export async function ensureGitignoreEntries(
     newContent += `${entry}\n`;
   }
   
-  await fs.promises.writeFile(gitignorePath, newContent, 'utf8');
-  return true;
+  try {
+    await fs.promises.writeFile(gitignorePath, newContent, 'utf8');
+    logger?.('[git] Updated .gitignore with orchestrator entries');
+    return true;
+  } catch (error) {
+    logger?.(`[git] Warning: Could not update .gitignore: ${error}`);
+    throw error;
+  }
+}
+
+/**
+ * Ensure .gitignore contains required entries for orchestrator temporary files.
+ * This is the ONLY function that should modify .gitignore for the orchestrator extension.
+ * 
+ * @param workspaceRoot - The workspace root path
+ * @returns true if .gitignore was modified, false if already up to date
+ */
+export async function ensureOrchestratorGitIgnore(workspaceRoot: string): Promise<boolean> {
+  return ensureGitignoreEntries(workspaceRoot, ['.worktrees/', '.orchestrator/']);
+}
+
+/**
+ * Check if .gitignore has all required orchestrator entries.
+ */
+export async function isOrchestratorGitIgnoreConfigured(workspaceRoot: string): Promise<boolean> {
+  const gitignorePath = path.join(workspaceRoot, '.gitignore');
+  const requiredEntries = ['.worktrees/', '.orchestrator/', '.worktrees', '.orchestrator'];
+  
+  try {
+    const content = await fs.promises.readFile(gitignorePath, 'utf-8');
+    const lines = content.split('\n').map(l => l.trim());
+    
+    // Check if any of the required entry variations are present
+    return ['.worktrees/', '.orchestrator/'].every(entry => 
+      lines.includes(entry) || lines.includes(entry.replace(/\/$/, ''))
+    );
+  } catch {
+    return false;
+  }
 }

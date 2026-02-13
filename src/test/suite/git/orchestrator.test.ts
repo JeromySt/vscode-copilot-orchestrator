@@ -264,42 +264,4 @@ suite('Git Orchestrator', () => {
       assert.ok(commitStub.notCalled);
     });
   });
-
-  // =========================================================================
-  // ensureGitignorePatterns
-  // =========================================================================
-
-  suite('ensureGitignorePatterns', () => {
-    test('creates .gitignore when it does not exist', async () => {
-      sinon.stub(fs.promises, 'readFile').rejects(new Error('ENOENT'));
-      const writeStub = sinon.stub(fs.promises, 'writeFile').resolves();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees']);
-
-      assert.ok(writeStub.calledOnce);
-      const content = writeStub.firstCall.args[1] as string;
-      assert.ok(content.includes('/.worktrees'));
-    });
-
-    test('appends patterns not already present', async () => {
-      sinon.stub(fs.promises, 'readFile').resolves('node_modules\n');
-      const writeStub = sinon.stub(fs.promises, 'writeFile').resolves();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees', '.orchestrator']);
-
-      assert.ok(writeStub.calledOnce);
-      const content = writeStub.firstCall.args[1] as string;
-      assert.ok(content.includes('/.worktrees'));
-      assert.ok(content.includes('/.orchestrator'));
-    });
-
-    test('does not modify when patterns already exist', async () => {
-      sinon.stub(fs.promises, 'readFile').resolves('/.worktrees\n');
-      const writeStub = sinon.stub(fs.promises, 'writeFile').resolves();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees']);
-
-      assert.ok(writeStub.notCalled);
-    });
-  });
 });

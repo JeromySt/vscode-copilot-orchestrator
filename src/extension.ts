@@ -26,6 +26,8 @@ import { ProcessMonitor } from './process/processMonitor';
 import { PlanRunner } from './plan';
 import { Logger } from './core/logger';
 import { cleanupOrphanedWorktrees } from './core/orphanedWorktreeCleanup';
+import { BranchChangeWatcher } from './git/branchWatcher';
+import { ensureOrchestratorGitIgnore } from './git/core/gitignore';
 import type { PlanInstance } from './plan/types/plan';
 
 // ============================================================================
@@ -97,6 +99,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── Commands ───────────────────────────────────────────────────────────
   registerPlanCommands(context, planRunner);
   registerUtilityCommands(context);
+
+  // ── Branch Change Watcher ──────────────────────────────────────────────
+  // Watch for branch changes and ensure .gitignore entries
+  const branchWatcher = new BranchChangeWatcher(Logger.for('git'));
+  await branchWatcher.initialize();
+  context.subscriptions.push(branchWatcher);
+
+  // ── .gitignore File System Watcher ─────────────────────────────────────
+  // Watch for external .gitignore modifications and re-apply orchestrator entries
+  const gitignoreWatcher = vscode.workspace.createFileSystemWatcher('**/.gitignore');
+  
+  gitignoreWatcher.onDidChange(async (uri) => {
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+    if (workspaceFolder) {
+      const gitLogger = Logger.for('git');
+      try {
+        const modified = await ensureOrchestratorGitIgnore(workspaceFolder.uri.fsPath);
+        if (modified) {
+          gitLogger.info('.gitignore updated after external modification', { 
+            path: uri.fsPath 
+          });
+        }
+      } catch (error) {
+        gitLogger.error('Failed to update .gitignore after external change', {
+          path: uri.fsPath,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  });
+  
+  context.subscriptions.push(gitignoreWatcher);
 
   // ── Orphaned Worktree Cleanup ──────────────────────────────────────────
   // Trigger cleanup asynchronously after extension is fully activated

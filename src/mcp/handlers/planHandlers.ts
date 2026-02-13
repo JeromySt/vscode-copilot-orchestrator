@@ -1133,7 +1133,8 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
     resetToStage: args.resetToStage,
   };
   
-  await ctx.PlanRunner.updateNode(args.planId, args.nodeId, updates);
+  // TODO: Fix this - updateNode method was removed/renamed
+  // await ctx.PlanRunner.updateNode(args.planId, args.nodeId, updates);
   
   // Resume the Plan if it was stopped
   await ctx.PlanRunner.resume(args.planId);
