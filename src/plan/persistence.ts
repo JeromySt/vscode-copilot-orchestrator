@@ -95,9 +95,16 @@ export class PlanPersistence {
    */
   constructor(storagePath: string) {
     this.storagePath = storagePath;
-    // Derive workspace path from storage path (storagePath is workspacePath/.orchestrator/plans)
-    const workspacePath = path.resolve(storagePath, '../..');
-    ensureOrchestratorDirs(workspacePath);  // Initial setup
+    // Only derive workspace if storagePath follows workspacePath/.orchestrator/plans convention
+    const normalizedStoragePath = path.resolve(storagePath);
+    const storageDirName = path.basename(normalizedStoragePath);
+    const parentDir = path.dirname(normalizedStoragePath);
+    const parentDirName = path.basename(parentDir);
+
+    if (storageDirName === 'plans' && parentDirName === '.orchestrator') {
+      const workspacePath = path.dirname(parentDir);
+      ensureOrchestratorDirs(workspacePath);
+    }
     this.ensureStorageDir();
   }
   

@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Activity Bar Badge**: Shows running plan count on the sidebar icon for at-a-glance status
 - **Filesystem Watcher**: Monitors `.orchestrator/plans/` directory for external file changes (deletions/creations)
 - **Auto-Fail Crashed Nodes**: Nodes left in `running` state after extension restart are automatically failed so they can be retried
-- **Node Spec Update & Reset**: `update_copilot_node` MCP tool can modify work specs and reset execution to updated stages
+- **Node Spec Update & Reset**: `update_copilot_plan_node` MCP tool can modify work specs and reset execution to updated stages
 
 ### Fixed
 - **Force-Fail Button**: Fixed non-functional force-fail button in node detail panel — now works regardless of attempt index or node state
