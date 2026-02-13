@@ -3152,25 +3152,6 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Run a git command in a directory
-   */
-  private async runGitCommand(cwd: string, command: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const cp = require('child_process');
-      const p = cp.spawn(command, { cwd, shell: true });
-      let stderr = '';
-      p.stderr?.on('data', (d: any) => stderr += d.toString());
-      p.on('exit', (code: number) => {
-        if (code === 0) {
-          resolve();
-        } else {
-          reject(new Error(`${command} failed with exit code ${code}: ${stderr}`));
-        }
-      });
-    });
-  }
-  
-  /**
    * Resolve merge conflicts using Copilot CLI.
    * 
    * Assumes we're in a merge conflict state in the given directory.
@@ -3273,7 +3254,13 @@ export class PlanRunner extends EventEmitter {
       }
       
       // Step 3: Perform the merge (will have conflicts)
-      await this.runGitCommand(repoPath, `git merge --no-commit ${sourceCommit}`).catch(() => {
+      await git.merge.merge({
+        source: sourceCommit,
+        target: targetBranch,
+        cwd: repoPath,
+        noCommit: true,
+        log: s => log.debug(s)
+      }).catch(() => {
         // Expected to fail due to conflicts
       });
       

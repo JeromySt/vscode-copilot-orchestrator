@@ -1396,13 +1396,16 @@ OR
    * Get git status output for debugging
    */
   private async getGitStatus(cwd: string): Promise<string | null> {
-    return new Promise((resolve) => {
-      const proc = spawn('git', ['status', '--porcelain'], { cwd });
-      let output = '';
-      proc.stdout?.on('data', (data) => output += data.toString());
-      proc.on('close', () => resolve(output.trim() || null));
-      proc.on('error', () => resolve(null));
-    });
+    try {
+      const dirtyFiles = await git.repository.getDirtyFiles(cwd);
+      if (dirtyFiles.length === 0) {
+        return null;
+      }
+      // Format similar to --porcelain output for logging consistency
+      return dirtyFiles.map(file => `M  ${file}`).join('\n');
+    } catch (error) {
+      return null;
+    }
   }
   
   /**
@@ -1410,26 +1413,18 @@ OR
    * Uses git status --ignored to show files excluded by .gitignore.
    */
   private async getIgnoredFiles(cwd: string): Promise<string | null> {
-    return new Promise((resolve) => {
-      // --ignored --short shows ignored files with !! prefix
-      const proc = spawn('git', ['status', '--ignored', '--short'], { cwd });
-      let output = '';
-      proc.stdout?.on('data', (data) => output += data.toString());
-      proc.on('close', () => {
-        // Filter to only lines starting with !! (ignored files)
-        const lines = output.split('\n')
-          .filter(line => line.startsWith('!!'))
-          .map(line => line.slice(3).trim()) // Remove !! prefix
-          .slice(0, 50); // Limit to 50 files to avoid huge output
-        if (lines.length === 0) {
-          resolve(null);
-        } else {
-          const result = lines.join('\n');
-          resolve(lines.length === 50 ? result + '\n... (truncated)' : result);
-        }
-      });
-      proc.on('error', () => resolve(null));
-    });
+    try {
+      const ignoredFiles = await git.repository.getIgnoredFiles(cwd);
+      if (ignoredFiles.length === 0) {
+        return null;
+      }
+      // Limit to 50 files to avoid huge output (same as before)
+      const limitedFiles = ignoredFiles.slice(0, 50);
+      const result = limitedFiles.join('\n');
+      return limitedFiles.length === 50 ? result + '\n... (truncated)' : result;
+    } catch (error) {
+      return null;
+    }
   }
   
   /**

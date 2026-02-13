@@ -763,4 +763,72 @@ suite('Git Repository Operations', () => {
       assert.deepStrictEqual(result, ['stash@{0}: WIP']);
     });
   });
+
+  // =========================================================================
+  // getIgnoredFiles()
+  // =========================================================================
+
+  suite('getIgnoredFiles()', () => {
+    test('returns list of ignored files', async () => {
+      execAsyncStub.resolves(ok('!! .env\n!! node_modules/package.json\n!! dist/app.js\n'));
+
+      const result = await repository.getIgnoredFiles('/repo');
+
+      assert.deepStrictEqual(result, ['.env', 'node_modules/package.json', 'dist/app.js']);
+      const [args] = execAsyncStub.firstCall.args;
+      assert.deepStrictEqual(args, ['status', '--ignored', '--short']);
+    });
+
+    test('returns empty array when no ignored files', async () => {
+      execAsyncStub.resolves(ok(''));
+
+      const result = await repository.getIgnoredFiles('/repo');
+
+      assert.deepStrictEqual(result, []);
+    });
+
+    test('returns empty array on command failure', async () => {
+      execAsyncStub.resolves(fail('not a git repository'));
+
+      const result = await repository.getIgnoredFiles('/repo');
+
+      assert.deepStrictEqual(result, []);
+    });
+
+    test('filters out non-ignored status lines', async () => {
+      execAsyncStub.resolves(ok('M file.txt\n!! .env\n?? untracked.txt\n!! logs/\n'));
+
+      const result = await repository.getIgnoredFiles('/repo');
+
+      assert.deepStrictEqual(result, ['.env', 'logs/']);
+    });
+
+    test('handles files with spaces in names', async () => {
+      execAsyncStub.resolves(ok('!! my file.txt\n!! "file with quotes.log"\n'));
+
+      const result = await repository.getIgnoredFiles('/repo');
+
+      assert.deepStrictEqual(result, ['my file.txt', '"file with quotes.log"']);
+    });
+
+    test('invokes logger on success', async () => {
+      execAsyncStub.resolves(ok('!! .env\n'));
+      const messages: string[] = [];
+
+      await repository.getIgnoredFiles('/repo', (m) => messages.push(m));
+
+      assert.ok(messages.some((m) => m.includes('Getting ignored files')));
+      assert.ok(messages.some((m) => m.includes('Found 1 ignored files')));
+    });
+
+    test('invokes logger when no ignored files found', async () => {
+      execAsyncStub.resolves(ok(''));
+      const messages: string[] = [];
+
+      await repository.getIgnoredFiles('/repo', (m) => messages.push(m));
+
+      assert.ok(messages.some((m) => m.includes('Getting ignored files')));
+      assert.ok(messages.some((m) => m.includes('No ignored files found')));
+    });
+  });
 });

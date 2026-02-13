@@ -418,3 +418,25 @@ export async function stashList(cwd: string): Promise<string[]> {
   if (!result) return [];
   return result.split(/\r?\n/).filter(Boolean);
 }
+
+/**
+ * Get list of ignored files for troubleshooting.
+ * Uses git status --ignored to show files excluded by .gitignore.
+ */
+export async function getIgnoredFiles(cwd: string, log?: GitLogger): Promise<string[]> {
+  log?.(`[git] Getting ignored files`);
+  
+  const result = await execAsync(['status', '--ignored', '--short'], { cwd });
+  if (!result.success || !result.stdout.trim()) {
+    log?.(`[git] ✓ No ignored files found`);
+    return [];
+  }
+  
+  // Filter to only lines starting with !! (ignored files)
+  const ignoredFiles = result.stdout.trim().split(/\r?\n/)
+    .filter(line => line.startsWith('!!'))
+    .map(line => line.slice(3).trim()); // Remove '!! ' prefix
+  
+  log?.(`[git] ✓ Found ${ignoredFiles.length} ignored files`);
+  return ignoredFiles;
+}
