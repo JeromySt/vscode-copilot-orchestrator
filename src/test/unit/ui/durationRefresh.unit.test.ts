@@ -66,16 +66,31 @@ suite('Plan Tree Duration Refresh', () => {
   });
 
   suite('Duration refresh timer', () => {
-    test('should start timer on construction', () => {
+    test('should start timer on construction when plans are running', () => {
+      mockPlanRunner.setMockPlans([{ id: '1', status: 'running', startedAt: Date.now() }]);
       const manager = new PlanTreeViewManager(mockPlanRunner as any);
       const setIntervalSpy = sinon.spy(global, 'setInterval');
       
-      // Create tree view which starts the timer
+      // Create tree view which starts the timer only when plans are running
       const mockContext = { subscriptions: [] };
       manager.createTreeView(mockContext as any);
       
       assert.strictEqual(setIntervalSpy.called, true, 'setInterval should be called to start timer');
       assert.strictEqual(setIntervalSpy.getCall(0).args[1], 1000, 'Timer should be set to 1000ms interval');
+      
+      manager.dispose();
+      setIntervalSpy.restore();
+    });
+
+    test('should not start timer on construction when no plans are running', () => {
+      mockPlanRunner.setMockPlans([{ id: '1', status: 'completed' }]);
+      const manager = new PlanTreeViewManager(mockPlanRunner as any);
+      const setIntervalSpy = sinon.spy(global, 'setInterval');
+      
+      const mockContext = { subscriptions: [] };
+      manager.createTreeView(mockContext as any);
+      
+      assert.strictEqual(setIntervalSpy.called, false, 'setInterval should not be called when no plans running');
       
       manager.dispose();
       setIntervalSpy.restore();
@@ -120,6 +135,7 @@ suite('Plan Tree Duration Refresh', () => {
     });
     
     test('should stop timer when disposed', () => {
+      mockPlanRunner.setMockPlans([{ id: '1', status: 'running', startedAt: Date.now() }]);
       const manager = new PlanTreeViewManager(mockPlanRunner as any);
       const mockContext = { subscriptions: [] };
       manager.createTreeView(mockContext as any);

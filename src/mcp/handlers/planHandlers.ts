@@ -10,6 +10,8 @@ import {
   PlanSpec, 
   JobNodeSpec, 
   GroupSpec,
+  JobNode,
+  normalizeWorkSpec,
 } from '../../plan/types';
 import { computeMergedLeafWorkSummary } from '../../plan';
 import { validateAllowedFolders, validateAllowedUrls } from '../validation';
@@ -1125,29 +1127,54 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
   if (isError(nodeResult)) return nodeResult;
   const { node } = nodeResult;
   
-  // Build update parameters from args
-  const updates = {
-    work: args.work,
-    prechecks: args.prechecks,
-    postchecks: args.postchecks,
-    resetToStage: args.resetToStage,
-  };
+  if (node.type !== 'job') {
+    return errorResult(`Node "${args.nodeId}" is not a job node and cannot be updated`);
+  }
+  const jobNode = node as JobNode;
   
-  // TODO: Fix this - updateNode method was removed/renamed
-  // await ctx.PlanRunner.updateNode(args.planId, args.nodeId, updates);
+  // Apply spec updates directly to the node
+  if (args.work !== undefined) {
+    jobNode.work = normalizeWorkSpec(args.work);
+  }
+  if (args.prechecks !== undefined) {
+    jobNode.prechecks = args.prechecks === null ? undefined : normalizeWorkSpec(args.prechecks);
+  }
+  if (args.postchecks !== undefined) {
+    jobNode.postchecks = args.postchecks === null ? undefined : normalizeWorkSpec(args.postchecks);
+  }
   
-  // Resume the Plan if it was stopped
+  // Handle resetToStage: clear step statuses from that stage onward
+  const nodeState = plan.nodeStates.get(args.nodeId);
+  if (nodeState) {
+    const stageOrder = ['prechecks', 'work', 'postchecks'] as const;
+    const resetTo = args.resetToStage || (args.work ? 'work' : args.prechecks ? 'prechecks' : 'postchecks');
+    const resetIdx = stageOrder.indexOf(resetTo as typeof stageOrder[number]);
+    
+    if (resetIdx >= 0 && nodeState.stepStatuses) {
+      for (let i = resetIdx; i < stageOrder.length; i++) {
+        delete nodeState.stepStatuses[stageOrder[i]];
+      }
+      // Also clear commit/merge-ri since they follow postchecks
+      delete nodeState.stepStatuses['commit'];
+      delete nodeState.stepStatuses['merge-ri'];
+    }
+    
+    // Set resumeFromPhase so executor knows where to pick up
+    nodeState.resumeFromPhase = resetTo as typeof nodeState.resumeFromPhase;
+  }
+  
+  // Resume the Plan if it was stopped (also persists the updated plan)
   await ctx.PlanRunner.resume(args.planId);
   
   return {
     success: true,
-    message: `Updated node "${node.name}"`,
+    message: `Updated node "${jobNode.name}"`,
     planId: args.planId,
     nodeId: args.nodeId,
-    nodeName: node.name,
-    hasNewPrechecks: !!args.prechecks,
-    hasNewWork: !!args.work,
-    hasNewPostchecks: !!args.postchecks,
-    resetToStage: updates.resetToStage || 'auto-detected',
+    nodeName: jobNode.name,
+    hasNewPrechecks: args.prechecks !== undefined,
+    hasNewWork: args.work !== undefined,
+    hasNewPostchecks: args.postchecks !== undefined,
+    resetToStage: args.resetToStage || (args.work ? 'work' : args.prechecks ? 'prechecks' : 'postchecks'),
   };
 }

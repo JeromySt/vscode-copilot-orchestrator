@@ -164,8 +164,8 @@ export class PlanTreeViewManager {
     // Subscribe to events for badge updates
     this.setupEventHandlers();
 
-    // Start duration refresh timer
-    this.startDurationRefreshTimer();
+    // Start duration refresh timer only if needed
+    this.updateTimerBasedOnState();
 
     context.subscriptions.push(this.treeView);
     return this.treeView;
