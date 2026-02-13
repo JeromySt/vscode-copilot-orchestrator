@@ -1137,6 +1137,11 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
     return errorResult(`Node "${jobNode.name}" is currently running and cannot be updated. Wait for it to complete or force-fail it first.`);
   }
   
+  // Check if node has already completed successfully - cannot update completed nodes
+  if (nodeState?.status === 'completed') {
+    return errorResult(`Node "${jobNode.name}" has already completed successfully and cannot be updated.`);
+  }
+  
   // Apply spec updates directly to the node
   if (args.work !== undefined) {
     jobNode.work = normalizeWorkSpec(args.work);
