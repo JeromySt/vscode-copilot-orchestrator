@@ -236,8 +236,13 @@ export class planDetailPanel {
     // Only shows work from leaf nodes that have been merged to target, ensuring
     // the summary reflects actual integrated work rather than all work performed.
     const summary = plan.targetBranch 
-      ? computeMergedLeafWorkSummary(plan, plan.nodeStates) || plan.workSummary
+      ? computeMergedLeafWorkSummary(plan, plan.nodeStates)
       : plan.workSummary;
+    
+    if (!summary) {
+      vscode.window.showInformationMessage('No work has been merged to target branch yet.');
+      return;
+    }
     
     // Build job details HTML
     let jobDetailsHtml = '';
@@ -1681,7 +1686,17 @@ ${mermaidDef}
     
     // Update duration every second if running
     updateDurationCounter();
-    setInterval(updateDurationCounter, 1000);
+    
+    // Clear any existing timers to prevent duplicates
+    if (window.durationTimer) {
+      clearInterval(window.durationTimer);
+    }
+    if (window.nodeTimer) {
+      clearInterval(window.nodeTimer);
+    }
+    
+    // Set up persistent timers
+    window.durationTimer = setInterval(updateDurationCounter, 1000);
     
     // Update node durations in SVG for running nodes
     function updateNodeDurations() {
@@ -1755,7 +1770,7 @@ ${mermaidDef}
     }
     
     // Update node durations every second
-    setInterval(updateNodeDurations, 1000);
+    window.nodeTimer = setInterval(updateNodeDurations, 1000);
     
     // Handle messages from extension (incremental updates, process stats)
     window.addEventListener('message', event => {
@@ -2093,8 +2108,17 @@ ${mermaidDef}
           }
         }
         
-        // Trigger duration update
+        // Trigger duration updates to ensure timers are working
+        updateDurationCounter();
         updateNodeDurations();
+        
+        // Ensure timers are active (restart if needed)
+        if (!window.durationTimer) {
+          window.durationTimer = setInterval(updateDurationCounter, 1000);
+        }
+        if (!window.nodeTimer) {
+          window.nodeTimer = setInterval(updateNodeDurations, 1000);
+        }
       } catch (err) {
         console.error('handleStatusUpdate error:', err);
         // On error, request a full refresh
@@ -2272,19 +2296,13 @@ ${mermaidDef}
    * @returns HTML fragment string, or empty string if no work has been performed.
    */
   private _buildWorkSummaryHtml(plan: PlanInstance): string {
-    // Use filtered summary for plans with target branch.
-    // Only shows work from leaf nodes that have been merged to target, ensuring
-    // the summary reflects actual integrated work rather than all work performed.
-    let workSummary = plan.targetBranch 
+    // For plans WITH targetBranch: only show merged leaf work (no fallback)
+    // For plans WITHOUT targetBranch: show all completed work
+    const workSummary = plan.targetBranch 
       ? computeMergedLeafWorkSummary(plan, plan.nodeStates)
       : plan.workSummary;
     
-    // Fall back to plan.workSummary if filtered result is undefined
-    if (!workSummary) {
-      workSummary = plan.workSummary;
-    }
-    
-    // Don't show if no work summary exists
+    // If no work summary (either because no targetBranch work or no work at all), return empty
     if (!workSummary) {
       return '';
     }

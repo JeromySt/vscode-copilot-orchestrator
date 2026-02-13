@@ -278,6 +278,27 @@ export async function hasUncommittedChanges(cwd: string): Promise<boolean> {
 }
 
 /**
+ * Get list of uncommitted (dirty) files.
+ * Returns file paths from `git status --porcelain`.
+ */
+export async function getDirtyFiles(cwd: string): Promise<string[]> {
+  const result = await execAsync(['status', '--porcelain'], { cwd });
+  if (!result.success || !result.stdout.trim()) {
+    return [];
+  }
+  
+  // Porcelain format: "XY filename" where XY is status, filename starts at index 3
+  return result.stdout.trim().split(/\r?\n/).filter(Boolean).map(line => {
+    // Handle renamed files: "R  old -> new"
+    const filename = line.slice(3);
+    if (filename.includes(' -> ')) {
+      return filename.split(' -> ')[1];
+    }
+    return filename;
+  });
+}
+
+/**
  * Stash uncommitted changes with a message.
  * Returns true if changes were stashed, false if nothing to stash.
  */
@@ -322,10 +343,100 @@ export async function stashPop(cwd: string, log?: GitLogger): Promise<boolean> {
 }
 
 /**
+ * Drop the most recent stash (or a specific stash by index).
+ */
+export async function stashDrop(cwd: string, index?: number, log?: GitLogger): Promise<boolean> {
+  const stashRef = index !== undefined ? `stash@{${index}}` : '';
+  log?.(`[git] Dropping stash${stashRef ? ` ${stashRef}` : ''}`);
+  
+  const args = stashRef ? ['stash', 'drop', stashRef] : ['stash', 'drop'];
+  const result = await execAsync(args, { cwd });
+  if (result.success) {
+    log?.(`[git] ✓ Stash dropped`);
+    return true;
+  }
+  
+  // "No stash entries found" is not an error for our purposes
+  if (result.stderr.includes('No stash entries found')) {
+    log?.(`[git] No stash to drop`);
+    return false;
+  }
+  
+  throw new Error(`Failed to drop stash: ${result.stderr}`);
+}
+
+/**
+ * Checkout (discard changes to) a specific file.
+ */
+export async function checkoutFile(cwd: string, filePath: string, log?: GitLogger): Promise<void> {
+  log?.(`[git] Checking out (discarding changes to): ${filePath}`);
+  
+  const result = await execAsync(['checkout', '--', filePath], { cwd });
+  if (result.success) {
+    log?.(`[git] ✓ File checked out: ${filePath}`);
+    return;
+  }
+  
+  throw new Error(`Failed to checkout file ${filePath}: ${result.stderr}`);
+}
+
+/**
+ * Reset to a specific commit (hard reset).
+ */
+export async function resetHard(cwd: string, ref: string, log?: GitLogger): Promise<void> {
+  log?.(`[git] Resetting to ${ref} (hard)`);
+  
+  const result = await execAsync(['reset', '--hard', ref], { cwd });
+  if (result.success) {
+    log?.(`[git] ✓ Reset to ${ref}`);
+    return;
+  }
+  
+  throw new Error(`Failed to reset to ${ref}: ${result.stderr}`);
+}
+
+/**
+ * Update a branch reference to point to a specific commit without checkout.
+ */
+export async function updateRef(cwd: string, refName: string, commit: string, log?: GitLogger): Promise<void> {
+  log?.(`[git] Updating ref ${refName} to ${commit}`);
+  
+  const result = await execAsync(['update-ref', refName, commit], { cwd });
+  if (result.success) {
+    log?.(`[git] ✓ Updated ${refName} to ${commit}`);
+    return;
+  }
+  
+  throw new Error(`Failed to update ref ${refName}: ${result.stderr}`);
+}
+
+/**
  * List stash entries.
  */
 export async function stashList(cwd: string): Promise<string[]> {
   const result = await execAsyncOrNull(['stash', 'list'], cwd);
   if (!result) return [];
   return result.split(/\r?\n/).filter(Boolean);
+}
+
+/**
+ * Get list of ignored files for troubleshooting.
+ * Uses git status --ignored to show files excluded by .gitignore.
+ */
+export async function getIgnoredFiles(cwd: string, log?: GitLogger): Promise<string[]> {
+  log?.(`[git] Getting ignored files`);
+  
+  const result = await execAsync(['status', '--ignored', '--short'], { cwd });
+  if (!result.success || !result.stdout.trim()) {
+    log?.(`[git] ✓ No ignored files found`);
+    return [];
+  }
+  
+  // Filter to only lines starting with !! (ignored files)
+  const ignoredFiles = result.stdout.trim().split(/\r?\n/)
+    .filter(line => line.startsWith('!!'))
+    .map(line => line.slice(3).trim()); // Remove '!! ' prefix
+  
+  log?.(`[git] ✓ Found ${ignoredFiles.length} ignored files`);
+  return ignoredFiles;
 }

@@ -21,6 +21,7 @@ import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
 import { CopilotStatsParser } from '../agent/copilotStatsParser';
 import { IMcpManager } from '../interfaces/IMcpManager';
 import type { CopilotUsageMetrics } from '../plan/types';
+import * as git from '../git';
 
 
 const log = Logger.for('init');
@@ -57,48 +58,6 @@ export function loadConfiguration(): ExtensionConfig {
 // ============================================================================
 // GITIGNORE HELPER
 // ============================================================================
-
-/**
- * Ensure entries are in .gitignore (adds them if missing)
- */
-function ensureGitignoreEntries(workspacePath: string, entries: string[]): void {
-  const fs = require('fs');
-  const gitignorePath = path.join(workspacePath, '.gitignore');
-  
-  try {
-    // Read existing .gitignore or create empty
-    let content = '';
-    if (fs.existsSync(gitignorePath)) {
-      content = fs.readFileSync(gitignorePath, 'utf8');
-    }
-    
-    const lines = content.split('\n');
-    const toAdd: string[] = [];
-    
-    for (const entry of entries) {
-      // Check if entry already exists (with or without trailing slash)
-      const entryBase = entry.replace(/\/$/, '');
-      const exists = lines.some((line: string) => {
-        const trimmed = line.trim();
-        return trimmed === entry || trimmed === entryBase || trimmed === entryBase + '/';
-      });
-      
-      if (!exists) {
-        toAdd.push(entry);
-      }
-    }
-    
-    if (toAdd.length > 0) {
-      // Add a comment and the entries
-      const addition = '\n# Copilot Orchestrator\n' + toAdd.join('\n') + '\n';
-      const newContent = content.endsWith('\n') ? content + addition : content + '\n' + addition;
-      fs.writeFileSync(gitignorePath, newContent, 'utf8');
-      log.info('Added entries to .gitignore', { entries: toAdd });
-    }
-  } catch (err: any) {
-    log.warn('Failed to update .gitignore', { error: err.message });
-  }
-}
 
 // ============================================================================
 // AGENT DELEGATOR ADAPTER
@@ -179,9 +138,9 @@ function createAgentDelegatorAdapter(log: any) {
 /**
  * Initialize the Plan Runner and executor
  */
-export function initializePlanRunner(
+export async function initializePlanRunner(
   context: vscode.ExtensionContext
-): { planRunner: PlanRunner; executor: DefaultJobExecutor; processMonitor: ProcessMonitor } {
+): Promise<{ planRunner: PlanRunner; executor: DefaultJobExecutor; processMonitor: ProcessMonitor }> {
   log.info('Initializing Plan Runner...');
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
@@ -216,13 +175,18 @@ export function initializePlanRunner(
   
   // Ensure .orchestrator and .worktrees are in .gitignore
   if (workspacePath) {
-    ensureGitignoreEntries(workspacePath, ['.orchestrator/', '.worktrees/']);
+    git.gitignore.ensureGitignoreEntries(workspacePath, ['.orchestrator/', '.worktrees/'], log.debug).catch((err: any) => {
+      log.warn('Failed to update .gitignore', { error: err.message });
+    });
   }
   
-  // Initialize (load persisted Plans)
-  planRunner.initialize().catch(err => {
-    log.error('Failed to initialize Plan Runner', { error: err.message });
-  });
+  // Initialize (load persisted Plans) - MUST complete before creating tree view
+  try {
+    await planRunner.initialize();
+    log.info('Plan Runner initialized', { storagePath, workspacePath });
+  } catch (err) {
+    log.error('Failed to initialize Plan Runner', { error: err instanceof Error ? err.message : String(err) });
+  }
   
   // Register cleanup
   context.subscriptions.push({
@@ -235,8 +199,6 @@ export function initializePlanRunner(
       }
     }
   });
-  
-  log.info('Plan Runner initialized', { storagePath, workspacePath });
   
   return { planRunner, executor, processMonitor };
 }
@@ -356,6 +318,12 @@ export function initializePlansView(
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
   );
+
+  // Initialize TreeView for badge functionality - AFTER plan recovery is complete
+  const { PlanTreeViewManager } = require('../ui/planTreeProvider');
+  const treeViewManager = new PlanTreeViewManager(planRunner);
+  treeViewManager.createTreeView(context);
+  context.subscriptions.push(treeViewManager);
   
   log.info('Plans view initialized');
 }

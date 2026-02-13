@@ -10,7 +10,11 @@ import {
   PlanSpec, 
   JobNodeSpec, 
   GroupSpec,
+  JobNode,
+  normalizeWorkSpec,
 } from '../../plan/types';
+import { computeMergedLeafWorkSummary } from '../../plan';
+import { validateAllowedFolders, validateAllowedUrls } from '../validation';
 import {
   PlanHandlerContext,
   errorResult,
@@ -21,6 +25,7 @@ import {
   resolveBaseBranch,
   resolveTargetBranch,
 } from './utils';
+import { validateAgentModels } from '../validation';
 
 // ============================================================================
 // GROUP FLATTENING
@@ -287,6 +292,24 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
   if (!validation.valid || !validation.spec) {
     return errorResult(validation.error || 'Invalid input');
   }
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
+  }
+  
+  // Validate agent model names
+  const modelValidation = await validateAgentModels(args, 'create_copilot_plan');
+  if (!modelValidation.valid) {
+    return { success: false, error: modelValidation.error };
+  }
   
   try {
     validation.spec.repoPath = ctx.workspacePath;
@@ -364,6 +387,24 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
   
   if (!args.task) {
     return errorResult('Job must have a task');
+  }
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_job');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_job');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
+  }
+  
+  // Validate agent model names
+  const modelValidation = await validateAgentModels(args, 'create_copilot_job');
+  if (!modelValidation.valid) {
+    return { success: false, error: modelValidation.error };
   }
   
   try {
@@ -487,6 +528,11 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
   // Get effective endedAt recursively including child plans
   const effectiveEndedAt = ctx.PlanRunner.getEffectiveEndedAt(plan.id) || plan.endedAt;
   
+  // Use merged-leaf-only workSummary when targetBranch is set
+  const workSummary = plan.targetBranch
+    ? computeMergedLeafWorkSummary(plan, plan.nodeStates)
+    : plan.workSummary;
+  
   return {
     success: true,
     planId: plan.id,
@@ -499,7 +545,8 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
     createdAt: plan.createdAt,
     startedAt: plan.startedAt,
     endedAt: effectiveEndedAt,
-    workSummary: plan.workSummary,
+    // Only include workSummary if there's actually merged work to show
+    ...(workSummary && { workSummary }),
   };
 }
 
@@ -833,6 +880,26 @@ export async function handleDeletePlan(args: any, ctx: PlanHandlerContext): Prom
 export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['id']);
   if (fieldError) return fieldError;
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'retry_copilot_plan');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'retry_copilot_plan');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
+  }
+  
+  // Validate agent model names if any new specs are provided
+  if (args.newWork || args.newPrechecks || args.newPostchecks) {
+    const modelValidation = await validateAgentModels(args, 'retry_copilot_plan');
+    if (!modelValidation.valid) {
+      return { success: false, error: modelValidation.error };
+    }
+  }
   
   const planResult = lookupPlan(ctx, args.id, 'getPlan');
   if (isError(planResult)) return planResult;
@@ -950,6 +1017,25 @@ export async function handleGetNodeFailureContext(args: any, ctx: PlanHandlerCon
 export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['planId', 'nodeId']);
   if (fieldError) return fieldError;
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'retry_copilot_plan_node');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'retry_copilot_plan_node');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
+  }
+  
+  // Validate agent model names if any new specs are provided
+  if (args.newWork || args.newPrechecks || args.newPostchecks) {    const modelValidation = await validateAgentModels(args, 'retry_copilot_plan_node');
+    if (!modelValidation.valid) {
+      return { success: false, error: modelValidation.error };
+    }
+  }
   
   const planResult = lookupPlan(ctx, args.planId, 'getPlan');
   if (isError(planResult)) return planResult;
@@ -990,5 +1076,104 @@ export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): P
     nodeName: node.name,
     hasNewWork: !!args.newWork,
     clearWorktree: retryOptions.clearWorktree,
+  };
+}
+
+/**
+ * Handle the `update_copilot_plan_node` MCP tool call.
+ *
+ * Updates a node's job specification and resets execution as needed.
+ * Any provided stage (prechecks, work, postchecks) will replace the existing
+ * definition and reset execution to re-run from that stage.
+ *
+ * @param args - Must contain `planId`, `nodeId`. At least one of `prechecks`, 
+ *               `work`, `postchecks` must be provided. Optional `resetToStage`.
+ * @param ctx  - Handler context.
+ * @returns `{ success, message, ... }`.
+ */
+export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): Promise<any> {
+  const fieldError = validateRequired(args, ['planId', 'nodeId']);
+  if (fieldError) return fieldError;
+
+  // Validate at least one stage is provided (use 'in' to allow falsy values like null)
+  if (!('prechecks' in args) && !('work' in args) && !('postchecks' in args)) {
+    return errorResult('At least one stage update (prechecks, work, postchecks) must be provided');
+  }
+
+  // Validate allowedFolders paths exist in any provided stages
+  const folderValidation = await validateAllowedFolders(args, 'update_copilot_plan_node');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS in any provided stages
+  const urlValidation = await validateAllowedUrls(args, 'update_copilot_plan_node');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
+  }
+  
+  // Validate agent model names in any provided stages
+  const modelValidation = await validateAgentModels(args, 'update_copilot_plan_node');
+  if (!modelValidation.valid) {
+    return { success: false, error: modelValidation.error };
+  }
+  
+  const planResult = lookupPlan(ctx, args.planId, 'getPlan');
+  if (isError(planResult)) return planResult;
+  const plan = planResult;
+  
+  const nodeResult = lookupNode(plan, args.nodeId);
+  if (isError(nodeResult)) return nodeResult;
+  const { node } = nodeResult;
+  
+  if (node.type !== 'job') {
+    return errorResult(`Node "${args.nodeId}" is not a job node and cannot be updated`);
+  }
+  const jobNode = node as JobNode;
+  
+  // Apply spec updates directly to the node
+  if (args.work !== undefined) {
+    jobNode.work = normalizeWorkSpec(args.work);
+  }
+  if (args.prechecks !== undefined) {
+    jobNode.prechecks = args.prechecks === null ? undefined : normalizeWorkSpec(args.prechecks);
+  }
+  if (args.postchecks !== undefined) {
+    jobNode.postchecks = args.postchecks === null ? undefined : normalizeWorkSpec(args.postchecks);
+  }
+  
+  // Handle resetToStage: clear step statuses from that stage onward
+  const nodeState = plan.nodeStates.get(args.nodeId);
+  if (nodeState) {
+    const stageOrder = ['prechecks', 'work', 'postchecks'] as const;
+    const resetTo = args.resetToStage || ('work' in args ? 'work' : 'prechecks' in args ? 'prechecks' : 'postchecks');
+    const resetIdx = stageOrder.indexOf(resetTo as typeof stageOrder[number]);
+    
+    if (resetIdx >= 0 && nodeState.stepStatuses) {
+      for (let i = resetIdx; i < stageOrder.length; i++) {
+        delete nodeState.stepStatuses[stageOrder[i]];
+      }
+      // Also clear commit/merge-ri since they follow postchecks
+      delete nodeState.stepStatuses['commit'];
+      delete nodeState.stepStatuses['merge-ri'];
+    }
+    
+    // Set resumeFromPhase so executor knows where to pick up
+    nodeState.resumeFromPhase = resetTo as typeof nodeState.resumeFromPhase;
+  }
+  
+  // Resume the Plan if it was stopped (also persists the updated plan)
+  await ctx.PlanRunner.resume(args.planId);
+  
+  return {
+    success: true,
+    message: `Updated node "${jobNode.name}"`,
+    planId: args.planId,
+    nodeId: args.nodeId,
+    nodeName: jobNode.name,
+    hasNewPrechecks: args.prechecks !== undefined,
+    hasNewWork: args.work !== undefined,
+    hasNewPostchecks: args.postchecks !== undefined,
+    resetToStage: args.resetToStage || (args.work ? 'work' : args.prechecks ? 'prechecks' : 'postchecks'),
   };
 }

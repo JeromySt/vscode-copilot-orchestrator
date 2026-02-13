@@ -287,7 +287,9 @@ completion_tokens: 1200
   suite('Plan serialization includes metrics', () => {
     test('serialize and deserialize preserves node state with metrics data', () => {
       const tmpDir = makeTmpDir();
-      const persistence = new PlanPersistence(tmpDir);
+      const plansDir = path.join(tmpDir, '.orchestrator', 'plans');
+      fs.mkdirSync(plansDir, { recursive: true });
+      const persistence = new PlanPersistence(plansDir);
 
       // Build a minimal PlanInstance with metrics-relevant data
       const plan: any = {

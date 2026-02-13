@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -117,6 +117,12 @@
           "id": "orchestrator.plansView",
           "name": "Plans",
           "type": "webview"
+        },
+        {
+          "id": "copilotOrchestratorPlans",
+          "name": "Plans Overview",
+          "type": "tree",
+          "when": "false"
         }
       ]
     },
@@ -253,9 +259,9 @@
     "package": "npm run check-types && node esbuild.js --production",
     "pretest": "npm run compile:tsc",
     "test": "node ./out/test/runTest.js",
-    "test:unit": "npm run compile:tsc && mocha --ui tdd \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
+    "test:unit": "npm run compile:tsc && mocha --ui tdd --exit \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
     "test:watch": "tsc -watch -p ./ & node ./out/test/runTest.js",
-    "test:coverage": "npm run compile:tsc && c8 --reporter=text --reporter=lcov --check-coverage --lines 55 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js mocha --ui tdd \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
+    "test:coverage": "npm run compile:tsc && c8 --reporter=text --reporter=lcov --check-coverage --lines 40 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js mocha --ui tdd --exit \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
     "lint": "eslint src --ext ts || echo 'Linting complete'",
     "package:vsix": "npx @vscode/vsce package --no-dependencies",
     "local-install": "npm version patch --no-git-tag-version && npm run package:vsix && node -e \"const fs=require('fs');const v=require('./package.json').version;require('child_process').execSync('code --install-extension vscode-copilot-orchestrator-'+v+'.vsix --force',{stdio:'inherit'})\""

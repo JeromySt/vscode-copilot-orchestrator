@@ -62,6 +62,8 @@ export interface MergeOptions {
   fastForward?: boolean;
   /** Whether to squash commits (default: false) */
   squash?: boolean;
+  /** Whether to skip the commit (--no-commit flag) (default: false) */
+  noCommit?: boolean;
   /** Logger function */
   log?: GitLogger;
 }
@@ -204,26 +206,6 @@ export interface MergeResult {
 }
 
 /**
- * Merge options.
- */
-export interface MergeOptions {
-  /** Source branch to merge from */
-  source: string;
-  /** Target branch to merge into (must be checked out) */
-  target: string;
-  /** Working directory */
-  cwd: string;
-  /** Commit message (optional, uses default if not provided) */
-  message?: string;
-  /** Whether to allow fast-forward (default: true) */
-  fastForward?: boolean;
-  /** Whether to squash commits (default: false) */
-  squash?: boolean;
-  /** Logger function */
-  log?: GitLogger;
-}
-
-/**
  * Perform a git merge.
  * 
  * @param options - Merge options
@@ -237,6 +219,7 @@ export async function merge(options: MergeOptions): Promise<MergeResult> {
     message, 
     fastForward = true, 
     squash = false,
+    noCommit = false,
     log 
   } = options;
   
@@ -244,15 +227,19 @@ export async function merge(options: MergeOptions): Promise<MergeResult> {
   
   const args = ['merge'];
   
+  if (noCommit) {
+    args.push('--no-commit');
+  }
+  
   if (squash) {
     args.push('--squash');
   } else if (!fastForward) {
     args.push('--no-ff');
   }
   
-  if (message && !squash) {
+  if (message && !squash && !noCommit) {
     args.push('-m', message);
-  } else if (!message && !squash) {
+  } else if (!message && !squash && !noCommit) {
     args.push('--no-edit');
   }
   

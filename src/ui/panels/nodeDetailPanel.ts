@@ -549,7 +549,9 @@ export class NodeDetailPanel {
         break;
       case 'forceFailNode':
         // Use message params if provided, otherwise fall back to instance variables
-        this._forceFailNode(message.planId || this._planId, message.nodeId || this._nodeId);
+        this._forceFailNode(message.planId || this._planId, message.nodeId || this._nodeId).catch(err => {
+          vscode.window.showErrorMessage(`Force fail failed: ${err?.message || err}`);
+        });
         break;
       case 'openLogFile':
         if (message.path && path.isAbsolute(message.path) && fs.existsSync(message.path)) {
@@ -565,14 +567,14 @@ export class NodeDetailPanel {
    * @param planId - The Plan containing the node.
    * @param nodeId - The node to force fail.
    */
-  private _forceFailNode(planId: string, nodeId: string) {
-    const result = this._planRunner.forceFailNode(planId, nodeId, 'Force failed via UI - process may have crashed');
-    
-    if (result.success) {
-      vscode.window.showInformationMessage('Node force failed. You can now retry it.');
+  private async _forceFailNode(planId: string, nodeId: string) {
+    try {
+      await this._planRunner.forceFailNode(planId, nodeId);
+      // Refresh panel after successful force fail
       this._update();
-    } else {
-      vscode.window.showErrorMessage(`Force fail failed: ${result.error}`);
+      vscode.window.showInformationMessage(`Node force failed. You can now retry.`);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to force fail: ${error}`);
     }
   }
 
@@ -785,7 +787,8 @@ export class NodeDetailPanel {
     </div>
     ${state.error ? `
     <div class="error-box">
-      <strong>Error:</strong> <span class="error-message">${escapeHtml(state.error)}</span>
+      <strong>${state.failureReason === 'crashed' ? 'Crashed:' : 'Error:'}</strong> 
+      <span class="error-message ${state.failureReason === 'crashed' ? 'crashed' : ''}">${escapeHtml(state.error)}</span>
       ${state.lastAttempt?.phase ? `<div class="error-phase">Failed in phase: <strong>${state.lastAttempt.phase}</strong></div>` : ''}
       ${state.lastAttempt?.exitCode !== undefined ? `<div class="error-phase">Exit code: <strong>${state.lastAttempt.exitCode}</strong></div>` : ''}
     </div>
@@ -800,7 +803,7 @@ export class NodeDetailPanel {
       </button>
     </div>
     ` : ''}
-    ${(state.status === 'running' || state.status === 'scheduled') ? `
+    ${(state.status === 'running' || state.status === 'scheduled' || state.status === 'pending') ? `
     <div class="force-fail-section">
       <p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 8px;">
         If the process has crashed or is stuck, you can force fail this node to enable retry.
@@ -1245,10 +1248,23 @@ export class NodeDetailPanel {
     const durationTimer = document.getElementById('duration-timer');
     if (durationTimer && durationTimer.hasAttribute('data-started-at')) {
       const startedAt = parseInt(durationTimer.getAttribute('data-started-at'), 10);
-      setInterval(() => {
-        const elapsed = Math.round((Date.now() - startedAt) / 1000);
-        durationTimer.textContent = formatDuration(elapsed * 1000);
-      }, 1000);
+      const nodeStatus = ${JSON.stringify(state.status)};
+      
+      // Clear any existing timer to prevent duplicates
+      if (window.nodeDurationTimer) {
+        clearInterval(window.nodeDurationTimer);
+      }
+      
+      // Only run timer if node is running
+      if (nodeStatus === 'running' && startedAt) {
+        window.nodeDurationTimer = setInterval(() => {
+          const elapsed = Math.round((Date.now() - startedAt) / 1000);
+          const elem = document.getElementById('duration-timer');
+          if (elem) {
+            elem.textContent = formatDuration(elapsed * 1000);
+          }
+        }, 1000);
+      }
     }
 
     function escapeHtml(text) {
@@ -2200,6 +2216,14 @@ export class NodeDetailPanel {
       line-height: 1.5;
       display: block;
       margin-top: 4px;
+    }
+    .error-message.crashed {
+      background: rgba(255, 100, 0, 0.1);
+      border: 1px solid rgba(255, 100, 0, 0.3);
+      border-radius: 4px;
+      padding: 4px 8px;
+      color: #ff6400;
+      font-weight: 500;
     }
     .error-phase {
       margin-top: 6px;

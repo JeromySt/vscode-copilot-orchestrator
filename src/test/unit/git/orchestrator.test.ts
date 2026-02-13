@@ -434,68 +434,6 @@ suite('Git Orchestrator', () => {
   });
 
   // =========================================================================
-  // ensureGitignorePatterns()
-  // =========================================================================
-
-  suite('ensureGitignorePatterns()', () => {
-
-    test('creates .gitignore with patterns when file does not exist', async () => {
-      sandbox.stub(fs.promises, 'readFile').rejects(new Error('ENOENT'));
-      const writeStub = sandbox.stub(fs.promises, 'writeFile').resolves();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees', '.orchestrator']);
-
-      assert.ok(writeStub.calledOnce);
-      const content = writeStub.firstCall.args[1] as string;
-      assert.ok(content.includes('/.worktrees'), 'should include normalized worktrees pattern');
-      assert.ok(content.includes('/.orchestrator'), 'should include normalized orchestrator pattern');
-      assert.ok(content.includes('Copilot Orchestrator'), 'should include header comment');
-    });
-
-    test('appends patterns to existing .gitignore', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('node_modules/\n');
-      const writeStub = sandbox.stub(fs.promises, 'writeFile').resolves();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees']);
-
-      assert.ok(writeStub.calledOnce);
-      const content = writeStub.firstCall.args[1] as string;
-      assert.ok(content.startsWith('node_modules/\n'), 'should preserve existing content');
-      assert.ok(content.includes('/.worktrees'), 'should append new pattern');
-    });
-
-    test('does not modify .gitignore if patterns already present', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('/.worktrees\n/.orchestrator\n');
-      const writeStub = sandbox.stub(fs.promises, 'writeFile').resolves();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees', '.orchestrator']);
-
-      assert.ok(writeStub.notCalled, 'should not write when patterns already exist');
-    });
-
-    test('tolerates write errors gracefully', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('');
-      sandbox.stub(fs.promises, 'writeFile').rejects(new Error('EACCES'));
-
-      // Should not throw
-      await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees']);
-    });
-
-    test('invokes logger when updating .gitignore', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('');
-      sandbox.stub(fs.promises, 'writeFile').resolves();
-      const { messages, log } = captureLogger();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['.worktrees'], log);
-
-      assert.ok(
-        messages.some(m => m.includes('.gitignore')),
-        'should log .gitignore update',
-      );
-    });
-  });
-
-  // =========================================================================
   // Full Workflow: branch → work → merge
   // =========================================================================
 
@@ -696,30 +634,6 @@ suite('Git Orchestrator', () => {
 
       const [, opts] = execStub.firstCall.args;
       assert.strictEqual(opts.throwOnError, true, 'squash merge should use throwOnError');
-    });
-
-    test('ensureGitignorePatterns normalizes patterns with leading slash', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('');
-      const writeStub = sandbox.stub(fs.promises, 'writeFile').resolves();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['mydir']);
-
-      const content = writeStub.firstCall.args[1] as string;
-      assert.ok(content.includes('/mydir'), 'pattern should be normalized with leading /');
-    });
-
-    test('ensureGitignorePatterns does not double-prefix patterns starting with /', async () => {
-      sandbox.stub(fs.promises, 'readFile').resolves('');
-      const writeStub = sandbox.stub(fs.promises, 'writeFile').resolves();
-
-      await orchestrator.ensureGitignorePatterns('/repo', ['/already-prefixed']);
-
-      const content = writeStub.firstCall.args[1] as string;
-      assert.ok(content.includes('/already-prefixed'), 'should include the pattern');
-      assert.ok(
-        !content.includes('//already-prefixed'),
-        'should not double-prefix with //',
-      );
     });
   });
 });

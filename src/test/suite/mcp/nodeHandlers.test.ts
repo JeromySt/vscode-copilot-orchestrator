@@ -594,7 +594,7 @@ suite('Node Handler Coverage Tests', () => {
     test('handles force fail failure', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      (ctx.PlanRunner as any).forceFailNode = sinon.stub().returns({ success: false, error: 'cannot force fail' });
+      (ctx.PlanRunner as any).forceFailNode = sinon.stub().throws(new Error('cannot force fail'));
       const result = await handleForceFailNode({ node_id: 'node-1' }, ctx);
       assert.strictEqual(result.success, false);
     });

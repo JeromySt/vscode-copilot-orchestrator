@@ -328,11 +328,19 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
 
     this.logger.log(`[${label}] ${sessionId ? 'Resuming' : 'Starting new'} Copilot session...`);
 
+    // Ensure worktree is always in allowedFolders
+    const finalAllowedFolders = allowedFolders || [];
+    if (!finalAllowedFolders.includes(worktreePath)) {
+      finalAllowedFolders.unshift(worktreePath);
+    }
+
     // Log security configuration
-    if (allowedFolders && allowedFolders.length > 0) {
-      this.logger.log(`[${label}] Agent allowed folders: ${allowedFolders.join(', ')}`);
+    this.logger.log(`[${label}] Executing agent in: ${worktreePath}`);
+    this.logger.log(`[${label}] Allowed folders: ${finalAllowedFolders.join(', ')}`);
+    if (allowedUrls && allowedUrls.length > 0) {
+      this.logger.log(`[${label}] Allowed URLs: ${allowedUrls.join(', ')}`);
     } else {
-      this.logger.log(`[${label}] Agent restricted to worktree: ${worktreePath}`);
+      this.logger.log(`[${label}] Allowed URLs: none`);
     }
 
     // Track PID and early session ID for process callbacks
@@ -350,7 +358,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       sharePath: sessionSharePath,
       configDir: copilotConfigDir,
       jobId,
-      allowedFolders,  // NEW: pass through to CLI runner
+      allowedFolders: finalAllowedFolders,  // Pass through allowed folders with worktree included
       allowedUrls,     // NEW: pass through to CLI runner
       timeout: 0, // No timeout — agent work can run for a long time
       onProcess: (proc) => {

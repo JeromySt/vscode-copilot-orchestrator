@@ -39,6 +39,8 @@ import * as git from '../git';
 import { DefaultEvidenceValidator } from './evidenceValidator';
 import { aggregateMetrics } from './metricsAggregator';
 import type { IEvidenceValidator } from '../interfaces';
+import { ensureOrchestratorDirs } from '../core';
+import { parseAiReviewResult } from './aiReviewUtils';
 
 const log = Logger.for('job-executor');
 
@@ -194,6 +196,7 @@ export class DefaultJobExecutor implements JobExecutor {
           error: `Worktree does not exist: ${worktreePath}`,
           stepStatuses,
           failedPhase: 'prechecks',
+          pid: execution.process?.pid,
         };
       }
       
@@ -238,6 +241,7 @@ export class DefaultJobExecutor implements JobExecutor {
             exitCode: precheckResult.exitCode,
             metrics: capturedMetrics,
             phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+            pid: execution.process?.pid,
           };
         }
         stepStatuses.prechecks = 'success';
@@ -249,7 +253,7 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Check if aborted
       if (execution.aborted) {
-        return { success: false, error: 'Execution canceled', stepStatuses };
+        return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };
       }
       
       // Run main work (skip if resuming from later phase)
@@ -299,6 +303,7 @@ export class DefaultJobExecutor implements JobExecutor {
             exitCode: workResult.exitCode,
             metrics: capturedMetrics,
             phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+            pid: execution.process?.pid,
           };
         }
         stepStatuses.work = 'success';
@@ -315,7 +320,7 @@ export class DefaultJobExecutor implements JobExecutor {
       
       // Check if aborted
       if (execution.aborted) {
-        return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
+        return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId, pid: execution.process?.pid };
       }
       
       // Run postchecks (skip if resuming from later phase)
@@ -361,6 +366,7 @@ export class DefaultJobExecutor implements JobExecutor {
             exitCode: postcheckResult.exitCode,
             metrics: capturedMetrics,
             phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+            pid: execution.process?.pid,
           };
         }
         stepStatuses.postchecks = 'success';
@@ -418,6 +424,7 @@ export class DefaultJobExecutor implements JobExecutor {
             failedPhase: 'commit',
             metrics: capturedMetrics,
             phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+            pid: execution.process?.pid,
           };
         }
       } else {
@@ -440,6 +447,7 @@ export class DefaultJobExecutor implements JobExecutor {
         copilotSessionId: capturedSessionId,
         metrics: capturedMetrics,
         phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+        pid: execution.process?.pid,
       };
       
     } catch (error: any) {
@@ -451,6 +459,7 @@ export class DefaultJobExecutor implements JobExecutor {
         copilotSessionId: capturedSessionId,
         metrics: capturedMetrics,
         phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
+        pid: execution.process?.pid,
       };
     } finally {
       this.activeExecutions.delete(executionKey);
@@ -709,19 +718,25 @@ export class DefaultJobExecutor implements JobExecutor {
       this.executionLogs.set(executionKey, []);
     }
     
-    const entry: LogEntry = {
-      timestamp: Date.now(),
-      phase,
-      type,
-      message,
-    };
-    
+    const timestamp = Date.now();
     const logs = this.executionLogs.get(executionKey);
-    if (logs) {
-      logs.push(entry);
-    }
     
-    this.appendToLogFile(executionKey, entry);
+    // Handle multi-line messages - create separate entry for each line
+    const lines = String(message).split('\n');
+    for (const line of lines) {
+      const entry: LogEntry = {
+        timestamp,
+        phase,
+        type,
+        message: line,
+      };
+      
+      if (logs) {
+        logs.push(entry);
+      }
+      
+      this.appendToLogFile(executionKey, entry);
+    }
   }
 
   // ============================================================================
@@ -1264,54 +1279,60 @@ export class DefaultJobExecutor implements JobExecutor {
         return 'Unknown work type';
       })();
 
-      const reviewPrompt = [
-        '# No-Change Review: Was This Outcome Expected?',
-        '',
-        '## Context',
-        `A plan node completed its work phase successfully, but produced NO file changes.`,
-        `The commit phase needs to determine: is this a legitimate "no-op" or a failure?`,
-        '',
-        '## Node Details',
-        `- **Name**: ${node.name}`,
-        `- **Task**: ${node.task}`,
-        `- **Work**: ${workDesc}`,
-        '',
-        '## Execution Logs',
-        '```',
-        truncatedLogs,
-        '```',
-        '',
-        '## Your Judgment',
-        'Based on the logs above, determine ONE of:',
-        '',
-        '1. **LEGITIMATE**: The work ran correctly but no file changes were needed.',
-        '   Examples: tests already pass, linter found no issues, files were already',
-        '   created by a dependency, agent verified work was already done.',
-        '',
-        '2. **UNEXPECTED**: The work should have produced changes but didn\'t.',
-        '   Examples: agent said it would write files but didn\'t, command silently',
-        '   failed, work was not attempted.',
-        '',
-        '## CRITICAL: Response Format',
-        'You MUST write your answer as a single-line JSON object on the LAST LINE',
-        'of your output. No markdown fences, no extra text after it.',
-        '',
-        'Format: {"legitimate": true|false, "reason": "brief explanation"}',
-        '',
-        'Example last line:',
-        '{"legitimate": true, "reason": "Tests already existed and all 24 passed — no changes needed"}',
-      ].join('\n');
+      const taskDescription = `Node: ${node.name}\nTask: ${node.task}\nWork: ${workDesc}`;
 
       this.logInfo(executionKey, 'commit', '========== AI REVIEW: NO-CHANGE ASSESSMENT ==========');
 
       // Get isolated config directory for Copilot CLI sessions
       const configDir = this.getCopilotConfigDir();
 
-      // Use a lightweight, fast model for the review
+      // Use standard agent invocation pattern - pass the full instructions content
+      // as the instructions parameter so CopilotCliRunner writes the proper file
+      const aiInstructions = `# AI Review: No-Change Assessment
+
+## Task
+You are reviewing the execution logs of an agent that completed without making file changes.
+Determine if this is a legitimate outcome or if the agent failed to do its work.
+
+## Original Task Description
+${taskDescription}
+
+## Execution Logs
+\`\`\`
+${truncatedLogs}
+\`\`\`
+
+## Your Response
+**IMPORTANT: Respond ONLY with a JSON object. No markdown, no explanation, no HTML.**
+
+Analyze the logs and respond with exactly this format:
+\`\`\`json
+{"legitimate": true, "reason": "Brief explanation why no changes were needed"}
+\`\`\`
+OR
+\`\`\`json
+{"legitimate": false, "reason": "Brief explanation of what went wrong"}
+\`\`\`
+
+### Legitimate No-Change Scenarios
+- Work was already completed in a prior commit/dependency
+- Task was verification/analysis only (no changes expected)
+- Agent correctly determined no changes were needed
+
+### NOT Legitimate (should return false)
+- Agent encountered errors and gave up
+- Agent misunderstood the task
+- Agent claimed success without evidence
+- Logs show the agent didn't attempt the work
+
+**YOUR RESPONSE (JSON ONLY):**`;
+
       const result = await this.agentDelegator.delegate({
-        task: reviewPrompt,
+        task: 'Complete the task described in the instructions.',
+        instructions: aiInstructions, // Pass instructions content to be written to file
         worktreePath,
         model: 'claude-haiku-4.5',
+        jobId: node.id, // Use node.id for proper file naming
         configDir, // Isolate sessions from user's history
         logOutput: (line: string) => this.logInfo(executionKey, 'commit', `[ai-review] ${line}`),
         onProcess: () => {}, // No need to track this short-lived process
@@ -1336,52 +1357,27 @@ export class DefaultJobExecutor implements JobExecutor {
         .filter(e => e.phase === 'commit' && e.message.includes('[ai-review]'))
         .map(e => e.message);
 
-      // Helper: strip HTML/markdown code fences so we can find JSON
-      // that the agent may have wrapped in <pre><code> or ```json blocks.
-      // Loop to handle nested/incomplete tag stripping (e.g. <scr<script>ipt>).
-      const stripMarkup = (s: string) => {
-        let result = s;
-        let prev: string;
-        do {
-          prev = result;
-          result = result.replace(/<\/?[^>]+>/g, '');
-        } while (result !== prev);
-        return result.replace(/```(?:json)?\s*/g, '');
-      };
-
-      // Search for JSON response — try each line last-to-first (most likely location)
+      // Try parsing each log line individually (most likely location is the last line)
       for (let i = reviewLogs.length - 1; i >= 0; i--) {
-        const line = stripMarkup(reviewLogs[i]);
-        const jsonMatch = line.match(/\{[^{}]*"legitimate"\s*:\s*(true|false)[^{}]*\}/);
-        if (jsonMatch) {
-          try {
-            const parsed = JSON.parse(jsonMatch[0]) as { legitimate: boolean; reason: string };
-            return {
-              legitimate: parsed.legitimate === true,
-              reason: parsed.reason || (parsed.legitimate ? 'AI review approved' : 'AI review rejected'),
-              metrics: reviewMetrics,
-            };
-          } catch {
-            // JSON parse failed, continue searching
-          }
+        const parsed = parseAiReviewResult(reviewLogs[i]);
+        if (parsed) {
+          return {
+            legitimate: parsed.legitimate,
+            reason: parsed.reason,
+            metrics: reviewMetrics,
+          };
         }
       }
 
-      // The JSON may have been split across multiple log lines (e.g., long reason text).
-      // Concatenate all review lines, strip markup, and search the combined text.
-      const combined = stripMarkup(reviewLogs.join(' '));
-      const combinedMatch = combined.match(/\{\s*"legitimate"\s*:\s*(true|false)\s*,\s*"reason"\s*:\s*"([^"]*)"\s*\}/);
-      if (combinedMatch) {
-        try {
-          const parsed = JSON.parse(combinedMatch[0]) as { legitimate: boolean; reason: string };
-          return {
-            legitimate: parsed.legitimate === true,
-            reason: parsed.reason || (parsed.legitimate ? 'AI review approved' : 'AI review rejected'),
-            metrics: reviewMetrics,
-          };
-        } catch {
-          // JSON parse failed
-        }
+      // Try parsing the combined log output
+      const combinedOutput = reviewLogs.join(' ');
+      const parsed = parseAiReviewResult(combinedOutput);
+      if (parsed) {
+        return {
+          legitimate: parsed.legitimate,
+          reason: parsed.reason,
+          metrics: reviewMetrics,
+        };
       }
 
       // Couldn't parse a structured response — fall through
@@ -1400,13 +1396,16 @@ export class DefaultJobExecutor implements JobExecutor {
    * Get git status output for debugging
    */
   private async getGitStatus(cwd: string): Promise<string | null> {
-    return new Promise((resolve) => {
-      const proc = spawn('git', ['status', '--porcelain'], { cwd });
-      let output = '';
-      proc.stdout?.on('data', (data) => output += data.toString());
-      proc.on('close', () => resolve(output.trim() || null));
-      proc.on('error', () => resolve(null));
-    });
+    try {
+      const dirtyFiles = await git.repository.getDirtyFiles(cwd);
+      if (dirtyFiles.length === 0) {
+        return null;
+      }
+      // Format similar to --porcelain output for logging consistency
+      return dirtyFiles.map(file => `M  ${file}`).join('\n');
+    } catch (error) {
+      return null;
+    }
   }
   
   /**
@@ -1414,26 +1413,18 @@ export class DefaultJobExecutor implements JobExecutor {
    * Uses git status --ignored to show files excluded by .gitignore.
    */
   private async getIgnoredFiles(cwd: string): Promise<string | null> {
-    return new Promise((resolve) => {
-      // --ignored --short shows ignored files with !! prefix
-      const proc = spawn('git', ['status', '--ignored', '--short'], { cwd });
-      let output = '';
-      proc.stdout?.on('data', (data) => output += data.toString());
-      proc.on('close', () => {
-        // Filter to only lines starting with !! (ignored files)
-        const lines = output.split('\n')
-          .filter(line => line.startsWith('!!'))
-          .map(line => line.slice(3).trim()) // Remove !! prefix
-          .slice(0, 50); // Limit to 50 files to avoid huge output
-        if (lines.length === 0) {
-          resolve(null);
-        } else {
-          const result = lines.join('\n');
-          resolve(lines.length === 50 ? result + '\n... (truncated)' : result);
-        }
-      });
-      proc.on('error', () => resolve(null));
-    });
+    try {
+      const ignoredFiles = await git.repository.getIgnoredFiles(cwd);
+      if (ignoredFiles.length === 0) {
+        return null;
+      }
+      // Limit to 50 files to avoid huge output (same as before)
+      const limitedFiles = ignoredFiles.slice(0, 50);
+      const result = limitedFiles.join('\n');
+      return limitedFiles.length === 50 ? result + '\n... (truncated)' : result;
+    } catch (error) {
+      return null;
+    }
   }
   
   /**
@@ -1713,6 +1704,12 @@ export class DefaultJobExecutor implements JobExecutor {
     if (!logFile) return;
     
     try {
+      // Guard against deleted directories (storagePath is workspacePath/.orchestrator)
+      if (this.storagePath) {
+        const workspacePath = path.resolve(this.storagePath, '..');
+        ensureOrchestratorDirs(workspacePath);
+      }
+      
       const time = new Date(entry.timestamp).toISOString();
       const prefix = entry.type === 'stderr' ? '[ERR]' : 
                      entry.type === 'error' ? '[ERROR]' :
@@ -1787,50 +1784,68 @@ export class DefaultJobExecutor implements JobExecutor {
     type: 'stdout' | 'stderr',
     message: string
   ): void {
-    const entry: LogEntry = {
-      timestamp: Date.now(),
-      phase,
-      type,
-      message,
-    };
-    
+    const timestamp = Date.now();
     const logs = this.executionLogs.get(executionKey);
-    if (logs) {
-      logs.push(entry);
-    }
     
-    this.appendToLogFile(executionKey, entry);
+    // Handle multi-line messages - create separate entry for each line
+    const lines = String(message).split('\n');
+    for (const line of lines) {
+      const entry: LogEntry = {
+        timestamp,
+        phase,
+        type,
+        message: line,
+      };
+      
+      if (logs) {
+        logs.push(entry);
+      }
+      
+      this.appendToLogFile(executionKey, entry);
+    }
   }
   
   private logInfo(executionKey: string, phase: ExecutionPhase, message: string): void {
-    const entry: LogEntry = {
-      timestamp: Date.now(),
-      phase,
-      type: 'info',
-      message,
-    };
-    
+    const timestamp = Date.now();
     const logs = this.executionLogs.get(executionKey);
-    if (logs) {
-      logs.push(entry);
-    }
     
-    this.appendToLogFile(executionKey, entry);
+    // Handle multi-line messages - create separate entry for each line
+    const lines = String(message).split('\n');
+    for (const line of lines) {
+      const entry: LogEntry = {
+        timestamp,
+        phase,
+        type: 'info',
+        message: line,
+      };
+      
+      if (logs) {
+        logs.push(entry);
+      }
+      
+      this.appendToLogFile(executionKey, entry);
+    }
   }
   
   private logError(executionKey: string, phase: ExecutionPhase, message: string): void {
-    const entry: LogEntry = {
-      timestamp: Date.now(),
-      phase,
-      type: 'error',
-      message,
-    };
-    
+    const timestamp = Date.now();
     const logs = this.executionLogs.get(executionKey);
-    if (logs) {
-      logs.push(entry);
-    }
     
-    this.appendToLogFile(executionKey, entry);
+    // Handle multi-line messages - create separate entry for each line
+    const lines = String(message).split('\n');
+    for (const line of lines) {
+      const entry: LogEntry = {
+        timestamp,
+        phase,
+        type: 'error',
+        message: line,
+      };
+      
+      if (logs) {
+        logs.push(entry);
+      }
+      
+      this.appendToLogFile(executionKey, entry);
+    }
   }
 }

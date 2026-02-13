@@ -15,6 +15,8 @@
 
 import * as path from 'path';
 import { EventEmitter } from 'events';
+import { OrchestratorFileWatcher } from '../core';
+import { ProcessMonitor } from '../process';
 
 // Conditionally import vscode - may not be available in standalone processes
 let vscode: typeof import('vscode') | undefined;
@@ -261,6 +263,8 @@ export class PlanRunner extends EventEmitter {
   private config: PlanRunnerConfig;
   private isRunning = false;
   private globalCapacity?: GlobalCapacityManager;
+  private readonly _fileWatcher: OrchestratorFileWatcher;
+  private readonly processMonitor = new ProcessMonitor();
   
   /**
    * Mutex for serializing Reverse Integration (RI) merges.
@@ -290,6 +294,16 @@ export class PlanRunner extends EventEmitter {
       globalMaxParallel: config.maxParallel || 8,
     });
     this.persistence = new PlanPersistence(config.storagePath);
+    
+    // Watch for external plan file deletions
+    // Extract workspace path from storagePath (remove 'plans' suffix if present)
+    const workspacePath = config.storagePath.endsWith('plans') 
+      ? path.dirname(config.storagePath)
+      : config.storagePath;
+    this._fileWatcher = new OrchestratorFileWatcher(
+      workspacePath,
+      (planId) => this._handleExternalPlanDeletion(planId)
+    );
   }
   
   /**
@@ -321,6 +335,48 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
+   * Recover nodes that were running when the extension restarted.
+   * 
+   * When the extension restarts, nodes that were in "running" state may have
+   * their processes terminated. This method checks if processes are still alive
+   * and marks crashed nodes as failed.
+   * 
+   * @param plan - Plan to recover running nodes for
+   */
+  private async recoverRunningNodes(plan: PlanInstance): Promise<void> {
+    for (const [nodeId, nodeState] of plan.nodeStates.entries()) {
+      if (nodeState.status === 'running') {
+        // Check if the process is still alive
+        if (nodeState.pid && !this.processMonitor.isRunning(nodeState.pid)) {
+          // Process died unexpectedly - mark as crashed
+          log.warn(`Node ${nodeId} process (PID ${nodeState.pid}) not found - marking as crashed`);
+          nodeState.status = 'failed';
+          nodeState.error = `Process crashed or was terminated unexpectedly (PID: ${nodeState.pid})`;
+          nodeState.failureReason = 'crashed';
+          nodeState.endedAt = Date.now();
+          nodeState.pid = undefined;  // Clear the stale PID
+          nodeState.version++; // Increment version for UI updates
+          
+          // Emit completion event
+          this.emit('nodeCompleted', plan.id, nodeId, false);
+        } else if (!nodeState.pid) {
+          // Running but no PID tracked (old state) - also mark as crashed
+          log.warn(`Node ${nodeId} was running but has no PID - marking as crashed`);
+          nodeState.status = 'failed';
+          nodeState.error = 'Extension reloaded while node was running (no process tracking)';
+          nodeState.failureReason = 'crashed';
+          nodeState.endedAt = Date.now();
+          nodeState.version++; // Increment version for UI updates
+          
+          // Emit completion event
+          this.emit('nodeCompleted', plan.id, nodeId, false);
+        }
+        // If process IS running, leave it - the process monitor should re-attach
+      }
+    }
+  }
+
+  /**
    * Initialize the runner — loads persisted Plans from disk and starts
    * the periodic pump loop that advances execution.
    *
@@ -332,6 +388,9 @@ export class PlanRunner extends EventEmitter {
     // Load persisted Plans
     const loadedPlans = this.persistence.loadAll();
     for (const plan of loadedPlans) {
+      // Validate and recover running nodes before setting up state machines
+      await this.recoverRunningNodes(plan);
+      
       this.plans.set(plan.id, plan);
       const sm = new PlanStateMachine(plan);
       this.setupStateMachineListeners(sm);
@@ -339,6 +398,11 @@ export class PlanRunner extends EventEmitter {
     }
     
     log.info(`Loaded ${loadedPlans.length} Plans from persistence`);
+    
+    // Persist any recovery changes
+    for (const plan of this.plans.values()) {
+      this.persistence.save(plan);
+    }
     
     // Start the pump
     this.startPump();
@@ -357,6 +421,9 @@ export class PlanRunner extends EventEmitter {
     for (const plan of this.plans.values()) {
       this.persistence.save(plan);
     }
+    
+    // Dispose file watcher
+    this._fileWatcher.dispose();
     
     this.isRunning = false;
   }
@@ -1081,9 +1148,10 @@ export class PlanRunner extends EventEmitter {
    * and clean up all worktrees since canceled plans cannot be resumed.
    *
    * @param planId - Plan identifier.
+   * @param options - Optional cancellation options
    * @returns `true` if the plan was found and cancellation initiated.
    */
-  cancel(planId: string): boolean {
+  cancel(planId: string, options?: { skipPersist?: boolean }): boolean {
     const plan = this.plans.get(planId);
     const sm = this.stateMachines.get(planId);
     if (!plan || !sm) return false;
@@ -1110,15 +1178,58 @@ export class PlanRunner extends EventEmitter {
       log.error(`Failed to cleanup canceled Plan resources`, { planId, error: err.message });
     });
     
-    // Persist
-    this.persistence.save(plan);
+    // Persist (unless skipped, e.g., when file is already deleted)
+    if (!options?.skipPersist) {
+      this.persistence.save(plan);
+    }
     
     // Update wake lock in case this was the last running plan
     this.updateWakeLock().catch(err => log.warn('Failed to update wake lock', { error: err }));
     
     return true;
   }
-  
+
+  /**
+   * Handle external deletion of a plan file.
+   * 
+   * Called by the file watcher when a plan JSON is deleted from the
+   * filesystem (e.g., by `git clean -dfx`).
+   * 
+   * @param planId - ID of the deleted plan
+   */
+  private _handleExternalPlanDeletion(planId: string): void {
+    const plan = this.plans.get(planId);
+    if (!plan) {
+      // Plan wasn't in memory, nothing to do
+      log.debug(`External deletion of unknown plan: ${planId}`);
+      return;
+    }
+    
+    log.warn(`Plan ${planId} ("${plan.spec.name}") was deleted externally`);
+    
+    // Get state machine to check plan status
+    const sm = this.stateMachines.get(planId);
+    if (sm && sm.computePlanStatus() === 'running') {
+      log.warn(`Canceling running plan due to external file deletion`);
+      // Cancel without trying to persist (file is already gone)
+      this.cancel(planId, { skipPersist: true });
+    }
+    
+    // Remove from in-memory state
+    this.plans.delete(planId);
+    this.stateMachines.delete(planId);
+    
+    // Fire deletion event (UI will update)
+    this.emit('planDeleted', planId);
+    
+    // Show notification to user
+    if (vscode) {
+      vscode.window.showWarningMessage(
+        `Plan "${plan.spec.name}" was deleted externally and has been removed.`
+      );
+    }
+  }
+
   /**
    * Delete a Plan and clean up all associated resources (worktrees, logs, child plans).
    *
@@ -1128,28 +1239,35 @@ export class PlanRunner extends EventEmitter {
    * @returns `true` if the plan existed and was deleted.
    */
   delete(planId: string): boolean {
-    const plan = this.plans.get(planId);
-    if (!plan) return false;
+    // 1. Clear in-memory state FIRST (ensures UI updates)
+    const hadPlan = this.plans.has(planId);
+    if (!hadPlan) return false;
     
+    const plan = this.plans.get(planId)!;
     log.info(`Deleting Plan: ${planId}`);
     
     // Cancel if running
     this.cancel(planId);
     
-    // Clean up worktrees and branches in background
-    this.cleanupPlanResources(plan).catch(err => {
-      log.error(`Failed to cleanup Plan resources`, { planId, error: err.message });
-    });
-    
-    // Remove from memory
+    // Remove from memory immediately
     this.plans.delete(planId);
     this.stateMachines.delete(planId);
     
-    // Remove from persistence
-    this.persistence.delete(planId);
-    
-    // Notify listeners
+    // 2. Fire event (UI will update even if FS fails)
     this.emit('planDeleted', planId);
+    
+    // 3. Attempt FS cleanup (ignore if already gone)
+    try {
+      this.persistence.delete(planId);
+    } catch (err) {
+      // Log unexpected errors but don't throw
+      log.warn(`Failed to delete plan file: ${err}`);
+    }
+    
+    // 4. Clean up worktrees and other resources (best effort)
+    this.cleanupPlanResources(plan).catch(err => {
+      log.error(`Failed to cleanup Plan resources`, { planId, error: err.message });
+    });
     
     return true;
   }
@@ -1630,6 +1748,9 @@ export class PlanRunner extends EventEmitter {
             };
             nodeState.attemptHistory = [...(nodeState.attemptHistory || []), fiFailedAttempt];
             
+            // Clear process ID since execution is complete
+            nodeState.pid = undefined;
+            
             sm.transition(node.id, 'failed');
             this.emit('nodeCompleted', plan.id, node.id, false);
             this.persistence.save(plan);
@@ -1724,6 +1845,11 @@ export class PlanRunner extends EventEmitter {
         // Store per-phase metrics breakdown
         if (result.phaseMetrics) {
           nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...result.phaseMetrics };
+        }
+        
+        // Store process ID for crash detection
+        if (result.pid) {
+          nodeState.pid = result.pid;
         }
         
         // Clear resumeFromPhase after execution (success or failure)
@@ -1976,6 +2102,9 @@ export class PlanRunner extends EventEmitter {
                 };
                 nodeState.attemptHistory = [...(nodeState.attemptHistory || []), retryAttempt];
                 
+                // Clear process ID since execution is complete
+                nodeState.pid = undefined;
+                
                 sm.transition(node.id, 'failed');
                 this.emit('nodeCompleted', plan.id, node.id, false);
                 
@@ -2020,6 +2149,9 @@ export class PlanRunner extends EventEmitter {
               ? `... (${logLines.length - 200} earlier lines omitted)\n` + logLines.slice(-200).join('\n')
               : phaseLogs;
             
+            // Get security settings from the original failed spec
+            const originalAgentSpec = normalizedFailedSpec?.type === 'agent' ? normalizedFailedSpec : null;
+
             const healSpec: WorkSpec = {
               type: 'agent',
               instructions: [
@@ -2052,6 +2184,10 @@ export class PlanRunner extends EventEmitter {
                 `   ${originalCommand}`,
                 '   ```',
               ].join('\n'),
+              // Inherit allowed folders/URLs from original spec (if any)
+              // This ensures auto-heal has same access as the original work
+              allowedFolders: originalAgentSpec?.allowedFolders,
+              allowedUrls: originalAgentSpec?.allowedUrls,
             };
             
             // Swap ONLY the failed phase to the agent, preserve the rest
@@ -2177,6 +2313,9 @@ export class PlanRunner extends EventEmitter {
               };
               nodeState.attemptHistory = [...(nodeState.attemptHistory || []), healAttempt];
               
+              // Clear process ID since execution is complete
+              nodeState.pid = undefined;
+              
               sm.transition(node.id, 'failed');
               this.emit('nodeCompleted', plan.id, node.id, false);
               
@@ -2191,6 +2330,9 @@ export class PlanRunner extends EventEmitter {
             }
           } else {
             // No auto-heal — transition to failed normally
+            // Clear process ID since execution is complete
+            nodeState.pid = undefined;
+            
             sm.transition(node.id, 'failed');
             this.emit('nodeCompleted', plan.id, node.id, false);
             
@@ -2287,6 +2429,9 @@ export class PlanRunner extends EventEmitter {
         };
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), riFailedAttempt];
         
+        // Clear process ID since execution is complete
+        nodeState.pid = undefined;
+        
         sm.transition(node.id, 'failed');
         this.emit('nodeCompleted', plan.id, node.id, false);
         
@@ -2315,6 +2460,9 @@ export class PlanRunner extends EventEmitter {
           phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
         };
         nodeState.attemptHistory = [...(nodeState.attemptHistory || []), successAttempt];
+        
+        // Clear process ID since execution is complete
+        nodeState.pid = undefined;
         
         sm.transition(node.id, 'succeeded');
         this.emit('nodeCompleted', plan.id, node.id, true);
@@ -2375,6 +2523,9 @@ export class PlanRunner extends EventEmitter {
         phaseMetrics: nodeState.phaseMetrics,
       };
       nodeState.attemptHistory = [...(nodeState.attemptHistory || []), errorAttempt];
+      
+      // Clear process ID since execution is complete
+      nodeState.pid = undefined;
       
       sm.transition(node.id, 'failed');
       this.emit('nodeCompleted', plan.id, node.id, false);
@@ -2483,8 +2634,14 @@ export class PlanRunner extends EventEmitter {
         
         // Update the target branch to point to the new commit
         // We need to handle the case where target branch is checked out elsewhere
-        await this.updateBranchRef(repoPath, targetBranch, newCommit);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Updated ${targetBranch} to ${newCommit.slice(0, 8)}`, attemptNumber);
+        const branchUpdated = await this.updateBranchRef(repoPath, targetBranch, newCommit);
+        if (branchUpdated) {
+          this.execLog(plan.id, node.id, 'merge-ri', 'info', `Updated ${targetBranch} to ${newCommit.slice(0, 8)}`, attemptNumber);
+        } else {
+          // Stash/reset failed but merge commit exists - partial success
+          this.execLog(plan.id, node.id, 'merge-ri', 'info', `⚠ Merge commit ${newCommit.slice(0, 8)} created but branch not auto-updated (stash failed)`, attemptNumber);
+          this.execLog(plan.id, node.id, 'merge-ri', 'info', `  Run 'git reset --hard ${newCommit.slice(0, 8)}' to update your local ${targetBranch}`, attemptNumber);
+        }
         
         log.info(`Merged leaf ${node.name} to ${targetBranch}`, {
           commit: completedCommit.slice(0, 8),
@@ -2572,18 +2729,20 @@ export class PlanRunner extends EventEmitter {
    * 
    * Includes retry logic for transient index.lock failures that can occur
    * when VS Code's built-in git extension briefly holds the lock.
+   * 
+   * @returns true if branch was updated, false if update was skipped (e.g., stash failed)
    */
   private async updateBranchRef(
     repoPath: string,
     branchName: string,
     newCommit: string,
     retryCount = 0
-  ): Promise<void> {
+  ): Promise<boolean> {
     const MAX_RETRIES = 3;
     const RETRY_DELAY_MS = 1000;
     
     try {
-      await this.updateBranchRefCore(repoPath, branchName, newCommit);
+      return await this.updateBranchRefCore(repoPath, branchName, newCommit);
     } catch (err: any) {
       const isLockError = err.message?.includes('index.lock') || err.message?.includes('lock');
       if (isLockError && retryCount < MAX_RETRIES) {
@@ -2597,12 +2756,19 @@ export class PlanRunner extends EventEmitter {
   
   /**
    * Core implementation of updateBranchRef — separated for retry logic.
+   * 
+   * Important: This is called AFTER the merge commit is already created.
+   * If we fail to update the branch pointer, the merge is still successful -
+   * the commit exists in the repo. We should not fail the entire merge-ri
+   * just because of a stash/reset failure.
+   * 
+   * @returns true if branch was updated, false if update was skipped (e.g., stash failed)
    */
   private async updateBranchRefCore(
     repoPath: string,
     branchName: string,
     newCommit: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     // Check if we're on this branch in the main repo
     const currentBranch = await git.branches.currentOrNull(repoPath);
     const isDirty = await git.repository.hasUncommittedChanges(repoPath);
@@ -2612,27 +2778,181 @@ export class PlanRunner extends EventEmitter {
       log.debug(`User is on ${branchName}, using reset --hard to update`);
       
       if (isDirty) {
+        // Check what files are dirty - if only .gitignore with only orchestrator changes, skip stash
+        const dirtyFiles = await git.repository.getDirtyFiles(repoPath);
+        const onlyGitignoreDirty = dirtyFiles.length === 1 && dirtyFiles[0] === '.gitignore';
+        
+        if (onlyGitignoreDirty) {
+          // Verify the .gitignore diff only contains orchestrator-related changes
+          // to avoid discarding legitimate user modifications
+          const isOnlyOrchestratorChanges = await this.isGitignoreOnlyOrchestratorChanges(repoPath);
+          
+          if (isOnlyOrchestratorChanges) {
+            // Safe to discard - these are only orchestrator changes already in merge commit
+            log.debug(`Only .gitignore is dirty with orchestrator-only changes - discarding and resetting`);
+            try {
+              await git.repository.checkoutFile(repoPath, '.gitignore', s => log.debug(s));
+              await git.repository.resetHard(repoPath, newCommit, s => log.debug(s));
+              log.info(`Updated ${branchName} via reset --hard to ${newCommit.slice(0, 8)} (discarded orchestrator .gitignore)`);
+              return true;
+            } catch (err: any) {
+              log.warn(`Failed to discard .gitignore and reset: ${err.message}`);
+              // Fall through to stash approach
+            }
+          } else {
+            log.debug(`.gitignore has non-orchestrator changes, will stash`);
+          }
+        }
+        
+        // Try stash + reset, but don't fail the merge if stash has issues
+        // The merge commit already exists - worst case user needs to manually sync
         const stashMsg = `orchestrator-merge-${Date.now()}`;
-        await git.repository.stashPush(repoPath, stashMsg, s => log.debug(s));
         try {
-          await this.runGitCommand(repoPath, `git reset --hard ${newCommit}`);
-          await git.repository.stashPop(repoPath, s => log.debug(s));
+          await git.repository.stashPush(repoPath, stashMsg, s => log.debug(s));
+        } catch (stashErr: any) {
+          // Stash failed (e.g., "could not write index") - this is non-fatal
+          // The merge commit exists, user just needs to manually update their branch
+          log.warn(`Stash failed during branch update: ${stashErr.message}`);
+          log.warn(`Merge commit ${newCommit.slice(0, 8)} was created successfully.`);
+          log.warn(`User may need to manually run: git reset --hard ${newCommit.slice(0, 8)}`);
+          // Don't throw - the merge succeeded, just the local branch pointer update failed
+          return false;
+        }
+        
+        try {
+          await git.repository.resetHard(repoPath, newCommit, s => log.debug(s));
+          // Try to pop the stash
+          try {
+            await git.repository.stashPop(repoPath, s => log.debug(s));
+          } catch (popErr: any) {
+            // Pop failed - check if it's just orchestrator .gitignore conflict
+            log.warn(`Stash pop failed: ${popErr.message}`);
+            
+            // Check stash contents - if only orchestrator .gitignore, drop it
+            const stashOnlyOrchestratorGitignore = await this.isStashOnlyOrchestratorGitignore(repoPath);
+            if (stashOnlyOrchestratorGitignore) {
+              log.debug(`Stash contains only orchestrator .gitignore changes - dropping`);
+              await git.repository.stashDrop(repoPath, undefined, s => log.debug(s));
+            } else {
+              // Stash has real user changes - leave it for user to resolve
+              log.warn(`Stash contains user changes that couldn't be applied. Run 'git stash pop' to recover.`);
+            }
+          }
         } catch (err) {
-          await git.repository.stashPop(repoPath, s => log.debug(s));
+          // Try to restore stash before re-throwing
+          try {
+            await git.repository.stashPop(repoPath, s => log.debug(s));
+          } catch {
+            log.warn(`Failed to restore stash after reset failure`);
+          }
           throw err;
         }
       } else {
-        await this.runGitCommand(repoPath, `git reset --hard ${newCommit}`);
+        await git.repository.resetHard(repoPath, newCommit, s => log.debug(s));
       }
       log.info(`Updated ${branchName} via reset --hard to ${newCommit.slice(0, 8)}`);
+      return true;
     } else {
       // User is NOT on target branch - we can use update-ref
       // This is safe even if the branch is "associated" with the main repo
       log.debug(`User is on ${currentBranch || 'detached HEAD'}, using update-ref`);
       
-      await this.runGitCommand(repoPath, `git update-ref refs/heads/${branchName} ${newCommit}`);
+      await git.repository.updateRef(repoPath, `refs/heads/${branchName}`, newCommit, s => log.debug(s));
       log.info(`Updated ${branchName} via update-ref to ${newCommit.slice(0, 8)}`);
+      return true;
     }
+  }
+  
+  /**
+   * Check if the working tree .gitignore diff contains ONLY orchestrator-related changes.
+   * Returns true only if all added/modified lines are orchestrator patterns.
+   */
+  private async isGitignoreOnlyOrchestratorChanges(repoPath: string): Promise<boolean> {
+    try {
+      // Get the diff of .gitignore (unstaged changes)
+      const result = await git.executor.execAsyncOrNull(['diff', '.gitignore'], repoPath);
+      
+      if (!result || !result.trim()) {
+        // No unstaged diff - check if staged
+        const stagedResult = await git.executor.execAsyncOrNull(['diff', '--cached', '.gitignore'], repoPath);
+        if (!stagedResult || !stagedResult.trim()) {
+          return true; // No changes at all
+        }
+        return this.diffContainsOnlyOrchestratorPatterns(stagedResult);
+      }
+      
+      return this.diffContainsOnlyOrchestratorPatterns(result);
+    } catch {
+      return false; // If we can't check, assume it has user changes
+    }
+  }
+  
+  /**
+   * Check if a stash contains only orchestrator .gitignore changes.
+   */
+  private async isStashOnlyOrchestratorGitignore(repoPath: string): Promise<boolean> {
+    try {
+      // List files in stash
+      const filesResult = await git.executor.execAsyncOrNull(['stash', 'show', '--name-only'], repoPath);
+      if (!filesResult) {
+        return false;
+      }
+      
+      const files = filesResult.trim().split(/\r?\n/).filter(Boolean);
+      
+      if (files.length !== 1 || files[0] !== '.gitignore') {
+        return false; // Stash has files other than .gitignore
+      }
+      
+      // Check the stash diff for .gitignore
+      const diffResult = await git.executor.execAsyncOrNull(['stash', 'show', '-p'], repoPath);
+      if (!diffResult) {
+        return false;
+      }
+      
+      return this.diffContainsOnlyOrchestratorPatterns(diffResult);
+    } catch {
+      return false; // If we can't check, assume it has user changes
+    }
+  }
+  
+  /**
+   * Check if a diff output contains only orchestrator-related patterns.
+   * Orchestrator patterns: .orchestrator/, # Copilot Orchestrator
+   */
+  private diffContainsOnlyOrchestratorPatterns(diff: string): boolean {
+    const lines = diff.split(/\r?\n/);
+    
+    // Patterns that are orchestrator-related
+    const orchestratorPatterns = [
+      /^[+-]\.orchestrator\/?$/,           // .orchestrator or .orchestrator/
+      /^[+-]\/?\.orchestrator\/?$/,        // /.orchestrator or /.orchestrator/  
+      /^[+-]#\s*[Cc]opilot [Oo]rchestrator/,  // # Copilot Orchestrator comment
+      /^[+-]\s*$/,                          // Empty lines (often added with entries)
+    ];
+    
+    for (const line of lines) {
+      // Skip diff metadata lines
+      if (line.startsWith('diff ') || line.startsWith('index ') || 
+          line.startsWith('--- ') || line.startsWith('+++ ') ||
+          line.startsWith('@@') || line.startsWith('\\')) {
+        continue;
+      }
+      
+      // Skip context lines (no + or -)
+      if (!line.startsWith('+') && !line.startsWith('-')) {
+        continue;
+      }
+      
+      // Check if this added/removed line is an orchestrator pattern
+      const isOrchestratorLine = orchestratorPatterns.some(pattern => pattern.test(line));
+      if (!isOrchestratorLine) {
+        log.debug(`Non-orchestrator .gitignore change detected: ${line}`);
+        return false;
+      }
+    }
+    
+    return true;
   }
   
   /**
@@ -2825,25 +3145,6 @@ export class PlanRunner extends EventEmitter {
   }
   
   /**
-   * Run a git command in a directory
-   */
-  private async runGitCommand(cwd: string, command: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const cp = require('child_process');
-      const p = cp.spawn(command, { cwd, shell: true });
-      let stderr = '';
-      p.stderr?.on('data', (d: any) => stderr += d.toString());
-      p.on('exit', (code: number) => {
-        if (code === 0) {
-          resolve();
-        } else {
-          reject(new Error(`${command} failed with exit code ${code}: ${stderr}`));
-        }
-      });
-    });
-  }
-  
-  /**
    * Resolve merge conflicts using Copilot CLI.
    * 
    * Assumes we're in a merge conflict state in the given directory.
@@ -2946,7 +3247,13 @@ export class PlanRunner extends EventEmitter {
       }
       
       // Step 3: Perform the merge (will have conflicts)
-      await this.runGitCommand(repoPath, `git merge --no-commit ${sourceCommit}`).catch(() => {
+      await git.merge.merge({
+        source: sourceCommit,
+        target: targetBranch,
+        cwd: repoPath,
+        noCommit: true,
+        log: s => log.debug(s)
+      }).catch(() => {
         // Expected to fail due to conflicts
       });
       
@@ -3160,115 +3467,93 @@ export class PlanRunner extends EventEmitter {
   // ============================================================================
   
   /**
-   * Force a stuck running node to failed state.
-   *
-   * Use this when a job's process has crashed but the node is still
-   * showing as "running". This allows the node to be retried.
-   *
-   * @param planId  - Plan ID.
-   * @param nodeId  - Node ID to force fail.
-   * @param reason  - Optional reason for the forced failure.
-   * @returns `{ success: true }` if force fail succeeded, or `{ success: false, error }`.
+   * Force a node to fail immediately, enabling retry.
+   * This must ALWAYS work regardless of current state.
    */
-  forceFailNode(planId: string, nodeId: string, reason?: string): { success: boolean; error?: string } {
+  public async forceFailNode(planId: string, nodeId: string): Promise<void> {
     const plan = this.plans.get(planId);
     if (!plan) {
-      return { success: false, error: `Plan not found: ${planId}` };
+      throw new Error(`Plan ${planId} not found`);
     }
     
     const node = plan.nodes.get(nodeId);
     if (!node) {
-      return { success: false, error: `Node not found: ${nodeId}` };
+      throw new Error(`Node ${nodeId} not found in plan ${planId}`);
     }
     
     const nodeState = plan.nodeStates.get(nodeId);
     if (!nodeState) {
-      return { success: false, error: `Node state not found: ${nodeId}` };
+      throw new Error(`Node state ${nodeId} not found in plan ${planId}`);
     }
     
-    if (nodeState.status !== 'running' && nodeState.status !== 'scheduled') {
-      return { success: false, error: `Node is not running or scheduled (current: ${nodeState.status})` };
+    log.info(`Force failing node ${nodeId} (current status: ${nodeState.status}, attempts: ${nodeState.attempts})`);
+    
+    // Kill any running process for this node
+    if (nodeState.pid) {
+      try {
+        process.kill(nodeState.pid, 'SIGTERM');
+        log.info(`Killed process ${nodeState.pid} for node ${nodeId}`);
+      } catch (e) {
+        // Process may already be dead - that's fine
+        log.debug(`Could not kill process ${nodeState.pid}: ${e}`);
+      }
     }
     
-    const sm = this.stateMachines.get(planId);
-    if (!sm) {
-      return { success: false, error: `State machine not found for Plan: ${planId}` };
+    // Update node state - ALWAYS force to failed
+    const previousStatus = nodeState.status;
+    nodeState.status = 'failed';
+    nodeState.error = 'Manually failed by user (Force Fail)';
+    nodeState.forceFailed = true;  // Flag for UI to show differently
+    nodeState.pid = undefined;  // Clear PID
+    
+    // Increment attempts if it was running (counts as a failed attempt)
+    if (previousStatus === 'running') {
+      nodeState.attempts = (nodeState.attempts || 0) + 1;
     }
     
-    const failReason = reason || 'Force failed by user (process may have crashed)';
+    // Set end time
+    nodeState.endedAt = Date.now();
+    nodeState.version = (nodeState.version || 0) + 1;
+    plan.stateVersion = (plan.stateVersion || 0) + 1;
     
-    log.info(`Force failing stuck node: ${node.name}`, {
+    // CRITICAL: Persist immediately
+    await this.savePlan(planId);
+    
+    // CRITICAL: Emit event for UI update
+    this.emitNodeTransition({
       planId,
       nodeId,
-      previousStatus: nodeState.status,
-      reason: failReason,
+      previousStatus,
+      newStatus: 'failed',
+      reason: 'force-failed'
     });
     
-    // Cancel any active execution tracking
-    if (this.executor) {
-      this.executor.cancel(planId, nodeId);
+    log.info(`Node ${nodeId} force failed successfully. New status: ${nodeState.status}`);
+  }
+
+  /**
+   * Save plan state to persistence layer.
+   */
+  private async savePlan(planId: string): Promise<void> {
+    const plan = this.plans.get(planId);
+    if (plan) {
+      this.persistence.save(plan);
     }
-    
-    // Set error before transition so it's available in side-effect handlers
-    nodeState.error = failReason;
-    
-    // Use state machine transition to properly propagate failure
-    // This handles: status change, timestamps, version increments,
-    // blocking dependents, updating group state, and checking plan completion
-    const transitioned = sm.transition(nodeId, 'failed');
-    if (!transitioned) {
-      // Fallback: force it directly (should not happen for running/scheduled nodes)
-      nodeState.status = 'failed';
-      nodeState.endedAt = Date.now();
-      nodeState.version = (nodeState.version || 0) + 1;
-      plan.stateVersion = (plan.stateVersion || 0) + 1;
-    }
-    
-    // Note: attempts was already incremented when the node started running,
-    // so we don't increment it again here
-    
-    // Update last attempt info
-    nodeState.lastAttempt = {
-      phase: 'work',
-      startTime: nodeState.startedAt || Date.now(),
-      endTime: Date.now(),
-      error: failReason,
-    };
-    
-    // Add to attempt history with execution logs preserved
-    if (!nodeState.attemptHistory) {
-      nodeState.attemptHistory = [];
-    }
-    
-    // Get any logs that were captured before the crash
-    const logs = this.getNodeLogs(planId, nodeId);
-    
-    nodeState.attemptHistory.push({
-      attemptNumber: nodeState.attempts || 1,
-      triggerType: 'retry',
-      startedAt: nodeState.startedAt || Date.now(),
-      endedAt: Date.now(),
-      status: 'failed',
-      failedPhase: 'work',
-      error: failReason,
-      copilotSessionId: nodeState.copilotSessionId,
-      stepStatuses: nodeState.stepStatuses,
-      worktreePath: nodeState.worktreePath,
-      baseCommit: nodeState.baseCommit,
-      logs,
-      logFilePath: this.getNodeLogFilePath(planId, nodeId, nodeState.attempts || 1),
-      workUsed: node.type === 'job' ? (node as JobNode).work : undefined,
-    });
-    
-    // Emit events
-    this.emit('nodeTransition', planId, nodeId, 'running', 'failed');
-    this.emit('nodeUpdated', planId, nodeId);
-    this.emit('planUpdated', planId);
-    
-    // Persist the updated state
-    this.persistence.save(plan);
-    
-    return { success: true };
+  }
+
+  /**
+   * Emit node transition event for UI updates.
+   */
+  private emitNodeTransition(event: {
+    planId: string;
+    nodeId: string;
+    previousStatus: NodeStatus;
+    newStatus: NodeStatus;
+    reason: string;
+  }): void {
+    this.emit('nodeTransition', event.planId, event.nodeId, event.previousStatus, event.newStatus);
+    this.emit('nodeUpdated', event.planId, event.nodeId);
+    this.emit('planUpdated', event.planId);
   }
 
   // ============================================================================

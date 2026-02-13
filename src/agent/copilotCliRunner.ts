@@ -406,7 +406,16 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     // Build allowed paths list: worktree + any additional folders
     const allowedPaths: string[] = [];
     if (cwd) {
-      allowedPaths.push(cwd);
+      // Normalize and validate the working directory path (usually the worktree)
+      const normalizedCwd = path.resolve(cwd);
+      if (fs.existsSync(normalizedCwd)) {
+        allowedPaths.push(normalizedCwd);
+        this.logger.debug(`[SECURITY] Added worktree to allowed paths: ${normalizedCwd}`);
+      } else {
+        this.logger.error(`[SECURITY] Working directory does not exist: ${cwd} (normalized: ${normalizedCwd})`);
+        // Still add it to prevent fallback to process.cwd(), but log the issue
+        allowedPaths.push(normalizedCwd);
+      }
     }
     if (allowedFolders && allowedFolders.length > 0) {
       // Validate and normalize paths — must be absolute for security
@@ -505,6 +514,9 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       cmd += ` --resume ${sessionId}`;
     }
     
+    // Log the final command for troubleshooting
+    this.logger.info(`[SECURITY] Copilot CLI command: copilot ${cmd}`);
+    
     return cmd;
   }
   
@@ -523,9 +535,15 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     const { command, cwd, label, sessionId, timeout, onOutput, onProcess } = options;
     
     return new Promise((resolve) => {
+      // Create a clean environment without NODE_OPTIONS to prevent VS Code's --no-warnings
+      // flag from being passed to the copilot CLI (which doesn't understand Node.js flags)
+      const cleanEnv = { ...process.env };
+      delete cleanEnv.NODE_OPTIONS;
+      
       const proc = spawn(command, [], {
         cwd,
         shell: true,
+        env: cleanEnv,
       });
       
       let capturedSessionId: string | undefined = sessionId;

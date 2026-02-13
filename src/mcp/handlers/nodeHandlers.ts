@@ -13,6 +13,7 @@ import {
   JobNodeSpec,
   PlanSpec,
 } from '../../plan/types';
+import { validateAllowedFolders, validateAllowedUrls, validateAgentModels } from '../validation';
 import { PRODUCER_ID_PATTERN } from '../tools/planTools';
 import {
   PlanHandlerContext,
@@ -118,6 +119,24 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
   const validation = validateNodeSpecs(args.nodes);
   if (!validation.valid || !validation.specs) {
     return errorResult(validation.error || 'Invalid input');
+  }
+
+  // Validate agent model names
+  const modelValidation = await validateAgentModels(args, 'create_copilot_node');
+  if (!modelValidation.valid) {
+    return { success: false, error: modelValidation.error };
+  }
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_node');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_node');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
   }
 
   try {
@@ -522,6 +541,26 @@ export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promi
   const fieldError = validateRequired(args, ['node_id']);
   if (fieldError) return fieldError;
 
+  // Validate agent model names if any new specs are provided
+  if (args.newWork || args.newPrechecks || args.newPostchecks) {
+    const modelValidation = await validateAgentModels(args, 'retry_copilot_node');
+    if (!modelValidation.valid) {
+      return { success: false, error: modelValidation.error };
+    }
+  }
+
+  // Validate allowedFolders paths exist
+  const folderValidation = await validateAllowedFolders(args, 'retry_copilot_node');
+  if (!folderValidation.valid) {
+    return { success: false, error: folderValidation.error };
+  }
+
+  // Validate allowedUrls are well-formed HTTP/HTTPS
+  const urlValidation = await validateAllowedUrls(args, 'retry_copilot_node');
+  if (!urlValidation.valid) {
+    return { success: false, error: urlValidation.error };
+  }
+
   const retryOptions = {
     newWork: args.newWork,
     clearWorktree: args.clearWorktree || false,
@@ -571,15 +610,15 @@ export async function handleForceFailNode(args: any, ctx: PlanHandlerContext): P
     }
 
     if (plan.nodes.has(nodeId)) {
-      const result = ctx.PlanRunner.forceFailNode(plan.id, nodeId, args.reason);
-      if (result.success) {
+      try {
+        await ctx.PlanRunner.forceFailNode(plan.id, nodeId);
         return {
           success: true,
           message: `Node '${args.node_id}' has been force failed. It can now be retried.`,
           groupId: plan.id,
         };
-      } else {
-        return errorResult(result.error || 'Failed to force fail node');
+      } catch (error) {
+        return errorResult((error as Error)?.message || 'Failed to force fail node');
       }
     }
   }

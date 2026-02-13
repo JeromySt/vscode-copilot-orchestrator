@@ -6,6 +6,12 @@
  */
 
 // ---------------------------------------------------------------------------
+// Event type
+// ---------------------------------------------------------------------------
+
+export type Event<T> = (listener: (e: T) => any, thisArgs?: any, disposables?: Disposable[]) => Disposable;
+
+// ---------------------------------------------------------------------------
 // Disposable
 // ---------------------------------------------------------------------------
 
@@ -65,7 +71,7 @@ export class Uri {
   readonly path: string;
   readonly query: string;
   readonly fragment: string;
-  readonly fsPath: string;
+  fsPath: string; // Make this mutable
 
   private constructor(scheme: string, authority: string, path: string, query: string, fragment: string) {
     this.scheme = scheme;
@@ -77,7 +83,10 @@ export class Uri {
   }
 
   static file(fsPath: string): Uri {
-    return new Uri('file', '', fsPath.replace(/\\/g, '/'), '', '');
+    const normalizedPath = fsPath.replace(/\\/g, '/');
+    const uri = new Uri('file', '', normalizedPath, '', '');
+    uri.fsPath = fsPath; // Preserve the original fsPath
+    return uri;
   }
 
   static parse(value: string): Uri {
@@ -199,6 +208,22 @@ export const window = {
   createTerminal,
   createWebviewPanel,
   registerWebviewViewProvider: (_viewType: string, _provider: unknown) => new Disposable(),
+  createTreeView: <T>(_viewId: string, _options: TreeViewOptions<T>): TreeView<T> => {
+    return {
+      visible: true,
+      selection: [],
+      badge: undefined,
+      title: undefined,
+      description: undefined,
+      message: undefined,
+      onDidChangeSelection: new EventEmitter<TreeViewSelectionChangeEvent<T>>().event,
+      onDidChangeVisibility: new EventEmitter<TreeViewVisibilityChangeEvent>().event,
+      onDidCollapseElement: new EventEmitter<TreeViewExpansionEvent<T>>().event,
+      onDidExpandElement: new EventEmitter<TreeViewExpansionEvent<T>>().event,
+      reveal: async (_element: T, _options?: { expand?: boolean; focus?: boolean; select?: boolean }) => {},
+      dispose: () => {}
+    } as TreeView<T>;
+  },
   withProgress: async <T>(_options: unknown, task: (progress: unknown, token: unknown) => Thenable<T>): Promise<T> => {
     return task({ report: _noop }, { isCancellationRequested: false, onCancellationRequested: new EventEmitter<void>().event });
   },
@@ -220,7 +245,48 @@ function createMockConfiguration(): Record<string, unknown> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// RelativePattern
+// ---------------------------------------------------------------------------
+
+export class RelativePattern {
+  readonly baseUri: Uri;
+
+  constructor(public base: string | Uri, public pattern: string) {
+    this.baseUri = typeof base === 'string' ? Uri.file(base) : base;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// workspace
+// ---------------------------------------------------------------------------
+
 const onDidChangeConfigurationEmitter = new EventEmitter<{ affectsConfiguration: (section: string) => boolean }>();
+
+// ---------------------------------------------------------------------------
+// FileSystemWatcher
+// ---------------------------------------------------------------------------
+
+export class FileSystemWatcher {
+  private _onDidCreateEmitter = new EventEmitter<Uri>();
+  private _onDidChangeEmitter = new EventEmitter<Uri>();
+  private _onDidDeleteEmitter = new EventEmitter<Uri>();
+
+  readonly onDidCreate = this._onDidCreateEmitter.event;
+  readonly onDidChange = this._onDidChangeEmitter.event;
+  readonly onDidDelete = this._onDidDeleteEmitter.event;
+
+  // Mock methods for triggering events in tests
+  _fireCreate(uri: Uri): void { this._onDidCreateEmitter.fire(uri); }
+  _fireChange(uri: Uri): void { this._onDidChangeEmitter.fire(uri); }
+  _fireDelete(uri: Uri): void { this._onDidDeleteEmitter.fire(uri); }
+
+  dispose(): void {
+    this._onDidCreateEmitter.dispose();
+    this._onDidChangeEmitter.dispose();
+    this._onDidDeleteEmitter.dispose();
+  }
+}
 
 export const workspace = {
   getConfiguration: (_section?: string) => createMockConfiguration(),
@@ -230,6 +296,9 @@ export const workspace = {
     readFile: async (_uri: Uri) => new Uint8Array(),
     writeFile: async (_uri: Uri, _content: Uint8Array) => {},
     stat: async (_uri: Uri) => ({ type: 1, ctime: 0, mtime: 0, size: 0 }),
+  },
+  createFileSystemWatcher: (_pattern: string | RelativePattern): FileSystemWatcher => {
+    return new FileSystemWatcher();
   },
 };
 
@@ -307,4 +376,119 @@ export class CancellationTokenSource {
   dispose(): void {
     this._emitter.dispose();
   }
+}
+
+// ---------------------------------------------------------------------------
+// TreeItem
+// ---------------------------------------------------------------------------
+
+export enum TreeItemCollapsibleState {
+  None = 0,
+  Collapsed = 1,
+  Expanded = 2
+}
+
+export class TreeItem {
+  label?: string | TreeItemLabel;
+  id?: string;
+  iconPath?: string | Uri | { light: string | Uri; dark: string | Uri } | ThemeIcon;
+  description?: string | boolean;
+  resourceUri?: Uri;
+  tooltip?: string | MarkdownString | undefined;
+  command?: Command;
+  collapsibleState?: TreeItemCollapsibleState;
+  contextValue?: string;
+  accessibilityInformation?: AccessibilityInformation;
+
+  constructor(label: string | TreeItemLabel, collapsibleState?: TreeItemCollapsibleState) {
+    this.label = label;
+    this.collapsibleState = collapsibleState;
+  }
+}
+
+export interface TreeItemLabel {
+  label: string;
+  highlights?: [number, number][];
+}
+
+export interface Command {
+  title: string;
+  command: string;
+  tooltip?: string;
+  arguments?: unknown[];
+}
+
+export interface AccessibilityInformation {
+  label: string;
+  role?: string;
+}
+
+export interface MarkdownString {
+  value: string;
+  isTrusted?: boolean;
+  supportThemeIcons?: boolean;
+  supportHtml?: boolean;
+  baseUri?: Uri;
+}
+
+// ---------------------------------------------------------------------------
+// TreeDataProvider
+// ---------------------------------------------------------------------------
+
+export interface TreeDataProvider<T> {
+  onDidChangeTreeData?: Event<T | T[] | undefined | null | void>;
+  getTreeItem(element: T): TreeItem | Thenable<TreeItem>;
+  getChildren(element?: T): ProviderResult<T[]>;
+  getParent?(element: T): ProviderResult<T>;
+  resolveTreeItem?(item: TreeItem, element: T, token: CancellationToken): ProviderResult<TreeItem>;
+}
+
+export type ProviderResult<T> = T | undefined | null | Thenable<T | undefined | null>;
+
+export interface CancellationToken {
+  isCancellationRequested: boolean;
+  onCancellationRequested: Event<any>;
+}
+
+// ---------------------------------------------------------------------------
+// TreeView
+// ---------------------------------------------------------------------------
+
+export interface ViewBadge {
+  tooltip: string;
+  value: number;
+}
+
+export interface TreeViewOptions<T> {
+  treeDataProvider: TreeDataProvider<T>;
+  showCollapseAll?: boolean;
+  canSelectMany?: boolean;
+  dragAndDropController?: unknown;
+  manageCheckboxStateManually?: boolean;
+}
+
+export interface TreeView<T> extends Disposable {
+  readonly onDidExpandElement: Event<TreeViewExpansionEvent<T>>;
+  readonly onDidCollapseElement: Event<TreeViewExpansionEvent<T>>;
+  readonly onDidChangeSelection: Event<TreeViewSelectionChangeEvent<T>>;
+  readonly onDidChangeVisibility: Event<TreeViewVisibilityChangeEvent>;
+  readonly selection: readonly T[];
+  readonly visible: boolean;
+  badge?: ViewBadge;
+  title?: string;
+  description?: string;
+  message?: string;
+  reveal(element: T, options?: { select?: boolean; focus?: boolean; expand?: boolean | number }): Thenable<void>;
+}
+
+export interface TreeViewExpansionEvent<T> {
+  readonly element: T;
+}
+
+export interface TreeViewSelectionChangeEvent<T> {
+  readonly selection: readonly T[];
+}
+
+export interface TreeViewVisibilityChangeEvent {
+  readonly visible: boolean;
 }

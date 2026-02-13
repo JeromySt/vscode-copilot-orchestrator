@@ -65,19 +65,22 @@ function createTestPlan(id: string, name: string = 'Test Plan'): PlanInstance {
 }
 
 suite('PlanPersistence', () => {
+  let baseDir: string;
   let tmpDir: string;
   let persistence: PlanPersistence;
 
   setup(() => {
     silenceConsole();
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-persistence-test-'));
+    baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-persistence-test-'));
+    // PlanPersistence expects storagePath = workspacePath/.orchestrator/plans
+    tmpDir = path.join(baseDir, '.orchestrator', 'plans');
     persistence = new PlanPersistence(tmpDir);
   });
 
   teardown(() => {
     sinon.restore();
     try {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(baseDir, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
     }

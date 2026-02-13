@@ -49,3 +49,66 @@ export async function existsAsync(p: string): Promise<boolean> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function cpuCountMinusOne(): number { const os = require('os'); const n: number = os.cpus()?.length || 2; return Math.max(1, n-1); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Directory initialization utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Required subdirectories under .orchestrator/
+ * These are created on-demand before any filesystem operation.
+ */
+const ORCHESTRATOR_SUBDIRS = [
+  'plans',
+  'logs', 
+  'evidence',
+  '.copilot'  // Session storage
+] as const;
+
+/**
+ * Ensure the .orchestrator directory structure exists.
+ * 
+ * Called before any filesystem write operation to handle cases where
+ * the directory was deleted externally (e.g., `git clean -dfx`).
+ * 
+ * Creates:
+ * - .orchestrator/
+ * - .orchestrator/plans/
+ * - .orchestrator/logs/
+ * - .orchestrator/evidence/
+ * - .orchestrator/.copilot/
+ * 
+ * @param workspacePath - Root path of the workspace
+ * @returns Path to the .orchestrator directory
+ */
+export function ensureOrchestratorDirs(workspacePath: string): string {
+  const orchestratorPath = path.join(workspacePath, '.orchestrator');
+  
+  // Create root .orchestrator if missing
+  if (!fs.existsSync(orchestratorPath)) {
+    fs.mkdirSync(orchestratorPath, { recursive: true });
+  }
+  
+  // Create each subdirectory
+  for (const subdir of ORCHESTRATOR_SUBDIRS) {
+    const subdirPath = path.join(orchestratorPath, subdir);
+    if (!fs.existsSync(subdirPath)) {
+      fs.mkdirSync(subdirPath, { recursive: true });
+    }
+  }
+  
+  return orchestratorPath;
+}
+
+/**
+ * Ensure a specific directory exists, creating it if necessary.
+ * 
+ * Use this for directories outside .orchestrator (e.g., worktrees).
+ * 
+ * @param dirPath - Absolute path to the directory
+ */
+export function ensureDirectory(dirPath: string): void {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+}

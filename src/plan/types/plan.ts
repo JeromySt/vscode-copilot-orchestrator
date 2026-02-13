@@ -80,6 +80,9 @@ export interface NodeExecutionState {
   /** Error message if failed */
   error?: string;
   
+  /** Reason for failure - helps distinguish crash from other failures */
+  failureReason?: 'crashed' | 'timeout' | 'execution-error' | 'user-canceled';
+  
   /** Base commit SHA the worktree was created from */
   baseCommit?: string;
   
@@ -151,6 +154,18 @@ export interface NodeExecutionState {
    * Can be used to resume context on retry or follow-up.
    */
   copilotSessionId?: string;
+  
+  /** 
+   * Process ID of the running agent/shell process.
+   * Used for crash detection on extension restart.
+   */
+  pid?: number;
+  
+  /**
+   * Flag indicating this node was manually force-failed by the user.
+   * Used by UI to show different styling/messaging for user-initiated failures.
+   */
+  forceFailed?: boolean;
   
   /**
    * Phase to resume from on retry.
@@ -528,6 +543,8 @@ export interface JobExecutionResult {
   metrics?: CopilotUsageMetrics;
   /** Per-phase metrics breakdown */
   phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri', CopilotUsageMetrics>>;
+  /** Process ID of the main running process (for crash detection) */
+  pid?: number;
 }
 
 /**

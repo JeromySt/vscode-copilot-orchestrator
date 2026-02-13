@@ -7,7 +7,7 @@
  */
 
 export { detectWorkspace, Detected } from './detector';
-export { ensureDir, readJSON, writeJSON, cpuCountMinusOne } from './utils';
+export { ensureDir, readJSON, writeJSON, cpuCountMinusOne, ensureOrchestratorDirs, ensureDirectory } from './utils';
 export * from './planInitialization';
 export { Logger, ComponentLogger } from './logger';
 export { powerManager, PowerManager, PowerManagerImpl } from './powerManager';
@@ -19,3 +19,4 @@ export {
   GlobalCapacityRegistry,
 } from './globalCapacity';
 export * from './orphanedWorktreeCleanup';
+export { OrchestratorFileWatcher, PlanFileDeletedCallback, PlanFileCreatedCallback } from './orchestratorFileWatcher';

@@ -258,5 +258,55 @@ Returns:
         required: ['node_id']
       }
     },
+
+    {
+      name: 'update_copilot_plan_node',
+      description: `Update a node's job specification. Any provided stage (prechecks, work, postchecks) will replace the existing definition and reset execution to re-run from that stage.
+
+WORKFLOW:
+1. Provide planId and nodeId to identify the node
+2. Specify which stages to update (prechecks, work, postchecks)
+3. Optionally set resetToStage to control execution restart point
+4. Updated stages will replace existing definitions completely
+5. Execution resets to the earliest updated stage (or resetToStage if specified)
+
+STAGE DEFINITIONS:
+Each stage (prechecks/work/postchecks) can be:
+1. String: "npm run test" or "@agent Check implementation"
+2. Process spec: { "type": "process", "executable": "node", "args": ["test.js"] }
+3. Shell spec: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
+4. Agent spec: { "type": "agent", "instructions": "# Task\\n1. Validate code", "model": "${modelEnum[0]}" }`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: {
+            type: 'string',
+            description: 'The plan ID'
+          },
+          nodeId: {
+            type: 'string',
+            description: 'The node ID to update'
+          },
+          prechecks: {
+            description: `New prechecks definition. If provided, prechecks will be re-run.
+Can be string or object with type (process/shell/agent).`
+          },
+          work: {
+            description: `New work definition. If provided, work stage will be re-run.
+Can be string or object with type (process/shell/agent).`
+          },
+          postchecks: {
+            description: `New postchecks definition. If provided, postchecks will be re-run.
+Can be string or object with type (process/shell/agent).`
+          },
+          resetToStage: {
+            type: 'string',
+            enum: ['prechecks', 'work', 'postchecks'],
+            description: 'Explicitly reset execution to start from this stage. If not provided, resets to the earliest updated stage.'
+          }
+        },
+        required: ['planId', 'nodeId']
+      }
+    },
   ];
 }
