@@ -535,10 +535,15 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     const { command, cwd, label, sessionId, timeout, onOutput, onProcess } = options;
     
     return new Promise((resolve) => {
+      // Create a clean environment without NODE_OPTIONS to prevent VS Code's --no-warnings
+      // flag from being passed to the copilot CLI (which doesn't understand Node.js flags)
+      const cleanEnv = { ...process.env };
+      delete cleanEnv.NODE_OPTIONS;
+      
       const proc = spawn(command, [], {
         cwd,
         shell: true,
-        env: { ...process.env, NODE_OPTIONS: '' },
+        env: cleanEnv,
       });
       
       let capturedSessionId: string | undefined = sessionId;
