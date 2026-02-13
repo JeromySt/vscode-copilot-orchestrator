@@ -818,7 +818,7 @@ export class NodeDetailPanel {
       </button>
     </div>
     ` : ''}
-    ${(state.status === 'running' || state.status === 'scheduled' || state.status === 'pending') ? `
+    ${state.status === 'running' ? `
     <div class="force-fail-section">
       <p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 8px;">
         If the process has crashed or is stuck, you can force fail this node to enable retry.
