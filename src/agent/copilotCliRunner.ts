@@ -514,8 +514,8 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       cmd += ` --resume ${sessionId}`;
     }
     
-    // Debug log the final command for troubleshooting
-    this.logger.debug(`[SECURITY] Final Copilot command: ${cmd}`);
+    // Log the final command for troubleshooting
+    this.logger.info(`[SECURITY] Copilot CLI command: copilot ${cmd}`);
     
     return cmd;
   }
