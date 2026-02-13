@@ -2807,11 +2807,8 @@ export class PlanRunner extends EventEmitter {
         // Try stash + reset, but don't fail the merge if stash has issues
         // The merge commit already exists - worst case user needs to manually sync
         const stashMsg = `orchestrator-merge-${Date.now()}`;
-        let stashSucceeded = false;
-        
         try {
           await git.repository.stashPush(repoPath, stashMsg, s => log.debug(s));
-          stashSucceeded = true;
         } catch (stashErr: any) {
           // Stash failed (e.g., "could not write index") - this is non-fatal
           // The merge commit exists, user just needs to manually update their branch
@@ -2824,33 +2821,29 @@ export class PlanRunner extends EventEmitter {
         
         try {
           await git.repository.resetHard(repoPath, newCommit, s => log.debug(s));
-          if (stashSucceeded) {
-            // Try to pop the stash
-            try {
-              await git.repository.stashPop(repoPath, s => log.debug(s));
-            } catch (popErr: any) {
-              // Pop failed - check if it's just orchestrator .gitignore conflict
-              log.warn(`Stash pop failed: ${popErr.message}`);
-              
-              // Check stash contents - if only orchestrator .gitignore, drop it
-              const stashOnlyOrchestratorGitignore = await this.isStashOnlyOrchestratorGitignore(repoPath);
-              if (stashOnlyOrchestratorGitignore) {
-                log.debug(`Stash contains only orchestrator .gitignore changes - dropping`);
-                await git.repository.stashDrop(repoPath, undefined, s => log.debug(s));
-              } else {
-                // Stash has real user changes - leave it for user to resolve
-                log.warn(`Stash contains user changes that couldn't be applied. Run 'git stash pop' to recover.`);
-              }
+          // Try to pop the stash
+          try {
+            await git.repository.stashPop(repoPath, s => log.debug(s));
+          } catch (popErr: any) {
+            // Pop failed - check if it's just orchestrator .gitignore conflict
+            log.warn(`Stash pop failed: ${popErr.message}`);
+            
+            // Check stash contents - if only orchestrator .gitignore, drop it
+            const stashOnlyOrchestratorGitignore = await this.isStashOnlyOrchestratorGitignore(repoPath);
+            if (stashOnlyOrchestratorGitignore) {
+              log.debug(`Stash contains only orchestrator .gitignore changes - dropping`);
+              await git.repository.stashDrop(repoPath, undefined, s => log.debug(s));
+            } else {
+              // Stash has real user changes - leave it for user to resolve
+              log.warn(`Stash contains user changes that couldn't be applied. Run 'git stash pop' to recover.`);
             }
           }
         } catch (err) {
           // Try to restore stash before re-throwing
-          if (stashSucceeded) {
-            try {
-              await git.repository.stashPop(repoPath, s => log.debug(s));
-            } catch {
-              log.warn(`Failed to restore stash after reset failure`);
-            }
+          try {
+            await git.repository.stashPop(repoPath, s => log.debug(s));
+          } catch {
+            log.warn(`Failed to restore stash after reset failure`);
           }
           throw err;
         }

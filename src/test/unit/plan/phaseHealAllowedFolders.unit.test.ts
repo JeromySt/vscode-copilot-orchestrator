@@ -6,7 +6,7 @@
  */
 
 import * as assert from 'assert';
-import { AgentSpec, WorkSpec, ShellSpec, ProcessSpec, JobNode, normalizeWorkSpec } from '../../../plan/types';
+import { AgentSpec, WorkSpec, JobNode, normalizeWorkSpec } from '../../../plan/types';
 
 // Mock implementation based on runner.ts heal logic
 function createPhaseHealSpec(

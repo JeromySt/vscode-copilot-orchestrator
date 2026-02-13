@@ -169,7 +169,7 @@ function createMockRunner(): MockRunner {
     resetTo: 'prechecks' | 'work' | 'postchecks'
   ): void {
     const stageOrder = ['prechecks', 'work', 'postchecks'];
-    const resetIndex = stageOrder.indexOf(resetTo);
+    const _resetIndex = stageOrder.indexOf(resetTo);
     
     // Clear success markers for resetTo stage and all subsequent stages
     if (nodeState.stepStatuses) {

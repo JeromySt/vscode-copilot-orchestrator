@@ -722,7 +722,7 @@ export class DefaultJobExecutor implements JobExecutor {
     const logs = this.executionLogs.get(executionKey);
     
     // Handle multi-line messages - create separate entry for each line
-    const lines = message.split('\n');
+    const lines = String(message).split('\n');
     for (const line of lines) {
       const entry: LogEntry = {
         timestamp,
@@ -1788,7 +1788,7 @@ OR
     const logs = this.executionLogs.get(executionKey);
     
     // Handle multi-line messages - create separate entry for each line
-    const lines = message.split('\n');
+    const lines = String(message).split('\n');
     for (const line of lines) {
       const entry: LogEntry = {
         timestamp,
@@ -1810,7 +1810,7 @@ OR
     const logs = this.executionLogs.get(executionKey);
     
     // Handle multi-line messages - create separate entry for each line
-    const lines = message.split('\n');
+    const lines = String(message).split('\n');
     for (const line of lines) {
       const entry: LogEntry = {
         timestamp,
@@ -1832,7 +1832,7 @@ OR
     const logs = this.executionLogs.get(executionKey);
     
     // Handle multi-line messages - create separate entry for each line
-    const lines = message.split('\n');
+    const lines = String(message).split('\n');
     for (const line of lines) {
       const entry: LogEntry = {
         timestamp,

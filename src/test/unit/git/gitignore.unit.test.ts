@@ -2,15 +2,12 @@ import { suite, test } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as fs from 'fs';
-import * as path from 'path';
 import * as git from '../../../git';
 import { BranchChangeWatcher } from '../../../git/branchWatcher';
 
 suite('.gitignore Handling', () => {
   const mockWorkspaceRoot = '/test/workspace';
-  const mockGitignorePath = path.join(mockWorkspaceRoot, '.gitignore');
-  
-  suite('ensureOrchestratorGitIgnore', () => {
+  suite('ensureOrchestratorGitIgnore',() => {
     let readFileStub: sinon.SinonStub;
     let writeFileStub: sinon.SinonStub;
 
@@ -155,7 +152,7 @@ suite('BranchChangeWatcher', () => {
   test('should detect branch change via repository state', async () => {
     // This would require mocking VS Code Git extension API
     // Implementation depends on how the watcher is structured
-    const watcher = new BranchChangeWatcher(mockLogger);
-    assert.ok(watcher !== undefined);
+    const _watcher = new BranchChangeWatcher(mockLogger);
+    assert.ok(_watcher !== undefined);
   });
 });

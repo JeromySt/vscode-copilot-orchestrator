@@ -9,7 +9,6 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as events from 'events';
-import { PlanRunner } from '../../../plan/runner';
 import { ProcessMonitor } from '../../../process/processMonitor';
 import {
   PlanInstance,

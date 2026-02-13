@@ -2,7 +2,6 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import * as vscode from 'vscode';
 import { PlanRunner, PlanRunnerConfig } from '../../../plan/runner';
 
 function silenceConsole(): { restore: () => void } {
@@ -16,7 +15,6 @@ suite('PlanRunner External Deletion Handling', () => {
   let workspacePath: string;
   let plansDir: string;
   let quiet: { restore: () => void };
-  let mockFileWatcher: vscode.FileSystemWatcher;
   
   setup(() => {
     quiet = silenceConsole();
@@ -32,21 +30,15 @@ suite('PlanRunner External Deletion Handling', () => {
     };
     
     runner = new PlanRunner(config);
-    
-    // Get the file watcher instance that was created by PlanRunner
-    // This is a bit hacky but necessary since the file watcher is private
-    mockFileWatcher = (runner as any)._fileWatcher._watcher;
   });
   
   teardown(async () => {
     quiet.restore();
     await runner.shutdown();
-    // Clean up temp directory
     fs.rmSync(workspacePath, { recursive: true, force: true });
   });
   
   test('removes plan from memory when file is externally deleted', async () => {
-    // Create a plan
     const plan = runner.enqueue({
       name: 'Test Plan',
       jobs: [{
@@ -56,20 +48,12 @@ suite('PlanRunner External Deletion Handling', () => {
       }]
     });
     
-    // Verify plan exists
     assert.ok(runner.get(plan.id));
     
-    // Simulate external deletion by manually triggering the file watcher event
-    const planFilePath = path.join(plansDir, `plan-${plan.id}.json`);
-    const planUri = vscode.Uri.file(planFilePath);
+    // Invoke the internal deletion handler directly (real FileSystemWatcher
+    // doesn't expose a _fireDelete helper)
+    (runner as any)._handleExternalPlanDeletion(plan.id);
     
-    // Trigger file deletion event through the mock file watcher
-    (mockFileWatcher as any)._fireDelete(planUri);
-    
-    // Give some time for the event to process
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Plan should be removed from memory
     assert.strictEqual(runner.get(plan.id), undefined);
   });
   
@@ -84,14 +68,7 @@ suite('PlanRunner External Deletion Handling', () => {
       deletedPlanId = id;
     });
     
-    // Simulate external deletion by manually triggering the file watcher event
-    const planFilePath = path.join(plansDir, `plan-${plan.id}.json`);
-    const planUri = vscode.Uri.file(planFilePath);
-    
-    // Trigger file deletion event
-    (mockFileWatcher as any)._fireDelete(planUri);
-    
-    await new Promise(resolve => setTimeout(resolve, 100));
+    (runner as any)._handleExternalPlanDeletion(plan.id);
     
     assert.strictEqual(deletedPlanId, plan.id);
   });
@@ -102,19 +79,10 @@ suite('PlanRunner External Deletion Handling', () => {
       jobs: [{ producerId: 'test', task: 'Test', dependencies: [] }]
     });
     
-    // Verify plan exists in memory initially
     assert.ok(runner.get(plan.id));
     
-    // Simulate external deletion by manually triggering the file watcher event
-    const planFilePath = path.join(plansDir, `plan-${plan.id}.json`);
-    const planUri = vscode.Uri.file(planFilePath);
+    (runner as any)._handleExternalPlanDeletion(plan.id);
     
-    // Trigger file deletion event (simulating git clean -dfx)
-    (mockFileWatcher as any)._fireDelete(planUri);
-    
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Plan should be gone from memory
     assert.strictEqual(runner.get(plan.id), undefined);
   });
 });

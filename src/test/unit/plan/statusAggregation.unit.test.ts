@@ -7,15 +7,13 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { EventEmitter } from 'events';
 import type { 
   PlanInstance, 
   JobNode, 
   NodeExecutionState, 
   PlanStatus 
 } from '../../../plan/types';
-import { PlanRunner } from '../../../plan/runner';
-import { ProcessMonitor } from '../../../process/processMonitor';
+
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
@@ -111,7 +109,7 @@ function createMockRunner(): MockRunner {
     },
     
     async recoverRunningNodes(plan: PlanInstance): Promise<void> {
-      for (const [nodeId, nodeState] of plan.nodeStates.entries()) {
+      for (const [_nodeId, nodeState] of plan.nodeStates.entries()) {
         if (nodeState.status === 'running') {
           if (nodeState.pid && !this.processMonitor.isRunning(nodeState.pid)) {
             nodeState.status = 'failed';

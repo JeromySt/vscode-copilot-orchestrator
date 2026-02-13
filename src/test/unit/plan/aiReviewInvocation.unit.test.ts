@@ -7,7 +7,6 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as fs from 'fs';
-import * as path from 'path';
 import { writeAiReviewInstructions, parseAiReviewResult } from '../../../plan/aiReviewUtils';
 
 function silenceConsole(): { restore: () => void } {
@@ -51,19 +50,19 @@ suite('AI Review Invocation', () => {
     });
     
     test('should include execution logs in instructions', async () => {
-      const mockWriteFile = sinon.stub(fs.promises, 'writeFile').resolves();
-      const mockMkdir = sinon.stub(fs.promises, 'mkdir').resolves('');
+      const _mockWriteFile = sinon.stub(fs.promises, 'writeFile').resolves();
+      const _mockMkdir = sinon.stub(fs.promises, 'mkdir').resolves('');
       const logs = 'Line 1\nLine 2\nLine 3';
       
       await writeAiReviewInstructions('/worktree', 'node', logs, 'Task');
       
-      const content = mockWriteFile.args[0][1] as string;
+      const content = _mockWriteFile.args[0][1] as string;
       assert.ok(content.includes(logs));
     });
     
     test('should write to standard instructions location', async () => {
-      const mockWriteFile = sinon.stub(fs.promises, 'writeFile').resolves();
-      const mockMkdir = sinon.stub(fs.promises, 'mkdir').resolves('');
+      const _mockWriteFile = sinon.stub(fs.promises, 'writeFile').resolves();
+      const _mockMkdir = sinon.stub(fs.promises, 'mkdir').resolves('');
       
       const result = await writeAiReviewInstructions(
         '/worktree/path',
@@ -119,7 +118,7 @@ suite('AI Review Invocation', () => {
       
       // Simulate a simple AI review method that would use the standard pattern
       const runAiReview = async (worktreePath: string, nodeId: string, logs: string, task: string) => {
-        const instructionsPath = await writeAiReviewInstructions(worktreePath, nodeId, logs, task);
+        const _instructionsPath = await writeAiReviewInstructions(worktreePath, nodeId, logs, task);
         
         const result = await agentDelegator.delegate({
           task: 'Complete the task described in the instructions.',
@@ -133,8 +132,8 @@ suite('AI Review Invocation', () => {
       };
       
       // Mock the file system operations
-      const mockWriteFile = sinon.stub(fs.promises, 'writeFile').resolves();
-      const mockMkdir = sinon.stub(fs.promises, 'mkdir').resolves('');
+      const _mockWriteFile = sinon.stub(fs.promises, 'writeFile').resolves();
+      const _mockMkdir = sinon.stub(fs.promises, 'mkdir').resolves('');
       
       await runAiReview('/worktree', 'node123', 'execution logs', 'test task');
       

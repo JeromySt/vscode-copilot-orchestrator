@@ -388,13 +388,13 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
   }
 
   // Validate allowedFolders paths exist
-  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_job');
   if (!folderValidation.valid) {
     return { success: false, error: folderValidation.error };
   }
 
   // Validate allowedUrls are well-formed HTTP/HTTPS
-  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_job');
   if (!urlValidation.valid) {
     return { success: false, error: urlValidation.error };
   }
@@ -880,13 +880,13 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   if (fieldError) return fieldError;
 
   // Validate allowedFolders paths exist
-  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  const folderValidation = await validateAllowedFolders(args, 'retry_copilot_plan');
   if (!folderValidation.valid) {
     return { success: false, error: folderValidation.error };
   }
 
   // Validate allowedUrls are well-formed HTTP/HTTPS
-  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  const urlValidation = await validateAllowedUrls(args, 'retry_copilot_plan');
   if (!urlValidation.valid) {
     return { success: false, error: urlValidation.error };
   }
@@ -1017,13 +1017,13 @@ export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): P
   if (fieldError) return fieldError;
 
   // Validate allowedFolders paths exist
-  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  const folderValidation = await validateAllowedFolders(args, 'retry_copilot_plan_node');
   if (!folderValidation.valid) {
     return { success: false, error: folderValidation.error };
   }
 
   // Validate allowedUrls are well-formed HTTP/HTTPS
-  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  const urlValidation = await validateAllowedUrls(args, 'retry_copilot_plan_node');
   if (!urlValidation.valid) {
     return { success: false, error: urlValidation.error };
   }

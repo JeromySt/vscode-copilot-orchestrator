@@ -146,7 +146,7 @@ suite('Activity Bar Badge', () => {
 
       // Create spy on updateBadge method by inspecting call count
       let badgeUpdateCount = 0;
-      const originalBadgeSetter = Object.getOwnPropertyDescriptor(mockTreeView, 'badge')?.set;
+      const _originalBadgeSetter = Object.getOwnPropertyDescriptor(mockTreeView, 'badge')?.set;
       Object.defineProperty(mockTreeView, 'badge', {
         set: function(value) {
           badgeUpdateCount++;

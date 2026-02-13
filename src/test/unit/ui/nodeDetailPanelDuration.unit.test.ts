@@ -119,7 +119,7 @@ suite('Node Detail Panel Duration Timer', () => {
     });
     
     test('should not start timer without startedAt attribute', () => {
-      const mockWindow = { nodeDurationTimer: undefined };
+      const _mockWindow = { nodeDurationTimer: undefined };
       const mockDocument = {
         getElementById: sinon.stub()
       };
@@ -134,7 +134,7 @@ suite('Node Detail Panel Duration Timer', () => {
       mockDocument.getElementById.withArgs('duration-timer').returns(mockDurationElement);
       
       const mockSetInterval = sinon.stub();
-      const mockClearInterval = sinon.stub();
+      const _mockClearInterval = sinon.stub();
       
       function simulateTimerLogic(nodeStatus: string) {
         const durationTimer = mockDocument.getElementById('duration-timer');
@@ -150,7 +150,7 @@ suite('Node Detail Panel Duration Timer', () => {
     });
     
     test('should not start timer without duration element', () => {
-      const mockWindow = { nodeDurationTimer: undefined };
+      const _mockWindow = { nodeDurationTimer: undefined };
       const mockDocument = {
         getElementById: sinon.stub()
       };

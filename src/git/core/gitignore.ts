@@ -79,7 +79,7 @@ export async function ensureGitignoreEntries(
     return true;
   } catch (error) {
     logger?.(`[git] Warning: Could not update .gitignore: ${error}`);
-    throw error;
+    return false;
   }
 }
 
@@ -99,7 +99,6 @@ export async function ensureOrchestratorGitIgnore(workspaceRoot: string): Promis
  */
 export async function isOrchestratorGitIgnoreConfigured(workspaceRoot: string): Promise<boolean> {
   const gitignorePath = path.join(workspaceRoot, '.gitignore');
-  const requiredEntries = ['.worktrees/', '.orchestrator/', '.worktrees', '.orchestrator'];
   
   try {
     const content = await fs.promises.readFile(gitignorePath, 'utf-8');

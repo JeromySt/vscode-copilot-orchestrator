@@ -18,7 +18,6 @@ import * as branches from '../../../git/core/branches';
 import * as worktrees from '../../../git/core/worktrees';
 import * as repository from '../../../git/core/repository';
 import * as executor from '../../../git/core/executor';
-import { ensureGitignoreEntries } from '../../../git/core/gitignore';
 import type { CommandResult } from '../../../git/core/executor';
 
 // ---------------------------------------------------------------------------

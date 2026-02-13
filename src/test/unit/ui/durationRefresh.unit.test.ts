@@ -7,7 +7,7 @@
 import { suite, test } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { PlanTreeViewManager, PlanTreeDataProvider } from '../../../ui/planTreeProvider';
+import { PlanTreeViewManager } from '../../../ui/planTreeProvider';
 import { formatDurationMs } from '../../../ui/templates/helpers';
 
 // Mock PlanRunner for testing

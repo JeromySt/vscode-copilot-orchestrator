@@ -6,7 +6,7 @@
  */
 
 import * as assert from 'assert';
-import { AgentSpec, WorkSpec, ProcessSpec, ShellSpec, normalizeWorkSpec } from '../../../plan/types';
+import { AgentSpec, WorkSpec, ShellSpec, normalizeWorkSpec } from '../../../plan/types';
 
 // Mock implementation of createAutoHealSpec based on the runner.ts logic
 function createAutoHealSpec(

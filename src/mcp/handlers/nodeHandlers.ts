@@ -128,13 +128,13 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
   }
 
   // Validate allowedFolders paths exist
-  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  const folderValidation = await validateAllowedFolders(args, 'create_copilot_node');
   if (!folderValidation.valid) {
     return { success: false, error: folderValidation.error };
   }
 
   // Validate allowedUrls are well-formed HTTP/HTTPS
-  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
+  const urlValidation = await validateAllowedUrls(args, 'create_copilot_node');
   if (!urlValidation.valid) {
     return { success: false, error: urlValidation.error };
   }
@@ -550,14 +550,13 @@ export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promi
   }
 
   // Validate allowedFolders paths exist
-  const folderValidation = await validateAllowedFolders(args, 'create_copilot_plan');
+  const folderValidation = await validateAllowedFolders(args, 'retry_copilot_node');
   if (!folderValidation.valid) {
     return { success: false, error: folderValidation.error };
   }
 
   // Validate allowedUrls are well-formed HTTP/HTTPS
-  const urlValidation = await validateAllowedUrls(args, 'create_copilot_plan');
-  if (!urlValidation.valid) {
+  const urlValidation = await validateAllowedUrls(args, 'retry_copilot_node');  if (!urlValidation.valid) {
     return { success: false, error: urlValidation.error };
   }
 

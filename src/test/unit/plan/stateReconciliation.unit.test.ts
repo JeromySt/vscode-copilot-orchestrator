@@ -8,7 +8,6 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { EventEmitter } from 'events';
 import type { 
   PlanInstance, 
   JobNode, 
@@ -16,7 +15,7 @@ import type {
   PlanStatus,
   NodeTransitionEvent
 } from '../../../plan/types';
-import { ProcessMonitor } from '../../../process/processMonitor';
+
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
@@ -160,7 +159,7 @@ function createMockRunner(): MockRunner {
     
     async initialize(): Promise<void> {
       // Simulate loading plans and recovering their state
-      for (const [planId, plan] of this.plans.entries()) {
+      for (const [_planId, plan] of this.plans.entries()) {
         await this.recoverRunningNodes(plan);
       }
     },
@@ -386,7 +385,7 @@ suite('Plan State Reconciliation on Reload', () => {
     
     test('should refresh tree view after all plans recovered', async () => {
       const runner = createMockRunner();
-      const treeProvider = createMockTreeProvider();
+      const _treeProvider = createMockTreeProvider();
       
       const plan = createTestPlan(1);
       plan.nodeStates.get('node-0')!.status = 'running';

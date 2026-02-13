@@ -356,15 +356,18 @@ export async function validateAllowedUrls(
       const lowerUrl = url.toLowerCase();
       
       // Check for blocked schemes
+      let blockedScheme = false;
       for (const scheme of BLOCKED_SCHEMES) {
         if (lowerUrl.startsWith(scheme)) {
           errors.push(
             `Blocked URL scheme at ${fullPath}: '${url}'. ` +
             `Only HTTP/HTTPS URLs are allowed. Blocked schemes: ${BLOCKED_SCHEMES.join(', ')}`
           );
-          continue;
+          blockedScheme = true;
+          break;
         }
       }
+      if (blockedScheme) continue;
       
       // If it has a scheme, must be http or https
       if (url.includes('://')) {
