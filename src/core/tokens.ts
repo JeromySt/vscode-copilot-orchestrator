@@ -88,3 +88,9 @@ export const IDialogService = Symbol('IDialogService');
  * Provides clipboard operations abstraction.
  */
 export const IClipboardService = Symbol('IClipboardService');
+
+/**
+ * Token for IPulseEmitter service.
+ * Provides a single-interval heartbeat for UI components.
+ */
+export const IPulseEmitter = Symbol('IPulseEmitter');

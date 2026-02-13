@@ -19,6 +19,7 @@ import type { PlanSummaryData, PlanMetricsBarData } from '../templates/planDetai
 import { PlanDetailController } from './planDetailController';
 import type { PlanDetailDelegate } from './planDetailController';
 import type { IDialogService } from '../../interfaces/IDialogService';
+import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
 
 /**
  * Webview panel that shows a detailed view of a single Plan's execution.
@@ -51,7 +52,7 @@ export class planDetailPanel {
   private readonly _panel: vscode.WebviewPanel;
   private _planId: string;
   private _disposables: vscode.Disposable[] = [];
-  private _updateInterval?: NodeJS.Timeout;
+  private _pulseSubscription?: PulseDisposable;
   private _lastStateVersion: number = -1;
   private _lastStructureHash: string = '';
   private _isFirstRender: boolean = true;
@@ -62,12 +63,14 @@ export class planDetailPanel {
    * @param planId - Unique identifier of the Plan to display.
    * @param _planRunner - The {@link PlanRunner} instance for querying Plan/node state.
    * @param dialogService - Abstraction over VS Code dialog APIs.
+   * @param _pulse - Pulse emitter for periodic updates.
    */
   private constructor(
     panel: vscode.WebviewPanel,
     planId: string,
     private _planRunner: PlanRunner,
-    dialogService: IDialogService
+    dialogService: IDialogService,
+    private _pulse: IPulseEmitter
   ) {
     this._panel = panel;
     this._planId = planId;
@@ -85,8 +88,8 @@ export class planDetailPanel {
     // Initial render
     this._update();
     
-    // Setup update interval
-    this._updateInterval = setInterval(() => this._update(), 1000);
+    // Subscribe to pulse for periodic updates
+    this._pulseSubscription = this._pulse.onPulse(() => this._update());
     
     // Handle panel disposal
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -115,7 +118,8 @@ export class planDetailPanel {
     planId: string,
     planRunner: PlanRunner,
     options?: { preserveFocus?: boolean },
-    dialogService?: IDialogService
+    dialogService?: IDialogService,
+    pulse?: IPulseEmitter
   ) {
     const preserveFocus = options?.preserveFocus ?? false;
     
@@ -155,7 +159,10 @@ export class planDetailPanel {
     };
     const effectiveDialogService = dialogService ?? defaultDialogService;
     
-    const planPanel = new planDetailPanel(panel, planId, planRunner, effectiveDialogService);
+    // Default pulse emitter (no-op) if not provided
+    const effectivePulse: IPulseEmitter = pulse ?? { onPulse: () => ({ dispose: () => {} }), isRunning: false };
+    
+    const planPanel = new planDetailPanel(panel, planId, planRunner, effectiveDialogService, effectivePulse);
     planDetailPanel.panels.set(planId, planPanel);
   }
   
@@ -175,8 +182,8 @@ export class planDetailPanel {
   public dispose() {
     planDetailPanel.panels.delete(this._planId);
     
-    if (this._updateInterval) {
-      clearInterval(this._updateInterval);
+    if (this._pulseSubscription) {
+      this._pulseSubscription.dispose();
     }
     
     this._panel.dispose();

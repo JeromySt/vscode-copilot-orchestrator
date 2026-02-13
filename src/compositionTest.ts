@@ -81,6 +81,7 @@ export function createTestContainer(overrides?: Record<symbol, () => unknown>): 
   container.registerSingleton(Tokens.IDialogService, () => new MockDialogService());
   container.registerSingleton(Tokens.IClipboardService, () => new MockClipboardService());
   container.registerSingleton(Tokens.IProcessMonitor, () => createStubProcessMonitor());
+  container.registerSingleton(Tokens.IPulseEmitter, () => ({ onPulse: () => ({ dispose: () => {} }), isRunning: false }));
   container.registerSingleton(Tokens.ILogger, () => createStubLogger());
 
   // ─── Apply overrides (symbol-keyed) ───────────────────────────────────

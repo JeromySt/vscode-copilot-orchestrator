@@ -8,6 +8,7 @@
 
 import * as vscode from 'vscode';
 import { PlanRunner } from '\.\./plan';
+import type { IPulseEmitter } from '../interfaces/IPulseEmitter';
 
 /**
  * Create and attach a status bar item that displays live Plan execution status.
@@ -27,14 +28,14 @@ import { PlanRunner } from '\.\./plan';
  * attachStatusBar(context, planRunner);
  * ```
  */
-export function attachStatusBar(context: vscode.ExtensionContext, planRunner: PlanRunner) {
+export function attachStatusBar(context: vscode.ExtensionContext, planRunner: PlanRunner, pulse: IPulseEmitter) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   item.text = 'Orchestrator: idle';
   item.tooltip = 'Copilot Orchestrator';
   item.command = 'orchestrator.refreshPlans';
   item.show();
   
-  const iv = setInterval(async () => {
+  const pulseSub = pulse.onPulse(async () => {
     const plans = planRunner.getAll();
     const runningPlans = plans.filter(plan => {
       const sm = planRunner.getStateMachine(plan.id);
@@ -67,12 +68,12 @@ export function attachStatusBar(context: vscode.ExtensionContext, planRunner: Pl
       item.text = total > 0 ? `Orchestrator: ${total} Plan${total > 1 ? 's' : ''}` : 'Orchestrator: idle';
       item.tooltip = 'Copilot Orchestrator';
     }
-  }, 1000);
+  });
   
   context.subscriptions.push({
     dispose() {
       try {
-        clearInterval(iv);
+        pulseSub.dispose();
         item.dispose();
       } catch (e) {
         // Item may already be disposed

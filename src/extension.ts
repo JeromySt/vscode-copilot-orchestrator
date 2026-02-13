@@ -33,6 +33,7 @@ import { createContainer } from './composition';
 import * as Tokens from './core/tokens';
 import type { ServiceContainer } from './core/container';
 import type { IConfigProvider } from './interfaces';
+import type { IPulseEmitter } from './interfaces/IPulseEmitter';
 
 // ============================================================================
 // MODULE STATE
@@ -106,10 +107,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   mcpManager = await initializeMcpServer(context, planRunner, config.mcp);
 
   // ── Plans view ──────────────────────────────────────────────────────────
-  initializePlansView(context, planRunner);
+  const pulse = container.resolve<IPulseEmitter>(Tokens.IPulseEmitter);
+  initializePlansView(context, planRunner, pulse);
 
   // ── Commands ───────────────────────────────────────────────────────────
-  registerPlanCommands(context, planRunner);
+  registerPlanCommands(context, planRunner, pulse);
   registerUtilityCommands(context);
 
   // ── Branch Change Watcher ──────────────────────────────────────────────

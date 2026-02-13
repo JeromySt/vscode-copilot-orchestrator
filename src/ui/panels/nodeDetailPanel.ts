@@ -28,6 +28,7 @@ import {
 } from '../templates/nodeDetail';
 import type { AttemptCardData } from '../templates/nodeDetail';
 import { NodeDetailController, NodeDetailCommands } from './nodeDetailController';
+import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
 
 /**
  * Format a {@link WorkSpec} as a plain-text summary string.
@@ -325,7 +326,7 @@ export class NodeDetailPanel {
   private _planId: string;
   private _nodeId: string;
   private _disposables: vscode.Disposable[] = [];
-  private _updateInterval?: NodeJS.Timeout;
+  private _pulseSubscription?: PulseDisposable;
   private _currentPhase: string | null = null;
   private _lastStatus: string | null = null;
   private _lastWorktreeCleanedUp: boolean | undefined = undefined;
@@ -336,12 +337,14 @@ export class NodeDetailPanel {
    * @param planId - The Plan ID that contains this node.
    * @param nodeId - The unique identifier of the node to display.
    * @param _planRunner - The {@link PlanRunner} instance for querying state and logs.
+   * @param _pulse - Pulse emitter for periodic updates.
    */
   private constructor(
     panel: vscode.WebviewPanel,
     planId: string,
     nodeId: string,
-    private _planRunner: PlanRunner
+    private _planRunner: PlanRunner,
+    private _pulse: IPulseEmitter
   ) {
     this._panel = panel;
     this._planId = planId;
@@ -395,8 +398,8 @@ export class NodeDetailPanel {
       this._update();
     });
     
-    // Setup update interval for running nodes
-    this._updateInterval = setInterval(() => {
+    // Subscribe to pulse for periodic state checks
+    this._pulseSubscription = this._pulse.onPulse(() => {
       const plan = this._planRunner.get(this._planId);
       const state = plan?.nodeStates.get(this._nodeId);
       if (state?.status === 'running' || state?.status === 'scheduled') {
@@ -423,7 +426,7 @@ export class NodeDetailPanel {
           this._update();
         }
       }
-    }, 500);
+    });
     
     // Handle panel disposal
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -452,7 +455,8 @@ export class NodeDetailPanel {
     extensionUri: vscode.Uri,
     planId: string,
     nodeId: string,
-    planRunner: PlanRunner
+    planRunner: PlanRunner,
+    pulse?: IPulseEmitter
   ) {
     const key = `${planId}:${nodeId}`;
     
@@ -477,7 +481,10 @@ export class NodeDetailPanel {
       }
     );
     
-    const nodePanel = new NodeDetailPanel(panel, planId, nodeId, planRunner);
+    // Default pulse emitter (no-op) if not provided
+    const effectivePulse: IPulseEmitter = pulse ?? { onPulse: () => ({ dispose: () => {} }), isRunning: false };
+    
+    const nodePanel = new NodeDetailPanel(panel, planId, nodeId, planRunner, effectivePulse);
     NodeDetailPanel.panels.set(key, nodePanel);
   }
   
@@ -507,8 +514,8 @@ export class NodeDetailPanel {
     const key = `${this._planId}:${this._nodeId}`;
     NodeDetailPanel.panels.delete(key);
     
-    if (this._updateInterval) {
-      clearInterval(this._updateInterval);
+    if (this._pulseSubscription) {
+      this._pulseSubscription.dispose();
     }
     
     this._panel.dispose();

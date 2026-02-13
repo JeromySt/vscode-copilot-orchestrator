@@ -320,14 +320,18 @@ export async function initializeMcpServer(
  */
 export function initializePlansView(
   context: vscode.ExtensionContext,
-  planRunner: PlanRunner
+  planRunner: PlanRunner,
+  pulse?: import('../interfaces/IPulseEmitter').IPulseEmitter
 ): void {
   log.info('Initializing Plans view...');
+  
+  // Default no-op pulse if not provided
+  const effectivePulse = pulse ?? { onPulse: () => ({ dispose: () => {} }), isRunning: false };
   
   // Import the view provider
   const { plansViewProvider } = require('../ui/plansViewProvider');
   
-  const plansView = new plansViewProvider(context, planRunner);
+  const plansView = new plansViewProvider(context, planRunner, effectivePulse);
   
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
@@ -335,7 +339,7 @@ export function initializePlansView(
 
   // Initialize TreeView for badge functionality - AFTER plan recovery is complete
   const { PlanTreeViewManager } = require('../ui/planTreeProvider');
-  const treeViewManager = new PlanTreeViewManager(planRunner);
+  const treeViewManager = new PlanTreeViewManager(planRunner, effectivePulse);
   treeViewManager.createTreeView(context);
   context.subscriptions.push(treeViewManager);
   
@@ -347,7 +351,8 @@ export function initializePlansView(
  */
 export function registerPlanCommands(
   context: vscode.ExtensionContext,
-  planRunner: PlanRunner
+  planRunner: PlanRunner,
+  pulse?: import('../interfaces/IPulseEmitter').IPulseEmitter
 ): void {
   log.info('Registering Plan commands...');
   
@@ -379,7 +384,7 @@ export function registerPlanCommands(
       }
       
       const { planDetailPanel } = require('../ui/panels/planDetailPanel');
-      planDetailPanel.createOrShow(context.extensionUri, planId, planRunner, { preserveFocus });
+      planDetailPanel.createOrShow(context.extensionUri, planId, planRunner, { preserveFocus }, undefined, pulse);
     })
   );
   
@@ -445,7 +450,7 @@ export function registerPlanCommands(
       }
       
       const { NodeDetailPanel } = require('../ui/panels/nodeDetailPanel');
-      NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, planRunner);
+      NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, planRunner, pulse);
     })
   );
   

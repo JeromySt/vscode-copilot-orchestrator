@@ -7,7 +7,9 @@
  * @module agent/modelDiscovery
  */
 
-import * as cp from 'child_process';
+import type { IProcessSpawner } from '../interfaces/IProcessSpawner';
+import { DefaultProcessSpawner } from '../interfaces/IProcessSpawner';
+import type { ILogger } from '../interfaces/ILogger';
 
 // ============================================================================
 // TYPES
@@ -33,6 +35,20 @@ export interface ModelDiscoveryResult {
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const FAILURE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// ============================================================================
+// DI OPTIONS
+// ============================================================================
+
+/** Optional dependency overrides for testability. */
+export interface ModelDiscoveryDeps {
+  /** Process spawner for running `copilot --help`. */
+  spawner?: IProcessSpawner;
+  /** Clock function returning current timestamp in ms. */
+  clock?: () => number;
+  /** Logger for warning messages. */
+  logger?: ILogger;
+}
 
 // ============================================================================
 // CACHE
@@ -106,20 +122,28 @@ export function parseModelChoices(helpOutput: string): string[] {
 /**
  * Run `copilot --help` and parse available model choices.
  */
-export async function discoverAvailableModels(): Promise<ModelDiscoveryResult> {
+export async function discoverAvailableModels(deps?: ModelDiscoveryDeps): Promise<ModelDiscoveryResult> {
+  const clock = deps?.clock ?? Date.now;
+  const logger = deps?.logger;
+  const spawner = deps?.spawner;
+
   // Check if we recently failed and should wait
-  if (lastFailureTime !== null && (Date.now() - lastFailureTime) < FAILURE_CACHE_TTL_MS) {
-    return emptyResult();
+  if (lastFailureTime !== null && (clock() - lastFailureTime) < FAILURE_CACHE_TTL_MS) {
+    return emptyResult(clock);
   }
 
   try {
-    const helpOutput = await runCopilotHelp();
+    const helpOutput = await runCopilotHelp(spawner);
     const rawChoices = parseModelChoices(helpOutput);
 
     if (rawChoices.length === 0) {
-      console.warn('[modelDiscovery] No model choices found in copilot --help output');
-      lastFailureTime = Date.now();
-      return emptyResult();
+      if (logger) {
+        logger.warn('[modelDiscovery] No model choices found in copilot --help output');
+      } else {
+        console.warn('[modelDiscovery] No model choices found in copilot --help output');
+      }
+      lastFailureTime = clock();
+      return emptyResult(clock);
     }
 
     const models: ModelInfo[] = rawChoices.map(id => ({
@@ -130,43 +154,48 @@ export async function discoverAvailableModels(): Promise<ModelDiscoveryResult> {
     const result: ModelDiscoveryResult = {
       models,
       rawChoices,
-      discoveredAt: Date.now(),
+      discoveredAt: clock(),
     };
 
     cachedResult = result;
     lastFailureTime = null;
     return result;
   } catch (e) {
-    console.warn(`[modelDiscovery] Failed to discover models: ${e}`);
-    lastFailureTime = Date.now();
-    return emptyResult();
+    if (logger) {
+      logger.warn(`[modelDiscovery] Failed to discover models: ${e}`);
+    } else {
+      console.warn(`[modelDiscovery] Failed to discover models: ${e}`);
+    }
+    lastFailureTime = clock();
+    return emptyResult(clock);
   }
 }
 
 /**
  * Return cached models if fresh (within TTL), otherwise re-discover.
  */
-export async function getCachedModels(): Promise<ModelDiscoveryResult> {
-  if (cachedResult && (Date.now() - cachedResult.discoveredAt) < CACHE_TTL_MS) {
+export async function getCachedModels(deps?: ModelDiscoveryDeps): Promise<ModelDiscoveryResult> {
+  const clock = deps?.clock ?? Date.now;
+  if (cachedResult && (clock() - cachedResult.discoveredAt) < CACHE_TTL_MS) {
     return cachedResult;
   }
-  return discoverAvailableModels();
+  return discoverAvailableModels(deps);
 }
 
 /**
  * Force re-discovery of available models, ignoring cache.
  */
-export async function refreshModelCache(): Promise<ModelDiscoveryResult> {
+export async function refreshModelCache(deps?: ModelDiscoveryDeps): Promise<ModelDiscoveryResult> {
   cachedResult = null;
   lastFailureTime = null;
-  return discoverAvailableModels();
+  return discoverAvailableModels(deps);
 }
 
 /**
  * Validate whether a model ID is in the discovered model list.
  */
-export async function isValidModel(modelId: string): Promise<boolean> {
-  const result = await getCachedModels();
+export async function isValidModel(modelId: string, deps?: ModelDiscoveryDeps): Promise<boolean> {
+  const result = await getCachedModels(deps);
   return result.models.some(m => m.id === modelId);
 }
 
@@ -175,8 +204,8 @@ export async function isValidModel(modelId: string): Promise<boolean> {
  * 
  * @param taskType - 'fast' for simple tasks, 'standard' for normal tasks, 'premium' for complex tasks
  */
-export async function suggestModel(taskType: 'fast' | 'standard' | 'premium'): Promise<ModelInfo | undefined> {
-  const result = await getCachedModels();
+export async function suggestModel(taskType: 'fast' | 'standard' | 'premium', deps?: ModelDiscoveryDeps): Promise<ModelInfo | undefined> {
+  const result = await getCachedModels(deps);
   if (result.models.length === 0) {
     return undefined;
   }
@@ -204,17 +233,22 @@ export function resetModelCache(): void {
 // HELPERS
 // ============================================================================
 
-function emptyResult(): ModelDiscoveryResult {
+function emptyResult(clock?: () => number): ModelDiscoveryResult {
   return {
     models: [],
     rawChoices: [],
-    discoveredAt: Date.now(),
+    discoveredAt: (clock ?? Date.now)(),
   };
 }
 
-function runCopilotHelp(): Promise<string> {
+/**
+ * Run `copilot --help` and return its output.
+ * Exported for testing with injected spawner.
+ */
+export function runCopilotHelp(spawner?: IProcessSpawner): Promise<string> {
+  const sp = spawner ?? new DefaultProcessSpawner();
   return new Promise((resolve, reject) => {
-    const proc = cp.spawn('copilot', ['--help'], { shell: true });
+    const proc = sp.spawn('copilot', ['--help'], { shell: true });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -227,15 +261,14 @@ function runCopilotHelp(): Promise<string> {
       stderr += data.toString();
     });
 
-    proc.on('close', (code) => {
+    proc.on('close', (code: number | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      // Accept any exit code since --help may return non-zero on some systems
       resolve(stdout || stderr);
     });
 
-    proc.on('error', (err) => {
+    proc.on('error', (err: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);

@@ -1,16 +1,15 @@
 /**
  * @fileoverview Utility VS Code commands.
  * 
- * Contains command handlers for utility operations like model discovery.
+ * Contains VS Code command registration that delegates to pure business logic.
+ * The actual command handling is in utilityCommandLogic.ts for testability.
  * 
  * @module commands/utilityCommands
  */
 
 import * as vscode from 'vscode';
-
-// ============================================================================
-// UTILITY COMMAND REGISTRATION
-// ============================================================================
+import { handleRefreshModels } from './utilityCommandLogic';
+import { VsCodeDialogService } from '../vscode/adapters';
 
 /**
  * Register utility commands with VS Code.
@@ -18,19 +17,11 @@ import * as vscode from 'vscode';
  * @param context - Extension context for subscription management
  */
 export function registerUtilityCommands(context: vscode.ExtensionContext): void {
+  const dialog = new VsCodeDialogService();
+
   context.subscriptions.push(
     vscode.commands.registerCommand('copilotOrchestrator.refreshModels', async () => {
-      const { refreshModelCache } = await import('../agent/modelDiscovery');
-      const result = await refreshModelCache();
-      if (result.models.length > 0) {
-        vscode.window.showInformationMessage(
-          `Discovered ${result.models.length} models from Copilot CLI`
-        );
-      } else {
-        vscode.window.showWarningMessage(
-          'Could not discover models. Is Copilot CLI installed?'
-        );
-      }
+      await handleRefreshModels({ dialog });
     })
   );
 }

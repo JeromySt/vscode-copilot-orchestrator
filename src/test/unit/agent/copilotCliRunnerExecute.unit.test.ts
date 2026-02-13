@@ -274,13 +274,13 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
       assert.ok(typeof instance.buildCommand === 'function', 'Should have buildCommand method');
     });
 
-    test('getCopilotCliRunner returns same instance on repeated calls', () => {
+    test('getCopilotCliRunner returns new instance on each call', () => {
       delete require.cache[require.resolve('../../../agent/copilotCliRunner')];
       const mod = require('../../../agent/copilotCliRunner');
 
       const instance1 = mod.getCopilotCliRunner();
       const instance2 = mod.getCopilotCliRunner();
-      assert.strictEqual(instance1, instance2, 'Should return same singleton instance');
+      assert.notStrictEqual(instance1, instance2, 'Should return new instance each call (no singleton)');
     });
 
     test('getCopilotCliRunner accepts optional logger', () => {

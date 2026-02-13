@@ -60,7 +60,7 @@ export function isCliCachePopulated(): boolean {
 }
 
 // Async command check using spawn
-async function cmdOkAsync(cmd: string): Promise<boolean> {
+export async function cmdOkAsync(cmd: string): Promise<boolean> {
   return new Promise((resolve) => {
     const proc = cp.spawn(cmd, [], { shell: true, stdio: 'ignore' });
     proc.on('close', (code) => resolve(code === 0));

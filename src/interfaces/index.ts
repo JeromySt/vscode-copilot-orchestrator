@@ -20,3 +20,7 @@ export * from './IConfigProvider';
 export * from './IDialogService';
 export * from './IClipboardService';
 export * from './IPhaseExecutor';
+export * from './ICopilotRunner';
+export * from './IProcessSpawner';
+export * from './IEnvironment';
+export * from './IPulseEmitter';

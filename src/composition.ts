@@ -32,6 +32,7 @@ import * as Tokens from './core/tokens';
 import { VsCodeConfigProvider, VsCodeDialogService, VsCodeClipboardService } from './vscode/adapters';
 import { ProcessMonitor } from './process/processMonitor';
 import { Logger } from './core/logger';
+import { PulseEmitter } from './core/pulse';
 
 /**
  * Create and wire the production DI container.
@@ -67,6 +68,12 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
   container.registerSingleton<import('./interfaces').IProcessMonitor>(
     Tokens.IProcessMonitor,
     () => new ProcessMonitor(),
+  );
+
+  // ─── Pulse Emitter ───────────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IPulseEmitter>(
+    Tokens.IPulseEmitter,
+    () => new PulseEmitter(),
   );
 
   // ─── Logger ──────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ import * as vscode from 'vscode';
 import { PlanRunner, PlanInstance, PlanStatus, NodeStatus } from '\.\./plan';
 import { planDetailPanel } from './panels/planDetailPanel';
 import { NodeDetailPanel } from './panels/nodeDetailPanel';
+import type { IPulseEmitter, Disposable as PulseDisposable } from '../interfaces/IPulseEmitter';
 
 /**
  * Sidebar webview provider that displays all top-level Plans and their execution status.
@@ -45,7 +46,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'orchestrator.plansView';
   
   private _view?: vscode.WebviewView;
-  private _refreshTimer?: NodeJS.Timeout;
+  private _pulseSubscription?: PulseDisposable;
   private _debounceTimer?: NodeJS.Timeout;
   
   /**
@@ -54,7 +55,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
    */
   constructor(
     private readonly _context: vscode.ExtensionContext,
-    private readonly _planRunner: PlanRunner
+    private readonly _planRunner: PlanRunner,
+    private readonly _pulse: IPulseEmitter
   ) {
     // Listen for Plan events to refresh
     _planRunner.on('planCreated', () => {
@@ -122,8 +124,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     // Send initial data
     setTimeout(() => this.refresh(), 100);
     
-    // Setup periodic refresh for running Plans
-    this._refreshTimer = setInterval(() => {
+    // Subscribe to pulse for periodic refresh of running Plans
+    this._pulseSubscription = this._pulse.onPulse(() => {
       const hasRunning = this._planRunner.getAll().some(plan => {
         const sm = this._planRunner.getStateMachine(plan.id);
         const status = sm?.computePlanStatus();
@@ -133,11 +135,11 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (hasRunning) {
         this.refresh();
       }
-    }, 1000);
+    });
     
     webviewView.onDidDispose(() => {
-      if (this._refreshTimer) {
-        clearInterval(this._refreshTimer);
+      if (this._pulseSubscription) {
+        this._pulseSubscription.dispose();
       }
       if (this._debounceTimer) {
         clearTimeout(this._debounceTimer);
