@@ -263,6 +263,10 @@ Returns:
       name: 'update_copilot_plan_node',
       description: `Update a node's job specification. Any provided stage (prechecks, work, postchecks) will replace the existing definition and reset execution to re-run from that stage.
 
+RESTRICTIONS:
+- Cannot update a node that is currently running (wait for completion or force-fail first)
+- Cannot update dependencies/consumesFrom (use a new plan for structural changes)
+
 WORKFLOW:
 1. Provide planId and nodeId to identify the node
 2. Specify which stages to update (prechecks, work, postchecks)
