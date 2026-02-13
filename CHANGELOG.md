@@ -5,14 +5,37 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.3] - 2026-02-12
+## [0.9.3] - 2026-02-13
+
+### Added
+- **Activity Bar Badge**: Shows running plan count on the sidebar icon for at-a-glance status
+- **Filesystem Watcher**: Monitors `.orchestrator/plans/` directory for external file changes (deletions/creations)
+- **Auto-Fail Crashed Nodes**: Nodes left in `running` state after extension restart are automatically failed so they can be retried
+- **Node Spec Update & Reset**: `update_copilot_node` MCP tool can modify work specs and reset execution to updated stages
 
 ### Fixed
-- **Model Name Validation**: MCP schema now validates agent model names in work specs, rejecting invalid or unsupported model identifiers before plan creation
-- **Work Summary Accuracy**: `computeMergedLeafWorkSummary` now only includes work from leaf nodes that were actually merged to the target branch, preventing phantom stats from failed/skipped nodes
+- **Force-Fail Button**: Fixed non-functional force-fail button in node detail panel — now works regardless of attempt index or node state
+- **Multi-Line Log Filtering**: Phase log filtering no longer truncates multi-line messages (e.g., stack traces)
+- **AI Review Standardization**: AI review now uses instructions file and JSON-only response format, matching standard Copilot CLI invocation pattern
+- **AI Review JSON Parsing**: Handles HTML-encoded output and residual formatting in AI review responses
+- **Plan Tree Duration Timers**: All duration timers (plan and node level) now refresh every second while running
+- **Plan Status Reconciliation**: Plan status is correctly reconciled after crash recovery on extension reload
+- **Copilot CLI `NODE_OPTIONS`**: Cleared `NODE_OPTIONS` env var before spawning Copilot CLI to prevent `--no-warnings` flag rejection
+- **Agent AllowedFolders**: Agent work always includes worktree in allowed directories; prechecks/postchecks auto-heal inherits correct folders
+- **Filesystem Resilience**: `.orchestrator` directory operations handle missing/corrupt files gracefully
+- **Schema Validation**: Added missing schema validation for node-centric MCP tools (`create_copilot_node`, `retry_copilot_node`)
+- **`.gitignore` Consolidation**: Unified `.gitignore` functions and added branch change detection; handles stash conflicts during RI merge
+- **Test Infrastructure**: Added `--exit` to mocha scripts to prevent hang from open async handles; fixed file watcher test filenames
+
+### Refactored
+- **Git Operations Consolidation**: All git operations now route through the core git module for consistency and error handling
 
 ### Security
-- **Strict `allowedFolders`/`allowedUrls` Validation**: MCP input validation now enforces path existence checks for `allowedFolders` and URL format/scheme validation for `allowedUrls` at the handler level, before reaching the CLI runner
+- **Strict `allowedFolders`/`allowedUrls` Validation**: MCP input validation enforces path existence checks and URL format/scheme validation at the handler level
+- **Model Name Validation**: MCP schema validates agent model names in work specs before plan creation
+
+### Removed
+- Cleaned up 20 agent investigation/analysis artifacts from `docs/`
 
 ## [0.9.2] - 2026-02-12
 
