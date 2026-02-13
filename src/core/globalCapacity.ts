@@ -94,6 +94,7 @@ const REGISTRY_VERSION = 1;
 const DEFAULT_MAX_PARALLEL = 16;
 const HEARTBEAT_INTERVAL_MS = 5000; // 5 seconds
 const STALE_THRESHOLD_MS = 30000;   // 30 seconds
+const WRITE_ERROR_LOG_INTERVAL_MS = 60000; // Log at most once per minute
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GlobalCapacityManager
@@ -126,6 +127,8 @@ export class GlobalCapacityManager extends EventEmitter {
   private currentRunningJobs: number = 0;
   private currentActivePlans: string[] = [];
   private isInitialized: boolean = false;
+  private writeErrorCount: number = 0;
+  private lastWriteErrorLog: number = 0;
 
   /**
    * Creates a new GlobalCapacityManager.
@@ -456,25 +459,52 @@ export class GlobalCapacityManager extends EventEmitter {
 
   /**
    * Write the registry file atomically.
-   * Uses temp file + rename for atomicity.
+   * Uses temp file + rename for atomicity with retry logic for EPERM/EBUSY errors.
    */
   private async writeRegistry(registry: GlobalCapacityRegistry): Promise<void> {
     const tempPath = `${this.registryPath}.tmp.${this.instanceId}`;
+    const MAX_RETRIES = 3;
+    const BASE_DELAY_MS = 100;
+    let originalError: any;
     
-    try {
-      // Write to temp file
-      await writeJSONAsync(tempPath, registry);
-      
-      // Atomic rename
-      await fs.promises.rename(tempPath, this.registryPath);
-    } catch (error) {
-      // Clean up temp file on error
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        await fs.promises.unlink(tempPath);
-      } catch {
-        // Ignore cleanup errors
+        // Write to temp file
+        await writeJSONAsync(tempPath, registry);
+        
+        // Atomic rename
+        await fs.promises.rename(tempPath, this.registryPath);
+        return; // Success!
+        
+      } catch (error: any) {
+        originalError = error;
+        
+        // Clean up temp file
+        try { 
+          await fs.promises.unlink(tempPath); 
+        } catch { 
+          // Ignore cleanup errors
+        }
+        
+        // Check if EPERM/EBUSY - retry those
+        if ((error.code === 'EPERM' || error.code === 'EBUSY') && attempt < MAX_RETRIES) {
+          const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1); // 100, 200, 400ms
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        
+        // If not retryable error or max retries reached, try fallback
+        break;
       }
-      throw error;
+    }
+    
+    // After all retries fail for rename, try direct write as last resort
+    try {
+      await writeJSONAsync(this.registryPath, registry);
+      log.debug('Used direct write fallback for registry');
+      return;
+    } catch {
+      throw originalError;
     }
   }
 
@@ -557,7 +587,14 @@ export class GlobalCapacityManager extends EventEmitter {
       
       await this.writeRegistry(registry);
     } catch (error) {
-      log.error('Failed to update registry', error);
+      this.writeErrorCount++;
+      const now = Date.now();
+      if (now - this.lastWriteErrorLog > WRITE_ERROR_LOG_INTERVAL_MS) {
+        log.warn(`Failed to update registry (${this.writeErrorCount} failures since last log)`, error);
+        this.lastWriteErrorLog = now;
+        this.writeErrorCount = 0;
+      }
+      // Still proceed - single instance mode as fallback
     }
   }
 
