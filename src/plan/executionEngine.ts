@@ -513,10 +513,10 @@ export class JobExecutionEngine {
               this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-RETRY: AGENT INTERRUPTED, RETRYING ==========', nodeState.attempts);
               this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', `Phase "${failedPhase}" agent was externally killed. Retrying same agent.`, nodeState.attempts);
               
-              // Reset state for the retry attempt
+              // Reset state for the retry attempt (do NOT increment attempts — auto-retries
+              // are sub-attempts of the current attempt, not new user-visible attempts)
               nodeState.error = undefined;
               nodeState.startedAt = Date.now();
-              nodeState.attempts++;
 
               // Capture log offsets for the retry attempt so its logs are isolated
               const retryLogMemoryOffset = this.state.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
@@ -720,10 +720,10 @@ export class JobExecutionEngine {
               node.postchecks = healSpec;
             }
             
-            // Reset state for the heal attempt
+            // Reset state for the heal attempt (do NOT increment attempts — auto-heal
+            // is a sub-attempt of the current attempt, not a new user-visible attempt)
             nodeState.error = undefined;
             nodeState.startedAt = Date.now();
-            nodeState.attempts++;
             
             // Capture log offsets for the auto-heal attempt
             const healLogMemoryOffset = this.state.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
