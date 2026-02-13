@@ -588,7 +588,7 @@ export class NodeDetailPanel {
       this._update();
       vscode.window.showInformationMessage(`Node force failed. You can now retry.`);
     } catch (error) {
-      console.log('forceFailNode failed:', error);  // Debug
+      console.debug('forceFailNode failed:', error);
       vscode.window.showErrorMessage(`Failed to force fail: ${error}`);
     }
   }

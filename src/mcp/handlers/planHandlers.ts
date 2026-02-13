@@ -1131,10 +1131,10 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
   }
   const jobNode = node as JobNode;
   
-  // Check if node is currently running - cannot update while executing
+  // Check if node is currently running or scheduled - cannot update while executing
   const nodeState = plan.nodeStates.get(args.nodeId);
-  if (nodeState?.status === 'running') {
-    return errorResult(`Node "${jobNode.name}" is currently running and cannot be updated. Wait for it to complete or force-fail it first.`);
+  if (nodeState?.status === 'running' || nodeState?.status === 'scheduled') {
+    return errorResult(`Node "${jobNode.name}" is currently ${nodeState.status} and cannot be updated. Wait for it to complete or force-fail it first.`);
   }
   
   // Check if node has already completed successfully - cannot update completed nodes
