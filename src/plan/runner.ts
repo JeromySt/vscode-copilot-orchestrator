@@ -3486,13 +3486,27 @@ export class PlanRunner extends EventEmitter {
       throw new Error(`Node state ${nodeId} not found in plan ${planId}`);
     }
     
-    log.info(`Force failing node ${nodeId} (current status: ${nodeState.status}, attempts: ${nodeState.attempts})`);
+    log.info(`Force failing node ${nodeId} (current status: ${nodeState.status}, attempts: ${nodeState.attempts}, pid: ${nodeState.pid})`);
     
-    // Kill any running process for this node
+    // First, cancel the executor's execution state so it knows to abort
+    // This sets the aborted flag and kills the process via the executor's method
+    if (this.executor && 'cancel' in this.executor) {
+      try {
+        (this.executor as any).cancel(planId, nodeId);
+        log.info(`Cancelled executor for node ${nodeId}`);
+      } catch (e) {
+        log.debug(`Could not cancel executor: ${e}`);
+      }
+    }
+    
+    // Also kill any running process using ProcessMonitor for cross-platform support
+    // This is a backup in case the executor doesn't have the process tracked
     if (nodeState.pid) {
       try {
-        process.kill(nodeState.pid, 'SIGTERM');
-        log.info(`Killed process ${nodeState.pid} for node ${nodeId}`);
+        // Use ProcessMonitor.terminate for proper cross-platform process tree killing
+        // force=true ensures the process is killed even if it doesn't respond to SIGTERM
+        await this.processMonitor.terminate(nodeState.pid, true);
+        log.info(`Killed process tree ${nodeState.pid} for node ${nodeId}`);
       } catch (e) {
         // Process may already be dead - that's fine
         log.debug(`Could not kill process ${nodeState.pid}: ${e}`);
