@@ -1248,10 +1248,23 @@ export class NodeDetailPanel {
     const durationTimer = document.getElementById('duration-timer');
     if (durationTimer && durationTimer.hasAttribute('data-started-at')) {
       const startedAt = parseInt(durationTimer.getAttribute('data-started-at'), 10);
-      setInterval(() => {
-        const elapsed = Math.round((Date.now() - startedAt) / 1000);
-        durationTimer.textContent = formatDuration(elapsed * 1000);
-      }, 1000);
+      const nodeStatus = ${JSON.stringify(state.status)};
+      
+      // Clear any existing timer to prevent duplicates
+      if (window.nodeDurationTimer) {
+        clearInterval(window.nodeDurationTimer);
+      }
+      
+      // Only run timer if node is running
+      if (nodeStatus === 'running' && startedAt) {
+        window.nodeDurationTimer = setInterval(() => {
+          const elapsed = Math.round((Date.now() - startedAt) / 1000);
+          const elem = document.getElementById('duration-timer');
+          if (elem) {
+            elem.textContent = formatDuration(elapsed * 1000);
+          }
+        }, 1000);
+      }
     }
 
     function escapeHtml(text) {

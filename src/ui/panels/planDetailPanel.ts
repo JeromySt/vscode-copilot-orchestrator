@@ -1686,7 +1686,17 @@ ${mermaidDef}
     
     // Update duration every second if running
     updateDurationCounter();
-    setInterval(updateDurationCounter, 1000);
+    
+    // Clear any existing timers to prevent duplicates
+    if (window.durationTimer) {
+      clearInterval(window.durationTimer);
+    }
+    if (window.nodeTimer) {
+      clearInterval(window.nodeTimer);
+    }
+    
+    // Set up persistent timers
+    window.durationTimer = setInterval(updateDurationCounter, 1000);
     
     // Update node durations in SVG for running nodes
     function updateNodeDurations() {
@@ -1760,7 +1770,7 @@ ${mermaidDef}
     }
     
     // Update node durations every second
-    setInterval(updateNodeDurations, 1000);
+    window.nodeTimer = setInterval(updateNodeDurations, 1000);
     
     // Handle messages from extension (incremental updates, process stats)
     window.addEventListener('message', event => {
@@ -2098,8 +2108,17 @@ ${mermaidDef}
           }
         }
         
-        // Trigger duration update
+        // Trigger duration updates to ensure timers are working
+        updateDurationCounter();
         updateNodeDurations();
+        
+        // Ensure timers are active (restart if needed)
+        if (!window.durationTimer) {
+          window.durationTimer = setInterval(updateDurationCounter, 1000);
+        }
+        if (!window.nodeTimer) {
+          window.nodeTimer = setInterval(updateNodeDurations, 1000);
+        }
       } catch (err) {
         console.error('handleStatusUpdate error:', err);
         // On error, request a full refresh

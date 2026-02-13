@@ -77,7 +77,23 @@ export class PlanTreeDataProvider implements vscode.TreeDataProvider<PlanTreeIte
   }
 
   getTreeItem(element: PlanTreeItem): vscode.TreeItem {
-    return element;
+    // ALWAYS return fresh tree item with current duration calculation
+    return this.createFreshTreeItem(element);
+  }
+
+  /**
+   * Create a fresh tree item with updated duration
+   */
+  private createFreshTreeItem(element: PlanTreeItem): vscode.TreeItem {
+    const plan = element.plan;
+    const item = new vscode.TreeItem(plan.spec.name || plan.id, element.collapsibleState);
+    
+    item.id = plan.id;
+    item.description = this.getFreshPlanStatusDescription(plan);
+    item.tooltip = `Plan: ${plan.spec.name || plan.id}`;
+    item.contextValue = 'orchestrator.plan';
+    
+    return item;
   }
 
   getChildren(element?: PlanTreeItem): Thenable<PlanTreeItem[]> {
@@ -93,6 +109,29 @@ export class PlanTreeDataProvider implements vscode.TreeDataProvider<PlanTreeIte
     
     // No children for plan items in this simple view
     return Promise.resolve([]);
+  }
+
+  /**
+   * Get fresh plan status description with current duration calculation
+   */
+  private getFreshPlanStatusDescription(plan: PlanInstance): string {
+    const nodeCount = plan.nodes.size;
+    let description = `(${nodeCount} nodes)`;
+    
+    // Add duration for running/pending plans - calculate FRESH each time
+    if (plan.startedAt) {
+      const sm = this.planRunner.getStateMachine(plan.id);
+      const status = sm?.computePlanStatus();
+      
+      if (status === 'running' || status === 'pending') {
+        // Calculate duration fresh from current time
+        const duration = Date.now() - plan.startedAt;
+        const durationStr = formatDurationMs(duration);
+        description = `${durationStr} • ${description}`;
+      }
+    }
+    
+    return description;
   }
 }
 
@@ -226,11 +265,15 @@ export class PlanTreeViewManager {
    * Uses the same pattern as plansViewProvider for consistency.
    */
   private hasRunningPlans(): boolean {
-    return this.planRunner.getAll().some(plan => {
+    const plans = this.planRunner.getAll();
+    for (const plan of plans) {
       const sm = this.planRunner.getStateMachine(plan.id);
       const status = sm?.computePlanStatus();
-      return status === 'running' || status === 'pending';
-    });
+      if (status === 'running' || status === 'pending') {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
