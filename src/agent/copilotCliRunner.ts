@@ -490,26 +490,14 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     
     let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-tools`;
     
-    // SECURITY: Network access control
-    // --allow-all-tools implicitly grants url(*) which would allow ALL network access.
-    // Per copilot CLI docs, --deny-tool takes precedence over --allow-all-tools.
-    // Strategy:
-    //   1. Always deny blanket URL access: --deny-tool "url()"
-    //   2. For each allowed URL, explicitly permit it: --allow-tool "url(<domain>)"
-    //   3. Also pass --allow-url for the URL permission layer
-    // This ensures URL access is denied by default and only allowed for specific domains.
-    cmd += ` --deny-tool "url()"`;
+    // SECURITY NOTE: --allow-all-tools implicitly grants url(*) which allows ALL network access.
+    // The copilot CLI does not currently support a way to allow all local tools while restricting
+    // URL access (--deny-tool url blocks ALL URLs with no selective override possible).
+    // We pass --allow-url for specific domains as a forward-compatible measure — when the CLI
+    // adds support for --allow-all-local-tools or similar, our constraints will be enforced.
+    // See: https://github.com/github/copilot-cli (feature request needed)
     if (urlsArg) {
-      // Add per-URL tool permissions alongside the URL allowlist
-      const urlToolArgs = sanitizedUrls.map(u => {
-        try {
-          const parsed = new URL(u.startsWith('http') ? u : `https://${u}`);
-          return `--allow-tool "url(${parsed.hostname})"`;
-        } catch {
-          return `--allow-tool "url(${u})"`;
-        }
-      }).join(' ');
-      cmd += ` ${urlToolArgs} ${urlsArg}`;
+      cmd += ` ${urlsArg}`;
     }
     
     // Use isolated config directory to prevent sessions from appearing in VS Code history
