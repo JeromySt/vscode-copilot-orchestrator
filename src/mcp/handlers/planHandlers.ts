@@ -893,8 +893,8 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
     return { success: false, error: urlValidation.error };
   }
   
-  // Validate agent model names in newWork if provided
-  if (args.newWork) {
+  // Validate agent model names if any new specs are provided
+  if (args.newWork || args.newPrechecks || args.newPostchecks) {
     const modelValidation = await validateAgentModels(args, 'retry_copilot_plan');
     if (!modelValidation.valid) {
       return { success: false, error: modelValidation.error };
@@ -1030,9 +1030,8 @@ export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): P
     return { success: false, error: urlValidation.error };
   }
   
-  // Validate agent model names in newWork if provided
-  if (args.newWork) {
-    const modelValidation = await validateAgentModels(args, 'retry_copilot_plan_node');
+  // Validate agent model names if any new specs are provided
+  if (args.newWork || args.newPrechecks || args.newPostchecks) {    const modelValidation = await validateAgentModels(args, 'retry_copilot_plan_node');
     if (!modelValidation.valid) {
       return { success: false, error: modelValidation.error };
     }
@@ -1096,8 +1095,8 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
   const fieldError = validateRequired(args, ['planId', 'nodeId']);
   if (fieldError) return fieldError;
 
-  // Validate at least one stage is provided
-  if (!args.prechecks && !args.work && !args.postchecks) {
+  // Validate at least one stage is provided (use 'in' to allow falsy values like null)
+  if (!('prechecks' in args) && !('work' in args) && !('postchecks' in args)) {
     return errorResult('At least one stage update (prechecks, work, postchecks) must be provided');
   }
 
@@ -1147,7 +1146,7 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
   const nodeState = plan.nodeStates.get(args.nodeId);
   if (nodeState) {
     const stageOrder = ['prechecks', 'work', 'postchecks'] as const;
-    const resetTo = args.resetToStage || (args.work ? 'work' : args.prechecks ? 'prechecks' : 'postchecks');
+    const resetTo = args.resetToStage || ('work' in args ? 'work' : 'prechecks' in args ? 'prechecks' : 'postchecks');
     const resetIdx = stageOrder.indexOf(resetTo as typeof stageOrder[number]);
     
     if (resetIdx >= 0 && nodeState.stepStatuses) {

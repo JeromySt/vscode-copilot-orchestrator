@@ -541,8 +541,8 @@ export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promi
   const fieldError = validateRequired(args, ['node_id']);
   if (fieldError) return fieldError;
 
-  // Validate agent model names in newWork if provided
-  if (args.newWork) {
+  // Validate agent model names if any new specs are provided
+  if (args.newWork || args.newPrechecks || args.newPostchecks) {
     const modelValidation = await validateAgentModels(args, 'retry_copilot_node');
     if (!modelValidation.valid) {
       return { success: false, error: modelValidation.error };
@@ -556,7 +556,8 @@ export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promi
   }
 
   // Validate allowedUrls are well-formed HTTP/HTTPS
-  const urlValidation = await validateAllowedUrls(args, 'retry_copilot_node');  if (!urlValidation.valid) {
+  const urlValidation = await validateAllowedUrls(args, 'retry_copilot_node');
+  if (!urlValidation.valid) {
     return { success: false, error: urlValidation.error };
   }
 
