@@ -54,7 +54,7 @@ export function getSpecTypeInfo(spec: WorkSpec | undefined): { type: string; lab
   switch (normalized.type) {
     case 'agent': {
       const model = (normalized as any).model;
-      return { type: 'agent', label: model ? `Agent · ${model}` : 'Agent' };
+      return { type: 'agent', label: model ? `Agent · ${model}` : 'Agent · unspecified' };
     }
     case 'process':
       return { type: 'process', label: 'Process' };
