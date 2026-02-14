@@ -113,8 +113,8 @@ suite('JobExecutionEngine', () => {
     const dir = makeTmpDir();
     const state = createEngineState(dir);
     const log = createMockLogger();
-    const nodeManager = new NodeManager(state as any, log);
-    const engine = new JobExecutionEngine(state, nodeManager, log);
+    const nodeManager = new NodeManager(state as any, log, {} as any);
+    const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
     assert.ok(engine);
   });
 
@@ -139,8 +139,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       // Mock git operations
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
@@ -178,8 +178,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base123', totalMs: 100,
@@ -205,8 +205,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir);
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').rejects(new Error('Cannot create worktree'));
 
@@ -235,8 +235,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: true, baseCommit: 'different-base', totalMs: 10,
@@ -271,8 +271,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'dep-commit-hash12345678901234567890', totalMs: 50,
@@ -305,8 +305,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base123', totalMs: 50,
@@ -355,8 +355,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base123', totalMs: 50,
@@ -394,8 +394,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base123', totalMs: 50,
@@ -427,8 +427,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base123', totalMs: 50,
@@ -456,8 +456,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: true, baseCommit: 'base123', totalMs: 10,
@@ -496,8 +496,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base-commit-abc', totalMs: 50,
@@ -538,8 +538,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'dep1-commit-abcdef1234567890123456', totalMs: 50,
@@ -570,8 +570,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base', totalMs: 5000,
@@ -600,8 +600,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base', totalMs: 100,
@@ -632,8 +632,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base', totalMs: 50,
@@ -680,8 +680,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base', totalMs: 50,
@@ -727,8 +727,8 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log);
-      const engine = new JobExecutionEngine(state, nodeManager, log);
+      const nodeManager = new NodeManager(state as any, log, {} as any);
+      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base', totalMs: 50,

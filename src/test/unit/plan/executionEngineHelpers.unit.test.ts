@@ -99,8 +99,8 @@ function createEngineState(storagePath: string, executorOverrides?: Partial<any>
 function createEngine(dir: string, executorOverrides?: Partial<any>) {
   const log = createMockLogger();
   const state = createEngineState(dir, executorOverrides);
-  const nodeManager = new NodeManager(state as any, log);
-  const engine = new JobExecutionEngine(state, nodeManager, log);
+  const nodeManager = new NodeManager(state as any, log, {} as any);
+  const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
   return { engine, state, log, nodeManager };
 }
 
