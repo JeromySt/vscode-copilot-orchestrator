@@ -190,6 +190,15 @@ export class JobExecutionEngine {
       } else {
         // Only set baseCommit on fresh worktree creation
         nodeState.baseCommit = timing.baseCommit;
+        
+        // Capture the resolved base branch SHA on the plan (once).
+        // This ensures RI merge diffs are computed against the original
+        // starting point even if the base branch moves forward later.
+        if (!plan.baseCommitAtStart) {
+          plan.baseCommitAtStart = timing.baseCommit;
+          this.log.info(`Captured plan baseCommitAtStart: ${timing.baseCommit.slice(0, 8)}`);
+        }
+        
         if (timing.totalMs > 500) {
           this.log.warn(`Slow worktree creation for ${node.name} took ${timing.totalMs}ms`);
         }
@@ -897,12 +906,17 @@ export class JobExecutionEngine {
         // Determine the merge source: the best commit we have for this leaf
         const mergeSource = nodeState.completedCommit || nodeState.baseCommit;
         
+        // Use the plan's captured base commit SHA for diff comparison.
+        // plan.baseBranch is a branch name that may have moved forward;
+        // plan.baseCommitAtStart is the resolved SHA from when the plan started.
+        const diffBase = plan.baseCommitAtStart || plan.baseBranch;
+        
         if (mergeSource) {
-          // Check if there are any actual changes compared to the plan's base branch
+          // Check if there are any actual changes compared to the plan's original base
           let hasChanges = false;
           try {
             const diffResult = await git.executor.execAsyncOrNull(
-              ['diff', '--stat', plan.baseBranch, mergeSource],
+              ['diff', '--stat', diffBase, mergeSource],
               plan.repoPath
             );
             hasChanges = !!(diffResult && diffResult.trim().length > 0);
@@ -917,7 +931,7 @@ export class JobExecutionEngine {
             
             this.log.info(`Initiating RI merge for leaf ${node.name}: ${mergeSource.slice(0, 8)} -> ${plan.targetBranch}`);
             this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========', nodeState.attempts);
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', `Merging ${mergeSource.slice(0, 8)} to ${plan.targetBranch} (diff from ${plan.baseBranch} detected changes)`, nodeState.attempts);
+            this.execLog(plan.id, node.id, 'merge-ri', 'info', `Merging ${mergeSource.slice(0, 8)} to ${plan.targetBranch} (diff from ${diffBase.slice(0, 8)} detected changes)`, nodeState.attempts);
             
             const mergeSuccess = await this.withRiMergeLock(() =>
               this.mergeLeafToTarget(plan, node, nodeState.completedCommit!, nodeState.attempts)
@@ -938,9 +952,9 @@ export class JobExecutionEngine {
             this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========', nodeState.attempts);
           } else {
             // No diff between base branch and leaf — truly nothing to merge
-            this.log.debug(`Leaf ${node.name}: no diff between ${plan.baseBranch} and ${mergeSource.slice(0, 8)} — nothing to merge`);
+            this.log.debug(`Leaf ${node.name}: no diff between ${diffBase.slice(0, 8)} and ${mergeSource.slice(0, 8)} — nothing to merge`);
             this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION ==========', nodeState.attempts);
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', `No changes detected (diff ${plan.baseBranch}..${mergeSource.slice(0, 8)} is empty)`, nodeState.attempts);
+            this.execLog(plan.id, node.id, 'merge-ri', 'info', `No changes detected (diff ${diffBase.slice(0, 8)}..${mergeSource.slice(0, 8)} is empty)`, nodeState.attempts);
             this.execLog(plan.id, node.id, 'merge-ri', 'info', '==========================================', nodeState.attempts);
             nodeState.mergedToTarget = true;
           }

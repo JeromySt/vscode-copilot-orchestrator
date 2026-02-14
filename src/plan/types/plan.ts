@@ -414,6 +414,15 @@ export interface PlanInstance {
   /** Base branch */
   baseBranch: string;
   
+  /**
+   * The resolved commit SHA of baseBranch at plan creation time.
+   * 
+   * This is captured once when the plan starts and never changes,
+   * ensuring RI merge diffs are computed against the original starting
+   * point even if the base branch moves forward during execution.
+   */
+  baseCommitAtStart?: string;
+  
   /** Target branch */
   targetBranch?: string;
   
