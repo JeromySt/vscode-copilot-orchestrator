@@ -12,7 +12,7 @@
 import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces/IPhaseExecutor';
 import type { CopilotUsageMetrics } from '../types';
 import { resolveMergeConflictWithCopilot } from './mergeHelper';
-import * as git from '../../git';
+import type { IGitOperations } from '../../interfaces/IGitOperations';
 import { aggregateMetrics } from '../metricsAggregator';
 
 interface DependencyInfo {
@@ -29,9 +29,11 @@ interface DependencyInfo {
  */
 export class MergeFiPhaseExecutor implements IPhaseExecutor {
   private configManager?: any;
+  private git: IGitOperations;
   
-  constructor(deps: { configManager?: any } = {}) {
+  constructor(deps: { configManager?: any; git: IGitOperations }) {
     this.configManager = deps.configManager;
+    this.git = deps.git;
   }
   
   async execute(context: PhaseContext): Promise<PhaseResult> {
@@ -73,7 +75,7 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
       
       try {
         // Merge by commit SHA directly (no branch needed)
-        const mergeResult = await git.merge.merge({
+        const mergeResult = await this.git.merge.merge({
           source: sourceCommit,
           target: 'HEAD',
           cwd: worktreePath,
@@ -102,7 +104,7 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
           
           if (!cliResult.success) {
             context.logError(`  ✗ Copilot CLI failed to resolve conflict`);
-            await git.merge.abort(worktreePath, s => context.logInfo(s));
+            await this.git.merge.abort(worktreePath, s => context.logInfo(s));
             context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
             return { 
               success: false, 

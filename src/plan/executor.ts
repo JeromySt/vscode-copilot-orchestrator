@@ -15,7 +15,7 @@ import {
 } from './types';
 import { JobExecutor } from './runner';
 import { Logger } from '../core/logger';
-import * as git from '../git';
+import type { IGitOperations } from '../interfaces/IGitOperations';
 import { aggregateMetrics } from './metricsAggregator';
 import type { IEvidenceValidator } from '../interfaces';
 import type { PhaseContext } from '../interfaces/IPhaseExecutor';
@@ -58,11 +58,13 @@ export class DefaultJobExecutor implements JobExecutor {
   private processMonitor: IProcessMonitor;
   private evidenceValidator: IEvidenceValidator;
   private spawner: IProcessSpawner;
+  private git: IGitOperations;
 
-  constructor(spawner: IProcessSpawner, evidenceValidator: IEvidenceValidator, processMonitor: IProcessMonitor) {
+  constructor(spawner: IProcessSpawner, evidenceValidator: IEvidenceValidator, processMonitor: IProcessMonitor, git: IGitOperations) {
     this.spawner = spawner;
     this.evidenceValidator = evidenceValidator;
     this.processMonitor = processMonitor;
+    this.git = git;
   }
 
   setStoragePath(storagePath: string): void {
@@ -108,6 +110,7 @@ export class DefaultJobExecutor implements JobExecutor {
       agentDelegator: this.agentDelegator, 
       getCopilotConfigDir: (wtp: string) => this.getCopilotConfigDir(wtp),
       spawner: this.spawner,
+      git: this.git,
       configManager: undefined, // TODO: Pass config manager if available
     });
     const makeCtx = (phase: ExecutionPhase): PhaseContext => ({
@@ -237,7 +240,7 @@ export class DefaultJobExecutor implements JobExecutor {
         stepStatuses['merge-ri'] = 'success'; context.onStepStatusChange?.('merge-ri', 'success');
       } else { stepStatuses['merge-ri'] = 'skipped'; context.onStepStatusChange?.('merge-ri', 'skipped'); }
 
-      const ws = await computeWorkSummary(node, worktreePath, context.baseCommit);
+      const ws = await computeWorkSummary(node, worktreePath, context.baseCommit, this.git);
       return { success: true, completedCommit: cr.commit, workSummary: ws, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid };
     } catch (error: any) {
       log.error(`Execution error: ${node.name}`, { error: error.message });
@@ -324,7 +327,7 @@ export class DefaultJobExecutor implements JobExecutor {
   // ===========================================================================
 
   async computeAggregatedWorkSummary(node: JobNode, worktreePath: string, baseBranch: string, repoPath: string): Promise<JobWorkSummary> {
-    return computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
+    return computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath, this.git);
   }
 
   // ===========================================================================

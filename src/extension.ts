@@ -89,7 +89,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   extLog.debug('Configuration loaded', config);
 
   // ── Plan Runner ─────────────────────────────────────────────────────────
-  const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context, container);
+  const git = container.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+  const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context, container, git);
   processMonitor = pm;
   planRunner = runner;
 
@@ -162,7 +163,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Orphaned Worktree Cleanup ──────────────────────────────────────────
   // Trigger cleanup asynchronously after extension is fully activated
-  triggerOrphanedWorktreeCleanup(planRunner, context).catch(err => {
+  triggerOrphanedWorktreeCleanup(planRunner, context, git).catch(err => {
     extLog.warn('Orphaned worktree cleanup failed', { error: err.message });
   });
 
@@ -184,7 +185,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
  */
 async function triggerOrphanedWorktreeCleanup(
   planRunner: PlanRunner,
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  git: import('./interfaces/IGitOperations').IGitOperations
 ): Promise<void> {
   const log = Logger.for('git');
   
@@ -231,6 +233,7 @@ async function triggerOrphanedWorktreeCleanup(
   const result = await cleanupOrphanedWorktrees({
     repoPaths: Array.from(repoPaths),
     activePlans,
+    git,
     logger: (msg) => log.debug(msg)
   });
   

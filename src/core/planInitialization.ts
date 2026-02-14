@@ -25,7 +25,7 @@ import type { CopilotUsageMetrics } from '../plan/types';
 import type { ServiceContainer } from './container';
 import type { DefaultJobExecutor } from '../plan/executor';
 import * as Tokens from './tokens';
-import * as git from '../git';
+import type { IGitOperations } from '../interfaces/IGitOperations';
 import { PlanConfigManager } from '../plan/configManager';
 import { PlanPersistence } from '../plan/persistence';
 import { PlanStateMachine } from '../plan/stateMachine';
@@ -150,7 +150,8 @@ function createAgentDelegatorAdapter(runner: ICopilotRunner, log: any) {
  */
 export async function initializePlanRunner(
   context: vscode.ExtensionContext,
-  container: ServiceContainer
+  container: ServiceContainer,
+  git: IGitOperations
 ): Promise<{ planRunner: PlanRunner; processMonitor: IProcessMonitor }> {
   log.info('Initializing Plan Runner...');
   
@@ -177,6 +178,7 @@ export async function initializePlanRunner(
     persistence: new PlanPersistence(storagePath),
     processMonitor,
     stateMachineFactory: (plan) => new PlanStateMachine(plan),
+    git,
   });
   
   // Wire up executor with logs in the same .orchestrator directory
@@ -249,7 +251,10 @@ export async function initializeMcpServer(
   const scope = container.createScope();
   const { McpHandler } = require('../mcp/handler');
   // eslint-disable-next-line no-restricted-syntax -- constructed inside scoped DI factory
-  scope.register(Tokens.IMcpRequestRouter, () => new McpHandler(planRunner, workspacePath));
+  scope.register(Tokens.IMcpRequestRouter, (c) => {
+    const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+    return new McpHandler(planRunner, workspacePath, git);
+  });
   const mcpHandler = scope.resolve<IMcpRequestRouter>(Tokens.IMcpRequestRouter);
 
   // Create and start the IPC server

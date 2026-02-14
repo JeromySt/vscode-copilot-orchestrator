@@ -9,7 +9,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as git from '../git';
+import type { IGitOperations } from '../interfaces/IGitOperations';
 import type { PlanInstance } from '../plan/types/plan';
 
 export interface OrphanedWorktreeCleanupOptions {
@@ -17,6 +17,8 @@ export interface OrphanedWorktreeCleanupOptions {
   repoPaths: string[];
   /** Map of planId -> PlanInstance for active plans */
   activePlans: Map<string, PlanInstance>;
+  /** Git operations interface */
+  git: IGitOperations;
   /** Logger for progress reporting */
   logger?: (msg: string) => void;
 }
@@ -55,7 +57,7 @@ export interface CleanupResult {
 export async function cleanupOrphanedWorktrees(
   options: OrphanedWorktreeCleanupOptions
 ): Promise<CleanupResult> {
-  const { repoPaths, activePlans, logger } = options;
+  const { repoPaths, activePlans, git, logger } = options;
   const log = logger || (() => {});
   
   const result: CleanupResult = {
@@ -90,7 +92,7 @@ export async function cleanupOrphanedWorktrees(
     
     try {
       // Get git-registered worktrees
-      const gitWorktrees = await getGitWorktreePaths(repoPath);
+      const gitWorktrees = await getGitWorktreePaths(repoPath, git);
       const gitWorktreeSet = new Set(gitWorktrees.map(p => path.normalize(p).toLowerCase()));
       
       // Scan .worktrees directory
@@ -147,7 +149,7 @@ export async function cleanupOrphanedWorktrees(
 /**
  * Get paths of all git-registered worktrees for a repository.
  */
-async function getGitWorktreePaths(repoPath: string): Promise<string[]> {
+async function getGitWorktreePaths(repoPath: string, git: IGitOperations): Promise<string[]> {
   try {
     const list = await git.worktrees.list(repoPath);
     return list.map(wt => wt.path);

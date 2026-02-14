@@ -23,7 +23,7 @@ import { PlanEventEmitter } from './planEvents';
 import { PlanPersistence } from './persistence';
 import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
 import { formatLogEntries } from './helpers';
-import * as git from '../git';
+import type { IGitOperations } from '../interfaces/IGitOperations';
 import type { JobExecutor, RetryNodeOptions } from './runner';
 
 /**
@@ -44,10 +44,12 @@ export interface NodeManagerState {
 export class NodeManager {
   private readonly state: NodeManagerState;
   private readonly log: ILogger;
+  private readonly git: IGitOperations;
 
-  constructor(state: NodeManagerState, log: ILogger) {
+  constructor(state: NodeManagerState, log: ILogger, git: IGitOperations) {
     this.state = state;
     this.log = log;
+    this.git = git;
   }
 
   // ── Queries ────────────────────────────────────────────────────────
@@ -386,15 +388,15 @@ export class NodeManager {
       }
 
       try {
-        await git.repository.fetch(plan.repoPath, { all: true });
+        await this.git.repository.fetch(plan.repoPath, { all: true });
       } catch (e: any) {
         this.log.warn(`Git fetch failed before worktree clear: ${e.message}`);
       }
 
       try {
         if (nodeState.baseCommit && nodeState.worktreePath) {
-          await git.repository.resetHard(nodeState.worktreePath, nodeState.baseCommit);
-          await git.repository.clean(nodeState.worktreePath);
+          await this.git.repository.resetHard(nodeState.worktreePath, nodeState.baseCommit);
+          await this.git.repository.clean(nodeState.worktreePath);
         }
       } catch (e: any) {
         this.log.warn(`Failed to reset worktree: ${e.message}`);

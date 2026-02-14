@@ -16,7 +16,7 @@ import type {
   CopilotUsageMetrics,
 } from '../types';
 import { normalizeWorkSpec } from '../types';
-import * as git from '../../git';
+import type { IGitOperations } from '../../interfaces/IGitOperations';
 import { parseAiReviewResult } from '../aiReviewUtils';
 
 /**
@@ -35,15 +35,18 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
   private evidenceValidator: IEvidenceValidator;
   private agentDelegator?: any;
   private getCopilotConfigDir: (worktreePath: string) => string;
+  private git: IGitOperations;
 
   constructor(deps: {
     evidenceValidator: IEvidenceValidator;
     agentDelegator?: any;
     getCopilotConfigDir: (worktreePath: string) => string;
+    git: IGitOperations;
   }) {
     this.evidenceValidator = deps.evidenceValidator;
     this.agentDelegator = deps.agentDelegator;
     this.getCopilotConfigDir = deps.getCopilotConfigDir;
+    this.git = deps.git;
   }
 
   async execute(context: PhaseContext): Promise<PhaseResult> {
@@ -63,13 +66,13 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
         }
       }
 
-      const hasChanges = await git.repository.hasUncommittedChanges(worktreePath);
+      const hasChanges = await this.git.repository.hasUncommittedChanges(worktreePath);
       ctx.logInfo(`hasUncommittedChanges: ${hasChanges}`);
 
       if (!hasChanges) {
         ctx.logInfo('No uncommitted changes, checking for commits since base...');
 
-        const head = await git.worktrees.getHeadCommit(worktreePath);
+        const head = await this.git.worktrees.getHeadCommit(worktreePath);
         ctx.logInfo(`HEAD: ${head?.slice(0, 8) || 'unknown'}, baseCommit: ${baseCommit!.slice(0, 8)}`);
 
         if (head && head !== baseCommit) {
@@ -83,10 +86,10 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
         );
         if (hasEvidence) {
           ctx.logInfo('Evidence file found, staging...');
-          await git.repository.stageAll(worktreePath);
+          await this.git.repository.stageAll(worktreePath);
           const message = `[Plan] ${node.task} (evidence only)`;
-          await git.repository.commit(worktreePath, message);
-          const commit = await git.worktrees.getHeadCommit(worktreePath);
+          await this.git.repository.commit(worktreePath, message);
+          const commit = await this.git.worktrees.getHeadCommit(worktreePath);
           return { success: true, commit: commit || undefined };
         }
 
@@ -119,13 +122,13 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
 
       // Stage and commit
       ctx.logInfo('Staging all changes...');
-      await git.repository.stageAll(worktreePath);
+      await this.git.repository.stageAll(worktreePath);
 
       const message = `[Plan] ${node.task}`;
       ctx.logInfo(`Creating commit: "${message}"`);
-      await git.repository.commit(worktreePath, message);
+      await this.git.repository.commit(worktreePath, message);
 
-      const commit = await git.worktrees.getHeadCommit(worktreePath);
+      const commit = await this.git.worktrees.getHeadCommit(worktreePath);
       ctx.logInfo(`✓ Committed: ${commit?.slice(0, 8)}`);
       return { success: true, commit: commit || undefined };
     } catch (error: any) {
@@ -147,7 +150,7 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
 
   private async getGitStatus(cwd: string): Promise<string | null> {
     try {
-      const dirtyFiles = await git.repository.getDirtyFiles(cwd);
+      const dirtyFiles = await this.git.repository.getDirtyFiles(cwd);
       if (dirtyFiles.length === 0) return null;
       return dirtyFiles.map(file => `M  ${file}`).join('\n');
     } catch {
@@ -157,7 +160,9 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
 
   private async getIgnoredFiles(cwd: string): Promise<string | null> {
     try {
-      const ignoredFiles = await git.repository.getIgnoredFiles(cwd);
+      // TODO: Add getIgnoredFiles to IGitOperations interface
+      // const ignoredFiles = await this.git.repository.getIgnoredFiles(cwd);
+      const ignoredFiles: string[] = []; // Temporary placeholder
       if (ignoredFiles.length === 0) return null;
       const limitedFiles = ignoredFiles.slice(0, 50);
       const result = limitedFiles.join('\n');

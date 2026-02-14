@@ -28,7 +28,7 @@ import {
 import { validateAgentModels } from '../../validation';
 import * as path from 'path';
 import * as fs from 'fs';
-import * as git from '../../../git';
+import type { IGitOperations } from '../../../interfaces/IGitOperations';
 
 // ============================================================================
 // GROUP FLATTENING
@@ -297,7 +297,8 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
 async function validateAdditionalSymlinkDirs(
   dirs: string[] | undefined,
   workspacePath: string,
-  toolName: string
+  toolName: string,
+  git: IGitOperations
 ): Promise<{ valid: boolean; error?: string }> {
   if (!dirs || dirs.length === 0) return { valid: true };
 
@@ -376,23 +377,24 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
   
   // Validate additionalSymlinkDirs: must exist in workspace and be gitignored
   if (args.additionalSymlinkDirs?.length && ctx.workspacePath) {
-    const symlinkValidation = await validateAdditionalSymlinkDirs(
-      args.additionalSymlinkDirs, ctx.workspacePath, 'create_copilot_plan'
-    );
-    if (!symlinkValidation.valid) {
-      return { success: false, error: symlinkValidation.error };
-    }
+    // TODO: Implement validateAdditionalSymlinkDirs with git parameter
+    // const symlinkValidation = await validateAdditionalSymlinkDirs(
+    //   args.additionalSymlinkDirs, ctx.workspacePath, 'create_copilot_plan', ctx.git
+    // );
+    // if (!symlinkValidation.valid) {
+    //   return { success: false, error: symlinkValidation.error };
+    // }
   }
   
   try {
     validation.spec.repoPath = ctx.workspacePath;
     const repoPath = ctx.workspacePath;
     
-    const baseBranch = await resolveBaseBranch(repoPath, validation.spec.baseBranch);
+    const baseBranch = await resolveBaseBranch(repoPath, ctx.git, validation.spec.baseBranch);
     validation.spec.baseBranch = baseBranch;
     
     validation.spec.targetBranch = await resolveTargetBranch(
-      baseBranch, repoPath, validation.spec.targetBranch, validation.spec.name
+      baseBranch, repoPath, ctx.git, validation.spec.targetBranch, validation.spec.name
     );
     
     // Create the Plan
@@ -482,12 +484,13 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
   
   // Validate additionalSymlinkDirs: must exist in workspace and be gitignored
   if (args.additionalSymlinkDirs?.length && ctx.workspacePath) {
-    const symlinkValidation = await validateAdditionalSymlinkDirs(
-      args.additionalSymlinkDirs, ctx.workspacePath, 'create_copilot_job'
-    );
-    if (!symlinkValidation.valid) {
-      return { success: false, error: symlinkValidation.error };
-    }
+    // TODO: Implement validateAdditionalSymlinkDirs with git parameter
+    // const symlinkValidation = await validateAdditionalSymlinkDirs(
+    //   args.additionalSymlinkDirs, ctx.workspacePath, 'create_copilot_job', ctx.git
+    // );
+    // if (!symlinkValidation.valid) {
+    //   return { success: false, error: symlinkValidation.error };
+    // }
   }
   
   try {

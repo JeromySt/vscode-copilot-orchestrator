@@ -39,7 +39,7 @@ import {
   formatLogEntries,
   appendWorkSummary as appendWorkSummaryHelper,
 } from './helpers';
-import * as git from '../git';
+import type { IGitOperations } from '../interfaces/IGitOperations';
 import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
 import { aggregateMetrics } from './metricsAggregator';
 import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
@@ -78,6 +78,7 @@ export class JobExecutionEngine {
   private readonly state: ExecutionEngineState;
   private readonly nodeManager: NodeManager;
   private readonly log: ILogger;
+  private readonly git: IGitOperations;
 
   /**
    * Mutex for serializing Reverse Integration (RI) merges.
@@ -94,10 +95,11 @@ export class JobExecutionEngine {
    */
   private riMergeMutex: Promise<void> = Promise.resolve();
 
-  constructor(state: ExecutionEngineState, nodeManager: NodeManager, log: ILogger) {
+  constructor(state: ExecutionEngineState, nodeManager: NodeManager, log: ILogger, git: IGitOperations) {
     this.state = state;
     this.nodeManager = nodeManager;
     this.log = log;
+    this.git = git;
   }
 
   /**
@@ -164,9 +166,9 @@ export class JobExecutionEngine {
       // Setup detached worktree (or reuse existing one for retries)
       // This is part of Forward Integration (merge-fi) phase
       this.log.debug(`Setting up worktree for job ${node.name} at ${worktreePath} from ${baseCommitish}`);
-      let timing: Awaited<ReturnType<typeof git.worktrees.createOrReuseDetached>>;
+      let timing: Awaited<ReturnType<typeof this.git.worktrees.createOrReuseDetached>>;
       try {
-        timing = await git.worktrees.createOrReuseDetached(
+        timing = await this.git.worktrees.createOrReuseDetached(
           plan.repoPath,
           worktreePath,
           baseCommitish,
@@ -209,11 +211,11 @@ export class JobExecutionEngine {
         
         // Ensure .gitignore includes orchestrator temp files
         try {
-          const modified = await git.gitignore.ensureGitignoreEntries(worktreePath);
+          const modified = await this.git.gitignore.ensureGitignoreEntries(worktreePath);
           if (modified) {
             this.log.debug(`Updated .gitignore in worktree: ${worktreePath}`);
             // Stage the gitignore change so it's included in the work commit
-            await git.repository.stageFile(worktreePath, '.gitignore');
+            await this.git.repository.stageFile(worktreePath, '.gitignore');
           }
         } catch (err: any) {
           this.log.warn(`Failed to update .gitignore: ${err.message}`);
@@ -1073,8 +1075,8 @@ export class JobExecutionEngine {
     newCommit: string
   ): Promise<boolean> {
     // Check if we're on this branch in the main repo
-    const currentBranch = await git.branches.currentOrNull(repoPath);
-    const isDirty = await git.repository.hasUncommittedChanges(repoPath);
+    const currentBranch = await this.git.branches.currentOrNull(repoPath);
+    const isDirty = await this.git.repository.hasUncommittedChanges(repoPath);
     
     if (currentBranch === branchName) {
       // User is on the target branch - use reset --hard (with stash if dirty)
@@ -1082,7 +1084,7 @@ export class JobExecutionEngine {
       
       if (isDirty) {
         // Check what files are dirty - if only .gitignore with only orchestrator changes, skip stash
-        const dirtyFiles = await git.repository.getDirtyFiles(repoPath);
+        const dirtyFiles = await this.git.repository.getDirtyFiles(repoPath);
         const onlyGitignoreDirty = dirtyFiles.length === 1 && dirtyFiles[0] === '.gitignore';
         
         if (onlyGitignoreDirty) {
@@ -1094,8 +1096,8 @@ export class JobExecutionEngine {
             // Safe to discard - these are only orchestrator changes already in merge commit
             this.log.debug(`Only .gitignore is dirty with orchestrator-only changes - discarding and resetting`);
             try {
-              await git.repository.checkoutFile(repoPath, '.gitignore', s => this.log.debug(s));
-              await git.repository.resetHard(repoPath, newCommit, s => this.log.debug(s));
+              await this.git.repository.checkoutFile(repoPath, '.gitignore', s => this.log.debug(s));
+              await this.git.repository.resetHard(repoPath, newCommit, s => this.log.debug(s));
               this.log.info(`Updated ${branchName} via reset --hard to ${newCommit.slice(0, 8)} (discarded orchestrator .gitignore)`);
               return true;
             } catch (err: any) {
@@ -1111,7 +1113,7 @@ export class JobExecutionEngine {
         // The merge commit already exists - worst case user needs to manually sync
         const stashMsg = `orchestrator-merge-${Date.now()}`;
         try {
-          await git.repository.stashPush(repoPath, stashMsg, s => this.log.debug(s));
+          await this.git.repository.stashPush(repoPath, stashMsg, s => this.log.debug(s));
         } catch (stashErr: any) {
           // Stash failed (e.g., "could not write index") - this is non-fatal
           // The merge commit exists, user just needs to manually update their branch
@@ -1123,10 +1125,10 @@ export class JobExecutionEngine {
         }
         
         try {
-          await git.repository.resetHard(repoPath, newCommit, s => this.log.debug(s));
+          await this.git.repository.resetHard(repoPath, newCommit, s => this.log.debug(s));
           // Try to pop the stash
           try {
-            await git.repository.stashPop(repoPath, s => this.log.debug(s));
+            await this.git.repository.stashPop(repoPath, s => this.log.debug(s));
           } catch (popErr: any) {
             // Pop failed - check if it's just orchestrator .gitignore conflict
             this.log.warn(`Stash pop failed: ${popErr.message}`);
@@ -1135,7 +1137,7 @@ export class JobExecutionEngine {
             const stashOnlyOrchestratorGitignore = await this.isStashOnlyOrchestratorGitignore(repoPath);
             if (stashOnlyOrchestratorGitignore) {
               this.log.debug(`Stash contains only orchestrator .gitignore changes - dropping`);
-              await git.repository.stashDrop(repoPath, undefined, s => this.log.debug(s));
+              await this.git.repository.stashDrop(repoPath, undefined, s => this.log.debug(s));
             } else {
               // Stash has real user changes - leave it for user to resolve
               this.log.warn(`Stash contains user changes that couldn't be applied. Run 'git stash pop' to recover.`);
@@ -1144,14 +1146,14 @@ export class JobExecutionEngine {
         } catch (err) {
           // Try to restore stash before re-throwing
           try {
-            await git.repository.stashPop(repoPath, s => this.log.debug(s));
+            await this.git.repository.stashPop(repoPath, s => this.log.debug(s));
           } catch {
             this.log.warn(`Failed to restore stash after reset failure`);
           }
           throw err;
         }
       } else {
-        await git.repository.resetHard(repoPath, newCommit, s => this.log.debug(s));
+        await this.git.repository.resetHard(repoPath, newCommit, s => this.log.debug(s));
       }
       this.log.info(`Updated ${branchName} via reset --hard to ${newCommit.slice(0, 8)}`);
       return true;
@@ -1160,7 +1162,7 @@ export class JobExecutionEngine {
       // This is safe even if the branch is "associated" with the main repo
       this.log.debug(`User is on ${currentBranch || 'detached HEAD'}, using update-ref`);
       
-      await git.repository.updateRef(repoPath, `refs/heads/${branchName}`, newCommit, s => this.log.debug(s));
+      await this.git.repository.updateRef(repoPath, `refs/heads/${branchName}`, newCommit, s => this.log.debug(s));
       this.log.info(`Updated ${branchName} via update-ref to ${newCommit.slice(0, 8)}`);
       return true;
     }
@@ -1173,11 +1175,11 @@ export class JobExecutionEngine {
   private async isGitignoreOnlyOrchestratorChanges(repoPath: string): Promise<boolean> {
     try {
       // Get the diff of .gitignore (unstaged changes)
-      const result = await git.repository.getFileDiff(repoPath, '.gitignore');
+      const result = await this.git.repository.getFileDiff(repoPath, '.gitignore');
       
       if (!result || !result.trim()) {
         // No unstaged diff - check if staged
-        const stagedResult = await git.repository.getStagedFileDiff(repoPath, '.gitignore');
+        const stagedResult = await this.git.repository.getStagedFileDiff(repoPath, '.gitignore');
         if (!stagedResult || !stagedResult.trim()) {
           return true; // No changes at all
         }
@@ -1196,7 +1198,7 @@ export class JobExecutionEngine {
   private async isStashOnlyOrchestratorGitignore(repoPath: string): Promise<boolean> {
     try {
       // List files in stash
-      const files = await git.repository.stashShowFiles(repoPath);
+      const files = await this.git.repository.stashShowFiles(repoPath);
       if (files.length === 0) {
         return false;
       }
@@ -1206,7 +1208,7 @@ export class JobExecutionEngine {
       }
       
       // Check the stash diff for .gitignore
-      const diffResult = await git.repository.stashShowPatch(repoPath);
+      const diffResult = await this.git.repository.stashShowPatch(repoPath);
       if (!diffResult) {
         return false;
       }
@@ -1346,7 +1348,7 @@ export class JobExecutionEngine {
     this.log.debug(`Cleaning up worktree: ${worktreePath}`);
     
     try {
-      await git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
+      await this.git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
     } catch (error: any) {
       this.log.warn(`Failed to cleanup worktree`, {
         path: worktreePath,

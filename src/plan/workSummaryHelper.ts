@@ -7,7 +7,7 @@
  * @module plan/workSummaryHelper
  */
 
-import * as git from '../git';
+import type { IGitOperations } from '../interfaces/IGitOperations';
 import { Logger } from '../core/logger';
 import type { JobNode, JobWorkSummary, CommitDetail } from './types';
 
@@ -17,7 +17,7 @@ function emptyWorkSummary(node: JobNode): JobWorkSummary {
   return { nodeId: node.id, nodeName: node.name, commits: 0, filesAdded: 0, filesModified: 0, filesDeleted: 0, description: node.task };
 }
 
-async function getCommitDetails(worktreePath: string, baseCommit: string, headCommit: string): Promise<CommitDetail[]> {
+async function getCommitDetails(worktreePath: string, baseCommit: string, headCommit: string, git: IGitOperations): Promise<CommitDetail[]> {
   try {
     const changes = await git.repository.getFileChangesBetween(baseCommit, headCommit, worktreePath);
     if (changes.length === 0) return [];
@@ -35,14 +35,14 @@ async function getCommitDetails(worktreePath: string, baseCommit: string, headCo
   } catch { return []; }
 }
 
-export async function computeWorkSummary(node: JobNode, worktreePath: string, baseCommit: string): Promise<JobWorkSummary> {
+export async function computeWorkSummary(node: JobNode, worktreePath: string, baseCommit: string, git: IGitOperations): Promise<JobWorkSummary> {
   try {
     const head = await git.worktrees.getHeadCommit(worktreePath);
     if (!head || (head === baseCommit && node.expectsNoChanges)) {
       if (node.expectsNoChanges) return { ...emptyWorkSummary(node), description: 'Node declared expectsNoChanges', commitDetails: [] };
       return emptyWorkSummary(node);
     }
-    const commitDetails = await getCommitDetails(worktreePath, baseCommit, head);
+    const commitDetails = await getCommitDetails(worktreePath, baseCommit, head, git);
     let filesAdded = 0, filesModified = 0, filesDeleted = 0;
     for (const d of commitDetails) { filesAdded += d.filesAdded.length; filesModified += d.filesModified.length; filesDeleted += d.filesDeleted.length; }
     return { nodeId: node.id, nodeName: node.name, commits: commitDetails.length, filesAdded, filesModified, filesDeleted, description: node.task, commitDetails };
@@ -52,7 +52,7 @@ export async function computeWorkSummary(node: JobNode, worktreePath: string, ba
   }
 }
 
-export async function computeAggregatedWorkSummary(node: JobNode, worktreePath: string, baseBranch: string, repoPath: string): Promise<JobWorkSummary> {
+export async function computeAggregatedWorkSummary(node: JobNode, worktreePath: string, baseBranch: string, repoPath: string, git: IGitOperations): Promise<JobWorkSummary> {
   try {
     const headCommit = await git.worktrees.getHeadCommit(worktreePath);
     if (!headCommit) { log.warn('No HEAD commit in worktree for aggregated summary'); return emptyWorkSummary(node); }

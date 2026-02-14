@@ -11,7 +11,7 @@
 import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces/IPhaseExecutor';
 import type { CopilotUsageMetrics } from '../types';
 import { resolveMergeConflictWithCopilot } from './mergeHelper';
-import * as git from '../../git';
+import type { IGitOperations } from '../../interfaces/IGitOperations';
 import { aggregateMetrics } from '../metricsAggregator';
 
 /**
@@ -22,9 +22,11 @@ import { aggregateMetrics } from '../metricsAggregator';
  */
 export class MergeRiPhaseExecutor implements IPhaseExecutor {
   private configManager?: any;
+  private git: IGitOperations;
   
-  constructor(deps: { configManager?: any } = {}) {
+  constructor(deps: { configManager?: any; git: IGitOperations }) {
     this.configManager = deps.configManager;
+    this.git = deps.git;
   }
   
   async execute(context: PhaseContext): Promise<PhaseResult> {
@@ -64,7 +66,7 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
     // Check if there are any changes to merge
     const diffBase = baseCommitAtStart;
     try {
-      const hasDiff = await git.repository.hasChangesBetween(diffBase, mergeSource, repoPath);
+      const hasDiff = await this.git.repository.hasChangesBetween(diffBase, mergeSource, repoPath);
       
       if (!hasDiff) {
         context.logInfo(`No changes detected (diff ${diffBase.slice(0, 8)}..${mergeSource.slice(0, 8)} is empty)`);
@@ -76,7 +78,7 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       
       // Use git merge-tree for conflict-free merge detection
       context.logInfo('Using git merge-tree for conflict-free merge...');
-      const mergeTreeResult = await git.merge.mergeWithoutCheckout({
+      const mergeTreeResult = await this.git.merge.mergeWithoutCheckout({
         source: mergeSource,
         target: targetBranch,
         repoPath,
@@ -87,10 +89,10 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
         context.logInfo('✓ No conflicts detected');
         
         // Create the merge commit from the tree
-        const targetSha = await git.repository.resolveRef(targetBranch, repoPath);
+        const targetSha = await this.git.repository.resolveRef(targetBranch, repoPath);
         const commitMessage = `Plan ${node.name}: merge ${node.name} (commit ${mergeSource.slice(0, 8)})`;
         
-        const newCommit = await git.merge.commitTree(
+        const newCommit = await this.git.merge.commitTree(
           mergeTreeResult.treeSha,
           [targetSha],  // Single parent for squash-style merge
           commitMessage,
@@ -116,7 +118,7 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
         if (pushOnSuccess) {
           try {
             context.logInfo(`Pushing ${targetBranch} to origin...`);
-            await git.repository.push(repoPath, { branch: targetBranch, log: s => context.logInfo(s) });
+            await this.git.repository.push(repoPath, { branch: targetBranch, log: s => context.logInfo(s) });
             context.logInfo('✓ Pushed to origin');
           } catch (pushError: any) {
             context.logError(`Push failed: ${pushError.message}`);
@@ -179,7 +181,7 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
   ): Promise<boolean> {
     try {
       // Try to update the branch reference
-      await git.repository.updateRef(`refs/heads/${targetBranch}`, newCommit, repoPath);
+      await this.git.repository.updateRef(`refs/heads/${targetBranch}`, newCommit, repoPath);
       return true;
     } catch (error: any) {
       context.logError(`Failed to update branch ${targetBranch}: ${error.message}`);
@@ -207,9 +209,9 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
     commitMessage: string
   ): Promise<{ success: boolean; metrics?: CopilotUsageMetrics }> {
     // Capture user's current state
-    const originalBranch = await git.branches.currentOrNull(repoPath);
+    const originalBranch = await this.git.branches.currentOrNull(repoPath);
     const isOnTargetBranch = originalBranch === targetBranch;
-    const isDirty = await git.repository.hasUncommittedChanges(repoPath);
+    const isDirty = await this.git.repository.hasUncommittedChanges(repoPath);
     
     let didStash = false;
     let didCheckout = false;
@@ -218,19 +220,19 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       // Step 1: Stash uncommitted changes if needed
       if (isDirty) {
         const stashMsg = `orchestrator-merge-${Date.now()}`;
-        didStash = await git.repository.stashPush(repoPath, stashMsg, s => context.logInfo(s));
+        didStash = await this.git.repository.stashPush(repoPath, stashMsg, s => context.logInfo(s));
         context.logInfo('Stashed user\'s uncommitted changes');
       }
       
       // Step 2: Checkout targetBranch if needed
       if (!isOnTargetBranch) {
-        await git.branches.checkout(repoPath, targetBranch, s => context.logInfo(s));
+        await this.git.branches.checkout(repoPath, targetBranch, s => context.logInfo(s));
         didCheckout = true;
         context.logInfo(`Checked out ${targetBranch} for merge`);
       }
       
       // Step 3: Perform the merge (will have conflicts)
-      await git.merge.merge({
+      await this.git.merge.merge({
         source: sourceCommit,
         target: targetBranch,
         cwd: repoPath,
@@ -241,7 +243,7 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       });
 
       // List conflicted files for the instructions
-      const conflictedFiles = await git.merge.listConflicts(repoPath).catch(() => []);
+      const conflictedFiles = await this.git.merge.listConflicts(repoPath).catch(() => []);
       
       // Step 4: Use Copilot CLI to resolve conflicts
       const cliResult = await resolveMergeConflictWithCopilot(
@@ -266,7 +268,7 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       
       if (pushOnSuccess) {
         try {
-          await git.repository.push(repoPath, { branch: targetBranch, log: s => context.logInfo(s) });
+          await this.git.repository.push(repoPath, { branch: targetBranch, log: s => context.logInfo(s) });
           context.logInfo(`Pushed ${targetBranch} to origin`);
         } catch (pushError: any) {
           context.logInfo(`Push failed: ${pushError.message}`);
@@ -275,14 +277,14 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       
       // Step 5: Restore user to original branch (if they weren't on target)
       if (didCheckout && originalBranch) {
-        await git.branches.checkout(repoPath, originalBranch, s => context.logInfo(s));
+        await this.git.branches.checkout(repoPath, originalBranch, (s: string) => context.logInfo(s));
         context.logInfo(`Restored user to ${originalBranch}`);
       }
       
       // Step 6: Restore stashed changes
       if (didStash) {
         try {
-          await git.repository.stashPop(repoPath, s => context.logInfo(s));
+          await this.git.repository.stashPop(repoPath, (s: string) => context.logInfo(s));
           context.logInfo('Restored user\'s stashed changes');
         } catch (stashError: any) {
           context.logInfo(`Could not auto-restore stash: ${stashError.message}`);
@@ -298,16 +300,16 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       // Best effort cleanup
       try {
         // Abort any ongoing merge
-        await git.merge.abort(repoPath, s => context.logInfo(s));
+        await this.git.merge.abort(repoPath, s => context.logInfo(s));
         
         // Restore original branch if we changed it
         if (didCheckout && originalBranch) {
-          await git.branches.checkout(repoPath, originalBranch, s => context.logInfo(s));
+          await this.git.branches.checkout(repoPath, originalBranch, s => context.logInfo(s));
         }
         
         // Restore stash if we created one
         if (didStash) {
-          await git.repository.stashPop(repoPath, s => context.logInfo(s));
+          await this.git.repository.stashPop(repoPath, s => context.logInfo(s));
         }
       } catch {
         // Ignore cleanup errors

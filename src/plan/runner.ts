@@ -103,6 +103,7 @@ export class PlanRunner extends EventEmitter {
     persistence: PlanPersistence;
     processMonitor: IProcessMonitor;
     stateMachineFactory: (plan: PlanInstance) => PlanStateMachine;
+    git: import('../interfaces/IGitOperations').IGitOperations;
   }) {
     super();
 
@@ -123,9 +124,9 @@ export class PlanRunner extends EventEmitter {
 
     this._state = state;
     this._events = events;
-    this._lifecycle = new PlanLifecycleManager(state, log);
-    this._nodeManager = new NodeManager(state, log);
-    this._engine = new JobExecutionEngine(state, this._nodeManager, log);
+    this._lifecycle = new PlanLifecycleManager(state, log, deps.git);
+    this._nodeManager = new NodeManager(state, log, deps.git);
+    this._engine = new JobExecutionEngine(state, this._nodeManager, log, deps.git);
     this._pump = new ExecutionPump(state, log, (plan, sm, node) => {
       this._engine.executeJobNode(plan, sm, node);
     });

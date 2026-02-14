@@ -21,7 +21,7 @@ import { PlanEventEmitter } from './planEvents';
 import { PlanConfigManager } from './configManager';
 import { OrchestratorFileWatcher } from '../core';
 import { computeProgress } from './helpers';
-import * as git from '../git';
+import type { IGitOperations } from '../interfaces/IGitOperations';
 import type { JobExecutor, PlanRunnerConfig } from './runner';
 import type { GlobalCapacityManager, GlobalCapacityStats } from '../core/globalCapacity';
 import type { PowerManager } from '../core/powerManager';
@@ -54,10 +54,12 @@ export class PlanLifecycleManager {
   private readonly state: PlanRunnerState;
   private readonly log: ILogger;
   private readonly _fileWatcher: OrchestratorFileWatcher;
+  private readonly git: IGitOperations;
 
-  constructor(state: PlanRunnerState, log: ILogger) {
+  constructor(state: PlanRunnerState, log: ILogger, git: IGitOperations) {
     this.state = state;
     this.log = log;
+    this.git = git;
     const workspacePath = state.config.storagePath.endsWith('plans')
       ? path.dirname(state.config.storagePath) : state.config.storagePath;
     this._fileWatcher = new OrchestratorFileWatcher(
@@ -114,7 +116,7 @@ export class PlanLifecycleManager {
       repoPath: spec.repoPath || this.state.config.defaultRepoPath,
     });
 
-    git.gitignore.ensureGitignoreEntries(plan.repoPath).catch((err: any) => {
+    this.git.gitignore.ensureGitignoreEntries(plan.repoPath).catch((err: any) => {
       this.log.warn(`Failed to update main repo .gitignore: ${err.message}`);
     });
 
@@ -347,7 +349,7 @@ export class PlanLifecycleManager {
     this.log.info(`Resuming Plan: ${planId}`);
 
     try {
-      await git.repository.fetch(plan.repoPath, { all: true });
+      await this.git.repository.fetch(plan.repoPath, { all: true });
       this.log.info(`Fetched latest refs for plan ${planId} before resuming`);
     } catch (e: any) {
       this.log.warn(`Git fetch failed before resume (continuing anyway): ${e.message}`);
@@ -440,7 +442,7 @@ export class PlanLifecycleManager {
 
     for (const worktreePath of worktreePaths) {
       try {
-        await git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
+        await this.git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
         this.log.debug(`Removed worktree: ${worktreePath}`);
       } catch (error: any) {
         cleanupErrors.push(`worktree ${worktreePath}: ${error.message}`);

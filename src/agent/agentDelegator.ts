@@ -12,11 +12,10 @@ import * as path from 'path';
 import { isCopilotCliAvailable } from './cliCheckCore';
 import { CopilotCliRunner, CopilotCliLogger } from './copilotCliRunner';
 import { isValidModel } from './modelDiscovery';
-import * as git from '../git';
+import type { IGitOperations } from '../interfaces/IGitOperations';
 import { TokenUsage, CopilotUsageMetrics } from '../plan/types';
 import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
 import type { IFileSystem } from '../interfaces/IFileSystem';
-import type { IGitOperations } from '../interfaces/IGitOperations';
 
 // ============================================================================
 // TYPES
@@ -173,7 +172,7 @@ export class AgentDelegator {
   private readonly logger: DelegatorLogger;
   private readonly callbacks: DelegatorCallbacks;
   private readonly runner?: ICopilotRunner;
-  private readonly gitOps?: IGitOperations;
+  private readonly gitOps: IGitOperations;
 
   /**
    * Create a new agent delegator.
@@ -181,13 +180,13 @@ export class AgentDelegator {
    * @param logger - Logger for output messages
    * @param callbacks - Optional callbacks for delegation events
    * @param runner - Optional ICopilotRunner (defaults to new CopilotCliRunner)
-   * @param gitOps - Optional IGitOperations (defaults to the git module)
+   * @param gitOps - Git operations interface
    */
   constructor(
     logger: DelegatorLogger,
+    gitOps: IGitOperations,
     callbacks: DelegatorCallbacks = {},
-    runner?: ICopilotRunner,
-    gitOps?: IGitOperations,
+    runner?: ICopilotRunner
   ) {
     this.logger = logger;
     this.callbacks = callbacks;
@@ -570,7 +569,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
    */
   private async createMarkerCommit(worktreePath: string, jobId: string, taskDescription: string, label: string): Promise<void> {
     try {
-      const repository = this.gitOps?.repository ?? git.repository;
+      const repository = this.gitOps.repository;
 
       // Stage the task file
       await repository.stageFile(worktreePath, '.copilot-task.md');
