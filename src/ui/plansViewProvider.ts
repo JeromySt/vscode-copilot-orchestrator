@@ -48,7 +48,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _pulseSubscription?: PulseDisposable;
   private _debounceTimer?: NodeJS.Timeout;
-  private _pulseTick = 0;
+  private _capacityTimer?: NodeJS.Timeout;
   
   /**
    * @param _context - The extension context for managing subscriptions and resources.
@@ -59,19 +59,24 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     private readonly _planRunner: PlanRunner,
     private readonly _pulse: IPulseEmitter
   ) {
-    // Listen for Plan events to refresh
-    _planRunner.on('planCreated', () => {
-      // Immediate refresh for new plans (user expectation)
-      this.refresh();
+    // Listen for Plan events — emit targeted per-plan messages
+    _planRunner.on('planCreated', (plan: PlanInstance) => {
+      this._sendPlanAdded(plan);
     });
-    _planRunner.on('planCompleted', () => this.refresh());
-    _planRunner.on('planDeleted', (planId) => {
-      // Close any open panels for this Plan
+    _planRunner.on('planCompleted', (plan: PlanInstance) => {
+      this._sendPlanStateChange(plan.id);
+    });
+    _planRunner.on('planDeleted', (planId: string) => {
       planDetailPanel.closeForPlan(planId);
       NodeDetailPanel.closeForPlan(planId);
-      this.refresh();
+      this._sendPlanDeleted(planId);
     });
-    _planRunner.on('nodeTransition', () => this.scheduleRefresh());
+    _planRunner.on('nodeTransition', (event: any) => {
+      const planId = typeof event === 'string' ? event : event?.planId;
+      if (planId) {
+        this._sendPlanStateChange(planId);
+      }
+    });
   }
   
   /**
@@ -122,31 +127,20 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       }
     });
     
-    // Send initial data
+    // Send initial data (full plan list for first render)
     setTimeout(() => this.refresh(), 100);
     
-    // Subscribe to pulse for periodic refresh of running Plans
+    // Pulse: pure 1-second signal forwarding to webview — NO logic, NO async
     this._pulseSubscription = this._pulse.onPulse(() => {
-      // Always forward pulse to webview for client-side duration ticking
       if (this._view) {
         this._view.webview.postMessage({ type: 'pulse' });
       }
-
-      // Refresh data every 5 seconds (not every pulse) to avoid overwhelming
-      // the async getGlobalCapacityStats call. Duration ticking is client-side.
-      this._pulseTick = (this._pulseTick || 0) + 1;
-      if (this._pulseTick % 5 === 0) {
-        const hasRunning = this._planRunner.getAll().some(plan => {
-          const sm = this._planRunner.getStateMachine(plan.id);
-          const status = sm?.computePlanStatus();
-          return status === 'running' || status === 'pending';
-        });
-        
-        if (hasRunning) {
-          this.refresh();
-        }
-      }
     });
+    
+    // Capacity stats: own cadence (every 10s)
+    this._capacityTimer = setInterval(() => {
+      this._refreshCapacity();
+    }, 10000);
     
     webviewView.onDidDispose(() => {
       if (this._pulseSubscription) {
@@ -155,87 +149,81 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (this._debounceTimer) {
         clearTimeout(this._debounceTimer);
       }
+      if (this._capacityTimer) {
+        clearInterval(this._capacityTimer);
+      }
     });
   }
   
   /**
-   * Schedule a debounced refresh (100 ms). Coalesces rapid node-transition
-   * events into a single view update.
+   * Build data object for a single plan (used by both initial load and per-plan events).
    */
-  private scheduleRefresh() {
-    // Debounce rapid updates
-    if (this._debounceTimer) return;
-    this._debounceTimer = setTimeout(() => {
-      this._debounceTimer = undefined;
-      this.refresh();
-    }, 100);
-  }
-  
-  /**
-   * Refresh the webview with current Plan data.
-   *
-   * Queries all Plans from the {@link PlanRunner}, computes per-Plan progress and
-   * status counts, filters out sub-plans (shown under their parents), and sends an
-   * `update` message to the webview. Top-level Plans are sorted newest-first.
-   */
-  async refresh() {
-    if (!this._view) return;
-    
-    const Plans = this._planRunner.getAll();
-    
-    // Sort by creation time (newest first)
-    Plans.sort((a, b) => b.createdAt - a.createdAt);
-    
-    // Default counts when state machine is not available
+  private _buildPlanData(plan: PlanInstance) {
+    const sm = this._planRunner.getStateMachine(plan.id);
+    const status = sm?.computePlanStatus() || 'pending';
     const defaultCounts: Record<NodeStatus, number> = {
       pending: 0, ready: 0, scheduled: 0, running: 0,
       succeeded: 0, failed: 0, blocked: 0, canceled: 0
     };
+    const counts = sm?.getStatusCounts() || defaultCounts;
+    const total = plan.nodes.size;
+    const completed = counts.succeeded + counts.failed + counts.blocked;
+    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
-    // Build Plan data for webview
-    const planData = Plans.map(plan => {
-      const sm = this._planRunner.getStateMachine(plan.id);
-      const status = sm?.computePlanStatus() || 'pending';
-      const counts = sm?.getStatusCounts() || defaultCounts;
-      
-      const total = plan.nodes.size;
-      const completed = counts.succeeded + counts.failed + counts.blocked;
-      const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
-      
-      return {
-        id: plan.id,
-        name: plan.spec.name,
-        status,
-        nodes: plan.nodes.size,
-        progress,
-        counts: {
-          succeeded: counts.succeeded,
-          failed: counts.failed,
-          running: counts.running,
-          pending: counts.pending + counts.ready,
-        },
-        createdAt: plan.createdAt,
-        startedAt: plan.startedAt,
-        endedAt: this._planRunner.getEffectiveEndedAt(plan.id) || plan.endedAt,
-        issubPlan: !!plan.parentPlanId,
-      };
-    });
-    
-    // Filter out sub-plans (they're shown under their parent)
-    const topLevelPlans = planData.filter(d => !d.issubPlan);
-    
-    // Get global execution stats
+    return {
+      id: plan.id,
+      name: plan.spec.name,
+      status,
+      nodes: plan.nodes.size,
+      progress,
+      counts: {
+        succeeded: counts.succeeded,
+        failed: counts.failed,
+        running: counts.running,
+        pending: counts.pending + counts.ready,
+      },
+      createdAt: plan.createdAt,
+      startedAt: plan.startedAt,
+      endedAt: this._planRunner.getEffectiveEndedAt(plan.id) || plan.endedAt,
+      issubPlan: !!plan.parentPlanId,
+    };
+  }
+  
+  /** Send a per-plan state change to the webview. */
+  private _sendPlanStateChange(planId: string) {
+    if (!this._view) return;
+    const plan = this._planRunner.get(planId);
+    if (!plan || plan.parentPlanId) return; // skip sub-plans
+    const data = this._buildPlanData(plan);
+    this._view.webview.postMessage({ type: 'planStateChange', plan: data });
+  }
+  
+  /** Send notification that a new plan was added. */
+  private _sendPlanAdded(plan: PlanInstance) {
+    if (!this._view) return;
+    if (plan.parentPlanId) return; // skip sub-plans
+    const data = this._buildPlanData(plan);
+    this._view.webview.postMessage({ type: 'planAdded', plan: data });
+    // Update total badge
+    const total = this._planRunner.getAll().filter(p => !p.parentPlanId).length;
+    this._view.webview.postMessage({ type: 'badgeUpdate', total });
+  }
+  
+  /** Send notification that a plan was deleted. */
+  private _sendPlanDeleted(planId: string) {
+    if (!this._view) return;
+    this._view.webview.postMessage({ type: 'planDeleted', planId });
+    const total = this._planRunner.getAll().filter(p => !p.parentPlanId).length;
+    this._view.webview.postMessage({ type: 'badgeUpdate', total });
+  }
+  
+  /** Refresh capacity stats independently (called on its own cadence). */
+  private async _refreshCapacity() {
+    if (!this._view) return;
     const globalStats = this._planRunner.getGlobalStats();
-    
-    // Get global capacity stats
-    // Get global capacity stats (catch to avoid unhandled rejections from timers/events)
     const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
-    
     this._view.webview.postMessage({
-      type: 'update',
-      Plans: topLevelPlans,
-      total: topLevelPlans.length,
-      running: topLevelPlans.filter(d => d.status === 'running').length,
+      type: 'capacityUpdate',
       globalStats,
       globalCapacity: globalCapacityStats ? {
         thisInstanceJobs: globalCapacityStats.thisInstanceJobs,
@@ -245,6 +233,30 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         instanceDetails: globalCapacityStats.instanceDetails
       } : null,
     });
+  }
+
+  /**
+   * Initial load: send all plans to the webview.
+   * After this, only per-plan events are sent.
+   */
+  async refresh() {
+    if (!this._view) return;
+    
+    const Plans = this._planRunner.getAll();
+    Plans.sort((a, b) => b.createdAt - a.createdAt);
+    
+    const planData = Plans
+      .filter(plan => !plan.parentPlanId)
+      .map(plan => this._buildPlanData(plan));
+    
+    this._view.webview.postMessage({
+      type: 'update',
+      Plans: planData,
+      total: planData.length,
+    });
+    
+    // Kick off first capacity refresh
+    this._refreshCapacity();
   }
   
   /**
@@ -724,11 +736,68 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       }
       
       this.publishUpdate(plans);
-
-      // Manage PULSE subscription lifecycle: subscribe only when running
-      var hasRunning = plans.some(function(p) {
-        return p.status === 'running' || p.status === 'pending';
-      });
+      this._managePulseSub();
+    };
+    
+    /** Add a single new plan card (from planAdded event). */
+    PlanListContainerControl.prototype.addPlan = function(planData) {
+      var container = this.getElement(this.containerId);
+      if (!container) return;
+      
+      // Clear empty state
+      var emptyEl = container.querySelector('.empty');
+      if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
+      
+      if (this.planCards.has(planData.id)) {
+        // Already exists — just update
+        var existing = this.planCards.get(planData.id);
+        existing.update(planData);
+        return;
+      }
+      
+      var element = document.createElement('div');
+      element.className = 'plan-item-wrapper';
+      // Insert at top (newest first)
+      if (container.firstChild) {
+        container.insertBefore(element, container.firstChild);
+      } else {
+        container.appendChild(element);
+      }
+      
+      var cardId = 'plan-card-' + planData.id;
+      var card = new PlanListCardControl(this.bus, cardId, element, planData.id);
+      this.planCards.set(planData.id, card);
+      card.update(planData);
+      this._managePulseSub();
+    };
+    
+    /** Remove a single plan card (from planDeleted event). */
+    PlanListContainerControl.prototype.removePlan = function(planId) {
+      var card = this.planCards.get(planId);
+      if (card) {
+        card.dispose();
+        if (card.element && card.element.parentNode) {
+          card.element.parentNode.removeChild(card.element);
+        }
+        this.planCards.delete(planId);
+      }
+      // Show empty state if no plans left
+      if (this.planCards.size === 0) {
+        var container = this.getElement(this.containerId);
+        if (container) {
+          container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> or <code>create_copilot_job</code> MCP tool.</div>';
+        }
+      }
+      this._managePulseSub();
+    };
+    
+    /** Subscribe/unsubscribe PULSE based on whether any cards are running. */
+    PlanListContainerControl.prototype._managePulseSub = function() {
+      var hasRunning = false;
+      for (var entry of this.planCards.values()) {
+        var s = entry.element && entry.element.dataset.status;
+        if (s === 'running' || s === 'pending') { hasRunning = true; break; }
+      }
       if (hasRunning && !this._pulseSub) {
         var self2 = this;
         this._pulseSub = this.bus.on(Topics.PULSE, function() {
@@ -909,35 +978,58 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     
     // ── Message Handler ──────────────────────────────────────────────────
     window.addEventListener('message', function(ev) {
-      if (ev.data.type === 'pulse') {
-        bus.emit(Topics.PULSE);
-        return;
-      }
-      if (ev.data.type !== 'update') return;
-      
-      var Plans = ev.data.Plans || [];
-      var globalStats = ev.data.globalStats;
-      var globalCapacity = ev.data.globalCapacity;
-      
-      // Update badge
-      document.getElementById('badge').textContent = Plans.length + ' total';
-      
-      // Emit updates through EventBus for controls to handle
-      bus.emit(Topics.PLANS_UPDATE, Plans);
-      bus.emit(Topics.CAPACITY_UPDATE, {
-        globalCapacity: globalCapacity,
-        globalStats: globalStats
-      });
-      
-      // Handle focus on initial load
-      if (isInitialLoad) {
-        isInitialLoad = false;
-        setTimeout(function() {
-          var firstPlan = document.querySelector('.plan-item');
-          if (firstPlan) {
-            firstPlan.focus();
+      var msg = ev.data;
+      switch (msg.type) {
+        case 'pulse':
+          bus.emit(Topics.PULSE);
+          break;
+          
+        case 'update':
+          // Initial load: full plan list
+          var Plans = msg.Plans || [];
+          document.getElementById('badge').textContent = Plans.length + ' total';
+          bus.emit(Topics.PLANS_UPDATE, Plans);
+          if (isInitialLoad) {
+            isInitialLoad = false;
+            setTimeout(function() {
+              var firstPlan = document.querySelector('.plan-item');
+              if (firstPlan) firstPlan.focus();
+            }, 50);
           }
-        }, 50);
+          break;
+          
+        case 'planAdded':
+          // Single plan added
+          if (msg.plan) {
+            planListContainer.addPlan(msg.plan);
+          }
+          break;
+          
+        case 'planStateChange':
+          // Per-plan state update — emit to EventBus for the matching card
+          if (msg.plan) {
+            bus.emit(Topics.PLAN_STATE_CHANGE, msg.plan);
+            planListContainer._managePulseSub();
+          }
+          break;
+          
+        case 'planDeleted':
+          // Single plan removed
+          if (msg.planId) {
+            planListContainer.removePlan(msg.planId);
+          }
+          break;
+          
+        case 'badgeUpdate':
+          document.getElementById('badge').textContent = (msg.total || 0) + ' total';
+          break;
+          
+        case 'capacityUpdate':
+          bus.emit(Topics.CAPACITY_UPDATE, {
+            globalCapacity: msg.globalCapacity,
+            globalStats: msg.globalStats
+          });
+          break;
       }
     });
     
