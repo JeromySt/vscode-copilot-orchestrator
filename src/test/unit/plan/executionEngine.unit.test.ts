@@ -639,6 +639,7 @@ suite('JobExecutionEngine', () => {
         reused: false, baseCommit: 'base', totalMs: 50,
       } as any);
       sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       // RI merge: mergeWithoutCheckout returns conflicts
       sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
         success: false, hasConflicts: true, conflictFiles: ['file.ts'],
@@ -733,6 +734,7 @@ suite('JobExecutionEngine', () => {
         reused: false, baseCommit: 'base', totalMs: 50,
       } as any);
       sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       // merge-tree fails without conflicts or treeSha
       sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
         success: false, hasConflicts: false, error: 'not a valid ref',

@@ -734,8 +734,9 @@ export class JobExecutionEngine {
               node.postchecks = healSpec;
             }
             
-            // Reset state for the heal attempt (do NOT increment attempts — auto-heal
-            // is a sub-attempt of the current attempt, not a new user-visible attempt)
+            // Increment attempts for auto-heal — swapping from shell/process to agent
+            // is a distinct execution attempt visible in attempt history
+            nodeState.attempts++;
             nodeState.error = undefined;
             nodeState.startedAt = Date.now();
             

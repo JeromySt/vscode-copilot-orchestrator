@@ -1044,4 +1044,131 @@ suite('Git Core Repository Unit Tests', () => {
       assert.ok(logMessages.some(m => m.includes('[git] ✓ No ignored files found')));
     });
   });
+
+  suite('stageFile()', () => {
+    test('should stage a file', async () => {
+      execAsyncStub.resolves({ success: true, stdout: '', stderr: '' });
+      await repository.stageFile('/test/repo', 'file.txt');
+      assert.ok(execAsyncStub.calledOnce);
+      assert.deepStrictEqual(execAsyncStub.firstCall.args[0], ['add', 'file.txt']);
+    });
+  });
+
+  suite('getFileDiff()', () => {
+    test('should return diff for a file', async () => {
+      execAsyncOrNullStub.resolves('diff output');
+      const result = await repository.getFileDiff('/test/repo', 'file.txt');
+      assert.strictEqual(result, 'diff output');
+    });
+
+    test('should return null when no diff', async () => {
+      execAsyncOrNullStub.resolves(null);
+      const result = await repository.getFileDiff('/test/repo', 'file.txt');
+      assert.strictEqual(result, null);
+    });
+  });
+
+  suite('getStagedFileDiff()', () => {
+    test('should return staged diff for a file', async () => {
+      execAsyncOrNullStub.resolves('staged diff');
+      const result = await repository.getStagedFileDiff('/test/repo', 'file.txt');
+      assert.strictEqual(result, 'staged diff');
+      assert.deepStrictEqual(execAsyncOrNullStub.firstCall.args[0], ['diff', '--cached', 'file.txt']);
+    });
+  });
+
+  suite('stashShowFiles()', () => {
+    test('should return list of stash files', async () => {
+      execAsyncOrNullStub.resolves('file1.txt\nfile2.txt\n');
+      const result = await repository.stashShowFiles('/test/repo');
+      assert.deepStrictEqual(result, ['file1.txt', 'file2.txt']);
+    });
+
+    test('should return empty array when null', async () => {
+      execAsyncOrNullStub.resolves(null);
+      const result = await repository.stashShowFiles('/test/repo');
+      assert.deepStrictEqual(result, []);
+    });
+  });
+
+  suite('stashShowPatch()', () => {
+    test('should return patch content', async () => {
+      execAsyncOrNullStub.resolves('patch content');
+      const result = await repository.stashShowPatch('/test/repo');
+      assert.strictEqual(result, 'patch content');
+    });
+  });
+
+  suite('hasChangesBetween()', () => {
+    test('should return true when changes exist', async () => {
+      execAsyncOrNullStub.resolves('A\tfile1.txt\nM\tfile2.txt\n');
+      const result = await repository.hasChangesBetween('abc', 'def', '/test/repo');
+      assert.strictEqual(result, true);
+    });
+
+    test('should return false when no changes', async () => {
+      execAsyncOrNullStub.resolves(null);
+      const result = await repository.hasChangesBetween('abc', 'def', '/test/repo');
+      assert.strictEqual(result, false);
+    });
+  });
+
+  suite('clean()', () => {
+    test('should clean successfully', async () => {
+      execAsyncStub.resolves({ success: true, stdout: '', stderr: '' });
+      await repository.clean('/test/repo');
+      assert.deepStrictEqual(execAsyncStub.firstCall.args[0], ['clean', '-fd']);
+    });
+
+    test('should log when logger provided', async () => {
+      execAsyncStub.resolves({ success: true, stdout: '', stderr: '' });
+      const logMessages: string[] = [];
+      const log = (msg: string) => logMessages.push(msg);
+      await repository.clean('/test/repo', log);
+      assert.ok(logMessages.some(m => m.includes('Cleaning untracked files')));
+      assert.ok(logMessages.some(m => m.includes('Clean complete')));
+    });
+
+    test('should throw on failure', async () => {
+      execAsyncStub.resolves({ success: false, stdout: '', stderr: 'error' });
+      await assert.rejects(() => repository.clean('/test/repo'), /Failed to clean/);
+    });
+  });
+
+  suite('getCommitCount()', () => {
+    test('should return commit count', async () => {
+      execAsyncOrNullStub.resolves('5\n');
+      const result = await repository.getCommitCount('abc', 'def', '/test/repo');
+      assert.strictEqual(result, 5);
+    });
+
+    test('should return 0 when null', async () => {
+      execAsyncOrNullStub.resolves(null);
+      const result = await repository.getCommitCount('abc', 'def', '/test/repo');
+      assert.strictEqual(result, 0);
+    });
+  });
+
+  suite('getFileChangesBetween()', () => {
+    test('should parse file changes', async () => {
+      execAsyncOrNullStub.resolves('A\tfile1.txt\nM\tfile2.txt\nD\tfile3.txt\n');
+      const result = await repository.getFileChangesBetween('abc', 'def', '/test/repo');
+      assert.strictEqual(result.length, 3);
+      assert.deepStrictEqual(result[0], { status: 'added', path: 'file1.txt' });
+      assert.deepStrictEqual(result[1], { status: 'modified', path: 'file2.txt' });
+      assert.deepStrictEqual(result[2], { status: 'deleted', path: 'file3.txt' });
+    });
+
+    test('should return empty array when null', async () => {
+      execAsyncOrNullStub.resolves(null);
+      const result = await repository.getFileChangesBetween('abc', 'def', '/test/repo');
+      assert.deepStrictEqual(result, []);
+    });
+
+    test('should handle unknown status as modified', async () => {
+      execAsyncOrNullStub.resolves('X\tunknown.txt\n');
+      const result = await repository.getFileChangesBetween('abc', 'def', '/test/repo');
+      assert.deepStrictEqual(result[0], { status: 'modified', path: 'unknown.txt' });
+    });
+  });
 });

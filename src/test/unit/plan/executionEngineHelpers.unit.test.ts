@@ -298,6 +298,7 @@ suite('JobExecutionEngine - helper methods', () => {
         reused: false, baseCommit: 'base', totalMs: 50,
       } as any);
       sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
         success: false, hasConflicts: false, error: 'some error',
       } as any);
@@ -330,6 +331,7 @@ suite('JobExecutionEngine - helper methods', () => {
         reused: false, baseCommit: 'base', totalMs: 50,
       } as any);
       sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       sandbox.stub(git.merge, 'mergeWithoutCheckout').rejects(new Error('Git fatal error'));
 
       await engine.executeJobNode(plan, sm, node);
@@ -711,6 +713,7 @@ suite('JobExecutionEngine - helper methods', () => {
         reused: false, baseCommit: 'base', totalMs: 50,
       } as any);
       sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       // RI merge fails with no conflicts and no treeSha
       sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
         success: false, hasConflicts: false, error: 'unexpected error',
@@ -752,6 +755,7 @@ suite('JobExecutionEngine - helper methods', () => {
         reused: false, baseCommit: 'base', totalMs: 50,
       } as any);
       sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
         success: true, treeSha: 'tree-sha',
       } as any);
@@ -877,6 +881,7 @@ suite('JobExecutionEngine - helper methods', () => {
         reused: false, baseCommit: 'base', totalMs: 50,
       } as any);
       sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
         success: true, treeSha: 'tree-sha',
       } as any);
