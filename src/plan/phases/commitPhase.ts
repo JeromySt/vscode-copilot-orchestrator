@@ -34,12 +34,12 @@ export interface CommitPhaseContext extends PhaseContext {
 export class CommitPhaseExecutor implements IPhaseExecutor {
   private evidenceValidator: IEvidenceValidator;
   private agentDelegator?: any;
-  private getCopilotConfigDir: () => string;
+  private getCopilotConfigDir: (worktreePath: string) => string;
 
   constructor(deps: {
     evidenceValidator: IEvidenceValidator;
     agentDelegator?: any;
-    getCopilotConfigDir: () => string;
+    getCopilotConfigDir: (worktreePath: string) => string;
   }) {
     this.evidenceValidator = deps.evidenceValidator;
     this.agentDelegator = deps.agentDelegator;
@@ -195,7 +195,7 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
 
       ctx.logInfo('========== AI REVIEW: NO-CHANGE ASSESSMENT ==========');
 
-      const configDir = this.getCopilotConfigDir();
+      const configDir = this.getCopilotConfigDir(worktreePath);
 
       const aiInstructions = `# AI Review: No-Change Assessment
 

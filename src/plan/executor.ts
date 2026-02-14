@@ -74,9 +74,10 @@ export class DefaultJobExecutor implements JobExecutor {
   setAgentDelegator(delegator: any): void { this.agentDelegator = delegator; }
   setEvidenceValidator(validator: IEvidenceValidator): void { this.evidenceValidator = validator; }
 
-  private getCopilotConfigDir(): string {
-    if (!this.storagePath) throw new Error('Storage path not configured. Call setStoragePath() first.');
-    const configDir = path.join(this.storagePath, '.copilot-cli');
+  private getCopilotConfigDir(worktreePath: string): string {
+    // Store Copilot CLI config inside the worktree so session state is
+    // isolated per node and cleaned up when the worktree is removed.
+    const configDir = path.join(worktreePath, '.copilot-cli');
     if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
     return configDir;
   }
@@ -105,7 +106,7 @@ export class DefaultJobExecutor implements JobExecutor {
     const skip = (p: typeof phaseOrder[number]) => phaseOrder.indexOf(p) < resumeIndex;
     const phaseDeps = () => ({ 
       agentDelegator: this.agentDelegator, 
-      getCopilotConfigDir: () => this.getCopilotConfigDir(),
+      getCopilotConfigDir: (wtp: string) => this.getCopilotConfigDir(wtp),
       spawner: this.spawner
     });
     const makeCtx = (phase: ExecutionPhase): PhaseContext => ({

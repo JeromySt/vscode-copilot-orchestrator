@@ -116,7 +116,7 @@ export function runShell(spec: ShellSpec, ctx: PhaseContext, spawner: IProcessSp
 /** Run agent work. */
 export async function runAgent(
   spec: AgentSpec, ctx: PhaseContext,
-  agentDelegator: any | undefined, getCopilotConfigDir: () => string,
+  agentDelegator: any | undefined, getCopilotConfigDir: (worktreePath: string) => string,
 ): Promise<PhaseResult> {
   if (!agentDelegator) return { success: false, error: 'Agent work requires an agent delegator to be configured' };
   ctx.setIsAgentWork(true);
@@ -131,7 +131,7 @@ export async function runAgent(
   if (spec.allowedFolders?.length) ctx.logInfo(`Agent allowed folders: ${spec.allowedFolders.join(', ')}`);
   if (spec.allowedUrls?.length) ctx.logInfo(`Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);
   try {
-    const configDir = getCopilotConfigDir();
+    const configDir = getCopilotConfigDir(ctx.worktreePath);
     const result = await agentDelegator.delegate({
       task: spec.instructions,
       instructions: ctx.node.instructions || spec.context,
@@ -162,12 +162,12 @@ export async function runAgent(
 /** Executes the main work phase of a job node. */
 export class WorkPhaseExecutor implements IPhaseExecutor {
   private agentDelegator?: any;
-  private getCopilotConfigDir: () => string;
+  private getCopilotConfigDir: (worktreePath: string) => string;
   private spawner: IProcessSpawner;
   
   constructor(deps: { 
     agentDelegator?: any; 
-    getCopilotConfigDir: () => string;
+    getCopilotConfigDir: (worktreePath: string) => string;
     spawner: IProcessSpawner;
   }) {
     this.agentDelegator = deps.agentDelegator;

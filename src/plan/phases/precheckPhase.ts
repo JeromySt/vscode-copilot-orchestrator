@@ -20,12 +20,12 @@ import { runAgent } from './workPhase';
  */
 export class PrecheckPhaseExecutor implements IPhaseExecutor {
   private agentDelegator?: any;
-  private getCopilotConfigDir: () => string;
+  private getCopilotConfigDir: (worktreePath: string) => string;
   private spawner: IProcessSpawner;
 
   constructor(deps: {
     agentDelegator?: any;
-    getCopilotConfigDir: () => string;
+    getCopilotConfigDir: (worktreePath: string) => string;
     spawner: IProcessSpawner;
   }) {
     this.agentDelegator = deps.agentDelegator;
