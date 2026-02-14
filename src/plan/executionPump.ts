@@ -8,6 +8,7 @@
  */
 
 import type { ILogger } from '../interfaces/ILogger';
+import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
 import type {
   PlanInstance,
   JobNode,
@@ -34,6 +35,7 @@ export interface ExecutionPumpState {
   config: PlanRunnerConfig;
   globalCapacity?: GlobalCapacityManager;
   events: PlanEventEmitter;
+  processMonitor?: IProcessMonitor;
 }
 
 /**
@@ -55,6 +57,8 @@ export class ExecutionPump {
   private pumpTimer?: NodeJS.Timeout;
   private wakeLockCleanup?: () => void;
   private _acquiringWakeLock = false;
+  /** Tracks how many pump cycles since last liveness check (check every ~10 seconds) */
+  private _livenessCheckCounter = 0;
 
   constructor(state: ExecutionPumpState, log: ILogger, executeNode: ExecuteNodeCallback) {
     this.state = state;
@@ -134,6 +138,43 @@ export class ExecutionPump {
    */
   private async pump(): Promise<void> {
     if (!this.state.executor) return;
+
+    // =========================================================================
+    // LIVENESS WATCHDOG: Detect stale processes after hibernate/crash
+    // Every ~10 pump cycles (~10s), check if any "running" node's PID is dead.
+    // If dead, force-fail the node so it can be retried.
+    // =========================================================================
+    this._livenessCheckCounter++;
+    if (this._livenessCheckCounter >= 10 && this.state.processMonitor) {
+      this._livenessCheckCounter = 0;
+      for (const [planId, plan] of this.state.plans) {
+        const sm = this.state.stateMachines.get(planId);
+        if (!sm) continue;
+        for (const [nodeId, state] of plan.nodeStates) {
+          if (state.status === 'running' && state.pid) {
+            if (!this.state.processMonitor.isRunning(state.pid)) {
+              const node = plan.nodes.get(nodeId);
+              this.log.warn(`Watchdog: PID ${state.pid} for node "${node?.name || nodeId}" is no longer running — marking as failed (possible hibernate/crash)`);
+              state.error = `Process ${state.pid} died unexpectedly (system hibernate or crash). Retry to resume.`;
+              state.pid = undefined;
+              state.lastAttempt = {
+                phase: 'work',
+                startTime: state.startedAt || Date.now(),
+                endTime: Date.now(),
+                error: state.error,
+              };
+              try {
+                sm.transition(nodeId, 'failed');
+                this.state.events.emit('nodeCompleted', planId, nodeId, false);
+              } catch (e) {
+                this.log.warn(`Watchdog: failed to transition node ${nodeId}: ${e}`);
+              }
+              this.state.persistence.save(plan);
+            }
+          }
+        }
+      }
+    }
 
     // Count local running jobs and collect active plan IDs
     let localRunning = 0;
