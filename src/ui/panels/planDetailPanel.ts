@@ -1476,16 +1476,31 @@ export class planDetailPanel {
     // Edge data for client-side incremental edge coloring
     const edgeData: Array<{ index: number; from: string; to: string; isLeafToTarget?: boolean }> = [];
     
+    // Truncate branch names for display (they can be very long)
+    const truncBranch = (name: string, maxLen: number) => {
+      if (name.length <= maxLen) return name;
+      // Show the last segment after / for readability
+      const lastSlash = name.lastIndexOf('/');
+      if (lastSlash > 0 && name.length - lastSlash < maxLen) {
+        return '...' + name.substring(lastSlash);
+      }
+      return name.substring(0, maxLen - 3) + '...';
+    };
+    
     // Add base branch node if different from target
     if (showBaseBranch) {
-      lines.push(`  BASE_BRANCH["🔀 ${this._escapeForMermaid(baseBranchName)}"]`);
+      const truncBase = truncBranch(baseBranchName, MAX_NODE_LABEL_CHARS);
+      lines.push(`  BASE_BRANCH["🔀 ${this._escapeForMermaid(truncBase)}"]`);
       lines.push('  class BASE_BRANCH baseBranchNode');
+      if (truncBase !== baseBranchName) nodeTooltips['BASE_BRANCH'] = baseBranchName;
     }
     
     // Add source target branch node
     if (showTargetBranch) {
-      lines.push(`  TARGET_SOURCE["📍 ${this._escapeForMermaid(targetBranchName)}"]`);
+      const truncTarget = truncBranch(targetBranchName, MAX_NODE_LABEL_CHARS);
+      lines.push(`  TARGET_SOURCE["📍 ${this._escapeForMermaid(truncTarget)}"]`);
       lines.push('  class TARGET_SOURCE branchNode');
+      if (truncTarget !== targetBranchName) nodeTooltips['TARGET_SOURCE'] = targetBranchName;
       
       if (showBaseBranch) {
         lines.push('  BASE_BRANCH --> TARGET_SOURCE');
@@ -1795,8 +1810,9 @@ export class planDetailPanel {
     // Add edges to target branch from leaf nodes
     if (showTargetBranch) {
       lines.push('');
-      lines.push(`  TARGET_DEST["🎯 ${this._escapeForMermaid(targetBranchName)}"]`);
+      lines.push(`  TARGET_DEST["🎯 ${this._escapeForMermaid(truncBranch(targetBranchName, MAX_NODE_LABEL_CHARS))}"]`);
       lines.push('  class TARGET_DEST branchNode');
+      if (targetBranchName.length > MAX_NODE_LABEL_CHARS) nodeTooltips['TARGET_DEST'] = targetBranchName;
       
       for (const leafId of mainResult.leaves) {
         const mapping = nodeEntryExitMap.get(leafId);
