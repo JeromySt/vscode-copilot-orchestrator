@@ -40,22 +40,22 @@ suite('Node Detail Scripts Template', () => {
 
     test('sets currentPhase to null when not provided', () => {
       const script = webviewScripts(baseConfig);
-      assert.ok(script.includes('let currentPhase = null'));
+      assert.ok(script.includes('var currentPhase = null'));
     });
 
     test('sets currentPhase when provided', () => {
       const script = webviewScripts({ ...baseConfig, currentPhase: 'work' });
-      assert.ok(script.includes('let currentPhase = "work"'));
+      assert.ok(script.includes('var currentPhase = "work"'));
     });
 
     test('sets initialPhase when provided', () => {
       const script = webviewScripts({ ...baseConfig, initialPhase: 'prechecks' });
-      assert.ok(script.includes('const initialPhase = "prechecks"'));
+      assert.ok(script.includes('var initialPhase = "prechecks"'));
     });
 
     test('sets initialPhase to null when not provided', () => {
       const script = webviewScripts(baseConfig);
-      assert.ok(script.includes('const initialPhase = null'));
+      assert.ok(script.includes('var initialPhase = null'));
     });
 
     test('includes Ctrl+C copy handler', () => {
@@ -147,7 +147,7 @@ suite('Node Detail Scripts Template', () => {
 
     test('includes process tree rendering', () => {
       const script = webviewScripts(baseConfig);
-      assert.ok(script.includes('initProcessTree'));
+      assert.ok(script.includes('ProcessTreeControl'));
       assert.ok(script.includes('processTree'));
       assert.ok(script.includes('processTreeTitle'));
     });
@@ -225,8 +225,8 @@ suite('Node Detail Scripts Template', () => {
 
     test('does not auto-select phase when both null', () => {
       const script = webviewScripts(baseConfig);
-      assert.ok(script.includes('let currentPhase = null'));
-      assert.ok(script.includes('const initialPhase = null'));
+      assert.ok(script.includes('var currentPhase = null'));
+      assert.ok(script.includes('var initialPhase = null'));
     });
 
     test('process tree renderNode handles nested children', () => {
