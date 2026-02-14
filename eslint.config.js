@@ -166,6 +166,10 @@ module.exports = [
             group: ['**/git/core/executor'],
             message: 'git/core/executor is internal to the git module. Use the public git API (import * as git from ../git) instead.',
           },
+          {
+            group: ['**/git', '**/git/index'],
+            message: 'Use IGitOperations from DI container instead of importing the git module directly.',
+          },
         ],
       }],
       'no-restricted-syntax': ['error',
@@ -234,10 +238,10 @@ module.exports = [
     },
   },
 
-  // ── 4b. git/core internals: may import from git/core/executor ───
+  // ── 4b. git internals: may import from git modules ───
   {
     files: [
-      'src/git/core/**/*.ts',
+      'src/git/**/*.ts',
     ],
     rules: {
       'no-restricted-imports': ['error', {
@@ -247,7 +251,7 @@ module.exports = [
             message: 'Use IProcessSpawner instead. Only src/interfaces/IProcessSpawner.ts may import child_process directly.',
           },
         ],
-        // No patterns restriction — git/core files may import from each other
+        // No patterns restriction — git files may import from git modules
       }],
     },
   },
@@ -259,6 +263,7 @@ module.exports = [
       'src/compositionTest.ts',
     ],
     rules: {
+      'no-restricted-imports': 'off',
       'no-restricted-syntax': 'off',
     },
   },
