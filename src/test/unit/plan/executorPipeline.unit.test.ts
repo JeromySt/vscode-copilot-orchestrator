@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { DefaultJobExecutor } from '../../../plan/executor';
+import { DefaultProcessSpawner } from '../../../interfaces/IProcessSpawner';
 import type { ExecutionContext, JobExecutionResult, PlanInstance, JobNode } from '../../../plan/types';
 
 function silenceConsole(): { restore: () => void } {
@@ -52,7 +53,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
 
   test('execute returns error when worktree does not exist', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     executor.setStoragePath(dir);
 
     const ctx: ExecutionContext = {
@@ -72,7 +73,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
   test('execute succeeds with no work and commit finds no evidence', async () => {
     const dir = makeTmpDir();
     const worktreeDir = makeTmpDir();
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     executor.setStoragePath(dir);
 
     const node = makeNode({ work: undefined, prechecks: undefined, postchecks: undefined });
@@ -92,37 +93,37 @@ suite('DefaultJobExecutor.execute pipeline', () => {
 
   test('cancel does nothing for unknown execution', () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     executor.setStoragePath(dir);
     // Should not throw
     executor.cancel('p1', 'n1');
   });
 
   test('isActive returns false for unknown', () => {
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     assert.strictEqual(executor.isActive('p1', 'n1'), false);
   });
 
   test('getLogs returns empty for unknown', () => {
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     const logs = executor.getLogs('p1', 'n1');
     assert.deepStrictEqual(logs, []);
   });
 
   test('getLogsForPhase returns empty for unknown', () => {
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     const logs = executor.getLogsForPhase('p1', 'n1', 'work');
     assert.deepStrictEqual(logs, []);
   });
 
   test('getLogFileSize returns 0 for unknown', () => {
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     const size = executor.getLogFileSize('p1', 'n1');
     assert.strictEqual(size, 0);
   });
 
   test('log method stores entries', () => {
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     executor.log('p1', 'n1', 'work', 'info', 'test message');
     const logs = executor.getLogs('p1', 'n1');
     assert.ok(logs.length > 0 || true); // May store under different key format
@@ -130,7 +131,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
 
   test('getProcessStats returns inactive for unknown', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     executor.setStoragePath(dir);
     const stats = await executor.getProcessStats('p1', 'n1');
     assert.strictEqual(stats.running, false);
@@ -140,7 +141,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
   test('execute with resumeFromPhase skips earlier phases', async () => {
     const dir = makeTmpDir();
     const worktreeDir = makeTmpDir();
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     executor.setStoragePath(dir);
 
     const node = makeNode({
@@ -169,7 +170,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
   test('execute catches thrown exceptions', async () => {
     const dir = makeTmpDir();
     const worktreeDir = makeTmpDir();
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     executor.setStoragePath(dir);
 
     // Create a node whose work will cause an internal exception

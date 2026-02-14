@@ -4,7 +4,7 @@
  * @module ui/webview/controls
  */
 
-export { DurationCounter, DurationData, formatElapsed } from './durationCounter';
+export { DurationCounter, DurationData } from './durationCounter';
 export { StatusBadge, StatusBadgeData } from './statusBadge';
 export { ProgressBar, ProgressBarData } from './progressBar';
 export { NodeCard, NodeCardData } from './nodeCard';
@@ -15,7 +15,7 @@ export { ProcessTree, ProcessTreeData, ProcessNode } from './processTree';
 export { LogViewer, LogViewerData } from './logViewer';
 export { PhaseTabBar, PhaseTabBarData, PhaseInfo, phaseStatusIcon } from './phaseTabBar';
 export { AttemptCard, AttemptCardData } from './attemptCard';
-export { AiUsageStats, AiUsageData, ModelBreakdown, formatTokenCount } from './aiUsageStats';
+export { AiUsageStats, AiUsageData, ModelBreakdown } from './aiUsageStats';
 export { WorkSummary, WorkSummaryData } from './workSummary';
 export { ConfigDisplay, ConfigDisplayData } from './configDisplay';
 export { PlanListCard, PlanListCardData } from './planListCard';

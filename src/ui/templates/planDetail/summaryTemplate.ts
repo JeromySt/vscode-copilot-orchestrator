@@ -8,6 +8,7 @@
  */
 
 import { escapeHtml } from '../helpers';
+import { formatTokenCount } from '../../../plan/metricsAggregator';
 
 /**
  * Job summary data for work summary rendering.
@@ -67,17 +68,7 @@ export interface PlanMetricsBarData {
   modelBreakdown?: ModelBreakdownItem[];
 }
 
-/**
- * Format a token count for display.
- *
- * @param n - Raw token count.
- * @returns Formatted string (e.g. '1.2k', '3.4m').
- */
-function formatTokenCountLocal(n: number): string {
-  if (n >= 1000000) { return (n / 1000000).toFixed(1) + 'm'; }
-  if (n >= 1000) { return (n / 1000).toFixed(1) + 'k'; }
-  return String(n);
-}
+
 
 /**
  * Render the work summary section HTML fragment.
@@ -176,11 +167,11 @@ export function renderMetricsBar(data: PlanMetricsBarData | undefined | null): s
   let modelsLine = '';
   if (data.modelBreakdown && data.modelBreakdown.length > 0) {
     const rows = data.modelBreakdown.map(m => {
-      const cached = m.cachedTokens ? `, ${escapeHtml(formatTokenCountLocal(m.cachedTokens))} cached` : '';
+      const cached = m.cachedTokens ? `, ${escapeHtml(formatTokenCount(m.cachedTokens))} cached` : '';
       const reqs = m.premiumRequests !== undefined ? ` (${m.premiumRequests} req)` : '';
       return `<div class="model-row">
             <span class="model-name">${escapeHtml(m.model)}</span>
-            <span class="model-tokens">${escapeHtml(formatTokenCountLocal(m.inputTokens))} in, ${escapeHtml(formatTokenCountLocal(m.outputTokens))} out${cached}${reqs}</span>
+            <span class="model-tokens">${escapeHtml(formatTokenCount(m.inputTokens))} in, ${escapeHtml(formatTokenCount(m.outputTokens))} out${cached}${reqs}</span>
           </div>`;
     }).join('');
     modelsLine = `

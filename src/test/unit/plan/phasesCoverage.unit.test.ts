@@ -28,6 +28,7 @@ suite('workPhase edge cases', () => {
     const executor = new workPhase.WorkPhaseExecutor({
       agentDelegator: undefined,
       getCopilotConfigDir: () => '/tmp/.copilot-cli',
+      spawner: { spawn: () => ({} as any) },
     });
     assert.ok(executor);
   });

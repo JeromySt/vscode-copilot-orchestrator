@@ -23,9 +23,10 @@
  * @module core/powerManager
  */
 
-import { spawn, ChildProcess } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import * as os from 'os';
 import { Logger } from './logger';
+import type { IProcessSpawner } from '../interfaces/IProcessSpawner';
 
 const log = Logger.for('extension');
 
@@ -92,6 +93,11 @@ export interface PowerManager {
 export class PowerManagerImpl implements PowerManager {
   private activeLocks: Map<string, ChildProcess | (() => void)> = new Map();
   private lockIdCounter = 0;
+  private spawner: IProcessSpawner;
+
+  constructor(spawner: IProcessSpawner) {
+    this.spawner = spawner;
+  }
 
   /**
    * Acquire a wake lock to prevent system sleep
@@ -214,7 +220,7 @@ while ($true) {
 }
 `.trim();
 
-      const proc = spawn('powershell.exe', [
+      const proc = this.spawner.spawn('powershell.exe', [
         '-NoProfile',
         '-NonInteractive',
         '-WindowStyle', 'Hidden',
@@ -222,7 +228,7 @@ while ($true) {
       ], {
         detached: false,
         stdio: 'ignore'
-      });
+      }) as ChildProcess;
 
       proc.on('error', (error) => {
         log.warn(`Windows power management process error: ${error.message}`);
@@ -264,10 +270,10 @@ while ($true) {
       // -i: prevent idle sleep
       // -m: prevent disk sleep
       // -s: prevent system sleep
-      const proc = spawn('caffeinate', ['-dims'], {
+      const proc = this.spawner.spawn('caffeinate', ['-dims'], {
         detached: false,
         stdio: 'ignore'
-      });
+      }) as ChildProcess;
 
       proc.on('error', (error) => {
         log.warn(`macOS caffeinate error: ${error.message}`);
@@ -308,7 +314,7 @@ while ($true) {
   private async preventSleepLinux(reason: string): Promise<ChildProcess> {
     return new Promise((resolve, reject) => {
       // Try systemd-inhibit first
-      const proc = spawn('systemd-inhibit', [
+      const proc = this.spawner.spawn('systemd-inhibit', [
         '--what=idle:sleep',
         '--who=Copilot Orchestrator',
         `--why=${reason}`,
@@ -316,7 +322,7 @@ while ($true) {
       ], {
         detached: false,
         stdio: 'ignore'
-      });
+      }) as ChildProcess;
 
       proc.on('error', (error) => {
         log.warn(`Linux systemd-inhibit error: ${error.message}`);
@@ -367,10 +373,10 @@ while true; do
 done
 `.trim();
 
-      const proc = spawn('sh', ['-c', script], {
+      const proc = this.spawner.spawn('sh', ['-c', script], {
         detached: false,
         stdio: 'ignore'
-      });
+      }) as ChildProcess;
 
       proc.on('error', (error) => {
         log.warn(`Linux fallback power management error: ${error.message}`);
@@ -391,8 +397,13 @@ done
 
 /**
  * Singleton instance of the power manager
+ * 
+ * @deprecated Use dependency injection instead
  */
-export const powerManager = new PowerManagerImpl();
+export const powerManager = (() => {
+  const { DefaultProcessSpawner } = require('../interfaces/IProcessSpawner');
+  return new PowerManagerImpl(new DefaultProcessSpawner());
+})();
 
 // Ensure cleanup on process exit
 process.on('exit', () => {

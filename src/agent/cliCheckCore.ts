@@ -1,5 +1,5 @@
 
-import * as cp from 'child_process';
+import type { IProcessSpawner } from '../interfaces/IProcessSpawner';
 
 // Cache the CLI availability result - it doesn't change during extension lifetime
 let cachedCliAvailable: boolean | null = null;
@@ -34,12 +34,12 @@ export function isCopilotCliAvailable(): boolean {
  * Force a fresh check of Copilot CLI availability (async).
  * Updates the cache and returns the result.
  */
-export async function checkCopilotCliAsync(): Promise<boolean> {
-  const result = await cmdOkAsync('gh copilot --help') || 
-                 await hasGhCopilotAsync() || 
-                 await cmdOkAsync('copilot --help') || 
-                 await cmdOkAsync('github-copilot --help') || 
-                 await cmdOkAsync('github-copilot-cli --help');
+export async function checkCopilotCliAsync(spawner?: IProcessSpawner): Promise<boolean> {
+  const result = await cmdOkAsync('gh copilot --help', spawner) || 
+                 await hasGhCopilotAsync(spawner) || 
+                 await cmdOkAsync('copilot --help', spawner) || 
+                 await cmdOkAsync('github-copilot --help', spawner) || 
+                 await cmdOkAsync('github-copilot-cli --help', spawner);
   cachedCliAvailable = result;
   return result;
 }
@@ -60,10 +60,15 @@ export function isCliCachePopulated(): boolean {
 }
 
 // Async command check using spawn
-export async function cmdOkAsync(cmd: string): Promise<boolean> {
+export async function cmdOkAsync(cmd: string, spawner?: IProcessSpawner): Promise<boolean> {
   return new Promise((resolve) => {
-    const proc = cp.spawn(cmd, [], { shell: true, stdio: 'ignore' });
-    proc.on('close', (code) => resolve(code === 0));
+    const actualSpawner = spawner || (() => {
+      const { DefaultProcessSpawner } = require('../interfaces/IProcessSpawner');
+      return new DefaultProcessSpawner();
+    })();
+    
+    const proc = actualSpawner.spawn(cmd, [], { shell: true, stdio: 'ignore' });
+    proc.on('close', (code: number | null) => resolve(code === 0));
     proc.on('error', () => resolve(false));
     // Timeout after 5 seconds
     setTimeout(() => {
@@ -73,11 +78,16 @@ export async function cmdOkAsync(cmd: string): Promise<boolean> {
   });
 }
 
-async function hasGhCopilotAsync(): Promise<boolean> {
+async function hasGhCopilotAsync(spawner?: IProcessSpawner): Promise<boolean> {
   return new Promise((resolve) => {
-    const proc = cp.spawn('gh', ['extension', 'list'], { shell: true });
+    const actualSpawner = spawner || (() => {
+      const { DefaultProcessSpawner } = require('../interfaces/IProcessSpawner');
+      return new DefaultProcessSpawner();
+    })();
+    
+    const proc = actualSpawner.spawn('gh', ['extension', 'list'], { shell: true });
     let output = '';
-    proc.stdout?.on('data', (data) => { output += data.toString(); });
+    proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
     proc.on('close', () => resolve(/github\/gh-copilot/i.test(output)));
     proc.on('error', () => resolve(false));
     setTimeout(() => {

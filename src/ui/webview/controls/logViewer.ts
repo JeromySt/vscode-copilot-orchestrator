@@ -10,6 +10,7 @@
 import { EventBus } from '../eventBus';
 import { SubscribableControl } from '../subscribableControl';
 import { Topics } from '../topics';
+import { escapeHtml } from '../../templates/helpers';
 
 /** Data delivered with each update. */
 export interface LogViewerData {
@@ -21,9 +22,7 @@ export interface LogViewerData {
   append?: boolean;
 }
 
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+
 
 /**
  * Log viewer control with incremental append and auto-scroll.

@@ -7,6 +7,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { DefaultJobExecutor } from '../../../plan/executor';
+import { DefaultProcessSpawner } from '../../../interfaces/IProcessSpawner';
 import { WorkPhaseExecutor } from '../../../plan/phases/workPhase';
 import { PostcheckPhaseExecutor } from '../../../plan/phases/postcheckPhase';
 import { Logger } from '../../../core/logger';
@@ -57,7 +58,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
 
   test('execute handles work phase failure (line 140)', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     executor.setStoragePath(dir);
 
     // Mock work phase to fail
@@ -100,7 +101,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
 
   test('execute handles postchecks failure (line 160)', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     executor.setStoragePath(dir);
 
     // Mock work phase to succeed
@@ -147,7 +148,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel handles Windows process termination (lines 202-205)', () => {
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     const logger = createMockLogger();
     
     // Mock Windows platform
@@ -191,7 +192,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel handles Unix process termination (lines 202-205)', () => {
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     
     // Mock Unix platform
     const origPlatform = process.platform;
@@ -232,7 +233,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel handles process kill exception gracefully (lines 204-205)', () => {
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     
     // Mock an active execution with process that throws on kill
     const planId = 'test-plan';
@@ -262,7 +263,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel with no active execution (edge case)', () => {
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     
     // Should not throw when no execution exists
     assert.doesNotThrow(() => {
@@ -271,7 +272,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel with execution but no process (edge case)', () => {
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     
     // Mock an active execution without process
     const planId = 'test-plan';

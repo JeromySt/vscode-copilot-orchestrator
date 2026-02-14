@@ -8,10 +8,11 @@
  */
 
 import * as path from 'path';
-import { spawn } from 'child_process';
 import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces/IPhaseExecutor';
+import type { IProcessSpawner } from '../../interfaces/IProcessSpawner';
 import { normalizeWorkSpec } from '../types';
 import type { ProcessSpec, ShellSpec, AgentSpec, CopilotUsageMetrics } from '../types';
+import { killProcessTree } from '../../process/processHelpers';
 
 /** Adapt a shell command for Windows PowerShell 5.x compatibility. */
 export function adaptCommandForPowerShell(command: string): string {
@@ -26,14 +27,15 @@ export function adaptCommandForPowerShell(command: string): string {
 
 // Shared helper: spawn a process/shell and track it in the PhaseContext
 function spawnAndTrack(
+  spawner: IProcessSpawner,
   executable: string, args: string[], cwd: string,
   env: NodeJS.ProcessEnv, timeout: number, ctx: PhaseContext, label: string,
 ): Promise<PhaseResult> {
   return new Promise((resolve) => {
     ctx.logInfo(`${label}: ${executable}`);
     ctx.logInfo(`Working directory: ${cwd}`);
-    const proc = spawn(executable, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-    ctx.setProcess(proc);
+    const proc = spawner.spawn(executable, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    ctx.setProcess(proc as any); // Cast to ChildProcess since ChildProcessLike is compatible
     const startTime = Date.now();
     ctx.setStartTime(startTime);
     ctx.logInfo(`${label} started: PID ${proc.pid}`);
@@ -41,9 +43,13 @@ function spawnAndTrack(
     let timeoutHandle: NodeJS.Timeout | undefined;
     const effectiveTimeout = timeout > 0 ? Math.min(timeout, 2147483647) : 0;
     if (effectiveTimeout > 0) {
-      timeoutHandle = setTimeout(() => {
+      timeoutHandle = setTimeout(async () => {
         ctx.logError(`${label} timed out after ${effectiveTimeout}ms (PID: ${proc.pid})`);
-        try { if (process.platform === 'win32') spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']); else proc.kill('SIGTERM'); } catch { /* ignore */ }
+        try { 
+          if (proc.pid) {
+            await killProcessTree(spawner, proc.pid, true);
+          }
+        } catch { /* ignore */ }
       }, effectiveTimeout);
     }
     proc.stdout?.setEncoding('utf8');
@@ -79,16 +85,16 @@ function spawnAndTrack(
 }
 
 /** Run a direct process (no shell). */
-export function runProcess(spec: ProcessSpec, ctx: PhaseContext): Promise<PhaseResult> {
+export function runProcess(spec: ProcessSpec, ctx: PhaseContext, spawner: IProcessSpawner): Promise<PhaseResult> {
   const cwd = spec.cwd ? path.resolve(ctx.worktreePath, spec.cwd) : ctx.worktreePath;
   const args = spec.args || [];
   ctx.logInfo(`Arguments: ${JSON.stringify(args)}`);
   if (spec.env) ctx.logInfo(`Environment overrides: ${JSON.stringify(spec.env)}`);
-  return spawnAndTrack(spec.executable, args, cwd, { ...process.env, ...spec.env }, spec.timeout || 0, ctx, 'Process');
+  return spawnAndTrack(spawner, spec.executable, args, cwd, { ...process.env, ...spec.env }, spec.timeout || 0, ctx, 'Process');
 }
 
 /** Run a shell command. */
-export function runShell(spec: ShellSpec, ctx: PhaseContext): Promise<PhaseResult> {
+export function runShell(spec: ShellSpec, ctx: PhaseContext, spawner: IProcessSpawner): Promise<PhaseResult> {
   const cwd = spec.cwd ? path.resolve(ctx.worktreePath, spec.cwd) : ctx.worktreePath;
   const isWindows = process.platform === 'win32';
   let shell: string, shellArgs: string[];
@@ -104,7 +110,7 @@ export function runShell(spec: ShellSpec, ctx: PhaseContext): Promise<PhaseResul
   }
   ctx.logInfo(`Command: ${spec.command}`);
   if (spec.env) ctx.logInfo(`Environment overrides: ${JSON.stringify(spec.env)}`);
-  return spawnAndTrack(shell, shellArgs, cwd, { ...process.env, ...spec.env }, spec.timeout || 0, ctx, 'Shell');
+  return spawnAndTrack(spawner, shell, shellArgs, cwd, { ...process.env, ...spec.env }, spec.timeout || 0, ctx, 'Shell');
 }
 
 /** Run agent work. */
@@ -157,17 +163,25 @@ export async function runAgent(
 export class WorkPhaseExecutor implements IPhaseExecutor {
   private agentDelegator?: any;
   private getCopilotConfigDir: () => string;
-  constructor(deps: { agentDelegator?: any; getCopilotConfigDir: () => string }) {
+  private spawner: IProcessSpawner;
+  
+  constructor(deps: { 
+    agentDelegator?: any; 
+    getCopilotConfigDir: () => string;
+    spawner: IProcessSpawner;
+  }) {
     this.agentDelegator = deps.agentDelegator;
     this.getCopilotConfigDir = deps.getCopilotConfigDir;
+    this.spawner = deps.spawner;
   }
+  
   async execute(context: PhaseContext): Promise<PhaseResult> {
     const normalized = normalizeWorkSpec(context.workSpec);
     if (!normalized) return { success: true };
     context.logInfo(`Work type: ${normalized.type}`);
     switch (normalized.type) {
-      case 'process': return runProcess(normalized as ProcessSpec, context);
-      case 'shell': return runShell(normalized as ShellSpec, context);
+      case 'process': return runProcess(normalized as ProcessSpec, context, this.spawner);
+      case 'shell': return runShell(normalized as ShellSpec, context, this.spawner);
       case 'agent': return runAgent(normalized as AgentSpec, context, this.agentDelegator, this.getCopilotConfigDir);
       default: return { success: false, error: `Unknown work type: ${(normalized as any).type}` };
     }

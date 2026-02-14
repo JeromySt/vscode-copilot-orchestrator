@@ -94,3 +94,9 @@ export const IClipboardService = Symbol('IClipboardService');
  * Provides a single-interval heartbeat for UI components.
  */
 export const IPulseEmitter = Symbol('IPulseEmitter');
+
+/**
+ * Token for IProcessSpawner service.
+ * Provides process spawning abstraction for testability.
+ */
+export const IProcessSpawner = Symbol('IProcessSpawner');

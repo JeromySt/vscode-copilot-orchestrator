@@ -10,25 +10,9 @@
 import { EventBus, Subscription } from '../eventBus';
 import { SubscribableControl } from '../subscribableControl';
 import { Topics } from '../topics';
+import { formatDurationMs } from '../../templates/helpers';
 
-/**
- * Format milliseconds into a human-readable duration string.
- *
- * @param ms - Elapsed time in milliseconds.
- * @returns Formatted string such as `"1m 30s"` or `"2h 5m"`.
- */
-export function formatElapsed(ms: number): string {
-  if (ms < 0) { return '0s'; }
-  const totalSec = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSec / 3600);
-  const minutes = Math.floor((totalSec % 3600) / 60);
-  const seconds = totalSec % 60;
-  const parts: string[] = [];
-  if (hours > 0) { parts.push(`${hours}h`); }
-  if (minutes > 0) { parts.push(`${minutes}m`); }
-  if (seconds > 0 || parts.length === 0) { parts.push(`${seconds}s`); }
-  return parts.join(' ');
-}
+
 
 /** Data delivered with each update. */
 export interface DurationData {
@@ -74,7 +58,7 @@ export class DurationCounter extends SubscribableControl {
       el.textContent = '--';
     } else {
       const elapsed = Date.now() - this.startedAt;
-      el.textContent = formatElapsed(elapsed);
+      el.textContent = formatDurationMs(elapsed);
     }
     this.publishUpdate();
   }

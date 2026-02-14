@@ -25,8 +25,7 @@ import {
   writeJSONAsync,
   existsAsync,
   cpuCountMinusOne,
-  ensureOrchestratorDirs,
-  ensureDirectory
+  ensureOrchestratorDirs
 } from '../../../core/utils';
 
 suite('Utils Unit Tests', () => {
@@ -379,12 +378,12 @@ suite('Utils Unit Tests', () => {
     });
   });
 
-  suite('ensureDirectory', () => {
+  suite('ensureDir', () => {
     test('creates directory if it does not exist', () => {
       const testDir = path.join(tempDir, 'ensure-test');
       assert.ok(!fs.existsSync(testDir));
       
-      ensureDirectory(testDir);
+      ensureDir(testDir);
       
       assert.ok(fs.existsSync(testDir));
       assert.ok(fs.statSync(testDir).isDirectory());
@@ -394,7 +393,7 @@ suite('Utils Unit Tests', () => {
       const testDir = path.join(tempDir, 'ensure-existing');
       fs.mkdirSync(testDir);
       
-      ensureDirectory(testDir);
+      ensureDir(testDir);
       
       assert.ok(fs.existsSync(testDir));
     });
@@ -402,7 +401,7 @@ suite('Utils Unit Tests', () => {
     test('creates parent directories recursively', () => {
       const testDir = path.join(tempDir, 'ensure', 'deep', 'path');
       
-      ensureDirectory(testDir);
+      ensureDir(testDir);
       
       assert.ok(fs.existsSync(testDir));
       assert.ok(fs.existsSync(path.dirname(testDir)));
@@ -442,7 +441,7 @@ suite('Utils Unit Tests', () => {
       
       // Use other directory utilities
       const customDir = path.join(workspaceDir, 'custom');
-      ensureDirectory(customDir);
+      ensureDir(customDir);
       
       const asyncDir = path.join(workspaceDir, 'async-custom');
       await ensureDirAsync(asyncDir);

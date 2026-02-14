@@ -8,6 +8,7 @@
  */
 
 import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces/IPhaseExecutor';
+import type { IProcessSpawner } from '../../interfaces/IProcessSpawner';
 import { normalizeWorkSpec } from '../types';
 import type { ProcessSpec, ShellSpec, AgentSpec } from '../types';
 import { runProcess, runShell, runAgent } from './workPhase';
@@ -18,13 +19,16 @@ import { runProcess, runShell, runAgent } from './workPhase';
 export class PostcheckPhaseExecutor implements IPhaseExecutor {
   private agentDelegator?: any;
   private getCopilotConfigDir: () => string;
+  private spawner: IProcessSpawner;
 
   constructor(deps: {
     agentDelegator?: any;
     getCopilotConfigDir: () => string;
+    spawner: IProcessSpawner;
   }) {
     this.agentDelegator = deps.agentDelegator;
     this.getCopilotConfigDir = deps.getCopilotConfigDir;
+    this.spawner = deps.spawner;
   }
 
   async execute(context: PhaseContext): Promise<PhaseResult> {
@@ -38,9 +42,9 @@ export class PostcheckPhaseExecutor implements IPhaseExecutor {
 
     switch (normalized.type) {
       case 'process':
-        return runProcess(normalized as ProcessSpec, context);
+        return runProcess(normalized as ProcessSpec, context, this.spawner);
       case 'shell':
-        return runShell(normalized as ShellSpec, context);
+        return runShell(normalized as ShellSpec, context, this.spawner);
       case 'agent':
         return runAgent(
           normalized as AgentSpec,

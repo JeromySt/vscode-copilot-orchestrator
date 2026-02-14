@@ -100,15 +100,4 @@ export function ensureOrchestratorDirs(workspacePath: string): string {
   return orchestratorPath;
 }
 
-/**
- * Ensure a specific directory exists, creating it if necessary.
- * 
- * Use this for directories outside .orchestrator (e.g., worktrees).
- * 
- * @param dirPath - Absolute path to the directory
- */
-export function ensureDirectory(dirPath: string): void {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-}
+

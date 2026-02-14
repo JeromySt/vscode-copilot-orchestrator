@@ -6,6 +6,19 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { PostcheckPhaseExecutor } from '../../../../plan/phases/postcheckPhase';
 import type { PhaseContext } from '../../../../interfaces/IPhaseExecutor';
+import type { IProcessSpawner } from '../../../../interfaces/IProcessSpawner';
+import { EventEmitter } from 'events';
+const stubSpawner: IProcessSpawner = {
+  spawn: () => {
+    const proc = Object.assign(new EventEmitter(), {
+      pid: 0, exitCode: 1, killed: false,
+      stdout: new EventEmitter(), stderr: new EventEmitter(),
+      kill: () => true,
+    });
+    process.nextTick(() => proc.emit('close', 1));
+    return proc as any;
+  },
+};
 import type { JobNode } from '../../../../plan/types';
 
 function makeNode(overrides: Partial<JobNode> = {}): JobNode {
@@ -27,14 +40,14 @@ function makeCtx(overrides: Partial<PhaseContext> = {}): PhaseContext {
 
 suite('PostcheckPhaseExecutor', () => {
   test('returns success when no workSpec', async () => {
-    const executor = new PostcheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp' });
+    const executor = new PostcheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const result = await executor.execute(makeCtx({ workSpec: undefined }));
     assert.strictEqual(result.success, true);
   });
 
   test('delegates agent work', async () => {
     const delegator = { delegate: sinon.stub().resolves({ success: true, sessionId: 'ss', metrics: { durationMs: 10 } }) };
-    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp' });
+    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'verify' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);
@@ -42,7 +55,7 @@ suite('PostcheckPhaseExecutor', () => {
   });
 
   test('returns error for unknown type', async () => {
-    const executor = new PostcheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp' });
+    const executor = new PostcheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'fake' as any } as any });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -50,7 +63,7 @@ suite('PostcheckPhaseExecutor', () => {
   });
 
   test('agent fails without delegator', async () => {
-    const executor = new PostcheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp' });
+    const executor = new PostcheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'check' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -59,7 +72,7 @@ suite('PostcheckPhaseExecutor', () => {
 
   test('agent failure returns error', async () => {
     const delegator = { delegate: sinon.stub().resolves({ success: false, error: 'nope', exitCode: 2 }) };
-    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp' });
+    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'verify' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -68,7 +81,7 @@ suite('PostcheckPhaseExecutor', () => {
 
   test('agent exception caught', async () => {
     const delegator = { delegate: sinon.stub().rejects(new Error('crash')) };
-    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp' });
+    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'verify' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -76,7 +89,7 @@ suite('PostcheckPhaseExecutor', () => {
   });
 
   test('normalises string workSpec', async () => {
-    const executor = new PostcheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp' });
+    const executor = new PostcheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: 'npm test' });
     const result = await executor.execute(ctx);
     assert.ok(typeof result.success === 'boolean');
@@ -84,7 +97,7 @@ suite('PostcheckPhaseExecutor', () => {
 
   test('normalises @agent string', async () => {
     const delegator = { delegate: sinon.stub().resolves({ success: true }) };
-    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp' });
+    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: '@agent review code' });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);
@@ -92,7 +105,7 @@ suite('PostcheckPhaseExecutor', () => {
 
   test('logs work type', async () => {
     const logInfo = sinon.stub();
-    const executor = new PostcheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp' });
+    const executor = new PostcheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'x' }, logInfo });
     await executor.execute(ctx);
     assert.ok(logInfo.calledWith('Work type: agent'));

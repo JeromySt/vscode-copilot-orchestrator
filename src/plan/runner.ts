@@ -30,6 +30,7 @@ import type {
   AttemptRecord,
   WorkSpec,
 } from './types';
+import type { PlanRunnerConfig, RetryNodeOptions } from '../interfaces/IPlanRunner';
 import { PlanStateMachine } from './stateMachine';
 import { PlanScheduler } from './scheduler';
 import { PlanPersistence } from './persistence';
@@ -80,21 +81,7 @@ export interface JobExecutor {
   ): Promise<JobWorkSummary>;
 }
 
-/** Plan Runner configuration */
-export interface PlanRunnerConfig {
-  storagePath: string;
-  defaultRepoPath?: string;
-  maxParallel?: number;
-  pumpInterval?: number;
-}
 
-/** Options for retrying a failed node */
-export interface RetryNodeOptions {
-  newWork?: WorkSpec;
-  newPrechecks?: WorkSpec | null;
-  newPostchecks?: WorkSpec | null;
-  clearWorktree?: boolean;
-}
 
 
 /**
@@ -118,7 +105,10 @@ export class PlanRunner extends EventEmitter {
     const configManager = new PlanConfigManager();
     const scheduler = new PlanScheduler({ globalMaxParallel: config.maxParallel || 8 });
     const persistence = new PlanPersistence(config.storagePath);
-    const processMonitor = new ProcessMonitor();
+    const processMonitor = (() => {
+      const { DefaultProcessSpawner } = require('../interfaces/IProcessSpawner');
+      return new ProcessMonitor(new DefaultProcessSpawner());
+    })();
 
     const state: PlanRunnerState = {
       plans: new Map(),
@@ -271,3 +261,6 @@ export class PlanRunner extends EventEmitter {
     return this._nodeManager.forceFailNode(planId, nodeId);
   }
 }
+
+// Re-export types from IPlanRunner to maintain backwards compatibility
+export type { PlanRunnerConfig, RetryNodeOptions } from '../interfaces/IPlanRunner';

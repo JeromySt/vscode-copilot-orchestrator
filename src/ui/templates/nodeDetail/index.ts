@@ -25,7 +25,7 @@ export type { AttemptCardData, AttemptHistoryData } from './attemptsTemplate';
 export { configSectionHtml, dependenciesSectionHtml, gitInfoSectionHtml, renderSpecContent, getSpecTypeInfo } from './configTemplate';
 export type { ConfigData } from './configTemplate';
 
-export { metricsSummaryHtml, attemptMetricsHtml, formatPremiumRequests, formatDurationSeconds, formatTokenCount, formatCodeChanges } from './metricsTemplate';
+export { metricsSummaryHtml, attemptMetricsHtml } from './metricsTemplate';
 export type { MetricsData, PhaseMetricsData, ModelBreakdownData, CodeChangesData } from './metricsTemplate';
 
 export { webviewScripts } from './scriptsTemplate';

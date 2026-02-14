@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { DefaultJobExecutor } from '../../../plan/executor';
+import { DefaultProcessSpawner } from '../../../interfaces/IProcessSpawner';
 import type { ExecutionPhase } from '../../../plan/types';
 
 function silenceConsole(): { restore: () => void } {
@@ -33,7 +34,7 @@ suite('DefaultJobExecutor', () => {
 
   setup(() => {
     quiet = silenceConsole();
-    executor = new DefaultJobExecutor();
+    executor = new DefaultJobExecutor(new DefaultProcessSpawner());
     tmpDirs = [];
   });
 

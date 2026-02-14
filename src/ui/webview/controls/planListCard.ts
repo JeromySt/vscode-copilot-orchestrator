@@ -10,6 +10,7 @@
 import { EventBus } from '../eventBus';
 import { SubscribableControl } from '../subscribableControl';
 import { Topics } from '../topics';
+import { escapeHtml } from '../../templates/helpers';
 
 /** Data delivered with each update. */
 export interface PlanListCardData {
@@ -31,9 +32,7 @@ const STATUS_ICONS: Record<string, string> = {
   paused: '⏸',
 };
 
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+
 
 /**
  * Sidebar plan list card showing plan status and progress.

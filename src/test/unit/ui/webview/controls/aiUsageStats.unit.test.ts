@@ -6,7 +6,8 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { EventBus } from '../../../../../ui/webview/eventBus';
 import { Topics } from '../../../../../ui/webview/topics';
-import { AiUsageStats, formatTokenCount } from '../../../../../ui/webview/controls/aiUsageStats';
+import { AiUsageStats } from '../../../../../ui/webview/controls/aiUsageStats';
+import { formatTokenCount } from '../../../../../plan/metricsAggregator';
 
 function mockDocument(elements: Record<string, any> = {}): () => void {
   const prev = (globalThis as any).document;

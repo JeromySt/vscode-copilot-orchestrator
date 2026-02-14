@@ -124,9 +124,7 @@ export function webviewScripts(config: ScriptsConfig): string {
 
     // ── Utility ─────────────────────────────────────────────────────────
     function escapeHtml(text) {
-      var div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
+      return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     function formatDuration(ms) {

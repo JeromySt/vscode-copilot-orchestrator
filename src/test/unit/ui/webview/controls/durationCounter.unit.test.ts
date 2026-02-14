@@ -6,7 +6,8 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { EventBus } from '../../../../../ui/webview/eventBus';
 import { Topics } from '../../../../../ui/webview/topics';
-import { DurationCounter, formatElapsed } from '../../../../../ui/webview/controls/durationCounter';
+import { DurationCounter } from '../../../../../ui/webview/controls/durationCounter';
+import { formatDurationMs } from '../../../../../ui/templates/helpers';
 
 // ── Minimal DOM mock ─────────────────────────────────────────────────────
 
@@ -36,34 +37,34 @@ suite('DurationCounter', () => {
     if (restoreDoc) { restoreDoc(); }
   });
 
-  // ── formatElapsed ──────────────────────────────────────────────────────
+  // ── formatDurationMs (replacement for formatElapsed) ──────────────────
 
-  test('formatElapsed: 0 ms → "0s"', () => {
-    assert.strictEqual(formatElapsed(0), '0s');
+  test('formatDurationMs: 0 ms → "< 1s"', () => {
+    assert.strictEqual(formatDurationMs(0), '< 1s');
   });
 
-  test('formatElapsed: negative → "0s"', () => {
-    assert.strictEqual(formatElapsed(-1000), '0s');
+  test('formatDurationMs: negative → "< 1s"', () => {
+    assert.strictEqual(formatDurationMs(-1000), '< 1s');
   });
 
-  test('formatElapsed: 30000 ms → "30s"', () => {
-    assert.strictEqual(formatElapsed(30000), '30s');
+  test('formatDurationMs: 30000 ms → "30s"', () => {
+    assert.strictEqual(formatDurationMs(30000), '30s');
   });
 
-  test('formatElapsed: 90000 ms → "1m 30s"', () => {
-    assert.strictEqual(formatElapsed(90000), '1m 30s');
+  test('formatDurationMs: 90000 ms → "1m 30s"', () => {
+    assert.strictEqual(formatDurationMs(90000), '1m 30s');
   });
 
-  test('formatElapsed: 3661000 ms → "1h 1m 1s"', () => {
-    assert.strictEqual(formatElapsed(3661000), '1h 1m 1s');
+  test('formatDurationMs: 3661000 ms → "1h 1m" (seconds dropped at hour level)', () => {
+    assert.strictEqual(formatDurationMs(3661000), '1h 1m');
   });
 
-  test('formatElapsed: exact minutes → no trailing seconds', () => {
-    assert.strictEqual(formatElapsed(120000), '2m');
+  test('formatDurationMs: exact minutes → shows "2m 0s"', () => {
+    assert.strictEqual(formatDurationMs(120000), '2m 0s');
   });
 
-  test('formatElapsed: exact hours → no trailing parts', () => {
-    assert.strictEqual(formatElapsed(7200000), '2h');
+  test('formatDurationMs: exact hours → shows "2h 0m"', () => {
+    assert.strictEqual(formatDurationMs(7200000), '2h 0m');
   });
 
   // ── basic update ───────────────────────────────────────────────────────

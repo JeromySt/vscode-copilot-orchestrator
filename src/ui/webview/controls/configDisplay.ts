@@ -10,6 +10,7 @@
 import { EventBus } from '../eventBus';
 import { SubscribableControl } from '../subscribableControl';
 import { Topics } from '../topics';
+import { escapeHtml } from '../../templates/helpers';
 
 /** Represents a job spec (work, prechecks, or postchecks) */
 export interface JobSpec {
@@ -36,9 +37,7 @@ export interface ConfigDisplayData {
   status?: string;
 }
 
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+
 
 /**
  * Config display control for job specifications.

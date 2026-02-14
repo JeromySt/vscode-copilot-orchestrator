@@ -7,6 +7,7 @@
  */
 
 import { escapeHtml } from '../helpers';
+import { formatDurationSeconds, formatTokenCount, formatPremiumRequests, formatCodeChanges } from '../../../plan/metricsAggregator';
 
 /**
  * Model usage breakdown for display.
@@ -45,52 +46,7 @@ export interface PhaseMetricsData {
   [phase: string]: MetricsData;
 }
 
-/**
- * Format premium request count.
- *
- * @param n - Number of premium requests.
- * @returns Formatted string.
- */
-export function formatPremiumRequests(n: number): string {
-  return `${n} Premium request${n === 1 ? '' : 's'}`;
-}
 
-/**
- * Format duration in seconds to human-readable form.
- *
- * @param seconds - Duration in seconds.
- * @returns Formatted string like "1h 2m 3s".
- */
-export function formatDurationSeconds(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
-
-/**
- * Format large token counts with k/m suffixes.
- *
- * @param n - Token count.
- * @returns Formatted string.
- */
-export function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return `${n}`;
-}
-
-/**
- * Format code changes as '+N -M'.
- *
- * @param changes - Code change data.
- * @returns Formatted string.
- */
-export function formatCodeChanges(changes: CodeChangesData): string {
-  return `+${changes.linesAdded} -${changes.linesRemoved}`;
-}
 
 /**
  * Build the main AI usage metrics card.

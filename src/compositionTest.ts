@@ -22,6 +22,7 @@ export interface TestContainerOverrides {
   [Tokens.IConfigProvider]?: () => import('./interfaces').IConfigProvider;
   [Tokens.IDialogService]?: () => import('./interfaces').IDialogService;
   [Tokens.IClipboardService]?: () => import('./interfaces').IClipboardService;
+  [Tokens.IProcessSpawner]?: () => import('./interfaces').IProcessSpawner;
   [Tokens.IProcessMonitor]?: () => import('./interfaces').IProcessMonitor;
   [Tokens.ILogger]?: () => import('./interfaces').ILogger;
 }
@@ -47,6 +48,21 @@ function createStubProcessMonitor(): import('./interfaces').IProcessMonitor {
     buildTree: () => [],
     isRunning: () => false,
     terminate: async () => {},
+  };
+}
+
+/** Stub process spawner that satisfies IProcessSpawner without real processes. */
+function createStubProcessSpawner(): import('./interfaces').IProcessSpawner {
+  return {
+    spawn: () => ({
+      pid: 12345,
+      exitCode: null,
+      killed: false,
+      stdout: null,
+      stderr: null,
+      kill: () => true,
+      on: () => ({} as any),
+    }),
   };
 }
 
@@ -80,6 +96,7 @@ export function createTestContainer(overrides?: Record<symbol, () => unknown>): 
   container.registerSingleton(Tokens.IConfigProvider, () => new MockConfigProvider());
   container.registerSingleton(Tokens.IDialogService, () => new MockDialogService());
   container.registerSingleton(Tokens.IClipboardService, () => new MockClipboardService());
+  container.registerSingleton(Tokens.IProcessSpawner, () => createStubProcessSpawner());
   container.registerSingleton(Tokens.IProcessMonitor, () => createStubProcessMonitor());
   container.registerSingleton(Tokens.IPulseEmitter, () => ({ onPulse: () => ({ dispose: () => {} }), isRunning: false }));
   container.registerSingleton(Tokens.ILogger, () => createStubLogger());

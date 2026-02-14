@@ -22,6 +22,8 @@ import { CopilotStatsParser } from '../agent/copilotStatsParser';
 import { IMcpManager } from '../interfaces/IMcpManager';
 import type { IConfigProvider } from '../interfaces/IConfigProvider';
 import type { CopilotUsageMetrics } from '../plan/types';
+import { createContainer } from '../composition';
+import * as Tokens from './tokens';
 import * as git from '../git';
 
 
@@ -159,6 +161,9 @@ export async function initializePlanRunner(
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
   
+  // Create DI container
+  const container = createContainer(context);
+  
   // Store everything in workspace .orchestrator folder (or fallback to globalStorage)
   const storagePath = workspacePath 
     ? path.join(workspacePath, '.orchestrator', 'plans')
@@ -172,8 +177,13 @@ export async function initializePlanRunner(
   };
   
   const planRunner = new PlanRunner(config);
-  const executor = new DefaultJobExecutor();
-  const processMonitor = new ProcessMonitor();
+  
+  // Create executor with IProcessSpawner dependency
+  const spawner = container.resolve<import('../interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+  const executor = new DefaultJobExecutor(spawner);
+  
+  // Get process monitor from DI container (already wired with spawner)
+  const processMonitor = container.resolve<import('../interfaces').IProcessMonitor>(Tokens.IProcessMonitor) as ProcessMonitor;
   
   // Wire up executor with logs in the same .orchestrator directory
   const logsPath = workspacePath 

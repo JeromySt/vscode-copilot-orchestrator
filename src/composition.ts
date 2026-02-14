@@ -16,7 +16,10 @@
  * IClipboardService ─→ VsCodeClipboardService (singleton)
  *   └─ used by: NodeDetailPanel
  *
- * IProcessMonitor  ──→ ProcessMonitor         (singleton)
+ * IProcessSpawner  ──→ DefaultProcessSpawner  (singleton)
+ *   └─ used by: ProcessMonitor, PowerManager, WorkPhase, etc.
+ *
+ * IProcessMonitor  ──→ ProcessMonitor         (singleton, uses IProcessSpawner)
  *   └─ used by: PlanRunner, NodeDetailPanel
  *
  * ILogger          ──→ Logger (ComponentLogger)(singleton)
@@ -31,6 +34,7 @@ import { ServiceContainer } from './core/container';
 import * as Tokens from './core/tokens';
 import { VsCodeConfigProvider, VsCodeDialogService, VsCodeClipboardService } from './vscode/adapters';
 import { ProcessMonitor } from './process/processMonitor';
+import { DefaultProcessSpawner } from './interfaces/IProcessSpawner';
 import { Logger } from './core/logger';
 import { PulseEmitter } from './core/pulse';
 
@@ -65,9 +69,19 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
   );
 
   // ─── Infrastructure Services ─────────────────────────────────────────
+  // Process spawning abstraction
+  container.registerSingleton<import('./interfaces').IProcessSpawner>(
+    Tokens.IProcessSpawner,
+    () => new DefaultProcessSpawner(),
+  );
+
+  // Process monitoring (now with spawner dependency)
   container.registerSingleton<import('./interfaces').IProcessMonitor>(
     Tokens.IProcessMonitor,
-    () => new ProcessMonitor(),
+    (c) => {
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      return new ProcessMonitor(spawner);
+    },
   );
 
   // ─── Pulse Emitter ───────────────────────────────────────────────────

@@ -5,9 +5,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn, ChildProcess } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import { ProcessMonitor } from '../process';
 import { ProcessNode } from '../types';
+import type { IProcessSpawner } from '../interfaces/IProcessSpawner';
+import { killProcessTree } from '../process/processHelpers';
 import {
   JobNode, ExecutionContext, JobExecutionResult,
   JobWorkSummary, CommitDetail, ExecutionPhase, LogEntry, CopilotUsageMetrics,
@@ -54,8 +56,14 @@ export class DefaultJobExecutor implements JobExecutor {
   private logFiles = new Map<string, string>();
   private agentDelegator?: any;
   private storagePath?: string;
-  private processMonitor = new ProcessMonitor();
+  private processMonitor: ProcessMonitor;
   private evidenceValidator: IEvidenceValidator = new DefaultEvidenceValidator();
+  private spawner: IProcessSpawner;
+
+  constructor(spawner: IProcessSpawner) {
+    this.spawner = spawner;
+    this.processMonitor = new ProcessMonitor(spawner);
+  }
 
   setStoragePath(storagePath: string): void {
     this.storagePath = storagePath;
@@ -95,7 +103,11 @@ export class DefaultJobExecutor implements JobExecutor {
     const phaseOrder = ['prechecks', 'work', 'postchecks', 'commit'] as const;
     const resumeIndex = context.resumeFromPhase ? phaseOrder.indexOf(context.resumeFromPhase as any) : 0;
     const skip = (p: typeof phaseOrder[number]) => phaseOrder.indexOf(p) < resumeIndex;
-    const phaseDeps = () => ({ agentDelegator: this.agentDelegator, getCopilotConfigDir: () => this.getCopilotConfigDir() });
+    const phaseDeps = () => ({ 
+      agentDelegator: this.agentDelegator, 
+      getCopilotConfigDir: () => this.getCopilotConfigDir(),
+      spawner: this.spawner
+    });
     const makeCtx = (phase: ExecutionPhase): PhaseContext => ({
       node, worktreePath, executionKey, phase,
       logInfo: (m) => this.logEntry(executionKey, phase, 'info', m),
@@ -190,7 +202,7 @@ export class DefaultJobExecutor implements JobExecutor {
   // CANCEL / QUERY
   // ===========================================================================
 
-  cancel(planId: string, nodeId: string): void {
+  async cancel(planId: string, nodeId: string): Promise<void> {
     const nodeKey = `${planId}:${nodeId}`;
     const executionKey = this.activeExecutionsByNode.get(nodeKey);
     if (!executionKey) return;
@@ -199,9 +211,11 @@ export class DefaultJobExecutor implements JobExecutor {
       const stack = new Error().stack;
       log.warn(`Executor.cancel() called`, { planId, nodeId, pid: execution.process?.pid, stack: stack?.split('\n').slice(1, 5).join('\n') });
       execution.aborted = true;
-      if (execution.process) {
+      if (execution.process?.pid) {
         log.info(`Killing process PID ${execution.process.pid} for execution: ${executionKey}`);
-        try { if (process.platform === 'win32') spawn('taskkill', ['/pid', String(execution.process.pid), '/f', '/t']); else execution.process.kill('SIGTERM'); } catch { /* ignore */ }
+        try { 
+          await killProcessTree(this.spawner, execution.process.pid, true);
+        } catch { /* ignore */ }
       }
     }
   }

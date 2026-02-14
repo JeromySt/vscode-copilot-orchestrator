@@ -6,6 +6,19 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { WorkPhaseExecutor, runAgent, adaptCommandForPowerShell } from '../../../../plan/phases/workPhase';
 import type { PhaseContext, PhaseResult } from '../../../../interfaces/IPhaseExecutor';
+import type { IProcessSpawner } from '../../../../interfaces/IProcessSpawner';
+import { EventEmitter } from 'events';
+const stubSpawner: IProcessSpawner = {
+  spawn: () => {
+    const proc = Object.assign(new EventEmitter(), {
+      pid: 0, exitCode: 1, killed: false,
+      stdout: new EventEmitter(), stderr: new EventEmitter(),
+      kill: () => true,
+    });
+    process.nextTick(() => proc.emit('close', 1));
+    return proc as any;
+  },
+};
 import type { JobNode } from '../../../../plan/types';
 
 function makeNode(overrides: Partial<JobNode> = {}): JobNode {
@@ -27,7 +40,7 @@ function makeCtx(overrides: Partial<PhaseContext> = {}): PhaseContext {
 
 suite('WorkPhaseExecutor', () => {
   test('returns success when no workSpec', async () => {
-    const executor = new WorkPhaseExecutor({ getCopilotConfigDir: () => '/tmp' });
+    const executor = new WorkPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const result = await executor.execute(makeCtx({ workSpec: undefined }));
     assert.strictEqual(result.success, true);
   });
@@ -36,7 +49,7 @@ suite('WorkPhaseExecutor', () => {
     const delegator = {
       delegate: sinon.stub().resolves({ success: true, sessionId: 'sess', metrics: { durationMs: 200 } }),
     };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/cfg' });
+    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/cfg', spawner: stubSpawner });
     const ctx = makeCtx({
       workSpec: { type: 'agent', instructions: 'implement feature', model: 'gpt-5', contextFiles: ['a.ts'], maxTurns: 10, context: 'ctx', allowedFolders: ['/x'], allowedUrls: ['example.com'] },
       sessionId: 'prev-sess',
@@ -55,7 +68,7 @@ suite('WorkPhaseExecutor', () => {
     const delegator = {
       delegate: sinon.stub().resolves({ success: false, error: 'broke', exitCode: 42, sessionId: 's1' }),
     };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp' });
+    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'x' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -65,7 +78,7 @@ suite('WorkPhaseExecutor', () => {
 
   test('agent exception caught', async () => {
     const delegator = { delegate: sinon.stub().rejects(new Error('timeout')) };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp' });
+    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'x' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -74,7 +87,7 @@ suite('WorkPhaseExecutor', () => {
   });
 
   test('unknown work type returns error', async () => {
-    const executor = new WorkPhaseExecutor({ getCopilotConfigDir: () => '/tmp' });
+    const executor = new WorkPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'magic' as any } as any });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -82,7 +95,7 @@ suite('WorkPhaseExecutor', () => {
   });
 
   test('without agent delegator returns error for agent spec', async () => {
-    const executor = new WorkPhaseExecutor({ getCopilotConfigDir: () => '/tmp' });
+    const executor = new WorkPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'hi' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -90,7 +103,7 @@ suite('WorkPhaseExecutor', () => {
   });
 
   test('string workSpec normalised to shell', async () => {
-    const executor = new WorkPhaseExecutor({ getCopilotConfigDir: () => '/tmp' });
+    const executor = new WorkPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: 'echo test' });
     const result = await executor.execute(ctx);
     assert.ok(typeof result.success === 'boolean');
@@ -98,7 +111,7 @@ suite('WorkPhaseExecutor', () => {
 
   test('@agent string normalised to agent spec', async () => {
     const delegator = { delegate: sinon.stub().resolves({ success: true }) };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp' });
+    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: '@agent fix bug' });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);
@@ -107,7 +120,7 @@ suite('WorkPhaseExecutor', () => {
   test('logs agent parameters', async () => {
     const logInfo = sinon.stub();
     const delegator = { delegate: sinon.stub().resolves({ success: true }) };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp' });
+    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({
       workSpec: { type: 'agent', instructions: 'instr', model: 'm', contextFiles: ['f'], maxTurns: 5, context: 'c', allowedFolders: ['/a'], allowedUrls: ['u'] },
       sessionId: 'sid', logInfo,
@@ -123,7 +136,7 @@ suite('WorkPhaseExecutor', () => {
     const delegator = {
       delegate: sinon.stub().resolves({ success: true, tokenUsage: { inputTokens: 10, outputTokens: 20, totalTokens: 30, model: 'm' } }),
     };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp' });
+    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'x' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);
@@ -132,7 +145,7 @@ suite('WorkPhaseExecutor', () => {
 
   test('agent uses node instructions over spec context', async () => {
     const delegator = { delegate: sinon.stub().resolves({ success: true }) };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp' });
+    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
     const node = makeNode({ instructions: 'node-level instructions' });
     const ctx = makeCtx({
       node,

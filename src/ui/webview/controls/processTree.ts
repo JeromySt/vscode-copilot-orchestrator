@@ -10,6 +10,7 @@
 import { EventBus } from '../eventBus';
 import { SubscribableControl } from '../subscribableControl';
 import { Topics } from '../topics';
+import { escapeHtml, formatDurationMs } from '../../templates/helpers';
 
 /** Single process node in the tree. */
 export interface ProcessNode {
@@ -30,17 +31,9 @@ export interface ProcessTreeData {
   duration?: number;
 }
 
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
-function formatDuration(ms: number): string {
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) { return `${sec}s`; }
-  const min = Math.floor(sec / 60);
-  const rem = sec % 60;
-  return `${min}m ${rem}s`;
-}
+
+
 
 function countProcesses(nodes: ProcessNode[]): { count: number; cpu: number; memory: number } {
   let count = 0, cpu = 0, memory = 0;
@@ -97,7 +90,7 @@ export class ProcessTree extends SubscribableControl {
     if (!treeEl) { return; }
 
     if (data.isAgentWork && !data.pid && data.running) {
-      const dur = data.duration ? ` (${formatDuration(data.duration)})` : '';
+      const dur = data.duration ? ` (${formatDurationMs(data.duration)})` : '';
       treeEl.innerHTML = `<div class="agent-work-indicator">🤖 Agent starting...${dur}</div>`;
       if (titleEl) { titleEl.textContent = 'Agent Work (starting)'; }
       this.publishUpdate(data);
