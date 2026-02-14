@@ -557,28 +557,7 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           } else {
             continue;
           }
-          
-          // Expand the foreignObject and rect to fit the updated text
-          var fo = textEl.closest ? textEl.closest('foreignObject') : null;
-          if (fo) {
-            var textWidth = textEl.scrollWidth || textEl.offsetWidth || 0;
-            var foWidth = parseFloat(fo.getAttribute('width') || '0');
-            if (textWidth + 20 > foWidth) {
-              var newWidth = textWidth + 30;
-              fo.setAttribute('width', String(newWidth));
-              // Also expand the sibling rect in the same node group
-              var nodeGroup = fo.parentNode;
-              if (nodeGroup) {
-                var rect = nodeGroup.querySelector('rect');
-                if (rect) {
-                  var rectWidth = parseFloat(rect.getAttribute('width') || '0');
-                  if (newWidth > rectWidth) {
-                    rect.setAttribute('width', String(newWidth));
-                  }
-                }
-              }
-            }
-          }
+          // CSS handles overflow with text-overflow:ellipsis — no need to expand foreignObject/rect
           break;
         }
       }

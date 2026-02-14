@@ -905,15 +905,22 @@ export class planDetailPanel {
     .mermaid g[id*="TARGET_SOURCE"] .node,
     .mermaid g[id*="TARGET_MERGED"] .node { cursor: default; }  /* Branch nodes are not clickable */
     
-    /* Node labels are pre-truncated server-side; clip any residual overflow */
+    /* Node labels — clip to rect bounds, ellipsis for overflow */
     .mermaid .node .nodeLabel {
       white-space: nowrap !important;
       overflow: hidden !important;
       text-overflow: ellipsis !important;
       display: block !important;
+      max-width: 100% !important;
     }
     .mermaid .node foreignObject {
       overflow: hidden !important;
+    }
+    /* Prevent node foreignObject/rect from being expanding beyond original Mermaid layout */
+    .mermaid .node foreignObject div {
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
     }
     
     /* Subgraph/cluster styling */
