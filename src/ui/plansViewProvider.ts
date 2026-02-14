@@ -652,6 +652,12 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       
+      // Clear empty state if it's showing
+      var emptyEl = container.querySelector('.empty');
+      if (emptyEl) {
+        emptyEl.parentNode.removeChild(emptyEl);
+      }
+      
       var existingPlanIds = new Set(this.planCards.keys());
       var newPlanIds = new Set(plans.map(function(p) { return p.id; }));
       
