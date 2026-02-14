@@ -126,6 +126,12 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     
     // Subscribe to pulse for periodic refresh of running Plans
     this._pulseSubscription = this._pulse.onPulse(() => {
+      // Always forward pulse to webview — the client-side lazy PULSE
+      // subscription ensures zero overhead when no plans are running.
+      if (this._view) {
+        this._view.webview.postMessage({ type: 'pulse' });
+      }
+
       const hasRunning = this._planRunner.getAll().some(plan => {
         const sm = this._planRunner.getStateMachine(plan.id);
         const status = sm?.computePlanStatus();
@@ -133,10 +139,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       });
       
       if (hasRunning) {
-        // Forward pulse to webview only when plans are active
-        if (this._view) {
-          this._view.webview.postMessage({ type: 'pulse' });
-        }
         this.refresh();
       }
     });
