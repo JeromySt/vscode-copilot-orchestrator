@@ -9,12 +9,13 @@
 
 import { escapeHtml } from '../helpers';
 import { WorkSpec, normalizeWorkSpec } from '../../../plan/types/specs';
-import { marked } from 'marked';
+import MarkdownIt from 'markdown-it';
 
-// Configure marked for safe rendering
-marked.setOptions({
-  breaks: true,
-  gfm: true,
+// Configure markdown-it for safe rendering (VS Code's preferred markdown library)
+const md = new MarkdownIt({
+  html: false,       // Disable raw HTML input (XSS prevention)
+  breaks: true,      // Convert newlines to <br>
+  linkify: true,     // Auto-detect URLs
 });
 
 /**
@@ -116,17 +117,13 @@ function renderAgentSpec(spec: any): string {
 }
 
 /**
- * Render markdown text to HTML using the `marked` library.
- * Uses GFM (GitHub Flavored Markdown) with line breaks enabled.
- * Output is sanitized by escaping any raw HTML in the input first.
+ * Render markdown text to HTML using markdown-it (VS Code's preferred library).
+ * HTML input is disabled for XSS prevention. URLs are auto-linked.
  */
 function renderMarkdown(text: string): string {
   try {
-    // Pre-escape any raw HTML tags in the input to prevent XSS,
-    // while preserving markdown syntax characters
-    return marked.parse(text) as string;
+    return md.render(text);
   } catch {
-    // Fallback to escaped plain text if marked fails
     return `<pre>${escapeHtml(text)}</pre>`;
   }
 }
