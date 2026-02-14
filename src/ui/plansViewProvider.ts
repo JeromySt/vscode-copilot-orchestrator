@@ -715,6 +715,16 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         }
       }
       
+      // Reorder DOM elements to match data order (newest-first).
+      // Plans arrive sorted by createdAt descending from the extension.
+      // After adding/removing cards, the DOM order may not match.
+      for (var i = 0; i < plans.length; i++) {
+        var card = this.planCards.get(plans[i].id);
+        if (card && card.element) {
+          container.appendChild(card.element); // appendChild moves existing elements to end
+        }
+      }
+      
       // Restore focus to the previously focused plan after update
       var self = this;
       setTimeout(function() {
