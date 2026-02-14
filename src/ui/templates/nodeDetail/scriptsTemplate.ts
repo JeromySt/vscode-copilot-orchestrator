@@ -577,47 +577,57 @@ export function webviewScripts(config: ScriptsConfig): string {
         var el = this.getElement(this._elementId);
         if (!el) return;
         var cfg = data.data;
-        var html = '';
+        var phasesHtml = '';
 
+        // Prechecks (collapsible, collapsed by default)
         if (cfg.prechecks) {
           var preType = cfg.prechecksType || { type: 'shell', label: 'Shell' };
           var preExpanded = this._userOverrides.prechecks !== undefined
             ? this._userOverrides.prechecks
             : (cfg.currentPhase === 'prechecks');
-          html += this._renderCollapsiblePhase('prechecks', 'Prechecks', preType, cfg.prechecks, preExpanded);
+          phasesHtml += this._renderCollapsiblePhase('prechecks', 'Prechecks', preType, cfg.prechecks, preExpanded);
         }
 
+        // Work (always expanded, not collapsible)
         if (cfg.work) {
           var workType = cfg.workType || { type: 'agent', label: 'Agent' };
-          html += '<div class="config-phase-section">'
-            + '<div class="config-phase-header">'
-            + '<span class="config-phase-badge work">' + escapeHtml(workType.label) + '</span>'
-            + '<span class="config-phase-label">Work</span>'
+          phasesHtml += '<div class="config-phase">'
+            + '<div class="config-phase-header non-collapsible">'
+            + '<span class="phase-label">Work</span>'
+            + '<span class="phase-type-badge ' + (workType.type || '').toLowerCase() + '">' + escapeHtml(workType.label) + '</span>'
             + '</div>'
             + '<div class="config-phase-body">' + cfg.work + '</div>'
             + '</div>';
         }
 
+        // Postchecks (collapsible, collapsed by default)
         if (cfg.postchecks) {
           var postType = cfg.postchecksType || { type: 'shell', label: 'Shell' };
           var postExpanded = this._userOverrides.postchecks !== undefined
             ? this._userOverrides.postchecks
             : (cfg.currentPhase === 'postchecks');
-          html += this._renderCollapsiblePhase('postchecks', 'Postchecks', postType, cfg.postchecks, postExpanded);
+          phasesHtml += this._renderCollapsiblePhase('postchecks', 'Postchecks', postType, cfg.postchecks, postExpanded);
         }
 
-        if (html) el.innerHTML = html;
+        // Wrap in matching server-side section structure
+        var html = '<div class="section"><h3>Job Configuration</h3>'
+          + '<div class="config-item"><div class="config-label">Task</div>'
+          + '<div class="config-value">' + escapeHtml(cfg.task || '') + '</div></div>'
+          + '<div class="config-phases">' + phasesHtml + '</div></div>';
+
+        el.innerHTML = html;
         this._bindCollapsibleHandlers(el);
         this.publishUpdate(data);
       };
       CDC.prototype._renderCollapsiblePhase = function(phaseId, label, typeInfo, content, expanded) {
         var chevron = expanded ? '▼' : '▶';
         var display = expanded ? 'block' : 'none';
-        return '<div class="config-phase-section collapsible" data-phase-id="' + phaseId + '">'
-          + '<div class="config-phase-header config-collapsible-toggle" data-phase-id="' + phaseId + '">'
-          + '<span class="config-chevron">' + chevron + '</span>'
-          + '<span class="config-phase-badge ' + phaseId + '">' + escapeHtml(typeInfo.label || label) + '</span>'
-          + '<span class="config-phase-label">' + escapeHtml(label) + '</span>'
+        var expandedClass = expanded ? '' : ' collapsed';
+        return '<div class="config-phase">'
+          + '<div class="config-phase-header' + expandedClass + ' config-collapsible-toggle" data-phase="' + phaseId + '">'
+          + '<span class="chevron">' + chevron + '</span>'
+          + '<span class="phase-label">' + escapeHtml(label) + '</span>'
+          + '<span class="phase-type-badge ' + (typeInfo.type || '').toLowerCase() + '">' + escapeHtml(typeInfo.label || label) + '</span>'
           + '</div>'
           + '<div class="config-phase-body" style="display: ' + display + ';">' + content + '</div>'
           + '</div>';
@@ -630,14 +640,19 @@ export function webviewScripts(config: ScriptsConfig): string {
             if (toggle._boundHandler) return;
             toggle._boundHandler = true;
             toggle.addEventListener('click', function() {
-              var phaseId = toggle.getAttribute('data-phase-id');
-              var section = toggle.closest('.config-phase-section');
+              var phaseId = toggle.getAttribute('data-phase');
+              var section = toggle.closest('.config-phase');
               var body = section ? section.querySelector('.config-phase-body') : null;
-              var chevron = toggle.querySelector('.config-chevron');
+              var chevron = toggle.querySelector('.chevron');
               if (!body) return;
               var isVisible = body.style.display !== 'none';
               body.style.display = isVisible ? 'none' : 'block';
               if (chevron) chevron.textContent = isVisible ? '▶' : '▼';
+              if (isVisible) {
+                toggle.classList.add('collapsed');
+              } else {
+                toggle.classList.remove('collapsed');
+              }
               self._userOverrides[phaseId] = !isVisible;
             });
           })(toggles[i]);

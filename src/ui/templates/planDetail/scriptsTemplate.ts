@@ -755,6 +755,11 @@ export function renderPlanScripts(data: PlanScriptsData): string {
         if (cancelBtn) cancelBtn.style.display = canControl ? '' : 'none';
         if (workSummaryBtn) workSummaryBtn.style.display = planStatus === 'succeeded' ? '' : 'none';
       }
+      // Show/hide processes section based on plan status
+      var procSection = document.getElementById('processesSection');
+      if (procSection) {
+        procSection.style.display = (planStatus === 'running' || planStatus === 'pending') ? '' : 'none';
+      }
       this.publishUpdate(msg);
     };
     planStatusCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { planStatusCtrl.update(msg); });
@@ -1239,10 +1244,16 @@ export function renderPlanScripts(data: PlanScriptsData): string {
     }
     
     // Poll for process stats via PULSE (every 2nd pulse ≈ 2s)
+    // processesSection always exists in DOM (hidden when paused/completed).
+    // The PlanStatusControl shows it when the plan transitions to running.
     const processesSection = document.getElementById('processesSection');
     if (processesSection) {
-      vscode.postMessage({ type: 'getAllProcessStats' });
+      // Only start polling if visible (running), otherwise wait for status change
+      if (processesSection.style.display !== 'none') {
+        vscode.postMessage({ type: 'getAllProcessStats' });
+      }
       bus.on(Topics.PULSE, function() {
+        if (processesSection.style.display === 'none') return;
         _processStatsPulseCount++;
         if (_processStatsPulseCount % 2 === 0) {
           vscode.postMessage({ type: 'getAllProcessStats' });

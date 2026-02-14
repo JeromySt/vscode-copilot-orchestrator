@@ -81,6 +81,16 @@ ${mermaidDef}
     </div>
   </div>
   `;
+  } else {
+    // Render hidden — the script layer will show it once the plan transitions to running
+    html += `
+  <div class="processes-section" id="processesSection" style="display:none;">
+    <h3>Running Processes</h3>
+    <div id="processesContainer">
+      <div class="processes-loading">Loading processes...</div>
+    </div>
+  </div>
+  `;
   }
 
   return html;

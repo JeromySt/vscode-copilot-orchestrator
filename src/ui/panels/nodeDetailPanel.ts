@@ -22,7 +22,7 @@ import {
   breadcrumbHtml, headerRowHtml, executionStateHtml,
   retryButtonsHtml, forceFailButtonHtml, bottomActionsHtml,
   processTreeSectionHtml, logViewerSectionHtml,
-  configSectionHtml, dependenciesSectionHtml, gitInfoSectionHtml,
+  dependenciesSectionHtml, gitInfoSectionHtml,
   metricsSummaryHtml, attemptMetricsHtml as attemptMetricsTemplateHtml,
   attemptHistoryHtml, webviewScripts,
   renderSpecContent, getSpecTypeInfo,
@@ -894,14 +894,6 @@ export class NodeDetailPanel {
   ${nodeMetricsHtml}
   <div id="aiUsageStatsContainer" style="display:none;"></div>
   
-  ${configSectionHtml({
-    task: node.task,
-    work: node.work,
-    prechecks: node.prechecks,
-    postchecks: node.postchecks,
-    instructions: node.instructions,
-    currentPhase: getCurrentExecutionPhase(state),
-  })}
   <div id="configDisplayContainer"></div>
   
   ${logViewerSectionHtml({
@@ -1276,6 +1268,44 @@ export class NodeDetailPanel {
       margin-bottom: 4px;
     }
     .config-value { }
+    
+    /* Config Phase Sections (Prechecks / Work / Postchecks) */
+    .config-phases { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+    .config-phase { border: 1px solid var(--vscode-panel-border); border-radius: 6px; overflow: hidden; }
+    .config-phase-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--vscode-sideBarSectionHeader-background);
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .config-phase-header.collapsed {
+      cursor: pointer;
+      border-bottom: none;
+    }
+    .config-phase-header.collapsed:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .config-phase-header.non-collapsible {
+      cursor: default;
+    }
+    .config-collapsible-toggle { cursor: pointer; }
+    .config-collapsible-toggle:hover { background: var(--vscode-list-hoverBackground); }
+    .phase-label { font-size: 12px; font-weight: 600; }
+    .phase-type-badge {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(128, 128, 128, 0.2);
+      color: var(--vscode-descriptionForeground);
+    }
+    .phase-type-badge.shell { background: rgba(72, 187, 120, 0.2); color: #48bb78; }
+    .phase-type-badge.process { background: rgba(237, 137, 54, 0.2); color: #ed8936; }
+    .phase-type-badge.agent { background: rgba(99, 179, 237, 0.2); color: #63b3ed; }
+    .config-phase-body { padding: 8px 12px; }
     
     /* Work Display Formatting */
     .work-item .config-value {
