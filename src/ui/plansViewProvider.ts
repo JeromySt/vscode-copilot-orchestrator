@@ -647,16 +647,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       var container = this.getElement(this.containerId);
       if (!container) return;
       
-      // Preserve focus: remember which plan was focused before re-render
-      var focusedEl = document.activeElement;
-      var focusedPlanId = focusedEl && focusedEl.classList.contains('plan-item') 
-        ? focusedEl.dataset.id 
-        : null;
-      
       // If no plans, show empty state
       if (!plans || plans.length === 0) {
         container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> or <code>create_copilot_job</code> MCP tool.</div>';
-        // Dispose all existing cards
         for (var entry of this.planCards.values()) {
           entry.dispose();
         }
@@ -672,10 +665,12 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       
       var existingPlanIds = new Set(this.planCards.keys());
       var newPlanIds = new Set(plans.map(function(p) { return p.id; }));
+      var structureChanged = false;
       
       // Remove cards for deleted plans
       for (var planId of existingPlanIds) {
         if (!newPlanIds.has(planId)) {
+          structureChanged = true;
           var card = this.planCards.get(planId);
           if (card) {
             card.dispose();
@@ -687,38 +682,24 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         }
       }
       
-      // Add cards for new plans or update existing ones
-      // Plans arrive sorted newest-first from the extension.
-      // Insert new cards at the correct position to maintain sort order.
+      // Add cards for new plans
       for (var i = 0; i < plans.length; i++) {
         var plan = plans[i];
-        var existingCard = this.planCards.get(plan.id);
-        
-        if (!existingCard) {
-          // Create new card
+        if (!this.planCards.has(plan.id)) {
+          structureChanged = true;
           var element = document.createElement('div');
-          
-          // Insert at the correct position (plans[i] should be the i-th child)
-          var existingChildren = container.querySelectorAll('.plan-item-wrapper');
-          if (i < existingChildren.length) {
-            container.insertBefore(element, existingChildren[i]);
-          } else {
-            container.appendChild(element);
-          }
           element.className = 'plan-item-wrapper';
+          container.appendChild(element);
           
           var cardId = 'plan-card-' + plan.id;
           var card = new PlanListCardControl(this.bus, cardId, element, plan.id);
           this.planCards.set(plan.id, card);
           
-          // Subscribe to the card's updates
-          this.subscribeToChild(cardId, function() {
-            // Container could react to card changes if needed
-          });
+          this.subscribeToChild(cardId, function() {});
         }
       }
       
-      // Update all cards with their data
+      // Update all cards with their data (targeted DOM updates, no innerHTML)
       for (var i = 0; i < plans.length; i++) {
         var plan = plans[i];
         var card = this.planCards.get(plan.id);
@@ -727,26 +708,15 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         }
       }
       
-      // Reorder DOM elements to match data order (newest-first).
-      // Plans arrive sorted by createdAt descending from the extension.
-      // After adding/removing cards, the DOM order may not match.
-      for (var i = 0; i < plans.length; i++) {
-        var card = this.planCards.get(plans[i].id);
-        if (card && card.element) {
-          container.appendChild(card.element); // appendChild moves existing elements to end
-        }
-      }
-      
-      // Restore focus to the previously focused plan after update
-      var self = this;
-      setTimeout(function() {
-        if (focusedPlanId) {
-          var targetEl = container.querySelector('.plan-item[data-id="' + focusedPlanId + '"]');
-          if (targetEl) {
-            targetEl.focus();
+      // Only reorder DOM when plans were added or removed
+      if (structureChanged) {
+        for (var i = 0; i < plans.length; i++) {
+          var card = this.planCards.get(plans[i].id);
+          if (card && card.element) {
+            container.appendChild(card.element);
           }
         }
-      }, 50);
+      }
       
       this.publishUpdate(plans);
 
