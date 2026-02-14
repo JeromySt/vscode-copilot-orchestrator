@@ -1691,7 +1691,8 @@ export class JobExecutionEngine {
             sourceCommit,
             'HEAD',
             `Merge parent commit ${shortSha} for job ${node.name}`,
-            { planId: plan.id, nodeId: node.id, phase: 'merge-fi', attemptNumber }
+            { planId: plan.id, nodeId: node.id, phase: 'merge-fi', attemptNumber },
+            mergeResult.conflictFiles
           );
           
           if (!cliResult.success) {
@@ -1744,16 +1745,41 @@ export class JobExecutionEngine {
     sourceBranch: string,
     targetBranch: string,
     commitMessage: string,
-    logContext?: { planId: string; nodeId: string; phase: ExecutionPhase; attemptNumber?: number }
+    logContext?: { planId: string; nodeId: string; phase: ExecutionPhase; attemptNumber?: number },
+    conflictedFiles?: string[]
   ): Promise<{ success: boolean; sessionId?: string; metrics?: CopilotUsageMetrics }> {
     const prefer = this.state.configManager.getConfig<string>('copilotOrchestrator.merge', 'prefer', 'theirs');
     
-    const mergeTask =
-      `Resolve the current git merge conflict. ` +
-      `We are merging '${sourceBranch}' into '${targetBranch}'. ` +
-      `Prefer '${prefer}' changes when there are conflicts. ` +
-      `Resolve all conflicts, stage the changes with 'git add', and commit with message '${commitMessage}'`;
-    
+    // Write a merge-specific instructions file so the agent focuses ONLY on
+    // resolving merge conflicts, not performing the job's actual work.
+    const conflictList = conflictedFiles?.length
+      ? conflictedFiles.map(f => `- ${f}`).join('\n')
+      : '(run `git diff --name-only --diff-filter=U` to list them)';
+
+    const mergeInstructions =
+`# Merge Conflict Resolution
+
+## Context
+We are merging \`${sourceBranch}\` into \`${targetBranch}\`.
+You MUST resolve all git merge conflicts and commit the result.
+
+## Conflicted Files
+${conflictList}
+
+## Rules
+1. **Prefer "${prefer}" changes** when there is a conflict. Keep all non-conflicting changes from both sides.
+2. Open each conflicted file and remove ALL \`<<<<<<<\`, \`=======\`, \`>>>>>>>\` conflict markers.
+3. After resolving, verify no conflict markers remain: \`git diff --check\`
+4. Stage all resolved files: \`git add <file>\` for each conflicted file.
+5. Commit with message: \`${commitMessage}\`
+
+## Important
+- Do NOT modify any files beyond resolving the conflict markers.
+- Do NOT refactor, rename, or restructure code.
+- Do NOT run builds, tests, or linters — just resolve conflicts and commit.
+- If both sides added different imports, keep ALL imports from both sides.
+- If both sides modified the same function differently, prefer "${prefer}" but preserve non-conflicting logic from the other side.`;
+
     this.log.info(`Running Copilot CLI to resolve conflicts...`, { cwd });
     if (logContext) {
       this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  Running Copilot CLI to resolve conflicts...`, logContext.attemptNumber);
@@ -1769,8 +1795,10 @@ export class JobExecutionEngine {
     const runner = new CopilotCliRunner(cliLogger);
     const result = await runner.run({
       cwd,
-      task: mergeTask,
+      task: 'Resolve all git merge conflicts in this repository.',
+      instructions: mergeInstructions,
       label: 'merge-conflict',
+      jobId: logContext?.nodeId,
       timeout: 300000,
       onOutput: (line) => {
         if (logContext && line.trim()) {
@@ -1845,6 +1873,9 @@ export class JobExecutionEngine {
       }).catch(() => {
         // Expected to fail due to conflicts
       });
+
+      // List conflicted files for the instructions
+      const conflictedFiles = await git.merge.listConflicts(repoPath).catch(() => []);
       
       // Step 4: Use Copilot CLI to resolve conflicts
       const cliResult = await this.resolveMergeConflictWithCopilot(
@@ -1852,7 +1883,8 @@ export class JobExecutionEngine {
         sourceCommit,
         targetBranch,
         commitMessage,
-        logContext
+        logContext,
+        conflictedFiles
       );
       
       if (!cliResult.success) {
