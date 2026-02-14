@@ -891,8 +891,6 @@ export class NodeDetailPanel {
   ${retryButtonsHtml(actionData)}
   ${forceFailButtonHtml(actionData)}
   
-  ${processTreeSectionHtml({ status: state.status })}
-  
   ${nodeMetricsHtml}
   <div id="aiUsageStatsContainer" style="display:none;"></div>
   
@@ -911,6 +909,8 @@ export class NodeDetailPanel {
     isRunning: state.status === 'running',
     logFilePath,
   })}
+  
+  ${processTreeSectionHtml({ status: state.status })}
   
   ${workSummaryHtml}
   <div id="workSummaryContainer" style="display:none;"></div>
