@@ -13,6 +13,7 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as cp from 'child_process';
 import { EventEmitter } from 'events';
+import type { IGitOperations } from '../../../interfaces/IGitOperations';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -35,6 +36,8 @@ function canStubSpawn(): boolean {
 
 /** Flag indicating if spawn can be stubbed in this environment */
 const spawnStubbable = canStubSpawn();
+
+const mockGitOps = {} as any as IGitOperations;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -301,7 +304,7 @@ suite('AgentDelegator', () => {
     test('extractSessionId captures UUID from "Session ID: <uuid>" format', async () => {
       const { AgentDelegator } = await import('../../../agent/agentDelegator');
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       // Access private method via bracket notation for testing
       const extract = (delegator as any).extractSessionId.bind(delegator);
@@ -313,7 +316,7 @@ suite('AgentDelegator', () => {
     test('extractSessionId captures UUID from "session: <uuid>" format', async () => {
       const { AgentDelegator } = await import('../../../agent/agentDelegator');
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       const extract = (delegator as any).extractSessionId.bind(delegator);
 
@@ -324,7 +327,7 @@ suite('AgentDelegator', () => {
     test('extractSessionId captures UUID from "Starting session: <uuid>" format', async () => {
       const { AgentDelegator } = await import('../../../agent/agentDelegator');
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       const extract = (delegator as any).extractSessionId.bind(delegator);
 
@@ -335,7 +338,7 @@ suite('AgentDelegator', () => {
     test('extractSessionId returns undefined for non-matching lines', async () => {
       const { AgentDelegator } = await import('../../../agent/agentDelegator');
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       const extract = (delegator as any).extractSessionId.bind(delegator);
 
@@ -370,7 +373,7 @@ suite('AgentDelegator', () => {
     test('extracts session ID from share file content', async () => {
       const { AgentDelegator } = await import('../../../agent/agentDelegator');
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       const uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
       fsStub.existsSync.returns(true);
@@ -385,7 +388,7 @@ suite('AgentDelegator', () => {
     test('extracts session ID from bare UUID in share file', async () => {
       const { AgentDelegator } = await import('../../../agent/agentDelegator');
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       const uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
       fsStub.existsSync.returns(true);
@@ -400,7 +403,7 @@ suite('AgentDelegator', () => {
     test('falls back to log filename when share file has no UUID', async () => {
       const { AgentDelegator } = await import('../../../agent/agentDelegator');
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       const uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
       fsStub.existsSync.callsFake((p: string) => true);
@@ -417,7 +420,7 @@ suite('AgentDelegator', () => {
     test('returns undefined when no files exist', async () => {
       const { AgentDelegator } = await import('../../../agent/agentDelegator');
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       fsStub.existsSync.returns(false);
 
@@ -430,7 +433,7 @@ suite('AgentDelegator', () => {
     test('returns undefined and logs on exception', async () => {
       const { AgentDelegator } = await import('../../../agent/agentDelegator');
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       fsStub.existsSync.throws(new Error('Permission denied'));
 
@@ -454,7 +457,7 @@ suite('AgentDelegator', () => {
         onProcessExited: sinon.stub(),
       };
 
-      const delegator = new AgentDelegator(logger, callbacks);
+      const delegator = new AgentDelegator(logger, mockGitOps, callbacks);
       assert.ok(delegator, 'should create delegator instance');
     });
 
@@ -462,7 +465,7 @@ suite('AgentDelegator', () => {
       const { AgentDelegator } = await import('../../../agent/agentDelegator');
       const logger = { log: sinon.stub() };
 
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
       assert.ok(delegator, 'should create delegator instance without callbacks');
     });
 
@@ -471,7 +474,7 @@ suite('AgentDelegator', () => {
       const cliCheckCore = await import('../../../agent/cliCheckCore');
 
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       // Reset cache and check behavior
       cliCheckCore.resetCliCache();
@@ -510,7 +513,7 @@ suite('AgentDelegator', () => {
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       await delegator.delegate({
         jobId: 'test-job-1',
@@ -547,7 +550,7 @@ suite('AgentDelegator', () => {
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       await delegator.delegate({
         jobId: 'test-job-2',
@@ -577,7 +580,7 @@ suite('AgentDelegator', () => {
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       await delegator.delegate({
         jobId: 'test-job-3',
@@ -617,7 +620,7 @@ suite('AgentDelegator', () => {
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       const result = await delegator.delegate({
         jobId: 'job-1',
@@ -645,7 +648,7 @@ suite('AgentDelegator', () => {
       const commitStub = sinon.stub(git.repository, 'commit').rejects(new Error('commit failed'));
 
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       // Should not throw even when marker commit fails
       const result = await delegator.delegate({
@@ -673,7 +676,7 @@ suite('AgentDelegator', () => {
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       await delegator.delegate({
         jobId: 'job-3',
@@ -736,7 +739,7 @@ suite('AgentDelegator', () => {
         onProcessExited: sinon.stub(),
       };
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger, callbacks);
+      const delegator = new AgentDelegator(logger, mockGitOps, callbacks);
 
       const delegatePromise = delegator.delegate({
         jobId: 'copilot-job',
@@ -780,7 +783,7 @@ suite('AgentDelegator', () => {
       spawnStub.returns(proc);
 
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       const delegatePromise = delegator.delegate({
         jobId: 'fail-job',
@@ -822,7 +825,7 @@ suite('AgentDelegator', () => {
       spawnStub.returns(proc);
 
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       const delegatePromise = delegator.delegate({
         jobId: 'error-job',
@@ -864,7 +867,7 @@ suite('AgentDelegator', () => {
 
       const sessionCallback = sinon.stub();
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger, { onSessionCaptured: sessionCallback });
+      const delegator = new AgentDelegator(logger, mockGitOps, { onSessionCaptured: sessionCallback });
 
       const uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
       const delegatePromise = delegator.delegate({
@@ -908,7 +911,7 @@ suite('AgentDelegator', () => {
       spawnStub.returns(proc);
 
       const logger = { log: sinon.stub() };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
 
       const delegatePromise = delegator.delegate({
         jobId: 'resume-job',

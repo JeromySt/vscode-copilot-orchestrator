@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { AgentDelegator } from '../../../agent/agentDelegator';
+import type { IGitOperations } from '../../../interfaces/IGitOperations';
 
 suite('AgentDelegator - Private Methods & Flow', () => {
   let delegator: AgentDelegator;
@@ -22,7 +23,7 @@ suite('AgentDelegator - Private Methods & Flow', () => {
   setup(() => {
     logMessages = [];
     const logger = { log: (msg: string) => logMessages.push(msg) };
-    delegator = new AgentDelegator(logger);
+    delegator = new AgentDelegator(logger, {} as any as IGitOperations);
   });
 
   // ==========================================================================

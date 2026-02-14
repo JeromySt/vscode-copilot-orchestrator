@@ -131,7 +131,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       };
       
       const gitOps = createMockGitOps();
-      const delegator = new AgentDelegator(logger, {}, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, {}, runner);
 
       // Create a scenario where the log directory path is invalid to trigger error
       const options = defaultOptions(tmpDir);
@@ -167,7 +167,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       };
       
       const gitOps = createMockGitOps();
-      const delegator = new AgentDelegator(logger, callbacks, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, callbacks, runner);
 
       const options = defaultOptions(tmpDir);
       await delegator.delegate(options);
@@ -211,7 +211,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       };
       
       const gitOps = createMockGitOps();
-      const delegator = new AgentDelegator(logger, callbacks, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, callbacks, runner);
 
       const options = defaultOptions(tmpDir);
       await delegator.delegate(options);
@@ -253,7 +253,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       };
       
       const gitOps = createMockGitOps();
-      const delegator = new AgentDelegator(logger, callbacks, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, callbacks, runner);
 
       const options = defaultOptions(tmpDir);
       await delegator.delegate(options);
@@ -298,7 +298,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       };
       
       const gitOps = createMockGitOps();
-      const delegator = new AgentDelegator(logger, callbacks, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, callbacks, runner);
 
       const options = defaultOptions(tmpDir);
       const result = await delegator.delegate(options);
@@ -338,7 +338,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       };
 
       const gitOps = createMockGitOps();
-      const delegator = new AgentDelegator(logger, {}, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, {}, runner);
 
       const options = defaultOptions(tmpDir);
       const result = await delegator.delegate(options);
@@ -358,7 +358,7 @@ suite('AgentDelegator - Missing Coverage', () => {
   suite('extractTokenUsage error handling', () => {
     test('handles file system errors gracefully', async () => {
       const logger = createLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, createMockGitOps());
 
       // Test with a path that should cause issues but be handled gracefully
       const result = await (delegator as any).extractTokenUsage('', 'test-model');
@@ -408,7 +408,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       };
 
       const gitOps = createMockGitOps();
-      const delegator = new AgentDelegator(logger, callbacks, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, callbacks, runner);
 
       const options = defaultOptions(tmpDir);
       const result = await delegator.delegate(options);

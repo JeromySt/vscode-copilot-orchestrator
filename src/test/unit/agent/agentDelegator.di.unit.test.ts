@@ -118,7 +118,7 @@ suite('AgentDelegator DI', () => {
   suite('constructor', () => {
     test('no-arg runner/gitOps works (backward compat)', () => {
       const logger = createLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, createMockGitOps());
       assert.ok(delegator);
     });
 
@@ -126,7 +126,7 @@ suite('AgentDelegator DI', () => {
       const logger = createLogger();
       const runner = createMockRunner();
       const gitOps = createMockGitOps();
-      const delegator = new AgentDelegator(logger, {}, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, {}, runner);
       assert.ok(delegator);
     });
   });
@@ -139,7 +139,7 @@ suite('AgentDelegator DI', () => {
       const logger = createLogger();
       const runner = createMockRunner();
       const gitOps = createMockGitOps();
-      const delegator = new AgentDelegator(logger, {}, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, {}, runner);
 
       const result = await delegator.delegate(defaultOptions(tmpDir));
 
@@ -157,7 +157,7 @@ suite('AgentDelegator DI', () => {
       const logger = createLogger();
       const runner = createMockRunner();
       const gitOps = createMockGitOps();
-      const delegator = new AgentDelegator(logger, {}, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, {}, runner);
 
       await delegator.delegate({
         ...defaultOptions(tmpDir),
@@ -178,7 +178,7 @@ suite('AgentDelegator DI', () => {
       const logger = createLogger();
       const runner = createMockRunner({ success: false, error: 'CLI crashed' });
       const gitOps = createMockGitOps();
-      const delegator = new AgentDelegator(logger, {}, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, {}, runner);
 
       const result = await delegator.delegate(defaultOptions(tmpDir));
 
@@ -201,7 +201,7 @@ suite('AgentDelegator DI', () => {
         assert.ok(msg.includes('test-job-123'));
         return true;
       };
-      const delegator = new AgentDelegator(logger, {}, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, {}, runner);
 
       await delegator.delegate(defaultOptions(tmpDir));
 
@@ -223,7 +223,7 @@ suite('AgentDelegator DI', () => {
       const callbacks: DelegatorCallbacks = {
         onSessionCaptured: (sid) => captured.push(sid),
       };
-      const delegator = new AgentDelegator(logger, callbacks, runner, gitOps);
+      const delegator = new AgentDelegator(logger, gitOps, callbacks, runner);
 
       await delegator.delegate(defaultOptions(tmpDir));
 
@@ -238,7 +238,7 @@ suite('AgentDelegator DI', () => {
   suite('isCopilotAvailable', () => {
     test('returns boolean', () => {
       const logger = createLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, createMockGitOps());
       const result = delegator.isCopilotAvailable();
       assert.ok(typeof result === 'boolean');
     });

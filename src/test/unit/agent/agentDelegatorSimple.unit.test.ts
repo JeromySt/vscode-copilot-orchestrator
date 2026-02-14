@@ -8,14 +8,17 @@
 
 import * as assert from 'assert';
 import { AgentDelegator } from '../../../agent/agentDelegator';
+import type { IGitOperations } from '../../../interfaces/IGitOperations';
 import { classifyModel, parseModelChoices } from '../../../agent/modelDiscovery';
+
+const mockGitOps = {} as any as IGitOperations;
 
 suite('AgentDelegator Core Functions', () => {
   let delegator: AgentDelegator;
 
   setup(() => {
     const logger = { log: () => {} };
-    delegator = new AgentDelegator(logger);
+    delegator = new AgentDelegator(logger, mockGitOps);
   });
 
   suite('extractSessionId method', () => {
@@ -66,13 +69,13 @@ suite('AgentDelegator Core Functions', () => {
     test('constructor accepts logger and callbacks', () => {
       const logger = { log: () => {} };
       const callbacks = { onProcessSpawned: () => {} };
-      const testDelegator = new AgentDelegator(logger, callbacks);
+      const testDelegator = new AgentDelegator(logger, mockGitOps, callbacks);
       assert.ok(testDelegator);
     });
 
     test('constructor works with only logger (no callbacks)', () => {
       const logger = { log: () => {} };
-      const testDelegator = new AgentDelegator(logger);
+      const testDelegator = new AgentDelegator(logger, mockGitOps);
       assert.ok(testDelegator);
     });
 
