@@ -1608,8 +1608,10 @@ export class NodeDetailPanel {
     .phase-icon { font-size: 11px; }
     .phase-tab.phase-success .phase-icon { color: #4ec9b0; }
     .phase-tab.phase-failed .phase-icon { color: #f48771; }
-    .phase-tab.phase-running .phase-icon { color: #3794ff; animation: pulse 1s infinite; }
-    @keyframes pulse { 50% { opacity: 0.5; } }
+    .phase-tab.phase-running .phase-icon { color: #3794ff; animation: pulse-phase 1.2s infinite; }
+    .phase-tab.active.phase-running .phase-icon { color: #ffffff; animation: pulse-phase-active 1.2s infinite; }
+    @keyframes pulse-phase { 50% { opacity: 0.4; } }
+    @keyframes pulse-phase-active { 0%, 100% { opacity: 1; text-shadow: 0 0 6px rgba(255,255,255,0.8); } 50% { opacity: 0.5; text-shadow: none; } }
     
     /* Log File Path */
     .log-file-path {
