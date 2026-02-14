@@ -54,12 +54,6 @@ function spawnAndTrack(
       if (timeoutHandle) clearTimeout(timeoutHandle);
       ctx.setProcess(undefined);
       ctx.logInfo(`${label} exited: PID ${proc.pid}, code ${code}, duration ${Date.now() - startTime}ms`);
-      if (stderr.trim()) {
-        // Log stderr content for diagnostics, but do NOT treat it as failure
-        // PowerShell writes warnings, progress, and verbose output to stderr
-        ctx.logInfo(`${label} stderr output (informational, not an error):`);
-        ctx.logOutput('stderr', stderr);
-      }
       if (ctx.isAborted()) resolve({ success: false, error: 'Execution canceled' });
       else if (code === 0) resolve({ success: true });
       else resolve({ success: false, error: `Exit code ${code}`, exitCode: code ?? undefined });
