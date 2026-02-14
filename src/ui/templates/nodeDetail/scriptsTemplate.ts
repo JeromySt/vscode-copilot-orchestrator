@@ -66,7 +66,8 @@ export function webviewScripts(config: ScriptsConfig): string {
       NODE_STATE:       'node:state',
       PROCESS_STATS:    'node:process-stats',
       LOG_UPDATE:       'node:log',
-      LOG_PHASE_CHANGE: 'node:log-phase'
+      LOG_PHASE_CHANGE: 'node:log-phase',
+      CONFIG_UPDATE:    'node:config-update'
     };
 
     // ── Utility ─────────────────────────────────────────────────────────
@@ -102,6 +103,9 @@ export function webviewScripts(config: ScriptsConfig): string {
           break;
         case 'stateChange':
           bus.emit(T.NODE_STATE, msg);
+          break;
+        case 'configUpdate':
+          bus.emit(T.CONFIG_UPDATE, msg.data);
           break;
       }
     });
@@ -396,6 +400,30 @@ export function webviewScripts(config: ScriptsConfig): string {
           console.error('Failed to parse attempt logs data:', err);
         }
       }
+    });
+
+    // ── Config phase collapse/expand handlers ────────────────────────────
+    document.body.addEventListener('click', function(e) {
+      if (!(e.target instanceof Element)) return;
+      const header = e.target.closest('.config-phase-header');
+      if (!header || header.classList.contains('non-collapsible')) return;
+      
+      const body = header.nextElementSibling;
+      const chevron = header.querySelector('.chevron');
+      const isExpanded = header.classList.contains('expanded');
+      
+      if (isExpanded) {
+        body.style.display = 'none';
+        header.classList.replace('expanded', 'collapsed');
+        if (chevron) chevron.textContent = '▶';
+      } else {
+        body.style.display = 'block';
+        header.classList.replace('collapsed', 'expanded');
+        if (chevron) chevron.textContent = '▼';
+      }
+      
+      // Track user override
+      header.dataset.userToggled = 'true';
     });
 
     // ── Phase tab selection (PhaseTabBar) ────────────────────────────────

@@ -14,6 +14,7 @@ export const Topics = {
   AI_USAGE_UPDATE: 'node:ai-usage',
   WORK_SUMMARY: 'node:work-summary',
   ATTEMPT_UPDATE: 'node:attempt',
+  CONFIG_UPDATE: 'node:config-update',
   LAYOUT_CHANGE: 'layout:change',
   LAYOUT_COMPLETE: 'layout:complete',
   CONTROL_PREFIX: 'control:',

@@ -295,6 +295,31 @@ function formatInline(text: string, escapeHtml: (s: string) => string): string {
 }
 
 /**
+ * Get the current execution phase from node state.
+ */
+function getCurrentExecutionPhase(state: NodeExecutionState | undefined): string | undefined {
+  if (!state?.stepStatuses) return undefined;
+  
+  // Check which phase is currently running
+  for (const [phase, status] of Object.entries(state.stepStatuses)) {
+    if (status === 'running') {
+      return phase;
+    }
+  }
+  
+  // If nothing is currently running, return the last incomplete phase
+  const phaseOrder = ['prechecks', 'work', 'postchecks'];
+  for (const phase of phaseOrder) {
+    const status = state.stepStatuses[phase as keyof typeof state.stepStatuses];
+    if (!status || status === 'pending') {
+      return phase;
+    }
+  }
+  
+  return undefined;
+}
+
+/**
  * Webview panel that shows detailed information for a single Plan node.
  *
  * Displays execution state with phase tabs (merge-fi, prechecks, work, commit,
@@ -628,6 +653,27 @@ export class NodeDetailPanel {
       logFilePath,
     });
   }
+
+  /** Send config update to webview for live config display updates. */
+  private _sendConfigUpdate() {
+    const plan = this._planRunner.get(this._planId);
+    const node = plan?.nodes.get(this._nodeId);
+    const state = plan?.nodeStates.get(this._nodeId);
+    
+    if (!node || node.type !== 'job') return;
+    
+    this._panel.webview.postMessage({
+      type: 'configUpdate',
+      data: {
+        work: node.work,
+        prechecks: node.prechecks,
+        postchecks: node.postchecks,
+        instructions: node.instructions,
+        task: node.task,
+        currentPhase: getCurrentExecutionPhase(state),
+      }
+    });
+  }
   
   /** Re-render the panel HTML with current node state. */
   private _update() {
@@ -646,6 +692,9 @@ export class NodeDetailPanel {
     }
     
     this._panel.webview.html = this._getHtml(plan, node, state);
+    
+    // Send config update after rendering
+    this._sendConfigUpdate();
   }
   
   /**
@@ -789,8 +838,11 @@ export class NodeDetailPanel {
   
   ${configSectionHtml({
     task: node.task,
-    workHtml: node.work ? formatWorkSpecHtml(node.work, escapeHtml) : undefined,
+    work: node.work,
+    prechecks: node.prechecks,
+    postchecks: node.postchecks,
     instructions: node.instructions,
+    currentPhase: getCurrentExecutionPhase(state),
   })}
   
   ${logViewerSectionHtml({
@@ -810,6 +862,10 @@ export class NodeDetailPanel {
     worktreeCleanedUp: state.worktreeCleanedUp,
     baseCommit: state.baseCommit,
     completedCommit: state.completedCommit,
+    workCommit: state.completedCommit, // In current implementation, work commit and completed commit are the same
+    baseBranch: plan.baseBranch,
+    targetBranch: plan.targetBranch,
+    mergedToTarget: state.mergedToTarget,
   })}
   
   ${bottomActionsHtml(actionData)}
