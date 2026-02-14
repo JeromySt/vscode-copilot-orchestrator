@@ -1440,7 +1440,7 @@ export class planDetailPanel {
     
     // Maximum total character width for a node label (icon + name + duration).
     // Labels exceeding this are truncated with '...' and a hover tooltip.
-    const MAX_NODE_LABEL_CHARS = 40;
+    const MAX_NODE_LABEL_CHARS = 45;
     
     // Track full names for tooltip display when labels are truncated
     const nodeTooltips: Record<string, string> = {};
@@ -1893,13 +1893,15 @@ export class planDetailPanel {
    * @returns The (possibly truncated) name.
    */
   private _truncateLabel(name: string, durationLabel: string, maxLen: number): string {
-    // +2 accounts for the status icon + space prefix ("✓ ")
-    const totalLen = 2 + name.length + durationLabel.length;
+    // +3 accounts for the status icon + space prefix ("✓ " renders ~3 chars wide
+    // in proportional fonts due to Unicode symbol width)
+    const ICON_WIDTH = 3;
+    const totalLen = ICON_WIDTH + name.length + durationLabel.length;
     if (totalLen <= maxLen) {
       return name;
     }
     // Reserve space for icon, duration, and ellipsis
-    const available = maxLen - 2 - durationLabel.length - 3; // 3 = '...'
+    const available = maxLen - ICON_WIDTH - durationLabel.length - 3; // 3 = '...'
     if (available <= 0) {
       return name; // duration alone exceeds limit – don't truncate name to nothing
     }
