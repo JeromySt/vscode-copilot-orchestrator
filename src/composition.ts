@@ -45,6 +45,7 @@ import { GlobalCapacityManager } from './core/globalCapacity';
 import { PlanConfigManager } from './plan/configManager';
 import { PlanPersistence } from './plan/persistence';
 import { StdioMcpServerManager } from './mcp/mcpServerManager';
+import { DefaultGitOperations } from './git/DefaultGitOperations';
 
 /**
  * Create and wire the production DI container.
@@ -74,6 +75,12 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
   container.registerSingleton<import('./interfaces').IClipboardService>(
     Tokens.IClipboardService,
     () => new VsCodeClipboardService(),
+  );
+
+  // ─── Git Operations Service ──────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IGitOperations').IGitOperations>(
+    Tokens.IGitOperations,
+    () => new DefaultGitOperations(),
   );
 
   // ─── Infrastructure Services ─────────────────────────────────────────

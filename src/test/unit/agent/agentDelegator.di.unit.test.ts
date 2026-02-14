@@ -81,6 +81,7 @@ function createMockGitOps(): IGitOperations {
       stashShowFiles: async () => [],
       stashShowPatch: async () => null,
     },
+    gitignore: {} as any,
   };
 }
 
