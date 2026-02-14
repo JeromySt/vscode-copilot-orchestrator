@@ -571,6 +571,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       
       this.element.className = 'plan-item ' + data.status;
       this.element.dataset.status = data.status;
+      // Store timestamps for client-side duration ticking
+      if (data.startedAt) this.element.dataset.startedAt = String(data.startedAt);
+      if (data.endedAt) this.element.dataset.endedAt = String(data.endedAt);
+      else delete this.element.dataset.endedAt;
       
       if (!this._rendered) {
         this._rendered = true;
@@ -873,6 +877,23 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     // ── Control Initialization ───────────────────────────────────────────
     var planListContainer = new PlanListContainerControl(bus, 'plan-list-container', 'plans');
     var capacityBar = new CapacityBarControl(bus, 'capacity-bar');
+    
+    // ── Client-side duration ticker ──────────────────────────────────────
+    // Tick durations every second locally without waiting for server refresh.
+    // PlanListCardControl stores startedAt/endedAt on its element's dataset.
+    setInterval(function() {
+      var cards = document.querySelectorAll('.plan-item[data-status="running"], .plan-item[data-status="pending"]');
+      for (var i = 0; i < cards.length; i++) {
+        var card = cards[i];
+        var startedAt = parseInt(card.dataset.startedAt || '0', 10);
+        if (!startedAt) continue;
+        var endedAt = parseInt(card.dataset.endedAt || '0', 10);
+        var durEl = card.querySelector('.plan-duration');
+        if (durEl) {
+          durEl.textContent = formatDuration(startedAt, endedAt || 0);
+        }
+      }
+    }, 1000);
     
     let isInitialLoad = true;
     
