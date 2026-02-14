@@ -85,7 +85,7 @@ suite('PlanLifecycleManager', () => {
     fs.writeFileSync(path.join(logsDir, 'plan-2_node-1.log'), 'other plan');
 
     const state = makeState(dir, { executor: { storagePath: dir } });
-    const lifecycle = new PlanLifecycleManager(state as any, log);
+    const lifecycle = new PlanLifecycleManager(state as any, log, {} as any);
 
     const worktreeDir = makeTmpDir();
     const plan: PlanInstance = {
@@ -113,7 +113,7 @@ suite('PlanLifecycleManager', () => {
     const dir = makeTmpDir();
     const log = createMockLogger();
     const state = makeState(dir);
-    const lifecycle = new PlanLifecycleManager(state as any, log);
+    const lifecycle = new PlanLifecycleManager(state as any, log, {} as any);
 
     const plan: PlanInstance = {
       id: 'plan-1', spec: { name: 'Test', jobs: [], baseBranch: 'main' },
@@ -136,7 +136,7 @@ suite('PlanLifecycleManager', () => {
     const dir = makeTmpDir();
     const log = createMockLogger();
     const state = makeState(dir);
-    const lifecycle = new PlanLifecycleManager(state as any, log);
+    const lifecycle = new PlanLifecycleManager(state as any, log, {} as any);
 
     const plan: PlanInstance = {
       id: 'plan-1', spec: { name: 'Test', jobs: [], baseBranch: 'main' },

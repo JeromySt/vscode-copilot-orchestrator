@@ -25,6 +25,7 @@ function createRunnerDeps(storagePath: string) {
     persistence: new PlanPersistence(storagePath),
     processMonitor: new ProcessMonitor(new DefaultProcessSpawner()),
     stateMachineFactory: (plan: any) => new PlanStateMachine(plan),
+    git: {} as any,
   };
 }
 

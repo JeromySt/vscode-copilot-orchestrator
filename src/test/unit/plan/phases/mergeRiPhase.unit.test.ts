@@ -69,18 +69,18 @@ suite('MergeRiPhaseExecutor', () => {
   });
 
   test('constructor creates instance', () => {
-    const executor = new MergeRiPhaseExecutor();
+    const executor = new MergeRiPhaseExecutor({ git: {} as any });
     assert.ok(executor);
   });
 
   test('constructor accepts configManager dependency', () => {
     const configManager = { getConfig: () => false };
-    const executor = new MergeRiPhaseExecutor({ configManager });
+    const executor = new MergeRiPhaseExecutor({ configManager, git: {} as any });
     assert.ok(executor);
   });
 
   test('returns failure when repoPath is missing', async () => {
-    const executor = new MergeRiPhaseExecutor();
+    const executor = new MergeRiPhaseExecutor({ git: {} as any });
     const context = createMockContext({
       repoPath: undefined
     });
@@ -92,7 +92,7 @@ suite('MergeRiPhaseExecutor', () => {
   });
 
   test('returns failure when targetBranch is missing', async () => {
-    const executor = new MergeRiPhaseExecutor();
+    const executor = new MergeRiPhaseExecutor({ git: {} as any });
     const context = createMockContext({
       targetBranch: undefined
     });
@@ -104,7 +104,7 @@ suite('MergeRiPhaseExecutor', () => {
   });
 
   test('returns failure when completedCommit is missing', async () => {
-    const executor = new MergeRiPhaseExecutor();
+    const executor = new MergeRiPhaseExecutor({ git: {} as any });
     const context = createMockContext({
       completedCommit: undefined
     });
@@ -119,7 +119,7 @@ suite('MergeRiPhaseExecutor', () => {
     // Mock hasChangesBetween to return false (no changes)
     sandbox.stub(git.repository, 'hasChangesBetween').resolves(false);
 
-    const executor = new MergeRiPhaseExecutor();
+    const executor = new MergeRiPhaseExecutor({ git: {} as any });
     const context = createMockContext();
 
     const result = await executor.execute(context);
@@ -154,7 +154,7 @@ suite('MergeRiPhaseExecutor', () => {
     sandbox.stub(git.merge, 'commitTree').resolves('merge456789012345678901234567890abcdef123');
 
     // Mock updateBranchRef method to return true
-    const executor = new MergeRiPhaseExecutor();
+    const executor = new MergeRiPhaseExecutor({ git: {} as any });
     sandbox.stub(executor as any, 'updateBranchRef').resolves(true);
 
     const context = createMockContext();
@@ -183,7 +183,7 @@ suite('MergeRiPhaseExecutor', () => {
     const configManager = {
       getConfig: sinon.stub().returns(true)
     };
-    const executor = new MergeRiPhaseExecutor({ configManager });
+    const executor = new MergeRiPhaseExecutor({ configManager, git: {} as any });
     sandbox.stub(executor as any, 'updateBranchRef').resolves(true);
 
     const context = createMockContext();
@@ -210,7 +210,7 @@ suite('MergeRiPhaseExecutor', () => {
     });
 
     // Mock mergeWithConflictResolution to succeed
-    const executor = new MergeRiPhaseExecutor();
+    const executor = new MergeRiPhaseExecutor({ git: {} as any });
     const mergeWithConflictStub = sandbox.stub(executor as any, 'mergeWithConflictResolution').resolves({
       success: true,
       metrics: {
@@ -255,7 +255,7 @@ suite('MergeRiPhaseExecutor', () => {
     });
 
     // Mock mergeWithConflictResolution to fail
-    const executor = new MergeRiPhaseExecutor();
+    const executor = new MergeRiPhaseExecutor({ git: {} as any });
     sandbox.stub(executor as any, 'mergeWithConflictResolution').resolves({
       success: false,
       error: 'Could not resolve conflicts'
@@ -270,7 +270,7 @@ suite('MergeRiPhaseExecutor', () => {
   });
 
   test('validation-only root node - no commit to merge', async () => {
-    const executor = new MergeRiPhaseExecutor();
+    const executor = new MergeRiPhaseExecutor({ git: {} as any });
     const context = createMockContext({
       completedCommit: undefined,
       baseCommit: undefined

@@ -64,18 +64,18 @@ suite('MergeFiPhaseExecutor', () => {
   });
 
   test('constructor creates instance', () => {
-    const executor = new MergeFiPhaseExecutor();
+    const executor = new MergeFiPhaseExecutor({ git: {} as any });
     assert.ok(executor);
   });
 
   test('constructor accepts configManager dependency', () => {
     const configManager = { test: true };
-    const executor = new MergeFiPhaseExecutor({ configManager });
+    const executor = new MergeFiPhaseExecutor({ configManager, git: {} as any });
     assert.ok(executor);
   });
 
   test('returns success when no dependency commits', async () => {
-    const executor = new MergeFiPhaseExecutor();
+    const executor = new MergeFiPhaseExecutor({ git: {} as any });
     const context = createMockContext({
       dependencyCommits: []
     });
@@ -87,7 +87,7 @@ suite('MergeFiPhaseExecutor', () => {
   });
 
   test('returns success when dependency commits is undefined', async () => {
-    const executor = new MergeFiPhaseExecutor();
+    const executor = new MergeFiPhaseExecutor({ git: {} as any });
     const context = createMockContext({
       dependencyCommits: undefined
     });
@@ -106,7 +106,7 @@ suite('MergeFiPhaseExecutor', () => {
       conflictFiles: [],
     });
 
-    const executor = new MergeFiPhaseExecutor();
+    const executor = new MergeFiPhaseExecutor({ git: {} as any });
     const context = createMockContext({
       dependencyCommits: [{
         commit: 'abcd1234567890abcdef1234567890abcdef1234',
@@ -156,7 +156,7 @@ suite('MergeFiPhaseExecutor', () => {
     const mergeHelperModule = await import('../../../../plan/phases/mergeHelper');
     sandbox.stub(mergeHelperModule, 'resolveMergeConflictWithCopilot').callsFake(resolveMergeConflictStub);
 
-    const executor = new MergeFiPhaseExecutor();
+    const executor = new MergeFiPhaseExecutor({ git: {} as any });
     const context = createMockContext({
       dependencyCommits: [{
         commit: 'conflict123456789012345678901234567890123456',
@@ -198,7 +198,7 @@ suite('MergeFiPhaseExecutor', () => {
     const mergeHelperModule = await import('../../../../plan/phases/mergeHelper');
     sandbox.stub(mergeHelperModule, 'resolveMergeConflictWithCopilot').callsFake(resolveMergeConflictStub);
 
-    const executor = new MergeFiPhaseExecutor();
+    const executor = new MergeFiPhaseExecutor({ git: {} as any });
     const context = createMockContext({
       dependencyCommits: [{
         commit: 'failed12345678901234567890123456789012345678',

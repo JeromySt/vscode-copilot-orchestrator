@@ -37,7 +37,7 @@ suite('workSummaryHelper', () => {
   suite('computeWorkSummary', () => {
     test('returns empty summary on getHeadCommit failure', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves(undefined);
-      const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123');
+      const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123', {} as any);
       assert.strictEqual(result.commits, 0);
       assert.strictEqual(result.nodeId, 'node-1');
     });
@@ -45,14 +45,14 @@ suite('workSummaryHelper', () => {
     test('returns expectsNoChanges summary when head === base and expectsNoChanges', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves('abc123');
       const node = makeJobNode({ expectsNoChanges: true });
-      const result = await computeWorkSummary(node, '/wt', 'abc123');
+      const result = await computeWorkSummary(node, '/wt', 'abc123', {} as any);
       assert.ok(result.description!.includes('expectsNoChanges'));
       assert.strictEqual(result.commits, 0);
     });
 
     test('returns empty summary when head === base without expectsNoChanges', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves('abc123');
-      const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123');
+      const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123', {} as any);
       assert.strictEqual(result.commits, 0);
     });
 
@@ -63,7 +63,7 @@ suite('workSummaryHelper', () => {
         { status: 'modified', path: 'existing.ts' },
         { status: 'deleted', path: 'old.ts' },
       ]);
-      const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123');
+      const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123', {} as any);
       assert.strictEqual(result.commits, 1);
       assert.strictEqual(result.filesAdded, 1);
       assert.strictEqual(result.filesModified, 1);
@@ -73,13 +73,13 @@ suite('workSummaryHelper', () => {
     test('handles diff failure gracefully', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves('def456');
       sandbox.stub(git.repository, 'getFileChangesBetween').resolves([]);
-      const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123');
+      const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123', {} as any);
       assert.strictEqual(result.commits, 0);
     });
 
     test('catches and returns empty on exception', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').rejects(new Error('git error'));
-      const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123');
+      const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123', {} as any);
       assert.strictEqual(result.commits, 0);
     });
   });
@@ -87,14 +87,14 @@ suite('workSummaryHelper', () => {
   suite('computeAggregatedWorkSummary', () => {
     test('returns empty when no HEAD commit', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves(undefined);
-      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo');
+      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo', {} as any);
       assert.strictEqual(result.commits, 0);
     });
 
     test('returns empty when baseBranch resolution fails', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves('head123');
       sandbox.stub(git.repository, 'resolveRef').rejects(new Error('unknown ref'));
-      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo');
+      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo', {} as any);
       assert.strictEqual(result.commits, 0);
     });
 
@@ -104,7 +104,7 @@ suite('workSummaryHelper', () => {
       sandbox.stub(git.repository, 'getDiffStats').resolves({ added: 1, modified: 1, deleted: 0 });
       sandbox.stub(git.repository, 'getCommitCount').resolves(3);
 
-      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo');
+      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo', {} as any);
       assert.strictEqual(result.commits, 3);
       assert.strictEqual(result.filesAdded, 1);
       assert.strictEqual(result.filesModified, 1);
@@ -117,13 +117,13 @@ suite('workSummaryHelper', () => {
       sandbox.stub(git.repository, 'getDiffStats').resolves({ added: 0, modified: 0, deleted: 0 });
       sandbox.stub(git.repository, 'getCommitCount').resolves(0);
 
-      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo');
+      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo', {} as any);
       assert.strictEqual(result.commits, 0);
     });
 
     test('catches exception and returns empty', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').rejects(new Error('fail'));
-      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo');
+      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo', {} as any);
       assert.strictEqual(result.commits, 0);
     });
 
@@ -133,7 +133,7 @@ suite('workSummaryHelper', () => {
       sandbox.stub(git.repository, 'getDiffStats').resolves({ added: 0, modified: 0, deleted: 0 });
       sandbox.stub(git.repository, 'getCommitCount').resolves(1);
 
-      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo');
+      const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo', {} as any);
       assert.strictEqual(result.filesAdded, 0);
       assert.strictEqual(result.commits, 1);
     });

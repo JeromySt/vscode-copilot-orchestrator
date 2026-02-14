@@ -84,7 +84,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
     const events = new PlanEventEmitter();
     const configManager = new PlanConfigManager();
     const state = { plans: new Map(), stateMachines: new Map(), persistence, events, configManager, executor: {} as any };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
     const result = await mgr.retryNode('unknown', 'n1');
     assert.strictEqual(result.success, false);
@@ -103,7 +103,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
       stateMachines: new Map([['plan-1', sm]]),
       persistence, events, configManager, executor: {} as any,
     };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
     const result = await mgr.retryNode('plan-1', 'unknown');
     assert.strictEqual(result.success, false);
@@ -124,7 +124,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
       stateMachines: new Map([['plan-1', sm]]),
       persistence, events, configManager, executor: {} as any,
     };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
     const result = await mgr.retryNode('plan-1', 'n1', { newWork: 'echo fixed' });
     assert.strictEqual(result.success, true);
@@ -147,7 +147,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
       stateMachines: new Map([['plan-1', sm]]),
       persistence, events, configManager, executor: {} as any,
     };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
     const result = await mgr.retryNode('plan-1', 'n1', {
       newPrechecks: { type: 'shell', command: 'echo pre' },
@@ -171,7 +171,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
       stateMachines: new Map([['plan-1', sm]]),
       persistence, events, configManager, executor: {} as any,
     };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
     const result = await mgr.retryNode('plan-1', 'n1', {
       newWork: { type: 'agent', instructions: 'fix it', resumeSession: false } as any,
@@ -213,7 +213,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
       stateMachines: new Map([['plan-1', sm]]),
       persistence, events, configManager, executor,
     };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
     const result = await mgr.retryNode('plan-1', 'n1');
     assert.strictEqual(result.success, true);
@@ -238,7 +238,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
       stateMachines: new Map([['plan-1', sm]]),
       persistence, events, configManager, executor: {} as any,
     };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
     sandbox.stub(git.repository, 'fetch').resolves();
     sandbox.stub(git.repository, 'resetHard').resolves();
@@ -269,7 +269,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
       stateMachines: new Map([['plan-1', sm]]),
       persistence, events, configManager, executor: {} as any,
     };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
     const result = await mgr.retryNode('plan-1', 'n1', { clearWorktree: true });
     assert.strictEqual(result.success, false);
@@ -292,7 +292,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
       stateMachines: new Map([['plan-1', sm]]),
       persistence, events, configManager, executor,
     };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
     await mgr.forceFailNode('plan-1', 'n1');
 
@@ -308,7 +308,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
     const events = new PlanEventEmitter();
     const configManager = new PlanConfigManager();
     const state = { plans: new Map(), stateMachines: new Map(), persistence, events, configManager, executor: {} as any };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
     try {
       await mgr.forceFailNode('unknown', 'n1');
@@ -333,9 +333,9 @@ suite('NodeManager - retryNode and forceFailNode', () => {
       stateMachines: new Map([['plan-1', sm]]),
       persistence, events, configManager, executor: { cancel: sinon.stub() } as any,
     };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
-    // forceFailNode should still work (it forces regardless of status)
+    // forceFailNode should still work(it forces regardless of status)
     await mgr.forceFailNode('plan-1', 'n1');
     const ns = plan.nodeStates.get('n1')!;
     assert.strictEqual(ns.status, 'failed');
@@ -357,7 +357,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
       stateMachines: new Map([['plan-1', sm]]),
       persistence, events, configManager, executor: {} as any,
     };
-    const mgr = new NodeManager(state as any, log);
+    const mgr = new NodeManager(state as any, log, {} as any);
 
     await mgr.retryNode('plan-1', 'n1');
 

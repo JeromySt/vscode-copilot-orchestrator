@@ -87,7 +87,7 @@ suite('PlanLifecycleManager', () => {
     quiet = silenceConsole();
     state = createState();
     log = createMockLogger();
-    mgr = new PlanLifecycleManager(state, log);
+    mgr = new PlanLifecycleManager(state, log, {} as any);
   });
 
   teardown(() => {

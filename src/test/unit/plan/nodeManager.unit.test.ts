@@ -94,7 +94,7 @@ suite('NodeManager', () => {
     quiet = silenceConsole();
     state = createState();
     log = createMockLogger();
-    mgr = new NodeManager(state, log);
+    mgr = new NodeManager(state, log, {} as any);
   });
 
   teardown(() => {
