@@ -417,6 +417,340 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   <script>
     const vscode = acquireVsCodeApi();
     
+    // ── Inline EventBus ──────────────────────────────────────────────────
+    const EventBus = (function() {
+      function EB() { this._h = new Map(); }
+      EB.prototype.on = function(topic, fn) {
+        var set = this._h.get(topic);
+        if (!set) { set = new Set(); this._h.set(topic, set); }
+        set.add(fn);
+        var active = true;
+        var self = this;
+        return { get isActive() { return active; }, topic: topic, unsubscribe: function() {
+          if (!active) return; active = false;
+          var s = self._h.get(topic); if (s) { s.delete(fn); if (s.size === 0) self._h.delete(topic); }
+        }};
+      };
+      EB.prototype.emit = function(topic, data) {
+        var set = this._h.get(topic);
+        if (!set) return;
+        var snapshot = Array.from(set);
+        for (var i = 0; i < snapshot.length; i++) snapshot[i](data);
+      };
+      EB.prototype.clear = function(topic) {
+        if (topic !== undefined) this._h.delete(topic); else this._h.clear();
+      };
+      return EB;
+    })();
+
+    // ── Inline SubscribableControl ───────────────────────────────────────
+    function SubscribableControl(bus, controlId) {
+      this.bus = bus;
+      this.controlId = controlId;
+      this.subs = [];
+      this.disposed = false;
+      this.pendingMicrotask = false;
+      this.pendingChildHandler = null;
+    }
+    
+    SubscribableControl.prototype.subscribe = function(topic, handler) {
+      var sub = this.bus.on(topic, handler);
+      this.subs.push(sub);
+      return sub;
+    };
+    
+    SubscribableControl.prototype.subscribeToChild = function(childId, handler) {
+      this.pendingChildHandler = handler;
+      var self = this;
+      var sub = this.bus.on('control:' + childId + ':updated', function() {
+        if (self.disposed) return;
+        if (!self.pendingMicrotask) {
+          self.pendingMicrotask = true;
+          (function() {
+            if (typeof queueMicrotask === 'function') {
+              queueMicrotask(function() {
+                self.pendingMicrotask = false;
+                if (!self.disposed && self.pendingChildHandler) {
+                  self.pendingChildHandler();
+                }
+              });
+            } else {
+              Promise.resolve().then(function() {
+                self.pendingMicrotask = false;
+                if (!self.disposed && self.pendingChildHandler) {
+                  self.pendingChildHandler();
+                }
+              });
+            }
+          })();
+        }
+      });
+      this.subs.push(sub);
+      return sub;
+    };
+    
+    SubscribableControl.prototype.publishUpdate = function(data) {
+      this.bus.emit('control:' + this.controlId + ':updated', data);
+    };
+    
+    SubscribableControl.prototype.getElement = function(id) {
+      return document.getElementById(id);
+    };
+    
+    SubscribableControl.prototype.dispose = function() {
+      if (this.disposed) return;
+      this.disposed = true;
+      for (var i = 0; i < this.subs.length; i++) {
+        this.subs[i].unsubscribe();
+      }
+      this.subs.length = 0;
+    };
+
+    // Well-known topics
+    var Topics = {
+      PLAN_STATE_CHANGE: 'plan:state',
+      PLANS_UPDATE: 'plans:update',
+      CAPACITY_UPDATE: 'capacity:update'
+    };
+
+    // Global bus instance
+    var bus = new EventBus();
+    
+    // ── PlanListCardControl ──────────────────────────────────────────────
+    function PlanListCardControl(bus, controlId, element, planId) {
+      SubscribableControl.call(this, bus, controlId);
+      this.element = element;
+      this.planId = planId;
+      this.element.dataset.id = planId;
+      this.element.classList.add('plan-item');
+      this.element.tabIndex = 0;
+      
+      // Subscribe to plan state changes
+      var self = this;
+      this.subscribe(Topics.PLAN_STATE_CHANGE, function(data) {
+        if (data && data.id === self.planId) {
+          self.update(data);
+        }
+      });
+      
+      // Add event listeners
+      this.element.addEventListener('click', function() {
+        vscode.postMessage({ type: 'previewPlan', planId: self.planId });
+      });
+      this.element.addEventListener('dblclick', function() {
+        vscode.postMessage({ type: 'openPlan', planId: self.planId });
+      });
+    }
+    
+    // Inherit from SubscribableControl
+    PlanListCardControl.prototype = Object.create(SubscribableControl.prototype);
+    PlanListCardControl.prototype.constructor = PlanListCardControl;
+    
+    PlanListCardControl.prototype.update = function(data) {
+      if (!data || data.id !== this.planId) return;
+      
+      this.element.className = 'plan-item ' + data.status;
+      this.element.dataset.status = data.status;
+      
+      var progressClass = data.status === 'failed' ? 'failed' : 
+                         data.status === 'succeeded' ? 'succeeded' : '';
+      
+      this.element.innerHTML = 
+        '<div class="plan-name">' +
+          '<span>' + escapeHtml(data.name) + '</span>' +
+          '<span class="plan-status ' + data.status + '">' + data.status + '</span>' +
+        '</div>' +
+        '<div class="plan-details">' +
+          '<span>' + data.nodes + ' nodes</span>' +
+          '<span>✓ ' + data.counts.succeeded + '</span>' +
+          '<span>✗ ' + data.counts.failed + '</span>' +
+          '<span>⏳ ' + data.counts.running + '</span>' +
+          (data.startedAt ? '<span>' + formatDuration(data.startedAt, data.endedAt) + '</span>' : '') +
+        '</div>' +
+        '<div class="plan-progress">' +
+          '<div class="plan-progress-bar ' + progressClass + '" style="width: ' + data.progress + '%"></div>' +
+        '</div>';
+        
+      this.publishUpdate(data);
+    };
+    
+    function escapeHtml(text) {
+      return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    
+    // ── PlanListContainerControl ─────────────────────────────────────────
+    function PlanListContainerControl(bus, controlId, containerId) {
+      SubscribableControl.call(this, bus, controlId);
+      this.containerId = containerId;
+      this.planCards = new Map(); // planId -> PlanListCardControl
+      
+      // Subscribe to plans update
+      var self = this;
+      this.subscribe(Topics.PLANS_UPDATE, function(data) {
+        self.updatePlans(data);
+      });
+    }
+    
+    // Inherit from SubscribableControl
+    PlanListContainerControl.prototype = Object.create(SubscribableControl.prototype);
+    PlanListContainerControl.prototype.constructor = PlanListContainerControl;
+    
+    PlanListContainerControl.prototype.updatePlans = function(plans) {
+      var container = this.getElement(this.containerId);
+      if (!container) return;
+      
+      // Preserve focus: remember which plan was focused before re-render
+      var focusedEl = document.activeElement;
+      var focusedPlanId = focusedEl && focusedEl.classList.contains('plan-item') 
+        ? focusedEl.dataset.id 
+        : null;
+      
+      // If no plans, show empty state
+      if (!plans || plans.length === 0) {
+        container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> or <code>create_copilot_job</code> MCP tool.</div>';
+        // Dispose all existing cards
+        for (var entry of this.planCards.values()) {
+          entry.dispose();
+        }
+        this.planCards.clear();
+        return;
+      }
+      
+      var existingPlanIds = new Set(this.planCards.keys());
+      var newPlanIds = new Set(plans.map(function(p) { return p.id; }));
+      
+      // Remove cards for deleted plans
+      for (var planId of existingPlanIds) {
+        if (!newPlanIds.has(planId)) {
+          var card = this.planCards.get(planId);
+          if (card) {
+            card.dispose();
+            if (card.element && card.element.parentNode) {
+              card.element.parentNode.removeChild(card.element);
+            }
+          }
+          this.planCards.delete(planId);
+        }
+      }
+      
+      // Add cards for new plans or update existing ones
+      for (var i = 0; i < plans.length; i++) {
+        var plan = plans[i];
+        var existingCard = this.planCards.get(plan.id);
+        
+        if (!existingCard) {
+          // Create new card
+          var element = document.createElement('div');
+          container.appendChild(element);
+          
+          var cardId = 'plan-card-' + plan.id;
+          var card = new PlanListCardControl(this.bus, cardId, element, plan.id);
+          this.planCards.set(plan.id, card);
+          
+          // Subscribe to the card's updates
+          this.subscribeToChild(cardId, function() {
+            // Container could react to card changes if needed
+          });
+        }
+      }
+      
+      // Update all cards with their data
+      for (var i = 0; i < plans.length; i++) {
+        var plan = plans[i];
+        var card = this.planCards.get(plan.id);
+        if (card) {
+          card.update(plan);
+        }
+      }
+      
+      // Restore focus to the previously focused plan after update
+      var self = this;
+      setTimeout(function() {
+        if (focusedPlanId) {
+          var targetEl = container.querySelector('.plan-item[data-id="' + focusedPlanId + '"]');
+          if (targetEl) {
+            targetEl.focus();
+          }
+        }
+      }, 50);
+      
+      this.publishUpdate(plans);
+    };
+    
+    PlanListContainerControl.prototype.dispose = function() {
+      for (var card of this.planCards.values()) {
+        card.dispose();
+      }
+      this.planCards.clear();
+      SubscribableControl.prototype.dispose.call(this);
+    };
+    
+    // ── CapacityBarControl ───────────────────────────────────────────────
+    function CapacityBarControl(bus, controlId) {
+      SubscribableControl.call(this, bus, controlId);
+      
+      // Subscribe to capacity updates
+      var self = this;
+      this.subscribe(Topics.CAPACITY_UPDATE, function(data) {
+        self.update(data);
+      });
+    }
+    
+    // Inherit from SubscribableControl
+    CapacityBarControl.prototype = Object.create(SubscribableControl.prototype);
+    CapacityBarControl.prototype.constructor = CapacityBarControl;
+    
+    CapacityBarControl.prototype.update = function(data) {
+      var capacityBarEl = this.getElement('globalCapacityBar');
+      var statsEl = this.getElement('globalStats');
+      
+      if (!capacityBarEl || !statsEl) return;
+      
+      // Update global capacity display
+      var globalCapacity = data.globalCapacity;
+      if (globalCapacity && (globalCapacity.totalGlobalJobs > 0 || globalCapacity.activeInstances > 1)) {
+        capacityBarEl.style.display = 'flex';
+        this.getElement('globalRunningJobs').textContent = globalCapacity.totalGlobalJobs;
+        this.getElement('globalMaxParallel').textContent = globalCapacity.globalMaxParallel;
+        this.getElement('activeInstances').textContent = globalCapacity.activeInstances;
+        
+        // Highlight if multiple instances
+        var instancesEl = capacityBarEl.querySelector('.capacity-instances');
+        if (instancesEl) {
+          instancesEl.classList.toggle('multiple', globalCapacity.activeInstances > 1);
+          
+          // Build tooltip with instance details
+          if (globalCapacity.instanceDetails && globalCapacity.instanceDetails.length > 0) {
+            var tooltip = globalCapacity.instanceDetails
+              .map(function(i) { return (i.isCurrentInstance ? '→ ' : '  ') + 'Instance: ' + i.runningJobs + ' jobs'; })
+              .join('\\n');
+            instancesEl.title = tooltip;
+          } else {
+            instancesEl.title = 'VS Code instances using orchestrator';
+          }
+        }
+      } else {
+        capacityBarEl.style.display = 'none';
+      }
+      
+      // Update global stats
+      var globalStats = data.globalStats;
+      if (globalStats && (globalStats.running > 0 || globalStats.queued > 0)) {
+        statsEl.style.display = 'block';
+        this.getElement('runningJobs').textContent = globalStats.running;
+        this.getElement('maxParallel').textContent = globalStats.maxParallel;
+        this.getElement('queuedJobs').textContent = globalStats.queued;
+        var queuedSection = this.getElement('queuedSection');
+        if (queuedSection) {
+          queuedSection.style.display = globalStats.queued > 0 ? 'inline' : 'none';
+        }
+      } else {
+        statsEl.style.display = 'none';
+      }
+      
+      this.publishUpdate(data);
+    };
+    
     function formatTime(ms) {
       if (!ms) return '';
       const date = new Date(ms);
@@ -474,115 +808,39 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       }
     });
     
+    // ── Control Initialization ───────────────────────────────────────────
+    var planListContainer = new PlanListContainerControl(bus, 'plan-list-container', 'plans');
+    var capacityBar = new CapacityBarControl(bus, 'capacity-bar');
+    
     let isInitialLoad = true;
     
-    window.addEventListener('message', ev => {
+    // ── Message Handler ──────────────────────────────────────────────────
+    window.addEventListener('message', function(ev) {
       if (ev.data.type !== 'update') return;
       
-      const Plans = ev.data.Plans || [];
-      const globalStats = ev.data.globalStats;
-      const globalCapacity = ev.data.globalCapacity;
+      var Plans = ev.data.Plans || [];
+      var globalStats = ev.data.globalStats;
+      var globalCapacity = ev.data.globalCapacity;
       
+      // Update badge
       document.getElementById('badge').textContent = Plans.length + ' total';
       
-      // Update global capacity display
-      const capacityBarEl = document.getElementById('globalCapacityBar');
-      if (globalCapacity && (globalCapacity.totalGlobalJobs > 0 || globalCapacity.activeInstances > 1)) {
-        capacityBarEl.style.display = 'flex';
-        document.getElementById('globalRunningJobs').textContent = globalCapacity.totalGlobalJobs;
-        document.getElementById('globalMaxParallel').textContent = globalCapacity.globalMaxParallel;
-        document.getElementById('activeInstances').textContent = globalCapacity.activeInstances;
-        
-        // Highlight if multiple instances
-        const instancesEl = document.querySelector('.capacity-instances');
-        instancesEl.classList.toggle('multiple', globalCapacity.activeInstances > 1);
-        
-        // Build tooltip with instance details
-        if (globalCapacity.instanceDetails && globalCapacity.instanceDetails.length > 0) {
-          const tooltip = globalCapacity.instanceDetails
-            .map(i => (i.isCurrentInstance ? '→ ' : '  ') + 'Instance: ' + i.runningJobs + ' jobs')
-            .join('\\n');
-          instancesEl.title = tooltip;
-        } else {
-          instancesEl.title = 'VS Code instances using orchestrator';
-        }
-      } else {
-        capacityBarEl.style.display = 'none';
-      }
-      
-      // Update global stats
-      const statsEl = document.getElementById('globalStats');
-      if (globalStats && (globalStats.running > 0 || globalStats.queued > 0)) {
-        statsEl.style.display = 'block';
-        document.getElementById('runningJobs').textContent = globalStats.running;
-        document.getElementById('maxParallel').textContent = globalStats.maxParallel;
-        document.getElementById('queuedJobs').textContent = globalStats.queued;
-        document.getElementById('queuedSection').style.display = globalStats.queued > 0 ? 'inline' : 'none';
-      } else {
-        statsEl.style.display = 'none';
-      }
-      
-      const container = document.getElementById('plans');
-      
-      if (Plans.length === 0) {
-        container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> or <code>create_copilot_job</code> MCP tool.</div>';
-        return;
-      }
-      
-      // Preserve focus: remember which plan was focused before re-render
-      const focusedEl = document.activeElement;
-      const focusedPlanId = focusedEl && focusedEl.classList.contains('plan-item') 
-        ? focusedEl.dataset.id 
-        : null;
-      
-      container.innerHTML = Plans.map(plan => {
-        const progressClass = plan.status === 'failed' ? 'failed' : 
-                             plan.status === 'succeeded' ? 'succeeded' : '';
-        
-        return \`
-          <div class="plan-item \${plan.status}" data-id="\${plan.id}" data-status="\${plan.status}" tabindex="0">
-            <div class="plan-name">
-              <span>\${plan.name}</span>
-              <span class="plan-status \${plan.status}">\${plan.status}</span>
-            </div>
-            <div class="plan-details">
-              <span>\${plan.nodes} nodes</span>
-              <span>✓ \${plan.counts.succeeded}</span>
-              <span>✗ \${plan.counts.failed}</span>
-              <span>⏳ \${plan.counts.running}</span>
-              \${plan.startedAt ? '<span>' + formatDuration(plan.startedAt, plan.endedAt) + '</span>' : ''}
-            </div>
-            <div class="plan-progress">
-              <div class="plan-progress-bar \${progressClass}" style="width: \${plan.progress}%"></div>
-            </div>
-          </div>
-        \`;
-      }).join('');
-      
-      // Add click handlers - click previews (keeps focus in tree), double-click opens
-      document.querySelectorAll('.plan-item').forEach(el => {
-        el.addEventListener('click', () => {
-          // Preview: show panel but keep focus in tree for continued navigation
-          vscode.postMessage({ type: 'previewPlan', planId: el.dataset.id });
-        });
-        el.addEventListener('dblclick', () => {
-          // Open: show panel and take focus
-          vscode.postMessage({ type: 'openPlan', planId: el.dataset.id });
-        });
+      // Emit updates through EventBus for controls to handle
+      bus.emit(Topics.PLANS_UPDATE, Plans);
+      bus.emit(Topics.CAPACITY_UPDATE, {
+        globalCapacity: globalCapacity,
+        globalStats: globalStats
       });
       
-      // Restore focus to the previously focused plan, or focus first on initial load
-      if (focusedPlanId) {
-        const targetEl = document.querySelector('.plan-item[data-id="' + focusedPlanId + '"]');
-        if (targetEl) {
-          targetEl.focus();
-        }
-      } else if (isInitialLoad) {
+      // Handle focus on initial load
+      if (isInitialLoad) {
         isInitialLoad = false;
-        const firstPlan = document.querySelector('.plan-item');
-        if (firstPlan) {
-          firstPlan.focus();
-        }
+        setTimeout(function() {
+          var firstPlan = document.querySelector('.plan-item');
+          if (firstPlan) {
+            firstPlan.focus();
+          }
+        }, 50);
       }
     });
     
