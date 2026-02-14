@@ -69,7 +69,7 @@ suite('Liveness Watchdog', () => {
 
     let checkCalled = false;
     const processMonitor = {
-      isRunning: () => { checkCalled = true; return false; },
+      isRunning: (_pid: number) => { checkCalled = true; return false; },
     };
 
     if (nodeState.status === 'running' && nodeState.pid) {
@@ -90,7 +90,7 @@ suite('Liveness Watchdog', () => {
 
     let checkCalled = false;
     const processMonitor = {
-      isRunning: () => { checkCalled = true; return false; },
+      isRunning: (_pid: number) => { checkCalled = true; return false; },
     };
 
     if (nodeState.status === 'running' && nodeState.pid) {

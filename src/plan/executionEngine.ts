@@ -683,37 +683,69 @@ export class JobExecutionEngine {
             // Get security settings from the original failed spec
             const originalAgentSpec = normalizedFailedSpec?.type === 'agent' ? normalizedFailedSpec : null;
 
+            // Get the log file path so the agent can read it directly
+            const failedLogFilePath = this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts);
+
+            // Remove the original instructions file to prevent the copilot CLI
+            // from re-reading and re-executing the original task during auto-heal.
+            // The heal agent should ONLY focus on analyzing errors and fixing them.
+            try {
+              const fs = require('fs');
+              const instrDir = require('path').join(worktreePath, '.github', 'instructions');
+              if (fs.existsSync(instrDir)) {
+                const files = fs.readdirSync(instrDir) as string[];
+                for (const f of files) {
+                  if (f.startsWith('orchestrator-job')) {
+                    fs.unlinkSync(require('path').join(instrDir, f));
+                    this.log.debug(`Removed original instructions file: ${f}`);
+                  }
+                }
+              }
+            } catch (e: any) {
+              this.log.debug(`Could not remove instructions file: ${e.message}`);
+            }
+
             const healSpec: WorkSpec = {
               type: 'agent',
               instructions: [
                 `# Auto-Heal: Fix Failed ${failedPhase} Phase`,
                 '',
-                `## Task Context`,
-                `This node's task: ${node.task || node.name}`,
+                `## IMPORTANT: Do NOT re-execute the original task`,
+                `Your ONLY job is to diagnose and fix the error that caused the ${failedPhase} phase to fail.`,
+                `Do NOT read or follow any previous instructions files — they are for the original task, not for healing.`,
                 '',
-                `## Original Command`,
-                '```',
-                originalCommand,
-                '```',
-                '',
-                `## Failure Details`,
+                `## What Failed`,
                 `- Phase: ${failedPhase}`,
                 `- Exit code: ${result.exitCode ?? 'unknown'}`,
+                `- Original command: \`${originalCommand}\``,
                 '',
-                `## Execution Logs`,
-                'The following are the full stdout/stderr logs from the failed execution:',
+                `## How to Diagnose`,
+                failedLogFilePath
+                  ? `1. Read the log file at: \`${failedLogFilePath}\``
+                  : `1. Review the error logs below`,
+                `2. Look for the LAST error, exception, or non-zero exit in the logs`,
+                `3. Identify the root cause (missing dependency, wrong path, syntax error, etc.)`,
                 '',
-                '```',
-                truncatedLogs,
-                '```',
+                failedLogFilePath
+                  ? [
+                      `## Log File`,
+                      `The complete execution log is at: \`${failedLogFilePath}\``,
+                      `Read this file to understand what went wrong.`,
+                    ].join('\n')
+                  : [
+                      `## Execution Logs (last ${Math.min(logLines.length, 200)} lines)`,
+                      '```',
+                      truncatedLogs,
+                      '```',
+                    ].join('\n'),
                 '',
-                `## Instructions`,
-                `1. Analyze the logs above to diagnose the root cause of the failure`,
-                `2. Fix the issue in the worktree (edit files, fix configs, etc.)`,
-                `3. Re-run the original command to verify it now passes:`,
+                `## How to Fix`,
+                `1. Based on the error, make targeted fixes in the worktree (edit files, fix configs, etc.)`,
+                `2. Re-run the original command to verify it now passes:`,
                 '   ```',
                 `   ${originalCommand}`,
                 '   ```',
+                `3. If it passes, you are done. If not, analyze the new error and try again.`,
               ].join('\n'),
               // Inherit allowed folders/URLs from original spec (if any)
               // This ensures auto-heal has same access as the original work
