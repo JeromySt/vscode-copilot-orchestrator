@@ -188,63 +188,20 @@ export function renderPlanScripts(data: PlanScriptsData): string {
         useMaxWidth: true,
         htmlLabels: true,
         curve: 'basis',
-        padding: 10,
+        padding: 16,
         nodeSpacing: 30,
         rankSpacing: 50
       }
     });
 
-    // ── fitNodesToContent ─────────────────────────────────────────────
-    // Measure the true rendered width of every node label and grow the
-    // rect + foreignObject + Mermaid inner-div max-width to fit.
-    // Called once after the initial Mermaid render and again after every
-    // duration-text update so nodes never clip their labels.
-    function fitNodesToContent() {
-      var svgEl = document.querySelector('.mermaid svg');
-      if (!svgEl) return;
-
-      svgEl.querySelectorAll('.node').forEach(function(ng) {
-        var rect = ng.querySelector('rect');
-        var fo   = ng.querySelector('foreignObject');
-        if (!rect || !fo) return;
-
-        var innerDiv = fo.querySelector('div');
-        if (!innerDiv) return;
-
-        // Temporarily lift Mermaid's inline max-width so scrollWidth
-        // reports the true content width, not the constrained one.
-        var savedMW = innerDiv.style.maxWidth;
-        innerDiv.style.maxWidth = 'none';
-
-        var label = innerDiv.querySelector('.nodeLabel') || innerDiv.querySelector('span');
-        var textW = label ? (label.scrollWidth || label.offsetWidth) : 0;
-
-        if (textW <= 0) {
-          innerDiv.style.maxWidth = savedMW;
-          return;
-        }
-
-        var padH   = 28; // horizontal breathing room (Mermaid uses ~8px each side)
-        var needed = textW + padH;
-        var rectW  = parseFloat(rect.getAttribute('width') || '0');
-
-        if (needed > rectW && rectW > 0) {
-          var grow = needed - rectW;
-          // Grow rect symmetrically around its centre
-          rect.setAttribute('width', String(needed));
-          var rx = parseFloat(rect.getAttribute('x') || '0');
-          rect.setAttribute('x', String(rx - grow / 2));
-          // Grow foreignObject and shift it so text stays centred
-          fo.setAttribute('width', String(needed));
-          var foX = parseFloat(fo.getAttribute('x') || '0');
-          fo.setAttribute('x', String(foX - grow / 2));
-        }
-
-        // Set max-width to the (possibly grown) foreignObject width
-        var finalW = Math.max(parseFloat(fo.getAttribute('width') || '0'), needed);
-        innerDiv.style.maxWidth = finalW + 'px';
-      });
-    }
+    // ── Node label sizing ─────────────────────────────────────────────
+    // Mermaid natively sizes rects, foreignObjects, cluster boxes, and
+    // edge paths based on initial label text content.  Post-render
+    // resizing of rects breaks edges and cluster containment.
+    //
+    // Instead we pre-pad labels with em-spaces (U+2003) server-side so
+    // Mermaid allocates enough width.  CSS overflow:visible on labels
+    // handles any ±2px rounding differences gracefully.
     
     // Render mermaid with error handling
     (async () => {
@@ -274,12 +231,8 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           label.style.width = 'auto';
         });
 
-        // Ensure node rects and foreignObjects are wide enough for their
-        // actual rendered text.  Mermaid's internal text measurement can
-        // underestimate the CSS-rendered width by a few pixels, clipping the
-        // last 1-2 characters.  This function measures each label and grows
-        // the rect + foreignObject + inner-div max-width to fit.
-        fitNodesToContent();
+        // Mermaid natively sizes everything — no post-render rect adjustments needed.
+        // CSS overflow:visible handles any minor sizing differences.
         
         // Add tooltips for truncated node labels
         for (const [id, fullName] of Object.entries(nodeTooltips)) {
@@ -608,8 +561,6 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           break;
         }
       }
-      // Re-measure and grow any nodes whose text now exceeds their rect
-      fitNodesToContent();
     }
     
     // Subscribe to PULSE for duration updates (replaces setInterval)

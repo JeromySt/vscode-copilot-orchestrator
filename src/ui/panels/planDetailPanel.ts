@@ -834,18 +834,21 @@ export class planDetailPanel {
     .mermaid g[id*="TARGET_SOURCE"] .node,
     .mermaid g[id*="TARGET_MERGED"] .node { cursor: default; }  /* Branch nodes are not clickable */
     
-    /* Node labels — sized by fitNodesToContent() after render.
-       overflow:visible lets the JS sizing be authoritative; text is
-       already server-side truncated so nothing should spill out. */
+    /* Node labels — Mermaid sizes rects natively from label content.
+       overflow:visible ensures text is never clipped even if Mermaid
+       undersizes by a few pixels.  Labels are pre-truncated server-side
+       and em-space-padded so Mermaid allocates enough room. */
     .mermaid .node .nodeLabel {
       white-space: nowrap !important;
       display: block !important;
+      overflow: visible !important;
     }
     .mermaid .node foreignObject {
       overflow: visible !important;
     }
     .mermaid .node foreignObject div {
       white-space: nowrap !important;
+      overflow: visible !important;
     }
     
     /* Subgraph/cluster styling */
@@ -1535,7 +1538,7 @@ export class planDetailPanel {
       // wide enough for the longest possible timer text.  On incremental
       // updates the client pads back to this character count.
       const emSp = '\u2003';
-      const TIMER_PAD = 6;
+      const TIMER_PAD = 8;
       lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}${emSp.repeat(TIMER_PAD)}"]`);
       lines.push(`${indent}class ${sanitizedId} ${status}`);
       
@@ -1702,7 +1705,7 @@ export class planDetailPanel {
           nodeTooltips[sanitizedGroupId] = groupPath.includes('/') ? groupPath : displayName;
         }
         const emSp = '\u2003'; // em space — proportional-font-safe padding
-        const padding = emSp.repeat(4); // reserve width to prevent cutoff
+        const padding = emSp.repeat(6); // reserve width to prevent cutoff
         
         lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedGroupName}${groupDurationLabel}${padding}"]`);
         
