@@ -38,26 +38,29 @@ export function renderPlanDag(data: PlanDagData): string {
       <button class="zoom-btn" onclick="zoomReset()" title="Reset Zoom">⟲</button>
       <button class="zoom-btn" onclick="zoomFit()" title="Fit to View">⊡</button>
     </div>
-    <div class="legend">
-      <div class="legend-item">
-        <span class="legend-icon pending">○</span>
-        <span>Pending</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-icon running">▶</span>
-        <span>Running</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-icon succeeded">✓</span>
-        <span>Succeeded</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-icon failed">✗</span>
-        <span>Failed</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-icon blocked">⊘</span>
-        <span>Blocked</span>
+    <div class="legend" id="dagLegend">
+      <span class="legend-title legend-toggle" onclick="document.getElementById('dagLegend').classList.toggle('collapsed')">Legend</span>
+      <div class="legend-items">
+        <div class="legend-item">
+          <span class="legend-icon pending">○</span>
+          <span>Pending</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-icon running">▶</span>
+          <span>Running</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-icon succeeded">✓</span>
+          <span>Succeeded</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-icon failed">✗</span>
+          <span>Failed</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-icon blocked">⊘</span>
+          <span>Blocked</span>
+        </div>
       </div>
     </div>
     <div class="mermaid-container" id="mermaidContainer">

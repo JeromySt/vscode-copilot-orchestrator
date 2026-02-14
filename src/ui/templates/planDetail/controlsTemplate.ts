@@ -49,13 +49,15 @@ export function renderPlanControls(data: PlanControlsData): string {
     : '<button id="workSummaryBtn" class="action-btn primary" onclick="showWorkSummary()" style="display:none">View Work Summary</button>';
 
   return `
-  <div class="actions">
-    ${pauseBtn}
-    ${resumeBtn}
-    ${cancelBtn}
-    <button class="action-btn secondary" onclick="refresh()">Refresh</button>
-    ${workSummaryBtn}
-    <button class="action-btn danger" onclick="deletePlan()">Delete</button>
+  <div class="plan-toolbar">
+    <div class="actions">
+      ${pauseBtn}
+      ${resumeBtn}
+      ${cancelBtn}
+      <button class="action-btn secondary" onclick="refresh()">Refresh</button>
+      ${workSummaryBtn}
+      <button class="action-btn danger" onclick="deletePlan()">Delete</button>
+    </div>
   </div>
   `;
 }

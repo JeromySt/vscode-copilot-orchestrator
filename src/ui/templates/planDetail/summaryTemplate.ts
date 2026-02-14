@@ -105,7 +105,7 @@ export function renderPlanSummary(data: PlanSummaryData | undefined | null): str
   return `
     <div class="work-summary">
       <h3>Work Summary${titleSuffix}</h3>
-      <div class="work-summary-grid">
+      <div class="work-summary-grid work-summary-clickable" onclick="if(typeof showWorkSummary==='function')showWorkSummary()" title="Click to open full Work Summary">
         <div class="work-stat">
           <div class="work-stat-value">${totalCommits}</div>
           <div class="work-stat-label">Commits</div>

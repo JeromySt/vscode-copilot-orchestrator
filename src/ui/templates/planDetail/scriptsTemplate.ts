@@ -666,10 +666,33 @@ export function renderPlanScripts(data: PlanScriptsData): string {
     var planStatusCtrl = new SubscribableControl(bus, 'plan-status');
     planStatusCtrl.update = function(msg) {
       var planStatus = msg.planStatus;
-      var statusBadge = document.querySelector('.status-badge');
+      var statusBadge = document.getElementById('statusBadge');
       if (statusBadge) {
         statusBadge.className = 'status-badge ' + planStatus;
-        statusBadge.textContent = planStatus.charAt(0).toUpperCase() + planStatus.slice(1);
+      }
+      // Update phase indicator
+      var phaseEl = document.getElementById('currentPhaseIndicator');
+      if (phaseEl) {
+        var label = planStatus.charAt(0).toUpperCase() + planStatus.slice(1);
+        if (planStatus === 'running' || planStatus === 'pending') {
+          // Compute phases from all nodeStatuses (changed + existing)
+          var phases = {};
+          for (var id in nodeData) {
+            var nd = nodeData[id];
+            if (nd.status === 'running' && nd.currentPhase) {
+              phases[nd.currentPhase] = (phases[nd.currentPhase] || 0) + 1;
+            }
+          }
+          var phaseKeys = Object.keys(phases);
+          if (phaseKeys.length > 0) {
+            var parts = phaseKeys.map(function(p) {
+              var name = p.charAt(0).toUpperCase() + p.slice(1);
+              return phases[p] > 1 ? name + ' (' + phases[p] + ')' : name;
+            });
+            label = label + ' - ' + parts.join(', ');
+          }
+        }
+        phaseEl.textContent = label;
       }
       // Update action buttons visibility
       var actionsDiv = document.querySelector('.actions');

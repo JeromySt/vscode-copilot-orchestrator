@@ -13,6 +13,8 @@
 import * as vscode from 'vscode';
 import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState, computeMergedLeafWorkSummary } from '../../plan';
 import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
+import { renderWorkSummaryPanelHtml } from '../templates/workSummaryPanel';
+import type { WorkSummaryPanelData, WsPanelJob, WsJourneyNode } from '../templates/workSummaryPanel';
 import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges, formatTokenCount } from '../../plan/metricsAggregator';
 import { renderPlanHeader, renderPlanControls, renderPlanDag, renderPlanNodeCard, renderPlanSummary, renderMetricsBar, renderPlanScripts } from '../templates/planDetail';
 import type { PlanSummaryData, PlanMetricsBarData } from '../templates/planDetail';
@@ -82,6 +84,13 @@ export class planDetailPanel {
       forceFullRefresh: () => this._forceFullRefresh(),
       showWorkSummaryDocument: () => this._showWorkSummaryDocument(),
       sendAllProcessStats: () => this._sendAllProcessStats(),
+      openFile: (relativePath) => {
+        const plan = this._planRunner.get(this._planId);
+        if (plan) {
+          const fileUri = vscode.Uri.file(require('path').join(plan.repoPath, relativePath));
+          vscode.window.showTextDocument(fileUri, { preview: true }).then(undefined, () => { /* file may not exist */ });
+        }
+      },
     };
     this._controller = new PlanDetailController(planId, dialogService, delegate);
     
@@ -236,8 +245,6 @@ export class planDetailPanel {
     }
     
     // Use filtered summary for plans with target branch.
-    // Only shows work from leaf nodes that have been merged to target, ensuring
-    // the summary reflects actual integrated work rather than all work performed.
     const summary = plan.targetBranch 
       ? computeMergedLeafWorkSummary(plan, plan.nodeStates)
       : plan.workSummary;
@@ -247,30 +254,77 @@ export class planDetailPanel {
       return;
     }
     
-    // Build job details HTML
-    let jobDetailsHtml = '';
-    if (summary.jobSummaries && summary.jobSummaries.length > 0) {
-      for (const job of summary.jobSummaries) {
-        const commitsHtml = commitDetailsHtml(job.commitDetails || []);
-        
-        jobDetailsHtml += `
-          <div class="job-card">
-            <div class="job-header">
-              <span class="job-name">${escapeHtml(job.nodeName)}</span>
-              <span class="job-stats">
-                <span class="stat-commits">${job.commits} commits</span>
-                <span class="stat-added">+${job.filesAdded}</span>
-                <span class="stat-modified">~${job.filesModified}</span>
-                <span class="stat-deleted">-${job.filesDeleted}</span>
-              </span>
-            </div>
-            <div class="job-description">${escapeHtml(job.description)}</div>
-            ${commitsHtml}
-          </div>`;
+    // Build per-job data with duration from node execution states
+    const jobs: WsPanelJob[] = (summary.jobSummaries || []).map(job => {
+      const nodeState = plan.nodeStates.get(job.nodeId);
+      const durationMs = (nodeState?.startedAt && nodeState?.endedAt)
+        ? nodeState.endedAt - nodeState.startedAt
+        : undefined;
+      return {
+        nodeId: job.nodeId,
+        nodeName: job.nodeName,
+        description: job.description,
+        durationMs,
+        commits: job.commits,
+        filesAdded: job.filesAdded,
+        filesModified: job.filesModified,
+        filesDeleted: job.filesDeleted,
+        commitDetails: (job.commitDetails || []).map(c => ({
+          shortHash: c.shortHash,
+          message: c.message,
+          date: c.date,
+          filesAdded: c.filesAdded,
+          filesModified: c.filesModified,
+          filesDeleted: c.filesDeleted,
+        })),
+      };
+    });
+    
+    // Build journey nodes in topological order
+    const journeyNodes: WsJourneyNode[] = [];
+    const visited = new Set<string>();
+    const toVisit = [...plan.roots];
+    while (toVisit.length > 0) {
+      const nodeId = toVisit.shift()!;
+      if (visited.has(nodeId)) { continue; }
+      const node = plan.nodes.get(nodeId);
+      if (!node || node.type !== 'job') { continue; }
+      const deps = (node as JobNode).dependencies || [];
+      if (deps.some(d => !visited.has(d))) {
+        toVisit.push(nodeId);
+        continue;
+      }
+      visited.add(nodeId);
+      const nodeState = plan.nodeStates.get(nodeId);
+      journeyNodes.push({
+        nodeName: node.name,
+        shortHash: nodeState?.completedCommit?.slice(0, 8),
+        status: (nodeState?.status || 'pending') as WsJourneyNode['status'],
+        mergedToTarget: nodeState?.mergedToTarget,
+        isLeaf: plan.leaves.includes(nodeId),
+      });
+      // Add dependents
+      for (const [otherId, otherNode] of plan.nodes) {
+        if (otherNode.type === 'job' && (otherNode as JobNode).dependencies.includes(nodeId)) {
+          toVisit.push(otherId);
+        }
       }
     }
     
-    // Create the webview panel
+    const panelData: WorkSummaryPanelData = {
+      planName: plan.spec.name,
+      baseBranch: plan.baseBranch,
+      baseCommitShort: plan.baseCommitAtStart?.slice(0, 8),
+      targetBranch: plan.targetBranch,
+      totalCommits: summary.totalCommits,
+      totalFilesAdded: summary.totalFilesAdded,
+      totalFilesModified: summary.totalFilesModified,
+      totalFilesDeleted: summary.totalFilesDeleted,
+      jobs,
+      journeyNodes,
+    };
+    
+    // Create the webview panel with scripts enabled for clickable files
     const panelTitle = plan.targetBranch 
       ? `Work Summary: ${plan.spec.name} (Merged to ${plan.targetBranch})`
       : `Work Summary: ${plan.spec.name}`;
@@ -278,159 +332,23 @@ export class planDetailPanel {
       'workSummary',
       panelTitle,
       vscode.ViewColumn.Beside,
-      { enableScripts: false }
+      { enableScripts: true }
     );
     
-    panel.webview.html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
-  <style>
-    body {
-      font-family: var(--vscode-font-family);
-      padding: 20px;
-      color: var(--vscode-foreground);
-      background: var(--vscode-editor-background);
-      line-height: 1.6;
-    }
-    h1 {
-      color: var(--vscode-foreground);
-      border-bottom: 1px solid var(--vscode-panel-border);
-      padding-bottom: 12px;
-      margin-bottom: 24px;
-    }
-    .overview-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-      gap: 16px;
-      margin-bottom: 32px;
-    }
-    .overview-stat {
-      background: var(--vscode-sideBar-background);
-      padding: 16px;
-      border-radius: 8px;
-      text-align: center;
-    }
-    .overview-stat .value {
-      font-size: 28px;
-      font-weight: bold;
-      color: var(--vscode-foreground);
-    }
-    .overview-stat .label {
-      font-size: 12px;
-      color: var(--vscode-descriptionForeground);
-      margin-top: 4px;
-    }
-    .overview-stat.added .value { color: #4ec9b0; }
-    .overview-stat.modified .value { color: #dcdcaa; }
-    .overview-stat.deleted .value { color: #f48771; }
+    // Handle openFile messages from clickable file links
+    panel.webview.onDidReceiveMessage(message => {
+      if (message.type === 'openFile' && message.path) {
+        const fileUri = vscode.Uri.file(
+          require('path').join(plan.repoPath, message.path)
+        );
+        vscode.window.showTextDocument(fileUri, { preview: true }).then(
+          undefined,
+          () => { /* file may not exist */ }
+        );
+      }
+    });
     
-    h2 {
-      margin-top: 24px;
-      margin-bottom: 16px;
-      color: var(--vscode-foreground);
-    }
-    
-    .job-card {
-      background: var(--vscode-sideBar-background);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 16px;
-      border-left: 3px solid #4ec9b0;
-    }
-    .job-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 8px;
-    }
-    .job-name {
-      font-weight: bold;
-      font-size: 14px;
-    }
-    .job-stats {
-      font-size: 12px;
-    }
-    .job-stats span {
-      margin-left: 12px;
-    }
-    .stat-commits { color: var(--vscode-descriptionForeground); }
-    .stat-added { color: #4ec9b0; }
-    .stat-modified { color: #dcdcaa; }
-    .stat-deleted { color: #f48771; }
-    
-    .job-description {
-      color: var(--vscode-descriptionForeground);
-      font-size: 13px;
-      margin-bottom: 12px;
-    }
-    
-    .commits-list {
-      margin-top: 12px;
-      border-top: 1px solid var(--vscode-panel-border);
-      padding-top: 12px;
-    }
-    .commit-item {
-      padding: 8px 0;
-      border-bottom: 1px solid var(--vscode-panel-border);
-    }
-    .commit-item:last-child {
-      border-bottom: none;
-    }
-    .commit-hash {
-      background: var(--vscode-textCodeBlock-background);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 12px;
-      color: #dcdcaa;
-    }
-    .commit-message {
-      margin-left: 8px;
-      font-size: 13px;
-    }
-    .commit-files {
-      margin-top: 8px;
-      margin-left: 70px;
-      font-size: 11px;
-      font-family: var(--vscode-editor-font-family), monospace;
-    }
-    .file-item {
-      padding: 2px 0;
-    }
-    .file-added { color: #4ec9b0; }
-    .file-modified { color: #dcdcaa; }
-    .file-deleted { color: #f48771; }
-  </style>
-</head>
-<body>
-  <h1>📊 Work Summary: ${escapeHtml(plan.spec.name)}${plan.targetBranch ? ` (Merged to ${escapeHtml(plan.targetBranch)})` : ''}</h1>
-  
-  <div class="overview-grid">
-    <div class="overview-stat">
-      <div class="value">${summary.totalCommits}</div>
-      <div class="label">Total Commits</div>
-    </div>
-    <div class="overview-stat added">
-      <div class="value">+${summary.totalFilesAdded}</div>
-      <div class="label">Files Added</div>
-    </div>
-    <div class="overview-stat modified">
-      <div class="value">~${summary.totalFilesModified}</div>
-      <div class="label">Files Modified</div>
-    </div>
-    <div class="overview-stat deleted">
-      <div class="value">-${summary.totalFilesDeleted}</div>
-      <div class="label">Files Deleted</div>
-    </div>
-  </div>
-  
-  ${summary.jobSummaries && summary.jobSummaries.length > 0 ? `
-    <h2>Job Details</h2>
-    ${jobDetailsHtml}
-  ` : ''}
-</body>
-</html>`;
+    panel.webview.html = renderWorkSummaryPanelHtml(panelData);
   }
 
   /**
@@ -483,15 +401,21 @@ export class planDetailPanel {
     const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
     
     // Build node status mapfor incremental updates (includes version for efficient updates)
-    const nodeStatuses: Record<string, { status: string; version: number; startedAt?: number; endedAt?: number }> = {};
+    const nodeStatuses: Record<string, { status: string; version: number; startedAt?: number; endedAt?: number; currentPhase?: string }> = {};
     for (const [nodeId, state] of plan.nodeStates) {
       const sanitizedId = this._sanitizeId(nodeId);
-      nodeStatuses[sanitizedId] = {
+      const entry: typeof nodeStatuses[string] = {
         status: state.status,
         version: state.version || 0,
         startedAt: state.startedAt,
         endedAt: state.endedAt
       };
+      if (state.status === 'running' && state.stepStatuses) {
+        for (const [phase, phaseStatus] of Object.entries(state.stepStatuses)) {
+          if (phaseStatus === 'running') { entry.currentPhase = phase; break; }
+        }
+      }
+      nodeStatuses[sanitizedId] = entry;
     }
     
     // Add group statuses (groups use same sanitized ID pattern as nodes)
@@ -581,10 +505,16 @@ export class planDetailPanel {
     // Build node statuses
     const nodeStatuses: Record<string, any> = {};
     for (const [nodeId, state] of plan.nodeStates) {
-      nodeStatuses[this._sanitizeId(nodeId)] = {
+      const entry: Record<string, any> = {
         status: state.status, version: state.version || 0,
         startedAt: state.startedAt, endedAt: state.endedAt,
       };
+      if (state.status === 'running' && state.stepStatuses) {
+        for (const [phase, phaseStatus] of Object.entries(state.stepStatuses)) {
+          if (phaseStatus === 'running') { entry.currentPhase = phase; break; }
+        }
+      }
+      nodeStatuses[this._sanitizeId(nodeId)] = entry;
     }
     for (const [groupId, state] of plan.groupStates) {
       nodeStatuses[this._sanitizeId(groupId)] = {
@@ -775,14 +705,13 @@ export class planDetailPanel {
       font-size: 11px;
     }
     
-    .capacity-info {
-      display: flex;
-      align-items: center;
-      padding: 8px 14px;
-      margin-bottom: 16px;
+    .capacity-info.capacity-badge {
+      display: inline-flex;
+      padding: 4px 10px;
+      margin-bottom: 12px;
       background: var(--vscode-editor-inactiveSelectionBackground);
-      border-radius: 6px;
-      font-size: 12px;
+      border-radius: 12px;
+      font-size: 11px;
       color: var(--vscode-descriptionForeground);
     }
     
@@ -972,6 +901,25 @@ export class planDetailPanel {
       align-items: center;
       margin-bottom: 12px;
       font-size: 11px;
+    }
+    .legend-toggle {
+      cursor: pointer;
+      user-select: none;
+    }
+    .legend-toggle:hover {
+      color: var(--vscode-foreground);
+    }
+    .legend.collapsed .legend-items {
+      display: none;
+    }
+    .legend.collapsed .legend-toggle::after {
+      content: ' ▸';
+    }
+    .legend:not(.collapsed) .legend-toggle::after {
+      content: ' ▾';
+    }
+    .legend-items {
+      display: contents;
     }
     .legend-title {
       font-size: 11px;
@@ -1203,10 +1151,11 @@ export class planDetailPanel {
       flex-wrap: wrap;
       align-items: center;
       gap: 16px;
-      padding: 10px 12px;
+      padding: 12px 16px;
       background: var(--vscode-sideBar-background);
       border-radius: 8px;
       margin-bottom: 16px;
+      border-left: 3px solid var(--vscode-progressBar-background);
     }
     .plan-metrics-bar .metrics-label {
       font-weight: 600;
@@ -1257,8 +1206,16 @@ export class planDetailPanel {
       color: var(--vscode-descriptionForeground);
     }
     
+    .plan-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: var(--vscode-editor-background);
+      padding: 8px 0 8px 0;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--vscode-widget-border);
+    }
     .actions {
-      margin-top: 16px;
       display: flex;
       gap: 8px;
     }
@@ -1297,6 +1254,24 @@ export class planDetailPanel {
       opacity: 0.5;
       cursor: not-allowed;
     }
+    
+    /* Phase indicator in status badge */
+    .phase-indicator {
+      font-size: 11px;
+      font-weight: 500;
+    }
+    
+    /* Work summary clickable stats */
+    .work-summary-clickable {
+      cursor: pointer;
+      transition: background 0.15s;
+      border-radius: 8px;
+      padding: 4px;
+    }
+    .work-summary-clickable:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    
   </style>
 </head>
 <body>
@@ -1310,11 +1285,11 @@ export class planDetailPanel {
     showBranchFlow: !!showBranchFlow,
     globalCapacityStats,
   })}
+  ${renderPlanControls({ status })}
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}
   ${renderPlanDag({ mermaidDef, status })}
   ${workSummaryHtml}
-  ${renderPlanControls({ status })}
   ${renderPlanScripts({ nodeData, nodeTooltips, mermaidDef, edgeData, globalCapacityStats: globalCapacityStats || null })}
 </body>
 </html>`;

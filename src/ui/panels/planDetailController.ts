@@ -25,6 +25,8 @@ export interface PlanDetailDelegate {
   showWorkSummaryDocument(): void;
   /** Send all process stats to the webview. */
   sendAllProcessStats(): void;
+  /** Open a file in the editor by relative path. */
+  openFile(relativePath: string): void;
 }
 
 /**
@@ -87,6 +89,11 @@ export class PlanDetailController {
         break;
       case 'getAllProcessStats':
         this._delegate.sendAllProcessStats();
+        break;
+      case 'openFile':
+        if (message.path) {
+          this._delegate.openFile(message.path);
+        }
         break;
     }
   }

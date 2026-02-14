@@ -64,12 +64,12 @@ export function renderPlanHeader(data: PlanHeaderData): string {
   const targetBranchName = targetBranch || baseBranch;
 
   let html = `  <div class="header">
+    <span class="status-badge ${status}" id="statusBadge"><span id="currentPhaseIndicator">${status}</span></span>
     <h2>${escapeHtml(planName)}</h2>
     <div class="header-duration">
       <span class="duration-icon">⏱</span>
       <span class="duration-value ${status}" id="planDuration" data-started="${startedAt || 0}" data-ended="${effectiveEndedAt || 0}" data-status="${status}">${durationText}</span>
     </div>
-    <span class="status-badge ${status}">${status}</span>
   </div>
   `;
 
@@ -88,9 +88,9 @@ export function renderPlanHeader(data: PlanHeaderData): string {
   }
 
   html += `
-  <div class="capacity-info" id="capacityInfo" style="display: none;">
+  <div class="capacity-info capacity-badge" id="capacityInfo" style="display: none;">
     <span>🖥️ <span id="instanceCount">1</span> instance(s)</span>
-    <span style="margin-left: 16px;">⚡ <span id="globalJobs">0</span>/<span id="globalMax">16</span> global jobs</span>
+    <span style="margin-left: 12px;">⚡ <span id="globalJobs">0</span>/<span id="globalMax">16</span> global</span>
   </div>
   `;
 
