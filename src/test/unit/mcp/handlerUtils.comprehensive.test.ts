@@ -94,7 +94,8 @@ suite('MCP Handler Utilities Unit Tests', () => {
       PlanRunner: mockPlanRunner as any,
       workspacePath: '/mock/workspace',
       runner: null as any,
-      plans: null as any
+      plans: null as any,
+      git: {} as any,
     };
     
     // Reset git mocks
@@ -383,7 +384,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
   
   suite('resolveBaseBranch', () => {
     test('should return requested branch when provided', async () => {
-      const result = await resolveBaseBranch('/test/repo', 'feature/custom');
+      const result = await resolveBaseBranch('/test/repo', {} as any, 'feature/custom');
       
       assert.strictEqual(result, 'feature/custom');
       // Should not call git when explicit branch provided
@@ -393,7 +394,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
     test.skip('should return current branch when no request and current exists', async () => {
       mockGit.branches.currentOrNull.withArgs('/test/repo').resolves('develop');
       
-      const result = await resolveBaseBranch('/test/repo');
+      const result = await resolveBaseBranch('/test/repo', {} as any);
       
       assert.strictEqual(result, 'develop');
       assert.ok(mockGit.branches.currentOrNull.calledWith('/test/repo'));
@@ -402,7 +403,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
     test.skip('should return main when no request and no current branch', async () => {
       mockGit.branches.currentOrNull.withArgs('/test/repo').resolves(null);
       
-      const result = await resolveBaseBranch('/test/repo');
+      const result = await resolveBaseBranch('/test/repo', {} as any);
       
       assert.strictEqual(result, 'main');
       assert.ok(mockGit.branches.currentOrNull.calledWith('/test/repo'));
@@ -411,7 +412,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
     test('should handle git errors gracefully', async () => {
       mockGit.branches.currentOrNull.withArgs('/test/repo').rejects(new Error('Git error'));
       
-      const result = await resolveBaseBranch('/test/repo');
+      const result = await resolveBaseBranch('/test/repo', {} as any);
       
       assert.strictEqual(result, 'main');
     });
@@ -419,7 +420,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
   
   suite('resolveTargetBranch', () => {
     test.skip('should return requested target when provided', async () => {
-      const result = await resolveTargetBranch('main', '/test/repo', 'feature/custom', 'Test Plan');
+      const result = await resolveTargetBranch('main', '/test/repo', {} as any, 'feature/custom', 'Test Plan');
       
       assert.strictEqual(result, 'feature/custom');
       // Should not generate branch name when explicit target provided
@@ -429,7 +430,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
     test.skip('should generate branch name from plan name when no target', async () => {
       mockGit.repository.ensureClean.withArgs('/test/repo').resolves();
       
-      const result = await resolveTargetBranch('main', '/test/repo', undefined, 'My Test Plan');
+      const result = await resolveTargetBranch('main', '/test/repo', {} as any, undefined, 'My Test Plan');
       
       assert.ok(result.startsWith('copilot/my-test-plan-'));
       assert.ok(mockGit.repository.ensureClean.calledWith('/test/repo'));
@@ -438,7 +439,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
     test.skip('should handle plan names with special characters', async () => {
       mockGit.repository.ensureClean.withArgs('/test/repo').resolves();
       
-      const result = await resolveTargetBranch('main', '/test/repo', undefined, 'Plan: Fix Bug #123!');
+      const result = await resolveTargetBranch('main', '/test/repo', {} as any, undefined, 'Plan: Fix Bug #123!');
       
       assert.ok(result.startsWith('copilot/plan-fix-bug-123-'));
     });
@@ -447,7 +448,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
       mockGit.repository.ensureClean.withArgs('/test/repo').resolves();
       const longName = 'A'.repeat(100);
       
-      const result = await resolveTargetBranch('main', '/test/repo', undefined, longName);
+      const result = await resolveTargetBranch('main', '/test/repo', {} as any, undefined, longName);
       
       // Should be truncated
       assert.ok(result.length < 100);
@@ -457,7 +458,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
     test.skip('should handle empty plan name', async () => {
       mockGit.repository.ensureClean.withArgs('/test/repo').resolves();
       
-      const result = await resolveTargetBranch('main', '/test/repo', undefined, '');
+      const result = await resolveTargetBranch('main', '/test/repo', {} as any, undefined, '');
       
       assert.ok(result.startsWith('copilot/plan-'));
     });

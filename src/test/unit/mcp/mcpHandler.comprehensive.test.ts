@@ -41,7 +41,7 @@ suite('MCP Handler Unit Tests', () => {
   
   setup(() => {
     mockPlanRunner = new MockPlanRunner();
-    handler = new McpHandler(mockPlanRunner as any, workspacePath);
+    handler = new McpHandler(mockPlanRunner as any, workspacePath, {} as any);
   });
   
   teardown(() => {
@@ -50,7 +50,7 @@ suite('MCP Handler Unit Tests', () => {
   
   suite('Constructor', () => {
     test('should initialize with PlanRunner and workspace path', () => {
-      const h = new McpHandler(mockPlanRunner as any, '/test/path');
+      const h = new McpHandler(mockPlanRunner as any, '/test/path', {} as any);
       assert.ok(h);
     });
   });
