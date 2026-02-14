@@ -52,6 +52,28 @@ module.exports = [
           selector: "CallExpression[callee.name='require'][arguments.0.value='fs']",
           message: 'Consider using IFileSystem interface for testability. Direct fs require() should be in core utility modules only.',
         },
+        // Enforce DI: prevent direct construction of service classes that should be resolved from the DI container.
+        // These classes have interfaces (IProcessMonitor, IProcessSpawner, etc.) and should be injected, not constructed.
+        {
+          selector: "NewExpression[callee.name='ProcessMonitor']",
+          message: 'Use IProcessMonitor from DI container instead of new ProcessMonitor(). Direct construction prevents mocking in tests.',
+        },
+        {
+          selector: "NewExpression[callee.name='DefaultProcessSpawner']",
+          message: 'Use IProcessSpawner from DI container instead of new DefaultProcessSpawner(). Direct construction prevents mocking in tests.',
+        },
+        {
+          selector: "NewExpression[callee.name='CopilotCliRunner']",
+          message: 'Use ICopilotRunner from DI container instead of new CopilotCliRunner(). Direct construction prevents mocking in tests.',
+        },
+        {
+          selector: "NewExpression[callee.name='PlanPersistence']",
+          message: 'Use INodePersistence from DI container instead of new PlanPersistence(). Direct construction prevents mocking in tests.',
+        },
+        {
+          selector: "NewExpression[callee.name='Logger'][parent.type!=\"ExportNamedDeclaration\"]",
+          message: 'Use ILogger from DI container instead of new Logger(). Use Logger.for() or DI-resolved ILogger.',
+        },
       ],
     },
   },
@@ -62,6 +84,23 @@ module.exports = [
     ],
     rules: {
       'no-restricted-imports': 'off',
+      'no-restricted-syntax': 'off',
+    },
+  },
+  // Composition root + class definition files may construct services directly
+  {
+    files: [
+      'src/composition.ts',
+      'src/compositionTest.ts',
+      'src/extension.ts',
+      'src/core/planInitialization.ts',
+      'src/plan/runner.ts',
+      'src/process/processMonitor.ts',
+      'src/plan/persistence.ts',
+      'src/core/logger.ts',
+      'src/agent/copilotCliRunner.ts',
+    ],
+    rules: {
       'no-restricted-syntax': 'off',
     },
   },
