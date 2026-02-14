@@ -145,11 +145,11 @@ suite('WorkPhaseExecutor', () => {
 
 suite('adaptCommandForPowerShell', () => {
   test('converts && to error-propagation chain', () => {
-    assert.strictEqual(adaptCommandForPowerShell('a && b'), 'a; if (!$?) { exit 1 }; b');
+    assert.strictEqual(adaptCommandForPowerShell('a && b'), "$ErrorActionPreference = 'Continue'; a; if (!$?) { exit 1 }; b; exit $LASTEXITCODE");
   });
 
   test('rewrites ls -la', () => {
-    assert.strictEqual(adaptCommandForPowerShell('ls -la'), 'Get-ChildItem');
+    assert.strictEqual(adaptCommandForPowerShell('ls -la'), "$ErrorActionPreference = 'Continue'; Get-ChildItem; exit $LASTEXITCODE");
   });
 });
 

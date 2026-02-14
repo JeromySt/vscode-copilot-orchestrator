@@ -1061,6 +1061,21 @@ export class planDetailPanel {
     .node-processes-tree {
       padding: 4px 12px 8px;
       border-top: 1px solid var(--vscode-widget-border);
+      max-height: 140px; /* ~5 process rows */
+      overflow-y: auto;
+      position: relative;
+    }
+    /* Scroll fade indicator at the bottom */
+    .node-processes-tree.has-overflow::after {
+      content: '';
+      position: sticky;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: block;
+      height: 24px;
+      background: linear-gradient(transparent, var(--vscode-editor-background));
+      pointer-events: none;
     }
     .process-item {
       display: flex;

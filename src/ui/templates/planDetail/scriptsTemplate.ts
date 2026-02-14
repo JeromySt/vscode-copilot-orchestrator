@@ -1094,6 +1094,16 @@ export function renderPlanScripts(data: PlanScriptsData): string {
       }
       
       container.innerHTML = html;
+      
+      // Mark process trees that overflow as scrollable (shows fade indicator)
+      var trees = container.querySelectorAll('.node-processes-tree');
+      for (var i = 0; i < trees.length; i++) {
+        if (trees[i].scrollHeight > trees[i].clientHeight) {
+          trees[i].classList.add('has-overflow');
+        } else {
+          trees[i].classList.remove('has-overflow');
+        }
+      }
     }
     
     // Render a job node with its process tree
