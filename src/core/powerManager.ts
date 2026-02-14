@@ -192,13 +192,11 @@ export class PowerManagerImpl implements PowerManager {
    */
   private async preventSleepWindows(reason: string): Promise<ChildProcess> {
     return new Promise((resolve, reject) => {
-      // PowerShell script that continuously sets execution state to prevent sleep/hibernate
-      // ES_CONTINUOUS     (0x80000000) — Keep state until explicitly cleared
-      // ES_SYSTEM_REQUIRED (0x00000001) — Prevent system sleep
-      // ES_DISPLAY_REQUIRED (0x00000002) — Prevent display sleep
-      // ES_AWAYMODE_REQUIRED (0x00000040) — Enter away mode instead of sleep (system looks
-      //   asleep but CPU keeps running — critical for DevBox VMs that force hibernate)
-      // Combined: 0x80000043
+      // PowerShell script that continuously sets execution state to prevent sleep
+      // ES_CONTINUOUS (0x80000000) | ES_SYSTEM_REQUIRED (0x00000001) | ES_DISPLAY_REQUIRED (0x00000002) = 0x80000003
+      // Note: This prevents idle-triggered sleep but NOT policy-driven hibernation
+      // (e.g., DevBox VMs with Azure-level hibernate policies). There is no user-level
+      // API to override forced hibernation — configure the DevBox idle timeout in Azure portal.
       const script = `
 Add-Type @"
 using System;
@@ -209,21 +207,9 @@ public class PowerUtil {
 }
 "@
 
-# Try to disable hibernate timeout via powercfg (best effort, needs elevation)
-try {
-    $currentScheme = (powercfg /getactivescheme) -replace '.*: (.+?) \\(.*', '$1'
-    if ($currentScheme) {
-        # HIBERNATEAFTER GUID: 9d7815a6-7ee4-497e-8888-515a05f02364 (under Sleep subgroup 238c9fa8...)
-        powercfg /change hibernate-timeout-ac 0 2>$null
-        powercfg /change hibernate-timeout-dc 0 2>$null
-        powercfg /change standby-timeout-ac 0 2>$null
-    }
-} catch {}
-
 # Keep setting execution state every 30 seconds
-# 0x80000043 = ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED | ES_AWAYMODE_REQUIRED
 while ($true) {
-    [PowerUtil]::SetThreadExecutionState(0x80000043) | Out-Null
+    [PowerUtil]::SetThreadExecutionState(0x80000003) | Out-Null
     Start-Sleep -Seconds 30
 }
 `.trim();
