@@ -253,6 +253,19 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       const cleanEnv = { ...this.environment.env };
       delete cleanEnv.NODE_OPTIONS;
       
+      // Log the full invocation for diagnostics
+      this.logger.info(`[${label}] Spawning: ${command}`);
+      this.logger.info(`[${label}] CWD: ${cwd}`);
+      this.logger.debug(`[${label}] Environment (non-default keys):`);
+      const defaultKeys = new Set(['PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP', 'HOMEDRIVE', 'HOMEPATH', 'USERPROFILE', 'USERNAME', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'COMMONPROGRAMFILES', 'COMMONPROGRAMFILES(X86)', 'OS', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS', 'COMPUTERNAME', 'USERDOMAIN']);
+      for (const [key, value] of Object.entries(cleanEnv)) {
+        if (!defaultKeys.has(key.toUpperCase()) && value) {
+          // Redact tokens/secrets but show the key exists
+          const redacted = /token|key|secret|password|auth/i.test(key) ? '***' : value;
+          this.logger.debug(`[${label}]   ${key}=${redacted}`);
+        }
+      }
+      
       const proc = this.spawner.spawn(command, [], { cwd, shell: true, env: cleanEnv });
       let capturedSessionId: string | undefined = sessionId;
       const statsParser = new CopilotStatsParser();
