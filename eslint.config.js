@@ -161,6 +161,12 @@ module.exports = [
             message: 'Use IProcessSpawner instead. Only src/interfaces/IProcessSpawner.ts (DefaultProcessSpawner) may import child_process directly.',
           },
         ],
+        patterns: [
+          {
+            group: ['**/git/core/executor'],
+            message: 'git/core/executor is internal to the git module. Use the public git API (import * as git from ../git) instead.',
+          },
+        ],
       }],
       'no-restricted-syntax': ['error',
         ...diSelectors,
@@ -225,6 +231,24 @@ module.exports = [
     rules: {
       'no-restricted-imports': 'off',
       'no-restricted-syntax': 'off',
+    },
+  },
+
+  // ── 4b. git/core internals: may import from git/core/executor ───
+  {
+    files: [
+      'src/git/core/**/*.ts',
+    ],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [
+          {
+            name: 'child_process',
+            message: 'Use IProcessSpawner instead. Only src/interfaces/IProcessSpawner.ts may import child_process directly.',
+          },
+        ],
+        // No patterns restriction — git/core files may import from each other
+      }],
     },
   },
 

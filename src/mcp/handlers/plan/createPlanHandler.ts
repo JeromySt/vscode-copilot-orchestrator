@@ -28,7 +28,7 @@ import {
 import { validateAgentModels } from '../../validation';
 import * as path from 'path';
 import * as fs from 'fs';
-import { execAsync } from '../../../git/core/executor';
+import * as git from '../../../git';
 
 // ============================================================================
 // GROUP FLATTENING
@@ -334,8 +334,8 @@ async function validateAdditionalSymlinkDirs(
     }
 
     // Check that git considers it ignored
-    const result = await execAsync(['check-ignore', '-q', dir], { cwd: workspacePath });
-    if (!result.success) {
+    const ignored = await git.gitignore.isIgnored(workspacePath, dir);
+    if (!ignored) {
       errors.push(`'${dir}' is not in .gitignore — only gitignored directories may be symlinked into worktrees`);
     }
   }
