@@ -48,6 +48,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _pulseSubscription?: PulseDisposable;
   private _debounceTimer?: NodeJS.Timeout;
+  private _pulseTick = 0;
   
   /**
    * @param _context - The extension context for managing subscriptions and resources.
@@ -126,20 +127,24 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     
     // Subscribe to pulse for periodic refresh of running Plans
     this._pulseSubscription = this._pulse.onPulse(() => {
-      // Always forward pulse to webview — the client-side lazy PULSE
-      // subscription ensures zero overhead when no plans are running.
+      // Always forward pulse to webview for client-side duration ticking
       if (this._view) {
         this._view.webview.postMessage({ type: 'pulse' });
       }
 
-      const hasRunning = this._planRunner.getAll().some(plan => {
-        const sm = this._planRunner.getStateMachine(plan.id);
-        const status = sm?.computePlanStatus();
-        return status === 'running' || status === 'pending';
-      });
-      
-      if (hasRunning) {
-        this.refresh();
+      // Refresh data every 5 seconds (not every pulse) to avoid overwhelming
+      // the async getGlobalCapacityStats call. Duration ticking is client-side.
+      this._pulseTick = (this._pulseTick || 0) + 1;
+      if (this._pulseTick % 5 === 0) {
+        const hasRunning = this._planRunner.getAll().some(plan => {
+          const sm = this._planRunner.getStateMachine(plan.id);
+          const status = sm?.computePlanStatus();
+          return status === 'running' || status === 'pending';
+        });
+        
+        if (hasRunning) {
+          this.refresh();
+        }
       }
     });
     
@@ -736,17 +741,28 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     };
     
     PlanListContainerControl.prototype._tickDurations = function() {
-      for (var entry of this.planCards.values()) {
+      var cards = this.planCards;
+      for (var entry of cards.values()) {
         var el = entry.element;
+        if (!el) continue;
         var status = el.dataset.status;
         if (status !== 'running' && status !== 'pending') continue;
         var startedAt = parseInt(el.dataset.startedAt || '0', 10);
         if (!startedAt) continue;
         var endedAt = parseInt(el.dataset.endedAt || '0', 10);
         var durEl = el.querySelector('.plan-duration');
-        if (durEl) {
-          durEl.textContent = formatDuration(startedAt, endedAt || 0);
+        if (!durEl) {
+          // Duration element doesn't exist yet — create it
+          durEl = document.createElement('span');
+          durEl.className = 'plan-duration';
+          var detailsEl = el.querySelector('.plan-details');
+          if (detailsEl) {
+            detailsEl.appendChild(durEl);
+          } else {
+            continue;
+          }
         }
+        durEl.textContent = formatDuration(startedAt, endedAt || 0);
       }
     };
 
