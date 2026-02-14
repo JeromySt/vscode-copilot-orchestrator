@@ -53,26 +53,72 @@ module.exports = [
           message: 'Consider using IFileSystem interface for testability. Direct fs require() should be in core utility modules only.',
         },
         // Enforce DI: prevent direct construction of service classes that should be resolved from the DI container.
-        // These classes have interfaces (IProcessMonitor, IProcessSpawner, etc.) and should be injected, not constructed.
+        // These classes have interfaces and should be injected, not constructed directly.
+        // == Process / Spawning ==
         {
           selector: "NewExpression[callee.name='ProcessMonitor']",
-          message: 'Use IProcessMonitor from DI container instead of new ProcessMonitor(). Direct construction prevents mocking in tests.',
+          message: 'Use IProcessMonitor from DI container instead of new ProcessMonitor().',
         },
         {
           selector: "NewExpression[callee.name='DefaultProcessSpawner']",
-          message: 'Use IProcessSpawner from DI container instead of new DefaultProcessSpawner(). Direct construction prevents mocking in tests.',
+          message: 'Use IProcessSpawner from DI container instead of new DefaultProcessSpawner().',
         },
+        // == Agent ==
         {
           selector: "NewExpression[callee.name='CopilotCliRunner']",
-          message: 'Use ICopilotRunner from DI container instead of new CopilotCliRunner(). Direct construction prevents mocking in tests.',
+          message: 'Use ICopilotRunner from DI container instead of new CopilotCliRunner().',
         },
+        {
+          selector: "NewExpression[callee.name='AgentDelegator']",
+          message: 'Resolve AgentDelegator through DI instead of direct construction.',
+        },
+        // == Plan ==
         {
           selector: "NewExpression[callee.name='PlanPersistence']",
-          message: 'Use INodePersistence from DI container instead of new PlanPersistence(). Direct construction prevents mocking in tests.',
+          message: 'Use INodePersistence from DI container instead of new PlanPersistence().',
         },
         {
-          selector: "NewExpression[callee.name='Logger'][parent.type!=\"ExportNamedDeclaration\"]",
+          selector: "NewExpression[callee.name='DefaultJobExecutor']",
+          message: 'Use INodeExecutor/JobExecutor from DI container instead of new DefaultJobExecutor().',
+        },
+        {
+          selector: "NewExpression[callee.name='PlanStateMachine']",
+          message: 'Use INodeStateMachine from DI container instead of new PlanStateMachine().',
+        },
+        {
+          selector: "NewExpression[callee.name='DefaultEvidenceValidator']",
+          message: 'Use IEvidenceValidator from DI container instead of new DefaultEvidenceValidator().',
+        },
+        // == Core ==
+        {
+          selector: "NewExpression[callee.name='Logger']",
           message: 'Use ILogger from DI container instead of new Logger(). Use Logger.for() or DI-resolved ILogger.',
+        },
+        {
+          selector: "NewExpression[callee.name='GlobalCapacityManager']",
+          message: 'Resolve GlobalCapacityManager through DI instead of direct construction.',
+        },
+        {
+          selector: "NewExpression[callee.name='PulseEmitter']",
+          message: 'Use IPulseEmitter from DI container instead of new PulseEmitter().',
+        },
+        {
+          selector: "NewExpression[callee.name='PlanConfigManager']",
+          message: 'Resolve PlanConfigManager through DI instead of direct construction.',
+        },
+        // == MCP ==
+        {
+          selector: "NewExpression[callee.name='McpHandler']",
+          message: 'Use IMcpRequestRouter from DI container instead of new McpHandler().',
+        },
+        {
+          selector: "NewExpression[callee.name='StdioMcpServerManager']",
+          message: 'Use IMcpManager from DI container instead of new StdioMcpServerManager().',
+        },
+        // == Environment ==
+        {
+          selector: "NewExpression[callee.name='DefaultEnvironment']",
+          message: 'Use IEnvironment from DI container instead of new DefaultEnvironment().',
         },
       ],
     },
@@ -87,21 +133,53 @@ module.exports = [
       'no-restricted-syntax': 'off',
     },
   },
-  // Composition root + class definition files may construct services directly
+  // ONLY the composition root may construct service classes directly.
+  // Class definition files should NOT construct other services — they receive
+  // dependencies through their constructors (DI pattern).
   {
     files: [
       'src/composition.ts',
       'src/compositionTest.ts',
-      'src/extension.ts',
-      'src/core/planInitialization.ts',
-      'src/plan/runner.ts',
-      'src/process/processMonitor.ts',
-      'src/plan/persistence.ts',
-      'src/core/logger.ts',
-      'src/agent/copilotCliRunner.ts',
     ],
     rules: {
       'no-restricted-syntax': 'off',
+    },
+  },
+  // TODO: These files currently violate DI but are exempted temporarily.
+  // Each should be refactored to accept dependencies via constructor injection.
+  // Track progress in the "Eliminate All Code Duplication" plan.
+  {
+    files: [
+      'src/extension.ts',
+      'src/core/planInitialization.ts',
+      'src/core/logger.ts',
+      'src/core/globalCapacity.ts',
+      'src/core/pulse.ts',
+      'src/core/powerManager.ts',
+      'src/plan/runner.ts',
+      'src/plan/executor.ts',
+      'src/plan/persistence.ts',
+      'src/plan/stateMachine.ts',
+      'src/plan/evidenceValidator.ts',
+      'src/plan/configManager.ts',
+      'src/plan/planLifecycle.ts',
+      'src/plan/executionEngine.ts',
+      'src/plan/executionPump.ts',
+      'src/plan/nodeManager.ts',
+      'src/plan/logFileHelper.ts',
+      'src/agent/copilotCliRunner.ts',
+      'src/agent/agentDelegator.ts',
+      'src/process/processMonitor.ts',
+      'src/mcp/handler.ts',
+      'src/mcp/mcpServerManager.ts',
+      'src/interfaces/IEnvironment.ts',
+    ],
+    rules: {
+      'no-restricted-syntax': ['warn',
+        // These are warnings (not errors) to track DI migration progress.
+        // Once a file is refactored to use DI, remove it from this list
+        // and it will get the full error-level enforcement.
+      ],
     },
   },
   // Test files can import anything
