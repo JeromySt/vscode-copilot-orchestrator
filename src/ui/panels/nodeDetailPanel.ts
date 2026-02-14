@@ -301,15 +301,15 @@ function formatInline(text: string, escapeHtml: (s: string) => string): string {
 function getCurrentExecutionPhase(state: NodeExecutionState | undefined): string | undefined {
   if (!state?.stepStatuses) return undefined;
   
-  // Check which phase is currently running
+  // Check which phase is currently running (includes merge phases)
   for (const [phase, status] of Object.entries(state.stepStatuses)) {
     if (status === 'running') {
       return phase;
     }
   }
   
-  // If nothing is currently running, return the last incomplete phase
-  const phaseOrder = ['prechecks', 'work', 'postchecks'];
+  // If nothing is currently running, return the first incomplete phase
+  const phaseOrder = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
   for (const phase of phaseOrder) {
     const status = state.stepStatuses[phase as keyof typeof state.stepStatuses];
     if (!status || status === 'pending') {
