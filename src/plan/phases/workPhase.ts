@@ -15,7 +15,13 @@ import type { ProcessSpec, ShellSpec, AgentSpec, CopilotUsageMetrics } from '../
 
 /** Adapt a shell command for Windows PowerShell 5.x compatibility. */
 export function adaptCommandForPowerShell(command: string): string {
-  return command.replace(/\s*&&\s*/g, '; if (!$?) { exit 1 }; ').replace(/\bls\s+-la\b/g, 'Get-ChildItem');
+  // Adapt && chaining to PowerShell's error-checking equivalent
+  const adapted = command.replace(/\s*&&\s*/g, '; if (!$?) { exit 1 }; ').replace(/\bls\s+-la\b/g, 'Get-ChildItem');
+  // Wrap in $ErrorActionPreference = 'Continue' to prevent stderr from native
+  // commands being treated as terminating errors. PowerShell by default wraps
+  // stderr output as NativeCommandError which can cause unexpected failures.
+  // We rely solely on exit code (not stderr content) to determine success.
+  return `$ErrorActionPreference = 'Continue'; ${adapted}; exit $LASTEXITCODE`;
 }
 
 // Shared helper: spawn a process/shell and track it in the PhaseContext
@@ -48,9 +54,15 @@ function spawnAndTrack(
       if (timeoutHandle) clearTimeout(timeoutHandle);
       ctx.setProcess(undefined);
       ctx.logInfo(`${label} exited: PID ${proc.pid}, code ${code}, duration ${Date.now() - startTime}ms`);
+      if (stderr.trim()) {
+        // Log stderr content for diagnostics, but do NOT treat it as failure
+        // PowerShell writes warnings, progress, and verbose output to stderr
+        ctx.logInfo(`${label} stderr output (informational, not an error):`);
+        ctx.logOutput('stderr', stderr);
+      }
       if (ctx.isAborted()) resolve({ success: false, error: 'Execution canceled' });
       else if (code === 0) resolve({ success: true });
-      else resolve({ success: false, error: `Exit code ${code}: ${stderr || stdout}`.trim() });
+      else resolve({ success: false, error: `Exit code ${code}`, exitCode: code ?? undefined });
     });
     proc.on('error', (err) => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
