@@ -7,7 +7,7 @@
  * @module ui/templates/nodeDetail/headerTemplate
  */
 
-import { escapeHtml, formatDuration, formatDurationMs } from '../helpers';
+import { escapeHtml, formatDurationMs } from '../helpers';
 
 /**
  * Input data for the node detail header template.
@@ -91,10 +91,6 @@ export function headerRowHtml(nodeName: string, status: string, startedAt?: numb
  * @returns HTML fragment string for the execution state section.
  */
 export function executionStateHtml(data: HeaderData): string {
-  const duration = data.startedAt
-    ? formatDuration(Math.round(((data.endedAt || Date.now()) - data.startedAt) / 1000))
-    : null;
-
   return `<div class="section">
     <h3>Execution State</h3>
     <div class="meta-grid">
@@ -110,12 +106,6 @@ export function executionStateHtml(data: HeaderData): string {
       <div class="meta-item">
         <div class="meta-label">Started</div>
         <div class="meta-value">${new Date(data.startedAt).toLocaleString()}</div>
-      </div>
-      ` : ''}
-      ${duration ? `
-      <div class="meta-item">
-        <div class="meta-label">Duration</div>
-        <div class="meta-value" id="duration-timer"${!data.endedAt && data.startedAt ? ` data-started-at="${data.startedAt}"` : ''}>${duration}</div>
       </div>
       ` : ''}
       ${data.copilotSessionId ? `
