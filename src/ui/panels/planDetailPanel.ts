@@ -627,17 +627,33 @@ export class planDetailPanel {
   <style>
     body {
       font: 13px var(--vscode-font-family);
-      padding: 16px;
+      padding: 0;
       color: var(--vscode-foreground);
       background: var(--vscode-editor-background);
+    }
+    /* Sticky header */
+    .sticky-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--vscode-editor-background);
+      padding: 12px 16px 8px 16px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .sticky-header + * {
+      padding-top: 8px;
+    }
+    body > *:not(.sticky-header) {
+      padding-left: 16px;
+      padding-right: 16px;
     }
     .header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 12px;
+      margin-bottom: 4px;
     }
-    .header h2 { margin: 0; }
+    .header h2 { margin: 0; flex: 1; margin-left: 12px; }
     .status-badge {
       padding: 4px 12px;
       border-radius: 12px;
@@ -1274,6 +1290,7 @@ export class planDetailPanel {
   </style>
 </head>
 <body>
+  <div class="sticky-header">
   ${renderPlanHeader({
     planName: plan.spec.name,
     status,
@@ -1284,6 +1301,7 @@ export class planDetailPanel {
     showBranchFlow: !!showBranchFlow,
     globalCapacityStats,
   })}
+  </div>
   ${renderPlanControls({ status })}
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}

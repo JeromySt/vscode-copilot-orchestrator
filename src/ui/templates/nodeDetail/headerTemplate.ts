@@ -7,7 +7,7 @@
  * @module ui/templates/nodeDetail/headerTemplate
  */
 
-import { escapeHtml, formatDuration } from '../helpers';
+import { escapeHtml, formatDuration, formatDurationMs } from '../helpers';
 
 /**
  * Input data for the node detail header template.
@@ -57,15 +57,27 @@ export function breadcrumbHtml(planId: string, planName: string, nodeName: strin
 
 /**
  * Render the node name and status badge header row.
+ * Layout matches the plan detail header: STATUS_BADGE | Name | Duration.
  *
  * @param nodeName - The node display name.
  * @param status - The current node status string.
+ * @param startedAt - Epoch ms when execution started.
+ * @param endedAt - Epoch ms when execution ended (uses Date.now() if running).
  * @returns HTML fragment string.
  */
-export function headerRowHtml(nodeName: string, status: string): string {
+export function headerRowHtml(nodeName: string, status: string, startedAt?: number, endedAt?: number): string {
+  let durationText = '--';
+  if (startedAt) {
+    const elapsed = (endedAt || Date.now()) - startedAt;
+    durationText = formatDurationMs(elapsed);
+  }
   return `<div class="header">
+    <span class="status-badge ${status}" id="node-status-badge">${status.toUpperCase()}</span>
     <h2>${escapeHtml(nodeName)}</h2>
-    <span class="status-badge ${status}">${status.toUpperCase()}</span>
+    <div class="header-duration">
+      <span class="duration-icon">⏱</span>
+      <span class="duration-value ${status}" id="duration-timer"${startedAt ? ` data-started-at="${startedAt}"` : ''}${endedAt ? ` data-ended-at="${endedAt}"` : ''} data-status="${status}">${durationText}</span>
+    </div>
   </div>`;
 }
 

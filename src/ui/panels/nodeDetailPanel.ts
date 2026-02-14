@@ -869,9 +869,11 @@ export class NodeDetailPanel {
   </style>
 </head>
 <body>
+  <div class="sticky-header">
   ${breadcrumbHtml(plan.id, plan.spec.name, node.name)}
   
-  ${headerRowHtml(node.name, state.status)}
+  ${headerRowHtml(node.name, state.status, state.startedAt, state.endedAt)}
+  </div>
   
   ${executionStateHtml({
     planId: plan.id,
@@ -1159,10 +1161,27 @@ export class NodeDetailPanel {
     * { box-sizing: border-box; }
     body {
       font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      padding: 16px;
+      padding: 0;
       color: var(--vscode-foreground);
       background: var(--vscode-editor-background);
       line-height: 1.5;
+    }
+    
+    /* Sticky header */
+    .sticky-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--vscode-editor-background);
+      padding: 12px 16px 8px 16px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .sticky-header + * {
+      padding-top: 8px;
+    }
+    body > *:not(.sticky-header) {
+      padding-left: 16px;
+      padding-right: 16px;
     }
     
     /* Header */
@@ -1170,9 +1189,28 @@ export class NodeDetailPanel {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 16px;
+      margin-bottom: 4px;
     }
-    .header h2 { margin: 0; font-size: 18px; }
+    .header h2 { margin: 0; font-size: 18px; flex: 1; margin-left: 12px; }
+    
+    /* Duration display in header */
+    .header-duration {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: var(--vscode-descriptionForeground);
+      white-space: nowrap;
+    }
+    .duration-icon { font-size: 16px; }
+    .duration-value {
+      font-family: var(--vscode-editor-font-family);
+      font-weight: 600;
+      color: var(--vscode-foreground);
+    }
+    .duration-value.running { color: #3794ff; }
+    .duration-value.succeeded { color: #4ec9b0; }
+    .duration-value.failed { color: #f48771; }
     
     .status-badge {
       padding: 4px 12px;
