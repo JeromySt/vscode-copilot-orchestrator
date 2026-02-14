@@ -5,10 +5,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { ChildProcess } from 'child_process';
-import { ProcessMonitor } from '../process';
 import { ProcessNode } from '../types';
-import type { IProcessSpawner } from '../interfaces/IProcessSpawner';
+import type { IProcessSpawner, ChildProcessLike } from '../interfaces/IProcessSpawner';
+import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
 import { killProcessTree } from '../process/processHelpers';
 import {
   JobNode, ExecutionContext, JobExecutionResult,
@@ -17,7 +16,6 @@ import {
 import { JobExecutor } from './runner';
 import { Logger } from '../core/logger';
 import * as git from '../git';
-import { DefaultEvidenceValidator } from './evidenceValidator';
 import { aggregateMetrics } from './metricsAggregator';
 import type { IEvidenceValidator } from '../interfaces';
 import type { PhaseContext } from '../interfaces/IPhaseExecutor';
@@ -39,7 +37,7 @@ const log = Logger.for('job-executor');
 interface ActiveExecution {
   planId: string;
   nodeId: string;
-  process?: ChildProcess;
+  process?: ChildProcessLike;
   aborted: boolean;
   startTime?: number;
   isAgentWork?: boolean;
@@ -56,13 +54,14 @@ export class DefaultJobExecutor implements JobExecutor {
   private logFiles = new Map<string, string>();
   private agentDelegator?: any;
   private storagePath?: string;
-  private processMonitor: ProcessMonitor;
-  private evidenceValidator: IEvidenceValidator = new DefaultEvidenceValidator();
+  private processMonitor: IProcessMonitor;
+  private evidenceValidator: IEvidenceValidator;
   private spawner: IProcessSpawner;
 
-  constructor(spawner: IProcessSpawner) {
+  constructor(spawner: IProcessSpawner, evidenceValidator: IEvidenceValidator, processMonitor: IProcessMonitor) {
     this.spawner = spawner;
-    this.processMonitor = new ProcessMonitor(spawner);
+    this.evidenceValidator = evidenceValidator;
+    this.processMonitor = processMonitor;
   }
 
   setStoragePath(storagePath: string): void {

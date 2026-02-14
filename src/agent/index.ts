@@ -21,8 +21,6 @@ export {
   CopilotRunResult,
   CopilotCliLogger,
   BuildCommandOptions,
-  getCopilotCliRunner,
-  runCopilotCli,
   sanitizeUrl,
   buildCommand,
 } from './copilotCliRunner';

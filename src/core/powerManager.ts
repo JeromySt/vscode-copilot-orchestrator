@@ -23,10 +23,9 @@
  * @module core/powerManager
  */
 
-import type { ChildProcess } from 'child_process';
 import * as os from 'os';
 import { Logger } from './logger';
-import type { IProcessSpawner } from '../interfaces/IProcessSpawner';
+import type { IProcessSpawner, ChildProcessLike } from '../interfaces/IProcessSpawner';
 
 const log = Logger.for('extension');
 
@@ -91,7 +90,7 @@ export interface PowerManager {
  * ensure graceful degradation.
  */
 export class PowerManagerImpl implements PowerManager {
-  private activeLocks: Map<string, ChildProcess | (() => void)> = new Map();
+  private activeLocks: Map<string, ChildProcessLike | (() => void)> = new Map();
   private lockIdCounter = 0;
   private spawner: IProcessSpawner;
 
@@ -109,7 +108,7 @@ export class PowerManagerImpl implements PowerManager {
     
     try {
       const platform = os.platform();
-      let cleanup: ChildProcess | (() => void);
+      let cleanup: ChildProcessLike | (() => void);
 
       switch (platform) {
         case 'win32':
@@ -196,7 +195,7 @@ export class PowerManagerImpl implements PowerManager {
    * 
    * @platform Windows only
    */
-  private async preventSleepWindows(reason: string): Promise<ChildProcess> {
+  private async preventSleepWindows(reason: string): Promise<ChildProcessLike> {
     return new Promise((resolve, reject) => {
       // PowerShell script that continuously sets execution state to prevent sleep
       // ES_CONTINUOUS (0x80000000) | ES_SYSTEM_REQUIRED (0x00000001) | ES_DISPLAY_REQUIRED (0x00000002) = 0x80000003
@@ -228,7 +227,7 @@ while ($true) {
       ], {
         detached: false,
         stdio: 'ignore'
-      }) as ChildProcess;
+      }) as ChildProcessLike;
 
       proc.on('error', (error) => {
         log.warn(`Windows power management process error: ${error.message}`);
@@ -264,7 +263,7 @@ while ($true) {
    * 
    * @platform macOS only
    */
-  private async preventSleepMac(reason: string): Promise<ChildProcess> {
+  private async preventSleepMac(reason: string): Promise<ChildProcessLike> {
     return new Promise((resolve, reject) => {
       // -d: prevent display sleep
       // -i: prevent idle sleep
@@ -273,7 +272,7 @@ while ($true) {
       const proc = this.spawner.spawn('caffeinate', ['-dims'], {
         detached: false,
         stdio: 'ignore'
-      }) as ChildProcess;
+      }) as ChildProcessLike;
 
       proc.on('error', (error) => {
         log.warn(`macOS caffeinate error: ${error.message}`);
@@ -311,7 +310,7 @@ while ($true) {
    * 
    * @platform Linux only (systemd systems)
    */
-  private async preventSleepLinux(reason: string): Promise<ChildProcess> {
+  private async preventSleepLinux(reason: string): Promise<ChildProcessLike> {
     return new Promise((resolve, reject) => {
       // Try systemd-inhibit first
       const proc = this.spawner.spawn('systemd-inhibit', [
@@ -322,7 +321,7 @@ while ($true) {
       ], {
         detached: false,
         stdio: 'ignore'
-      }) as ChildProcess;
+      }) as ChildProcessLike;
 
       proc.on('error', (error) => {
         log.warn(`Linux systemd-inhibit error: ${error.message}`);
@@ -363,7 +362,7 @@ while ($true) {
    * 
    * @platform Linux only (X11 systems); gracefully fails on headless/Wayland systems
    */
-  private async preventSleepLinuxFallback(reason: string): Promise<ChildProcess> {
+  private async preventSleepLinuxFallback(reason: string): Promise<ChildProcessLike> {
     return new Promise((resolve, reject) => {
       // Fallback: continuously reset idle timer using xdg-screensaver
       const script = `
@@ -376,7 +375,7 @@ done
       const proc = this.spawner.spawn('sh', ['-c', script], {
         detached: false,
         stdio: 'ignore'
-      }) as ChildProcess;
+      }) as ChildProcessLike;
 
       proc.on('error', (error) => {
         log.warn(`Linux fallback power management error: ${error.message}`);
@@ -394,27 +393,3 @@ done
     });
   }
 }
-
-/**
- * Singleton instance of the power manager
- * 
- * @deprecated Use dependency injection instead
- */
-export const powerManager = (() => {
-  const { DefaultProcessSpawner } = require('../interfaces/IProcessSpawner');
-  return new PowerManagerImpl(new DefaultProcessSpawner());
-})();
-
-// Ensure cleanup on process exit
-process.on('exit', () => {
-  powerManager.releaseAll();
-});
-
-// Handle termination signals
-process.on('SIGINT', () => {
-  powerManager.releaseAll();
-});
-
-process.on('SIGTERM', () => {
-  powerManager.releaseAll();
-});

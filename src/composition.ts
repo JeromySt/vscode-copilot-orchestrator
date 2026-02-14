@@ -37,6 +37,14 @@ import { ProcessMonitor } from './process/processMonitor';
 import { DefaultProcessSpawner } from './interfaces/IProcessSpawner';
 import { Logger } from './core/logger';
 import { PulseEmitter } from './core/pulse';
+import { DefaultEnvironment } from './interfaces/IEnvironment';
+import { CopilotCliRunner } from './agent/copilotCliRunner';
+import { DefaultJobExecutor } from './plan/executor';
+import { DefaultEvidenceValidator } from './plan/evidenceValidator';
+import { GlobalCapacityManager } from './core/globalCapacity';
+import { PlanConfigManager } from './plan/configManager';
+import { PlanPersistence } from './plan/persistence';
+import { StdioMcpServerManager } from './mcp/mcpServerManager';
 
 /**
  * Create and wire the production DI container.
@@ -101,6 +109,82 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const configProvider = c.resolve<import('./interfaces').IConfigProvider>(Tokens.IConfigProvider);
       logger.setConfigProvider(configProvider);
       return logger;
+    },
+  );
+
+  // ─── Environment ────────────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IEnvironment>(
+    Tokens.IEnvironment,
+    () => new DefaultEnvironment(),
+  );
+
+  // ─── Copilot Runner ─────────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').ICopilotRunner>(
+    Tokens.ICopilotRunner,
+    (c) => {
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const env = c.resolve<import('./interfaces').IEnvironment>(Tokens.IEnvironment);
+      return new CopilotCliRunner(undefined, spawner, env);
+    },
+  );
+
+  // ─── Node Executor ──────────────────────────────────────────────────
+  container.registerSingleton(
+    Tokens.INodeExecutor,
+    (c) => {
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const evidenceValidator = c.resolve<import('./interfaces').IEvidenceValidator>(Tokens.IEvidenceValidator);
+      const processMonitor = c.resolve<import('./interfaces').IProcessMonitor>(Tokens.IProcessMonitor);
+      return new DefaultJobExecutor(spawner, evidenceValidator, processMonitor);
+    },
+  );
+
+  // ─── Node State Machine ─────────────────────────────────────────────
+  // PlanStateMachine requires a PlanInstance at construction time.
+  // Scoped containers override this registration with a configured instance.
+  container.register(
+    Tokens.INodeStateMachine,
+    () => { throw new Error('INodeStateMachine must be resolved from a scoped container with a PlanInstance'); },
+  );
+
+  // ─── Node Persistence ───────────────────────────────────────────────
+  container.registerSingleton(
+    Tokens.INodePersistence,
+    () => new PlanPersistence(context.globalStorageUri.fsPath),
+  );
+
+  // ─── Evidence Validator ─────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IEvidenceValidator>(
+    Tokens.IEvidenceValidator,
+    () => new DefaultEvidenceValidator(),
+  );
+
+  // ─── MCP Request Router ─────────────────────────────────────────────
+  // McpHandler requires a PlanRunner and workspacePath at construction time.
+  // Scoped containers override this registration with a configured instance.
+  container.register(
+    Tokens.IMcpRequestRouter,
+    () => { throw new Error('IMcpRequestRouter must be resolved from a scoped container with a PlanRunner'); },
+  );
+
+  // ─── MCP Manager ───────────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IMcpManager>(
+    Tokens.IMcpManager,
+    () => new StdioMcpServerManager(context),
+  );
+
+  // ─── Global Capacity ────────────────────────────────────────────────
+  container.registerSingleton(
+    Tokens.IGlobalCapacity,
+    () => new GlobalCapacityManager(context.globalStorageUri.fsPath),
+  );
+
+  // ─── Plan Config Manager ────────────────────────────────────────────
+  container.registerSingleton(
+    Tokens.IPlanConfigManager,
+    (c) => {
+      const configProvider = c.resolve<import('./interfaces').IConfigProvider>(Tokens.IConfigProvider);
+      return new PlanConfigManager(configProvider);
     },
   );
 

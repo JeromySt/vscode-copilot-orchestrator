@@ -4,6 +4,7 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { PlanLifecycleManager, PlanRunnerState } from '../../../plan/planLifecycle';
+import { PlanStateMachine } from '../../../plan/stateMachine';
 import { PlanEventEmitter } from '../../../plan/planEvents';
 import { PlanConfigManager } from '../../../plan/configManager';
 import type { PlanInstance, JobNode, NodeExecutionState, PlanStatus } from '../../../plan/types';
@@ -72,6 +73,7 @@ function createState(): PlanRunnerState {
     processMonitor: { isRunning: sinon.stub().returns(false), terminate: sinon.stub().resolves() } as any,
     events: new PlanEventEmitter(),
     configManager: new PlanConfigManager(),
+    stateMachineFactory: (plan: any) => new PlanStateMachine(plan),
   };
 }
 

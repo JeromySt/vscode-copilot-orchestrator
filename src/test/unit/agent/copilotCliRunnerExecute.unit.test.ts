@@ -14,7 +14,7 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { CopilotCliRunner, getCopilotCliRunner, runCopilotCli } from '../../../agent/copilotCliRunner';
+import { CopilotCliRunner } from '../../../agent/copilotCliRunner';
 
 /**
  * Testable subclass that overrides buildCommand to use simple shell commands
@@ -256,58 +256,6 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
       // With a pre-existing session ID, it should be preserved
       // The exact behavior depends on whether copilot is available
       assert.ok(result !== undefined);
-    });
-  });
-
-  // ==========================================================================
-  // Singleton and convenience
-  // ==========================================================================
-  suite('getCopilotCliRunner and runCopilotCli', () => {
-    test('getCopilotCliRunner returns a CopilotCliRunner instance', () => {
-      // Clear module cache to get fresh singleton
-      delete require.cache[require.resolve('../../../agent/copilotCliRunner')];
-      const mod = require('../../../agent/copilotCliRunner');
-
-      const instance = mod.getCopilotCliRunner();
-      assert.ok(instance, 'Should return a runner instance');
-      assert.ok(typeof instance.run === 'function', 'Should have run method');
-      assert.ok(typeof instance.buildCommand === 'function', 'Should have buildCommand method');
-    });
-
-    test('getCopilotCliRunner returns new instance on each call', () => {
-      delete require.cache[require.resolve('../../../agent/copilotCliRunner')];
-      const mod = require('../../../agent/copilotCliRunner');
-
-      const instance1 = mod.getCopilotCliRunner();
-      const instance2 = mod.getCopilotCliRunner();
-      assert.notStrictEqual(instance1, instance2, 'Should return new instance each call (no singleton)');
-    });
-
-    test('getCopilotCliRunner accepts optional logger', () => {
-      delete require.cache[require.resolve('../../../agent/copilotCliRunner')];
-      const mod = require('../../../agent/copilotCliRunner');
-
-      const customLogger = createLogger();
-      const instance = mod.getCopilotCliRunner(customLogger);
-      assert.ok(instance, 'Should accept custom logger');
-    });
-
-    test('runCopilotCli is an async function', () => {
-      assert.ok(typeof runCopilotCli === 'function');
-    });
-
-    test('runCopilotCli returns a promise', async function () {
-      this.timeout(15000);
-
-      const result = runCopilotCli({
-        cwd: os.tmpdir(),
-        task: 'test',
-        skipInstructionsFile: true,
-        timeout: 5000,
-      });
-
-      assert.ok(result instanceof Promise, 'Should return a promise');
-      await result; // Let it finish
     });
   });
 

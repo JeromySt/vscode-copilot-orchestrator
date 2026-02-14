@@ -100,3 +100,39 @@ export const IPulseEmitter = Symbol('IPulseEmitter');
  * Provides process spawning abstraction for testability.
  */
 export const IProcessSpawner = Symbol('IProcessSpawner');
+
+/**
+ * Token for ICopilotRunner service.
+ * Provides Copilot CLI execution capabilities.
+ */
+export const ICopilotRunner = Symbol('ICopilotRunner');
+
+/**
+ * Token for IAgentDelegator service.
+ * Provides agent delegation and orchestration.
+ */
+export const IAgentDelegator = Symbol('IAgentDelegator');
+
+/**
+ * Token for IMcpRequestRouter service.
+ * Provides MCP request routing and handling.
+ */
+export const IMcpRequestRouter = Symbol('IMcpRequestRouter');
+
+/**
+ * Token for IEnvironment service.
+ * Provides environment variable and platform information.
+ */
+export const IEnvironment = Symbol('IEnvironment');
+
+/**
+ * Token for IGlobalCapacity service.
+ * Provides global capacity management across extension instances.
+ */
+export const IGlobalCapacity = Symbol('IGlobalCapacity');
+
+/**
+ * Token for IPlanConfigManager service.
+ * Provides plan configuration management.
+ */
+export const IPlanConfigManager = Symbol('IPlanConfigManager');

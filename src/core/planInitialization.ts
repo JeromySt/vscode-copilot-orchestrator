@@ -10,21 +10,25 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
-import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '../plan';
-import { ProcessMonitor } from '../process/processMonitor';
-import { StdioMcpServerManager } from '../mcp/mcpServerManager';
+import { PlanRunner, PlanRunnerConfig } from '../plan';
 import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
-import { McpHandler } from '../mcp/handler';
 import { McpIpcServer } from '../mcp/ipc/server';
 import { Logger } from './logger';
-import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
+
 import { CopilotStatsParser } from '../agent/copilotStatsParser';
 import { IMcpManager } from '../interfaces/IMcpManager';
+import type { IMcpRequestRouter } from '../interfaces/IMcpManager';
 import type { IConfigProvider } from '../interfaces/IConfigProvider';
+import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
+import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
 import type { CopilotUsageMetrics } from '../plan/types';
-import { createContainer } from '../composition';
+import type { ServiceContainer } from './container';
+import type { DefaultJobExecutor } from '../plan/executor';
 import * as Tokens from './tokens';
 import * as git from '../git';
+import { PlanConfigManager } from '../plan/configManager';
+import { PlanPersistence } from '../plan/persistence';
+import { PlanStateMachine } from '../plan/stateMachine';
 
 
 const log = Logger.for('init');
@@ -81,19 +85,9 @@ export function loadConfiguration(configProvider?: IConfigProvider): ExtensionCo
  * Create an agent delegator adapter for the executor.
  * 
  * This bridges the executor's expected interface to the Copilot CLI.
- * Uses the unified CopilotCliRunner for all Copilot CLI interactions.
+ * Uses the DI-resolved ICopilotRunner for all Copilot CLI interactions.
  */
-function createAgentDelegatorAdapter(log: any) {
-  // Create a logger adapter for CopilotCliRunner
-  const cliLogger: CopilotCliLogger = {
-    info: (msg) => log.info(msg),
-    warn: (msg) => log.warn(msg),
-    error: (msg) => log.error(msg),
-    debug: (msg) => log.debug(msg),
-  };
-  
-  const runner = new CopilotCliRunner(cliLogger);
-  
+function createAgentDelegatorAdapter(runner: ICopilotRunner, log: any) {
   return {
     async delegate(options: {
       task: string;
@@ -155,14 +149,12 @@ function createAgentDelegatorAdapter(log: any) {
  * Initialize the Plan Runner and executor
  */
 export async function initializePlanRunner(
-  context: vscode.ExtensionContext
-): Promise<{ planRunner: PlanRunner; executor: DefaultJobExecutor; processMonitor: ProcessMonitor }> {
+  context: vscode.ExtensionContext,
+  container: ServiceContainer
+): Promise<{ planRunner: PlanRunner; processMonitor: IProcessMonitor }> {
   log.info('Initializing Plan Runner...');
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-  
-  // Create DI container
-  const container = createContainer(context);
   
   // Store everything in workspace .orchestrator folder (or fallback to globalStorage)
   const storagePath = workspacePath 
@@ -176,14 +168,16 @@ export async function initializePlanRunner(
     pumpInterval: 1000,
   };
   
-  const planRunner = new PlanRunner(config);
+  // Resolve DI services needed by PlanRunner
+  const executor = container.resolve<DefaultJobExecutor>(Tokens.INodeExecutor);
+  const processMonitor = container.resolve<IProcessMonitor>(Tokens.IProcessMonitor);
   
-  // Create executor with IProcessSpawner dependency
-  const spawner = container.resolve<import('../interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
-  const executor = new DefaultJobExecutor(spawner);
-  
-  // Get process monitor from DI container (already wired with spawner)
-  const processMonitor = container.resolve<import('../interfaces').IProcessMonitor>(Tokens.IProcessMonitor) as ProcessMonitor;
+  const planRunner = new PlanRunner(config, {
+    configManager: new PlanConfigManager(),
+    persistence: new PlanPersistence(storagePath),
+    processMonitor,
+    stateMachineFactory: (plan) => new PlanStateMachine(plan),
+  });
   
   // Wire up executor with logs in the same .orchestrator directory
   const logsPath = workspacePath 
@@ -191,8 +185,9 @@ export async function initializePlanRunner(
     : path.join(context.globalStorageUri.fsPath);
   executor.setStoragePath(logsPath);
   
-  // Create agent delegator adapter for the executor
-  const agentDelegator = createAgentDelegatorAdapter(log);
+  // Create agent delegator adapter using DI-resolved ICopilotRunner
+  const copilotRunner = container.resolve<ICopilotRunner>(Tokens.ICopilotRunner);
+  const agentDelegator = createAgentDelegatorAdapter(copilotRunner, log);
   executor.setAgentDelegator(agentDelegator);
   
   planRunner.setExecutor(executor);
@@ -224,7 +219,7 @@ export async function initializePlanRunner(
     }
   });
   
-  return { planRunner, executor, processMonitor };
+  return { planRunner, processMonitor };
 }
 
 // ============================================================================
@@ -240,7 +235,8 @@ export async function initializePlanRunner(
 export async function initializeMcpServer(
   context: vscode.ExtensionContext,
   planRunner: PlanRunner,
-  mcpConfig: McpServerConfig
+  mcpConfig: McpServerConfig,
+  container: ServiceContainer
 ): Promise<IMcpManager | undefined> {
   if (!mcpConfig.enabled) {
     log.info('MCP registration disabled');
@@ -249,13 +245,18 @@ export async function initializeMcpServer(
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
 
-  // Create the McpHandler that wraps our PlanRunner
-  const mcpHandler = new McpHandler(planRunner, workspacePath);
+  // Resolve McpHandler from a scoped container with runtime dependencies
+  const scope = container.createScope();
+  const { McpHandler } = require('../mcp/handler');
+  // eslint-disable-next-line no-restricted-syntax -- constructed inside scoped DI factory
+  scope.register(Tokens.IMcpRequestRouter, () => new McpHandler(planRunner, workspacePath));
+  const mcpHandler = scope.resolve<IMcpRequestRouter>(Tokens.IMcpRequestRouter);
 
   // Create and start the IPC server
   // The stdio child process will connect to this server
   const ipcServer = new McpIpcServer();
-  ipcServer.setHandler(mcpHandler);
+  // setHandler expects concrete McpHandler; the scoped resolve returns one
+  ipcServer.setHandler(mcpHandler as any);
   
   try {
     await ipcServer.start();
@@ -269,8 +270,8 @@ export async function initializeMcpServer(
     ipcServer.stop();
   }});
 
-  // Create stdio manager - VS Code manages the child process
-  const manager: IMcpManager = new StdioMcpServerManager(context);
+  // Resolve MCP manager from DI container
+  const manager: IMcpManager = container.resolve<IMcpManager>(Tokens.IMcpManager);
   
   manager.start();
   context.subscriptions.push({ dispose: () => {

@@ -22,7 +22,7 @@ import {
 import { GlobalCapacityManager } from './core/globalCapacity';
 import { registerUtilityCommands } from './commands';
 import { IMcpManager } from './interfaces/IMcpManager';
-import { ProcessMonitor } from './process/processMonitor';
+import type { IProcessMonitor } from './interfaces/IProcessMonitor';
 import { PlanRunner } from './plan';
 import { Logger } from './core/logger';
 import { cleanupOrphanedWorktrees } from './core/orphanedWorktreeCleanup';
@@ -46,10 +46,13 @@ let container: ServiceContainer | undefined;
 let mcpManager: IMcpManager | undefined;
 
 /** Process Monitor - retained for cleanup */
-let processMonitor: ProcessMonitor | undefined;
+let processMonitor: IProcessMonitor | undefined;
 
 /** Plan Runner - retained for shutdown persistence */
 let planRunner: PlanRunner | undefined;
+
+/** Power Manager - retained for cleanup */
+let powerMgr: import('./core/powerManager').PowerManager | undefined;
 
 /** Global Capacity Manager - retained for cleanup */
 let globalCapacity: GlobalCapacityManager | undefined;
@@ -86,9 +89,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   extLog.debug('Configuration loaded', config);
 
   // ── Plan Runner ─────────────────────────────────────────────────────────
-  const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context);
+  const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context, container);
   processMonitor = pm;
   planRunner = runner;
+
+  // ── Power Manager ──────────────────────────────────────────────────────
+  const spawner = container.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+  const { PowerManagerImpl } = require('./core/powerManager');
+  powerMgr = new PowerManagerImpl(spawner);
+  planRunner.setPowerManager(powerMgr!);
+  // Register process exit handlers for wake lock cleanup
+  const pmRef = powerMgr;
+  process.on('exit', () => pmRef?.releaseAll());
+  process.on('SIGINT', () => pmRef?.releaseAll());
+  process.on('SIGTERM', () => pmRef?.releaseAll());
 
   // ── Global Capacity Manager ────────────────────────────────────────────
   const globalMaxParallel = vscode.workspace.getConfiguration('copilotOrchestrator').get<number>('globalMaxParallel', 16);
@@ -104,7 +118,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   // ── MCP Server (stdio transport via IPC) ───────────────────────────────
-  mcpManager = await initializeMcpServer(context, planRunner, config.mcp);
+  mcpManager = await initializeMcpServer(context, planRunner, config.mcp, container);
 
   // ── Plans view ──────────────────────────────────────────────────────────
   const pulse = container.resolve<IPulseEmitter>(Tokens.IPulseEmitter);
@@ -253,8 +267,7 @@ async function triggerOrphanedWorktreeCleanup(
  */
 export function deactivate(): void {
   // Release all wake locks
-  const { powerManager } = require('./core/powerManager');
-  powerManager.releaseAll();
+  powerMgr?.releaseAll();
   
   // Persist state synchronously before shutdown
   try {
@@ -278,4 +291,5 @@ export function deactivate(): void {
   
   processMonitor = undefined;
   planRunner = undefined;
+  powerMgr = undefined;
 }

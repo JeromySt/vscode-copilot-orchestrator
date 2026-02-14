@@ -19,7 +19,7 @@ import { PlanStateMachine } from './stateMachine';
 import { PlanScheduler } from './scheduler';
 import { PlanPersistence } from './persistence';
 import { PlanEventEmitter } from './planEvents';
-import { powerManager } from '../core/powerManager';
+import type { PowerManager } from '../core/powerManager';
 import type { JobExecutor, PlanRunnerConfig } from './runner';
 import type { GlobalCapacityManager } from '../core/globalCapacity';
 
@@ -36,6 +36,7 @@ export interface ExecutionPumpState {
   globalCapacity?: GlobalCapacityManager;
   events: PlanEventEmitter;
   processMonitor?: IProcessMonitor;
+  powerManager?: PowerManager;
 }
 
 /**
@@ -114,12 +115,15 @@ export class ExecutionPump {
    * Update wake lock state based on running plans.
    */
   async updateWakeLock(): Promise<void> {
+    const pm = this.state.powerManager;
+    if (!pm) { return; }
+
     const hasRunning = this.hasRunningPlans();
 
     if (hasRunning && !this.wakeLockCleanup && !this._acquiringWakeLock) {
       this._acquiringWakeLock = true;
       try {
-        this.wakeLockCleanup = await powerManager.acquireWakeLock('Copilot Plan execution in progress');
+        this.wakeLockCleanup = await pm.acquireWakeLock('Copilot Plan execution in progress');
         this.log.info('Acquired wake lock - system sleep prevented');
       } catch (e) {
         this.log.warn('Failed to acquire wake lock', { error: e });

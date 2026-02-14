@@ -6,6 +6,8 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { DefaultJobExecutor } from '../../../plan/executor';
 import { DefaultProcessSpawner } from '../../../interfaces/IProcessSpawner';
+import { DefaultEvidenceValidator } from '../../../plan/evidenceValidator';
+import { ProcessMonitor } from '../../../process';
 import type { JobNode } from '../../../plan/types';
 
 function silenceConsole(): { restore: () => void } {
@@ -35,7 +37,7 @@ suite('computeAggregatedWorkSummary', () => {
 
   setup(() => {
     quiet = silenceConsole();
-    executor = new DefaultJobExecutor(new DefaultProcessSpawner());
+    executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()));
     
     // Stub git module functions
     const gitModule = require('../../../git');

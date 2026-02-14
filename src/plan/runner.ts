@@ -13,7 +13,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { ProcessMonitor } from '../process';
+import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
 import type {
   PlanSpec,
   PlanInstance,
@@ -31,9 +31,9 @@ import type {
   WorkSpec,
 } from './types';
 import type { PlanRunnerConfig, RetryNodeOptions } from '../interfaces/IPlanRunner';
-import { PlanStateMachine } from './stateMachine';
+import type { PlanStateMachine } from './stateMachine';
 import { PlanScheduler } from './scheduler';
-import { PlanPersistence } from './persistence';
+import type { PlanPersistence } from './persistence';
 import { Logger } from '../core/logger';
 import type { GlobalCapacityManager, GlobalCapacityStats } from '../core/globalCapacity';
 import { PlanLifecycleManager, PlanRunnerState } from './planLifecycle';
@@ -41,7 +41,7 @@ import { NodeManager } from './nodeManager';
 import { ExecutionPump } from './executionPump';
 import { JobExecutionEngine } from './executionEngine';
 import { PlanEventEmitter } from './planEvents';
-import { PlanConfigManager } from './configManager';
+import type { PlanConfigManager } from './configManager';
 
 const log = Logger.for('plan-runner');
 
@@ -98,27 +98,27 @@ export class PlanRunner extends EventEmitter {
   private readonly _engine: JobExecutionEngine;
   private readonly _events: PlanEventEmitter;
 
-  constructor(config: PlanRunnerConfig) {
+  constructor(config: PlanRunnerConfig, deps: {
+    configManager: PlanConfigManager;
+    persistence: PlanPersistence;
+    processMonitor: IProcessMonitor;
+    stateMachineFactory: (plan: PlanInstance) => PlanStateMachine;
+  }) {
     super();
 
     const events = new PlanEventEmitter();
-    const configManager = new PlanConfigManager();
     const scheduler = new PlanScheduler({ globalMaxParallel: config.maxParallel || 8 });
-    const persistence = new PlanPersistence(config.storagePath);
-    const processMonitor = (() => {
-      const { DefaultProcessSpawner } = require('../interfaces/IProcessSpawner');
-      return new ProcessMonitor(new DefaultProcessSpawner());
-    })();
 
     const state: PlanRunnerState = {
       plans: new Map(),
       stateMachines: new Map(),
       scheduler,
-      persistence,
+      persistence: deps.persistence,
       config,
-      processMonitor,
+      processMonitor: deps.processMonitor,
       events,
-      configManager,
+      configManager: deps.configManager,
+      stateMachineFactory: deps.stateMachineFactory,
     };
 
     this._state = state;
@@ -160,8 +160,16 @@ export class PlanRunner extends EventEmitter {
     this._state.executor = executor;
   }
 
+  setCopilotRunner(runner: import('../interfaces/ICopilotRunner').ICopilotRunner): void {
+    this._state.copilotRunner = runner;
+  }
+
   setGlobalCapacityManager(manager: GlobalCapacityManager): void {
     this._state.globalCapacity = manager;
+  }
+
+  setPowerManager(pm: import('../core/powerManager').PowerManager): void {
+    this._state.powerManager = pm;
   }
 
   // -- Lifecycle -------------------------------------------------------------

@@ -11,6 +11,11 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 
+// Stub dependencies for DefaultJobExecutor constructor
+const stubSpawner = { spawn: () => ({ pid: undefined, exitCode: null, killed: false, stdout: null, stderr: null, kill: () => true, on: () => ({}) }) } as any;
+const stubValidator = { validate: async () => ({ isValid: true }) } as any;
+const stubMonitor = { getSnapshot: async () => [], buildTree: () => [], isRunning: () => false, terminate: async () => {} } as any;
+
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
   console.log = console.debug = console.warn = console.error = () => {};
@@ -40,7 +45,7 @@ suite('DefaultJobExecutor - getAllProcessStats', () => {
     // Clear require cache to get a fresh executor
     delete require.cache[require.resolve('../../../plan/executor')];
     const { DefaultJobExecutor } = require('../../../plan/executor');
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(stubSpawner, stubValidator, stubMonitor);
     
     // Mock ProcessMonitor to avoid OS-level queries
     const mockSnapshot = [
@@ -94,7 +99,7 @@ suite('DefaultJobExecutor - getAllProcessStats', () => {
   test('returns latest execution when multiple attempts exist for same node', async () => {
     delete require.cache[require.resolve('../../../plan/executor')];
     const { DefaultJobExecutor } = require('../../../plan/executor');
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(stubSpawner, stubValidator, stubMonitor);
     
     // Mock ProcessMonitor
     sandbox.stub(executor['processMonitor'], 'getSnapshot').resolves([
@@ -152,7 +157,7 @@ suite('DefaultJobExecutor - getAllProcessStats', () => {
   test('returns empty after execution cleanup', async () => {
     delete require.cache[require.resolve('../../../plan/executor')];
     const { DefaultJobExecutor } = require('../../../plan/executor');
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(stubSpawner, stubValidator, stubMonitor);
     
     // Mock ProcessMonitor
     sandbox.stub(executor['processMonitor'], 'getSnapshot').resolves([]);
@@ -199,7 +204,7 @@ suite('DefaultJobExecutor - getAllProcessStats', () => {
   test('handles agent work without process and shell work with process', async () => {
     delete require.cache[require.resolve('../../../plan/executor')];
     const { DefaultJobExecutor } = require('../../../plan/executor');
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(stubSpawner, stubValidator, stubMonitor);
     
     // Mock ProcessMonitor
     const mockSnapshot = [
@@ -272,7 +277,7 @@ suite('DefaultJobExecutor - getAllProcessStats', () => {
   test('skips non-agent work without process', async () => {
     delete require.cache[require.resolve('../../../plan/executor')];
     const { DefaultJobExecutor } = require('../../../plan/executor');
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(stubSpawner, stubValidator, stubMonitor);
     
     // Mock ProcessMonitor
     sandbox.stub(executor['processMonitor'], 'getSnapshot').resolves([]);
@@ -307,7 +312,7 @@ suite('DefaultJobExecutor - getAllProcessStats', () => {
   test('returns empty for unknown planId/nodeId', async () => {
     delete require.cache[require.resolve('../../../plan/executor')];
     const { DefaultJobExecutor } = require('../../../plan/executor');
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(stubSpawner, stubValidator, stubMonitor);
     
     // Mock ProcessMonitor
     sandbox.stub(executor['processMonitor'], 'getSnapshot').resolves([]);
@@ -330,7 +335,7 @@ suite('DefaultJobExecutor - getAllProcessStats', () => {
   test('handles ProcessMonitor errors gracefully', async () => {
     delete require.cache[require.resolve('../../../plan/executor')];
     const { DefaultJobExecutor } = require('../../../plan/executor');
-    const executor = new DefaultJobExecutor();
+    const executor = new DefaultJobExecutor(stubSpawner, stubValidator, stubMonitor);
     
     // Mock ProcessMonitor to have errors
     sandbox.stub(executor['processMonitor'], 'getSnapshot').rejects(new Error('snapshot failed'));

@@ -5,14 +5,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { ChildProcess } from 'child_process';
 import { isCopilotCliAvailable } from './cliCheckCore';
 import { CopilotStatsParser } from './copilotStatsParser';
 import type { CopilotUsageMetrics } from '../plan/types';
 import type { IProcessSpawner, ChildProcessLike } from '../interfaces/IProcessSpawner';
-import { DefaultProcessSpawner } from '../interfaces/IProcessSpawner';
 import type { IEnvironment } from '../interfaces/IEnvironment';
-import { DefaultEnvironment } from '../interfaces/IEnvironment';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -39,7 +36,7 @@ export interface CopilotRunOptions {
   /** Callback for output lines */
   onOutput?: (line: string) => void;
   /** Callback when process is spawned */
-  onProcess?: (proc: ChildProcess | ChildProcessLike) => void;
+  onProcess?: (proc: ChildProcessLike) => void;
   /** Timeout in milliseconds (default: 5 minutes) */
   timeout?: number;
   /** Skip writing instructions file (for simple one-off prompts) */
@@ -83,6 +80,19 @@ const noopLogger: CopilotCliLogger = {
   debug: () => {},
 };
 
+/** @internal Lazy-loaded process spawner for backward compatibility. Production code must inject via DI. */
+function getFallbackSpawner(): IProcessSpawner {
+  const mod = require('../interfaces/IProcessSpawner');
+  return new mod.DefaultProcessSpawner();
+}
+
+/** @internal Inline environment fallback. Production code must inject via DI. */
+const fallbackEnvironment: IEnvironment = {
+  get env() { return process.env; },
+  get platform() { return process.platform; },
+  cwd() { return process.cwd(); },
+};
+
 // ── CopilotCliRunner ───────────────────────────────────────────────────
 
 /** Unified runner for Copilot CLI operations. */
@@ -93,8 +103,8 @@ export class CopilotCliRunner {
   
   constructor(logger?: CopilotCliLogger, spawner?: IProcessSpawner, environment?: IEnvironment) {
     this.logger = logger ?? noopLogger;
-    this.spawner = spawner ?? new DefaultProcessSpawner();
-    this.environment = environment ?? new DefaultEnvironment();
+    this.spawner = spawner ?? getFallbackSpawner();
+    this.environment = environment ?? fallbackEnvironment;
   }
   
   /**
@@ -244,7 +254,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
   private execute(options: {
     command: string; cwd: string; label: string; sessionId?: string;
     timeout: number; onOutput?: (line: string) => void;
-    onProcess?: (proc: ChildProcess | ChildProcessLike) => void;
+    onProcess?: (proc: ChildProcessLike) => void;
   }): Promise<CopilotRunResult> {
     const { command, cwd, label, sessionId, timeout, onOutput, onProcess } = options;
     
@@ -590,27 +600,4 @@ export function buildCommand(
   if (sessionId) { cmd += ` --resume ${sessionId}`; }
   log.info(`[SECURITY] Copilot CLI command: copilot ${cmd}`);
   return cmd;
-}
-
-// ============================================================================
-// FACTORY FUNCTIONS (backward compat — no module-level singleton)
-// ============================================================================
-
-/**
- * Create a new Copilot CLI runner.
- * Replaces the old singleton pattern — callers should hold their own reference.
- */
-export function getCopilotCliRunner(logger?: CopilotCliLogger): CopilotCliRunner {
-  return new CopilotCliRunner(logger);
-}
-
-/**
- * Convenience function to run Copilot CLI with a fresh runner.
- */
-export async function runCopilotCli(
-  options: CopilotRunOptions,
-  logger?: CopilotCliLogger
-): Promise<CopilotRunResult> {
-  const runner = new CopilotCliRunner(logger);
-  return runner.run(options);
 }

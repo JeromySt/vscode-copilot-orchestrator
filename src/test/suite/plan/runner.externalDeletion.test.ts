@@ -3,6 +3,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { PlanRunner, PlanRunnerConfig } from '../../../plan/runner';
+import { PlanConfigManager } from '../../../plan/configManager';
+import { PlanPersistence } from '../../../plan/persistence';
+import { PlanStateMachine } from '../../../plan/stateMachine';
+import { ProcessMonitor } from '../../../process/processMonitor';
+import { DefaultProcessSpawner } from '../../../interfaces/IProcessSpawner';
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
@@ -29,7 +34,12 @@ suite('PlanRunner External Deletion Handling', () => {
       defaultRepoPath: workspacePath,
     };
     
-    runner = new PlanRunner(config);
+    runner = new PlanRunner(config, {
+      configManager: new PlanConfigManager(),
+      persistence: new PlanPersistence(plansDir),
+      processMonitor: new ProcessMonitor(new DefaultProcessSpawner()),
+      stateMachineFactory: (plan: any) => new PlanStateMachine(plan),
+    });
   });
   
   teardown(async () => {

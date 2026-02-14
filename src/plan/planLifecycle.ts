@@ -4,26 +4,27 @@
  * @module plan/planLifecycle
  */
 
+import * as fs from 'fs';
 import * as path from 'path';
-import type { IConfigProvider } from '../interfaces/IConfigProvider';
 import type { ILogger } from '../interfaces/ILogger';
+import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
 import type {
   PlanSpec, PlanInstance, PlanStatus, NodeStatus,
   NodeTransitionEvent, PlanCompletionEvent,
 } from './types';
 import { nodePerformsWork } from './types';
 import { buildPlan, buildSingleJobPlan } from './builder';
-import { PlanStateMachine } from './stateMachine';
+import type { PlanStateMachine } from './stateMachine';
 import { PlanScheduler } from './scheduler';
 import { PlanPersistence } from './persistence';
 import { PlanEventEmitter } from './planEvents';
 import { PlanConfigManager } from './configManager';
 import { OrchestratorFileWatcher } from '../core';
-import { ProcessMonitor } from '../process';
 import { computeProgress } from './helpers';
 import * as git from '../git';
 import type { JobExecutor, PlanRunnerConfig } from './runner';
 import type { GlobalCapacityManager, GlobalCapacityStats } from '../core/globalCapacity';
+import type { PowerManager } from '../core/powerManager';
 
 // Conditionally import vscode for UI notifications
 let vscode: typeof import('vscode') | undefined;
@@ -40,9 +41,12 @@ export interface PlanRunnerState {
   executor?: JobExecutor;
   config: PlanRunnerConfig;
   globalCapacity?: GlobalCapacityManager;
-  processMonitor: ProcessMonitor;
+  processMonitor: IProcessMonitor;
   events: PlanEventEmitter;
   configManager: PlanConfigManager;
+  stateMachineFactory: (plan: PlanInstance) => PlanStateMachine;
+  copilotRunner?: import('../interfaces/ICopilotRunner').ICopilotRunner;
+  powerManager?: PowerManager;
 }
 
   /** Manages Plan CRUD operations and lifecycle transitions. */
@@ -72,7 +76,7 @@ export class PlanLifecycleManager {
     for (const plan of loadedPlans) {
       await this.recoverRunningNodes(plan);
       this.state.plans.set(plan.id, plan);
-      const sm = new PlanStateMachine(plan);
+      const sm = this.state.stateMachineFactory(plan);
       this.setupStateMachineListeners(sm);
       this.state.stateMachines.set(plan.id, sm);
     }
@@ -121,7 +125,7 @@ export class PlanLifecycleManager {
       plan.isPaused = true;
     }
 
-    const sm = new PlanStateMachine(plan);
+    const sm = this.state.stateMachineFactory(plan);
     this.setupStateMachineListeners(sm);
     this.state.stateMachines.set(plan.id, sm);
 
@@ -162,7 +166,7 @@ export class PlanLifecycleManager {
     }
 
     this.state.plans.set(plan.id, plan);
-    const sm = new PlanStateMachine(plan);
+    const sm = this.state.stateMachineFactory(plan);
     this.setupStateMachineListeners(sm);
     this.state.stateMachines.set(plan.id, sm);
 
@@ -445,18 +449,16 @@ export class PlanLifecycleManager {
 
     if (this.state.executor) {
       try {
-        const fs = require('fs');
-        const pathMod = require('path');
         const storagePath = (this.state.executor as any).storagePath;
         if (storagePath) {
-          const logsDir = pathMod.join(storagePath, 'logs');
+          const logsDir = path.join(storagePath, 'logs');
           if (fs.existsSync(logsDir)) {
             const safePlanId = plan.id.replace(/[^a-zA-Z0-9-_]/g, '_');
             const files = fs.readdirSync(logsDir) as string[];
             let removedCount = 0;
             for (const file of files) {
               if (file.startsWith(safePlanId + '_') && file.endsWith('.log')) {
-                try { fs.unlinkSync(pathMod.join(logsDir, file)); removedCount++; } catch (e: any) {
+                try { fs.unlinkSync(path.join(logsDir, file)); removedCount++; } catch (e: any) {
                   cleanupErrors.push(`log file ${file}: ${e.message}`);
                 }
               }

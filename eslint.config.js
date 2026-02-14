@@ -202,6 +202,21 @@ module.exports = [
     },
   },
 
+  // ── 3b. planInitialization: approved webview view provider ──────
+  // This is the ONE file that registers the sidebar view provider.
+  // webviewCreationSelectors intentionally excluded — it owns the
+  // sidebar registration lifecycle. DI enforcement is still active.
+  {
+    files: ['src/core/planInitialization.ts'],
+    rules: {
+      'no-restricted-syntax': ['error',
+        ...diSelectors,
+        ...uiEventBusSelectors,
+        // webviewCreationSelectors intentionally excluded — this is the bootstrap
+      ],
+    },
+  },
+
   // ── 4. IProcessSpawner.ts: only file that may import child_process ──
   {
     files: [
@@ -231,28 +246,9 @@ module.exports = [
   {
     files: [
       'src/extension.ts',
-      'src/core/planInitialization.ts',
       'src/core/logger.ts',
-      'src/core/globalCapacity.ts',
-      'src/core/pulse.ts',
-      'src/core/powerManager.ts',
-      'src/plan/runner.ts',
-      'src/plan/executor.ts',
-      'src/plan/persistence.ts',
-      'src/plan/stateMachine.ts',
-      'src/plan/evidenceValidator.ts',
-      'src/plan/configManager.ts',
-      'src/plan/planLifecycle.ts',
-      'src/plan/executionEngine.ts',
-      'src/plan/executionPump.ts',
-      'src/plan/nodeManager.ts',
       'src/plan/logFileHelper.ts',
-      'src/agent/copilotCliRunner.ts',
       'src/agent/agentDelegator.ts',
-      'src/process/processMonitor.ts',
-      'src/mcp/handler.ts',
-      'src/mcp/mcpServerManager.ts',
-      'src/interfaces/IEnvironment.ts',
     ],
     rules: {
       'no-restricted-syntax': ['warn',

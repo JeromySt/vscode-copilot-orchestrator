@@ -5,6 +5,12 @@ import type { IProcessSpawner } from '../interfaces/IProcessSpawner';
 let cachedCliAvailable: boolean | null = null;
 let checkInProgress: Promise<boolean> | null = null;
 
+/** @internal Lazy-loaded process spawner for fallback. Production code must inject via DI. */
+function getFallbackSpawner(): IProcessSpawner {
+  const mod = require('../interfaces/IProcessSpawner');
+  return new mod.DefaultProcessSpawner();
+}
+
 /**
  * Check if Copilot CLI is available (cached, non-blocking after first call).
  * Returns cached result immediately if available, otherwise returns false
@@ -62,10 +68,7 @@ export function isCliCachePopulated(): boolean {
 // Async command check using spawn
 export async function cmdOkAsync(cmd: string, spawner?: IProcessSpawner): Promise<boolean> {
   return new Promise((resolve) => {
-    const actualSpawner = spawner || (() => {
-      const { DefaultProcessSpawner } = require('../interfaces/IProcessSpawner');
-      return new DefaultProcessSpawner();
-    })();
+    const actualSpawner = spawner ?? getFallbackSpawner();
     
     const proc = actualSpawner.spawn(cmd, [], { shell: true, stdio: 'ignore' });
     proc.on('close', (code: number | null) => resolve(code === 0));
@@ -80,10 +83,7 @@ export async function cmdOkAsync(cmd: string, spawner?: IProcessSpawner): Promis
 
 async function hasGhCopilotAsync(spawner?: IProcessSpawner): Promise<boolean> {
   return new Promise((resolve) => {
-    const actualSpawner = spawner || (() => {
-      const { DefaultProcessSpawner } = require('../interfaces/IProcessSpawner');
-      return new DefaultProcessSpawner();
-    })();
+    const actualSpawner = spawner ?? getFallbackSpawner();
     
     const proc = actualSpawner.spawn('gh', ['extension', 'list'], { shell: true });
     let output = '';

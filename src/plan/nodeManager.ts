@@ -21,7 +21,7 @@ import { normalizeWorkSpec } from './types';
 import { PlanStateMachine } from './stateMachine';
 import { PlanEventEmitter } from './planEvents';
 import { PlanPersistence } from './persistence';
-import { ProcessMonitor } from '../process';
+import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
 import { formatLogEntries } from './helpers';
 import * as git from '../git';
 import type { JobExecutor, RetryNodeOptions } from './runner';
@@ -35,7 +35,7 @@ export interface NodeManagerState {
   persistence: PlanPersistence;
   executor?: JobExecutor;
   events: PlanEventEmitter;
-  processMonitor: ProcessMonitor;
+  processMonitor: IProcessMonitor;
 }
 
 /**

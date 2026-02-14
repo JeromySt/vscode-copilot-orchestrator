@@ -12,6 +12,7 @@
  */
 
 import * as path from 'path';
+import * as fs from 'fs';
 import type { ILogger } from '../interfaces/ILogger';
 import type {
   PlanInstance,
@@ -41,6 +42,7 @@ import {
 import * as git from '../git';
 import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
 import { aggregateMetrics } from './metricsAggregator';
+import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
 import type { JobExecutor } from './runner';
 import { NodeManager } from './nodeManager';
 
@@ -64,6 +66,7 @@ export interface ExecutionEngineState {
   executor?: JobExecutor;
   events: PlanEventEmitter;
   configManager: PlanConfigManager;
+  copilotRunner?: ICopilotRunner;
 }
 
 /**
@@ -690,16 +693,14 @@ export class JobExecutionEngine {
             // This prevents the copilot CLI from re-reading and re-executing the
             // original task. The heal instructions point the agent at the log file.
             try {
-              const fs = require('fs');
-              const pathMod = require('path');
-              const instrDir = pathMod.join(worktreePath, '.github', 'instructions');
+              const instrDir = path.join(worktreePath, '.github', 'instructions');
               
               // Remove original instructions
               if (fs.existsSync(instrDir)) {
                 const files = fs.readdirSync(instrDir) as string[];
                 for (const f of files) {
                   if (f.startsWith('orchestrator-job')) {
-                    fs.unlinkSync(pathMod.join(instrDir, f));
+                    fs.unlinkSync(path.join(instrDir, f));
                   }
                 }
               } else {
@@ -725,7 +726,7 @@ export class JobExecutionEngine {
                 `Read the log file, find the error, fix it, then re-run the command above.`,
               ].join('\n');
               
-              const healFile = pathMod.join(instrDir, `orchestrator-heal-${node.id.slice(0, 8)}.instructions.md`);
+              const healFile = path.join(instrDir, `orchestrator-heal-${node.id.slice(0, 8)}.instructions.md`);
               fs.writeFileSync(healFile, healInstructions, 'utf8');
               this.log.debug(`Wrote heal instructions to: ${healFile}`);
             } catch (e: any) {
@@ -1785,6 +1786,11 @@ ${conflictList}
       this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  Running Copilot CLI to resolve conflicts...`, logContext.attemptNumber);
     }
     
+    if (!this.state.copilotRunner) {
+      this.log.error('No ICopilotRunner available for merge conflict resolution');
+      return { success: false };
+    }
+    
     const cliLogger: CopilotCliLogger = {
       info: (msg) => this.log.info(msg),
       warn: (msg) => this.log.warn(msg),
@@ -1792,7 +1798,7 @@ ${conflictList}
       debug: (msg) => this.log.debug(msg),
     };
     
-    const runner = new CopilotCliRunner(cliLogger);
+    const runner: ICopilotRunner = this.state.copilotRunner ?? new CopilotCliRunner(cliLogger);
     const result = await runner.run({
       cwd,
       task: 'Resolve all git merge conflicts in this repository.',
@@ -2013,7 +2019,6 @@ ${conflictList}
       }
       
       // Check if worktree still exists
-      const fs = require('fs');
       if (!fs.existsSync(state.worktreePath)) {
         continue; // Already cleaned up
       }

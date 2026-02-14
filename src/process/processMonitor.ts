@@ -310,14 +310,3 @@ export class ProcessMonitor implements IProcessMonitor {
   }
 }
 
-/**
- * Singleton instance for convenience.
- * Use dependency injection for testability.
- * 
- * @deprecated Use dependency injection instead
- */
-export const processMonitor = (() => {
-  // Use a default spawner for backward compatibility
-  const { DefaultProcessSpawner } = require('../interfaces/IProcessSpawner');
-  return new ProcessMonitor(new DefaultProcessSpawner());
-})();

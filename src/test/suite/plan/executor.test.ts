@@ -8,6 +8,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { DefaultJobExecutor } from '../../../plan/executor';
 import { DefaultProcessSpawner } from '../../../interfaces/IProcessSpawner';
+import { DefaultEvidenceValidator } from '../../../plan/evidenceValidator';
+import { ProcessMonitor } from '../../../process';
 import type { ExecutionPhase } from '../../../plan/types';
 
 function silenceConsole(): { restore: () => void } {
@@ -34,7 +36,7 @@ suite('DefaultJobExecutor', () => {
 
   setup(() => {
     quiet = silenceConsole();
-    executor = new DefaultJobExecutor(new DefaultProcessSpawner());
+    executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()));
     tmpDirs = [];
   });
 

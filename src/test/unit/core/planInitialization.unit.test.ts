@@ -798,6 +798,7 @@ suite('initializePlanRunner', () => {
   test('initializes with workspace path', async function() {
     this.timeout(10000);
     const { initializePlanRunner } = require('../../../core/planInitialization');
+    const { createContainer } = require('../../../composition');
 
     vscode.workspace.workspaceFolders = [
       { uri: vscode.Uri.file('/test/workspace'), name: 'test', index: 0 }
@@ -811,9 +812,9 @@ suite('initializePlanRunner', () => {
     };
 
     try {
-      const result = await initializePlanRunner(mockContext);
+      const container = createContainer(mockContext);
+      const result = await initializePlanRunner(mockContext, container);
       assert.ok(result.planRunner);
-      assert.ok(result.executor);
       assert.ok(result.processMonitor);
       // Verify cleanup handler was registered
       assert.ok(mockContext.subscriptions.length > 0);
@@ -827,6 +828,7 @@ suite('initializePlanRunner', () => {
   test('falls back to globalStorageUri when no workspace', async function() {
     this.timeout(10000);
     const { initializePlanRunner } = require('../../../core/planInitialization');
+    const { createContainer } = require('../../../composition');
 
     vscode.workspace.workspaceFolders = undefined;
 
@@ -838,7 +840,8 @@ suite('initializePlanRunner', () => {
     };
 
     try {
-      const result = await initializePlanRunner(mockContext);
+      const container = createContainer(mockContext);
+      const result = await initializePlanRunner(mockContext, container);
       assert.ok(result.planRunner);
     } catch {
       // Expected in test env
