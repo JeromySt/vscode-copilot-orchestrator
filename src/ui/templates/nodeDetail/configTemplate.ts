@@ -44,12 +44,16 @@ export function getSpecTypeInfo(spec: WorkSpec | undefined): { type: string; lab
   if (!normalized) return { type: 'none', label: 'None' };
 
   switch (normalized.type) {
-    case 'agent':
-      return { type: 'agent', label: 'Agent' };
+    case 'agent': {
+      const model = (normalized as any).model;
+      return { type: 'agent', label: model ? `Agent · ${model}` : 'Agent' };
+    }
     case 'process':
       return { type: 'process', label: 'Process' };
-    case 'shell':
-      return { type: 'shell', label: 'Shell' };
+    case 'shell': {
+      const shell = (normalized as any).shell;
+      return { type: 'shell', label: shell ? `Shell · ${shell}` : 'Shell' };
+    }
     default:
       return { type: 'unknown', label: 'Unknown' };
   }
@@ -84,26 +88,111 @@ function renderAgentSpec(spec: any): string {
   let html = '<div class="spec-content spec-agent">';
   
   if (spec.instructions) {
-    const truncated = spec.instructions.length > 200 ? 
-      spec.instructions.substring(0, 200) + '...' : 
-      spec.instructions;
-    html += `<div class="spec-field"><span class="spec-label">Instructions:</span> <span class="spec-value">${escapeHtml(truncated)}</span></div>`;
+    // Render instructions as formatted content with basic markdown support
+    html += `<div class="agent-instructions">${renderMarkdownLike(spec.instructions)}</div>`;
   }
   
-  if (spec.model) {
-    html += `<div class="spec-field"><span class="spec-label">Model:</span> <span class="spec-value">${escapeHtml(spec.model)}</span></div>`;
-  }
-  
+  // Show metadata below instructions
+  const meta: string[] = [];
   if (spec.allowedFolders && spec.allowedFolders.length > 0) {
-    html += `<div class="spec-field"><span class="spec-label">Allowed Folders:</span> <span class="spec-value">${escapeHtml(spec.allowedFolders.join(', '))}</span></div>`;
+    meta.push(`<span class="spec-label">Allowed Folders:</span> ${escapeHtml(spec.allowedFolders.join(', '))}`);
   }
-  
   if (spec.allowedUrls && spec.allowedUrls.length > 0) {
-    html += `<div class="spec-field"><span class="spec-label">Allowed URLs:</span> <span class="spec-value">${escapeHtml(spec.allowedUrls.join(', '))}</span></div>`;
+    meta.push(`<span class="spec-label">Allowed URLs:</span> ${escapeHtml(spec.allowedUrls.join(', '))}`);
+  }
+  if (meta.length > 0) {
+    html += `<div class="spec-meta">${meta.map(m => `<div class="spec-field">${m}</div>`).join('')}</div>`;
   }
   
   html += '</div>';
   return html;
+}
+
+/**
+ * Render text with basic markdown-like formatting.
+ * Supports: headers (#), bold (**), code blocks (```), inline code (`), lists (- / *), numbered lists.
+ */
+function renderMarkdownLike(text: string): string {
+  const lines = text.split('\n');
+  let html = '';
+  let inCodeBlock = false;
+  let inList = false;
+  
+  for (const line of lines) {
+    // Code block toggle
+    if (line.trim().startsWith('```')) {
+      if (inCodeBlock) {
+        html += '</code></pre>';
+        inCodeBlock = false;
+      } else {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<pre class="spec-code"><code>';
+        inCodeBlock = true;
+      }
+      continue;
+    }
+    
+    if (inCodeBlock) {
+      html += escapeHtml(line) + '\n';
+      continue;
+    }
+    
+    // Headers
+    if (line.startsWith('### ')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h5>${escapeHtml(line.substring(4))}</h5>`;
+      continue;
+    }
+    if (line.startsWith('## ')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h4>${escapeHtml(line.substring(3))}</h4>`;
+      continue;
+    }
+    if (line.startsWith('# ')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h3>${escapeHtml(line.substring(2))}</h3>`;
+      continue;
+    }
+    
+    // List items
+    const listMatch = line.match(/^(\s*)([-*]|\d+\.)\s+(.+)/);
+    if (listMatch) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${formatInline(listMatch[3])}</li>`;
+      continue;
+    }
+    
+    // Close list if not a list item
+    if (inList && line.trim() === '') {
+      html += '</ul>';
+      inList = false;
+      continue;
+    }
+    
+    // Empty line
+    if (line.trim() === '') {
+      if (inList) { html += '</ul>'; inList = false; }
+      continue;
+    }
+    
+    // Regular paragraph
+    html += `<p>${formatInline(line)}</p>`;
+  }
+  
+  if (inCodeBlock) html += '</code></pre>';
+  if (inList) html += '</ul>';
+  
+  return html;
+}
+
+/** Format inline markdown: bold, inline code */
+function formatInline(text: string): string {
+  let result = escapeHtml(text);
+  // Bold
+  result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Inline code
+  result = result.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+  return result;
 }
 
 function renderProcessSpec(spec: any): string {

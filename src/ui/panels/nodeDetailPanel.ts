@@ -1335,6 +1335,38 @@ export class NodeDetailPanel {
       font-style: italic;
     }
     
+    /* Agent instructions markdown rendering */
+    .agent-instructions {
+      padding: 8px 12px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .agent-instructions h3 { font-size: 15px; margin: 12px 0 6px; color: var(--vscode-foreground); }
+    .agent-instructions h4 { font-size: 14px; margin: 10px 0 4px; color: var(--vscode-foreground); }
+    .agent-instructions h5 { font-size: 13px; margin: 8px 0 4px; color: var(--vscode-descriptionForeground); }
+    .agent-instructions p { margin: 4px 0; }
+    .agent-instructions ul { margin: 4px 0 4px 16px; padding: 0; }
+    .agent-instructions li { margin: 2px 0; }
+    .agent-instructions pre.spec-code {
+      background: var(--vscode-textCodeBlock-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin: 6px 0;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+    .agent-instructions code.inline-code {
+      background: var(--vscode-textCodeBlock-background);
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+    .agent-instructions strong { color: var(--vscode-foreground); }
+    .spec-meta { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
+    .spec-meta .spec-field { font-size: 11px; margin: 2px 0; }
+    .spec-meta .spec-label { color: var(--vscode-descriptionForeground); }
+    
     /* Code content area */
     .work-code {
       margin: 0;
