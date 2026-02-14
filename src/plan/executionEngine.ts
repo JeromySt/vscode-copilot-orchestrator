@@ -915,11 +915,8 @@ export class JobExecutionEngine {
           // Check if there are any actual changes compared to the plan's original base
           let hasChanges = false;
           try {
-            const diffResult = await git.executor.execAsyncOrNull(
-              ['diff', '--stat', diffBase, mergeSource],
-              plan.repoPath
-            );
-            hasChanges = !!(diffResult && diffResult.trim().length > 0);
+            const diffStats = await git.repository.getDiffStats(diffBase, mergeSource, plan.repoPath);
+            hasChanges = (diffStats.added + diffStats.modified + diffStats.deleted) > 0;
           } catch {
             // If diff fails, assume there are changes to be safe
             hasChanges = true;
