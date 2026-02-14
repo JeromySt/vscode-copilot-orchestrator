@@ -50,13 +50,24 @@ function spawnAndTrack(
     proc.stderr?.setEncoding('utf8');
     proc.stdout?.on('data', (d: string) => { stdout += d; ctx.logOutput('stdout', d); });
     proc.stderr?.on('data', (d: string) => { stderr += d; ctx.logOutput('stderr', d); });
+    
+    // Track stream completion separately from process exit.
+    // The 'close' event fires when the process exits AND all stdio streams
+    // are closed. However, on Windows with shell:true, the streams may
+    // deliver their final buffered data in the same tick as 'close'.
+    // Using setImmediate ensures all pending I/O callbacks (including any
+    // final data events) are processed before we log the exit summary.
     proc.on('close', (code) => {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-      ctx.setProcess(undefined);
-      ctx.logInfo(`${label} exited: PID ${proc.pid}, code ${code}, duration ${Date.now() - startTime}ms`);
-      if (ctx.isAborted()) resolve({ success: false, error: 'Execution canceled' });
-      else if (code === 0) resolve({ success: true });
-      else resolve({ success: false, error: `Exit code ${code}`, exitCode: code ?? undefined });
+      setImmediate(() => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        ctx.setProcess(undefined);
+        ctx.logInfo(`${label} exited: PID ${proc.pid}, code ${code}, duration ${Date.now() - startTime}ms`);
+        if (stdout.trim()) ctx.logInfo(`${label} stdout (${stdout.split('\\n').length} lines)`);
+        if (stderr.trim()) ctx.logInfo(`${label} stderr (${stderr.split('\\n').length} lines, informational)`);
+        if (ctx.isAborted()) resolve({ success: false, error: 'Execution canceled' });
+        else if (code === 0) resolve({ success: true });
+        else resolve({ success: false, error: `Exit code ${code}`, exitCode: code ?? undefined });
+      });
     });
     proc.on('error', (err) => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
