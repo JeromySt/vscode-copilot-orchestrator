@@ -393,8 +393,8 @@ export class NodeManager {
 
       try {
         if (nodeState.baseCommit && nodeState.worktreePath) {
-          await git.executor.execAsync(['reset', '--hard', nodeState.baseCommit], { cwd: nodeState.worktreePath });
-          await git.executor.execAsync(['clean', '-fd'], { cwd: nodeState.worktreePath });
+          await git.repository.resetHard(nodeState.worktreePath, nodeState.baseCommit);
+          await git.repository.clean(nodeState.worktreePath);
         }
       } catch (e: any) {
         this.log.warn(`Failed to reset worktree: ${e.message}`);

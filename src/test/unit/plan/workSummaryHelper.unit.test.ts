@@ -58,12 +58,11 @@ suite('workSummaryHelper', () => {
 
     test('computes summary with diff stats', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves('def456');
-      sandbox.stub(git.executor, 'execAsync').resolves({
-        success: true,
-        stdout: 'A\tnew-file.ts\nM\texisting.ts\nD\told.ts\n',
-        stderr: '',
-        exitCode: 0,
-      });
+      sandbox.stub(git.repository, 'getFileChangesBetween').resolves([
+        { status: 'added', path: 'new-file.ts' },
+        { status: 'modified', path: 'existing.ts' },
+        { status: 'deleted', path: 'old.ts' },
+      ]);
       const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123');
       assert.strictEqual(result.commits, 1);
       assert.strictEqual(result.filesAdded, 1);
@@ -73,9 +72,7 @@ suite('workSummaryHelper', () => {
 
     test('handles diff failure gracefully', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves('def456');
-      sandbox.stub(git.executor, 'execAsync').resolves({
-        success: false, stdout: '', stderr: 'error', exitCode: 0,
-      });
+      sandbox.stub(git.repository, 'getFileChangesBetween').resolves([]);
       const result = await computeWorkSummary(makeJobNode(), '/wt', 'abc123');
       assert.strictEqual(result.commits, 0);
     });
@@ -96,20 +93,16 @@ suite('workSummaryHelper', () => {
 
     test('returns empty when baseBranch resolution fails', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves('head123');
-      sandbox.stub(git.executor, 'execAsync').resolves({ success: false, stdout: '', stderr: 'error', exitCode: 0 });
+      sandbox.stub(git.repository, 'resolveRef').rejects(new Error('unknown ref'));
       const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo');
       assert.strictEqual(result.commits, 0);
     });
 
     test('computes aggregated summary from baseBranch', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves('head123');
-      const execStub = sandbox.stub(git.executor, 'execAsync');
-      // First call: rev-parse baseBranch
-      execStub.onFirstCall().resolves({ success: true, stdout: 'base123\n', stderr: '', exitCode: 0 });
-      // Second call: diff --name-status
-      execStub.onSecondCall().resolves({ success: true, stdout: 'A\tnew.ts\nM\texist.ts\n', stderr: '', exitCode: 0 });
-      // Third call: rev-list --count
-      execStub.onThirdCall().resolves({ success: true, stdout: '3\n', stderr: '', exitCode: 0 });
+      sandbox.stub(git.repository, 'resolveRef').resolves('base123');
+      sandbox.stub(git.repository, 'getDiffStats').resolves({ added: 1, modified: 1, deleted: 0 });
+      sandbox.stub(git.repository, 'getCommitCount').resolves(3);
 
       const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo');
       assert.strictEqual(result.commits, 3);
@@ -120,10 +113,9 @@ suite('workSummaryHelper', () => {
 
     test('handles rev-list failure gracefully', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves('head123');
-      const execStub = sandbox.stub(git.executor, 'execAsync');
-      execStub.onFirstCall().resolves({ success: true, stdout: 'base123\n', stderr: '', exitCode: 0 });
-      execStub.onSecondCall().resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
-      execStub.onThirdCall().resolves({ success: false, stdout: '', stderr: 'error', exitCode: 0 });
+      sandbox.stub(git.repository, 'resolveRef').resolves('base123');
+      sandbox.stub(git.repository, 'getDiffStats').resolves({ added: 0, modified: 0, deleted: 0 });
+      sandbox.stub(git.repository, 'getCommitCount').resolves(0);
 
       const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo');
       assert.strictEqual(result.commits, 0);
@@ -137,10 +129,9 @@ suite('workSummaryHelper', () => {
 
     test('handles diff failure with zero counts', async () => {
       sandbox.stub(git.worktrees, 'getHeadCommit').resolves('head123');
-      const execStub = sandbox.stub(git.executor, 'execAsync');
-      execStub.onFirstCall().resolves({ success: true, stdout: 'base123\n', stderr: '', exitCode: 0 });
-      execStub.onSecondCall().resolves({ success: false, stdout: '', stderr: 'error', exitCode: 0 });
-      execStub.onThirdCall().resolves({ success: true, stdout: '1\n', stderr: '', exitCode: 0 });
+      sandbox.stub(git.repository, 'resolveRef').resolves('base123');
+      sandbox.stub(git.repository, 'getDiffStats').resolves({ added: 0, modified: 0, deleted: 0 });
+      sandbox.stub(git.repository, 'getCommitCount').resolves(1);
 
       const result = await computeAggregatedWorkSummary(makeJobNode(), '/wt', 'main', '/repo');
       assert.strictEqual(result.filesAdded, 0);

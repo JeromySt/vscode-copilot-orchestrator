@@ -843,7 +843,8 @@ suite('JobExecutionEngine - helper methods', () => {
       sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(true);
       sandbox.stub(git.repository, 'getDirtyFiles').resolves(['.gitignore']);
       // Return only orchestrator patterns in diff
-      sandbox.stub(git.executor, 'execAsyncOrNull').resolves('+.orchestrator/\n+# Copilot Orchestrator\n');
+      sandbox.stub(git.repository, 'getFileDiff').resolves('+.orchestrator/\n+# Copilot Orchestrator\n');
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       sandbox.stub(git.repository, 'checkoutFile').resolves();
       sandbox.stub(git.repository, 'resetHard').resolves();
       sandbox.stub(git.worktrees, 'removeSafe').resolves();
@@ -930,12 +931,9 @@ suite('JobExecutionEngine - helper methods', () => {
       sandbox.stub(git.repository, 'resetHard').resolves();
       sandbox.stub(git.repository, 'stashPop').rejects(new Error('stash pop conflict'));
       // Stash is orchestrator-only
-      const execOrNull = sandbox.stub(git.executor, 'execAsyncOrNull');
-      execOrNull.withArgs(sinon.match.array.contains(['stash']), sinon.match.any).callsFake(async (args: string[]) => {
-        if (args.includes('--name-only')) return '.gitignore';
-        if (args.includes('-p')) return '+.orchestrator/\n+# Copilot Orchestrator\n';
-        return null;
-      });
+      sandbox.stub(git.repository, 'stashShowFiles').resolves(['.gitignore']);
+      sandbox.stub(git.repository, 'stashShowPatch').resolves('+.orchestrator/\n+# Copilot Orchestrator\n');
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       const stashDropStub = sandbox.stub(git.repository, 'stashDrop').resolves(true);
       sandbox.stub(git.worktrees, 'removeSafe').resolves();
 

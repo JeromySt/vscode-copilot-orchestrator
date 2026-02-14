@@ -241,7 +241,8 @@ suite('NodeManager - retryNode and forceFailNode', () => {
     const mgr = new NodeManager(state as any, log);
 
     sandbox.stub(git.repository, 'fetch').resolves();
-    sandbox.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+    sandbox.stub(git.repository, 'resetHard').resolves();
+    sandbox.stub(git.repository, 'clean').resolves();
 
     const result = await mgr.retryNode('plan-1', 'n1', { clearWorktree: true });
     assert.strictEqual(result.success, true);
