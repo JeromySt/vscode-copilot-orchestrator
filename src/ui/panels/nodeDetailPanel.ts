@@ -729,24 +729,6 @@ export class NodeDetailPanel {
       filesDeleted: ws.filesDeleted || 0,
     });
   }
-
-  /**
-   * Push config update to the webview for live spec changes.
-   *
-   * @param node - The job node definition.
-   * @param state - The current node execution state.
-   */
-  private _sendConfigUpdate(node: JobNode, state: NodeExecutionState): void {
-    this._panel.webview.postMessage({
-      type: 'configUpdate',
-      data: {
-        work: node.work ? formatWorkSpecHtml(node.work, escapeHtml) : undefined,
-        prechecks: undefined,
-        postchecks: undefined,
-        currentPhase: state.lastAttempt?.phase,
-      },
-    });
-  }
   
   /** Re-render the panel HTML with current node state. */
   private _update() {
