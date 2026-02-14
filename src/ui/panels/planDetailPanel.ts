@@ -834,21 +834,17 @@ export class planDetailPanel {
     .mermaid g[id*="TARGET_SOURCE"] .node,
     .mermaid g[id*="TARGET_MERGED"] .node { cursor: default; }  /* Branch nodes are not clickable */
     
-    /* Node labels — clip to rect bounds, ellipsis for overflow */
+    /* Node labels — sized by fitNodesToContent() after render.
+       overflow:visible lets the JS sizing be authoritative; text is
+       already server-side truncated so nothing should spill out. */
     .mermaid .node .nodeLabel {
       white-space: nowrap !important;
-      overflow: hidden !important;
-      text-overflow: ellipsis !important;
       display: block !important;
-      max-width: 100% !important;
     }
     .mermaid .node foreignObject {
-      overflow: hidden !important;
+      overflow: visible !important;
     }
-    /* Prevent node foreignObject/rect from being expanding beyond original Mermaid layout */
     .mermaid .node foreignObject div {
-      overflow: hidden !important;
-      text-overflow: ellipsis !important;
       white-space: nowrap !important;
     }
     
