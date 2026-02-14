@@ -686,69 +686,56 @@ export class JobExecutionEngine {
             // Get the log file path so the agent can read it directly
             const failedLogFilePath = this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts);
 
-            // Remove the original instructions file to prevent the copilot CLI
-            // from re-reading and re-executing the original task during auto-heal.
-            // The heal agent should ONLY focus on analyzing errors and fixing them.
+            // Replace the original instructions file with a heal-specific one.
+            // This prevents the copilot CLI from re-reading and re-executing the
+            // original task. The heal instructions point the agent at the log file.
             try {
               const fs = require('fs');
-              const instrDir = require('path').join(worktreePath, '.github', 'instructions');
+              const pathMod = require('path');
+              const instrDir = pathMod.join(worktreePath, '.github', 'instructions');
+              
+              // Remove original instructions
               if (fs.existsSync(instrDir)) {
                 const files = fs.readdirSync(instrDir) as string[];
                 for (const f of files) {
                   if (f.startsWith('orchestrator-job')) {
-                    fs.unlinkSync(require('path').join(instrDir, f));
-                    this.log.debug(`Removed original instructions file: ${f}`);
+                    fs.unlinkSync(pathMod.join(instrDir, f));
                   }
                 }
+              } else {
+                fs.mkdirSync(instrDir, { recursive: true });
               }
-            } catch (e: any) {
-              this.log.debug(`Could not remove instructions file: ${e.message}`);
-            }
-
-            const healSpec: WorkSpec = {
-              type: 'agent',
-              instructions: [
+              
+              // Write heal instructions file
+              const healInstructions = [
                 `# Auto-Heal: Fix Failed ${failedPhase} Phase`,
                 '',
-                `## IMPORTANT: Do NOT re-execute the original task`,
-                `Your ONLY job is to diagnose and fix the error that caused the ${failedPhase} phase to fail.`,
-                `Do NOT read or follow any previous instructions files — they are for the original task, not for healing.`,
+                `Do NOT re-execute the original task. Your only job is to fix the error.`,
                 '',
-                `## What Failed`,
-                `- Phase: ${failedPhase}`,
-                `- Exit code: ${result.exitCode ?? 'unknown'}`,
-                `- Original command: \`${originalCommand}\``,
-                '',
-                `## How to Diagnose`,
+                `## Log File`,
                 failedLogFilePath
-                  ? `1. Read the log file at: \`${failedLogFilePath}\``
-                  : `1. Review the error logs below`,
-                `2. Look for the LAST error, exception, or non-zero exit in the logs`,
-                `3. Identify the root cause (missing dependency, wrong path, syntax error, etc.)`,
+                  ? `Read: \`${failedLogFilePath}\``
+                  : 'No log file available.',
                 '',
-                failedLogFilePath
-                  ? [
-                      `## Log File`,
-                      `The complete execution log is at: \`${failedLogFilePath}\``,
-                      `Read this file to understand what went wrong.`,
-                    ].join('\n')
-                  : [
-                      `## Execution Logs (last ${Math.min(logLines.length, 200)} lines)`,
-                      '```',
-                      truncatedLogs,
-                      '```',
-                    ].join('\n'),
+                `## Command to Fix and Re-run`,
+                '```',
+                originalCommand,
+                '```',
                 '',
-                `## How to Fix`,
-                `1. Based on the error, make targeted fixes in the worktree (edit files, fix configs, etc.)`,
-                `2. Re-run the original command to verify it now passes:`,
-                '   ```',
-                `   ${originalCommand}`,
-                '   ```',
-                `3. If it passes, you are done. If not, analyze the new error and try again.`,
-              ].join('\n'),
-              // Inherit allowed folders/URLs from original spec (if any)
-              // This ensures auto-heal has same access as the original work
+                `Read the log file, find the error, fix it, then re-run the command above.`,
+              ].join('\n');
+              
+              const healFile = pathMod.join(instrDir, `orchestrator-heal-${node.id.slice(0, 8)}.instructions.md`);
+              fs.writeFileSync(healFile, healInstructions, 'utf8');
+              this.log.debug(`Wrote heal instructions to: ${healFile}`);
+            } catch (e: any) {
+              this.log.debug(`Could not write heal instructions file: ${e.message}`);
+            }
+
+            // The heal spec is minimal — the real instructions are in the .md file
+            const healSpec: WorkSpec = {
+              type: 'agent',
+              instructions: 'Fix the error described in the heal instructions file. Read the log file, diagnose the failure, fix it, and re-run the command.',
               allowedFolders: originalAgentSpec?.allowedFolders,
               allowedUrls: originalAgentSpec?.allowedUrls,
             };
