@@ -1236,6 +1236,29 @@ export class NodeDetailPanel {
       margin-bottom: 2px;
     }
     .meta-value { font-size: 13px; }
+    
+    /* Git Info - stacked vertical list */
+    .git-info-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .git-info-row {
+      display: flex;
+      flex-direction: row;
+      align-items: baseline;
+      gap: 12px;
+    }
+    .git-info-label {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      min-width: 120px;
+      flex-shrink: 0;
+    }
+    .git-info-value {
+      font-size: 13px;
+      word-break: break-all;
+    }
     .meta-value.mono, .config-value.mono {
       font-family: 'Consolas', 'Courier New', monospace;
       font-size: 12px;

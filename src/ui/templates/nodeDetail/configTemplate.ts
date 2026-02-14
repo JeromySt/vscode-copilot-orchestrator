@@ -263,48 +263,48 @@ export function gitInfoSectionHtml(data: {
   return `<!-- Git Information -->
   <div class="section">
     <h3>Git Information</h3>
-    <div class="meta-grid">
+    <div class="git-info-list">
       ${data.baseBranch ? `
-      <div class="meta-item">
-        <div class="meta-label">Base Branch</div>
-        <div class="meta-value mono">${escapeHtml(data.baseBranch)}</div>
+      <div class="git-info-row">
+        <span class="git-info-label">Base Branch</span>
+        <span class="git-info-value mono">${escapeHtml(data.baseBranch)}</span>
       </div>
       ` : ''}
       ${data.targetBranch ? `
-      <div class="meta-item">
-        <div class="meta-label">Target Branch</div>
-        <div class="meta-value mono">${escapeHtml(data.targetBranch)}</div>
+      <div class="git-info-row">
+        <span class="git-info-label">Target Branch</span>
+        <span class="git-info-value mono">${escapeHtml(data.targetBranch)}</span>
       </div>
       ` : ''}
       ${data.baseCommit ? `
-      <div class="meta-item">
-        <div class="meta-label">Base Commit</div>
-        <div class="meta-value mono">${data.baseCommit.slice(0, 12)}</div>
+      <div class="git-info-row">
+        <span class="git-info-label">Base Commit</span>
+        <span class="git-info-value mono">${data.baseCommit.slice(0, 12)}</span>
       </div>
       ` : ''}
       ${data.workCommit && data.workCommit !== data.completedCommit ? `
-      <div class="meta-item">
-        <div class="meta-label">Work Commit</div>
-        <div class="meta-value mono">${data.workCommit.slice(0, 12)}</div>
+      <div class="git-info-row">
+        <span class="git-info-label">Work Commit</span>
+        <span class="git-info-value mono">${data.workCommit.slice(0, 12)}</span>
       </div>
       ` : ''}
       ${data.completedCommit ? `
-      <div class="meta-item">
-        <div class="meta-label">Completed Commit</div>
-        <div class="meta-value mono">${data.completedCommit.slice(0, 12)}</div>
+      <div class="git-info-row">
+        <span class="git-info-label">Completed Commit</span>
+        <span class="git-info-value mono">${data.completedCommit.slice(0, 12)}</span>
       </div>
       ` : ''}
       ${data.mergedToTarget !== undefined ? `
-      <div class="meta-item">
-        <div class="meta-label">Merged to Target</div>
-        <div class="meta-value">${data.mergedToTarget ? '✅ Yes' : '⏳ Pending'}</div>
+      <div class="git-info-row">
+        <span class="git-info-label">Merged to Target</span>
+        <span class="git-info-value">${data.mergedToTarget ? '✅ Yes' : '⏳ Pending'}</span>
       </div>
       ` : ''}
     </div>
     ${data.worktreePath ? `
-    <div class="config-item">
-      <div class="config-label">Worktree${data.worktreeCleanedUp ? ' (cleaned up)' : ' (detached HEAD)'}</div>
-      <div class="config-value mono" style="${data.worktreeCleanedUp ? 'text-decoration: line-through; opacity: 0.6;' : ''}">${escapeHtml(data.worktreePath)}</div>
+    <div class="git-info-row" style="margin-top: 8px;">
+      <span class="git-info-label">Worktree${data.worktreeCleanedUp ? ' (cleaned up)' : ' (detached HEAD)'}</span>
+      <span class="git-info-value mono" style="${data.worktreeCleanedUp ? 'text-decoration: line-through; opacity: 0.6;' : ''}">${escapeHtml(data.worktreePath)}</span>
     </div>
     ` : ''}
   </div>`;
