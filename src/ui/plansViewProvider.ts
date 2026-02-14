@@ -126,6 +126,11 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     
     // Subscribe to pulse for periodic refresh of running Plans
     this._pulseSubscription = this._pulse.onPulse(() => {
+      // Always forward pulse to webview for client-side duration ticking
+      if (this._view) {
+        this._view.webview.postMessage({ type: 'pulse' });
+      }
+
       const hasRunning = this._planRunner.getAll().some(plan => {
         const sm = this._planRunner.getStateMachine(plan.id);
         const status = sm?.computePlanStatus();
@@ -510,7 +515,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     var Topics = {
       PLAN_STATE_CHANGE: 'plan:state',
       PLANS_UPDATE: 'plans:update',
-      CAPACITY_UPDATE: 'capacity:update'
+      CAPACITY_UPDATE: 'capacity:update',
+      PULSE: 'extension:pulse'
     };
 
     // Global bus instance
@@ -878,10 +884,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     var planListContainer = new PlanListContainerControl(bus, 'plan-list-container', 'plans');
     var capacityBar = new CapacityBarControl(bus, 'capacity-bar');
     
-    // ── Client-side duration ticker ──────────────────────────────────────
-    // Tick durations every second locally without waiting for server refresh.
-    // PlanListCardControl stores startedAt/endedAt on its element's dataset.
-    setInterval(function() {
+    // ── Client-side duration ticker (PULSE-driven) ───────────────────
+    // Subscribes to PULSE topic from EventBus (forwarded by extension).
+    // Ticks durations every pulse without needing setInterval.
+    bus.on(Topics.PULSE, function() {
       var cards = document.querySelectorAll('.plan-item[data-status="running"], .plan-item[data-status="pending"]');
       for (var i = 0; i < cards.length; i++) {
         var card = cards[i];
@@ -893,12 +899,16 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
           durEl.textContent = formatDuration(startedAt, endedAt || 0);
         }
       }
-    }, 1000);
+    });
     
     let isInitialLoad = true;
     
     // ── Message Handler ──────────────────────────────────────────────────
     window.addEventListener('message', function(ev) {
+      if (ev.data.type === 'pulse') {
+        bus.emit(Topics.PULSE);
+        return;
+      }
       if (ev.data.type !== 'update') return;
       
       var Plans = ev.data.Plans || [];
