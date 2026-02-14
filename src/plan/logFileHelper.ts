@@ -24,8 +24,57 @@ export function getLogFilePathByKey(
     const safeKey = executionKey.replace(/[^a-zA-Z0-9-_]/g, '_');
     logFile = path.join(logsDir, `${safeKey}.log`);
     logFiles.set(executionKey, logFile);
+    
+    // Write log file header with version info on first creation
+    try {
+      if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir, { recursive: true });
+      }
+      const header = buildLogFileHeader(executionKey);
+      fs.writeFileSync(logFile, header, 'utf8');
+    } catch { /* ignore header write errors */ }
   }
   return logFile;
+}
+
+/**
+ * Build a diagnostic header for log files.
+ * Includes extension version, git commit, platform, and node version.
+ */
+function buildLogFileHeader(executionKey: string): string {
+  const now = new Date().toISOString();
+  let version = 'unknown';
+  let commit = 'unknown';
+  
+  // Read version from package.json (bundled in dist/)
+  try {
+    const pkgPath = path.resolve(__dirname, '..', 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      version = pkg.version || 'unknown';
+    }
+  } catch { /* ignore */ }
+  
+  // Try to get git commit from the workspace
+  try {
+    const { execSync } = require('child_process');
+    commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000 }).trim();
+  } catch { /* ignore - not in a git repo or git not available */ }
+  
+  const lines = [
+    `================================================================================`,
+    `  Copilot Orchestrator - Node Execution Log`,
+    `================================================================================`,
+    `  Version:    ${version}`,
+    `  Commit:     ${commit}`,
+    `  Platform:   ${process.platform} ${process.arch}`,
+    `  Node:       ${process.version}`,
+    `  Created:    ${now}`,
+    `  Key:        ${executionKey}`,
+    `================================================================================`,
+    ``,
+  ];
+  return lines.join('\n') + '\n';
 }
 
 export function appendToLogFile(
