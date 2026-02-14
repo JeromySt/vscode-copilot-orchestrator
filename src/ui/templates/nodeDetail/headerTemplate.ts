@@ -74,6 +74,7 @@ export function headerRowHtml(nodeName: string, status: string, startedAt?: numb
   return `<div class="header">
     <span class="status-badge ${status}" id="node-status-badge">${status.toUpperCase()}</span>
     <h2>${escapeHtml(nodeName)}</h2>
+    <div class="header-phase" id="header-phase-indicator" style="display:none;"></div>
     <div class="header-duration">
       <span class="duration-icon">⏱</span>
       <span class="duration-value ${status}" id="duration-timer"${startedAt ? ` data-started-at="${startedAt}"` : ''}${endedAt ? ` data-ended-at="${endedAt}"` : ''} data-status="${status}">${durationText}</span>

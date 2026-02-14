@@ -431,6 +431,19 @@ export class NodeDetailPanel {
 
       const plan = this._planRunner.get(this._planId);
       const state = plan?.nodeStates.get(this._nodeId);
+
+      // Always send incremental state change so header phase indicator updates
+      if (state) {
+        const phaseStatus = this._getPhaseStatus(state);
+        const currentPhase = getCurrentExecutionPhase(state);
+        this._panel.webview.postMessage({
+          type: 'stateChange',
+          status: state.status,
+          phaseStatus,
+          currentPhase,
+        });
+      }
+
       if (state?.status === 'running' || state?.status === 'scheduled') {
         // Status changed - do full update
         if (this._lastStatus !== state.status) {
@@ -1192,6 +1205,23 @@ export class NodeDetailPanel {
       margin-bottom: 4px;
     }
     .header h2 { margin: 0; font-size: 18px; flex: 1; margin-left: 12px; }
+    
+    /* Phase indicator in header */
+    .header-phase {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 10px;
+      background: rgba(0, 122, 204, 0.15);
+      color: #3794ff;
+      white-space: nowrap;
+      margin-right: 12px;
+      animation: pulse-phase-badge 2s infinite;
+    }
+    @keyframes pulse-phase-badge {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
     
     /* Duration display in header */
     .header-duration {

@@ -204,7 +204,19 @@ export function webviewScripts(config: ScriptsConfig): string {
         if (!el) return;
         for (var i = 0; i < STATUS_CLASSES.length; i++) el.classList.remove(STATUS_CLASSES[i]);
         el.classList.add(data.status);
-        el.textContent = (STATUS_ICONS[data.status] || '') + ' ' + data.status;
+        el.textContent = data.status.toUpperCase();
+        // Update header phase indicator
+        var phaseEl = document.getElementById('header-phase-indicator');
+        if (phaseEl) {
+          if (data.currentPhase && (data.status === 'running' || data.status === 'scheduled')) {
+            var phaseName = data.currentPhase.replace(/-/g, ' ');
+            phaseName = phaseName.charAt(0).toUpperCase() + phaseName.slice(1);
+            phaseEl.textContent = phaseName;
+            phaseEl.style.display = '';
+          } else {
+            phaseEl.style.display = 'none';
+          }
+        }
         this.publishUpdate(data);
       };
       return SBC;
