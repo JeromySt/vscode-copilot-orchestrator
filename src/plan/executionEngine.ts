@@ -1799,7 +1799,7 @@ ${conflictList}
       instructions: mergeInstructions,
       label: 'merge-conflict',
       jobId: logContext?.nodeId,
-      timeout: 300000,
+      timeout: 600000, // 10 minutes — merge resolution needs time for multi-file conflicts
       onOutput: (line) => {
         if (logContext && line.trim()) {
           this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  [copilot] ${line.trim()}`, logContext.attemptNumber);
