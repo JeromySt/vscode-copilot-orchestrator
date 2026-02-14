@@ -36,7 +36,7 @@ suite('DefaultJobExecutor', () => {
 
   setup(() => {
     quiet = silenceConsole();
-    executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()));
+    executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
     tmpDirs = [];
   });
 

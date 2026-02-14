@@ -121,6 +121,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -152,6 +153,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map([['plan-1', mockPlan]]),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -186,6 +188,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map([['plan-1', mockPlan]]),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -206,6 +209,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -236,6 +240,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -262,6 +267,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -291,6 +297,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map([['plan-1', mockPlan]]),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -324,6 +331,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map([['plan-1', mockPlan]]),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -359,6 +367,7 @@ suite('cleanupOrphanedWorktrees', () => {
       const result = await cleanupOrphanedWorktrees({
         repoPaths: [tempDir, tempDir2],
         activePlans: new Map(),
+        git: {} as any,
         logger: () => {}
       });
       
@@ -388,6 +397,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -418,6 +428,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map([['plan-1', mockPlan]]),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -446,6 +457,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -477,6 +489,7 @@ suite('cleanupOrphanedWorktrees', () => {
       const result = await cleanupOrphanedWorktrees({
         repoPaths: [tempDir],
         activePlans: new Map(),
+        git: {} as any,
         logger: () => {}
       });
       
@@ -509,6 +522,7 @@ suite('cleanupOrphanedWorktrees', () => {
       const result = await cleanupOrphanedWorktrees({
         repoPaths: [tempDir],
         activePlans: new Map(),
+        git: {} as any,
         logger: () => {}
       });
       
@@ -553,6 +567,7 @@ suite('cleanupOrphanedWorktrees', () => {
       const result = await cleanupOrphanedWorktrees({
         repoPaths: [tempDir],
         activePlans: new Map(),
+        git: {} as any,
         logger: () => {}
       });
       
@@ -584,6 +599,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
+      git: {} as any,
       logger: () => {}
     });
     
@@ -610,6 +626,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
+      git: {} as any,
       logger
     });
     

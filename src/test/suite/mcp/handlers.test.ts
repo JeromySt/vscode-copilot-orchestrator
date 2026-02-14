@@ -82,6 +82,7 @@ function createContext(plans: PlanInstance[] = []): PlanHandlerContext {
   const planMap = new Map(plans.map(p => [p.id, p]));
 
   return {
+    git: {} as any,
     PlanRunner: {
       // lookupPlan uses .get() by default and .getPlan() as alternate
       get: sinon.stub().callsFake((id: string) => planMap.get(id)),

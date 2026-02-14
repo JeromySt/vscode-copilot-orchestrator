@@ -72,6 +72,7 @@ function createContext(plans: PlanInstance[] = []): PlanHandlerContext {
   const mockCounts = { pending: 0, ready: 0, scheduled: 0, running: 1, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
 
   return {
+    git: {} as any,
     PlanRunner: {
       get: sinon.stub().callsFake((id: string) => planMap.get(id)),
       getPlan: sinon.stub().callsFake((id: string) => planMap.get(id)),
@@ -322,6 +323,7 @@ suite('Legacy Adapters', () => {
     const mockCounts = { pending: 0, ready: 0, scheduled: 0, running: 1, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
 
     return {
+      git: {} as any,
       PlanRunner: {
         get: sinon.stub().callsFake((id: string) => planMap.get(id)),
         getPlan: sinon.stub().callsFake((id: string) => planMap.get(id)),

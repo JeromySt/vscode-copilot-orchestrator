@@ -50,7 +50,7 @@ suite('McpHandler', () => {
   setup(() => {
     silenceConsole();
     stubRunner = createStubPlanRunner();
-    handler = new McpHandler(stubRunner, '/workspace');
+    handler = new McpHandler(stubRunner, '/workspace', {} as any);
   });
 
   teardown(() => {
