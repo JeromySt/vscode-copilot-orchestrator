@@ -88,10 +88,14 @@ export class planDetailPanel {
     // Initial render
     this._update();
     
-    // Subscribe to pulse for periodic updates + forward pulse to webview
+    // Subscribe to pulse — send fresh status data on every tick so duration
+    // counters stay updated. The _update() method skips entirely if stateVersion
+    // hasn't changed, but duration counters need startedAt/endedAt on every pulse.
     this._pulseSubscription = this._pulse.onPulse(() => {
       this._panel.webview.postMessage({ type: 'pulse' });
-      this._update();
+      // Force a status update even if stateVersion hasn't changed,
+      // because duration counters need fresh startedAt/endedAt data
+      this._sendIncrementalUpdate();
     });
     
     // Handle panel disposal
@@ -554,6 +558,51 @@ export class planDetailPanel {
     });
   }
   
+  /**
+   * Send an incremental status update to the webview (used by pulse).
+   * Unlike _update(), this always sends the status message even if the
+   * stateVersion hasn't changed, because duration counters need fresh
+   * startedAt/endedAt data on every pulse tick.
+   */
+  private async _sendIncrementalUpdate() {
+    const plan = this._planRunner.get(this._planId);
+    if (!plan) return;
+    
+    const sm = this._planRunner.getStateMachine(this._planId);
+    const status = sm?.computePlanStatus() || 'pending';
+    const recursiveCounts = this._planRunner.getRecursiveStatusCounts(this._planId);
+    const counts = recursiveCounts.counts;
+    const totalNodes = recursiveCounts.totalNodes;
+    const total = totalNodes ?? plan.nodes.size;
+    const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
+    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
+    
+    // Build node statuses
+    const nodeStatuses: Record<string, any> = {};
+    for (const [nodeId, state] of plan.nodeStates) {
+      nodeStatuses[this._sanitizeId(nodeId)] = {
+        status: state.status, version: state.version || 0,
+        startedAt: state.startedAt, endedAt: state.endedAt,
+      };
+    }
+    for (const [groupId, state] of plan.groupStates) {
+      nodeStatuses[this._sanitizeId(groupId)] = {
+        status: state.status, version: state.version || 0,
+        startedAt: state.startedAt, endedAt: state.endedAt,
+      };
+    }
+    
+    this._panel.webview.postMessage({
+      type: 'statusUpdate',
+      planStatus: status,
+      nodeStatuses,
+      counts, progress, total, completed,
+      startedAt: plan.startedAt,
+      endedAt: effectiveEndedAt,
+    });
+  }
+
   /**
    * Generate a minimal error page HTML.
    *
