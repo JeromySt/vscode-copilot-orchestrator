@@ -610,30 +610,31 @@ export function renderPlanScripts(data: PlanScriptsData): string {
     };
     var nodeIcons = { succeeded: '✓', failed: '✗', running: '▶', blocked: '⊘', pending: '○', ready: '○', scheduled: '▶', canceled: '⊘' };
 
+    // ── SVG health check (extracted from handleStatusUpdate) ──────────────
+    function checkSvgUpdateHealth(changed) {
+      var changedCount = Object.keys(changed).length;
+      if (changedCount > 0) {
+        var totalFound = (mermaidNodeStyleCtrl._lastUpdated || 0) + (mermaidGroupStyleCtrl._lastUpdated || 0);
+        if (totalFound === 0) {
+          console.warn('SVG node update failed: updated 0 of ' + changedCount + ' nodes, requesting full refresh');
+          vscode.postMessage({ type: 'refresh' });
+        }
+      }
+    }
+
     // ── Simplified handleStatusUpdate ─────────────────────────────────────
     function handleStatusUpdate(msg) {
       try {
         var changed = {};
-        if (msg.nodeStatuses) {
-          for (var id in msg.nodeStatuses) {
-            var existing = nodeData[id];
-            var incoming = msg.nodeStatuses[id];
-            if (!existing || existing.version !== incoming.version) {
-              nodeData[id] = Object.assign(existing || {}, incoming);
-              changed[id] = incoming;
-            }
+        for (var id in (msg.nodeStatuses || {})) {
+          var existing = nodeData[id], incoming = msg.nodeStatuses[id];
+          if (!existing || existing.version !== incoming.version) {
+            nodeData[id] = Object.assign(existing || {}, incoming);
+            changed[id] = incoming;
           }
         }
         bus.emit(Topics.STATUS_UPDATE, Object.assign({}, msg, { nodeStatuses: changed }));
-        // After synchronous controls ran, check SVG update health
-        var changedCount = Object.keys(changed).length;
-        if (changedCount > 0) {
-          var totalFound = (mermaidNodeStyleCtrl._lastUpdated || 0) + (mermaidGroupStyleCtrl._lastUpdated || 0);
-          if (totalFound === 0) {
-            console.warn('SVG node update failed: updated 0 of ' + changedCount + ' nodes, requesting full refresh');
-            vscode.postMessage({ type: 'refresh' });
-          }
-        }
+        checkSvgUpdateHealth(changed);
       } catch (err) {
         console.error('handleStatusUpdate error:', err);
         vscode.postMessage({ type: 'refresh' });

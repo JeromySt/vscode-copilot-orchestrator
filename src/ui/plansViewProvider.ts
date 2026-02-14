@@ -546,30 +546,66 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     PlanListCardControl.prototype = Object.create(SubscribableControl.prototype);
     PlanListCardControl.prototype.constructor = PlanListCardControl;
     
+    PlanListCardControl.prototype._initDom = function(data) {
+      var progressClass = data.status === 'failed' ? 'failed' : 
+                         data.status === 'succeeded' ? 'succeeded' : '';
+      this.element.innerHTML = 
+        '<div class="plan-name">' +
+          '<span class="plan-name-text">' + escapeHtml(data.name) + '</span>' +
+          '<span class="plan-status ' + data.status + '">' + data.status + '</span>' +
+        '</div>' +
+        '<div class="plan-details">' +
+          '<span class="plan-node-count">' + data.nodes + ' nodes</span>' +
+          '<span class="plan-succeeded">✓ ' + data.counts.succeeded + '</span>' +
+          '<span class="plan-failed">✗ ' + data.counts.failed + '</span>' +
+          '<span class="plan-running">⏳ ' + data.counts.running + '</span>' +
+          (data.startedAt ? '<span class="plan-duration">' + formatDuration(data.startedAt, data.endedAt) + '</span>' : '') +
+        '</div>' +
+        '<div class="plan-progress">' +
+          '<div class="plan-progress-bar ' + progressClass + '" style="width: ' + data.progress + '%"></div>' +
+        '</div>';
+    };
+
     PlanListCardControl.prototype.update = function(data) {
       if (!data || data.id !== this.planId) return;
       
       this.element.className = 'plan-item ' + data.status;
       this.element.dataset.status = data.status;
       
+      if (!this._rendered) {
+        this._rendered = true;
+        this._initDom(data);
+        this.publishUpdate(data);
+        return;
+      }
+
       var progressClass = data.status === 'failed' ? 'failed' : 
                          data.status === 'succeeded' ? 'succeeded' : '';
-      
-      this.element.innerHTML = 
-        '<div class="plan-name">' +
-          '<span>' + escapeHtml(data.name) + '</span>' +
-          '<span class="plan-status ' + data.status + '">' + data.status + '</span>' +
-        '</div>' +
-        '<div class="plan-details">' +
-          '<span>' + data.nodes + ' nodes</span>' +
-          '<span>✓ ' + data.counts.succeeded + '</span>' +
-          '<span>✗ ' + data.counts.failed + '</span>' +
-          '<span>⏳ ' + data.counts.running + '</span>' +
-          (data.startedAt ? '<span>' + formatDuration(data.startedAt, data.endedAt) + '</span>' : '') +
-        '</div>' +
-        '<div class="plan-progress">' +
-          '<div class="plan-progress-bar ' + progressClass + '" style="width: ' + data.progress + '%"></div>' +
-        '</div>';
+      // Targeted DOM updates (no innerHTML on refresh)
+      var nameEl = this.element.querySelector('.plan-name-text');
+      if (nameEl) nameEl.textContent = data.name;
+      var statusEl = this.element.querySelector('.plan-status');
+      if (statusEl) { statusEl.className = 'plan-status ' + data.status; statusEl.textContent = data.status; }
+      var countEl = this.element.querySelector('.plan-node-count');
+      if (countEl) countEl.textContent = data.nodes + ' nodes';
+      var sEl = this.element.querySelector('.plan-succeeded');
+      if (sEl) sEl.textContent = '✓ ' + data.counts.succeeded;
+      var fEl = this.element.querySelector('.plan-failed');
+      if (fEl) fEl.textContent = '✗ ' + data.counts.failed;
+      var rEl = this.element.querySelector('.plan-running');
+      if (rEl) rEl.textContent = '⏳ ' + data.counts.running;
+      var durEl = this.element.querySelector('.plan-duration');
+      if (data.startedAt) {
+        if (!durEl) {
+          durEl = document.createElement('span');
+          durEl.className = 'plan-duration';
+          var detailsEl = this.element.querySelector('.plan-details');
+          if (detailsEl) detailsEl.appendChild(durEl);
+        }
+        durEl.textContent = formatDuration(data.startedAt, data.endedAt);
+      }
+      var barEl = this.element.querySelector('.plan-progress-bar');
+      if (barEl) { barEl.className = 'plan-progress-bar ' + progressClass; barEl.style.width = data.progress + '%'; }
         
       this.publishUpdate(data);
     };
