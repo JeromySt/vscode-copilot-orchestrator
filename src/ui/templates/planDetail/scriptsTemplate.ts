@@ -222,14 +222,17 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           label.style.width = 'auto';
         });
 
-        // Fix label clipping for regular node labels (same foreignObject expansion)
-        element.querySelectorAll('.node .nodeLabel, .node span, .node div').forEach(function(label) {
-          var parent = label;
-          while (parent && parent.tagName !== 'foreignObject') { parent = parent.parentElement; }
-          if (parent && parent.tagName === 'foreignObject') {
-            var textWidth = label.scrollWidth || label.offsetWidth || 200;
-            var curWidth = parseFloat(parent.getAttribute('width')) || 0;
-            if (textWidth + 20 > curWidth) { parent.setAttribute('width', String(textWidth + 30)); }
+        // Ensure node label foreignObjects don't exceed their rect widths
+        // (prevents text overflow beyond node boundaries)
+        element.querySelectorAll('.node').forEach(function(nodeGroup) {
+          var rect = nodeGroup.querySelector('rect');
+          var fo = nodeGroup.querySelector('foreignObject');
+          if (rect && fo) {
+            var rectWidth = parseFloat(rect.getAttribute('width') || '0');
+            var foWidth = parseFloat(fo.getAttribute('width') || '0');
+            if (foWidth > rectWidth && rectWidth > 0) {
+              fo.setAttribute('width', String(rectWidth));
+            }
           }
         });
         

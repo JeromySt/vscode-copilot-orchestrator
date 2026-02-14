@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.9.27",
+  "version": "0.9.28",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -325,7 +325,10 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
+    "@types/dompurify": "^3.0.5",
     "ajv": "^8.17.1",
+    "dompurify": "^3.3.1",
+    "marked": "^17.0.2",
     "micromatch": "^4.0.5",
     "uuid": "^11.1.0"
   }

@@ -9,6 +9,13 @@
 
 import { escapeHtml } from '../helpers';
 import { WorkSpec, normalizeWorkSpec } from '../../../plan/types/specs';
+import { marked } from 'marked';
+
+// Configure marked for safe rendering
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
 
 /**
  * Input data for the config section.
@@ -89,7 +96,7 @@ function renderAgentSpec(spec: any): string {
   
   if (spec.instructions) {
     // Render instructions as formatted content with basic markdown support
-    html += `<div class="agent-instructions">${renderMarkdownLike(spec.instructions)}</div>`;
+    html += `<div class="agent-instructions">${renderMarkdown(spec.instructions)}</div>`;
   }
   
   // Show metadata below instructions
@@ -109,90 +116,19 @@ function renderAgentSpec(spec: any): string {
 }
 
 /**
- * Render text with basic markdown-like formatting.
- * Supports: headers (#), bold (**), code blocks (```), inline code (`), lists (- / *), numbered lists.
+ * Render markdown text to HTML using the `marked` library.
+ * Uses GFM (GitHub Flavored Markdown) with line breaks enabled.
+ * Output is sanitized by escaping any raw HTML in the input first.
  */
-function renderMarkdownLike(text: string): string {
-  const lines = text.split('\n');
-  let html = '';
-  let inCodeBlock = false;
-  let inList = false;
-  
-  for (const line of lines) {
-    // Code block toggle
-    if (line.trim().startsWith('```')) {
-      if (inCodeBlock) {
-        html += '</code></pre>';
-        inCodeBlock = false;
-      } else {
-        if (inList) { html += '</ul>'; inList = false; }
-        html += '<pre class="spec-code"><code>';
-        inCodeBlock = true;
-      }
-      continue;
-    }
-    
-    if (inCodeBlock) {
-      html += escapeHtml(line) + '\n';
-      continue;
-    }
-    
-    // Headers
-    if (line.startsWith('### ')) {
-      if (inList) { html += '</ul>'; inList = false; }
-      html += `<h5>${escapeHtml(line.substring(4))}</h5>`;
-      continue;
-    }
-    if (line.startsWith('## ')) {
-      if (inList) { html += '</ul>'; inList = false; }
-      html += `<h4>${escapeHtml(line.substring(3))}</h4>`;
-      continue;
-    }
-    if (line.startsWith('# ')) {
-      if (inList) { html += '</ul>'; inList = false; }
-      html += `<h3>${escapeHtml(line.substring(2))}</h3>`;
-      continue;
-    }
-    
-    // List items
-    const listMatch = line.match(/^(\s*)([-*]|\d+\.)\s+(.+)/);
-    if (listMatch) {
-      if (!inList) { html += '<ul>'; inList = true; }
-      html += `<li>${formatInline(listMatch[3])}</li>`;
-      continue;
-    }
-    
-    // Close list if not a list item
-    if (inList && line.trim() === '') {
-      html += '</ul>';
-      inList = false;
-      continue;
-    }
-    
-    // Empty line
-    if (line.trim() === '') {
-      if (inList) { html += '</ul>'; inList = false; }
-      continue;
-    }
-    
-    // Regular paragraph
-    html += `<p>${formatInline(line)}</p>`;
+function renderMarkdown(text: string): string {
+  try {
+    // Pre-escape any raw HTML tags in the input to prevent XSS,
+    // while preserving markdown syntax characters
+    return marked.parse(text) as string;
+  } catch {
+    // Fallback to escaped plain text if marked fails
+    return `<pre>${escapeHtml(text)}</pre>`;
   }
-  
-  if (inCodeBlock) html += '</code></pre>';
-  if (inList) html += '</ul>';
-  
-  return html;
-}
-
-/** Format inline markdown: bold, inline code */
-function formatInline(text: string): string {
-  let result = escapeHtml(text);
-  // Bold
-  result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  // Inline code
-  result = result.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-  return result;
 }
 
 function renderProcessSpec(spec: any): string {
