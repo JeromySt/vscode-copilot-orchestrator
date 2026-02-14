@@ -141,7 +141,7 @@ export class CopilotCliRunner {
     
     // Build the command
     const copilotCmd = this.buildCommand({
-      task: skipInstructionsFile ? task : 'Complete the task described in the instructions.',
+      task: skipInstructionsFile ? task : `Complete the task described in the instructions file at ${instructionsFile}.`,
       sessionId,
       model,
       logDir,
@@ -256,10 +256,10 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       // Log the full invocation for diagnostics (to both logger AND onOutput for node log visibility)
       this.logger.info(`[${label}] Spawning: ${command}`);
       this.logger.info(`[${label}] CWD: ${cwd}`);
-      const defaultKeys = new Set(['PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP', 'HOMEDRIVE', 'HOMEPATH', 'USERPROFILE', 'USERNAME', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'COMMONPROGRAMFILES', 'COMMONPROGRAMFILES(X86)', 'OS', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS', 'COMPUTERNAME', 'USERDOMAIN']);
+      const defaultKeyPrefixes = ['PATH', 'SYSTEM', 'WIN', 'COM', 'TEMP', 'TMP', 'HOME', 'USER', 'APP', 'LOCAL', 'PROGRAM', 'OS', 'PROCESSOR', 'NUMBER_OF', 'COMPUTER', 'VSCODE', 'ELECTRON', 'CHROME', 'NO_COLOR', 'PROMPT', 'PUBLIC', 'DRIVER', 'SESSION', 'LOGON', 'FPS_', 'GIT_TR', 'WVD_', 'NUGET', 'CONDA', 'PSModule', 'WSLENV', 'WT_', 'YARN', 'npm_', 'MACE', 'UATDATA', 'APPLICATION_INS', 'POWERSHELL_D', 'OneDrive', 'ESPMRepo', 'Chocolatey', 'IsDevBox', 'CLIENTNAME', 'CommonProgram'];
       const envLines: string[] = [];
       for (const [key, value] of Object.entries(cleanEnv)) {
-        if (!defaultKeys.has(key.toUpperCase()) && value) {
+        if (value && !defaultKeyPrefixes.some(p => key.toUpperCase().startsWith(p.toUpperCase()))) {
           const redacted = /token|key|secret|password|auth/i.test(key) ? '***' : value;
           envLines.push(`  ${key}=${redacted}`);
         }
