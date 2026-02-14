@@ -25,6 +25,7 @@ import {
   configSectionHtml, dependenciesSectionHtml, gitInfoSectionHtml,
   metricsSummaryHtml, attemptMetricsHtml as attemptMetricsTemplateHtml,
   attemptHistoryHtml, webviewScripts,
+  renderSpecContent, getSpecTypeInfo,
 } from '../templates/nodeDetail';
 import type { AttemptCardData } from '../templates/nodeDetail';
 import { NodeDetailController, NodeDetailCommands } from './nodeDetailController';
@@ -662,13 +663,16 @@ export class NodeDetailPanel {
     
     if (!node || node.type !== 'job') return;
     
+    // Pre-render spec HTML server-side so the webview gets formatted HTML
     this._panel.webview.postMessage({
       type: 'configUpdate',
       data: {
-        work: node.work,
-        prechecks: node.prechecks,
-        postchecks: node.postchecks,
-        instructions: node.instructions,
+        work: node.work ? renderSpecContent(node.work) : undefined,
+        workType: node.work ? getSpecTypeInfo(node.work) : undefined,
+        prechecks: node.prechecks ? renderSpecContent(node.prechecks) : undefined,
+        prechecksType: node.prechecks ? getSpecTypeInfo(node.prechecks) : undefined,
+        postchecks: node.postchecks ? renderSpecContent(node.postchecks) : undefined,
+        postchecksType: node.postchecks ? getSpecTypeInfo(node.postchecks) : undefined,
         task: node.task,
         currentPhase: getCurrentExecutionPhase(state),
       }

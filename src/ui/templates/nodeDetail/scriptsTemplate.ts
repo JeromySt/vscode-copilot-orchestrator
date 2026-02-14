@@ -582,39 +582,44 @@ export function webviewScripts(config: ScriptsConfig): string {
         var html = '';
 
         if (cfg.prechecks) {
+          var preType = cfg.prechecksType || { type: 'shell', label: 'Shell' };
           var preExpanded = this._userOverrides.prechecks !== undefined
             ? this._userOverrides.prechecks
             : (cfg.currentPhase === 'prechecks');
-          html += this._renderCollapsiblePhase('prechecks', 'Prechecks', cfg.prechecks, preExpanded);
+          html += this._renderCollapsiblePhase('prechecks', 'Prechecks', preType, cfg.prechecks, preExpanded);
         }
 
         if (cfg.work) {
+          var workType = cfg.workType || { type: 'agent', label: 'Agent' };
           html += '<div class="config-phase-section">'
             + '<div class="config-phase-header">'
-            + '<span class="config-phase-badge work">⚙ Work</span>'
+            + '<span class="config-phase-badge work">' + escapeHtml(workType.label) + '</span>'
+            + '<span class="config-phase-label">Work</span>'
             + '</div>'
             + '<div class="config-phase-body">' + cfg.work + '</div>'
             + '</div>';
         }
 
         if (cfg.postchecks) {
+          var postType = cfg.postchecksType || { type: 'shell', label: 'Shell' };
           var postExpanded = this._userOverrides.postchecks !== undefined
             ? this._userOverrides.postchecks
             : (cfg.currentPhase === 'postchecks');
-          html += this._renderCollapsiblePhase('postchecks', 'Postchecks', cfg.postchecks, postExpanded);
+          html += this._renderCollapsiblePhase('postchecks', 'Postchecks', postType, cfg.postchecks, postExpanded);
         }
 
         if (html) el.innerHTML = html;
         this._bindCollapsibleHandlers(el);
         this.publishUpdate(data);
       };
-      CDC.prototype._renderCollapsiblePhase = function(phaseId, label, content, expanded) {
+      CDC.prototype._renderCollapsiblePhase = function(phaseId, label, typeInfo, content, expanded) {
         var chevron = expanded ? '▼' : '▶';
         var display = expanded ? 'block' : 'none';
         return '<div class="config-phase-section collapsible" data-phase-id="' + phaseId + '">'
           + '<div class="config-phase-header config-collapsible-toggle" data-phase-id="' + phaseId + '">'
           + '<span class="config-chevron">' + chevron + '</span>'
-          + '<span class="config-phase-badge ' + phaseId + '">✓ ' + escapeHtml(label) + '</span>'
+          + '<span class="config-phase-badge ' + phaseId + '">' + escapeHtml(typeInfo.label || label) + '</span>'
+          + '<span class="config-phase-label">' + escapeHtml(label) + '</span>'
           + '</div>'
           + '<div class="config-phase-body" style="display: ' + display + ';">' + content + '</div>'
           + '</div>';

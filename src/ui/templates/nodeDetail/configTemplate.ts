@@ -33,7 +33,7 @@ export interface ConfigData {
 /**
  * Get spec type info for badge display
  */
-function getSpecTypeInfo(spec: WorkSpec | undefined): { type: string; label: string } {
+export function getSpecTypeInfo(spec: WorkSpec | undefined): { type: string; label: string } {
   if (!spec) return { type: 'none', label: 'None' };
   
   if (typeof spec === 'string') {
@@ -58,7 +58,7 @@ function getSpecTypeInfo(spec: WorkSpec | undefined): { type: string; label: str
 /**
  * Render spec content as HTML
  */
-function renderSpecContent(spec: WorkSpec | undefined): string {
+export function renderSpecContent(spec: WorkSpec | undefined): string {
   if (!spec) return '<div class="spec-empty">No specification defined</div>';
   
   if (typeof spec === 'string') {

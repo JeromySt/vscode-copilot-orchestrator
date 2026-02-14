@@ -22,7 +22,7 @@ export type { LogViewerData } from './logViewerTemplate';
 export { attemptCardHtml, attemptPhaseTabsHtml, attemptHistoryHtml } from './attemptsTemplate';
 export type { AttemptCardData, AttemptHistoryData } from './attemptsTemplate';
 
-export { configSectionHtml, dependenciesSectionHtml, gitInfoSectionHtml } from './configTemplate';
+export { configSectionHtml, dependenciesSectionHtml, gitInfoSectionHtml, renderSpecContent, getSpecTypeInfo } from './configTemplate';
 export type { ConfigData } from './configTemplate';
 
 export { metricsSummaryHtml, attemptMetricsHtml, formatPremiumRequests, formatDurationSeconds, formatTokenCount, formatCodeChanges } from './metricsTemplate';
