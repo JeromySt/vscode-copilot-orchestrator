@@ -126,11 +126,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     
     // Subscribe to pulse for periodic refresh of running Plans
     this._pulseSubscription = this._pulse.onPulse(() => {
-      // Always forward pulse to webview for client-side duration ticking
-      if (this._view) {
-        this._view.webview.postMessage({ type: 'pulse' });
-      }
-
       const hasRunning = this._planRunner.getAll().some(plan => {
         const sm = this._planRunner.getStateMachine(plan.id);
         const status = sm?.computePlanStatus();
@@ -138,6 +133,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       });
       
       if (hasRunning) {
+        // Forward pulse to webview only when plans are active
+        if (this._view) {
+          this._view.webview.postMessage({ type: 'pulse' });
+        }
         this.refresh();
       }
     });
@@ -629,6 +628,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       SubscribableControl.call(this, bus, controlId);
       this.containerId = containerId;
       this.planCards = new Map(); // planId -> PlanListCardControl
+      this._pulseSub = null;      // PULSE subscription — only active when plans are running
       
       // Subscribe to plans update
       var self = this;
@@ -747,9 +747,42 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       }, 50);
       
       this.publishUpdate(plans);
+
+      // Manage PULSE subscription lifecycle: subscribe only when running
+      var hasRunning = plans.some(function(p) {
+        return p.status === 'running' || p.status === 'pending';
+      });
+      if (hasRunning && !this._pulseSub) {
+        var self2 = this;
+        this._pulseSub = this.bus.on(Topics.PULSE, function() {
+          self2._tickDurations();
+        });
+      } else if (!hasRunning && this._pulseSub) {
+        this._pulseSub.unsubscribe();
+        this._pulseSub = null;
+      }
     };
     
+    PlanListContainerControl.prototype._tickDurations = function() {
+      for (var entry of this.planCards.values()) {
+        var el = entry.element;
+        var status = el.dataset.status;
+        if (status !== 'running' && status !== 'pending') continue;
+        var startedAt = parseInt(el.dataset.startedAt || '0', 10);
+        if (!startedAt) continue;
+        var endedAt = parseInt(el.dataset.endedAt || '0', 10);
+        var durEl = el.querySelector('.plan-duration');
+        if (durEl) {
+          durEl.textContent = formatDuration(startedAt, endedAt || 0);
+        }
+      }
+    };
+
     PlanListContainerControl.prototype.dispose = function() {
+      if (this._pulseSub) {
+        this._pulseSub.unsubscribe();
+        this._pulseSub = null;
+      }
       for (var card of this.planCards.values()) {
         card.dispose();
       }
@@ -883,23 +916,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     // ── Control Initialization ───────────────────────────────────────────
     var planListContainer = new PlanListContainerControl(bus, 'plan-list-container', 'plans');
     var capacityBar = new CapacityBarControl(bus, 'capacity-bar');
-    
-    // ── Client-side duration ticker (PULSE-driven) ───────────────────
-    // Subscribes to PULSE topic from EventBus (forwarded by extension).
-    // Ticks durations every pulse without needing setInterval.
-    bus.on(Topics.PULSE, function() {
-      var cards = document.querySelectorAll('.plan-item[data-status="running"], .plan-item[data-status="pending"]');
-      for (var i = 0; i < cards.length; i++) {
-        var card = cards[i];
-        var startedAt = parseInt(card.dataset.startedAt || '0', 10);
-        if (!startedAt) continue;
-        var endedAt = parseInt(card.dataset.endedAt || '0', 10);
-        var durEl = card.querySelector('.plan-duration');
-        if (durEl) {
-          durEl.textContent = formatDuration(startedAt, endedAt || 0);
-        }
-      }
-    });
     
     let isInitialLoad = true;
     
