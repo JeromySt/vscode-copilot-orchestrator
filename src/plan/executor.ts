@@ -23,6 +23,7 @@ import { ensureOrchestratorDirs } from '../core';
 import {
   PrecheckPhaseExecutor, WorkPhaseExecutor,
   PostcheckPhaseExecutor, CommitPhaseExecutor,
+  MergeFiPhaseExecutor, MergeRiPhaseExecutor,
 } from './phases';
 import type { CommitPhaseContext } from './phases';
 import {
@@ -100,13 +101,14 @@ export class DefaultJobExecutor implements JobExecutor {
     let capturedMetrics: CopilotUsageMetrics | undefined;
     const phaseMetrics: Record<string, CopilotUsageMetrics> = {};
 
-    const phaseOrder = ['prechecks', 'work', 'postchecks', 'commit'] as const;
+    const phaseOrder = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
     const resumeIndex = context.resumeFromPhase ? phaseOrder.indexOf(context.resumeFromPhase as any) : 0;
     const skip = (p: typeof phaseOrder[number]) => phaseOrder.indexOf(p) < resumeIndex;
     const phaseDeps = () => ({ 
       agentDelegator: this.agentDelegator, 
       getCopilotConfigDir: (wtp: string) => this.getCopilotConfigDir(wtp),
-      spawner: this.spawner
+      spawner: this.spawner,
+      configManager: undefined, // TODO: Pass config manager if available
     });
     const makeCtx = (phase: ExecutionPhase): PhaseContext => ({
       node, worktreePath, executionKey, phase,
@@ -122,7 +124,22 @@ export class DefaultJobExecutor implements JobExecutor {
 
     try {
       if (!fs.existsSync(worktreePath))
-        return { success: false, error: `Worktree does not exist: ${worktreePath}`, stepStatuses, failedPhase: 'prechecks', pid: execution.process?.pid };
+        return { success: false, error: `Worktree does not exist: ${worktreePath}`, stepStatuses, failedPhase: 'merge-fi', pid: execution.process?.pid };
+
+      // ---- MERGE-FI ----
+      if (skip('merge-fi')) { this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION (SKIPPED - RESUMING) =========='); }
+      else if (context.dependencyCommits && context.dependencyCommits.length > 0) {
+        context.onProgress?.('Forward integration merge'); context.onStepStatusChange?.('merge-fi', 'running');
+        this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION START ==========');
+        const ctx = makeCtx('merge-fi'); 
+        ctx.dependencyCommits = context.dependencyCommits;
+        const r = await new MergeFiPhaseExecutor(phaseDeps()).execute(ctx);
+        if (r.metrics) { capturedMetrics = r.metrics; phaseMetrics['merge-fi'] = r.metrics; }
+        this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION END ==========');
+        if (!r.success) { stepStatuses['merge-fi'] = 'failed'; context.onStepStatusChange?.('merge-fi', 'failed'); return { success: false, error: `Forward integration merge failed: ${r.error}`, stepStatuses, failedPhase: 'merge-fi', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+        stepStatuses['merge-fi'] = 'success'; context.onStepStatusChange?.('merge-fi', 'success');
+      } else { stepStatuses['merge-fi'] = 'skipped'; context.onStepStatusChange?.('merge-fi', 'skipped'); }
+      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };
 
       // ---- PRECHECKS ----
       if (skip('prechecks')) { this.logEntry(executionKey, 'prechecks', 'info', '========== PRECHECKS SECTION (SKIPPED - RESUMING) =========='); }
@@ -186,6 +203,39 @@ export class DefaultJobExecutor implements JobExecutor {
         if (workWasSkipped) { this.logEntry(executionKey, 'commit', 'info', 'Commit found no evidence, but work was skipped (resuming). Succeeding without commit.'); stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
         else { stepStatuses.commit = 'failed'; context.onStepStatusChange?.('commit', 'failed'); return { success: false, error: `Commit failed: ${cr.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'commit', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
       } else { stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
+
+      // ---- POSTCHECKS ----
+      if (skip('postchecks')) { this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION (SKIPPED - RESUMING) =========='); }
+      else if (node.postchecks) {
+        context.onProgress?.('Running postchecks'); context.onStepStatusChange?.('postchecks', 'running');
+        this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION START ==========');
+        const ctx = makeCtx('postchecks'); ctx.workSpec = node.postchecks; ctx.sessionId = capturedSessionId;
+        const r = await new PostcheckPhaseExecutor(phaseDeps()).execute(ctx);
+        if (r.copilotSessionId) capturedSessionId = r.copilotSessionId;
+        if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['postchecks'] = r.metrics; }
+        this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION END ==========');
+        if (!r.success) { stepStatuses.postchecks = 'failed'; context.onStepStatusChange?.('postchecks', 'failed'); return { success: false, error: `Postchecks failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'postchecks', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+        stepStatuses.postchecks = 'success'; context.onStepStatusChange?.('postchecks', 'success');
+      } else { stepStatuses.postchecks = 'skipped'; context.onStepStatusChange?.('postchecks', 'skipped'); }
+      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
+
+      // ---- MERGE-RI ----
+      if (skip('merge-ri')) { this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION (SKIPPED - RESUMING) =========='); }
+      else if (context.targetBranch && context.repoPath) {
+        context.onProgress?.('Reverse integration merge'); context.onStepStatusChange?.('merge-ri', 'running');
+        this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION START ==========');
+        const ctx = makeCtx('merge-ri'); 
+        ctx.repoPath = context.repoPath;
+        ctx.targetBranch = context.targetBranch;
+        ctx.baseCommitAtStart = context.baseCommitAtStart;
+        ctx.completedCommit = cr.commit;
+        ctx.baseCommit = context.baseCommit;
+        const r = await new MergeRiPhaseExecutor(phaseDeps()).execute(ctx);
+        if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['merge-ri'] = r.metrics; }
+        this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION END ==========');
+        if (!r.success) { stepStatuses['merge-ri'] = 'failed'; context.onStepStatusChange?.('merge-ri', 'failed'); return { success: false, error: `Reverse integration merge failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'merge-ri', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+        stepStatuses['merge-ri'] = 'success'; context.onStepStatusChange?.('merge-ri', 'success');
+      } else { stepStatuses['merge-ri'] = 'skipped'; context.onStepStatusChange?.('merge-ri', 'skipped'); }
 
       const ws = await computeWorkSummary(node, worktreePath, context.baseCommit);
       return { success: true, completedCommit: cr.commit, workSummary: ws, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid };

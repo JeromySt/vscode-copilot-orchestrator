@@ -220,104 +220,9 @@ export class JobExecutionEngine {
         }
       }
       
-      // Log dependency info in merge-fi phase (even if no additional merges needed)
-      if (baseCommits.length > 0) {
-        const baseShort = typeof baseCommitish === 'string' && baseCommitish.length === 40 
-          ? baseCommitish.slice(0, 8) 
-          : baseCommitish;
-        
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE START ==========', nodeState.attempts);
-        
-        // Log the worktree base dependency with its work summary
-        const baseDep = dependencyInfoMap.get(baseCommits[0]);
-        if (baseDep) {
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', '', nodeState.attempts);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `[Worktree Base] ${baseDep.nodeName}`, nodeState.attempts);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Commit: ${baseShort} (from dependency "${baseDep.nodeName}")`, nodeState.attempts);
-          
-          // Show work summary from the dependency node
-          this.logDependencyWorkSummary(plan.id, node.id, baseDep.workSummary, nodeState.attempts);
-        } else {
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${baseShort} (from dependency)`, nodeState.attempts);
-        }
-        
-        if (additionalSources.length > 0) {
-          this.log.info(`Merging ${additionalSources.length} additional source commits for job ${node.name}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', '', nodeState.attempts);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging ${additionalSources.length} additional source commit(s) into worktree...`, nodeState.attempts);
-          
-          const mergeSuccess = await this.mergeSourcesIntoWorktree(
-            plan, node, worktreePath, additionalSources, dependencyInfoMap, nodeState.attempts
-          );
-          
-          if (!mergeSuccess) {
-            this.execLog(plan.id, node.id, 'merge-fi', 'error', 'Forward integration merge FAILED', nodeState.attempts);
-            this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========', nodeState.attempts);
-            if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
-            nodeState.stepStatuses['merge-fi'] = 'failed';
-            nodeState.error = 'Failed to merge sources from dependencies';
-            
-            // Record failed FI attempt in history
-            const fiFailedAttempt: AttemptRecord = {
-              attemptNumber: nodeState.attempts,
-              triggerType: nodeState.attempts === 1 ? 'initial' : 'retry',
-              status: 'failed',
-              startedAt: nodeState.startedAt || Date.now(),
-              endedAt: Date.now(),
-              failedPhase: 'merge-fi',
-              error: nodeState.error,
-              copilotSessionId: nodeState.copilotSessionId,
-              stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
-              worktreePath: nodeState.worktreePath,
-              baseCommit: nodeState.baseCommit,
-              logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
-              logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-              workUsed: node.work,
-              metrics: nodeState.metrics,
-              phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
-            };
-            nodeState.attemptHistory = [...(nodeState.attemptHistory || []), fiFailedAttempt];
-            
-            // Clear process ID since execution is complete
-            nodeState.pid = undefined;
-            
-            sm.transition(node.id, 'failed');
-            this.state.events.emit('nodeCompleted', plan.id, node.id, false);
-            this.state.persistence.save(plan);
-            return;
-          }
-          
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', '', nodeState.attempts);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Forward integration merge succeeded', nodeState.attempts);
-        } else {
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', '', nodeState.attempts);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', 'Single dependency - no additional merges needed', nodeState.attempts);
-        }
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION MERGE END ==========', nodeState.attempts);
-        if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
-        nodeState.stepStatuses['merge-fi'] = 'success';
-        
-        // FI succeeded - acknowledge consumption to all dependencies
-        // This allows dependency worktrees to be cleaned up as soon as all consumers have FI'd
-        await this.acknowledgeConsumption(plan, sm, node);
-      } else if (node.dependencies.length > 0) {
-        // Has dependencies but none produced commits (all expectsNoChanges)
-        // Still need to acknowledge consumption so those worktrees can be cleaned up
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========', nodeState.attempts);
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${plan.baseBranch} (dependencies have no commits to merge)`, nodeState.attempts);
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '===========================================', nodeState.attempts);
-        if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
-        nodeState.stepStatuses['merge-fi'] = 'success';
-        
-        await this.acknowledgeConsumption(plan, sm, node);
-      } else {
-        // Root node - no dependencies
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '========== FORWARD INTEGRATION ==========', nodeState.attempts);
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Worktree base: ${plan.baseBranch} (root node, no dependencies)`, nodeState.attempts);
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '===========================================', nodeState.attempts);
-        if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
-        nodeState.stepStatuses['merge-fi'] = 'success';
-      }
+      // Acknowledge consumption to all dependencies
+      // This allows dependency worktrees to be cleaned up as soon as all consumers have FI'd
+      await this.acknowledgeConsumption(plan, sm, node);
       
       // Track whether executor succeeded (or was skipped for RI-only retry)
       let executorSuccess = false;
@@ -334,6 +239,17 @@ export class JobExecutionEngine {
       } else {
         // Build execution context
         // Use nodeState.baseCommit which is preserved across retries
+        
+        // Prepare dependency commits for forward integration
+        const dependencyCommits = additionalSources.map(commit => {
+          const depInfo = dependencyInfoMap.get(commit);
+          return {
+            commit,
+            nodeId: depInfo?.nodeId || 'unknown',
+            nodeName: depInfo?.nodeName || 'unknown'
+          };
+        });
+        
         const context: ExecutionContext = {
           plan,
           node,
@@ -343,6 +259,11 @@ export class JobExecutionEngine {
           copilotSessionId: nodeState.copilotSessionId, // Pass existing session for resumption
           resumeFromPhase: nodeState.resumeFromPhase, // Resume from failed phase
           previousStepStatuses: nodeState.stepStatuses, // Preserve completed phase statuses
+          // Merge-specific fields
+          dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
+          repoPath: plan.repoPath,
+          targetBranch: plan.targetBranch,
+          baseCommitAtStart: plan.baseCommitAtStart,
           onProgress: (step) => {
             this.log.debug(`Job progress: ${node.name} - ${step}`);
           },
@@ -897,8 +818,8 @@ export class JobExecutionEngine {
             this.log.error(`Job failed: ${node.name}`, {
               planId: plan.id,
               nodeId: node.id,
-              phase: result.failedPhase || 'unknown',
-              error: result.error,
+              phase: nodeState.lastAttempt?.phase || 'unknown',
+              error: nodeState.error,
             });
             this.state.persistence.save(plan);
             return;
@@ -907,86 +828,22 @@ export class JobExecutionEngine {
       }
       
       // At this point, executor succeeded (or was skipped for RI-only retry)
-      // Handle leaf node merge to target branch (Reverse Integration)
+      // Leaf node tracking - merge phases handled by executor pipeline
       const isLeaf = plan.leaves.includes(node.id);
-      this.log.debug(`Merge check: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${plan.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
+      this.log.debug(`Node completion: node=${node.name}, isLeaf=${isLeaf}, targetBranch=${plan.targetBranch}, completedCommit=${nodeState.completedCommit?.slice(0, 8)}`);
       
-      // Track whether RI merge failed (only applies to leaf nodes with targetBranch)
-      let riMergeFailed = false;
-      
+      // For leaf nodes, assume merge will be handled by executor's merge-ri phase
       if (isLeaf && plan.targetBranch) {
-        // =====================================================================
-        // SIMPLE RI MERGE LOGIC: Diff the leaf's worktree HEAD against plan's
-        // base branch. If there are ANY changes anywhere in the chain, merge.
-        // This handles all cases uniformly:
-        //   - Leaf with own commit (normal case)
-        //   - Leaf with expects_no_changes but upstream work from dependencies
-        //   - Multiple consecutive expects_no_changes nodes in a row
-        //   - Root validation-only node with truly no changes
-        // =====================================================================
-        
-        // Determine the merge source: the best commit we have for this leaf
-        const mergeSource = nodeState.completedCommit || nodeState.baseCommit;
-        
-        // Use the plan's captured base commit SHA for diff comparison.
-        // plan.baseBranch is a branch name that may have moved forward;
-        // plan.baseCommitAtStart is the resolved SHA from when the plan started.
-        const diffBase = plan.baseCommitAtStart || plan.baseBranch;
-        
-        if (mergeSource) {
-          // Check if there are any actual changes compared to the plan's original base
-          let hasChanges = false;
-          try {
-            hasChanges = await git.repository.hasChangesBetween(diffBase, mergeSource, plan.repoPath);
-          } catch {
-            // If diff fails, assume there are changes to be safe
-            hasChanges = true;
-          }
-          
-          if (hasChanges) {
-            // There are changes to merge — ensure completedCommit is set
-            nodeState.completedCommit = mergeSource;
-            
-            this.log.info(`Initiating RI merge for leaf ${node.name}: ${mergeSource.slice(0, 8)} -> ${plan.targetBranch}`);
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE START ==========', nodeState.attempts);
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', `Merging ${mergeSource.slice(0, 8)} to ${plan.targetBranch} (diff from ${diffBase.slice(0, 8)} detected changes)`, nodeState.attempts);
-            
-            const mergeSuccess = await this.withRiMergeLock(() =>
-              this.mergeLeafToTarget(plan, node, nodeState.completedCommit!, nodeState.attempts)
-            );
-            nodeState.mergedToTarget = mergeSuccess;
-            
-            if (mergeSuccess) {
-              this.execLog(plan.id, node.id, 'merge-ri', 'info', `Reverse integration merge succeeded`, nodeState.attempts);
-              if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
-              nodeState.stepStatuses['merge-ri'] = 'success';
-            } else {
-              riMergeFailed = true;
-              if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
-              nodeState.stepStatuses['merge-ri'] = 'failed';
-              this.execLog(plan.id, node.id, 'merge-ri', 'error', `Reverse integration merge FAILED`, nodeState.attempts);
-              this.log.warn(`Leaf ${node.name} RI merge to ${plan.targetBranch} failed`);
-            }
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========', nodeState.attempts);
-          } else {
-            // No diff between base branch and leaf — truly nothing to merge
-            this.log.debug(`Leaf ${node.name}: no diff between ${diffBase.slice(0, 8)} and ${mergeSource.slice(0, 8)} — nothing to merge`);
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION ==========', nodeState.attempts);
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', `No changes detected (diff ${diffBase.slice(0, 8)}..${mergeSource.slice(0, 8)} is empty)`, nodeState.attempts);
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', '==========================================', nodeState.attempts);
-            nodeState.mergedToTarget = true;
-          }
-        } else {
-          // No commit and no baseCommit — root validation node, nothing to merge
-          this.log.debug(`Leaf ${node.name}: no mergeSource available — nothing to merge`);
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION ==========', nodeState.attempts);
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', 'No commit to merge (validation-only root node)', nodeState.attempts);
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', '==========================================', nodeState.attempts);
-          nodeState.mergedToTarget = true;
-        }
-      } else if (isLeaf) {
-        this.log.debug(`Skipping merge: isLeaf=${isLeaf}, hasTargetBranch=${!!plan.targetBranch}`);
+        // The executor's merge-ri phase will handle reverse integration
+        // We'll check the nodeState step status to determine if RI succeeded
+        const riSuccess = nodeState.stepStatuses?.['merge-ri'] === 'success';
+        nodeState.mergedToTarget = riSuccess;
+      } else {
+        nodeState.mergedToTarget = true; // No merge needed
       }
+      
+      // Check if RI merge failed based on executor result
+      const riMergeFailed = isLeaf && plan.targetBranch && nodeState.stepStatuses?.['merge-ri'] === 'failed';
       
       // If RI merge failed, treat the node as failed (work succeeded but merge did not)
       if (riMergeFailed) {
@@ -1163,158 +1020,11 @@ export class JobExecutionEngine {
     }
   }
 
-  /**
-   * Merge a leaf node's commit to target branch using a temp worktree.
-   * 
-   * Uses the same model as planRunner/jobRunner:
-   * - Create a temp detached worktree on the target branch
-   * - Checkout the target branch
-   * - Squash merge the source commit
-   * - Commit and optionally push
-   * - Clean up the temp worktree
-   * 
-   * @returns true if merge succeeded, false if it failed
-   */
-  private async mergeLeafToTarget(
-    plan: PlanInstance,
-    node: PlanNode,
-    completedCommit: string,
-    attemptNumber?: number
-  ): Promise<boolean> {
-    if (!plan.targetBranch) return true; // No target = nothing to merge = success
-    
-    this.log.info(`Merging leaf to target: ${node.name} -> ${plan.targetBranch}`, {
-      commit: completedCommit.slice(0, 8),
-    });
-    
-    const repoPath = plan.repoPath;
-    const targetBranch = plan.targetBranch;
-    
-    try {
-      // =========================================================================
-      // FAST PATH: Use git merge-tree (no checkout needed, no worktree conflicts)
-      // =========================================================================
-      this.execLog(plan.id, node.id, 'merge-ri', 'info', `Using git merge-tree for conflict-free merge...`, attemptNumber);
-      
-      const mergeTreeResult = await git.merge.mergeWithoutCheckout({
-        source: completedCommit,
-        target: targetBranch,
-        repoPath,
-        log: s => {
-          this.log.debug(s);
-          this.execLog(plan.id, node.id, 'merge-ri', 'stdout', s, attemptNumber);
-        }
-      });
-      
-      if (mergeTreeResult.success && mergeTreeResult.treeSha) {
-        this.log.info(`Fast path: conflict-free merge via merge-tree`);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ No conflicts detected`, attemptNumber);
-        
-        // Create the merge commit from the tree
-        const targetSha = await git.repository.resolveRef(targetBranch, repoPath);
-        const commitMessage = `Plan ${plan.spec.name}: merge ${node.name} (commit ${completedCommit.slice(0, 8)})`;
-        
-        const newCommit = await git.merge.commitTree(
-          mergeTreeResult.treeSha,
-          [targetSha],  // Single parent for squash-style merge
-          commitMessage,
-          repoPath,
-          s => this.log.debug(s)
-        );
-        
-        this.log.debug(`Created merge commit: ${newCommit.slice(0, 8)}`);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `Created merge commit: ${newCommit.slice(0, 8)}`, attemptNumber);
-        
-        // Update the target branch to point to the new commit
-        // We need to handle the case where target branch is checked out elsewhere
-        const branchUpdated = await this.updateBranchRef(repoPath, targetBranch, newCommit);
-        if (branchUpdated) {
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', `Updated ${targetBranch} to ${newCommit.slice(0, 8)}`, attemptNumber);
-        } else {
-          // Stash/reset failed but merge commit exists - partial success
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', `⚠ Merge commit ${newCommit.slice(0, 8)} created but branch not auto-updated (stash failed)`, attemptNumber);
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', `  Run 'git reset --hard ${newCommit.slice(0, 8)}' to update your local ${targetBranch}`, attemptNumber);
-        }
-        
-        this.log.info(`Merged leaf ${node.name} to ${targetBranch}`, {
-          commit: completedCommit.slice(0, 8),
-          newCommit: newCommit.slice(0, 8),
-        });
-        
-        // Push if configured
-        const pushOnSuccess = this.state.configManager.getConfig<boolean>('copilotOrchestrator.merge', 'pushOnSuccess', false);
-        
-        if (pushOnSuccess) {
-          try {
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', `Pushing ${targetBranch} to origin...`, attemptNumber);
-            await git.repository.push(repoPath, { branch: targetBranch, log: s => this.log.debug(s) });
-            this.log.info(`Pushed ${targetBranch} to origin`);
-            this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ Pushed to origin`, attemptNumber);
-          } catch (pushError: any) {
-            this.log.warn(`Push failed: ${pushError.message}`);
-            this.execLog(plan.id, node.id, 'merge-ri', 'error', `Push failed: ${pushError.message}`, attemptNumber);
-            // Push failure doesn't mean merge failed - the commit is local
-          }
-        }
-        
-        return true;
-      }
-      
-      // =========================================================================
-      // CONFLICT: Use Copilot CLI to resolve via main repo merge
-      // =========================================================================
-      if (mergeTreeResult.hasConflicts) {
-        this.log.info(`Merge has conflicts, using Copilot CLI to resolve`, {
-          conflictFiles: mergeTreeResult.conflictFiles,
-        });
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `⚠ Merge has conflicts`, attemptNumber);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `  Conflicts: ${mergeTreeResult.conflictFiles?.join(', ')}`, attemptNumber);
-        this.execLog(plan.id, node.id, 'merge-ri', 'info', `  Invoking Copilot CLI to resolve...`, attemptNumber);
-        
-        // Fall back to main repo merge with Copilot CLI resolution
-        const resolved = await this.mergeWithConflictResolution(
-          repoPath,
-          completedCommit,
-          targetBranch,
-          `Plan ${plan.spec.name}: merge ${node.name} (commit ${completedCommit.slice(0, 8)})`,
-          { planId: plan.id, nodeId: node.id, phase: 'merge-ri', attemptNumber }
-        );
-        
-        if (resolved.success) {
-          this.execLog(plan.id, node.id, 'merge-ri', 'info', `✓ Conflict resolved by Copilot CLI`, attemptNumber);
-          
-          // Aggregate CLI metrics from merge conflict resolution into node metrics
-          if (resolved.metrics) {
-            const nodeState = plan.nodeStates.get(node.id);
-            if (nodeState) {
-              nodeState.metrics = nodeState.metrics
-                ? aggregateMetrics([nodeState.metrics, resolved.metrics])
-                : resolved.metrics;
-              // Track per-phase metrics for merge-ri
-              nodeState.phaseMetrics = nodeState.phaseMetrics || {};
-              nodeState.phaseMetrics['merge-ri'] = resolved.metrics;
-            }
-          }
-        } else {
-          this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Copilot CLI failed to resolve conflict`, attemptNumber);
-        }
-        
-        return resolved.success;
-      }
-      
-      this.log.error(`Merge-tree failed: ${mergeTreeResult.error}`);
-      this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Merge-tree failed: ${mergeTreeResult.error}`, attemptNumber);
-      return false;
-      
-    } catch (error: any) {
-      this.log.error(`Failed to merge leaf to target`, {
-        node: node.name,
-        error: error.message,
-      });
-      this.execLog(plan.id, node.id, 'merge-ri', 'error', `✗ Exception: ${error.message}`, attemptNumber);
-      return false;
-    }
-  }
+  // ============================================================================
+  // MERGE METHODS (moved to executor phases)
+  // ============================================================================
+  // The merge logic has been moved to MergeFiPhaseExecutor and MergeRiPhaseExecutor
+  // to integrate with the executor's phase pipeline system.
 
   /**
    * Update a branch reference to point to a new commit.
@@ -1622,334 +1332,9 @@ export class JobExecutionEngine {
     return `[${summary}] ${examples.join(', ')}`;
   }
 
-  /**
-   * Merge additional source commits into a worktree.
-   * 
-   * This is called when a job has multiple dependencies (RI/FI model).
-   * The worktree is already created from the first dependency's commit,
-   * and we merge in the remaining dependency commits.
-   * 
-   * Uses full merge (not squash) to preserve history for downstream jobs.
-   * 
-   * @param dependencyInfoMap - Map from commit SHA to dependency node info for logging
-   */
-  private async mergeSourcesIntoWorktree(
-    plan: PlanInstance,
-    node: JobNode,
-    worktreePath: string,
-    additionalSources: string[],
-    dependencyInfoMap: Map<string, DependencyInfo>,
-    attemptNumber?: number
-  ): Promise<boolean> {
-    if (additionalSources.length === 0) {
-      return true;
-    }
-    
-    this.log.info(`Merging ${additionalSources.length} source commits into worktree for ${node.name}`);
-    
-    for (const sourceCommit of additionalSources) {
-      const shortSha = sourceCommit.slice(0, 8);
-      const depInfo = dependencyInfoMap.get(sourceCommit);
-      
-      this.log.debug(`Merging commit ${shortSha} into worktree at ${worktreePath}`);
-      
-      // Log dependency info before merging
-      this.execLog(plan.id, node.id, 'merge-fi', 'info', '', attemptNumber);
-      if (depInfo) {
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `[Merge Source] ${depInfo.nodeName}`, attemptNumber);
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `  Commit: ${shortSha} (from dependency "${depInfo.nodeName}")`, attemptNumber);
-        
-        // Show work summary from the dependency node
-        this.logDependencyWorkSummary(plan.id, node.id, depInfo.workSummary, attemptNumber);
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', '  Merging into worktree...', attemptNumber);
-      } else {
-        this.execLog(plan.id, node.id, 'merge-fi', 'info', `Merging source commit ${shortSha}...`, attemptNumber);
-      }
-      
-      try {
-        // Merge by commit SHA directly (no branch needed)
-        const mergeResult = await git.merge.merge({
-          source: sourceCommit,
-          target: 'HEAD',
-          cwd: worktreePath,
-          message: `Merge parent commit ${shortSha} for job ${node.name}`,
-          fastForward: true,
-        });
-        
-        if (mergeResult.success) {
-          this.log.debug(`Merge of commit ${shortSha} succeeded`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ✓ Merged successfully`, attemptNumber);
-        } else if (mergeResult.hasConflicts) {
-          this.log.info(`Merge conflict for commit ${shortSha}, using Copilot CLI to resolve`, {
-            conflicts: mergeResult.conflictFiles,
-          });
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ⚠ Merge conflict detected`, attemptNumber);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `    Conflicts: ${mergeResult.conflictFiles?.join(', ')}`, attemptNumber);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `    Invoking Copilot CLI to resolve...`, attemptNumber);
-          
-          // Use Copilot CLI to resolve conflicts
-          const cliResult = await this.resolveMergeConflictWithCopilot(
-            worktreePath,
-            sourceCommit,
-            'HEAD',
-            `Merge parent commit ${shortSha} for job ${node.name}`,
-            { planId: plan.id, nodeId: node.id, phase: 'merge-fi', attemptNumber },
-            mergeResult.conflictFiles
-          );
-          
-          if (!cliResult.success) {
-            this.log.error(`Copilot CLI failed to resolve merge conflict for commit ${shortSha}`);
-            this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Copilot CLI failed to resolve conflict`, attemptNumber);
-            await git.merge.abort(worktreePath, s => this.log.debug(s));
-            return false;
-          }
-          
-          this.log.info(`Merge conflict resolved by Copilot CLI for commit ${shortSha}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'info', `  ✓ Conflict resolved by Copilot CLI`, attemptNumber);
-          
-          // Aggregate CLI metrics from FI merge conflict resolution into node metrics
-          if (cliResult.metrics) {
-            const nodeState = plan.nodeStates.get(node.id);
-            if (nodeState) {
-              nodeState.metrics = nodeState.metrics
-                ? aggregateMetrics([nodeState.metrics, cliResult.metrics])
-                : cliResult.metrics;
-              // Track per-phase metrics for merge-fi
-              nodeState.phaseMetrics = nodeState.phaseMetrics || {};
-              nodeState.phaseMetrics['merge-fi'] = nodeState.phaseMetrics['merge-fi']
-                ? aggregateMetrics([nodeState.phaseMetrics['merge-fi'], cliResult.metrics])
-                : cliResult.metrics;
-            }
-          }
-        } else {
-          this.log.error(`Merge failed for commit ${shortSha}: ${mergeResult.error}`);
-          this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Merge failed: ${mergeResult.error}`, attemptNumber);
-          return false;
-        }
-      } catch (error: any) {
-        this.log.error(`Exception merging commit ${shortSha}: ${error.message}`);
-        this.execLog(plan.id, node.id, 'merge-fi', 'error', `  ✗ Exception: ${error.message}`, attemptNumber);
-        return false;
-      }
-    }
-    
-    return true;
-  }
-
-  /**
-   * Resolve merge conflicts using Copilot CLI.
-   * 
-   * Assumes we're in a merge conflict state in the given directory.
-   * Uses Copilot CLI to resolve the conflicts, stage changes, and commit.
-   */
-  private async resolveMergeConflictWithCopilot(
-    cwd: string,
-    sourceBranch: string,
-    targetBranch: string,
-    commitMessage: string,
-    logContext?: { planId: string; nodeId: string; phase: ExecutionPhase; attemptNumber?: number },
-    conflictedFiles?: string[]
-  ): Promise<{ success: boolean; sessionId?: string; metrics?: CopilotUsageMetrics }> {
-    const prefer = this.state.configManager.getConfig<string>('copilotOrchestrator.merge', 'prefer', 'theirs');
-    
-    // Write a merge-specific instructions file so the agent focuses ONLY on
-    // resolving merge conflicts, not performing the job's actual work.
-    const conflictList = conflictedFiles?.length
-      ? conflictedFiles.map(f => `- ${f}`).join('\n')
-      : '(run `git diff --name-only --diff-filter=U` to list them)';
-
-    const mergeInstructions =
-`# Merge Conflict Resolution
-
-## Context
-We are merging \`${sourceBranch}\` into \`${targetBranch}\`.
-You MUST resolve all git merge conflicts and commit the result.
-
-## Conflicted Files
-${conflictList}
-
-## Rules
-1. **Prefer "${prefer}" changes** when there is a conflict. Keep all non-conflicting changes from both sides.
-2. Open each conflicted file and remove ALL \`<<<<<<<\`, \`=======\`, \`>>>>>>>\` conflict markers.
-3. After resolving, verify no conflict markers remain: \`git diff --check\`
-4. Stage all resolved files: \`git add <file>\` for each conflicted file.
-5. Commit with message: \`${commitMessage}\`
-
-## Important
-- Do NOT modify any files beyond resolving the conflict markers.
-- Do NOT refactor, rename, or restructure code.
-- Do NOT run builds, tests, or linters — just resolve conflicts and commit.
-- If both sides added different imports, keep ALL imports from both sides.
-- If both sides modified the same function differently, prefer "${prefer}" but preserve non-conflicting logic from the other side.`;
-
-    this.log.info(`Running Copilot CLI to resolve conflicts...`, { cwd });
-    if (logContext) {
-      this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  Running Copilot CLI to resolve conflicts...`, logContext.attemptNumber);
-    }
-    
-    if (!this.state.copilotRunner) {
-      this.log.error('No ICopilotRunner available for merge conflict resolution');
-      return { success: false };
-    }
-    
-    const cliLogger: CopilotCliLogger = {
-      info: (msg) => this.log.info(msg),
-      warn: (msg) => this.log.warn(msg),
-      error: (msg) => this.log.error(msg),
-      debug: (msg) => this.log.debug(msg),
-    };
-    
-    const runner: ICopilotRunner = this.state.copilotRunner ?? new CopilotCliRunner(cliLogger);
-    const result = await runner.run({
-      cwd,
-      task: 'Resolve all git merge conflicts in this repository.',
-      instructions: mergeInstructions,
-      label: 'merge-conflict',
-      jobId: logContext?.nodeId,
-      timeout: 600000, // 10 minutes — merge resolution needs time for multi-file conflicts
-      onOutput: (line) => {
-        if (logContext && line.trim()) {
-          this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  [copilot] ${line.trim()}`, logContext.attemptNumber);
-        }
-      },
-    });
-    
-    // Log the CLI result details
-    if (logContext) {
-      if (result.sessionId) {
-        this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'info', `  Copilot session: ${result.sessionId}`, logContext.attemptNumber);
-      }
-      if (!result.success) {
-        this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'error', `  Copilot CLI error: ${result.error || 'unknown'}`, logContext.attemptNumber);
-        if (result.exitCode !== undefined) {
-          this.execLog(logContext.planId, logContext.nodeId, logContext.phase, 'error', `  Exit code: ${result.exitCode}`, logContext.attemptNumber);
-        }
-      }
-    }
-    
-    return { success: result.success, sessionId: result.sessionId, metrics: result.metrics };
-  }
-
-  /**
-   * Merge with conflict resolution using main repo merge and Copilot CLI.
-   * 
-   * This is used when merge-tree detects conflicts. It:
-   * 1. Stashes user's uncommitted changes
-   * 2. Checks out target branch
-   * 3. Performs merge (conflicts occur)
-   * 4. Uses Copilot CLI to resolve conflicts
-   * 5. Restores user's original branch and stash
-   */
-  private async mergeWithConflictResolution(
-    repoPath: string,
-    sourceCommit: string,
-    targetBranch: string,
-    commitMessage: string,
-    logContext?: { planId: string; nodeId: string; phase: ExecutionPhase; attemptNumber?: number }
-  ): Promise<{ success: boolean; metrics?: CopilotUsageMetrics }> {
-    // Capture user's current state
-    const originalBranch = await git.branches.currentOrNull(repoPath);
-    const isOnTargetBranch = originalBranch === targetBranch;
-    const isDirty = await git.repository.hasUncommittedChanges(repoPath);
-    
-    let didStash = false;
-    let didCheckout = false;
-    
-    try {
-      // Step 1: Stash uncommitted changes if needed
-      if (isDirty) {
-        const stashMsg = `orchestrator-merge-${Date.now()}`;
-        didStash = await git.repository.stashPush(repoPath, stashMsg, s => this.log.debug(s));
-        this.log.debug(`Stashed user's uncommitted changes`);
-      }
-      
-      // Step 2: Checkout targetBranch if needed
-      if (!isOnTargetBranch) {
-        await git.branches.checkout(repoPath, targetBranch, s => this.log.debug(s));
-        didCheckout = true;
-        this.log.debug(`Checked out ${targetBranch} for merge`);
-      }
-      
-      // Step 3: Perform the merge (will have conflicts)
-      await git.merge.merge({
-        source: sourceCommit,
-        target: targetBranch,
-        cwd: repoPath,
-        noCommit: true,
-        log: s => this.log.debug(s)
-      }).catch(() => {
-        // Expected to fail due to conflicts
-      });
-
-      // List conflicted files for the instructions
-      const conflictedFiles = await git.merge.listConflicts(repoPath).catch(() => []);
-      
-      // Step 4: Use Copilot CLI to resolve conflicts
-      const cliResult = await this.resolveMergeConflictWithCopilot(
-        repoPath,
-        sourceCommit,
-        targetBranch,
-        commitMessage,
-        logContext,
-        conflictedFiles
-      );
-      
-      if (!cliResult.success) {
-        throw new Error('Copilot CLI failed to resolve conflicts');
-      }
-      
-      this.log.info(`Merge conflict resolved by Copilot CLI`);
-      
-      // Push if configured
-      const pushOnSuccess = this.state.configManager.getConfig<boolean>('copilotOrchestrator.merge', 'pushOnSuccess', false);
-      
-      if (pushOnSuccess) {
-        try {
-          await git.repository.push(repoPath, { branch: targetBranch, log: s => this.log.debug(s) });
-          this.log.info(`Pushed ${targetBranch} to origin`);
-        } catch (pushError: any) {
-          this.log.warn(`Push failed: ${pushError.message}`);
-        }
-      }
-      
-      // Step 5: Restore user to original branch (if they weren't on target)
-      if (didCheckout && originalBranch) {
-        await git.branches.checkout(repoPath, originalBranch, s => this.log.debug(s));
-        this.log.debug(`Restored user to ${originalBranch}`);
-      }
-      
-      // Step 6: Restore user's uncommitted changes
-      if (didStash) {
-        await git.repository.stashPop(repoPath, s => this.log.debug(s));
-        this.log.debug(`Restored user's uncommitted changes`);
-      }
-      
-      return { success: true, metrics: cliResult.metrics };
-      
-    } catch (error: any) {
-      this.log.error(`Merge with conflict resolution failed: ${error.message}`);
-      
-      // Try to restore user state
-      try {
-        await git.merge.abort(repoPath, s => this.log.debug(s)).catch(() => {});
-        
-        if (didCheckout && originalBranch) {
-          const currentBranch = await git.branches.currentOrNull(repoPath);
-          if (currentBranch !== originalBranch) {
-            await git.branches.checkout(repoPath, originalBranch, s => this.log.debug(s));
-          }
-        }
-        
-        if (didStash) {
-          await git.repository.stashPop(repoPath, s => this.log.debug(s));
-        }
-      } catch (restoreError: any) {
-        this.log.error(`Failed to restore user state: ${restoreError.message}`);
-      }
-      
-      return { success: false };
-    }
-  }
+  // ============================================================================
+  // WORKTREE CLEANUP
+  // ============================================================================
 
   /**
    * Clean up a worktree after successful completion (detached HEAD - no branch)

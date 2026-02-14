@@ -10,9 +10,11 @@ import type { IProcessSpawner } from '../../../../interfaces/IProcessSpawner';
 import { EventEmitter } from 'events';
 const stubSpawner: IProcessSpawner = {
   spawn: () => {
+    const stdout = Object.assign(new EventEmitter(), { setEncoding: () => {} });
+    const stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} });
     const proc = Object.assign(new EventEmitter(), {
       pid: 0, exitCode: 1, killed: false,
-      stdout: new EventEmitter(), stderr: new EventEmitter(),
+      stdout, stderr,
       kill: () => true,
     });
     process.nextTick(() => proc.emit('close', 1));

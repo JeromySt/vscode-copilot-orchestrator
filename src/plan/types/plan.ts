@@ -604,6 +604,16 @@ export interface ExecutionContext {
     postchecks?: PhaseStatus;
     'merge-ri'?: PhaseStatus;
   };
+  
+  // --- Merge phase specific fields ---
+  /** Dependency commits for forward integration (merge-fi phase) */
+  dependencyCommits?: Array<{ nodeId: string; nodeName: string; commit: string }>;
+  /** Main repository path (not worktree) for reverse integration (merge-ri phase) */
+  repoPath?: string;
+  /** Target branch for reverse integration merge */
+  targetBranch?: string;
+  /** Base commit at the start of plan execution */
+  baseCommitAtStart?: string;
 }
 
 // ============================================================================
