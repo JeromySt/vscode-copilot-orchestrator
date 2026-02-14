@@ -111,8 +111,11 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
     nodeState.resumeFromPhase = resetTo as typeof nodeState.resumeFromPhase;
   }
   
-  // Resume the Plan if it was stopped (also persists the updated plan)
-  await ctx.PlanRunner.resume(args.planId);
+  // Persist the updated plan. Only resume execution if the plan was already
+  // running — do NOT auto-resume a paused plan just because a node was updated.
+  if (plan.isPaused !== true) {
+    await ctx.PlanRunner.resume(args.planId);
+  }
   
   return {
     success: true,
