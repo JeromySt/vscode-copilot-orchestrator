@@ -850,14 +850,14 @@ export class planDetailPanel {
     .mermaid g[id*="TARGET_SOURCE"] .node,
     .mermaid g[id*="TARGET_MERGED"] .node { cursor: default; }  /* Branch nodes are not clickable */
     
-    /* Node labels — Mermaid sizes rects natively from label content.
-       overflow:visible ensures text is never clipped even if Mermaid
-       undersizes by a few pixels.  Labels are pre-truncated server-side
-       and em-space-padded so Mermaid allocates enough room. */
+    /* Node labels — override Mermaid's inline max-width so text renders
+       at its natural width.  Labels are pre-truncated server-side so they
+       won't grow unbounded.  overflow:visible ensures nothing clips. */
     .mermaid .node .nodeLabel {
       white-space: nowrap !important;
       display: block !important;
       overflow: visible !important;
+      max-width: none !important;
     }
     .mermaid .node foreignObject {
       overflow: visible !important;
@@ -865,6 +865,7 @@ export class planDetailPanel {
     .mermaid .node foreignObject div {
       white-space: nowrap !important;
       overflow: visible !important;
+      max-width: none !important;
     }
     
     /* Subgraph/cluster styling */
@@ -1535,29 +1536,25 @@ export class planDetailPanel {
       const label = this._escapeForMermaid(node.name);
       const icon = this._getStatusIcon(status);
       
-      // Calculate duration for completed or running nodes
-      // Always include a duration placeholder to maintain consistent node sizing
-      let durationLabel = ' | --';
+      // Calculate duration for completed or running nodes.
+      // ALL nodes get rendered with ' | 00m 00s' sizing template so Mermaid
+      // allocates consistent rect widths. Client-side strips the suffix from
+      // non-started nodes after render.
+      const DURATION_TEMPLATE = ' | 00m 00s'; // fixed-width sizing template
+      let durationLabel = DURATION_TEMPLATE;
       if (state?.startedAt) {
         const endTime = state.endedAt || Date.now();
         const duration = endTime - state.startedAt;
         durationLabel = ' | ' + formatDurationMs(duration);
       }
       
-      // Truncate long node labels to keep the diagram compact.
-      const displayLabel = this._truncateLabel(label, durationLabel, MAX_NODE_LABEL_CHARS);
+      // Truncate long node labels using the sizing template width.
+      const displayLabel = this._truncateLabel(label, DURATION_TEMPLATE, MAX_NODE_LABEL_CHARS);
       if (displayLabel !== label) {
         nodeTooltips[sanitizedId] = node.name;
       }
       
-      // Reserve space for the maximum timer format (e.g. "59m 59s") by
-      // padding with em-spaces (U+2003).  Em-spaces are proportional-font-safe
-      // — each is ~1 'M' wide — so the Mermaid foreignObject is pre-sized
-      // wide enough for the longest possible timer text.  On incremental
-      // updates the client pads back to this character count.
-      const emSp = '\u2003';
-      const TIMER_PAD = 8;
-      lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}${emSp.repeat(TIMER_PAD)}"]`);
+      lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);
       lines.push(`${indent}class ${sanitizedId} ${status}`);
       
       nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
@@ -1723,7 +1720,7 @@ export class planDetailPanel {
           nodeTooltips[sanitizedGroupId] = groupPath.includes('/') ? groupPath : displayName;
         }
         const emSp = '\u2003'; // em space — proportional-font-safe padding
-        const padding = emSp.repeat(6); // reserve width to prevent cutoff
+        const padding = ''; // no extra padding — sizing template handles width
         
         lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedGroupName}${groupDurationLabel}${padding}"]`);
         

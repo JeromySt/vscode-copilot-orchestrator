@@ -195,13 +195,9 @@ export function renderPlanScripts(data: PlanScriptsData): string {
     });
 
     // ── Node label sizing ─────────────────────────────────────────────
-    // Mermaid natively sizes rects, foreignObjects, cluster boxes, and
-    // edge paths based on initial label text content.  Post-render
-    // resizing of rects breaks edges and cluster containment.
-    //
-    // Instead we pre-pad labels with em-spaces (U+2003) server-side so
-    // Mermaid allocates enough width.  CSS overflow:visible on labels
-    // handles any ±2px rounding differences gracefully.
+    // Server renders ALL nodes with ' | 00m 00s' (or actual duration) so
+    // Mermaid allocates consistent rect widths. After render, client strips
+    // the duration suffix from non-started nodes.
     
     // Render mermaid with error handling
     (async () => {
@@ -209,6 +205,32 @@ export function renderPlanScripts(data: PlanScriptsData): string {
         const element = document.querySelector('.mermaid');
         const { svg } = await mermaid.render('mermaid-graph', mermaidDef);
         element.innerHTML = svg;
+
+        // Strip duration from non-started nodes (they were sized with a template)
+        element.querySelectorAll('.node').forEach(function(ng) {
+          // Find which nodeData entry this is
+          var gId = ng.getAttribute('id') || '';
+          var matchedId = null;
+          for (var sid in nodeData) {
+            if (gId.includes(sid)) { matchedId = sid; break; }
+          }
+          if (!matchedId) return;
+          var nd = nodeData[matchedId];
+          // Only strip from nodes that haven't started
+          if (nd && nd.startedAt) return;
+          // Find the text element and strip ' | 00m 00s'
+          var textEls = ng.querySelectorAll('foreignObject *, text, tspan, .nodeLabel, .label');
+          for (var i = 0; i < textEls.length; i++) {
+            var el = textEls[i];
+            if (!el.childNodes.length || el.children.length > 0) continue;
+            var t = el.textContent || '';
+            var pipeIdx = t.lastIndexOf(' | ');
+            if (pipeIdx > 0) {
+              el.textContent = t.substring(0, pipeIdx);
+            }
+            break;
+          }
+        });
         
         // Fix label clipping for cluster/subgraph labels only.
         // Node labels use CSS overflow:hidden + text-overflow:ellipsis instead.
@@ -545,16 +567,13 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           if (!textEl.childNodes.length || textEl.children.length > 0) continue;
           
           const text = textEl.textContent || '';
-          if (text.includes('|')) {
-            // Update existing duration
-            const pipeIndex = text.lastIndexOf('|');
-            if (pipeIndex > 0) {
-              textEl.textContent = text.substring(0, pipeIndex + 1) + ' ' + durationStr;
-            }
+          const pipeIndex = text.lastIndexOf(' | ');
+          if (pipeIndex > 0) {
+            // Update existing duration after the pipe
+            textEl.textContent = text.substring(0, pipeIndex) + ' | ' + durationStr;
           } else if (text.length > 0) {
-            // No duration yet — add it
-            var trimmed = text.replace(/[\\u2003\\u00A0]+$/, '');
-            textEl.textContent = trimmed + ' | ' + durationStr;
+            // No pipe yet — node was stripped on initial render, now add duration
+            textEl.textContent = text + ' | ' + durationStr;
           } else {
             continue;
           }
