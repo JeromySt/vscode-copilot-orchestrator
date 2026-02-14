@@ -1020,9 +1020,10 @@ export class planDetailPanel {
       background: var(--vscode-editor-background);
       border-radius: 6px;
       overflow: hidden;
+      border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
     }
     .node-processes.collapsed .node-processes-tree { display: none; }
-    .node-processes.collapsed .node-chevron { transform: rotate(-90deg); }
+    .node-processes.collapsed .node-chevron { content: '▶'; }
     .node-processes-header {
       display: flex;
       align-items: center;

@@ -1069,6 +1069,16 @@ export function renderPlanScripts(data: PlanScriptsData): string {
         return;
       }
       
+      // Preserve collapsed state of each job node before re-render
+      var collapsedJobs = {};
+      var existingNodes = container.querySelectorAll('.node-processes');
+      for (var i = 0; i < existingNodes.length; i++) {
+        var nameEl = existingNodes[i].querySelector('.node-name');
+        if (nameEl && existingNodes[i].classList.contains('collapsed')) {
+          collapsedJobs[nameEl.textContent] = true;
+        }
+      }
+      
       // Aggregation summary
       const agg = sumAllProcessStats(rootJobs);
       let html = '<div class="processes-summary">';
@@ -1080,14 +1090,14 @@ export function renderPlanScripts(data: PlanScriptsData): string {
       
       // Render all jobs
       for (const job of (rootJobs || [])) {
-        html += renderJobNode(job, 0);
+        html += renderJobNode(job, 0, collapsedJobs);
       }
       
       container.innerHTML = html;
     }
     
     // Render a job node with its process tree
-    function renderJobNode(job, depth) {
+    function renderJobNode(job, depth, collapsedJobs) {
       const indent = depth * 16;
       const tree = job.tree || [];
       
@@ -1115,10 +1125,11 @@ export function renderPlanScripts(data: PlanScriptsData): string {
       const memMB = (totals.memory / 1024 / 1024).toFixed(1);
       const statusClass = 'job-' + job.status;
       const hasProcesses = tree.length > 0;
+      const isCollapsed = collapsedJobs && collapsedJobs[job.nodeName];
       
-      let html = '<div class="node-processes ' + statusClass + '" style="margin-left: ' + indent + 'px;">';
+      let html = '<div class="node-processes ' + statusClass + (isCollapsed ? ' collapsed' : '') + '" style="margin-left: ' + indent + 'px;">';
       html += '<div class="node-processes-header" onclick="this.parentElement.classList.toggle(\\'collapsed\\')">';
-      html += '<span class="node-chevron">▼</span>';
+      html += '<span class="node-chevron">' + (isCollapsed ? '▶' : '▼') + '</span>';
       html += '<span class="node-icon">⚡</span>';
       html += '<span class="node-name">' + escapeHtml(job.nodeName) + '</span>';
       
