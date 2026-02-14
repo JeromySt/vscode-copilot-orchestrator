@@ -52,6 +52,7 @@ function createMockGitOps(): IGitOperations {
     repository: {
       commit: async () => true,
       stageAll: async () => {},
+      stageFile: async () => {},
       hasChanges: async () => false,
       hasStagedChanges: async () => false,
       hasUncommittedChanges: async () => false,
@@ -63,14 +64,22 @@ function createMockGitOps(): IGitOperations {
       getCommitLog: async () => [],
       getCommitChanges: async () => [],
       getDiffStats: async () => ({ added: 0, modified: 0, deleted: 0 }),
+      getFileDiff: async () => null,
+      getStagedFileDiff: async () => null,
+      getFileChangesBetween: async () => [],
+      hasChangesBetween: async () => false,
+      getCommitCount: async () => 0,
+      getDirtyFiles: async () => [],
+      checkoutFile: async () => {},
+      resetHard: async () => {},
+      clean: async () => {},
+      updateRef: async () => {},
       stashPush: async () => true,
       stashPop: async () => true,
+      stashDrop: async () => true,
       stashList: async () => [],
-    },
-    executor: {
-      execAsync: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
-      execAsyncOrThrow: async () => '',
-      execAsyncOrNull: async () => '',
+      stashShowFiles: async () => [],
+      stashShowPatch: async () => null,
     },
   };
 }
@@ -180,12 +189,11 @@ suite('AgentDelegator DI', () => {
       const logger = createLogger();
       const runner = createMockRunner();
       const gitOps = createMockGitOps();
-      let execCalled = false;
+      let stageFileCalled = false;
       let commitCalled = false;
-      gitOps.executor.execAsync = async (args) => {
-        execCalled = true;
-        assert.ok(args.includes('add'));
-        return { success: true, exitCode: 0, stdout: '', stderr: '' };
+      gitOps.repository.stageFile = async (cwd, filePath) => {
+        stageFileCalled = true;
+        assert.ok(filePath.includes('.copilot-task.md'));
       };
       gitOps.repository.commit = async (cwd, msg) => {
         commitCalled = true;
@@ -196,7 +204,7 @@ suite('AgentDelegator DI', () => {
 
       await delegator.delegate(defaultOptions(tmpDir));
 
-      assert.ok(execCalled, 'git add should be called via injected executor');
+      assert.ok(stageFileCalled, 'git add should be called via injected repository.stageFile');
       assert.ok(commitCalled, 'git commit should be called via injected repository');
     });
   });

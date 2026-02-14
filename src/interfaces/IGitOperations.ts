@@ -81,6 +81,7 @@ export interface IGitRepository {
   pull(cwd: string, log?: GitLogger): Promise<boolean>;
   push(cwd: string, options?: { remote?: string; branch?: string; force?: boolean; log?: GitLogger }): Promise<boolean>;
   stageAll(cwd: string, log?: GitLogger): Promise<void>;
+  stageFile(cwd: string, filePath: string, log?: GitLogger): Promise<void>;
   commit(cwd: string, message: string, options?: { allowEmpty?: boolean; log?: GitLogger }): Promise<boolean>;
   hasChanges(cwd: string): Promise<boolean>;
   hasStagedChanges(cwd: string): Promise<boolean>;
@@ -90,9 +91,22 @@ export interface IGitRepository {
   getCommitLog(from: string, to: string, cwd: string): Promise<CommitInfo[]>;
   getCommitChanges(commitHash: string, cwd: string): Promise<FileChange[]>;
   getDiffStats(from: string, to: string, cwd: string): Promise<{ added: number; modified: number; deleted: number }>;
+  getFileDiff(repoPath: string, filePath: string): Promise<string | null>;
+  getStagedFileDiff(repoPath: string, filePath: string): Promise<string | null>;
+  getFileChangesBetween(from: string, to: string, cwd: string): Promise<FileChange[]>;
+  hasChangesBetween(from: string, to: string, repoPath: string): Promise<boolean>;
+  getCommitCount(from: string, to: string, cwd: string): Promise<number>;
+  getDirtyFiles(cwd: string): Promise<string[]>;
+  checkoutFile(cwd: string, filePath: string, log?: GitLogger): Promise<void>;
+  resetHard(cwd: string, ref: string, log?: GitLogger): Promise<void>;
+  clean(cwd: string, log?: GitLogger): Promise<void>;
+  updateRef(cwd: string, refName: string, commit: string, log?: GitLogger): Promise<void>;
   stashPush(cwd: string, message: string, log?: GitLogger): Promise<boolean>;
   stashPop(cwd: string, log?: GitLogger): Promise<boolean>;
+  stashDrop(cwd: string, index?: number, log?: GitLogger): Promise<boolean>;
   stashList(cwd: string): Promise<string[]>;
+  stashShowFiles(repoPath: string): Promise<string[]>;
+  stashShowPatch(repoPath: string): Promise<string | null>;
 }
 
 /**
@@ -139,5 +153,4 @@ export interface IGitOperations {
   readonly worktrees: IGitWorktrees;
   readonly merge: IGitMerge;
   readonly repository: IGitRepository;
-  readonly executor: IGitExecutor;
 }

@@ -209,7 +209,7 @@ export class JobExecutionEngine {
           if (modified) {
             this.log.debug(`Updated .gitignore in worktree: ${worktreePath}`);
             // Stage the gitignore change so it's included in the work commit
-            await git.executor.execAsync(['add', '.gitignore'], { cwd: worktreePath });
+            await git.repository.stageFile(worktreePath, '.gitignore');
           }
         } catch (err: any) {
           this.log.warn(`Failed to update .gitignore: ${err.message}`);
@@ -935,8 +935,7 @@ export class JobExecutionEngine {
           // Check if there are any actual changes compared to the plan's original base
           let hasChanges = false;
           try {
-            const diffStats = await git.repository.getDiffStats(diffBase, mergeSource, plan.repoPath);
-            hasChanges = (diffStats.added + diffStats.modified + diffStats.deleted) > 0;
+            hasChanges = await git.repository.hasChangesBetween(diffBase, mergeSource, plan.repoPath);
           } catch {
             // If diff fails, assume there are changes to be safe
             hasChanges = true;
@@ -1462,11 +1461,11 @@ export class JobExecutionEngine {
   private async isGitignoreOnlyOrchestratorChanges(repoPath: string): Promise<boolean> {
     try {
       // Get the diff of .gitignore (unstaged changes)
-      const result = await git.executor.execAsyncOrNull(['diff', '.gitignore'], repoPath);
+      const result = await git.repository.getFileDiff(repoPath, '.gitignore');
       
       if (!result || !result.trim()) {
         // No unstaged diff - check if staged
-        const stagedResult = await git.executor.execAsyncOrNull(['diff', '--cached', '.gitignore'], repoPath);
+        const stagedResult = await git.repository.getStagedFileDiff(repoPath, '.gitignore');
         if (!stagedResult || !stagedResult.trim()) {
           return true; // No changes at all
         }
@@ -1485,19 +1484,17 @@ export class JobExecutionEngine {
   private async isStashOnlyOrchestratorGitignore(repoPath: string): Promise<boolean> {
     try {
       // List files in stash
-      const filesResult = await git.executor.execAsyncOrNull(['stash', 'show', '--name-only'], repoPath);
-      if (!filesResult) {
+      const files = await git.repository.stashShowFiles(repoPath);
+      if (files.length === 0) {
         return false;
       }
-      
-      const files = filesResult.trim().split(/\r?\n/).filter(Boolean);
       
       if (files.length !== 1 || files[0] !== '.gitignore') {
         return false; // Stash has files other than .gitignore
       }
       
       // Check the stash diff for .gitignore
-      const diffResult = await git.executor.execAsyncOrNull(['stash', 'show', '-p'], repoPath);
+      const diffResult = await git.repository.stashShowPatch(repoPath);
       if (!diffResult) {
         return false;
       }

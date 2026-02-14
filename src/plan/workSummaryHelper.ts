@@ -19,19 +19,13 @@ function emptyWorkSummary(node: JobNode): JobWorkSummary {
 
 async function getCommitDetails(worktreePath: string, baseCommit: string, headCommit: string): Promise<CommitDetail[]> {
   try {
-    const diffResult = await git.executor.execAsync(
-      ['diff', '--stat', '--name-status', `${baseCommit}..${headCommit}`],
-      { cwd: worktreePath },
-    );
-    if (!diffResult.success) return [];
+    const changes = await git.repository.getFileChangesBetween(baseCommit, headCommit, worktreePath);
+    if (changes.length === 0) return [];
     const filesAdded: string[] = [], filesModified: string[] = [], filesDeleted: string[] = [];
-    for (const line of diffResult.stdout.split('\n').filter(l => l.trim())) {
-      const parts = line.split('\t');
-      if (parts.length >= 2) {
-        if (parts[0] === 'A') filesAdded.push(parts[1]);
-        else if (parts[0] === 'M') filesModified.push(parts[1]);
-        else if (parts[0] === 'D') filesDeleted.push(parts[1]);
-      }
+    for (const change of changes) {
+      if (change.status === 'added') filesAdded.push(change.path);
+      else if (change.status === 'modified') filesModified.push(change.path);
+      else if (change.status === 'deleted') filesDeleted.push(change.path);
     }
     return [{
       hash: headCommit, shortHash: headCommit.slice(0, 8),
@@ -62,20 +56,16 @@ export async function computeAggregatedWorkSummary(node: JobNode, worktreePath: 
   try {
     const headCommit = await git.worktrees.getHeadCommit(worktreePath);
     if (!headCommit) { log.warn('No HEAD commit in worktree for aggregated summary'); return emptyWorkSummary(node); }
-    const baseBranchResult = await git.executor.execAsync(['rev-parse', baseBranch], { cwd: repoPath });
-    if (!baseBranchResult.success || !baseBranchResult.stdout.trim()) { log.warn(`Failed to resolve baseBranch ${baseBranch}`); return emptyWorkSummary(node); }
-    const baseBranchCommit = baseBranchResult.stdout.trim();
-    const diffResult = await git.executor.execAsync(['diff', '--name-status', `${baseBranchCommit}..${headCommit}`], { cwd: worktreePath });
-    let filesAdded = 0, filesModified = 0, filesDeleted = 0;
-    if (diffResult.success) {
-      for (const line of diffResult.stdout.split('\n').filter(l => l.trim())) {
-        const parts = line.split('\t');
-        if (parts.length >= 2) { if (parts[0] === 'A') filesAdded++; else if (parts[0] === 'M') filesModified++; else if (parts[0] === 'D') filesDeleted++; }
-      }
+    let baseBranchCommit: string;
+    try {
+      baseBranchCommit = await git.repository.resolveRef(baseBranch, repoPath);
+    } catch {
+      log.warn(`Failed to resolve baseBranch ${baseBranch}`);
+      return emptyWorkSummary(node);
     }
-    const ccr = await git.executor.execAsync(['rev-list', '--count', `${baseBranchCommit}..${headCommit}`], { cwd: worktreePath });
-    const commits = ccr.success ? parseInt(ccr.stdout.trim(), 10) || 0 : 0;
-    return { nodeId: node.id, nodeName: node.name, commits, filesAdded, filesModified, filesDeleted, description: `Aggregated work from ${baseBranch}` };
+    const diffStats = await git.repository.getDiffStats(baseBranchCommit, headCommit, worktreePath);
+    const commits = await git.repository.getCommitCount(baseBranchCommit, headCommit, worktreePath);
+    return { nodeId: node.id, nodeName: node.name, commits, filesAdded: diffStats.added, filesModified: diffStats.modified, filesDeleted: diffStats.deleted, description: `Aggregated work from ${baseBranch}` };
   } catch (error: any) {
     log.warn(`Failed to compute aggregated work summary: ${error.message}`);
     return emptyWorkSummary(node);

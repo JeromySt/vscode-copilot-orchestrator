@@ -317,9 +317,11 @@ suite('JobExecutionEngine', () => {
       } as any);
       sandbox.stub(git.repository, 'resolveRef').resolves('target-sha-456');
       sandbox.stub(git.merge, 'commitTree').resolves('new-merge-commit-789');
-      // updateBranchRef uses git.executor
+      // updateBranchRef uses git.repository.updateRef
       sandbox.stub(git.branches, 'currentOrNull').resolves('main');
-      sandbox.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
+      sandbox.stub(git.repository, 'updateRef').resolves();
+      sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(false);
       sandbox.stub(git.worktrees, 'removeSafe').resolves();
 
       await engine.executeJobNode(plan, sm, node);
@@ -466,7 +468,9 @@ suite('JobExecutionEngine', () => {
       sandbox.stub(git.repository, 'resolveRef').resolves('target-sha');
       sandbox.stub(git.merge, 'commitTree').resolves('new-commit');
       sandbox.stub(git.branches, 'currentOrNull').resolves('main');
-      sandbox.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
+      sandbox.stub(git.repository, 'updateRef').resolves();
+      sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(false);
       sandbox.stub(git.worktrees, 'removeSafe').resolves();
 
       await engine.executeJobNode(plan, sm, node);
@@ -542,7 +546,7 @@ suite('JobExecutionEngine', () => {
       } as any);
       sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
       // Mock the merge for second dependency
-      sandbox.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      sandbox.stub(git.merge, 'merge').resolves({ success: true } as any);
       sandbox.stub(git.worktrees, 'removeSafe').resolves();
 
       await engine.executeJobNode(plan, sm, mainNode as JobNode);
@@ -603,14 +607,14 @@ suite('JobExecutionEngine', () => {
         reused: false, baseCommit: 'base', totalMs: 100,
       } as any);
       const gitignoreStub = sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(true);
-      const execStub = sandbox.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const stageFileStub = sandbox.stub(git.repository, 'stageFile').resolves();
       sandbox.stub(git.worktrees, 'removeSafe').resolves();
 
       await engine.executeJobNode(plan, sm, node);
 
       assert.ok(gitignoreStub.calledOnce);
-      // git add .gitignore should have been called
-      assert.ok(execStub.calledWith(['add', '.gitignore'], sinon.match.any));
+      // git add .gitignore should have been called via stageFile
+      assert.ok(stageFileStub.calledOnce);
     });
 
     test('RI merge failure marks node as failed with preserved worktree', async () => {
@@ -635,6 +639,7 @@ suite('JobExecutionEngine', () => {
         reused: false, baseCommit: 'base', totalMs: 50,
       } as any);
       sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       // RI merge: mergeWithoutCheckout returns conflicts
       sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
         success: false, hasConflicts: true, conflictFiles: ['file.ts'],
@@ -729,6 +734,7 @@ suite('JobExecutionEngine', () => {
         reused: false, baseCommit: 'base', totalMs: 50,
       } as any);
       sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       // merge-tree fails without conflicts or treeSha
       sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
         success: false, hasConflicts: false, error: 'not a valid ref',

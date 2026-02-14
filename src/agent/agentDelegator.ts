@@ -570,11 +570,10 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
    */
   private async createMarkerCommit(worktreePath: string, jobId: string, taskDescription: string, label: string): Promise<void> {
     try {
-      const executor = this.gitOps?.executor ?? git.executor;
       const repository = this.gitOps?.repository ?? git.repository;
 
       // Stage the task file
-      await executor.execAsync(['add', '.copilot-task.md'], { cwd: worktreePath });
+      await repository.stageFile(worktreePath, '.copilot-task.md');
       
       // Create the marker commit
       const commitMessage = `orchestrator(${jobId}): AI agent task created\n\n${taskDescription}`;

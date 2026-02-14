@@ -506,7 +506,7 @@ suite('AgentDelegator', () => {
       sinon.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
 
       const git = require('../../../git');
-      const execAsyncStub = sinon.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const stageFileStub = sinon.stub(git.repository, 'stageFile').resolves();
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const logger = { log: sinon.stub() };
@@ -533,7 +533,7 @@ suite('AgentDelegator', () => {
       assert.ok(content.includes('main'), 'content should include base branch');
       assert.ok(content.includes('feature/x'), 'content should include target branch');
 
-      execAsyncStub.restore();
+      stageFileStub.restore();
       commitStub.restore();
     });
 
@@ -543,7 +543,7 @@ suite('AgentDelegator', () => {
       sinon.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
 
       const git = require('../../../git');
-      const execAsyncStub = sinon.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const stageFileStub = sinon.stub(git.repository, 'stageFile').resolves();
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const logger = { log: sinon.stub() };
@@ -563,7 +563,7 @@ suite('AgentDelegator', () => {
       assert.ok(content.includes('existing-session-id-here'), 'should include session ID');
       assert.ok(content.includes('active Copilot session'), 'should mention active session');
 
-      execAsyncStub.restore();
+      stageFileStub.restore();
       commitStub.restore();
     });
 
@@ -573,7 +573,7 @@ suite('AgentDelegator', () => {
       sinon.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
 
       const git = require('../../../git');
-      const execAsyncStub = sinon.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const stageFileStub = sinon.stub(git.repository, 'stageFile').resolves();
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const logger = { log: sinon.stub() };
@@ -591,7 +591,7 @@ suite('AgentDelegator', () => {
       const [, content] = fsWriteStub.firstCall.args;
       assert.ok(content.includes('No additional instructions provided'), 'should include default instructions');
 
-      execAsyncStub.restore();
+      stageFileStub.restore();
       commitStub.restore();
     });
   });
@@ -613,7 +613,7 @@ suite('AgentDelegator', () => {
       sinon.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
 
       const git = require('../../../git');
-      const execAsyncStub = sinon.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const stageFileStub = sinon.stub(git.repository, 'stageFile').resolves();
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const logger = { log: sinon.stub() };
@@ -631,7 +631,7 @@ suite('AgentDelegator', () => {
       assert.strictEqual(result.success, true);
       assert.ok(logger.log.called, 'should have logged messages');
 
-      execAsyncStub.restore();
+      stageFileStub.restore();
       commitStub.restore();
     });
 
@@ -641,7 +641,7 @@ suite('AgentDelegator', () => {
       sinon.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
 
       const git = require('../../../git');
-      const execAsyncStub = sinon.stub(git.executor, 'execAsync').rejects(new Error('git not found'));
+      const stageFileStub = sinon.stub(git.repository, 'stageFile').rejects(new Error('git not found'));
       const commitStub = sinon.stub(git.repository, 'commit').rejects(new Error('commit failed'));
 
       const logger = { log: sinon.stub() };
@@ -659,7 +659,7 @@ suite('AgentDelegator', () => {
 
       assert.strictEqual(result.success, true);
 
-      execAsyncStub.restore();
+      stageFileStub.restore();
       commitStub.restore();
     });
 
@@ -669,7 +669,7 @@ suite('AgentDelegator', () => {
       sinon.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
 
       const git = require('../../../git');
-      const execAsyncStub = sinon.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const stageFileStub = sinon.stub(git.repository, 'stageFile').resolves();
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const logger = { log: sinon.stub() };
@@ -689,7 +689,7 @@ suite('AgentDelegator', () => {
       assert.ok(loggedMessages.some((m: string) => m.includes('/my/worktree')), 'should log worktree path');
       assert.ok(loggedMessages.some((m: string) => m.includes('postchecks')), 'should log label');
 
-      execAsyncStub.restore();
+      stageFileStub.restore();
       commitStub.restore();
     });
   });
@@ -720,7 +720,7 @@ suite('AgentDelegator', () => {
       sinon.stub(cliCheckCore, 'isCopilotCliAvailable').returns(true);
 
       const git = require('../../../git');
-      const execAsyncStub = sinon.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const stageFileStub = sinon.stub(git.repository, 'stageFile').resolves();
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const proc = new EventEmitter() as any;
@@ -758,7 +758,7 @@ suite('AgentDelegator', () => {
       assert.ok(callbacks.onProcessSpawned.calledWith(999), 'should notify process spawned');
       assert.ok(callbacks.onProcessExited.calledWith(999), 'should notify process exited');
 
-      execAsyncStub.restore();
+      stageFileStub.restore();
       commitStub.restore();
     });
 
@@ -768,7 +768,7 @@ suite('AgentDelegator', () => {
       sinon.stub(cliCheckCore, 'isCopilotCliAvailable').returns(true);
 
       const git = require('../../../git');
-      const execAsyncStub = sinon.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const stageFileStub = sinon.stub(git.repository, 'stageFile').resolves();
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const proc = new EventEmitter() as any;
@@ -800,7 +800,7 @@ suite('AgentDelegator', () => {
       assert.strictEqual(result.exitCode, 1);
       assert.ok(result.error?.includes('exit code'), 'should include exit code in error');
 
-      execAsyncStub.restore();
+      stageFileStub.restore();
       commitStub.restore();
     });
 
@@ -810,7 +810,7 @@ suite('AgentDelegator', () => {
       sinon.stub(cliCheckCore, 'isCopilotCliAvailable').returns(true);
 
       const git = require('../../../git');
-      const execAsyncStub = sinon.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const stageFileStub = sinon.stub(git.repository, 'stageFile').resolves();
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const proc = new EventEmitter() as any;
@@ -841,7 +841,7 @@ suite('AgentDelegator', () => {
       assert.strictEqual(result.success, false);
       assert.ok(result.error?.includes('ENOENT'), 'should include error message');
 
-      execAsyncStub.restore();
+      stageFileStub.restore();
       commitStub.restore();
     });
 
@@ -851,7 +851,7 @@ suite('AgentDelegator', () => {
       sinon.stub(cliCheckCore, 'isCopilotCliAvailable').returns(true);
 
       const git = require('../../../git');
-      const execAsyncStub = sinon.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const stageFileStub = sinon.stub(git.repository, 'stageFile').resolves();
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const proc = new EventEmitter() as any;
@@ -886,7 +886,7 @@ suite('AgentDelegator', () => {
       assert.strictEqual(result.sessionId, uuid);
       assert.ok(sessionCallback.calledWith(uuid), 'should call onSessionCaptured callback');
 
-      execAsyncStub.restore();
+      stageFileStub.restore();
       commitStub.restore();
     });
 
@@ -896,7 +896,7 @@ suite('AgentDelegator', () => {
       sinon.stub(cliCheckCore, 'isCopilotCliAvailable').returns(true);
 
       const git = require('../../../git');
-      const execAsyncStub = sinon.stub(git.executor, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
+      const stageFileStub = sinon.stub(git.repository, 'stageFile').resolves();
       const commitStub = sinon.stub(git.repository, 'commit').resolves(true);
 
       const proc = new EventEmitter() as any;
@@ -937,7 +937,7 @@ suite('AgentDelegator', () => {
       const loggedMessages = logger.log.args.map((a: any[]) => a[0]);
       assert.ok(loggedMessages.some((m: string) => m.includes('Resuming')), 'should log resuming session');
 
-      execAsyncStub.restore();
+      stageFileStub.restore();
       commitStub.restore();
     });
   });
