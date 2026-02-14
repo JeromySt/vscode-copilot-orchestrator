@@ -61,6 +61,13 @@ function buildLogFileHeader(executionKey: string): string {
     commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000 }).trim();
   } catch { /* ignore - not in a git repo or git not available */ }
   
+  // Parse execution key to extract plan/node/attempt info
+  // Key format: planId:nodeId:attemptNumber
+  const keyParts = executionKey.split(':');
+  const planId = keyParts[0] || 'unknown';
+  const nodeId = keyParts[1] || 'unknown';
+  const attempt = keyParts[2] || '1';
+  
   const lines = [
     `================================================================================`,
     `  Copilot Orchestrator - Node Execution Log`,
@@ -68,9 +75,11 @@ function buildLogFileHeader(executionKey: string): string {
     `  Version:    ${version}`,
     `  Commit:     ${commit}`,
     `  Platform:   ${process.platform} ${process.arch}`,
-    `  Node:       ${process.version}`,
+    `  Node.js:    ${process.version}`,
     `  Created:    ${now}`,
-    `  Key:        ${executionKey}`,
+    `  Plan ID:    ${planId}`,
+    `  Node ID:    ${nodeId}`,
+    `  Attempt:    ${attempt}`,
     `================================================================================`,
     ``,
   ];
