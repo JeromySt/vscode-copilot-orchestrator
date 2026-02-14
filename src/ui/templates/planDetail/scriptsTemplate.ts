@@ -79,11 +79,80 @@ export function renderPlanScripts(data: PlanScriptsData): string {
       NODE_STATE_CHANGE: 'node:state',
       PLAN_STATE_CHANGE: 'plan:state',
       PROCESS_STATS: 'node:process-stats',
-      STATUS_UPDATE: 'extension:statusUpdate'
+      STATUS_UPDATE: 'extension:statusUpdate',
+      LAYOUT_CHANGE: 'layout:change',
+      CONTROL_PREFIX: 'control:',
+      controlUpdate: function(id) { return 'control:' + id + ':updated'; }
     };
 
     // Global bus instance
     var bus = new EventBus();
+
+    // ── Inline SubscribableControl ────────────────────────────────────────
+    var SubscribableControl = (function() {
+      var enqueue = typeof queueMicrotask === 'function'
+        ? queueMicrotask
+        : function(cb) { Promise.resolve().then(cb); };
+
+      function SC(bus, controlId) {
+        this.bus = bus;
+        this.controlId = controlId;
+        this._subs = [];
+        this._disposed = false;
+        this._pendingMicrotask = false;
+        this._pendingChildHandler = null;
+      }
+
+      SC.prototype.subscribe = function(topic, handler) {
+        var sub = this.bus.on(topic, handler);
+        this._subs.push(sub);
+        return sub;
+      };
+
+      SC.prototype.subscribeToChild = function(childId, handler) {
+        var self = this;
+        self._pendingChildHandler = handler;
+        var sub = self.bus.on(Topics.controlUpdate(childId), function() {
+          if (self._disposed) return;
+          if (!self._pendingMicrotask) {
+            self._pendingMicrotask = true;
+            enqueue(function() {
+              self._pendingMicrotask = false;
+              if (!self._disposed && self._pendingChildHandler) {
+                self._pendingChildHandler();
+              }
+            });
+          }
+        });
+        self._subs.push(sub);
+        return sub;
+      };
+
+      SC.prototype.publishUpdate = function(data) {
+        this.bus.emit(Topics.controlUpdate(this.controlId), data);
+      };
+
+      SC.prototype.unsubscribeAll = function() {
+        for (var i = 0; i < this._subs.length; i++) {
+          this._subs[i].unsubscribe();
+        }
+        this._subs.length = 0;
+      };
+
+      SC.prototype.getElement = function(id) {
+        return document.getElementById(id);
+      };
+
+      SC.prototype.dispose = function() {
+        if (this._disposed) return;
+        this._disposed = true;
+        this.unsubscribeAll();
+      };
+
+      SC.prototype.update = function() {};
+
+      return SC;
+    })();
 
     // ── Process stats pulse counter ──────────────────────────────────────
     var _processStatsPulseCount = 0;
@@ -151,6 +220,17 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           }
           label.style.overflow = 'visible';
           label.style.width = 'auto';
+        });
+
+        // Fix label clipping for regular node labels (same foreignObject expansion)
+        element.querySelectorAll('.node .nodeLabel, .node span, .node div').forEach(function(label) {
+          var parent = label;
+          while (parent && parent.tagName !== 'foreignObject') { parent = parent.parentElement; }
+          if (parent && parent.tagName === 'foreignObject') {
+            var textWidth = label.scrollWidth || label.offsetWidth || 200;
+            var curWidth = parseFloat(parent.getAttribute('width')) || 0;
+            if (textWidth + 20 > curWidth) { parent.setAttribute('width', String(textWidth + 30)); }
+          }
         });
         
         // Add tooltips for truncated node labels
@@ -497,15 +577,10 @@ export function renderPlanScripts(data: PlanScriptsData): string {
       if (msg.type === 'allProcessStats') {
         bus.emit(Topics.PROCESS_STATS, msg);
       } else if (msg.type === 'statusUpdate') {
-        bus.emit(Topics.STATUS_UPDATE, msg);
+        handleStatusUpdate(msg);
       } else if (msg.type === 'pulse') {
         bus.emit(Topics.PULSE);
       }
-    });
-
-    // Subscribe to STATUS_UPDATE topic
-    bus.on(Topics.STATUS_UPDATE, function(msg) {
-      handleStatusUpdate(msg);
     });
 
     // Subscribe to PROCESS_STATS topic
@@ -513,341 +588,418 @@ export function renderPlanScripts(data: PlanScriptsData): string {
       renderAllProcesses(msg.rootJobs);
     });
     
-    // Handle incremental status updates without full re-render (preserves zoom/scroll)
+    // ── Shared colour maps ────────────────────────────────────────────────
+    var statusColors = {
+      pending: { fill: '#3c3c3c', stroke: '#858585' },
+      ready: { fill: '#2d4a6e', stroke: '#3794ff' },
+      running: { fill: '#2d4a6e', stroke: '#3794ff' },
+      scheduled: { fill: '#2d4a6e', stroke: '#3794ff' },
+      succeeded: { fill: '#1e4d40', stroke: '#4ec9b0' },
+      failed: { fill: '#4d2929', stroke: '#f48771' },
+      blocked: { fill: '#3c3c3c', stroke: '#858585' },
+      canceled: { fill: '#3c3c3c', stroke: '#858585' }
+    };
+    var groupColors = {
+      pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
+      ready: { fill: '#1a2a4e', stroke: '#3794ff' },
+      running: { fill: '#1a2a4e', stroke: '#3794ff' },
+      succeeded: { fill: '#1a3a2e', stroke: '#4ec9b0' },
+      failed: { fill: '#3a1a1e', stroke: '#f48771' },
+      blocked: { fill: '#3a1a1e', stroke: '#f48771' },
+      canceled: { fill: '#1a1a2e', stroke: '#6a6a8a' }
+    };
+    var nodeIcons = { succeeded: '✓', failed: '✗', running: '▶', blocked: '⊘', pending: '○', ready: '○', scheduled: '▶', canceled: '⊘' };
+
+    // ── Simplified handleStatusUpdate ─────────────────────────────────────
     function handleStatusUpdate(msg) {
       try {
-        const { planStatus, nodeStatuses, counts, progress, total, completed, startedAt, endedAt, planMetrics, globalCapacity } = msg;
-        
-        // Update global capacity info
-        if (globalCapacity) {
-          const capacityInfoEl = document.getElementById('capacityInfo');
-          if (globalCapacity.totalGlobalJobs > 0 || globalCapacity.activeInstances > 1) {
-            capacityInfoEl.style.display = 'flex';
-            document.getElementById('instanceCount').textContent = globalCapacity.activeInstances;
-            document.getElementById('globalJobs').textContent = globalCapacity.totalGlobalJobs;
-            document.getElementById('globalMax').textContent = globalCapacity.globalMaxParallel;
-          } else {
-            capacityInfoEl.style.display = 'none';
-          }
-        }
-        
-        // Update plan status badge
-        const statusBadge = document.querySelector('.status-badge');
-        if (statusBadge) {
-          statusBadge.className = 'status-badge ' + planStatus;
-          statusBadge.textContent = planStatus.charAt(0).toUpperCase() + planStatus.slice(1);
-        }
-        
-        // Update progress bar
-        const progressFill = document.querySelector('.progress-fill');
-        const progressText = document.querySelector('.progress-text');
-        if (progressFill) {
-          progressFill.style.width = progress + '%';
-        }
-        if (progressText) {
-          progressText.textContent = completed + ' / ' + total + ' (' + progress + '%)';
-        }
-        
-        // Update stats section
-        const statsContainer = document.querySelector('.stats');
-        if (statsContainer) {
-          const statItems = statsContainer.querySelectorAll('.stat');
-          statItems.forEach(stat => {
-            const label = stat.querySelector('.stat-label');
-            const value = stat.querySelector('.stat-value');
-            if (!label || !value) return;
-            const labelText = label.textContent.trim();
-            if (labelText === 'Total Nodes') {
-              value.textContent = total;
-            } else if (labelText === 'Succeeded') {
-              value.textContent = counts.succeeded || 0;
-            } else if (labelText === 'Failed') {
-              value.textContent = counts.failed || 0;
-            } else if (labelText === 'Running') {
-              value.textContent = (counts.running || 0) + (counts.scheduled || 0);
-            } else if (labelText === 'Pending') {
-              value.textContent = (counts.pending || 0) + (counts.ready || 0);
-            }
-          });
-        }
-        
-        // Update metrics bar
-        if (planMetrics) {
-          const metricsBar = document.getElementById('planMetricsBar');
-          if (metricsBar) {
-            const items = [];
-            if (planMetrics.premiumRequests) {
-              items.push('<span class="metric-item">🎫 <span class="metric-value">' + planMetrics.premiumRequests + '</span></span>');
-            }
-            if (planMetrics.apiTime) {
-              items.push('<span class="metric-item">⏱ API: <span class="metric-value">' + planMetrics.apiTime + '</span></span>');
-            }
-            if (planMetrics.sessionTime) {
-              items.push('<span class="metric-item">🕐 Session: <span class="metric-value">' + planMetrics.sessionTime + '</span></span>');
-            }
-            if (planMetrics.codeChanges) {
-              items.push('<span class="metric-item">📝 <span class="metric-value">' + planMetrics.codeChanges + '</span></span>');
-            }
-            var modelsHtml = '';
-            if (planMetrics.modelBreakdown && planMetrics.modelBreakdown.length > 0) {
-              var rows = planMetrics.modelBreakdown.map(function(m) {
-                var cached = m.cachedTokens ? ', ' + formatTk(m.cachedTokens) + ' cached' : '';
-                var reqs = m.premiumRequests !== undefined ? ' (' + m.premiumRequests + ' req)' : '';
-                return '<div class="model-row"><span class="model-name">' + escHtml(m.model) + '</span><span class="model-tokens">' + formatTk(m.inputTokens) + ' in, ' + formatTk(m.outputTokens) + ' out' + cached + reqs + '</span></div>';
-              }).join('');
-              modelsHtml = '<div class="model-breakdown"><div class="model-breakdown-label">Model Breakdown:</div><div class="model-breakdown-list">' + rows + '</div></div>';
-            }
-            metricsBar.innerHTML = '<span class="metrics-label">⚡ AI Usage:</span> ' + items.join(' ') + modelsHtml;
-            metricsBar.style.display = '';
-          }
-        }
-        
-        // Update legend counts
-        const legendItems = document.querySelectorAll('.legend-item');
-        legendItems.forEach(item => {
-          const icon = item.querySelector('.legend-icon');
-          if (!icon) return;
-          const statusClass = Array.from(icon.classList).find(c => c !== 'legend-icon');
-          if (statusClass && counts[statusClass] !== undefined) {
-            const span = item.querySelector('span:last-child');
-            if (span) {
-              span.textContent = statusClass.charAt(0).toUpperCase() + statusClass.slice(1) + ' (' + counts[statusClass] + ')';
-            }
-          }
-        });
-        
-        // Status color map (must match classDef in buildMermaidDiagram)
-        const statusColors = {
-          pending: { fill: '#3c3c3c', stroke: '#858585' },
-          ready: { fill: '#2d4a6e', stroke: '#3794ff' },
-          running: { fill: '#2d4a6e', stroke: '#3794ff' },
-          scheduled: { fill: '#2d4a6e', stroke: '#3794ff' },
-          succeeded: { fill: '#1e4d40', stroke: '#4ec9b0' },
-          failed: { fill: '#4d2929', stroke: '#f48771' },
-          blocked: { fill: '#3c3c3c', stroke: '#858585' },
-          canceled: { fill: '#3c3c3c', stroke: '#858585' }
-        };
-        
-        // Update Mermaid node colors in SVG directly (Mermaid uses inline styles)
-        const svgElement = document.querySelector('.mermaid svg');
-        let nodesUpdated = 0;
-        const totalNodes = Object.keys(nodeStatuses).length;
-        
-        if (!svgElement) {
-          console.warn('SVG element not found in handleStatusUpdate');
-        }
-        
-        if (svgElement) {
-          for (const [sanitizedId, data] of Object.entries(nodeStatuses)) {
-            // Skip if version hasn't changed (efficient update)
-            const existingData = nodeData[sanitizedId];
-            if (existingData && existingData.version === data.version) {
-              nodesUpdated++; // Count as success (already up to date)
-              continue;
-            }
-            
-            // Status colors for groups/subgraphs (dimmer than nodes)
-            const groupColors = {
-              pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
-              ready: { fill: '#1a2a4e', stroke: '#3794ff' },
-              running: { fill: '#1a2a4e', stroke: '#3794ff' },
-              succeeded: { fill: '#1a3a2e', stroke: '#4ec9b0' },
-              failed: { fill: '#3a1a1e', stroke: '#f48771' },
-              blocked: { fill: '#3a1a1e', stroke: '#f48771' },
-              canceled: { fill: '#1a1a2e', stroke: '#6a6a8a' },
-            };
-            
-            // Try to find as a node first
-            // Mermaid generates IDs like "flowchart-nabc123...-0" where nabc123... is our sanitizedId
-            const nodeGroup = svgElement.querySelector('g[id^="flowchart-' + sanitizedId + '-"]');
-            
-            if (nodeGroup) {
-              nodesUpdated++;
-              const nodeEl = nodeGroup.querySelector('.node') || nodeGroup;
-              
-              // Update CSS class for additional styling
-              nodeEl.classList.remove('pending', 'ready', 'running', 'succeeded', 'failed', 'blocked', 'canceled', 'scheduled');
-              nodeEl.classList.add(data.status);
-              
-              // Update inline styles on the rect (Mermaid uses inline styles from classDef)
-              const rect = nodeEl.querySelector('rect');
-              if (rect && statusColors[data.status]) {
-                rect.style.fill = statusColors[data.status].fill;
-                rect.style.stroke = statusColors[data.status].stroke;
-                // Add animation for running nodes
-                if (data.status === 'running') {
-                  rect.style.strokeWidth = '2px';
-                } else {
-                  rect.style.strokeWidth = '';
-                }
-              }
-              
-              // Update icon in node label
-              const foreignObject = nodeEl.querySelector('foreignObject');
-              const textSpan = foreignObject ? foreignObject.querySelector('span') : nodeEl.querySelector('text tspan, text');
-              if (textSpan) {
-                const icons = { succeeded: '✓', failed: '✗', running: '▶', blocked: '⊘', pending: '○', ready: '○', scheduled: '▶', canceled: '⊘' };
-                const newIcon = icons[data.status] || '○';
-                const currentText = textSpan.textContent || '';
-                // Replace first character (icon) with new icon
-                if (currentText.length > 0 && ['✓', '✗', '▶', '⊘', '○'].includes(currentText[0])) {
-                  textSpan.textContent = newIcon + currentText.substring(1);
-                }
-              }
-            } else {
-              // Try to find as a subgraph (group)
-              // Mermaid generates subgraph clusters with ID patterns we can match
-              let cluster = svgElement.querySelector('g.cluster[id*="' + sanitizedId + '"], g[id*="' + sanitizedId + '"].cluster');
-              
-              // Fallback: iterate all clusters and check their IDs
-              if (!cluster) {
-                const allClusters = svgElement.querySelectorAll('g.cluster');
-                for (const c of allClusters) {
-                  const clusterId = c.getAttribute('id') || '';
-                  if (clusterId.includes(sanitizedId)) {
-                    cluster = c;
-                    break;
-                  }
-                }
-              }
-              
-              // Update the cluster if found
-              if (cluster) {
-                const clusterRect = cluster.querySelector('rect');
-                if (clusterRect && groupColors[data.status]) {
-                  clusterRect.style.fill = groupColors[data.status].fill;
-                  clusterRect.style.stroke = groupColors[data.status].stroke;
-                }
-                // Update icon in subgraph label - Mermaid uses various label selectors
-                const labelText = cluster.querySelector('.cluster-label .nodeLabel, .cluster-label text, .nodeLabel, text');
-                if (labelText) {
-                  const icons = { succeeded: '✓', failed: '✗', running: '▶', blocked: '⊘', pending: '○', ready: '○', scheduled: '▶', canceled: '⊘' };
-                  const newIcon = icons[data.status] || '○';
-                  const currentText = labelText.textContent || '';
-                  // Check for status icon at start or package icon
-                  if (currentText.length > 0) {
-                    const firstChar = currentText[0];
-                    if (['✓', '✗', '▶', '⊘', '○', '📦'].includes(firstChar)) {
-                      labelText.textContent = newIcon + currentText.substring(1);
-                    }
-                  }
-                }
-                nodesUpdated++;
-              }
-            }
-            
-            // Update nodeData for duration tracking (and version for next comparison)
-            if (nodeData[sanitizedId]) {
-              nodeData[sanitizedId].status = data.status;
-              nodeData[sanitizedId].version = data.version;
-              nodeData[sanitizedId].startedAt = data.startedAt;
-              nodeData[sanitizedId].endedAt = data.endedAt;
+        var changed = {};
+        if (msg.nodeStatuses) {
+          for (var id in msg.nodeStatuses) {
+            var existing = nodeData[id];
+            var incoming = msg.nodeStatuses[id];
+            if (!existing || existing.version !== incoming.version) {
+              nodeData[id] = Object.assign(existing || {}, incoming);
+              changed[id] = incoming;
             }
           }
         }
-        
-        // If we couldn't update any nodes and there are nodes to update, force full refresh
-        if (totalNodes > 0 && nodesUpdated === 0) {
-          console.warn('SVG node update failed: updated 0 of ' + totalNodes + ' nodes, requesting full refresh');
-          vscode.postMessage({ type: 'refresh' });
-          return;
-        }
-        
-        // Update edge colors based on source node status
-        // Mermaid renders edges as <path> elements inside .edgePaths children,
-        // in the same order as our edgeIndex tracking.
-        if (svgElement && edgeData && edgeData.length > 0) {
-          var edgePaths = svgElement.querySelectorAll('.edgePaths > *');
-          var edgeColors = {
-            succeeded: '#4ec9b0',
-            failed: '#f48771',
-            running: '#3794ff',
-            scheduled: '#3794ff',
-          };
-          var defaultEdgeColor = '#858585';
-          
-          for (var i = 0; i < edgeData.length; i++) {
-            var edge = edgeData[i];
-            var edgeEl = edgePaths[edge.index];
-            if (!edgeEl) continue;
-            
-            var pathEl = edgeEl.querySelector('path') || edgeEl;
-            
-            // Determine color from source node status
-            var sourceStatus = null;
-            if (edge.from === 'TARGET_SOURCE') {
-              // Base branch edge — always green
-              sourceStatus = 'succeeded';
-            } else {
-              // Find source node's current status from nodeData
-              var sourceData = nodeData[edge.from];
-              if (sourceData) sourceStatus = sourceData.status;
-            }
-            
-            // For leaf-to-target edges, color based on the leaf (source) status
-            var color = (sourceStatus && edgeColors[sourceStatus]) || defaultEdgeColor;
-            pathEl.style.stroke = color;
-            pathEl.style.strokeWidth = (sourceStatus === 'succeeded' || sourceStatus === 'failed') ? '2px' : '';
-            
-            // Switch dashed→solid once the source node leaves pending/ready
-            if (sourceStatus && sourceStatus !== 'pending' && sourceStatus !== 'ready') {
-              pathEl.style.strokeDasharray = 'none';
-            } else {
-              pathEl.style.strokeDasharray = ''; // restore Mermaid default (dashed)
-            }
-            
-            // Also color the marker/arrowhead if present
-            var marker = edgeEl.querySelector('defs marker path, marker path');
-            if (marker) {
-              marker.style.fill = color;
-              marker.style.stroke = color;
-            }
+        bus.emit(Topics.STATUS_UPDATE, Object.assign({}, msg, { nodeStatuses: changed }));
+        // After synchronous controls ran, check SVG update health
+        var changedCount = Object.keys(changed).length;
+        if (changedCount > 0) {
+          var totalFound = (mermaidNodeStyleCtrl._lastUpdated || 0) + (mermaidGroupStyleCtrl._lastUpdated || 0);
+          if (totalFound === 0) {
+            console.warn('SVG node update failed: updated 0 of ' + changedCount + ' nodes, requesting full refresh');
+            vscode.postMessage({ type: 'refresh' });
           }
         }
-        
-        // Update plan duration counter data attributes
-        const durationEl = document.getElementById('planDuration');
-        if (durationEl) {
-          durationEl.dataset.status = planStatus;
-          if (startedAt) durationEl.dataset.started = startedAt.toString();
-          if (endedAt) durationEl.dataset.ended = endedAt.toString();
-        }
-        
-        // Update action buttons visibility based on new status
-        const actionsDiv = document.querySelector('.actions');
-        if (actionsDiv) {
-          const pauseBtn = document.getElementById('pauseBtn');
-          const resumeBtn = document.getElementById('resumeBtn');
-          const cancelBtn = document.getElementById('cancelBtn');
-          const workSummaryBtn = document.getElementById('workSummaryBtn');
-          
-          const isActive = (planStatus === 'running' || planStatus === 'pending');
-          const isPaused = (planStatus === 'paused');
-          const canControl = isActive || isPaused;
-          
-          if (pauseBtn) {
-            pauseBtn.style.display = isActive ? '' : 'none';
-          }
-          if (resumeBtn) {
-            resumeBtn.style.display = isPaused ? '' : 'none';
-          }
-          if (cancelBtn) {
-            cancelBtn.style.display = canControl ? '' : 'none';
-          }
-          if (workSummaryBtn) {
-            workSummaryBtn.style.display = planStatus === 'succeeded' ? '' : 'none';
-          }
-        }
-        
-        // Trigger duration updates immediately
-        updateDurationCounter();
-        updateNodeDurations();
       } catch (err) {
         console.error('handleStatusUpdate error:', err);
-        // On error, request a full refresh
         vscode.postMessage({ type: 'refresh' });
       }
     }
+
+    // ── Controls ──────────────────────────────────────────────────────────
+
+    // (a) CapacityInfoControl
+    var capacityInfoCtrl = new SubscribableControl(bus, 'capacity-info');
+    capacityInfoCtrl.update = function(msg) {
+      var gc = msg.globalCapacity;
+      if (!gc) return;
+      var el = document.getElementById('capacityInfo');
+      if (!el) return;
+      if (gc.totalGlobalJobs > 0 || gc.activeInstances > 1) {
+        el.style.display = 'flex';
+        document.getElementById('instanceCount').textContent = gc.activeInstances;
+        document.getElementById('globalJobs').textContent = gc.totalGlobalJobs;
+        document.getElementById('globalMax').textContent = gc.globalMaxParallel;
+      } else {
+        el.style.display = 'none';
+      }
+    };
+    capacityInfoCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { capacityInfoCtrl.update(msg); });
+
+    // (b) PlanStatusControl
+    var planStatusCtrl = new SubscribableControl(bus, 'plan-status');
+    planStatusCtrl.update = function(msg) {
+      var planStatus = msg.planStatus;
+      var statusBadge = document.querySelector('.status-badge');
+      if (statusBadge) {
+        statusBadge.className = 'status-badge ' + planStatus;
+        statusBadge.textContent = planStatus.charAt(0).toUpperCase() + planStatus.slice(1);
+      }
+      // Update action buttons visibility
+      var actionsDiv = document.querySelector('.actions');
+      if (actionsDiv) {
+        var pauseBtn = document.getElementById('pauseBtn');
+        var resumeBtn = document.getElementById('resumeBtn');
+        var cancelBtn = document.getElementById('cancelBtn');
+        var workSummaryBtn = document.getElementById('workSummaryBtn');
+        var isActive = (planStatus === 'running' || planStatus === 'pending');
+        var isPaused = (planStatus === 'paused');
+        var canControl = isActive || isPaused;
+        if (pauseBtn) pauseBtn.style.display = isActive ? '' : 'none';
+        if (resumeBtn) resumeBtn.style.display = isPaused ? '' : 'none';
+        if (cancelBtn) cancelBtn.style.display = canControl ? '' : 'none';
+        if (workSummaryBtn) workSummaryBtn.style.display = planStatus === 'succeeded' ? '' : 'none';
+      }
+      this.publishUpdate(msg);
+    };
+    planStatusCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { planStatusCtrl.update(msg); });
+
+    // (c) ProgressControl
+    var progressCtrl = new SubscribableControl(bus, 'progress');
+    progressCtrl.update = function(msg) {
+      var progressFill = document.querySelector('.progress-fill');
+      var progressText = document.querySelector('.progress-text');
+      if (progressFill) progressFill.style.width = msg.progress + '%';
+      if (progressText) progressText.textContent = msg.completed + ' / ' + msg.total + ' (' + msg.progress + '%)';
+    };
+    progressCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { progressCtrl.update(msg); });
+
+    // (d) StatsControl
+    var statsCtrl = new SubscribableControl(bus, 'stats');
+    statsCtrl.update = function(msg) {
+      var counts = msg.counts;
+      var total = msg.total;
+      var statsContainer = document.querySelector('.stats');
+      if (!statsContainer) return;
+      var statItems = statsContainer.querySelectorAll('.stat');
+      statItems.forEach(function(stat) {
+        var label = stat.querySelector('.stat-label');
+        var value = stat.querySelector('.stat-value');
+        if (!label || !value) return;
+        var labelText = label.textContent.trim();
+        if (labelText === 'Total Nodes') value.textContent = total;
+        else if (labelText === 'Succeeded') value.textContent = counts.succeeded || 0;
+        else if (labelText === 'Failed') value.textContent = counts.failed || 0;
+        else if (labelText === 'Running') value.textContent = (counts.running || 0) + (counts.scheduled || 0);
+        else if (labelText === 'Pending') value.textContent = (counts.pending || 0) + (counts.ready || 0);
+      });
+    };
+    statsCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { statsCtrl.update(msg); });
+
+    // (e) MetricsBarControl
+    var metricsBarCtrl = new SubscribableControl(bus, 'metrics-bar');
+    metricsBarCtrl.update = function(msg) {
+      var pm = msg.planMetrics;
+      if (!pm) return;
+      var metricsBar = document.getElementById('planMetricsBar');
+      if (!metricsBar) return;
+      var items = [];
+      if (pm.premiumRequests) items.push('<span class="metric-item">🎫 <span class="metric-value">' + pm.premiumRequests + '</span></span>');
+      if (pm.apiTime) items.push('<span class="metric-item">⏱ API: <span class="metric-value">' + pm.apiTime + '</span></span>');
+      if (pm.sessionTime) items.push('<span class="metric-item">🕐 Session: <span class="metric-value">' + pm.sessionTime + '</span></span>');
+      if (pm.codeChanges) items.push('<span class="metric-item">📝 <span class="metric-value">' + pm.codeChanges + '</span></span>');
+      var modelsHtml = '';
+      if (pm.modelBreakdown && pm.modelBreakdown.length > 0) {
+        var rows = pm.modelBreakdown.map(function(m) {
+          var cached = m.cachedTokens ? ', ' + formatTk(m.cachedTokens) + ' cached' : '';
+          var reqs = m.premiumRequests !== undefined ? ' (' + m.premiumRequests + ' req)' : '';
+          return '<div class="model-row"><span class="model-name">' + escHtml(m.model) + '</span><span class="model-tokens">' + formatTk(m.inputTokens) + ' in, ' + formatTk(m.outputTokens) + ' out' + cached + reqs + '</span></div>';
+        }).join('');
+        modelsHtml = '<div class="model-breakdown"><div class="model-breakdown-label">Model Breakdown:</div><div class="model-breakdown-list">' + rows + '</div></div>';
+      }
+      metricsBar.innerHTML = '<span class="metrics-label">⚡ AI Usage:</span> ' + items.join(' ') + modelsHtml;
+      metricsBar.style.display = '';
+    };
+    metricsBarCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { metricsBarCtrl.update(msg); });
+
+    // (f) LegendControl
+    var legendCtrl = new SubscribableControl(bus, 'legend');
+    legendCtrl.update = function(msg) {
+      var counts = msg.counts;
+      var legendItems = document.querySelectorAll('.legend-item');
+      legendItems.forEach(function(item) {
+        var icon = item.querySelector('.legend-icon');
+        if (!icon) return;
+        var statusClass = Array.from(icon.classList).find(function(c) { return c !== 'legend-icon'; });
+        if (statusClass && counts[statusClass] !== undefined) {
+          var span = item.querySelector('span:last-child');
+          if (span) span.textContent = statusClass.charAt(0).toUpperCase() + statusClass.slice(1) + ' (' + counts[statusClass] + ')';
+        }
+      });
+    };
+    legendCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { legendCtrl.update(msg); });
+
+    // (g) MermaidNodeStyleControl
+    var mermaidNodeStyleCtrl = new SubscribableControl(bus, 'mermaid-node-style');
+    mermaidNodeStyleCtrl._lastUpdated = 0;
+    mermaidNodeStyleCtrl.update = function(msg) {
+      var svgElement = document.querySelector('.mermaid svg');
+      if (!svgElement || !msg.nodeStatuses) { this._lastUpdated = 0; return; }
+      var ns = msg.nodeStatuses;
+      var updated = 0;
+      for (var sanitizedId in ns) {
+        var data = ns[sanitizedId];
+        var nodeGroup = svgElement.querySelector('g[id^="flowchart-' + sanitizedId + '-"]');
+        if (!nodeGroup) continue;
+        updated++;
+        var nodeEl = nodeGroup.querySelector('.node') || nodeGroup;
+        nodeEl.classList.remove('pending', 'ready', 'running', 'succeeded', 'failed', 'blocked', 'canceled', 'scheduled');
+        nodeEl.classList.add(data.status);
+        var rect = nodeEl.querySelector('rect');
+        if (rect && statusColors[data.status]) {
+          rect.style.fill = statusColors[data.status].fill;
+          rect.style.stroke = statusColors[data.status].stroke;
+          rect.style.strokeWidth = data.status === 'running' ? '2px' : '';
+        }
+        var foreignObject = nodeEl.querySelector('foreignObject');
+        var textSpan = foreignObject ? foreignObject.querySelector('span') : nodeEl.querySelector('text tspan, text');
+        if (textSpan) {
+          var newIcon = nodeIcons[data.status] || '○';
+          var currentText = textSpan.textContent || '';
+          if (currentText.length > 0 && ['✓', '✗', '▶', '⊘', '○'].includes(currentText[0])) {
+            textSpan.textContent = newIcon + currentText.substring(1);
+          }
+        }
+      }
+      this._lastUpdated = updated;
+      this.publishUpdate(msg);
+    };
+    mermaidNodeStyleCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { mermaidNodeStyleCtrl.update(msg); });
+
+    // (h) MermaidEdgeStyleControl
+    var mermaidEdgeStyleCtrl = new SubscribableControl(bus, 'mermaid-edge-style');
+    mermaidEdgeStyleCtrl.update = function(msg) {
+      var svgElement = document.querySelector('.mermaid svg');
+      if (!svgElement || !edgeData || edgeData.length === 0) return;
+      var edgePaths = svgElement.querySelectorAll('.edgePaths > *');
+      var edgeColors = {
+        succeeded: '#4ec9b0',
+        failed: '#f48771',
+        running: '#3794ff',
+        scheduled: '#3794ff'
+      };
+      var defaultEdgeColor = '#858585';
+      for (var i = 0; i < edgeData.length; i++) {
+        var edge = edgeData[i];
+        var edgeEl = edgePaths[edge.index];
+        if (!edgeEl) continue;
+        var pathEl = edgeEl.querySelector('path') || edgeEl;
+        var sourceStatus = null;
+        if (edge.from === 'TARGET_SOURCE') {
+          sourceStatus = 'succeeded';
+        } else {
+          var sourceData = nodeData[edge.from];
+          if (sourceData) sourceStatus = sourceData.status;
+        }
+        var color = (sourceStatus && edgeColors[sourceStatus]) || defaultEdgeColor;
+        pathEl.style.stroke = color;
+        pathEl.style.strokeWidth = (sourceStatus === 'succeeded' || sourceStatus === 'failed') ? '2px' : '';
+        if (sourceStatus && sourceStatus !== 'pending' && sourceStatus !== 'ready') {
+          pathEl.style.strokeDasharray = 'none';
+        } else {
+          pathEl.style.strokeDasharray = '';
+        }
+        var marker = edgeEl.querySelector('defs marker path, marker path');
+        if (marker) {
+          marker.style.fill = color;
+          marker.style.stroke = color;
+        }
+      }
+    };
+    mermaidEdgeStyleCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { mermaidEdgeStyleCtrl.update(msg); });
+
+    // (i) MermaidGroupStyleControl
+    var mermaidGroupStyleCtrl = new SubscribableControl(bus, 'mermaid-group-style');
+    mermaidGroupStyleCtrl._lastUpdated = 0;
+    mermaidGroupStyleCtrl.update = function(msg) {
+      var svgElement = document.querySelector('.mermaid svg');
+      if (!svgElement || !msg.nodeStatuses) { this._lastUpdated = 0; return; }
+      var ns = msg.nodeStatuses;
+      var updated = 0;
+      for (var sanitizedId in ns) {
+        var data = ns[sanitizedId];
+        // Skip if already handled as a regular node
+        if (svgElement.querySelector('g[id^="flowchart-' + sanitizedId + '-"]')) continue;
+        var cluster = svgElement.querySelector('g.cluster[id*="' + sanitizedId + '"], g[id*="' + sanitizedId + '"].cluster');
+        if (!cluster) {
+          var allClusters = svgElement.querySelectorAll('g.cluster');
+          for (var ci = 0; ci < allClusters.length; ci++) {
+            var clusterId = allClusters[ci].getAttribute('id') || '';
+            if (clusterId.includes(sanitizedId)) { cluster = allClusters[ci]; break; }
+          }
+        }
+        if (!cluster) continue;
+        updated++;
+        var clusterRect = cluster.querySelector('rect');
+        if (clusterRect && groupColors[data.status]) {
+          clusterRect.style.fill = groupColors[data.status].fill;
+          clusterRect.style.stroke = groupColors[data.status].stroke;
+        }
+        var labelText = cluster.querySelector('.cluster-label .nodeLabel, .cluster-label text, .nodeLabel, text');
+        if (labelText) {
+          var newIcon = nodeIcons[data.status] || '○';
+          var currentText = labelText.textContent || '';
+          if (currentText.length > 0) {
+            var firstChar = currentText[0];
+            if (['✓', '✗', '▶', '⊘', '○', '📦'].includes(firstChar)) {
+              labelText.textContent = newIcon + currentText.substring(1);
+            }
+          }
+        }
+      }
+      this._lastUpdated = updated;
+      this.publishUpdate(msg);
+    };
+    mermaidGroupStyleCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { mermaidGroupStyleCtrl.update(msg); });
+
+    // (j) DurationCounterControl
+    var durationCounterCtrl = new SubscribableControl(bus, 'duration-counter');
+    durationCounterCtrl.update = function(msg) {
+      var durationEl = document.getElementById('planDuration');
+      if (!durationEl) return;
+      durationEl.dataset.status = msg.planStatus;
+      if (msg.startedAt) durationEl.dataset.started = msg.startedAt.toString();
+      if (msg.endedAt) durationEl.dataset.ended = msg.endedAt.toString();
+      updateDurationCounter();
+    };
+    durationCounterCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { durationCounterCtrl.update(msg); });
+
+    // (k) NodeDurationControl
+    var nodeDurationCtrl = new SubscribableControl(bus, 'node-duration');
+    nodeDurationCtrl.update = function() {
+      updateNodeDurations();
+    };
+    nodeDurationCtrl.subscribe(Topics.STATUS_UPDATE, function() { nodeDurationCtrl.update(); });
+
+    // (l) ProcessStatsControl
+    var processStatsCtrl = new SubscribableControl(bus, 'process-stats');
+    processStatsCtrl.update = function(msg) {
+      renderAllProcesses(msg.rootJobs);
+    };
+    processStatsCtrl.subscribe(Topics.PROCESS_STATS, function(msg) { processStatsCtrl.update(msg); });
+
+    // (Step 6) Wire inner-out: group recalculates when node children update
+    mermaidGroupStyleCtrl.subscribeToChild('mermaid-node-style', function() {
+      // When node styles update, re-aggregate group statuses from nodeData
+      var svgElement = document.querySelector('.mermaid svg');
+      if (!svgElement) return;
+      var allClusters = svgElement.querySelectorAll('g.cluster');
+      for (var ci = 0; ci < allClusters.length; ci++) {
+        var cluster = allClusters[ci];
+        var clusterId = cluster.getAttribute('id') || '';
+        // Find matching nodeData entry for this cluster
+        for (var sid in nodeData) {
+          if (clusterId.includes(sid) && nodeData[sid].type === 'group') {
+            var clusterRect = cluster.querySelector('rect');
+            if (clusterRect && groupColors[nodeData[sid].status]) {
+              clusterRect.style.fill = groupColors[nodeData[sid].status].fill;
+              clusterRect.style.stroke = groupColors[nodeData[sid].status].stroke;
+            }
+            break;
+          }
+        }
+      }
+    });
+
+    // ── LayoutManager ─────────────────────────────────────────────────────
+    var layoutMgr = new SubscribableControl(bus, 'layout-manager');
+    layoutMgr._rafId = null;
+    layoutMgr.update = function() {
+      var self = this;
+      if (self._rafId) return;
+      self._rafId = requestAnimationFrame(function() {
+        self._rafId = null;
+        var container = document.getElementById('mermaidContainer');
+        var element = document.querySelector('.mermaid');
+        if (!container || !element) return;
+        // Save viewport state
+        var savedZoom = currentZoom;
+        var scrollParent = container.parentElement;
+        var savedScrollTop = scrollParent ? scrollParent.scrollTop : 0;
+        var savedScrollLeft = scrollParent ? scrollParent.scrollLeft : 0;
+        // Re-render mermaid
+        mermaid.render('mermaid-graph', mermaidDef).then(function(result) {
+          element.innerHTML = result.svg;
+          // Expand foreignObject for nodes (same fix as clusters)
+          element.querySelectorAll('.node .nodeLabel, .node span, .node div').forEach(function(label) {
+            var parent = label;
+            while (parent && parent.tagName !== 'foreignObject') { parent = parent.parentElement; }
+            if (parent && parent.tagName === 'foreignObject') {
+              var textWidth = label.scrollWidth || label.offsetWidth || 200;
+              var curWidth = parseFloat(parent.getAttribute('width')) || 0;
+              if (textWidth + 20 > curWidth) { parent.setAttribute('width', String(textWidth + 30)); }
+            }
+          });
+          // Expand foreignObject for clusters
+          element.querySelectorAll('.cluster-label').forEach(function(label) {
+            var parent = label.parentElement;
+            while (parent && parent.tagName !== 'foreignObject') { parent = parent.parentElement; }
+            if (parent && parent.tagName === 'foreignObject') {
+              var textEl = label.querySelector('.nodeLabel, span, div');
+              if (textEl) {
+                var textWidth = textEl.scrollWidth || textEl.offsetWidth || 200;
+                var curWidth = parseFloat(parent.getAttribute('width')) || 0;
+                if (textWidth + 20 > curWidth) { parent.setAttribute('width', String(textWidth + 30)); }
+              }
+            }
+            label.style.overflow = 'visible';
+            label.style.width = 'auto';
+          });
+          // Restore viewport state
+          currentZoom = savedZoom;
+          updateZoom();
+          if (scrollParent) {
+            scrollParent.scrollTop = savedScrollTop;
+            scrollParent.scrollLeft = savedScrollLeft;
+          }
+          // Re-apply node colours
+          var replayMsg = { nodeStatuses: {}, counts: {}, planStatus: '', progress: 0, total: 0, completed: 0 };
+          for (var sid in nodeData) { replayMsg.nodeStatuses[sid] = nodeData[sid]; }
+          mermaidNodeStyleCtrl.update(replayMsg);
+          mermaidGroupStyleCtrl.update(replayMsg);
+          mermaidEdgeStyleCtrl.update(replayMsg);
+          updateNodeDurations();
+          bus.emit(Topics.LAYOUT_CHANGE + ':complete');
+        }).catch(function(err) {
+          console.error('LayoutManager re-render error:', err);
+        });
+      });
+    };
+    layoutMgr.subscribe(Topics.LAYOUT_CHANGE, function() { layoutMgr.update(); });
     
     function formatMemory(bytes) {
       const mb = bytes / 1024 / 1024;
