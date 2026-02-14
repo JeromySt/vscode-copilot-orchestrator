@@ -676,6 +676,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       }
       
       // Add cards for new plans or update existing ones
+      // Plans arrive sorted newest-first from the extension.
+      // Insert new cards at the correct position to maintain sort order.
       for (var i = 0; i < plans.length; i++) {
         var plan = plans[i];
         var existingCard = this.planCards.get(plan.id);
@@ -683,7 +685,15 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         if (!existingCard) {
           // Create new card
           var element = document.createElement('div');
-          container.appendChild(element);
+          
+          // Insert at the correct position (plans[i] should be the i-th child)
+          var existingChildren = container.querySelectorAll('.plan-item-wrapper');
+          if (i < existingChildren.length) {
+            container.insertBefore(element, existingChildren[i]);
+          } else {
+            container.appendChild(element);
+          }
+          element.className = 'plan-item-wrapper';
           
           var cardId = 'plan-card-' + plan.id;
           var card = new PlanListCardControl(this.bus, cardId, element, plan.id);
