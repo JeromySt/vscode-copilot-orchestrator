@@ -629,6 +629,79 @@ export class NodeDetailPanel {
     });
   }
   
+  /**
+   * Push attempt history updates to the webview for dynamic rendering.
+   *
+   * @param state - The current node execution state.
+   */
+  private _sendAttemptUpdate(state: NodeExecutionState): void {
+    if (!state.attemptHistory || state.attemptHistory.length === 0) return;
+    this._panel.webview.postMessage({
+      type: 'attemptUpdate',
+      attempts: state.attemptHistory.map(a => ({
+        attemptNumber: a.attemptNumber,
+        status: a.status,
+        triggerType: a.triggerType,
+        startedAt: a.startedAt,
+        endedAt: a.endedAt,
+        error: a.error,
+        failedPhase: a.failedPhase,
+      })),
+    });
+  }
+
+  /**
+   * Push AI usage metrics to the webview.
+   *
+   * @param state - The current node execution state.
+   */
+  private _sendAiUsageUpdate(state: NodeExecutionState): void {
+    const metrics = getNodeMetrics(state);
+    if (!metrics) return;
+    this._panel.webview.postMessage({
+      type: 'aiUsageUpdate',
+      premiumRequests: metrics.premiumRequests,
+      apiTimeSeconds: metrics.apiTimeSeconds,
+      sessionTimeSeconds: metrics.sessionTimeSeconds,
+      modelBreakdown: metrics.modelBreakdown,
+    });
+  }
+
+  /**
+   * Push work summary data to the webview.
+   *
+   * @param state - The current node execution state.
+   */
+  private _sendWorkSummary(state: NodeExecutionState): void {
+    if (!state.workSummary) return;
+    const ws = state.workSummary;
+    this._panel.webview.postMessage({
+      type: 'workSummary',
+      totalCommits: ws.commits || 0,
+      filesAdded: ws.filesAdded || 0,
+      filesModified: ws.filesModified || 0,
+      filesDeleted: ws.filesDeleted || 0,
+    });
+  }
+
+  /**
+   * Push config update to the webview for live spec changes.
+   *
+   * @param node - The job node definition.
+   * @param state - The current node execution state.
+   */
+  private _sendConfigUpdate(node: JobNode, state: NodeExecutionState): void {
+    this._panel.webview.postMessage({
+      type: 'configUpdate',
+      data: {
+        work: node.work ? formatWorkSpecHtml(node.work, escapeHtml) : undefined,
+        prechecks: undefined,
+        postchecks: undefined,
+        currentPhase: state.lastAttempt?.phase,
+      },
+    });
+  }
+  
   /** Re-render the panel HTML with current node state. */
   private _update() {
     const plan = this._planRunner.get(this._planId);
@@ -786,12 +859,14 @@ export class NodeDetailPanel {
   ${processTreeSectionHtml({ status: state.status })}
   
   ${nodeMetricsHtml}
+  <div id="aiUsageStatsContainer" style="display:none;"></div>
   
   ${configSectionHtml({
     task: node.task,
     workHtml: node.work ? formatWorkSpecHtml(node.work, escapeHtml) : undefined,
     instructions: node.instructions,
   })}
+  <div id="configDisplayContainer"></div>
   
   ${logViewerSectionHtml({
     phaseStatus,
@@ -800,10 +875,12 @@ export class NodeDetailPanel {
   })}
   
   ${workSummaryHtml}
+  <div id="workSummaryContainer" style="display:none;"></div>
   
   ${dependenciesSectionHtml(dependencies)}
   
   ${attemptHistorySection}
+  <div class="attempt-history-container"></div>
   
   ${gitInfoSectionHtml({
     worktreePath: state.worktreePath,
