@@ -170,7 +170,8 @@ export class JobExecutionEngine {
           plan.repoPath,
           worktreePath,
           baseCommitish,
-          s => this.log.debug(s)
+          s => this.log.debug(s),
+          plan.spec.additionalSymlinkDirs
         );
       } catch (wtError: any) {
         // Worktree creation is part of FI phase - log and set correct phase

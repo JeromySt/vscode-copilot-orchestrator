@@ -71,6 +71,7 @@ export interface CreatePlanInput {
   targetBranch?: string;
   maxParallel?: number;
   cleanUpSuccessfulWork?: boolean;
+  additionalSymlinkDirs?: string[];
   jobs: JobInput[];
   groups?: GroupInput[];
 }
@@ -204,6 +205,12 @@ export const createPlanSchema = {
     targetBranch: { type: 'string', maxLength: 200 },
     maxParallel: { type: 'number', minimum: 1, maximum: 32 },
     cleanUpSuccessfulWork: { type: 'boolean' },
+    additionalSymlinkDirs: {
+      type: 'array',
+      items: { type: 'string', maxLength: 200 },
+      maxItems: 20,
+      description: 'Additional directories to symlink from the main repo into worktrees (e.g. .venv, vendor). Merged with built-in list (node_modules).'
+    },
     jobs: {
       type: 'array',
       items: jobSchema,

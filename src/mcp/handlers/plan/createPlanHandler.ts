@@ -26,6 +26,9 @@ import {
   resolveTargetBranch,
 } from '../utils';
 import { validateAgentModels } from '../../validation';
+import * as path from 'path';
+import * as fs from 'fs';
+import { execAsync } from '../../../git/core/executor';
 
 // ============================================================================
 // GROUP FLATTENING
@@ -247,6 +250,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
     targetBranch: args.targetBranch,
     maxParallel: args.maxParallel,
     cleanUpSuccessfulWork: args.cleanUpSuccessfulWork,
+    additionalSymlinkDirs: args.additionalSymlinkDirs,
     startPaused: args.startPaused,
     jobs: [...rootJobs, ...groupJobs],
     // Note: groups are flattened into jobs, not stored separately
@@ -286,6 +290,65 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
  * }
  * ```
  */
+/**
+ * Validate additionalSymlinkDirs: each must be a relative path, exist
+ * in the workspace, and be listed in .gitignore.
+ */
+async function validateAdditionalSymlinkDirs(
+  dirs: string[] | undefined,
+  workspacePath: string,
+  toolName: string
+): Promise<{ valid: boolean; error?: string }> {
+  if (!dirs || dirs.length === 0) return { valid: true };
+
+  const errors: string[] = [];
+
+  for (const dir of dirs) {
+    // Security: reject absolute paths and path traversal
+    if (path.isAbsolute(dir)) {
+      errors.push(`'${dir}' must be a relative path, not absolute`);
+      continue;
+    }
+    if (dir.includes('..')) {
+      errors.push(`'${dir}' must not contain '..' (path traversal)`);
+      continue;
+    }
+    // Reject if it targets critical directories
+    if (dir === '.git' || dir.startsWith('.git/') || dir.startsWith('.git\\')) {
+      errors.push(`'${dir}' is a protected directory`);
+      continue;
+    }
+
+    const fullPath = path.join(workspacePath, dir);
+
+    // Check directory exists
+    try {
+      const stats = await fs.promises.stat(fullPath);
+      if (!stats.isDirectory()) {
+        errors.push(`'${dir}' exists but is not a directory`);
+        continue;
+      }
+    } catch {
+      errors.push(`'${dir}' does not exist in the workspace`);
+      continue;
+    }
+
+    // Check that git considers it ignored
+    const result = await execAsync(['check-ignore', '-q', dir], { cwd: workspacePath });
+    if (!result.success) {
+      errors.push(`'${dir}' is not in .gitignore — only gitignored directories may be symlinked into worktrees`);
+    }
+  }
+
+  if (errors.length > 0) {
+    return {
+      valid: false,
+      error: `[${toolName}] additionalSymlinkDirs validation failed:\n${errors.map(e => `  - ${e}`).join('\n')}`,
+    };
+  }
+  return { valid: true };
+}
+
 export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   // Validate input
   const validation = validatePlanInput(args);
@@ -309,6 +372,16 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
   const modelValidation = await validateAgentModels(args, 'create_copilot_plan');
   if (!modelValidation.valid) {
     return { success: false, error: modelValidation.error };
+  }
+  
+  // Validate additionalSymlinkDirs: must exist in workspace and be gitignored
+  if (args.additionalSymlinkDirs?.length && ctx.workspacePath) {
+    const symlinkValidation = await validateAdditionalSymlinkDirs(
+      args.additionalSymlinkDirs, ctx.workspacePath, 'create_copilot_plan'
+    );
+    if (!symlinkValidation.valid) {
+      return { success: false, error: symlinkValidation.error };
+    }
   }
   
   try {
@@ -405,6 +478,16 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
   const modelValidation = await validateAgentModels(args, 'create_copilot_job');
   if (!modelValidation.valid) {
     return { success: false, error: modelValidation.error };
+  }
+  
+  // Validate additionalSymlinkDirs: must exist in workspace and be gitignored
+  if (args.additionalSymlinkDirs?.length && ctx.workspacePath) {
+    const symlinkValidation = await validateAdditionalSymlinkDirs(
+      args.additionalSymlinkDirs, ctx.workspacePath, 'create_copilot_job'
+    );
+    if (!symlinkValidation.valid) {
+      return { success: false, error: symlinkValidation.error };
+    }
   }
   
   try {

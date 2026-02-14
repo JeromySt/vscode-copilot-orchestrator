@@ -162,6 +162,11 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
             type: 'boolean', 
             description: 'Clean up worktrees after successful merges (default: true)' 
           },
+          additionalSymlinkDirs: {
+            type: 'array',
+            description: "Additional directories to symlink from the main repo into worktrees (e.g. '.venv', 'vendor'). Merged with built-in list (node_modules). Must be .gitignored, read-only directories.",
+            items: { type: 'string' }
+          },
           startPaused: {
             type: 'boolean',
             description: 'Create the plan in paused state for review before execution (default: true). Set to false to start immediately.'

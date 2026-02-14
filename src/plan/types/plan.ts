@@ -39,6 +39,11 @@ export interface PlanSpec {
   /** Whether to create the plan in a paused state (default: true for plans, false for single jobs) */
   startPaused?: boolean;
   
+  /** Additional directories to symlink from the main repo into worktrees.
+   *  Merged with the built-in list (node_modules). Must be .gitignored,
+   *  read-only directories (e.g. '.venv', 'vendor', '.gradle'). */
+  additionalSymlinkDirs?: string[];
+  
   /** Job nodes at the top level of this Plan */
   jobs: JobNodeSpec[];
   

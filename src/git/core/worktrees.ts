@@ -261,7 +261,8 @@ export async function createDetachedWithTiming(
   repoPath: string,
   worktreePath: string,
   commitish: string,
-  log?: GitLogger
+  log?: GitLogger,
+  additionalSymlinkDirs?: string[]
 ): Promise<CreateTiming & { baseCommit: string }> {
   // Acquire mutex to prevent race condition with parallel worktree operations
   const releaseMutex = await acquireRepoMutex(repoPath);
@@ -294,7 +295,7 @@ export async function createDetachedWithTiming(
     const submoduleMs = await setupSubmoduleSymlinks(repoPath, worktreePath, log);
     
     // Symlink shared directories (node_modules, etc.) for tool availability
-    await setupSharedDirectorySymlinks(repoPath, worktreePath, log);
+    await setupSharedDirectorySymlinks(repoPath, worktreePath, log, additionalSymlinkDirs);
     
     const totalMs = Date.now() - totalStart;
     return { worktreeMs, submoduleMs, totalMs, baseCommit };
@@ -319,7 +320,8 @@ export async function createOrReuseDetached(
   repoPath: string,
   worktreePath: string,
   commitish: string,
-  log?: GitLogger
+  log?: GitLogger,
+  additionalSymlinkDirs?: string[]
 ): Promise<CreateTiming & { baseCommit: string; reused: boolean }> {
   // Check if worktree already exists and is valid
   if (await isValid(worktreePath)) {
@@ -339,7 +341,7 @@ export async function createOrReuseDetached(
   }
   
   // Create new worktree
-  const result = await createDetachedWithTiming(repoPath, worktreePath, commitish, log);
+  const result = await createDetachedWithTiming(repoPath, worktreePath, commitish, log, additionalSymlinkDirs);
   return { ...result, reused: false };
 }
 
@@ -574,9 +576,14 @@ const SHARED_DIRECTORIES = [
 async function setupSharedDirectorySymlinks(
   repoPath: string,
   worktreePath: string,
-  log?: GitLogger
+  log?: GitLogger,
+  additionalDirs?: string[]
 ): Promise<void> {
-  for (const dirName of SHARED_DIRECTORIES) {
+  const dirs = [...SHARED_DIRECTORIES, ...(additionalDirs || [])];
+  // Deduplicate
+  const uniqueDirs = [...new Set(dirs)];
+  
+  for (const dirName of uniqueDirs) {
     const sourceDir = path.join(repoPath, dirName);
     const destDir = path.join(worktreePath, dirName);
 
