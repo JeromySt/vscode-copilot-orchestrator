@@ -563,6 +563,11 @@ export class JobExecutionEngine {
                 autoHealSucceeded = true;
                 if (retryResult.completedCommit) {
                   nodeState.completedCommit = retryResult.completedCommit;
+                } else if (!nodeState.completedCommit && nodeState.baseCommit) {
+                  // CRITICAL: If auto-retry produced no new commit (e.g., expects_no_changes),
+                  // fall back to baseCommit which contains all upstream work from dependencies.
+                  // Without this, leaf nodes lose all upstream changes during RI merge.
+                  nodeState.completedCommit = nodeState.baseCommit;
                 }
                 if (retryResult.workSummary) {
                   nodeState.workSummary = retryResult.workSummary;
@@ -775,6 +780,11 @@ export class JobExecutionEngine {
               autoHealSucceeded = true;
               if (healResult.completedCommit) {
                 nodeState.completedCommit = healResult.completedCommit;
+              } else if (!nodeState.completedCommit && nodeState.baseCommit) {
+                // CRITICAL: If auto-heal produced no new commit (e.g., expects_no_changes),
+                // fall back to baseCommit which contains all upstream work from dependencies.
+                // Without this, leaf nodes lose all upstream changes during RI merge.
+                nodeState.completedCommit = nodeState.baseCommit;
               }
               if (healResult.workSummary) {
                 nodeState.workSummary = healResult.workSummary;
@@ -901,9 +911,37 @@ export class JobExecutionEngine {
         this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION MERGE END ==========', nodeState.attempts);
         
         this.log.info(`Merge result: ${mergeSuccess ? 'success' : 'failed'}`, { mergedToTarget: nodeState.mergedToTarget });
-      } else if (isLeaf && plan.targetBranch && !nodeState.completedCommit) {
-        // Leaf node with no commit at all (no baseCommit either) - nothing to merge
-        this.log.debug(`Leaf node ${node.name} has no commit to merge to ${plan.targetBranch} - marking as merged`);
+      } else if (isLeaf && plan.targetBranch && !nodeState.completedCommit && nodeState.baseCommit) {
+        // CRITICAL FIX: Leaf node has no own commit but HAS upstream work via baseCommit.
+        // This happens when a validation/expects_no_changes leaf follows nodes that did real work.
+        // We MUST merge baseCommit (which contains all upstream work) to target.
+        this.log.info(`Leaf node ${node.name} has no own commit but baseCommit ${nodeState.baseCommit.slice(0, 8)} contains upstream work — merging baseCommit to ${plan.targetBranch}`);
+        nodeState.completedCommit = nodeState.baseCommit;
+        // Now perform the actual merge with the corrected completedCommit
+        try {
+          const mergeSuccess = await this.withRiMergeLock(() =>
+            this.mergeLeafToTarget(plan, node, nodeState.completedCommit!, nodeState.attempts)
+          );
+          nodeState.mergedToTarget = mergeSuccess;
+          if (mergeSuccess) {
+            this.execLog(plan.id, node.id, 'merge-ri', 'info', `Merged upstream work (baseCommit) to ${plan.targetBranch}`, nodeState.attempts);
+            if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+            nodeState.stepStatuses['merge-ri'] = 'success';
+          } else {
+            riMergeFailed = true;
+            if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+            nodeState.stepStatuses['merge-ri'] = 'failed';
+            this.execLog(plan.id, node.id, 'merge-ri', 'error', 'RI merge of upstream work FAILED', nodeState.attempts);
+          }
+        } catch (mergeError: any) {
+          riMergeFailed = true;
+          if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+          nodeState.stepStatuses['merge-ri'] = 'failed';
+          this.execLog(plan.id, node.id, 'merge-ri', 'error', `RI merge error: ${mergeError.message}`, nodeState.attempts);
+        }
+      } else if (isLeaf && plan.targetBranch && !nodeState.completedCommit && !nodeState.baseCommit) {
+        // Truly nothing to merge — root validation node with no work anywhere
+        this.log.debug(`Leaf node ${node.name} has no commit and no baseCommit — nothing to merge`);
         this.execLog(plan.id, node.id, 'merge-ri', 'info', '========== REVERSE INTEGRATION ==========', nodeState.attempts);
         this.execLog(plan.id, node.id, 'merge-ri', 'info', 'No commit to merge (validation-only root node)', nodeState.attempts);
         this.execLog(plan.id, node.id, 'merge-ri', 'info', '==========================================', nodeState.attempts);
