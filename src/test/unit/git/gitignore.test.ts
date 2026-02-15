@@ -55,7 +55,7 @@ suite('ensureGitignoreEntries', () => {
   test('returns false if entries already exist', async () => {
     await fs.promises.writeFile(
       path.join(tempDir, '.gitignore'),
-      'node_modules\n.worktrees\n.orchestrator\n'
+      'node_modules\n.worktrees/\n.orchestrator/\n.github/instructions/orchestrator-*.instructions.md\n'
     );
     
     const result = await ensureGitignoreEntries(tempDir);
@@ -66,7 +66,7 @@ suite('ensureGitignoreEntries', () => {
   test('handles partial existing entries', async () => {
     await fs.promises.writeFile(
       path.join(tempDir, '.gitignore'),
-      '.worktrees\n'
+      '.worktrees/\n'
     );
     
     const result = await ensureGitignoreEntries(tempDir);
@@ -75,7 +75,7 @@ suite('ensureGitignoreEntries', () => {
     const content = await fs.promises.readFile(path.join(tempDir, '.gitignore'), 'utf8');
     assert.ok(content.includes('.orchestrator'), 'Should add .orchestrator entry');
     // Should not duplicate .worktrees
-    const worktreesMatches = content.match(/\.worktrees/g) || [];
+    const worktreesMatches = content.match(/\.worktrees\//g) || [];
     assert.strictEqual(worktreesMatches.length, 1, 'Should not duplicate .worktrees entry');
   });
   
@@ -169,7 +169,7 @@ suite('ensureGitignoreEntries', () => {
     const content = await fs.promises.readFile(path.join(tempDir, '.gitignore'), 'utf8');
     // Comment should be preserved and actual entry should be added
     assert.ok(content.includes('# .worktrees is for'), 'Should preserve comment');
-    assert.ok(content.match(/^\.worktrees$/m), 'Should add actual .worktrees entry');
+    assert.ok(content.match(/^\.worktrees\/$/m), 'Should add actual .worktrees entry');
   });
   
   test('handles empty lines correctly', async () => {
