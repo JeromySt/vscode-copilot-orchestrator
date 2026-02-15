@@ -31,6 +31,7 @@ function makeMockPlanRunner(overrides?: Record<string, any>): any {
     getNodeFailureContext: sinon.stub().returns({ error: 'not found' }),
     getEffectiveEndedAt: sinon.stub().returns(undefined),
     forceFailNode: sinon.stub().resolves(),
+    savePlan: sinon.stub(),
     ...overrides,
   };
 }
