@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @fileoverview Unit tests for MergeFiPhaseExecutor
  */
 
@@ -133,6 +133,7 @@ function mockGitOperations(): IGitOperations {
       isIgnored: sinon.stub().resolves(false),
       isOrchestratorGitIgnoreConfigured: sinon.stub().resolves(true),
       ensureOrchestratorGitIgnore: sinon.stub().resolves(true),
+    isDiffOnlyOrchestratorChanges: sinon.stub().returns(true),
     },
   };
 }
@@ -210,7 +211,7 @@ suite('MergeFiPhaseExecutor', () => {
 
     assert.strictEqual(result.success, true);
     assert.ok((context.logInfo as sinon.SinonStub).calledWith('========== FORWARD INTEGRATION MERGE START =========='));
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith('  ✓ Merged successfully'));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('  âœ“ Merged successfully'));
     assert.ok((context.logInfo as sinon.SinonStub).calledWith('========== FORWARD INTEGRATION MERGE END =========='));
 
     // Check that git.merge.merge was called correctly
@@ -259,9 +260,9 @@ suite('MergeFiPhaseExecutor', () => {
     const result = await executor.execute(context);
 
     assert.strictEqual(result.success, true);
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith('  ⚠ Merge conflict detected'));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('  âš  Merge conflict detected'));
     assert.ok((context.logInfo as sinon.SinonStub).calledWith('    Conflicts: file1.txt, file2.txt'));
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith('  ✓ Conflict resolved by Copilot CLI'));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('  âœ“ Conflict resolved by Copilot CLI'));
     
     // Check that metrics are returned
     assert.ok(result.metrics);
@@ -299,7 +300,7 @@ suite('MergeFiPhaseExecutor', () => {
 
     assert.strictEqual(result.success, false);
     assert.ok(result.error?.includes('Failed to resolve merge conflict for dependency Failed Node'));
-    assert.ok((context.logError as sinon.SinonStub).calledWith('  ✗ Copilot CLI failed to resolve conflict'));
+    assert.ok((context.logError as sinon.SinonStub).calledWith('  âœ— Copilot CLI failed to resolve conflict'));
     
     // Check that merge abort was called
     assert.ok((git.merge.abort as sinon.SinonStub).calledOnce);
@@ -326,7 +327,7 @@ suite('MergeFiPhaseExecutor', () => {
 
     assert.strictEqual(result.success, false);
     assert.ok(result.error?.includes('Merge failed for dependency Error Node'));
-    assert.ok((context.logError as sinon.SinonStub).calledWith('  ✗ Merge failed: Merge failed for unknown reason'));
+    assert.ok((context.logError as sinon.SinonStub).calledWith('  âœ— Merge failed: Merge failed for unknown reason'));
   });
 
   test('merge exception is caught and returned as error', async () => {
@@ -346,7 +347,7 @@ suite('MergeFiPhaseExecutor', () => {
 
     assert.strictEqual(result.success, false);
     assert.ok(result.error?.includes('Merge error for dependency Exception Node'));
-    assert.ok((context.logError as sinon.SinonStub).calledWith('  ✗ Merge error: Git command failed'));
+    assert.ok((context.logError as sinon.SinonStub).calledWith('  âœ— Merge error: Git command failed'));
   });
 
   test('multiple dependency commits are processed in order', async () => {

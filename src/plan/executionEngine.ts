@@ -1159,25 +1159,19 @@ export class JobExecutionEngine {
 
   /**
    * Check if the working tree .gitignore diff contains ONLY orchestrator-related changes.
-   * Returns true only if all added/modified lines are orchestrator patterns.
+   * Delegates to IGitGitignore.isDiffOnlyOrchestratorChanges (single source of truth).
    */
   private async isGitignoreOnlyOrchestratorChanges(repoPath: string): Promise<boolean> {
     try {
-      // Get the diff of .gitignore (unstaged changes)
       const result = await this.git.repository.getFileDiff(repoPath, '.gitignore');
-      
       if (!result || !result.trim()) {
-        // No unstaged diff - check if staged
         const stagedResult = await this.git.repository.getStagedFileDiff(repoPath, '.gitignore');
-        if (!stagedResult || !stagedResult.trim()) {
-          return true; // No changes at all
-        }
-        return this.diffContainsOnlyOrchestratorPatterns(stagedResult);
+        if (!stagedResult || !stagedResult.trim()) return true;
+        return this.git.gitignore.isDiffOnlyOrchestratorChanges(stagedResult);
       }
-      
-      return this.diffContainsOnlyOrchestratorPatterns(result);
+      return this.git.gitignore.isDiffOnlyOrchestratorChanges(result);
     } catch {
-      return false; // If we can't check, assume it has user changes
+      return false;
     }
   }
   
@@ -1186,65 +1180,14 @@ export class JobExecutionEngine {
    */
   private async isStashOnlyOrchestratorGitignore(repoPath: string): Promise<boolean> {
     try {
-      // List files in stash
       const files = await this.git.repository.stashShowFiles(repoPath);
-      if (files.length === 0) {
-        return false;
-      }
-      
-      if (files.length !== 1 || files[0] !== '.gitignore') {
-        return false; // Stash has files other than .gitignore
-      }
-      
-      // Check the stash diff for .gitignore
+      if (files.length !== 1 || files[0] !== '.gitignore') return false;
       const diffResult = await this.git.repository.stashShowPatch(repoPath);
-      if (!diffResult) {
-        return false;
-      }
-      
-      return this.diffContainsOnlyOrchestratorPatterns(diffResult);
+      if (!diffResult) return false;
+      return this.git.gitignore.isDiffOnlyOrchestratorChanges(diffResult);
     } catch {
-      return false; // If we can't check, assume it has user changes
+      return false;
     }
-  }
-  
-  /**
-   * Check if a diff output contains only orchestrator-related patterns.
-   * Orchestrator patterns: .orchestrator/, # Copilot Orchestrator
-   */
-  private diffContainsOnlyOrchestratorPatterns(diff: string): boolean {
-    const lines = diff.split(/\r?\n/);
-    
-    // Patterns that are orchestrator-related
-    const orchestratorPatterns = [
-      /^[+-]\.orchestrator\/?$/,           // .orchestrator or .orchestrator/
-      /^[+-]\/?\.orchestrator\/?$/,        // /.orchestrator or /.orchestrator/  
-      /^[+-]#\s*[Cc]opilot [Oo]rchestrator/,  // # Copilot Orchestrator comment
-      /^[+-]\s*$/,                          // Empty lines (often added with entries)
-    ];
-    
-    for (const line of lines) {
-      // Skip diff metadata lines
-      if (line.startsWith('diff ') || line.startsWith('index ') || 
-          line.startsWith('--- ') || line.startsWith('+++ ') ||
-          line.startsWith('@@') || line.startsWith('\\')) {
-        continue;
-      }
-      
-      // Skip context lines (no + or -)
-      if (!line.startsWith('+') && !line.startsWith('-')) {
-        continue;
-      }
-      
-      // Check if this added/removed line is an orchestrator pattern
-      const isOrchestratorLine = orchestratorPatterns.some(pattern => pattern.test(line));
-      if (!isOrchestratorLine) {
-        this.log.debug(`Non-orchestrator .gitignore change detected: ${line}`);
-        return false;
-      }
-    }
-    
-    return true;
   }
 
   /**

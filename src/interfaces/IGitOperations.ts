@@ -125,6 +125,8 @@ export interface IGitGitignore {
   isIgnored(repoPath: string, relativePath: string): Promise<boolean>;
   isOrchestratorGitIgnoreConfigured(workspaceRoot: string): Promise<boolean>;
   ensureOrchestratorGitIgnore(workspaceRoot: string): Promise<boolean>;
+  /** Check if a unified diff contains only orchestrator-managed .gitignore changes. */
+  isDiffOnlyOrchestratorChanges(diff: string): boolean;
 }
 
 /**

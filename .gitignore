@@ -44,17 +44,10 @@ yarn-error.log*
 # TypeScript incremental compilation
 *.tsbuildinfo
 
-# Optional: local config overrides (uncomment if needed)
-# .orchestrator/
 
 # Copilot Orchestrator
 .orchestrator/
 .worktrees/
-.worktrees
-.orchestrator
 
-# Copilot CLI session state
-.copilot-cli/
-
-# Auto-generated healing instructions
-.github/instructions/*.instructions.md
+# Auto-generated orchestrator instruction files (per-job UUID patterns)
+.github/instructions/orchestrator-*.instructions.md

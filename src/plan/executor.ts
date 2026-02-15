@@ -82,7 +82,7 @@ export class DefaultJobExecutor implements JobExecutor {
   private getCopilotConfigDir(worktreePath: string): string {
     // Store Copilot CLI config inside the worktree so session state is
     // isolated per node and cleaned up when the worktree is removed.
-    const configDir = path.join(worktreePath, '.copilot-cli');
+    const configDir = path.join(worktreePath, '.orchestrator', '.copilot-cli');
     if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
     return configDir;
   }

@@ -320,6 +320,10 @@ class DefaultGitGitignore implements IGitGitignore {
   async ensureOrchestratorGitIgnore(workspaceRoot: string): Promise<boolean> {
     return gitignore.ensureOrchestratorGitIgnore(workspaceRoot);
   }
+
+  isDiffOnlyOrchestratorChanges(diff: string): boolean {
+    return gitignore.isDiffOnlyOrchestratorChanges(diff);
+  }
 }
 
 /**

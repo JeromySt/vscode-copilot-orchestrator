@@ -10,6 +10,36 @@ import type { GitLogger } from './executor';
 import { execAsync } from './executor';
 
 /**
+ * Canonical list of .gitignore entries managed by the orchestrator.
+ * This is the single source of truth — used by ensureGitignoreEntries,
+ * diff pattern detection, and the .gitignore "only change" check.
+ */
+export const ORCHESTRATOR_GITIGNORE_ENTRIES = [
+  '.worktrees/',
+  '.orchestrator/',
+  '.github/instructions/orchestrator-*.instructions.md',
+] as const;
+
+/**
+ * Regex patterns that match orchestrator-managed .gitignore diff lines.
+ * Derived from {@link ORCHESTRATOR_GITIGNORE_ENTRIES} plus comment/whitespace.
+ * Used to detect whether a .gitignore diff contains ONLY orchestrator changes.
+ */
+const ORCHESTRATOR_DIFF_PATTERNS: RegExp[] = [
+  // Entries with/without trailing slash, with/without leading slash
+  /^[+-]\.orchestrator\/?$/,
+  /^[+-]\/?\.orchestrator\/?$/,
+  /^[+-]\.worktrees\/?$/,
+  /^[+-]\/?\.worktrees\/?$/,
+  // Instruction file glob
+  /^[+-]\.github\/instructions\/orchestrator-.*\.instructions\.md$/,
+  // Comment header
+  /^[+-]#\s*[Cc]opilot [Oo]rchestrator/,
+  // Empty lines (often added alongside entries)
+  /^[+-]\s*$/,
+];
+
+/**
  * Ensure .gitignore contains required entries for orchestrator temporary files.
  * 
  * This function is called automatically when:
@@ -29,7 +59,7 @@ import { execAsync } from './executor';
  */
 export async function ensureGitignoreEntries(
   repoPath: string,
-  entries: string[] = ['.worktrees', '.orchestrator'],
+  entries: string[] = [...ORCHESTRATOR_GITIGNORE_ENTRIES],
   logger?: GitLogger
 ): Promise<boolean> {
   const gitignorePath = path.join(repoPath, '.gitignore');
@@ -92,7 +122,7 @@ export async function ensureGitignoreEntries(
  * @returns true if .gitignore was modified, false if already up to date
  */
 export async function ensureOrchestratorGitIgnore(workspaceRoot: string): Promise<boolean> {
-  return ensureGitignoreEntries(workspaceRoot, ['.worktrees/', '.orchestrator/']);
+  return ensureGitignoreEntries(workspaceRoot, [...ORCHESTRATOR_GITIGNORE_ENTRIES]);
 }
 
 /**
@@ -106,7 +136,7 @@ export async function isOrchestratorGitIgnoreConfigured(workspaceRoot: string): 
     const lines = content.split('\n').map(l => l.trim());
     
     // Check if any of the required entry variations are present
-    return ['.worktrees/', '.orchestrator/'].every(entry => 
+    return [...ORCHESTRATOR_GITIGNORE_ENTRIES].every(entry => 
       lines.includes(entry) || lines.includes(entry.replace(/\/$/, ''))
     );
   } catch {
@@ -124,4 +154,34 @@ export async function isOrchestratorGitIgnoreConfigured(workspaceRoot: string): 
 export async function isIgnored(repoPath: string, relativePath: string): Promise<boolean> {
   const result = await execAsync(['check-ignore', '-q', relativePath], { cwd: repoPath });
   return result.success; // exit code 0 = ignored, 1 = not ignored
+}
+
+/**
+ * Check if a unified diff contains only orchestrator-managed .gitignore changes.
+ *
+ * Uses {@link ORCHESTRATOR_DIFF_PATTERNS} (derived from
+ * {@link ORCHESTRATOR_GITIGNORE_ENTRIES}) as the single source of truth.
+ *
+ * @param diff - Unified diff output (from `git diff` or `git stash show -p`)
+ * @returns true if every added/removed line matches an orchestrator pattern
+ */
+export function isDiffOnlyOrchestratorChanges(diff: string): boolean {
+  const lines = diff.split(/\r?\n/);
+
+  for (const line of lines) {
+    // Skip diff metadata
+    if (line.startsWith('diff ') || line.startsWith('index ') ||
+        line.startsWith('--- ') || line.startsWith('+++ ') ||
+        line.startsWith('@@') || line.startsWith('\\')) {
+      continue;
+    }
+    // Skip context lines
+    if (!line.startsWith('+') && !line.startsWith('-')) {
+      continue;
+    }
+    if (!ORCHESTRATOR_DIFF_PATTERNS.some(p => p.test(line))) {
+      return false;
+    }
+  }
+  return true;
 }
