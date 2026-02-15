@@ -1111,17 +1111,23 @@ export class JobExecutionEngine {
           try {
             await this.git.repository.stashPop(repoPath, s => this.log.debug(s));
           } catch (popErr: any) {
-            // Pop failed - check if it's just orchestrator .gitignore conflict
             this.log.warn(`Stash pop failed: ${popErr.message}`);
             
-            // Check stash contents - if only orchestrator .gitignore, drop it
-            const stashOnlyOrchestratorGitignore = await this.isStashOnlyOrchestratorGitignore(repoPath);
-            if (stashOnlyOrchestratorGitignore) {
-              this.log.debug(`Stash contains only orchestrator .gitignore changes - dropping`);
+            // Check if stash is only orchestrator changes (safe to drop)
+            const stashOnlyOrchestrator = await this.isStashOnlyOrchestratorGitignore(repoPath);
+            if (stashOnlyOrchestrator) {
+              this.log.debug(`Stash contains only orchestrator changes - dropping`);
               await this.git.repository.stashDrop(repoPath, undefined, s => this.log.debug(s));
             } else {
-              // Stash has real user changes - leave it for user to resolve
-              this.log.warn(`Stash contains user changes that couldn't be applied. Run 'git stash pop' to recover.`);
+              // Stash has real user changes - attempt to resolve conflicts
+              const conflicts = await this.git.merge.listConflicts(repoPath).catch(() => []);
+              if (conflicts.length > 0) {
+                this.log.info(`Stash pop has ${conflicts.length} conflict(s), leaving for user to resolve`);
+                this.log.warn(`User changes stashed before RI merge could not be auto-restored.`);
+                this.log.warn(`Run 'git checkout --theirs . && git add .' to keep merged state, or 'git stash pop' to retry.`);
+              } else {
+                this.log.warn(`Stash pop failed but no conflicts detected. Run 'git stash pop' to recover.`);
+              }
             }
           }
         } catch (err) {

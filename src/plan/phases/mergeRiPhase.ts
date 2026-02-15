@@ -286,8 +286,47 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
           await this.git.repository.stashPop(repoPath, (s: string) => context.logInfo(s));
           context.logInfo('Restored user\'s stashed changes');
         } catch (stashError: any) {
-          context.logInfo(`Could not auto-restore stash: ${stashError.message}`);
-          context.logInfo('Run `git stash list` and `git stash pop` manually if needed');
+          context.logInfo(`Stash pop failed: ${stashError.message}`);
+          context.logInfo('Attempting AI-assisted resolution of stash conflicts...');
+          
+          // Stash pop leaves conflict markers in the working tree.
+          // Use AI to resolve them, then stage + drop the stash.
+          try {
+            const conflictFiles = await this.git.merge.listConflicts(repoPath).catch(() => []);
+            if (conflictFiles.length > 0) {
+              const stashResult = await resolveMergeConflictWithCopilot(
+                context,
+                repoPath,
+                'stash@{0}',
+                'HEAD',
+                'Resolve stash pop conflicts (restore user\'s local changes after RI merge)',
+                this.copilotRunner,
+                conflictFiles,
+                this.configManager
+              );
+              
+              if (stashResult.success) {
+                // Stage resolved files and drop the stash
+                await this.git.repository.stageAll(repoPath);
+                await this.git.repository.stashDrop(repoPath);
+                context.logInfo('AI resolved stash conflicts successfully');
+              } else {
+                context.logInfo('AI could not resolve stash conflicts. Run `git stash pop` manually.');
+              }
+            } else {
+              // No conflicts but pop still failed — check if it's orchestrator-only
+              const isOrchestratorOnly = await this.isStashOrchestratorOnly(repoPath);
+              if (isOrchestratorOnly) {
+                await this.git.repository.stashDrop(repoPath);
+                context.logInfo('Dropped stash (orchestrator-only changes already in merge)');
+              } else {
+                context.logInfo('Run `git stash list` and `git stash pop` manually if needed');
+              }
+            }
+          } catch (resolveErr: any) {
+            context.logInfo(`Stash resolution failed: ${resolveErr.message}`);
+            context.logInfo('Run `git stash list` and `git stash pop` manually if needed');
+          }
         }
       }
       
@@ -315,6 +354,19 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       }
       
       return { success: false };
+    }
+  }
+  
+  /** Check if stash contains only orchestrator-managed changes (safe to drop). */
+  private async isStashOrchestratorOnly(repoPath: string): Promise<boolean> {
+    try {
+      const files = await this.git.repository.stashShowFiles(repoPath);
+      if (files.length !== 1 || files[0] !== '.gitignore') return false;
+      const diff = await this.git.repository.stashShowPatch(repoPath);
+      if (!diff) return false;
+      return this.git.gitignore.isDiffOnlyOrchestratorChanges(diff);
+    } catch {
+      return false;
     }
   }
 }
