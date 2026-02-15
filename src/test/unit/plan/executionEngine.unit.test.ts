@@ -91,6 +91,47 @@ function createEngineState(storagePath: string, executorOverrides?: Partial<any>
   };
 }
 
+function createMockGitOperations(): any {
+  return {
+    worktrees: {
+      createOrReuseDetached: sinon.stub().resolves({
+        reused: false, baseCommit: 'base123', totalMs: 100,
+      }),
+      removeSafe: sinon.stub().resolves(true),
+    },
+    gitignore: {
+      ensureGitignoreEntries: sinon.stub().resolves(false),
+    },
+    repository: {
+      updateRef: sinon.stub().resolves(),
+      resolveRef: sinon.stub().resolves('target-sha-123'),
+      stageFile: sinon.stub().resolves(),
+      hasChangesBetween: sinon.stub().resolves(true),
+      hasUncommittedChanges: sinon.stub().resolves(false),
+    },
+    merge: {
+      mergeWithoutCheckout: sinon.stub().resolves({ success: true, treeSha: 'tree-sha-123' }),
+      commitTree: sinon.stub().resolves('new-commit-123'),
+    },
+    branches: {
+      getCommit: sinon.stub().resolves('abc123'),
+      currentOrNull: sinon.stub().resolves('current-branch'),
+    },
+  };
+}
+
+function createPassthroughGitOperations(): any {
+  // This creates a git operations object that delegates to the real git module
+  // so that sandbox stubs on the real git module will work
+  return {
+    worktrees: git.worktrees,
+    gitignore: git.gitignore,
+    repository: git.repository,
+    merge: git.merge,
+    branches: git.branches,
+  };
+}
+
 suite('JobExecutionEngine', () => {
   let quiet: { restore: () => void };
   let sandbox: sinon.SinonSandbox;
@@ -113,8 +154,9 @@ suite('JobExecutionEngine', () => {
     const dir = makeTmpDir();
     const state = createEngineState(dir);
     const log = createMockLogger();
-    const nodeManager = new NodeManager(state as any, log, {} as any);
-    const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
+    const mockGit = createMockGitOperations();
+    const nodeManager = new NodeManager(state as any, log, mockGit);
+    const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
     assert.ok(engine);
   });
 
@@ -139,15 +181,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      // Mock git operations
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base123', totalMs: 100,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -178,13 +214,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base123', totalMs: 100,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -205,10 +237,11 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir);
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').rejects(new Error('Cannot create worktree'));
+      const mockGit = createMockGitOperations();
+      // Override the stub to throw an error for this test
+      mockGit.worktrees.createOrReuseDetached = sinon.stub().rejects(new Error('Cannot create worktree'));
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -235,8 +268,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
+      const passthroughGit = createPassthroughGitOperations();
+      const nodeManager = new NodeManager(state as any, log, passthroughGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, passthroughGit);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: true, baseCommit: 'different-base', totalMs: 10,
@@ -271,14 +305,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'dep-commit-hash12345678901234567890', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, mainNode as JobNode);
 
@@ -305,24 +334,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base123', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
-        success: true, treeSha: 'tree-sha-123',
-      } as any);
-      sandbox.stub(git.repository, 'resolveRef').resolves('target-sha-456');
-      sandbox.stub(git.merge, 'commitTree').resolves('new-merge-commit-789');
-      // updateBranchRef uses git.repository.updateRef
-      sandbox.stub(git.branches, 'currentOrNull').resolves('main');
-      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
-      sandbox.stub(git.repository, 'updateRef').resolves();
-      sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(false);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -355,14 +369,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base123', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -394,13 +403,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base123', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -427,13 +432,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base123', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -456,8 +457,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
+      const passthroughGit = createPassthroughGitOperations();
+      const nodeManager = new NodeManager(state as any, log, passthroughGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, passthroughGit);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: true, baseCommit: 'base123', totalMs: 10,
@@ -496,21 +498,16 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base-commit-abc', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, node);
 
       const nodeState = plan.nodeStates.get('node-1')!;
       assert.strictEqual(nodeState.status, 'succeeded');
       // completedCommit should be set to baseCommit as fallback
-      assert.strictEqual(nodeState.completedCommit, 'base-commit-abc');
+      assert.strictEqual(nodeState.completedCommit, 'base123');
     });
 
     test('multi-dependency FI merge', async () => {
@@ -538,16 +535,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'dep1-commit-abcdef1234567890123456', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      // Mock the merge for second dependency
-      sandbox.stub(git.merge, 'merge').resolves({ success: true } as any);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, mainNode as JobNode);
 
@@ -570,14 +560,13 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
+      const mockGit = createMockGitOperations();
+      // Override for this test to return slow timing
+      mockGit.worktrees.createOrReuseDetached = sinon.stub().resolves({
         reused: false, baseCommit: 'base', totalMs: 5000,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      });
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -600,21 +589,17 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 100,
-      } as any);
-      const gitignoreStub = sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(true);
-      const stageFileStub = sandbox.stub(git.repository, 'stageFile').resolves();
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      const mockGit = createMockGitOperations();
+      // Override gitignore to return true (modified)
+      mockGit.gitignore.ensureGitignoreEntries = sinon.stub().resolves(true);
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, node);
 
-      assert.ok(gitignoreStub.calledOnce);
+      assert.ok(mockGit.gitignore.ensureGitignoreEntries.calledOnce);
       // git add .gitignore should have been called via stageFile
-      assert.ok(stageFileStub.calledOnce);
+      assert.ok(mockGit.repository.stageFile.calledOnce);
     });
 
     test('RI merge failure marks node as failed with preserved worktree', async () => {
@@ -632,8 +617,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base', totalMs: 50,
@@ -680,8 +666,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base', totalMs: 50,
@@ -727,8 +714,9 @@ suite('JobExecutionEngine', () => {
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-      const nodeManager = new NodeManager(state as any, log, {} as any);
-      const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: false, baseCommit: 'base', totalMs: 50,
