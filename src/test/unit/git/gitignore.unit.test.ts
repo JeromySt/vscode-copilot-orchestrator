@@ -43,7 +43,7 @@ suite('.gitignore Handling', () => {
     
     test('should not modify .gitignore if entries already exist', async () => {
       readFileStub = sinon.stub(fs.promises, 'readFile').resolves(
-        'node_modules/\n.worktrees/\n.orchestrator/\n'
+        'node_modules/\n.worktrees/\n.orchestrator/\n.github/instructions/orchestrator-*.instructions.md\n'
       );
       writeFileStub = sinon.stub(fs.promises, 'writeFile').resolves();
       
@@ -88,7 +88,7 @@ suite('.gitignore Handling', () => {
 
     test('should return true if all entries exist', async () => {
       readFileStub = sinon.stub(fs.promises, 'readFile').resolves(
-        '.worktrees/\n.orchestrator/\n'
+        '.worktrees/\n.orchestrator/\n.github/instructions/orchestrator-*.instructions.md\n'
       );
       
       const result = await git.gitignore.isOrchestratorGitIgnoreConfigured(mockWorkspaceRoot);

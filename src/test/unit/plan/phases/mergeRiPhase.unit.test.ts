@@ -248,7 +248,7 @@ suite('MergeRiPhaseExecutor', () => {
     const result = await executor.execute(context);
 
     assert.strictEqual(result.success, true);
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith('âœ“ No conflicts detected'));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('✓ No conflicts detected'));
     assert.ok((context.logInfo as sinon.SinonStub).calledWith('========== REVERSE INTEGRATION MERGE END =========='));
   });
 
@@ -277,7 +277,7 @@ suite('MergeRiPhaseExecutor', () => {
 
     assert.strictEqual(result.success, true);
     assert.ok((context.logInfo as sinon.SinonStub).calledWith('Pushing main to origin...'));
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith('âœ“ Pushed to origin'));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('✓ Pushed to origin'));
     
     // Verify push was called
     assert.ok((git.repository.push as sinon.SinonStub).calledOnce);
@@ -314,7 +314,7 @@ suite('MergeRiPhaseExecutor', () => {
     const result = await executor.execute(context);
 
     assert.strictEqual(result.success, true);
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith('âš  Merge has conflicts'));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('⚠ Merge has conflicts'));
     assert.ok((context.logInfo as sinon.SinonStub).calledWith('  Conflicts: conflict1.txt, conflict2.txt'));
     assert.ok((context.logInfo as sinon.SinonStub).calledWith('  Invoking Copilot CLI to resolve...'));
     
@@ -419,7 +419,7 @@ suite('MergeRiPhaseExecutor', () => {
 
     assert.strictEqual(result.success, false);
     assert.ok(result.error?.includes('Reverse integration merge failed: Git operation failed'));
-    assert.ok((context.logError as sinon.SinonStub).calledWith('âœ— Exception: Git operation failed'));
+    assert.ok((context.logError as sinon.SinonStub).calledWith('✗ Exception: Git operation failed'));
   });
 
   test('updateBranchRef failure with warning', async () => {
