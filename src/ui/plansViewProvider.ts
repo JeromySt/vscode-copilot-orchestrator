@@ -547,12 +547,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       SubscribableControl.call(this, bus, controlId);
       this.element = element;
       this.planId = planId;
-      this._pulseSub = null;
       this.element.dataset.id = planId;
       this.element.classList.add('plan-item');
       this.element.tabIndex = 0;
       
-      // Subscribe to plan state changes
       var self = this;
       this.subscribe(Topics.PLAN_STATE_CHANGE, function(data) {
         if (data && data.id === self.planId) {
@@ -560,7 +558,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         }
       });
       
-      // Add event listeners
       this.element.addEventListener('click', function() {
         vscode.postMessage({ type: 'previewPlan', planId: self.planId });
       });
@@ -569,44 +566,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       });
     }
     
-    // Inherit from SubscribableControl
     PlanListCardControl.prototype = Object.create(SubscribableControl.prototype);
     PlanListCardControl.prototype.constructor = PlanListCardControl;
-    
-    /** Manage this card's own PULSE subscription based on status. */
-    PlanListCardControl.prototype._managePulse = function() {
-      var isActive = this.element.dataset.status === 'running' || this.element.dataset.status === 'pending';
-      var hasStarted = !!this.element.dataset.startedAt;
-      if (isActive && hasStarted && !this._pulseSub) {
-        var self = this;
-        this._pulseSub = this.bus.on(Topics.PULSE, function() {
-          self._tickDuration();
-        });
-      } else if (!isActive && this._pulseSub) {
-        this._pulseSub.unsubscribe();
-        this._pulseSub = null;
-      }
-    };
-    
-    /** Tick this card's duration display. Called by own PULSE subscription. */
-    PlanListCardControl.prototype._tickDuration = function() {
-      var el = this.element;
-      var startedAt = parseInt(el.dataset.startedAt || '0', 10);
-      if (!startedAt) return;
-      var endedAt = parseInt(el.dataset.endedAt || '0', 10);
-      var durEl = el.querySelector('.plan-duration');
-      if (!durEl) {
-        durEl = document.createElement('span');
-        durEl.className = 'plan-duration';
-        var detailsEl = el.querySelector('.plan-details');
-        if (detailsEl) {
-          detailsEl.appendChild(durEl);
-        } else {
-          return;
-        }
-      }
-      durEl.textContent = formatDuration(startedAt, endedAt || 0);
-    };
     
     PlanListCardControl.prototype._initDom = function(data) {
       var progressClass = data.status === 'failed' ? 'failed' : 
@@ -621,7 +582,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
           '<span class="plan-succeeded">✓ ' + data.counts.succeeded + '</span>' +
           '<span class="plan-failed">✗ ' + data.counts.failed + '</span>' +
           '<span class="plan-running">⏳ ' + data.counts.running + '</span>' +
-          (data.startedAt ? '<span class="plan-duration">' + formatDuration(data.startedAt, data.endedAt) + '</span>' : '') +
+          '<span class="plan-duration" data-started="' + (data.startedAt || 0) + '" data-ended="' + (data.endedAt || 0) + '">' + formatDuration(data.startedAt, data.endedAt) + '</span>' +
         '</div>' +
         '<div class="plan-progress">' +
           '<div class="plan-progress-bar ' + progressClass + '" style="width: ' + data.progress + '%"></div>' +
@@ -633,20 +594,14 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       
       this.element.className = 'plan-item ' + data.status;
       this.element.dataset.status = data.status;
-      if (data.startedAt) this.element.dataset.startedAt = String(data.startedAt);
-      if (data.endedAt) this.element.dataset.endedAt = String(data.endedAt);
-      else delete this.element.dataset.endedAt;
       
       if (!this._rendered) {
         this._rendered = true;
         this._initDom(data);
-        this._managePulse();
         this.publishUpdate(data);
         return;
       }
 
-      var progressClass = data.status === 'failed' ? 'failed' : 
-                         data.status === 'succeeded' ? 'succeeded' : '';
       var nameEl = this.element.querySelector('.plan-name-text');
       if (nameEl) nameEl.textContent = data.name;
       var statusEl = this.element.querySelector('.plan-status');
@@ -659,28 +614,17 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (fEl) fEl.textContent = '✗ ' + data.counts.failed;
       var rEl = this.element.querySelector('.plan-running');
       if (rEl) rEl.textContent = '⏳ ' + data.counts.running;
-      // Duration is managed by _tickDuration via PULSE — don't overwrite here.
-      // Just ensure the element exists if startedAt is set.
-      if (data.startedAt && !this.element.querySelector('.plan-duration')) {
-        var durEl = document.createElement('span');
-        durEl.className = 'plan-duration';
-        var detailsEl = this.element.querySelector('.plan-details');
-        if (detailsEl) detailsEl.appendChild(durEl);
+      // Update duration data attributes (but don't set textContent — PULSE does that)
+      var durEl = this.element.querySelector('.plan-duration');
+      if (durEl) {
+        if (data.startedAt) durEl.dataset.started = String(data.startedAt);
+        if (data.endedAt) durEl.dataset.ended = String(data.endedAt);
+        else durEl.dataset.ended = '0';
       }
       var barEl = this.element.querySelector('.plan-progress-bar');
-      if (barEl) { barEl.className = 'plan-progress-bar ' + progressClass; barEl.style.width = data.progress + '%'; }
+      if (barEl) { barEl.className = 'plan-progress-bar ' + (data.status === 'failed' ? 'failed' : data.status === 'succeeded' ? 'succeeded' : ''); barEl.style.width = data.progress + '%'; }
       
-      // Manage own PULSE subscription based on new status
-      this._managePulse();
       this.publishUpdate(data);
-    };
-    
-    PlanListCardControl.prototype.dispose = function() {
-      if (this._pulseSub) {
-        this._pulseSub.unsubscribe();
-        this._pulseSub = null;
-      }
-      SubscribableControl.prototype.dispose.call(this);
     };
     
     function escapeHtml(text) {
@@ -973,6 +917,30 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     // ── Control Initialization ───────────────────────────────────────────
     var planListContainer = new PlanListContainerControl(bus, 'plan-list-container', 'plans');
     var capacityBar = new CapacityBarControl(bus, 'capacity-bar');
+    
+    // ── Global duration ticker ───────────────────────────────────────────
+    // Identical pattern to plan detail panel: one global PULSE handler that
+    // ticks all duration elements. Each .plan-duration stores its own
+    // data-started/data-ended timestamps. Simple, reliable, no subscription management.
+    function tickAllDurations() {
+      var els = document.querySelectorAll('.plan-duration');
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        var started = parseInt(el.dataset.started || '0', 10);
+        if (!started) continue;
+        var ended = parseInt(el.dataset.ended || '0', 10);
+        // Find parent card status
+        var card = el.closest('.plan-item');
+        var status = card ? card.dataset.status : '';
+        if (status === 'running' || status === 'pending') {
+          el.textContent = formatDuration(started, 0);
+        } else if (ended) {
+          el.textContent = formatDuration(started, ended);
+        }
+      }
+    }
+    
+    bus.on(Topics.PULSE, tickAllDurations);
     
     let isInitialLoad = true;
     
