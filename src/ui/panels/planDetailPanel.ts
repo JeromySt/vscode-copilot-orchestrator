@@ -104,15 +104,22 @@ export class planDetailPanel {
         this._update();
       }
     };
+    const onPlanStarted = (plan: any) => {
+      if (plan?.id === this._planId || plan === this._planId) {
+        this._sendIncrementalUpdate();
+      }
+    };
     const onPlanCompleted = (plan: any) => {
       if (plan?.id === this._planId || plan === this._planId) {
         this._update();
       }
     };
     this._planRunner.on('nodeTransition', onNodeTransition);
+    this._planRunner.on('planStarted', onPlanStarted);
     this._planRunner.on('planCompleted', onPlanCompleted);
     this._disposables.push({ dispose: () => {
       this._planRunner.removeListener('nodeTransition', onNodeTransition);
+      this._planRunner.removeListener('planStarted', onPlanStarted);
       this._planRunner.removeListener('planCompleted', onPlanCompleted);
     }});
     
