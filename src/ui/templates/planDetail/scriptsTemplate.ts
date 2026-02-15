@@ -198,13 +198,50 @@ export function renderPlanScripts(data: PlanScriptsData): string {
     // Server renders ALL nodes with ' | 00m 00s' (or actual duration) so
     // Mermaid allocates consistent rect widths. After render, client strips
     // the duration suffix from non-started nodes.
-    
+
+    // Store original rendered text character counts per node group id.
+    // Mermaid sizes node boxes based on the initial text; every subsequent
+    // update must stay within this length to avoid overflow.
+    var nodeTextLengths = {};
+
+    function clampText(text, maxLen) {
+      if (!maxLen || text.length <= maxLen) return text;
+      var pipeIdx = text.lastIndexOf(' | ');
+      if (pipeIdx > 0) {
+        var prefix = text.substring(0, pipeIdx);
+        var suffix = text.substring(pipeIdx);
+        var available = maxLen - suffix.length - 3;
+        if (available > 3) {
+          var iconEnd = 2;
+          return prefix.substring(0, iconEnd) + prefix.substring(iconEnd, iconEnd + available - iconEnd) + '...' + suffix;
+        }
+      }
+      return text.substring(0, maxLen - 3) + '...';
+    }
+
     // Render mermaid with error handling
     (async () => {
       try {
         const element = document.querySelector('.mermaid');
         const { svg } = await mermaid.render('mermaid-graph', mermaidDef);
         element.innerHTML = svg;
+
+        // Capture rendered text lengths for nodes
+        element.querySelectorAll('.node').forEach(function(ng) {
+          var textEl = ng.querySelector('.nodeLabel') || ng.querySelector('span');
+          if (textEl && textEl.textContent) {
+            var gId = ng.getAttribute('id') || '';
+            nodeTextLengths[gId] = textEl.textContent.length;
+          }
+        });
+        // Capture rendered text lengths for cluster/subgraph labels
+        element.querySelectorAll('.cluster').forEach(function(cg) {
+          var textEl = cg.querySelector('.cluster-label .nodeLabel') || cg.querySelector('.cluster-label span') || cg.querySelector('.cluster-label text');
+          if (textEl && textEl.textContent) {
+            var gId = cg.getAttribute('id') || '';
+            nodeTextLengths[gId] = textEl.textContent.length;
+          }
+        });
 
         // Strip duration from non-started nodes (they were sized with a template)
         element.querySelectorAll('.node').forEach(function(ng) {
@@ -563,20 +600,24 @@ export function renderPlanScripts(data: PlanScriptsData): string {
         
         if (!targetGroup || !textEls) continue;
         
+        var gId = targetGroup.getAttribute('id') || '';
+        var maxLen = nodeTextLengths[gId];
         for (const textEl of textEls) {
           if (!textEl.childNodes.length || textEl.children.length > 0) continue;
           
           const text = textEl.textContent || '';
+          var newText;
           const pipeIndex = text.lastIndexOf(' | ');
           if (pipeIndex > 0) {
             // Update existing duration after the pipe
-            textEl.textContent = text.substring(0, pipeIndex) + ' | ' + durationStr;
+            newText = text.substring(0, pipeIndex) + ' | ' + durationStr;
           } else if (text.length > 0) {
             // No pipe yet — node was stripped on initial render, now add duration
-            textEl.textContent = text + ' | ' + durationStr;
+            newText = text + ' | ' + durationStr;
           } else {
             continue;
           }
+          textEl.textContent = maxLen ? clampText(newText, maxLen) : newText;
           break;
         }
       }
@@ -837,7 +878,10 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           var newIcon = nodeIcons[data.status] || '○';
           var currentText = textSpan.textContent || '';
           if (currentText.length > 0 && ['✓', '✗', '▶', '⊘', '○'].includes(currentText[0])) {
-            textSpan.textContent = newIcon + currentText.substring(1);
+            var updatedText = newIcon + currentText.substring(1);
+            var nodeElId = nodeEl.getAttribute('id') || '';
+            var maxLen = nodeTextLengths[nodeElId];
+            textSpan.textContent = maxLen ? clampText(updatedText, maxLen) : updatedText;
           }
         }
       }
@@ -922,7 +966,10 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           if (currentText.length > 0) {
             var firstChar = currentText[0];
             if (['✓', '✗', '▶', '⊘', '○', '📦'].includes(firstChar)) {
-              labelText.textContent = newIcon + currentText.substring(1);
+              var updatedText = newIcon + currentText.substring(1);
+              var clusterGId = cluster.getAttribute('id') || '';
+              var maxLen = nodeTextLengths[clusterGId];
+              labelText.textContent = maxLen ? clampText(updatedText, maxLen) : updatedText;
             }
           }
         }
