@@ -48,25 +48,17 @@ export function retryButtonsHtml(data: ActionButtonsData): string {
 }
 
 /**
- * Render the force-fail section for running nodes.
+ * Render the force-fail button for the sticky header.
  *
- * Only renders when status is 'running'. Allows the user to force-fail
- * a stuck or crashed node so it can be retried.
+ * Always renders the button (hidden by default). Client-side script
+ * toggles visibility based on node status (shown only while running).
  *
  * @param data - Action button input data.
- * @returns HTML fragment string, or empty string if not applicable.
+ * @returns HTML fragment string.
  */
 export function forceFailButtonHtml(data: ActionButtonsData): string {
-  if (data.status !== 'running') return '';
-
-  return `<div class="force-fail-section">
-      <p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 8px;">
-        If the process has crashed or is stuck, you can force fail this node to enable retry.
-      </p>
-      <button class="retry-btn secondary" data-action="force-fail-node" data-plan-id="${data.planId}" data-node-id="${data.nodeId}">
-        ⚠️ Force Fail (Enable Retry)
-      </button>
-    </div>`;
+  const display = data.status === 'running' ? '' : ' style="display:none"';
+  return `<button id="forceFailBtn" class="force-fail-btn" data-action="force-fail-node" data-plan-id="${data.planId}" data-node-id="${data.nodeId}"${display}>Force Fail</button>`;
 }
 
 /**

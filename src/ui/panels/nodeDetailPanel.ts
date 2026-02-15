@@ -886,6 +886,7 @@ export class NodeDetailPanel {
   ${breadcrumbHtml(plan.id, plan.spec.name, node.name)}
   
   ${headerRowHtml(node.name, state.status, state.startedAt, state.endedAt)}
+  ${forceFailButtonHtml(actionData)}
   </div>
   
   ${executionStateHtml({
@@ -904,7 +905,6 @@ export class NodeDetailPanel {
     lastAttemptExitCode: state.lastAttempt?.exitCode,
   })}
   ${retryButtonsHtml(actionData)}
-  ${forceFailButtonHtml(actionData)}
   
   ${nodeMetricsHtml}
   <div id="aiUsageStatsContainer" style="display:none;"></div>
@@ -1195,6 +1195,21 @@ export class NodeDetailPanel {
     body > *:not(.sticky-header) {
       padding-left: 16px;
       padding-right: 16px;
+    }
+    
+    /* Force Fail button in sticky header */
+    .force-fail-btn {
+      padding: 4px 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      margin-top: 8px;
+      background: var(--vscode-inputValidation-errorBackground, rgba(244, 135, 113, 0.2));
+      color: #f48771;
+    }
+    .force-fail-btn:hover {
+      background: rgba(244, 135, 113, 0.4);
     }
     
     /* Header */
