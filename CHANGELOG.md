@@ -5,6 +5,22 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3] - 2026-02-15
+
+### Added
+- **Copilot Agent Instructions**: Repo-wide instructions (`.github/copilot-instructions.md`), path-scoped instruction files for source code, testing, and code review
+- **Agent Skills**: 5 agent skills (`.github/skills/`): `test-writer`, `di-refactor`, `security-hardener`, `auto-heal`, `documentation-writer` — auto-loaded by Copilot CLI based on task relevance
+- **Instruction Enrichment Spec**: Design spec for skill-aware instruction augmentation at plan creation time (`docs/INSTRUCTION_ENRICHMENT.md`)
+- **Gitignore Single Source of Truth**: `ORCHESTRATOR_GITIGNORE_ENTRIES` constant and `isDiffOnlyOrchestratorChanges()` centralized in `git/core/gitignore.ts`, eliminating duplicated pattern lists
+
+### Fixed
+- **`.copilot-cli` directory placement**: Moved Copilot CLI config from `{worktree}/.copilot-cli` to `{worktree}/.orchestrator/.copilot-cli` — prevents CLI session artifacts from appearing as uncommitted changes in worktrees
+- **`.gitignore` diff detection**: Added `.worktrees/` and instruction file glob patterns to orchestrator diff detection, preventing false positives during RI merge stash handling
+- **IGitOperations interface**: Exposed `isDiffOnlyOrchestratorChanges` on `IGitGitignore` interface, routing through DI instead of private method duplication in `executionEngine.ts`
+
+### Changed
+- **CI Optimization**: Push CI triggers only on `main` (was `main, develop, users/**`); PR CI triggers only targeting `main` (was `main, develop`). Eliminates duplicate 6-job matrix runs on feature branch pushes
+
 ## [0.10.0] - 2026-02-15
 
 ### Architecture
