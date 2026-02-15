@@ -206,17 +206,9 @@ export class JobExecutionEngine {
           this.log.warn(`Slow worktree creation for ${node.name} took ${timing.totalMs}ms`);
         }
         
-        // Ensure .gitignore includes orchestrator temp files
-        try {
-          const modified = await this.git.gitignore.ensureGitignoreEntries(worktreePath);
-          if (modified) {
-            this.log.debug(`Updated .gitignore in worktree: ${worktreePath}`);
-            // Stage the gitignore change so it's included in the work commit
-            await this.git.repository.stageFile(worktreePath, '.gitignore');
-          }
-        } catch (err: any) {
-          this.log.warn(`Failed to update .gitignore: ${err.message}`);
-        }
+        // Note: .gitignore management is handled at the repo level (planInitialization.ts),
+        // not per-worktree. Modifying .gitignore here would block FI merges when
+        // dependency commits also touch .gitignore.
       }
       
       // Acknowledge consumption to all dependencies
