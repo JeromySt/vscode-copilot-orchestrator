@@ -427,8 +427,8 @@ export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promi
   
   try {
     const repoPath = ctx.workspacePath;
-    const baseBranch = await resolveBaseBranch(repoPath, args.baseBranch);
-    const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.targetBranch, args.name);
+    const baseBranch = await resolveBaseBranch(repoPath, ctx.git, args.baseBranch);
+    const targetBranch = await resolveTargetBranch(baseBranch, repoPath, ctx.git, args.targetBranch, args.name);
     
     const plan = ctx.PlanRunner.enqueueJob({
       name: args.name,

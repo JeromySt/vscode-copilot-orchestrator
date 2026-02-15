@@ -146,8 +146,8 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
       // Single node → create as a single job plan
       const nodeSpec = validation.specs[0];
       const nodeName = nodeSpec.name || nodeSpec.producerId;
-      const baseBranch = await resolveBaseBranch(repoPath, args.base_branch || nodeSpec.baseBranch);
-      const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.target_branch, nodeName);
+      const baseBranch = await resolveBaseBranch(repoPath, ctx.git, args.base_branch || nodeSpec.baseBranch);
+      const targetBranch = await resolveTargetBranch(baseBranch, repoPath, ctx.git, args.target_branch, nodeName);
 
       const plan = ctx.PlanRunner.enqueueJob({
         name: nodeName,
@@ -175,8 +175,8 @@ export async function handleCreateNode(args: any, ctx: PlanHandlerContext): Prom
     } else {
       // Multiple nodes → create as a plan
       const batchName = `Batch (${validation.specs.length} nodes)`;
-      const baseBranch = await resolveBaseBranch(repoPath, args.base_branch);
-      const targetBranch = await resolveTargetBranch(baseBranch, repoPath, args.target_branch, batchName);
+      const baseBranch = await resolveBaseBranch(repoPath, ctx.git, args.base_branch);
+      const targetBranch = await resolveTargetBranch(baseBranch, repoPath, ctx.git, args.target_branch, batchName);
 
       const spec: PlanSpec = {
         name: batchName,

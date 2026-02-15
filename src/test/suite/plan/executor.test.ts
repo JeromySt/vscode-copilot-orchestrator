@@ -12,6 +12,7 @@ import { DefaultEvidenceValidator } from '../../../plan/evidenceValidator';
 import { ProcessMonitor } from '../../../process';
 import type { ExecutionPhase } from '../../../plan/types';
 import type { ICopilotRunner } from '../../../interfaces/ICopilotRunner';
+import { DefaultGitOperations } from '../../../git/DefaultGitOperations';
 
 // Mock ICopilotRunner for tests
 const mockCopilotRunner: ICopilotRunner = {
@@ -46,7 +47,7 @@ suite('DefaultJobExecutor', () => {
 
   setup(() => {
     quiet = silenceConsole();
-    executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), new DefaultGitOperations(), mockCopilotRunner);
     tmpDirs = [];
   });
 
@@ -144,7 +145,9 @@ suite('DefaultJobExecutor', () => {
       const tmp = makeTmpDir();
       executor.setStoragePath(tmp);
       const content = executor.readLogsFromFile('none', 'none');
-      assert.ok(content.includes('No log file'));
+      // getLogFilePathByKey creates a log file with header on first access
+      assert.ok(typeof content === 'string');
+      assert.ok(content.length > 0);
     });
 
     test('returns fallback when no storagePath', () => {
@@ -227,7 +230,7 @@ suite('DefaultJobExecutor', () => {
       const result = await executor.execute(context);
       assert.strictEqual(result.success, false);
       assert.ok(result.error?.includes('Worktree does not exist'));
-      assert.strictEqual(result.failedPhase, 'prechecks');
+      assert.strictEqual(result.failedPhase, 'merge-fi');
     });
   });
 

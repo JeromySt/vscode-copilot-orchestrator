@@ -33,6 +33,11 @@ function makeTmpDir(): string {
   return dir;
 }
 
+const mockGitOps = {
+  branches: { currentOrNull: async () => 'main', isDefaultBranch: async () => false, exists: async () => false, create: async () => {}, current: async () => 'main' },
+  worktrees: {}, merge: {}, repository: {}, orchestrator: {}, gitignore: { ensureGitignoreEntries: async () => {} },
+};
+
 const HELP_OUTPUT = `Usage: copilot [options]
 
 Options:
@@ -152,7 +157,7 @@ suite('Model Selection Integration', () => {
 
       const tmpDir = makeTmpDir();
       const logger = { log: (_m: string) => {} };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps as any);
 
       // Stub spawn for the Copilot CLI invocation
       spawnStub.callsFake(() => fakeSpawnProc(0, 'Session ID: 12345678-1234-1234-1234-123456789abc'));
@@ -216,7 +221,7 @@ completion_tokens: 1200
       fs.writeFileSync(path.join(logDir, 'copilot-2026-01-15.log'), mockLogContent);
 
       const logger = { log: (_m: string) => {} };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps as any);
 
       // Make spawn return a process that exits immediately
       spawnStub.callsFake(() => fakeSpawnProc(0));
@@ -259,7 +264,7 @@ completion_tokens: 1200
       fs.writeFileSync(path.join(logDir, 'copilot-2026-01-16.log'), mockLogContent);
 
       const logger = { log: (_m: string) => {} };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps as any);
 
       spawnStub.callsFake(() => fakeSpawnProc(0));
 
@@ -406,7 +411,7 @@ completion_tokens: 1200
       const tmpDir = makeTmpDir();
       const messages: string[] = [];
       const logger = { log: (m: string) => messages.push(m) };
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps as any);
 
       // Override spawn for the CLI invocation to return a successful exit
       // First call is model discovery (already stubbed above), subsequent calls are CLI

@@ -339,8 +339,8 @@ suite('PlanPersistence', () => {
     });
 
     test('handles missing index directory gracefully', () => {
-      // Create persistence pointing to a non-existent directory
-      const dir = '/nonexistent/dir';
+      // Create persistence pointing to a non-existent directory under temp
+      const dir = path.join(os.tmpdir(), 'nonexistent-' + Date.now(), 'dir');
       const persistence = new PlanPersistence(dir);
       assert.deepStrictEqual(persistence.listplanIds(), []);
     });

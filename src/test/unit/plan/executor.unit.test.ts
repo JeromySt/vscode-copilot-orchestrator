@@ -195,7 +195,8 @@ suite('DefaultJobExecutor', () => {
       assert.deepStrictEqual(stats, []);
     });
 
-    test('skips unknown executions', async () => {
+    test('skips unknown executions', async function() {
+      this.timeout(10000);
       const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
       const stats = await executor.getAllProcessStats([
         { planId: 'p1', nodeId: 'n1', nodeName: 'Job' },

@@ -39,7 +39,22 @@ suite('PlanRunner External Deletion Handling', () => {
       persistence: new PlanPersistence(plansDir),
       processMonitor: new ProcessMonitor(new DefaultProcessSpawner()),
       stateMachineFactory: (plan: any) => new PlanStateMachine(plan),
-      git: {} as any,
+      git: {
+        branches: {
+          currentOrNull: async () => 'main',
+          isDefaultBranch: async () => false,
+          exists: async () => false,
+          create: async () => {},
+          current: async () => 'main',
+        },
+        gitignore: {
+          ensureGitignoreEntries: async () => {},
+        },
+        worktrees: {},
+        merge: {},
+        repository: {},
+        orchestrator: {},
+      } as any,
     });
   });
   
