@@ -349,7 +349,8 @@ suite('ProcessMonitor', () => {
     test('returns cached snapshot within TTL', async function() {
       this.timeout(20000); // PowerShell snapshot can take time on Windows
       const Monitor = getMonitorClass();
-      const monitor = new Monitor(60000); // very long TTL
+      const { DefaultProcessSpawner } = require('../../../interfaces/IProcessSpawner');
+      const monitor = new Monitor(new DefaultProcessSpawner(), 60000); // very long TTL
 
       // Get first snapshot
       const first = await monitor.getSnapshot();
@@ -373,9 +374,7 @@ suite('ProcessMonitor', () => {
 
     test('getSnapshot returns stale cache on consecutive errors within cooldown', async () => {
       const Monitor = getMonitorClass();
-      const monitor = new Monitor(100); // Short TTL for testing
-      
-      // Mock the platform-specific methods to throw
+      const monitor = new Monitor({ spawn: () => {} } as any, 100); // Short TTL for testing
       const stubWin = sandbox.stub(monitor as any, 'getWindowsProcesses').rejects(new Error('Test error'));
       const stubUnix = sandbox.stub(monitor as any, 'getUnixProcesses').rejects(new Error('Test error'));
       
@@ -401,8 +400,7 @@ suite('ProcessMonitor', () => {
 
     test('getSnapshot logs first 3 errors then suppresses', async () => {
       const Monitor = getMonitorClass();
-      const monitor = new Monitor(100);
-      
+      const monitor = new Monitor({ spawn: () => {} } as any, 100);
       const consoleErrorStub = sandbox.stub(console, 'error');
       const stubWin = sandbox.stub(monitor as any, 'getWindowsProcesses').rejects(new Error('Test error'));
       const stubUnix = sandbox.stub(monitor as any, 'getUnixProcesses').rejects(new Error('Test error'));
@@ -465,11 +463,6 @@ suite('ProcessMonitor', () => {
 
     test('getWindowsProcesses handles PowerShell output correctly', async () => {
       const Monitor = getMonitorClass();
-      const monitor = new Monitor();
-      
-      // Mock child_process.spawn to simulate PowerShell output
-      const spawn = require('child_process').spawn;
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
       
       const mockOutput = JSON.stringify([{
         ProcessId: 1234,
@@ -492,12 +485,13 @@ suite('ProcessMonitor', () => {
         kill: sandbox.stub()
       };
       
-      spawnStub.returns(mockProc);
+      const mockSpawner = { spawn: sandbox.stub().returns(mockProc) };
+      const monitor = new Monitor(mockSpawner);
       
       // Simulate successful execution
       setTimeout(() => {
         mockProc.stdout.on.firstCall.args[1](mockOutput);
-        const closeHandler = mockProc.on.args.find(([event]) => event === 'close');
+        const closeHandler = mockProc.on.args.find(([event]: any[]) => event === 'close');
         if (closeHandler) closeHandler[1](0);
       }, 10);
       
@@ -510,16 +504,10 @@ suite('ProcessMonitor', () => {
       assert.strictEqual(result[0].commandLine, 'test.exe --flag');
       assert.strictEqual(result[0].memory, 1024000);
       assert.ok(result[0].cpu > 0); // CPU is normalized by core count
-      
-      spawnStub.restore();
     });
 
     test('getWindowsProcesses handles single process object (not array)', async () => {
       const Monitor = getMonitorClass();
-      const monitor = new Monitor();
-      
-      const spawn = require('child_process').spawn;
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
       
       const mockOutput = JSON.stringify({
         ProcessId: 1234,
@@ -534,7 +522,8 @@ suite('ProcessMonitor', () => {
         kill: sandbox.stub()
       };
       
-      spawnStub.returns(mockProc);
+      const mockSpawner = { spawn: sandbox.stub().returns(mockProc) };
+      const monitor = new Monitor(mockSpawner);
       
       setTimeout(() => {
         mockProc.stdout.on.firstCall.args[1](mockOutput);
@@ -546,16 +535,10 @@ suite('ProcessMonitor', () => {
       
       assert.strictEqual(result.length, 1);
       assert.strictEqual(result[0].pid, 1234);
-      
-      spawnStub.restore();
     });
 
     test('getUnixProcesses handles ps command output correctly', async () => {
       const Monitor = getMonitorClass();
-      const monitor = new Monitor();
-      
-      const spawn = require('child_process').spawn;
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
       
       const mockOutput = 'PID  PPID %CPU   RSS COMMAND          COMMAND\n' +
                         '1234 5678  2.5  1024 bash            /bin/bash -c "test"\n' +
@@ -568,7 +551,8 @@ suite('ProcessMonitor', () => {
         kill: sandbox.stub()
       };
       
-      spawnStub.returns(mockProc);
+      const mockSpawner = { spawn: sandbox.stub().returns(mockProc) };
+      const monitor = new Monitor(mockSpawner);
       
       setTimeout(() => {
         mockProc.stdout.on.firstCall.args[1](mockOutput);
@@ -585,16 +569,10 @@ suite('ProcessMonitor', () => {
       assert.strictEqual(result[0].cpu, 2.5);
       assert.strictEqual(result[0].memory, 1024 * 1024); // KB to bytes
       assert.strictEqual(result[0].commandLine, '/bin/bash -c "test"');
-      
-      spawnStub.restore();
     });
 
     test('getUnixProcesses skips malformed lines', async () => {
       const Monitor = getMonitorClass();
-      const monitor = new Monitor();
-      
-      const spawn = require('child_process').spawn;
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
       
       const mockOutput = 'PID  PPID %CPU   RSS COMMAND\n' +
                         '1234 5678  2.5  1024 bash /bin/bash\n' +
@@ -608,7 +586,8 @@ suite('ProcessMonitor', () => {
         kill: sandbox.stub()
       };
       
-      spawnStub.returns(mockProc);
+      const mockSpawner = { spawn: sandbox.stub().returns(mockProc) };
+      const monitor = new Monitor(mockSpawner);
       
       setTimeout(() => {
         mockProc.stdout.on.firstCall.args[1](mockOutput);
@@ -621,8 +600,6 @@ suite('ProcessMonitor', () => {
       assert.strictEqual(result.length, 2); // Should skip malformed line
       assert.strictEqual(result[0].pid, 1234);
       assert.strictEqual(result[1].pid, 9999);
-      
-      spawnStub.restore();
     });
   });
 
@@ -670,9 +647,9 @@ suite('ProcessMonitor', () => {
 
     test('terminateWindows uses correct taskkill flags', async () => {
       const Monitor = getMonitorClass();
-      const monitor = new Monitor();
       
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
+      const mockSpawner = { spawn: sandbox.stub() };
+      const monitor = new Monitor(mockSpawner);
       
       function makeMockProc() {
         const mp = {
@@ -689,30 +666,28 @@ suite('ProcessMonitor', () => {
       }
       
       // Test force=false
-      spawnStub.returns(makeMockProc());
+      mockSpawner.spawn.returns(makeMockProc());
       await (monitor as any).terminateWindows(1234, false);
-      assert.ok(spawnStub.calledWith('taskkill', ['/T', '/PID', '1234']));
+      assert.ok(mockSpawner.spawn.calledWith('taskkill', ['/T', '/PID', '1234']));
       
-      spawnStub.resetHistory();
+      mockSpawner.spawn.resetHistory();
       
       // Test force=true
-      spawnStub.returns(makeMockProc());
+      mockSpawner.spawn.returns(makeMockProc());
       await (monitor as any).terminateWindows(1234, true);
-      assert.ok(spawnStub.calledWith('taskkill', ['/F', '/T', '/PID', '1234']));
-      
-      spawnStub.restore();
+      assert.ok(mockSpawner.spawn.calledWith('taskkill', ['/F', '/T', '/PID', '1234']));
     });
 
     test('terminateUnix handles recursive termination', async () => {
       const Monitor = getMonitorClass();
-      const monitor = new Monitor();
       
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
+      const mockSpawner = { spawn: sandbox.stub() };
+      const monitor = new Monitor(mockSpawner);
       const killStub = sandbox.stub(process, 'kill');
       
       // Create a fresh mockProc each time spawn is called
       let spawnCallCount = 0;
-      spawnStub.callsFake(() => {
+      mockSpawner.spawn.callsFake(() => {
         spawnCallCount++;
         const mp = {
           stdout: { on: sandbox.stub() },
@@ -744,16 +719,11 @@ suite('ProcessMonitor', () => {
       assert.ok(killStub.calledWith(5678, 'SIGTERM'), 'Should kill child 5678');
       assert.ok(killStub.calledWith(9999, 'SIGTERM'), 'Should kill child 9999');
       
-      spawnStub.restore();
       killStub.restore();
     });
 
     test('terminateUnix uses SIGKILL when force=true', async () => {
       const Monitor = getMonitorClass();
-      const monitor = new Monitor();
-      
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
-      const killStub = sandbox.stub(process, 'kill');
       
       const mockProc = {
         stdout: { on: sandbox.stub() },
@@ -762,7 +732,9 @@ suite('ProcessMonitor', () => {
         kill: sandbox.stub()
       };
       
-      spawnStub.returns(mockProc);
+      const mockSpawner = { spawn: sandbox.stub().returns(mockProc) };
+      const monitor = new Monitor(mockSpawner);
+      const killStub = sandbox.stub(process, 'kill');
       
       setTimeout(() => {
         const closeHandler = mockProc.on.args.find((a: any[]) => a[0] === 'close');
@@ -773,18 +745,11 @@ suite('ProcessMonitor', () => {
       
       assert.ok(killStub.calledWith(1234, 'SIGKILL'));
       
-      spawnStub.restore();
       killStub.restore();
     });
 
     test('terminateUnix handles ESRCH error gracefully', async () => {
       const Monitor = getMonitorClass();
-      const monitor = new Monitor();
-      
-      const spawn = require('child_process').spawn;
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
-      const killStub = sandbox.stub(process, 'kill');
-      const consoleStub = sandbox.stub(console, 'error');
       
       const mockProc = {
         stdout: { on: sandbox.stub() },
@@ -793,10 +758,13 @@ suite('ProcessMonitor', () => {
         kill: sandbox.stub()
       };
       
-      spawnStub.returns(mockProc);
+      const mockSpawner = { spawn: sandbox.stub().returns(mockProc) };
+      const monitor = new Monitor(mockSpawner);
+      const killStub = sandbox.stub(process, 'kill');
+      const consoleStub = sandbox.stub(console, 'error');
       
       setTimeout(() => {
-        const closeHandler = mockProc.on.args.find(([event]) => event === 'close');
+        const closeHandler = mockProc.on.args.find((a: any[]) => a[0] === 'close');
         if (closeHandler) closeHandler[1](1);
       }, 10);
       
@@ -809,7 +777,6 @@ suite('ProcessMonitor', () => {
       // Should not log ESRCH errors
       assert.strictEqual(consoleStub.callCount, 0);
       
-      spawnStub.restore();
       killStub.restore();
     });
   });
@@ -889,9 +856,6 @@ suite('ProcessMonitor', () => {
   // =========================================================================
   suite('execAsync', () => {
     test('execAsync resolves with stdout on success', async () => {
-      const spawn = require('child_process').spawn;
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
-      
       const mockProc = {
         stdout: { on: sandbox.stub() },
         stderr: { on: sandbox.stub() },
@@ -899,20 +863,17 @@ suite('ProcessMonitor', () => {
         kill: sandbox.stub()
       };
       
-      spawnStub.returns(mockProc);
+      const mockSpawner = { spawn: sandbox.stub().returns(mockProc) };
       
       setTimeout(() => {
         mockProc.stdout.on.firstCall.args[1]('test output');
-        const closeHandler = mockProc.on.args.find(([event]) => event === 'close');
+        const closeHandler = mockProc.on.args.find((a: any[]) => a[0] === 'close');
         if (closeHandler) closeHandler[1](0);
       }, 10);
       
-      // Use require to access the private execAsync function
       const processMonitorModule = require('../../../process/processMonitor');
-      
-      // We need to test through a public method that uses execAsync
       const Monitor = processMonitorModule.ProcessMonitor;
-      const monitor = new Monitor();
+      const monitor = new Monitor(mockSpawner);
       
       // Test via getSnapshot which calls execAsync internally
       const origPlatform = process.platform;
@@ -923,12 +884,10 @@ suite('ProcessMonitor', () => {
       assert.ok(Array.isArray(result)); // Should parse the JSON output
       
       Object.defineProperty(process, 'platform', { value: origPlatform, writable: true });
-      spawnStub.restore();
     });
 
     test('execAsync rejects on command timeout', async function() {
       this.timeout(10000); // Allow enough time for internal timeout
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
       
       const mockProc = {
         stdout: { on: sandbox.stub() },
@@ -937,13 +896,12 @@ suite('ProcessMonitor', () => {
         kill: sandbox.stub()
       };
       
-      spawnStub.returns(mockProc);
+      const mockSpawner = { spawn: sandbox.stub().returns(mockProc) };
       
       // Don't trigger close event to simulate timeout
-      // The timeout will trigger after the specified time
       
       const Monitor = require('../../../process/processMonitor').ProcessMonitor;
-      const monitor = new Monitor(1); // Very short cache TTL to force fresh snapshot
+      const monitor = new Monitor(mockSpawner, 1); // Very short cache TTL
       
       const origPlatform = process.platform;
       Object.defineProperty(process, 'platform', { value: 'linux', writable: true });
@@ -964,13 +922,9 @@ suite('ProcessMonitor', () => {
       }
       
       Object.defineProperty(process, 'platform', { value: origPlatform, writable: true });
-      spawnStub.restore();
     });
 
     test('execAsync rejects on non-zero exit code with stderr', async () => {
-      const spawn = require('child_process').spawn;
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
-      
       const mockProc = {
         stdout: { on: sandbox.stub() },
         stderr: { on: sandbox.stub() },
@@ -978,16 +932,16 @@ suite('ProcessMonitor', () => {
         kill: sandbox.stub()
       };
       
-      spawnStub.returns(mockProc);
+      const mockSpawner = { spawn: sandbox.stub().returns(mockProc) };
       
       setTimeout(() => {
         mockProc.stderr.on.firstCall.args[1]('Command failed');
-        const closeHandler = mockProc.on.args.find(([event]) => event === 'close');
+        const closeHandler = mockProc.on.args.find((a: any[]) => a[0] === 'close');
         if (closeHandler) closeHandler[1](1); // Non-zero exit
       }, 10);
       
       const Monitor = require('../../../process/processMonitor').ProcessMonitor;
-      const monitor = new Monitor(1);
+      const monitor = new Monitor(mockSpawner, 1);
       
       const origPlatform = process.platform;
       Object.defineProperty(process, 'platform', { value: 'linux', writable: true });
@@ -1007,13 +961,9 @@ suite('ProcessMonitor', () => {
       }
       
       Object.defineProperty(process, 'platform', { value: origPlatform, writable: true });
-      spawnStub.restore();
     });
 
     test('execAsync handles process spawn error', async () => {
-      const spawn = require('child_process').spawn;
-      const spawnStub = sandbox.stub(require('child_process'), 'spawn');
-      
       const mockProc = {
         stdout: { on: sandbox.stub() },
         stderr: { on: sandbox.stub() },
@@ -1021,15 +971,15 @@ suite('ProcessMonitor', () => {
         kill: sandbox.stub()
       };
       
-      spawnStub.returns(mockProc);
+      const mockSpawner = { spawn: sandbox.stub().returns(mockProc) };
       
       setTimeout(() => {
-        const errorHandler = mockProc.on.args.find(([event]) => event === 'error');
+        const errorHandler = mockProc.on.args.find((a: any[]) => a[0] === 'error');
         if (errorHandler) errorHandler[1](new Error('Spawn failed'));
       }, 10);
       
       const Monitor = require('../../../process/processMonitor').ProcessMonitor;
-      const monitor = new Monitor(1);
+      const monitor = new Monitor(mockSpawner, 1);
       
       const origPlatform = process.platform;
       Object.defineProperty(process, 'platform', { value: 'linux', writable: true });
@@ -1046,7 +996,6 @@ suite('ProcessMonitor', () => {
       assert.deepStrictEqual(result, []);
       
       Object.defineProperty(process, 'platform', { value: origPlatform, writable: true });
-      spawnStub.restore();
     });
   });
 });

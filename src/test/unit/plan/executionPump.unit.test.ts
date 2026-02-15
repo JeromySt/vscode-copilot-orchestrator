@@ -268,4 +268,163 @@ suite('ExecutionPump', () => {
     assert.ok((state.globalCapacity!.updateRunningJobs as sinon.SinonStub).called);
     pump.stopPump();
   });
+
+  test('updateWakeLock acquires lock when plans are running', async () => {
+    const plan = createTestPlan();
+    const sm = createMockStateMachine('running');
+    const state = createState(plan, sm);
+    const releaseFn = sinon.stub();
+    state.powerManager = {
+      acquireWakeLock: sinon.stub().resolves(releaseFn),
+    } as any;
+    const pump = new ExecutionPump(state, createMockLogger(), sinon.stub());
+    await pump.updateWakeLock();
+    assert.ok((state.powerManager!.acquireWakeLock as sinon.SinonStub).calledOnce);
+  });
+
+  test('updateWakeLock releases lock when no plans are running', async () => {
+    const plan = createTestPlan();
+    const sm = createMockStateMachine('running');
+    const state = createState(plan, sm);
+    const releaseFn = sinon.stub();
+    state.powerManager = {
+      acquireWakeLock: sinon.stub().resolves(releaseFn),
+    } as any;
+    const pump = new ExecutionPump(state, createMockLogger(), sinon.stub());
+    // First acquire the lock
+    await pump.updateWakeLock();
+    assert.ok((state.powerManager!.acquireWakeLock as sinon.SinonStub).calledOnce);
+    // Now make the plan "succeeded" so no running plans
+    sm.computePlanStatus.returns('succeeded');
+    await pump.updateWakeLock();
+    assert.ok(releaseFn.calledOnce);
+  });
+
+  test('updateWakeLock handles acquireWakeLock failure', async () => {
+    const plan = createTestPlan();
+    const sm = createMockStateMachine('running');
+    const state = createState(plan, sm);
+    state.powerManager = {
+      acquireWakeLock: sinon.stub().rejects(new Error('lock failed')),
+    } as any;
+    const log = createMockLogger();
+    const pump = new ExecutionPump(state, log, sinon.stub());
+    await pump.updateWakeLock();
+    assert.ok((log.warn as sinon.SinonStub).called);
+  });
+
+  test('updateWakeLock returns early when no powerManager', async () => {
+    const state = createState();
+    state.powerManager = undefined;
+    const pump = new ExecutionPump(state, createMockLogger(), sinon.stub());
+    await pump.updateWakeLock(); // should not throw
+  });
+
+  test('pump liveness watchdog detects dead PID', async () => {
+    const plan = createTestPlan();
+    plan.nodeStates.get('node-1')!.status = 'running';
+    (plan.nodeStates.get('node-1')! as any).pid = 12345;
+    (plan.nodeStates.get('node-1')! as any).startedAt = Date.now();
+    const sm = createMockStateMachine('running');
+    sm.getReadyNodes.returns([]);
+    const state = createState(plan, sm);
+    state.scheduler.selectNodes = sinon.stub().returns([]) as any;
+    state.processMonitor = { isRunning: sinon.stub().returns(false) } as any;
+    const log = createMockLogger();
+    const pump = new ExecutionPump(state, log, sinon.stub());
+    pump.startPump();
+    // Need 10+ pump cycles for watchdog to trigger
+    await clock.tickAsync(1100);
+    assert.ok(sm.transition.called);
+    assert.ok((log.warn as sinon.SinonStub).called);
+    pump.stopPump();
+  });
+
+  test('pump liveness watchdog skips alive PID', async () => {
+    const plan = createTestPlan();
+    plan.nodeStates.get('node-1')!.status = 'running';
+    (plan.nodeStates.get('node-1')! as any).pid = 12345;
+    const sm = createMockStateMachine('running');
+    sm.getReadyNodes.returns([]);
+    const state = createState(plan, sm);
+    state.scheduler.selectNodes = sinon.stub().returns([]) as any;
+    state.processMonitor = { isRunning: sinon.stub().returns(true) } as any;
+    const pump = new ExecutionPump(state, createMockLogger(), sinon.stub());
+    pump.startPump();
+    await clock.tickAsync(1100);
+    assert.strictEqual(sm.transition.callCount, 0);
+    pump.stopPump();
+  });
+
+  test('pump logs bottleneck when ready nodes exist but none scheduled', async () => {
+    const plan = createTestPlan();
+    const sm = createMockStateMachine('running');
+    sm.getReadyNodes.returns(['node-1']);
+    const state = createState(plan, sm);
+    state.scheduler.selectNodes = sinon.stub().returns([]) as any;
+    const log = createMockLogger();
+    const pump = new ExecutionPump(state, log, sinon.stub());
+    pump.startPump();
+    await clock.tickAsync(200);
+    assert.ok((log.debug as sinon.SinonStub).called);
+    pump.stopPump();
+  });
+
+  test('pump skips node when nodes.get returns undefined', async () => {
+    const plan = createTestPlan();
+    const sm = createMockStateMachine('running');
+    const state = createState(plan, sm);
+    // Scheduler returns a node ID that doesn't exist in the plan
+    state.scheduler.selectNodes = sinon.stub().returns(['nonexistent']) as any;
+    const cb = sinon.stub();
+    const pump = new ExecutionPump(state, createMockLogger(), cb);
+    pump.startPump();
+    await clock.tickAsync(200);
+    // executeNode should not be called for the nonexistent node
+    assert.strictEqual(cb.callCount, 0);
+    pump.stopPump();
+  });
+
+  test('pump handles plan with no state machine gracefully', async () => {
+    const plan = createTestPlan();
+    const state = createState(plan);
+    state.stateMachines.clear();
+    const cb = sinon.stub();
+    const pump = new ExecutionPump(state, createMockLogger(), cb);
+    pump.startPump();
+    await clock.tickAsync(200);
+    assert.strictEqual(cb.callCount, 0);
+    pump.stopPump();
+  });
+
+  test('hasRunningPlans returns false when state machine is missing', () => {
+    const plan = createTestPlan();
+    const state = createState(plan);
+    state.stateMachines.clear();
+    const pump = new ExecutionPump(state, createMockLogger(), sinon.stub());
+    assert.strictEqual(pump.hasRunningPlans(), false);
+  });
+
+  test('pump counts work-performing running nodes for local capacity', async () => {
+    const plan = createTestPlan();
+    // Set the node to have work and be running
+    const node = plan.nodes.get('node-1')!;
+    (node as any).work = { type: 'shell', command: 'echo test' };
+    plan.nodeStates.get('node-1')!.status = 'running';
+    const sm = createMockStateMachine('running');
+    sm.getReadyNodes.returns([]);
+    const state = createState(plan, sm);
+    state.scheduler.selectNodes = sinon.stub().returns([]) as any;
+    state.globalCapacity = {
+      updateRunningJobs: sinon.stub().resolves(),
+      getTotalGlobalRunning: sinon.stub().resolves(1),
+    } as any;
+    const pump = new ExecutionPump(state, createMockLogger(), sinon.stub());
+    pump.startPump();
+    await clock.tickAsync(200);
+    const updateStub = state.globalCapacity!.updateRunningJobs as sinon.SinonStub;
+    assert.ok(updateStub.called);
+    assert.strictEqual(updateStub.firstCall.args[0], 1); // 1 local running job
+    pump.stopPump();
+  });
 });

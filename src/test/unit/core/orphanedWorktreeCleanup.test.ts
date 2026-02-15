@@ -14,7 +14,7 @@ import { cleanupOrphanedWorktrees } from '../../../core/orphanedWorktreeCleanup'
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import * as git from '../../../git';
+// git operations are now injected via options.git (IGitOperations DI)
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -71,6 +71,16 @@ async function execAsync(cmd: string, cwd: string): Promise<void> {
   });
 }
 
+/** Create a mock IGitOperations with worktree stubs for DI. */
+function createMockGit(overrides?: { list?: AsyncFn; removeSafe?: AsyncFn }): any {
+  return {
+    worktrees: {
+      list: overrides?.list || (async () => []),
+      removeSafe: overrides?.removeSafe || (async () => {}),
+    }
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -112,16 +122,10 @@ suite('cleanupOrphanedWorktrees', () => {
     await fs.promises.mkdir(orphanPath);
     await fs.promises.writeFile(path.join(orphanPath, 'test.txt'), 'test');
     
-    // Stub git.worktrees.list to return empty (no git-registered worktrees)
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
-    // Stub git.worktrees.removeSafe to succeed but not actually remove
-    stubs.push(stub(git.worktrees, 'removeSafe', async () => {}));
-    
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
-      git: {} as any,
+      git: createMockGit(),
       logger: () => {}
     });
     
@@ -147,13 +151,10 @@ suite('cleanupOrphanedWorktrees', () => {
       ])
     } as any;
     
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map([['plan-1', mockPlan]]),
-      git: {} as any,
+      git: createMockGit(),
       logger: () => {}
     });
     
@@ -179,16 +180,10 @@ suite('cleanupOrphanedWorktrees', () => {
       ])
     } as any;
     
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
-    // Stub git.worktrees.removeSafe to succeed
-    stubs.push(stub(git.worktrees, 'removeSafe', async () => {}));
-    
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map([['plan-1', mockPlan]]),
-      git: {} as any,
+      git: createMockGit(),
       logger: () => {}
     });
     
@@ -209,7 +204,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
-      git: {} as any,
+      git: createMockGit(),
       logger: () => {}
     });
     
@@ -225,22 +220,20 @@ suite('cleanupOrphanedWorktrees', () => {
     await fs.promises.mkdir(orphan1);
     await fs.promises.mkdir(orphan2);
     
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
-    // Stub git.worktrees.removeSafe to fail on first call, succeed on second
     let callCount = 0;
-    stubs.push(stub(git.worktrees, 'removeSafe', async (repoPath: string, worktreePath: string) => {
-      callCount++;
-      if (callCount === 1) {
-        throw new Error('Simulated removal failure');
+    const mockGit = createMockGit({
+      removeSafe: async () => {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error('Simulated removal failure');
+        }
       }
-    }));
+    });
     
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
-      git: {} as any,
+      git: mockGit,
       logger: () => {}
     });
     
@@ -259,15 +252,16 @@ suite('cleanupOrphanedWorktrees', () => {
     const registeredPath = path.join(worktreesDir, 'registered-uuid');
     await fs.promises.mkdir(registeredPath);
     
-    // Stub git.worktrees.list to return this worktree as registered
-    stubs.push(stub(git.worktrees, 'list', async () => [
-      { path: registeredPath, branch: 'feature-branch', head: 'abc123', detached: false, locked: false, prunable: false }
-    ]));
+    const mockGit = createMockGit({
+      list: async () => [
+        { path: registeredPath, branch: 'feature-branch', head: 'abc123', detached: false, locked: false, prunable: false }
+      ]
+    });
     
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
-      git: {} as any,
+      git: mockGit,
       logger: () => {}
     });
     
@@ -291,13 +285,10 @@ suite('cleanupOrphanedWorktrees', () => {
       ])
     } as any;
     
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map([['plan-1', mockPlan]]),
-      git: {} as any,
+      git: createMockGit(),
       logger: () => {}
     });
     
@@ -322,16 +313,10 @@ suite('cleanupOrphanedWorktrees', () => {
       ])
     } as any;
     
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
-    // Stub git.worktrees.removeSafe
-    stubs.push(stub(git.worktrees, 'removeSafe', async () => {}));
-    
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map([['plan-1', mockPlan]]),
-      git: {} as any,
+      git: createMockGit(),
       logger: () => {}
     });
     
@@ -357,17 +342,11 @@ suite('cleanupOrphanedWorktrees', () => {
     await fs.promises.mkdir(orphan1);
     await fs.promises.mkdir(orphan2);
     
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
-    // Stub git.worktrees.removeSafe
-    stubs.push(stub(git.worktrees, 'removeSafe', async () => {}));
-    
     try {
       const result = await cleanupOrphanedWorktrees({
         repoPaths: [tempDir, tempDir2],
         activePlans: new Map(),
-        git: {} as any,
+        git: createMockGit(),
         logger: () => {}
       });
       
@@ -388,16 +367,10 @@ suite('cleanupOrphanedWorktrees', () => {
     const orphanPath = path.join(worktreesDir, 'orphaned-uuid');
     await fs.promises.mkdir(orphanPath);
     
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
-    // Stub git.worktrees.removeSafe
-    stubs.push(stub(git.worktrees, 'removeSafe', async () => {}));
-    
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
-      git: {} as any,
+      git: createMockGit(),
       logger: () => {}
     });
     
@@ -419,16 +392,10 @@ suite('cleanupOrphanedWorktrees', () => {
       ])
     } as any;
     
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
-    // Stub git.worktrees.removeSafe
-    stubs.push(stub(git.worktrees, 'removeSafe', async () => {}));
-    
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map([['plan-1', mockPlan]]),
-      git: {} as any,
+      git: createMockGit(),
       logger: () => {}
     });
     
@@ -446,18 +413,14 @@ suite('cleanupOrphanedWorktrees', () => {
     const orphanPath = path.join(worktreesDir, 'orphan-uuid');
     await fs.promises.mkdir(orphanPath);
     
-    // Stub git.worktrees.list to throw error
-    stubs.push(stub(git.worktrees, 'list', async () => {
-      throw new Error('Git command failed');
-    }));
-    
-    // Stub git.worktrees.removeSafe
-    stubs.push(stub(git.worktrees, 'removeSafe', async () => {}));
+    const mockGit = createMockGit({
+      list: async () => { throw new Error('Git command failed'); },
+    });
     
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
-      git: {} as any,
+      git: mockGit,
       logger: () => {}
     });
     
@@ -506,12 +469,6 @@ suite('cleanupOrphanedWorktrees', () => {
     const orphanPath = path.join(worktreesDir, 'orphan-uuid');
     await fs.promises.mkdir(orphanPath);
     
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
-    // Stub git.worktrees.removeSafe
-    stubs.push(stub(git.worktrees, 'removeSafe', async () => {}));
-    
     // Stub fs.promises.rmdir to fail
     const originalRmdir = fs.promises.rmdir;
     (fs.promises as any).rmdir = async () => {
@@ -522,7 +479,7 @@ suite('cleanupOrphanedWorktrees', () => {
       const result = await cleanupOrphanedWorktrees({
         repoPaths: [tempDir],
         activePlans: new Map(),
-        git: {} as any,
+        git: createMockGit(),
         logger: () => {}
       });
       
@@ -539,12 +496,6 @@ suite('cleanupOrphanedWorktrees', () => {
     const orphanPath = path.join(worktreesDir, 'orphan-uuid');
     await fs.promises.mkdir(orphanPath);
     await fs.promises.writeFile(path.join(orphanPath, 'file.txt'), 'content');
-    
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
-    // Stub git.worktrees.removeSafe to succeed
-    stubs.push(stub(git.worktrees, 'removeSafe', async () => {}));
     
     // Stub fs.existsSync to return true (simulating directory still exists)
     // and fs.promises.rm to fail
@@ -567,7 +518,7 @@ suite('cleanupOrphanedWorktrees', () => {
       const result = await cleanupOrphanedWorktrees({
         repoPaths: [tempDir],
         activePlans: new Map(),
-        git: {} as any,
+        git: createMockGit(),
         logger: () => {}
       });
       
@@ -590,16 +541,10 @@ suite('cleanupOrphanedWorktrees', () => {
     const orphanPath = path.join(worktreesDir, 'orphan-uuid');
     await fs.promises.mkdir(orphanPath);
     
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
-    // Stub git.worktrees.removeSafe
-    stubs.push(stub(git.worktrees, 'removeSafe', async () => {}));
-    
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
-      git: {} as any,
+      git: createMockGit(),
       logger: () => {}
     });
     
@@ -614,19 +559,13 @@ suite('cleanupOrphanedWorktrees', () => {
     const orphanPath = path.join(worktreesDir, 'orphan-uuid');
     await fs.promises.mkdir(orphanPath);
     
-    // Stub git.worktrees.list to return empty
-    stubs.push(stub(git.worktrees, 'list', async () => []));
-    
-    // Stub git.worktrees.removeSafe
-    stubs.push(stub(git.worktrees, 'removeSafe', async () => {}));
-    
     const logMessages: string[] = [];
     const logger = (msg: string) => logMessages.push(msg);
     
     const result = await cleanupOrphanedWorktrees({
       repoPaths: [tempDir],
       activePlans: new Map(),
-      git: {} as any,
+      git: createMockGit(),
       logger
     });
     

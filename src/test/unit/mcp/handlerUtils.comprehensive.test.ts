@@ -412,7 +412,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
     test('should handle git errors gracefully', async () => {
       mockGit.branches.currentOrNull.withArgs('/test/repo').rejects(new Error('Git error'));
       
-      const result = await resolveBaseBranch('/test/repo', {} as any);
+      const result = await resolveBaseBranch('/test/repo', mockGit as any);
       
       assert.strictEqual(result, 'main');
     });

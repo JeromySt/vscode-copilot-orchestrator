@@ -149,8 +149,12 @@ export type NodeHandlerContext = PlanHandlerContext;
  */
 export async function resolveBaseBranch(repoPath: string, git: IGitOperations, requested?: string): Promise<string> {
   if (requested) return requested;
-  const current = await git.branches.currentOrNull(repoPath);
-  return current || 'main';
+  try {
+    const current = await git.branches.currentOrNull(repoPath);
+    return current || 'main';
+  } catch {
+    return 'main';
+  }
 }
 
 /**
