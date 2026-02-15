@@ -194,7 +194,7 @@ suite('MergeRiPhaseExecutor', () => {
     assert.ok(result.error?.includes('targetBranch is required'));
   });
 
-  test('returns failure when completedCommit is missing', async () => {
+  test('returns success when completedCommit is missing (skip RI merge)', async () => {
     const executor = new MergeRiPhaseExecutor({ git: mockGitOperations(), copilotRunner: mockCopilotRunner });
     const context = createMockContext({
       completedCommit: undefined
@@ -202,8 +202,8 @@ suite('MergeRiPhaseExecutor', () => {
 
     const result = await executor.execute(context);
 
-    assert.strictEqual(result.success, false);
-    assert.ok(result.error?.includes('completedCommit is required'));
+    assert.strictEqual(result.success, true);
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/No completed commit/)));
   });
 
   test('no changes skip - returns success when no diff detected', async () => {
@@ -356,20 +356,11 @@ suite('MergeRiPhaseExecutor', () => {
       baseCommit: undefined
     });
 
-    // Override the required parameter validation for this test
-    context.completedCommit = '';  // Empty string to pass validation but trigger no-commit logic
-
     const result = await executor.execute(context);
 
-    // This test would need the actual implementation to handle empty string as "no commit"
-    // For now, let's test the parameter validation
-    const contextWithUndefined = createMockContext({
-      completedCommit: undefined
-    });
-
-    const failResult = await executor.execute(contextWithUndefined);
-    assert.strictEqual(failResult.success, false);
-    assert.ok(failResult.error?.includes('completedCommit is required for reverse integration merge'));
+    // No completed commit means skip RI merge
+    assert.strictEqual(result.success, true);
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/No completed commit/)));
   });
 
   test('returns failure when baseCommitAtStart is missing', async () => {
@@ -393,8 +384,9 @@ suite('MergeRiPhaseExecutor', () => {
 
     const result = await executor.execute(context);
 
-    assert.strictEqual(result.success, false);
-    assert.ok(result.error?.includes('completedCommit is required'));
+    // No completed commit means skip RI merge gracefully
+    assert.strictEqual(result.success, true);
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/No completed commit/)));
   });
 
   test('merge tree failure returns error', async () => {

@@ -5,6 +5,7 @@
  */
 
 import * as assert from 'assert';
+import * as sinon from 'sinon';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -13,6 +14,7 @@ import type { DelegatorLogger, DelegatorCallbacks, DelegateOptions } from '../..
 import type { ICopilotRunner } from '../../../interfaces/ICopilotRunner';
 import type { IGitOperations } from '../../../interfaces/IGitOperations';
 import type { CopilotRunOptions, CopilotRunResult } from '../../../agent/copilotCliRunner';
+import * as modelDiscovery from '../../../agent/modelDiscovery';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -100,8 +102,12 @@ function defaultOptions(tmpDir: string): DelegateOptions {
 
 suite('AgentDelegator DI', () => {
   let tmpDir: string;
+  let sandbox: sinon.SinonSandbox;
 
   setup(() => {
+    sandbox = sinon.createSandbox();
+    // Stub model validation to avoid needing a spawner
+    sandbox.stub(modelDiscovery, 'isValidModel').resolves(true);
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'delegator-test-'));
     // Create .copilot-orchestrator dir structure
     fs.mkdirSync(path.join(tmpDir, '.orchestrator', '.copilot'), { recursive: true });
@@ -109,6 +115,7 @@ suite('AgentDelegator DI', () => {
   });
 
   teardown(() => {
+    sandbox.restore();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 

@@ -25,7 +25,13 @@ function createRunnerDeps(storagePath: string) {
     persistence: new PlanPersistence(storagePath),
     processMonitor: new ProcessMonitor(new DefaultProcessSpawner()),
     stateMachineFactory: (plan: any) => new PlanStateMachine(plan),
-    git: {} as any,
+    git: {
+      worktrees: { removeSafe: async () => {}, list: async () => [], prune: async () => {} },
+      gitignore: { ensureGitignoreEntries: async () => true, ensureOrchestratorGitIgnore: async () => true },
+      branches: { current: async () => 'main', exists: async () => true },
+      repository: { hasChanges: async () => false },
+      merge: {},
+    } as any,
   };
 }
 

@@ -52,3 +52,9 @@ yarn-error.log*
 .worktrees/
 .worktrees
 .orchestrator
+
+# Copilot CLI session state
+.copilot-cli/
+
+# Auto-generated healing instructions
+.github/instructions/*.instructions.md

@@ -6,7 +6,6 @@ import * as sinon from 'sinon';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import * as git from '../../../git';
 import { PlanLifecycleManager } from '../../../plan/planLifecycle';
 import { PlanPersistence } from '../../../plan/persistence';
 import { PlanEventEmitter } from '../../../plan/planEvents';
@@ -85,7 +84,11 @@ suite('PlanLifecycleManager', () => {
     fs.writeFileSync(path.join(logsDir, 'plan-2_node-1.log'), 'other plan');
 
     const state = makeState(dir, { executor: { storagePath: dir } });
-    const lifecycle = new PlanLifecycleManager(state as any, log, {} as any);
+    const mockGit = {
+      worktrees: { removeSafe: sinon.stub().resolves() },
+      gitignore: { ensureGitignoreEntries: sinon.stub().resolves(true) },
+    };
+    const lifecycle = new PlanLifecycleManager(state as any, log, mockGit as any);
 
     const worktreeDir = makeTmpDir();
     const plan: PlanInstance = {
@@ -100,10 +103,9 @@ suite('PlanLifecycleManager', () => {
       cleanUpSuccessfulWork: false, maxParallel: 4,
     };
 
-    const removeStub = sandbox.stub(git.worktrees, 'removeSafe').resolves();
     await lifecycle.cleanupPlanResources(plan);
 
-    assert.ok(removeStub.called);
+    assert.ok(mockGit.worktrees.removeSafe.called);
     assert.ok(!fs.existsSync(path.join(logsDir, 'plan-1_node-1.log')));
     assert.ok(!fs.existsSync(path.join(logsDir, 'plan-1_node-2.log')));
     assert.ok(fs.existsSync(path.join(logsDir, 'plan-2_node-1.log')));
@@ -113,7 +115,10 @@ suite('PlanLifecycleManager', () => {
     const dir = makeTmpDir();
     const log = createMockLogger();
     const state = makeState(dir);
-    const lifecycle = new PlanLifecycleManager(state as any, log, {} as any);
+    const mockGit = {
+      worktrees: { removeSafe: sinon.stub().rejects(new Error('Cannot remove')) },
+    };
+    const lifecycle = new PlanLifecycleManager(state as any, log, mockGit as any);
 
     const plan: PlanInstance = {
       id: 'plan-1', spec: { name: 'Test', jobs: [], baseBranch: 'main' },
@@ -126,7 +131,6 @@ suite('PlanLifecycleManager', () => {
       cleanUpSuccessfulWork: false, maxParallel: 4,
     };
 
-    sandbox.stub(git.worktrees, 'removeSafe').rejects(new Error('Cannot remove'));
     await lifecycle.cleanupPlanResources(plan);
 
     assert.ok((log.warn as sinon.SinonStub).called);

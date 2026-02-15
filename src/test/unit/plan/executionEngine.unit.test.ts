@@ -328,7 +328,7 @@ suite('JobExecutionEngine', () => {
       const executorResult: JobExecutionResult = {
         success: true,
         completedCommit: 'commit-hash-12345678901234567890123456',
-        stepStatuses: { work: 'success', commit: 'success' },
+        stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
       };
 
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
@@ -611,7 +611,7 @@ suite('JobExecutionEngine', () => {
 
       const executorResult: JobExecutionResult = {
         success: true, completedCommit: 'commit-abc-12345678901234567890',
-        stepStatuses: { work: 'success', commit: 'success' },
+        stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'failed' },
       };
 
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
@@ -660,7 +660,7 @@ suite('JobExecutionEngine', () => {
 
       const executorResult: JobExecutionResult = {
         success: true, completedCommit: 'commit-abc-12345678901234567890',
-        stepStatuses: { work: 'success', commit: 'success' },
+        stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
       };
 
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });
@@ -708,7 +708,7 @@ suite('JobExecutionEngine', () => {
 
       const executorResult: JobExecutionResult = {
         success: true, completedCommit: 'commit-abc-12345678901234567890',
-        stepStatuses: { work: 'success', commit: 'success' },
+        stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'failed' },
       };
 
       const state = createEngineState(dir, { execute: sinon.stub().resolves(executorResult) });

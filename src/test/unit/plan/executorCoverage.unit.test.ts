@@ -13,6 +13,7 @@ import { ProcessMonitor } from '../../../process';
 import { WorkPhaseExecutor } from '../../../plan/phases/workPhase';
 import { PostcheckPhaseExecutor } from '../../../plan/phases/postcheckPhase';
 import { Logger } from '../../../core/logger';
+import * as processHelpers from '../../../process/processHelpers';
 import type { JobNode, ExecutionContext, JobExecutionResult } from '../../../plan/types';
 import type { ICopilotRunner } from '../../../interfaces/ICopilotRunner';
 
@@ -24,6 +25,33 @@ const mockCopilotRunner: ICopilotRunner = {
   buildCommand: (options: any) => 'copilot --help',
   cleanupInstructionsFile: (filePath: string, dirPath: string | undefined, label: string) => {}
 };
+
+function createMockGitOps() {
+  return {
+    worktrees: {
+      createOrReuseDetached: sinon.stub().resolves({ path: '/tmp/wt', created: true }),
+      getHeadCommit: sinon.stub().resolves('abc123'),
+      removeSafe: sinon.stub().resolves(),
+      list: sinon.stub().resolves([]),
+    },
+    repository: {
+      resolveRef: sinon.stub().resolves('abc123'),
+      getDiffStats: sinon.stub().resolves({ added: 0, modified: 0, deleted: 0 }),
+      getCommitCount: sinon.stub().resolves(1),
+      getFileChangesBetween: sinon.stub().resolves([]),
+      revParse: sinon.stub().resolves('abc123'),
+    },
+    merge: {
+      mergeWithoutCheckout: sinon.stub().resolves({ success: true, mergeCommit: 'abc123' }),
+    },
+    branches: {
+      exists: sinon.stub().resolves(true),
+    },
+    gitignore: {
+      ensureGitignoreEntries: sinon.stub().resolves(),
+    },
+  } as any;
+}
 
 let tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -70,7 +98,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
 
   test('execute handles work phase failure (line 140)', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     executor.setStoragePath(dir);
 
     // Mock work phase to fail
@@ -113,7 +141,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
 
   test('execute handles postchecks failure (line 160)', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     executor.setStoragePath(dir);
 
     // Mock work phase to succeed
@@ -159,16 +187,11 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
     assert.strictEqual(result.exitCode, 2);
   });
 
-  test('cancel handles Windows process termination (lines 202-205)', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
-    const logger = createMockLogger();
+  test('cancel handles Windows process termination (lines 202-205)', async () => {
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     
-    // Mock Windows platform
-    const origPlatform = process.platform;
-    Object.defineProperty(process, 'platform', { value: 'win32' });
-    
-    // Stub spawn to capture taskkill call
-    const spawnStub = sandbox.stub(require('child_process'), 'spawn');
+    // Stub killProcessTree to verify it's called with correct args
+    const killStub = sandbox.stub(processHelpers, 'killProcessTree').resolves();
     
     // Mock an active execution with process
     const planId = 'test-plan';
@@ -184,31 +207,23 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
     });
     (executor as any).activeExecutionsByNode.set(nodeKey, executionKey);
 
-    try {
-      executor.cancel(planId, nodeId);
-      
-      // Verify taskkill was called with correct args
-      assert.ok(spawnStub.calledOnce);
-      const [cmd, args] = spawnStub.firstCall.args;
-      assert.strictEqual(cmd, 'taskkill');
-      assert.deepStrictEqual(args, ['/pid', '12345', '/f', '/t']);
-      
-      // Verify execution was marked as aborted
-      const execution = (executor as any).activeExecutions.get(executionKey);
-      assert.strictEqual(execution.aborted, true);
-      
-    } finally {
-      // Restore platform
-      Object.defineProperty(process, 'platform', { value: origPlatform });
-    }
+    await executor.cancel(planId, nodeId);
+    
+    // Verify killProcessTree was called with pid and force=true
+    assert.ok(killStub.calledOnce);
+    assert.strictEqual(killStub.firstCall.args[1], 12345);
+    assert.strictEqual(killStub.firstCall.args[2], true);
+    
+    // Verify execution was marked as aborted
+    const execution = (executor as any).activeExecutions.get(executionKey);
+    assert.strictEqual(execution.aborted, true);
   });
 
-  test('cancel handles Unix process termination (lines 202-205)', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+  test('cancel handles Unix process termination (lines 202-205)', async () => {
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     
-    // Mock Unix platform
-    const origPlatform = process.platform;
-    Object.defineProperty(process, 'platform', { value: 'linux' });
+    // Stub killProcessTree to verify it's called
+    const killStub = sandbox.stub(processHelpers, 'killProcessTree').resolves();
     
     // Mock an active execution with process
     const planId = 'test-plan';
@@ -227,25 +242,19 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
     });
     (executor as any).activeExecutionsByNode.set(nodeKey, executionKey);
 
-    try {
-      executor.cancel(planId, nodeId);
-      
-      // Verify kill was called with SIGTERM
-      assert.ok(mockProcess.kill.calledOnce);
-      assert.strictEqual(mockProcess.kill.firstCall.args[0], 'SIGTERM');
-      
-      // Verify execution was marked as aborted
-      const execution = (executor as any).activeExecutions.get(executionKey);
-      assert.strictEqual(execution.aborted, true);
-      
-    } finally {
-      // Restore platform
-      Object.defineProperty(process, 'platform', { value: origPlatform });
-    }
+    await executor.cancel(planId, nodeId);
+    
+    // Verify killProcessTree was called (handles platform-specific logic)
+    assert.ok(killStub.calledOnce);
+    assert.strictEqual(killStub.firstCall.args[1], 12345);
+    
+    // Verify execution was marked as aborted
+    const execution = (executor as any).activeExecutions.get(executionKey);
+    assert.strictEqual(execution.aborted, true);
   });
 
   test('cancel handles process kill exception gracefully (lines 204-205)', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     
     // Mock an active execution with process that throws on kill
     const planId = 'test-plan';
@@ -275,7 +284,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel with no active execution (edge case)', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     
     // Should not throw when no execution exists
     assert.doesNotThrow(() => {
@@ -284,7 +293,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel with execution but no process (edge case)', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     
     // Mock an active execution without process
     const planId = 'test-plan';

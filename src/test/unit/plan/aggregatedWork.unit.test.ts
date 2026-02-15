@@ -20,6 +20,33 @@ const mockCopilotRunner: ICopilotRunner = {
   cleanupInstructionsFile: (filePath: string, dirPath: string | undefined, label: string) => {}
 };
 
+function createMockGitOps() {
+  return {
+    worktrees: {
+      createOrReuseDetached: sinon.stub().resolves({ path: '/tmp/wt', created: true }),
+      getHeadCommit: sinon.stub().resolves('abc123'),
+      removeSafe: sinon.stub().resolves(),
+      list: sinon.stub().resolves([]),
+    },
+    repository: {
+      resolveRef: sinon.stub().resolves('abc123'),
+      getDiffStats: sinon.stub().resolves({ added: 0, modified: 0, deleted: 0 }),
+      getCommitCount: sinon.stub().resolves(1),
+      getFileChangesBetween: sinon.stub().resolves([]),
+      revParse: sinon.stub().resolves('abc123'),
+    },
+    merge: {
+      mergeWithoutCheckout: sinon.stub().resolves({ success: true, mergeCommit: 'abc123' }),
+    },
+    branches: {
+      exists: sinon.stub().resolves(true),
+    },
+    gitignore: {
+      ensureGitignoreEntries: sinon.stub().resolves(),
+    },
+  } as any;
+}
+
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
   console.log = console.debug = console.warn = console.error = () => {};
@@ -29,10 +56,7 @@ function silenceConsole(): { restore: () => void } {
 suite('computeAggregatedWorkSummary', () => {
   let quiet: { restore: () => void };
   let executor: DefaultJobExecutor;
-  let gitWorktreesStub: sinon.SinonStub;
-  let resolveRefStub: sinon.SinonStub;
-  let getDiffStatsStub: sinon.SinonStub;
-  let getCommitCountStub: sinon.SinonStub;
+  let mockGitOps: ReturnType<typeof createMockGitOps>;
 
   const createJobNode = (id: string, name: string, task: string): JobNode => ({
     id,
@@ -47,14 +71,8 @@ suite('computeAggregatedWorkSummary', () => {
 
   setup(() => {
     quiet = silenceConsole();
-    executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
-    
-    // Stub git module functions
-    const gitModule = require('../../../git');
-    gitWorktreesStub = sinon.stub(gitModule.worktrees, 'getHeadCommit');
-    resolveRefStub = sinon.stub(gitModule.repository, 'resolveRef');
-    getDiffStatsStub = sinon.stub(gitModule.repository, 'getDiffStats');
-    getCommitCountStub = sinon.stub(gitModule.repository, 'getCommitCount');
+    mockGitOps = createMockGitOps();
+    executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), mockGitOps, mockCopilotRunner);
   });
 
   teardown(() => {
@@ -69,11 +87,11 @@ suite('computeAggregatedWorkSummary', () => {
     const repoPath = '/test/repo';
     
     const headCommit = 'abc123';
-    gitWorktreesStub.resolves(headCommit);
+    mockGitOps.worktrees.getHeadCommit.resolves(headCommit);
     
-    resolveRefStub.resolves(headCommit);
-    getDiffStatsStub.resolves({ added: 0, modified: 0, deleted: 0 });
-    getCommitCountStub.resolves(0);
+    mockGitOps.repository.resolveRef.resolves(headCommit);
+    mockGitOps.repository.getDiffStats.resolves({ added: 0, modified: 0, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(0);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -91,10 +109,10 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    gitWorktreesStub.resolves('def456');
-    resolveRefStub.resolves('abc123');
-    getDiffStatsStub.resolves({ added: 0, modified: 0, deleted: 0 });
-    getCommitCountStub.resolves(3);
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    mockGitOps.repository.getDiffStats.resolves({ added: 0, modified: 0, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(3);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -108,10 +126,10 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    gitWorktreesStub.resolves('def456');
-    resolveRefStub.resolves('abc123');
-    getDiffStatsStub.resolves({ added: 2, modified: 1, deleted: 0 });
-    getCommitCountStub.resolves(2);
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    mockGitOps.repository.getDiffStats.resolves({ added: 2, modified: 1, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(2);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -127,11 +145,11 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    gitWorktreesStub.resolves('def456');
-    resolveRefStub.resolves('abc123');
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
     // getDiffStats counts renames as modified
-    getDiffStatsStub.resolves({ added: 0, modified: 2, deleted: 0 });
-    getCommitCountStub.resolves(1);
+    mockGitOps.repository.getDiffStats.resolves({ added: 0, modified: 2, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(1);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -146,10 +164,10 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/develop';
     const repoPath = '/test/repo';
     
-    gitWorktreesStub.resolves('def456');
-    resolveRefStub.resolves('abc123');
-    getDiffStatsStub.resolves({ added: 0, modified: 0, deleted: 0 });
-    getCommitCountStub.resolves(1);
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    mockGitOps.repository.getDiffStats.resolves({ added: 0, modified: 0, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(1);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -164,10 +182,10 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    gitWorktreesStub.resolves('def456');
-    resolveRefStub.resolves('abc123');
-    getDiffStatsStub.resolves({ added: 1, modified: 0, deleted: 2 });
-    getCommitCountStub.resolves(2);
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    mockGitOps.repository.getDiffStats.resolves({ added: 1, modified: 0, deleted: 2 });
+    mockGitOps.repository.getCommitCount.resolves(2);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -182,7 +200,7 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    gitWorktreesStub.resolves(null);
+    mockGitOps.worktrees.getHeadCommit.resolves(null);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -198,8 +216,8 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    gitWorktreesStub.resolves('abc123');
-    resolveRefStub.rejects(new Error('branch not found'));
+    mockGitOps.worktrees.getHeadCommit.resolves('abc123');
+    mockGitOps.repository.resolveRef.rejects(new Error('branch not found'));
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -213,11 +231,11 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    gitWorktreesStub.resolves('def456');
-    resolveRefStub.resolves('abc123');
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
     // getDiffStats returns zeros on failure
-    getDiffStatsStub.resolves({ added: 0, modified: 0, deleted: 0 });
-    getCommitCountStub.resolves(1);
+    mockGitOps.repository.getDiffStats.resolves({ added: 0, modified: 0, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(1);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -234,10 +252,10 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    gitWorktreesStub.resolves('def456');
-    resolveRefStub.resolves('abc123');
-    getDiffStatsStub.resolves({ added: 2, modified: 3, deleted: 1 });
-    getCommitCountStub.resolves(5);
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    mockGitOps.repository.getDiffStats.resolves({ added: 2, modified: 3, deleted: 1 });
+    mockGitOps.repository.getCommitCount.resolves(5);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     

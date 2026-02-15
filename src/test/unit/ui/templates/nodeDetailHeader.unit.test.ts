@@ -122,16 +122,16 @@ suite('Node Detail Header Templates', () => {
       assert.ok(!html.includes('Started'));
     });
 
-    test('renders duration when started', () => {
+    test('renders duration when started (via headerRowHtml)', () => {
       const startedAt = Date.now() - 65000; // 65 seconds ago
-      const html = executionStateHtml({ ...baseData, startedAt });
-      assert.ok(html.includes('Duration'));
+      const html = headerRowHtml('Node', 'running', startedAt);
       assert.ok(html.includes('duration-timer'));
+      assert.ok(html.includes('duration-value'));
     });
 
-    test('renders duration with data-started-at for running nodes', () => {
+    test('renders duration with data-started-at for running nodes (via headerRowHtml)', () => {
       const startedAt = Date.now() - 5000;
-      const html = executionStateHtml({ ...baseData, startedAt, status: 'running' });
+      const html = headerRowHtml('Node', 'running', startedAt);
       assert.ok(html.includes('data-started-at'));
     });
 

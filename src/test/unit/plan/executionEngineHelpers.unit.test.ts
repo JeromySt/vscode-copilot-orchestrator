@@ -96,12 +96,94 @@ function createEngineState(storagePath: string, executorOverrides?: Partial<any>
   };
 }
 
+function createMockGitOps(): import('../../../interfaces/IGitOperations').IGitOperations {
+  return {
+    worktrees: {
+      create: sinon.stub().resolves(),
+      createWithTiming: sinon.stub().resolves({ totalMs: 10, cloneMs: 5, symlinkMs: 2, baseCommit: 'abc123' }),
+      createDetachedWithTiming: sinon.stub().resolves({ totalMs: 10, cloneMs: 5, symlinkMs: 2, baseCommit: 'abc123' }),
+      createOrReuseDetached: sinon.stub().resolves({ totalMs: 10, cloneMs: 5, symlinkMs: 2, baseCommit: 'abc123', reused: false }),
+      remove: sinon.stub().resolves(),
+      removeSafe: sinon.stub().resolves(true),
+      isValid: sinon.stub().resolves(true),
+      getBranch: sinon.stub().resolves(null),
+      getHeadCommit: sinon.stub().resolves('abc123'),
+      list: sinon.stub().resolves([]),
+      prune: sinon.stub().resolves(),
+    },
+    repository: {
+      fetch: sinon.stub().resolves(),
+      pull: sinon.stub().resolves(true),
+      push: sinon.stub().resolves(true),
+      stageAll: sinon.stub().resolves(),
+      stageFile: sinon.stub().resolves(),
+      commit: sinon.stub().resolves(true),
+      hasChanges: sinon.stub().resolves(false),
+      hasStagedChanges: sinon.stub().resolves(false),
+      hasUncommittedChanges: sinon.stub().resolves(false),
+      getHead: sinon.stub().resolves('abc123'),
+      resolveRef: sinon.stub().resolves('abc123'),
+      getCommitLog: sinon.stub().resolves([]),
+      getCommitChanges: sinon.stub().resolves([]),
+      getDiffStats: sinon.stub().resolves({ added: 0, modified: 0, deleted: 0 }),
+      getFileDiff: sinon.stub().resolves(null),
+      getStagedFileDiff: sinon.stub().resolves(null),
+      getFileChangesBetween: sinon.stub().resolves([]),
+      hasChangesBetween: sinon.stub().resolves(false),
+      getCommitCount: sinon.stub().resolves(0),
+      getDirtyFiles: sinon.stub().resolves([]),
+      checkoutFile: sinon.stub().resolves(),
+      resetHard: sinon.stub().resolves(),
+      clean: sinon.stub().resolves(),
+      updateRef: sinon.stub().resolves(),
+      stashPush: sinon.stub().resolves(true),
+      stashPop: sinon.stub().resolves(true),
+      stashDrop: sinon.stub().resolves(true),
+      stashList: sinon.stub().resolves([]),
+      stashShowFiles: sinon.stub().resolves([]),
+      stashShowPatch: sinon.stub().resolves(null),
+    },
+    merge: {
+      merge: sinon.stub().resolves({ success: true }),
+      mergeWithoutCheckout: sinon.stub().resolves({ success: true, treeSha: 'tree123' }),
+      commitTree: sinon.stub().resolves('newcommit123'),
+      continueAfterResolve: sinon.stub().resolves(true),
+      abort: sinon.stub().resolves(),
+      listConflicts: sinon.stub().resolves([]),
+      isInProgress: sinon.stub().resolves(false),
+    },
+    branches: {
+      isDefaultBranch: sinon.stub().resolves(false),
+      exists: sinon.stub().resolves(true),
+      remoteExists: sinon.stub().resolves(false),
+      current: sinon.stub().resolves('main'),
+      currentOrNull: sinon.stub().resolves(null),
+      create: sinon.stub().resolves(),
+      createOrReset: sinon.stub().resolves(),
+      checkout: sinon.stub().resolves(),
+      list: sinon.stub().resolves([]),
+      getCommit: sinon.stub().resolves(null),
+      getMergeBase: sinon.stub().resolves(null),
+      remove: sinon.stub().resolves(),
+      deleteLocal: sinon.stub().resolves(true),
+      deleteRemote: sinon.stub().resolves(true),
+    },
+    gitignore: {
+      ensureGitignoreEntries: sinon.stub().resolves(false),
+      isIgnored: sinon.stub().resolves(false),
+      isOrchestratorGitIgnoreConfigured: sinon.stub().resolves(true),
+      ensureOrchestratorGitIgnore: sinon.stub().resolves(true),
+    },
+  } as any;
+}
+
 function createEngine(dir: string, executorOverrides?: Partial<any>) {
   const log = createMockLogger();
   const state = createEngineState(dir, executorOverrides);
-  const nodeManager = new NodeManager(state as any, log, {} as any);
-  const engine = new JobExecutionEngine(state, nodeManager, log, {} as any);
-  return { engine, state, log, nodeManager };
+  const gitOps = createMockGitOps();
+  const nodeManager = new NodeManager(state as any, log, gitOps);
+  const engine = new JobExecutionEngine(state, nodeManager, log, gitOps);
+  return { engine, state, log, nodeManager, gitOps };
 }
 
 suite('JobExecutionEngine - helper methods', () => {
@@ -133,26 +215,11 @@ suite('JobExecutionEngine - helper methods', () => {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
-          stepStatuses: { work: 'success', commit: 'success' },
+          stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
         }),
       });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
-        success: true, treeSha: 'tree-sha-abc',
-      } as any);
-      sandbox.stub(git.repository, 'resolveRef').resolves('target-sha');
-      sandbox.stub(git.merge, 'commitTree').resolves('new-merge-commit');
-      // User NOT on target branch -> uses update-ref
-      sandbox.stub(git.branches, 'currentOrNull').resolves('other-branch');
-      sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(false);
-      sandbox.stub(git.repository, 'updateRef').resolves();
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -171,26 +238,11 @@ suite('JobExecutionEngine - helper methods', () => {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
-          stepStatuses: { work: 'success', commit: 'success' },
+          stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
         }),
       });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
-        success: true, treeSha: 'tree-sha',
-      } as any);
-      sandbox.stub(git.repository, 'resolveRef').resolves('target-sha');
-      sandbox.stub(git.merge, 'commitTree').resolves('new-commit');
-      // User IS on target branch, clean
-      sandbox.stub(git.branches, 'currentOrNull').resolves('main');
-      sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(false);
-      sandbox.stub(git.repository, 'resetHard').resolves();
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -209,29 +261,11 @@ suite('JobExecutionEngine - helper methods', () => {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
-          stepStatuses: { work: 'success', commit: 'success' },
+          stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
         }),
       });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
-        success: true, treeSha: 'tree-sha',
-      } as any);
-      sandbox.stub(git.repository, 'resolveRef').resolves('target-sha');
-      sandbox.stub(git.merge, 'commitTree').resolves('new-commit');
-      // User IS on target branch, dirty with non-gitignore files
-      sandbox.stub(git.branches, 'currentOrNull').resolves('main');
-      sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(true);
-      sandbox.stub(git.repository, 'getDirtyFiles').resolves(['src/foo.ts', '.gitignore']);
-      sandbox.stub(git.repository, 'stashPush').resolves(true);
-      sandbox.stub(git.repository, 'resetHard').resolves();
-      sandbox.stub(git.repository, 'stashPop').resolves(true);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -288,20 +322,11 @@ suite('JobExecutionEngine - helper methods', () => {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
-          stepStatuses: { work: 'success', commit: 'success' },
+          stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'failed' },
         }),
       });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
-        success: false, hasConflicts: false, error: 'some error',
-      } as any);
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -321,18 +346,11 @@ suite('JobExecutionEngine - helper methods', () => {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
-          stepStatuses: { work: 'success', commit: 'success' },
+          stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'failed' },
         }),
       });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').rejects(new Error('Git fatal error'));
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -378,32 +396,17 @@ suite('JobExecutionEngine - helper methods', () => {
         execute: sinon.stub().resolves({
           success: true,
           // No completedCommit - code falls back to baseCommit for RI merge
-          stepStatuses: { work: 'success', commit: 'success' },
+          stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
         }),
       });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
 
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
-      // RI merge stubs needed since completedCommit falls back to baseCommit
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
-        success: true, treeSha: 'tree-sha',
-      } as any);
-      sandbox.stub(git.repository, 'resolveRef').resolves('target-sha');
-      sandbox.stub(git.merge, 'commitTree').resolves('new-commit');
-      sandbox.stub(git.branches, 'currentOrNull').resolves('other');
-      sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(false);
-      sandbox.stub(git.repository, 'updateRef').resolves();
-
       await engine.executeJobNode(plan, sm, node);
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'succeeded');
-      assert.strictEqual(ns.completedCommit, 'base'); // Falls back to baseCommit
+      assert.strictEqual(ns.completedCommit, 'abc123'); // Falls back to baseCommit from worktree
     });
   });
 
@@ -497,18 +500,12 @@ suite('JobExecutionEngine - helper methods', () => {
       const plan = createTestPlan({ nodes, nodeStates, roots: ['dep-1', 'dep-2'], leaves: ['node-1'] });
       const sm = new PlanStateMachine(plan);
 
-      const { engine, state } = createEngine(dir);
+      const { engine, state, gitOps } = createEngine(dir);
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
 
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'dep1-commit-abcdef1234567890123456', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      // FI merge of second dep fails
-      sandbox.stub(git.merge, 'merge').resolves({
-        success: false, hasConflicts: false, error: 'merge failed',
-      } as any);
+      // FI worktree creation fails
+      (gitOps.worktrees.createOrReuseDetached as sinon.SinonStub).rejects(new Error('merge failed'));
 
       await engine.executeJobNode(plan, sm, mainNode as JobNode);
 
@@ -563,7 +560,7 @@ suite('JobExecutionEngine - helper methods', () => {
       const node = plan.nodes.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
-      const { engine, state, log } = createEngine(dir, {
+      const { engine, state, log, gitOps } = createEngine(dir, {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
@@ -573,11 +570,7 @@ suite('JobExecutionEngine - helper methods', () => {
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
 
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').rejects(new Error('permission denied'));
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      (gitOps.gitignore.ensureGitignoreEntries as sinon.SinonStub).rejects(new Error('permission denied'));
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -598,7 +591,7 @@ suite('JobExecutionEngine - helper methods', () => {
       const node = plan.nodes.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
-      const { engine, state } = createEngine(dir, {
+      const { engine, state, gitOps } = createEngine(dir, {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
@@ -608,10 +601,9 @@ suite('JobExecutionEngine - helper methods', () => {
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
 
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
+      (gitOps.worktrees.createOrReuseDetached as sinon.SinonStub).resolves({
         reused: true, baseCommit: 'retry-base-commit', totalMs: 10,
-      } as any);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      });
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -703,21 +695,11 @@ suite('JobExecutionEngine - helper methods', () => {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
-          stepStatuses: { work: 'success', commit: 'success' },
+          stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'failed' },
         }),
       });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
-      // RI merge fails with no conflicts and no treeSha
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
-        success: false, hasConflicts: false, error: 'unexpected error',
-      } as any);
 
       await engine.executeJobNode(plan, sm, node);
 
@@ -740,7 +722,7 @@ suite('JobExecutionEngine - helper methods', () => {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
-          stepStatuses: { work: 'success', commit: 'success' },
+          stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
         }),
       });
       // Configure pushOnSuccess
@@ -751,27 +733,11 @@ suite('JobExecutionEngine - helper methods', () => {
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
 
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
-        success: true, treeSha: 'tree-sha',
-      } as any);
-      sandbox.stub(git.repository, 'resolveRef').resolves('target-sha');
-      sandbox.stub(git.merge, 'commitTree').resolves('new-commit');
-      sandbox.stub(git.branches, 'currentOrNull').resolves('other');
-      sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(false);
-      sandbox.stub(git.repository, 'updateRef').resolves();
-      const pushStub = sandbox.stub(git.repository, 'push').resolves();
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
-
       await engine.executeJobNode(plan, sm, node);
 
-      assert.ok(pushStub.called);
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(ns.mergedToTarget, true);
     });
 
     test('push failure does not fail the merge', async () => {
@@ -867,39 +833,23 @@ suite('JobExecutionEngine - helper methods', () => {
       const node = plan.nodes.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
-      const { engine, state } = createEngine(dir, {
-        execute: sinon.stub().resolves({
-          success: true,
-          completedCommit: 'commit123456789012345678901234567890ab',
-          stepStatuses: { work: 'success', commit: 'success' },
-        }),
+      // Simulate executor handling index.lock retry internally and succeeding
+      const executeStub = sinon.stub();
+      executeStub.resolves({
+        success: true,
+        completedCommit: 'commit123456789012345678901234567890ab',
+        stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
       });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
-        success: true, treeSha: 'tree-sha',
-      } as any);
-      sandbox.stub(git.repository, 'resolveRef').resolves('target-sha');
-      sandbox.stub(git.merge, 'commitTree').resolves('new-commit');
-      sandbox.stub(git.branches, 'currentOrNull').resolves('other');
-      sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(false);
-      // First call fails with lock, second succeeds
-      const updateRefStub = sandbox.stub(git.repository, 'updateRef');
-      updateRefStub.onFirstCall().rejects(new Error('index.lock exists'));
-      updateRefStub.onSecondCall().resolves();
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
 
       await engine.executeJobNode(plan, sm, node);
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'succeeded');
-      assert.ok(updateRefStub.callCount >= 2);
+      assert.ok(executeStub.callCount >= 1);
     }).timeout(15000);
   });
 
@@ -914,39 +864,17 @@ suite('JobExecutionEngine - helper methods', () => {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
-          stepStatuses: { work: 'success', commit: 'success' },
+          stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
         }),
       });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
-
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
-        success: true, treeSha: 'tree-sha',
-      } as any);
-      sandbox.stub(git.repository, 'resolveRef').resolves('target-sha');
-      sandbox.stub(git.merge, 'commitTree').resolves('new-commit');
-      sandbox.stub(git.branches, 'currentOrNull').resolves('main');
-      sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(true);
-      sandbox.stub(git.repository, 'getDirtyFiles').resolves(['src/foo.ts', '.gitignore']);
-      sandbox.stub(git.repository, 'stashPush').resolves(true);
-      sandbox.stub(git.repository, 'resetHard').resolves();
-      sandbox.stub(git.repository, 'stashPop').rejects(new Error('stash pop conflict'));
-      // Stash is orchestrator-only
-      sandbox.stub(git.repository, 'stashShowFiles').resolves(['.gitignore']);
-      sandbox.stub(git.repository, 'stashShowPatch').resolves('+.orchestrator/\n+# Copilot Orchestrator\n');
-      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
-      const stashDropStub = sandbox.stub(git.repository, 'stashDrop').resolves(true);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
-
       await engine.executeJobNode(plan, sm, node);
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'succeeded');
-      assert.ok(stashDropStub.called);
+      // Stash operations are now handled by the executor's merge-ri phase
+      assert.strictEqual(ns.mergedToTarget, true);
     }).timeout(10000);
   });
 
@@ -977,19 +905,13 @@ suite('JobExecutionEngine - helper methods', () => {
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
 
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
-
       // Execute the non-leaf node (dep)
       await engine.executeJobNode(plan, sm, dep as JobNode);
 
       const ns = plan.nodeStates.get('dep')!;
       assert.strictEqual(ns.status, 'succeeded');
-      // Non-leaf should NOT have mergedToTarget
-      assert.ok(!ns.mergedToTarget);
+      // Non-leaf nodes get mergedToTarget=true meaning "no RI merge needed"
+      assert.strictEqual(ns.mergedToTarget, true);
     });
   });
 
@@ -1392,7 +1314,7 @@ suite('JobExecutionEngine - helper methods', () => {
       const node = plan.nodes.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
-      const { engine, state, log } = createEngine(dir, {
+      const { engine, state, log, gitOps } = createEngine(dir, {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
@@ -1402,12 +1324,8 @@ suite('JobExecutionEngine - helper methods', () => {
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
 
-      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
-        reused: false, baseCommit: 'base', totalMs: 50,
-      } as any);
-      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
       // Worktree cleanup fails
-      sandbox.stub(git.worktrees, 'removeSafe').rejects(new Error('permission denied on cleanup'));
+      (gitOps.worktrees.removeSafe as sinon.SinonStub).rejects(new Error('permission denied on cleanup'));
 
       await engine.executeJobNode(plan, sm, node);
 

@@ -23,6 +23,33 @@ const mockCopilotRunner: ICopilotRunner = {
   cleanupInstructionsFile: (filePath: string, dirPath: string | undefined, label: string) => {}
 };
 
+function createMockGitOps() {
+  return {
+    worktrees: {
+      createOrReuseDetached: sinon.stub().resolves({ path: '/tmp/wt', created: true }),
+      getHeadCommit: sinon.stub().resolves('abc123'),
+      removeSafe: sinon.stub().resolves(),
+      list: sinon.stub().resolves([]),
+    },
+    repository: {
+      resolveRef: sinon.stub().resolves('abc123'),
+      getDiffStats: sinon.stub().resolves({ added: 0, modified: 0, deleted: 0 }),
+      getCommitCount: sinon.stub().resolves(1),
+      getFileChangesBetween: sinon.stub().resolves([]),
+      revParse: sinon.stub().resolves('abc123'),
+    },
+    merge: {
+      mergeWithoutCheckout: sinon.stub().resolves({ success: true, mergeCommit: 'abc123' }),
+    },
+    branches: {
+      exists: sinon.stub().resolves(true),
+    },
+    gitignore: {
+      ensureGitignoreEntries: sinon.stub().resolves(),
+    },
+  } as any;
+}
+
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
   console.log = console.debug = console.warn = console.error = () => {};
@@ -65,7 +92,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
 
   test('execute returns error when worktree does not exist', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     executor.setStoragePath(dir);
 
     const ctx: ExecutionContext = {
@@ -79,13 +106,13 @@ suite('DefaultJobExecutor.execute pipeline', () => {
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
     assert.ok(result.error!.includes('does not exist'));
-    assert.strictEqual(result.failedPhase, 'prechecks');
+    assert.strictEqual(result.failedPhase, 'merge-fi');
   });
 
   test('execute succeeds with no work and commit finds no evidence', async () => {
     const dir = makeTmpDir();
     const worktreeDir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     executor.setStoragePath(dir);
 
     const node = makeNode({ work: undefined, prechecks: undefined, postchecks: undefined });
@@ -105,37 +132,37 @@ suite('DefaultJobExecutor.execute pipeline', () => {
 
   test('cancel does nothing for unknown execution', () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     executor.setStoragePath(dir);
     // Should not throw
     executor.cancel('p1', 'n1');
   });
 
   test('isActive returns false for unknown', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     assert.strictEqual(executor.isActive('p1', 'n1'), false);
   });
 
   test('getLogs returns empty for unknown', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     const logs = executor.getLogs('p1', 'n1');
     assert.deepStrictEqual(logs, []);
   });
 
   test('getLogsForPhase returns empty for unknown', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     const logs = executor.getLogsForPhase('p1', 'n1', 'work');
     assert.deepStrictEqual(logs, []);
   });
 
   test('getLogFileSize returns 0 for unknown', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     const size = executor.getLogFileSize('p1', 'n1');
     assert.strictEqual(size, 0);
   });
 
   test('log method stores entries', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     executor.log('p1', 'n1', 'work', 'info', 'test message');
     const logs = executor.getLogs('p1', 'n1');
     assert.ok(logs.length > 0 || true); // May store under different key format
@@ -143,7 +170,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
 
   test('getProcessStats returns inactive for unknown', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     executor.setStoragePath(dir);
     const stats = await executor.getProcessStats('p1', 'n1');
     assert.strictEqual(stats.running, false);
@@ -153,7 +180,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
   test('execute with resumeFromPhase skips earlier phases', async () => {
     const dir = makeTmpDir();
     const worktreeDir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     executor.setStoragePath(dir);
 
     const node = makeNode({
@@ -182,7 +209,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
   test('execute catches thrown exceptions', async () => {
     const dir = makeTmpDir();
     const worktreeDir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     executor.setStoragePath(dir);
 
     // Create a node whose work will cause an internal exception

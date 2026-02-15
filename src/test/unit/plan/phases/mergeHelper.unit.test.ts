@@ -103,25 +103,9 @@ suite('mergeHelper', () => {
       assert.strictEqual(runCall.args[0].timeout, 600000);
     });
 
-    test('creates new CopilotCliRunner when none provided', async () => {
+    test('uses provided CopilotCliRunner', async () => {
       const context = createMockContext();
-
-      // Mock the CopilotCliRunner constructor and run method
-      const mockRun = sinon.stub().resolves({
-        success: true,
-        sessionId: 'auto-created-session',
-        metrics: { durationMs: 2000 }
-      });
-
-      // We need to mock the dynamic import and constructor
-      const CopilotCliRunnerClass = function(this: any, logger: any) {
-        this.run = mockRun;
-      };
-
-      // Temporarily replace the CopilotCliRunner import
-      const helperModule = await import('../../../../plan/phases/mergeHelper');
-      const originalModule = await import('../../../../agent/copilotCliRunner');
-      sandbox.stub(originalModule, 'CopilotCliRunner').callsFake(CopilotCliRunnerClass as any);
+      const runner = createMockCopilotRunner();
 
       const result = await resolveMergeConflictWithCopilot(
         context,
@@ -129,13 +113,13 @@ suite('mergeHelper', () => {
         'source',
         'target',
         'Test merge',
-        createMockCopilotRunner(),
+        runner,
         ['conflict.txt']
       );
 
       assert.strictEqual(result.success, true);
-      assert.strictEqual(result.sessionId, 'auto-created-session');
-      assert.ok(mockRun.calledOnce);
+      assert.strictEqual(result.sessionId, 'test-session-123');
+      assert.ok((runner.run as sinon.SinonStub).calledOnce);
     });
 
     test('handles runner failure', async () => {

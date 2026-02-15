@@ -120,10 +120,14 @@ suite('logFileHelper', () => {
   });
 
   suite('readLogsFromFile', () => {
-    test('returns "No log file found." when no file exists', () => {
+    test('returns header content when storagePath is provided (file auto-created)', () => {
+      const dir = makeTmpDir();
+      const orchDir = path.join(dir, '.orchestrator');
+      fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
       const logFiles = new Map<string, string>();
-      const result = readLogsFromFile('key1', '/nonexistent', logFiles);
-      assert.ok(result.includes('No log file found'));
+      const result = readLogsFromFile('key1', orchDir, logFiles);
+      // getLogFilePathByKey now auto-creates the log file with a header
+      assert.ok(result.includes('Copilot Orchestrator'));
     });
 
     test('returns "No log file found." when storagePath is undefined', () => {
