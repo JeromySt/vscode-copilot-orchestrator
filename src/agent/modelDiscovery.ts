@@ -213,7 +213,8 @@ export async function refreshModelCache(deps?: ModelDiscoveryDeps): Promise<Mode
  * Validate whether a model ID is in the discovered model list.
  */
 export async function isValidModel(modelId: string, deps?: ModelDiscoveryDeps): Promise<boolean> {
-  const result = await getCachedModels(deps);
+  const discoverer = deps?.spawner ? getCachedModels : discoverAvailableModelsLegacy;
+  const result = await discoverer(deps);
   return result.models.some(m => m.id === modelId);
 }
 

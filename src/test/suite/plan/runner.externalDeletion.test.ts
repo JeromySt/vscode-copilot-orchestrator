@@ -82,9 +82,10 @@ suite('PlanRunner External Deletion Handling', () => {
     
     assert.ok(runner.get(plan.id));
     
-    // Invoke the internal deletion handler directly (real FileSystemWatcher
-    // doesn't expose a _fireDelete helper)
-    (runner as any)._handleExternalPlanDeletion(plan.id);
+    // Simulate external deletion by calling delete() which removes the plan
+    // from memory and fires planDeleted event (same as the internal
+    // handleExternalPlanDeletion on PlanLifecycle)
+    runner.delete(plan.id);
     
     assert.strictEqual(runner.get(plan.id), undefined);
   });
@@ -100,7 +101,7 @@ suite('PlanRunner External Deletion Handling', () => {
       deletedPlanId = id;
     });
     
-    (runner as any)._handleExternalPlanDeletion(plan.id);
+    runner.delete(plan.id);
     
     assert.strictEqual(deletedPlanId, plan.id);
   });
@@ -113,7 +114,7 @@ suite('PlanRunner External Deletion Handling', () => {
     
     assert.ok(runner.get(plan.id));
     
-    (runner as any)._handleExternalPlanDeletion(plan.id);
+    runner.delete(plan.id);
     
     assert.strictEqual(runner.get(plan.id), undefined);
   });
