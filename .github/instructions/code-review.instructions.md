@@ -31,6 +31,7 @@ When reviewing pull requests in this repository, enforce these critical rules:
 - `Logger.for('component')` static factory (singleton, initialized in composition root)
 - `as any` in test mocks (mock objects don't need full interface implementation)
 - Direct `fs` calls in `src/plan/logFileHelper.ts` (performance-critical path)
-- Direct `fs` calls in `src/git/core/*.ts` (low-level git implementation layer)
+- Direct `fs` calls in `src/git/core/*.ts` (these ARE the low-level implementation behind `IGitOperations` — same role as `DefaultProcessSpawner` for `IProcessSpawner`)
 - Direct `fs` calls in `src/plan/executionEngine.ts` for instructions file I/O (auto-heal)
 - `child_process` import in `src/interfaces/IProcessSpawner.ts` (the abstraction boundary itself)
+- `child_process` import in `src/git/core/executor.ts` (the git command executor — wrapped by `IGitOperations`)
