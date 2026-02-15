@@ -32,6 +32,7 @@ export {
   classifyModel,
   parseModelChoices,
   discoverAvailableModels,
+  discoverAvailableModelsLegacy,
   getCachedModels,
   refreshModelCache,
   isValidModel,

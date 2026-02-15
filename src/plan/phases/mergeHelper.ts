@@ -47,8 +47,8 @@ export async function resolveMergeConflictWithCopilot(
   sourceBranch: string,
   targetBranch: string,
   commitMessage: string,
+  copilotRunner: ICopilotRunner,
   conflictedFiles?: string[],
-  copilotRunner?: ICopilotRunner,
   configManager?: any
 ): Promise<MergeConflictResult> {
   const prefer = configManager?.getConfig('copilotOrchestrator.merge', 'prefer', 'theirs') ?? 'theirs';
@@ -84,16 +84,6 @@ ${conflictList}
 - If both sides modified the same function differently, prefer "${prefer}" but preserve non-conflicting logic from the other side.`;
 
   ctx.logInfo(`Running Copilot CLI to resolve conflicts...`);
-  
-  if (!copilotRunner) {
-    const cliLogger = {
-      info: (msg: string) => ctx.logInfo(`[copilot] ${msg}`),
-      warn: (msg: string) => ctx.logInfo(`[copilot] WARN: ${msg}`),
-      error: (msg: string) => ctx.logError(`[copilot] ERROR: ${msg}`),
-      debug: (msg: string) => ctx.logInfo(`[copilot] DEBUG: ${msg}`),
-    };
-    copilotRunner = new CopilotCliRunner(cliLogger);
-  }
   
   const result = await copilotRunner.run({
     cwd,

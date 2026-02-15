@@ -48,7 +48,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _pulseSubscription?: PulseDisposable;
   private _debounceTimer?: NodeJS.Timeout;
-  private _capacityTimer?: NodeJS.Timeout;
+  private _pulseCounter: number = 0;
   
   /**
    * @param _context - The extension context for managing subscriptions and resources.
@@ -130,17 +130,19 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     // Send initial data (full plan list for first render)
     setTimeout(() => this.refresh(), 100);
     
-    // Pulse: pure 1-second signal forwarding to webview — NO logic, NO async
+    // Pulse: 1-second signal forwarding to webview + capacity refresh counter
     this._pulseSubscription = this._pulse.onPulse(() => {
       if (this._view) {
         this._view.webview.postMessage({ type: 'pulse' });
       }
+      
+      // Capacity refresh every 10 pulses (10 seconds)
+      this._pulseCounter++;
+      if (this._pulseCounter >= 10) {
+        this._pulseCounter = 0;
+        this._refreshCapacity();
+      }
     });
-    
-    // Capacity stats: own cadence (every 10s)
-    this._capacityTimer = setInterval(() => {
-      this._refreshCapacity();
-    }, 10000);
     
     webviewView.onDidDispose(() => {
       if (this._pulseSubscription) {
@@ -148,9 +150,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       }
       if (this._debounceTimer) {
         clearTimeout(this._debounceTimer);
-      }
-      if (this._capacityTimer) {
-        clearInterval(this._capacityTimer);
       }
     });
   }

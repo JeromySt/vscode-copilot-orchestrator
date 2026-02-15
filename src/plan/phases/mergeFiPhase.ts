@@ -13,6 +13,7 @@ import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces
 import type { CopilotUsageMetrics } from '../types';
 import { resolveMergeConflictWithCopilot } from './mergeHelper';
 import type { IGitOperations } from '../../interfaces/IGitOperations';
+import type { ICopilotRunner } from '../../interfaces/ICopilotRunner';
 import { aggregateMetrics } from '../metricsAggregator';
 
 interface DependencyInfo {
@@ -30,10 +31,12 @@ interface DependencyInfo {
 export class MergeFiPhaseExecutor implements IPhaseExecutor {
   private configManager?: any;
   private git: IGitOperations;
+  private copilotRunner: ICopilotRunner;
   
-  constructor(deps: { configManager?: any; git: IGitOperations }) {
+  constructor(deps: { configManager?: any; git: IGitOperations; copilotRunner: ICopilotRunner }) {
     this.configManager = deps.configManager;
     this.git = deps.git;
+    this.copilotRunner = deps.copilotRunner;
   }
   
   async execute(context: PhaseContext): Promise<PhaseResult> {
@@ -97,8 +100,8 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
             sourceCommit,
             'HEAD',
             `Merge parent commit ${shortSha} for job ${node.name}`,
+            this.copilotRunner,
             mergeResult.conflictFiles,
-            undefined,
             this.configManager
           );
           

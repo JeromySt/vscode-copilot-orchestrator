@@ -127,6 +127,10 @@ export async function discoverAvailableModels(deps?: ModelDiscoveryDeps): Promis
   const logger = deps?.logger;
   const spawner = deps?.spawner;
 
+  if (!spawner) {
+    throw new Error('ModelDiscoveryDeps.spawner is required. Use discoverAvailableModelsLegacy() for backward compatibility.');
+  }
+
   // Check if we recently failed and should wait
   if (lastFailureTime !== null && (clock() - lastFailureTime) < FAILURE_CACHE_TTL_MS) {
     return emptyResult(clock);
@@ -169,6 +173,20 @@ export async function discoverAvailableModels(deps?: ModelDiscoveryDeps): Promis
     lastFailureTime = clock();
     return emptyResult(clock);
   }
+}
+
+/**
+ * Convenience function for legacy callers that don't use DI.
+ * 
+ * @deprecated Use discoverAvailableModels with proper DI instead
+ */
+export async function discoverAvailableModelsLegacy(deps?: Omit<ModelDiscoveryDeps, 'spawner'>): Promise<ModelDiscoveryResult> {
+  // eslint-disable-next-line no-restricted-syntax
+  const spawner = new DefaultProcessSpawner();
+  return discoverAvailableModels({
+    ...deps,
+    spawner,
+  });
 }
 
 /**
@@ -245,10 +263,9 @@ function emptyResult(clock?: () => number): ModelDiscoveryResult {
  * Run `copilot --help` and return its output.
  * Exported for testing with injected spawner.
  */
-export function runCopilotHelp(spawner?: IProcessSpawner): Promise<string> {
-  const sp = spawner ?? new DefaultProcessSpawner();
+export function runCopilotHelp(spawner: IProcessSpawner): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = sp.spawn('copilot', ['--help'], { shell: true });
+    const proc = spawner.spawn('copilot', ['--help'], { shell: true });
     let stdout = '';
     let stderr = '';
     let settled = false;

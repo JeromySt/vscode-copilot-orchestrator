@@ -143,7 +143,8 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const evidenceValidator = c.resolve<import('./interfaces').IEvidenceValidator>(Tokens.IEvidenceValidator);
       const processMonitor = c.resolve<import('./interfaces').IProcessMonitor>(Tokens.IProcessMonitor);
       const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
-      return new DefaultJobExecutor(spawner, evidenceValidator, processMonitor, git);
+      const copilotRunner = c.resolve<import('./interfaces/ICopilotRunner').ICopilotRunner>(Tokens.ICopilotRunner);
+      return new DefaultJobExecutor(spawner, evidenceValidator, processMonitor, git, copilotRunner);
     },
   );
 

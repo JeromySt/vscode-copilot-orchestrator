@@ -14,6 +14,16 @@ import { WorkPhaseExecutor } from '../../../plan/phases/workPhase';
 import { PostcheckPhaseExecutor } from '../../../plan/phases/postcheckPhase';
 import { Logger } from '../../../core/logger';
 import type { JobNode, ExecutionContext, JobExecutionResult } from '../../../plan/types';
+import type { ICopilotRunner } from '../../../interfaces/ICopilotRunner';
+
+// Mock ICopilotRunner for tests
+const mockCopilotRunner: ICopilotRunner = {
+  run: async () => ({ success: true, sessionId: 'test', metrics: { requestCount: 1, inputTokens: 100, outputTokens: 50, costUsd: 0.01, durationMs: 1000 } }),
+  isAvailable: () => true,
+  writeInstructionsFile: (cwd: string, task: string, instructions: string | undefined, label: string, jobId?: string) => ({ filePath: '/tmp/instructions.md', dirPath: '/tmp' }),
+  buildCommand: (options: any) => 'copilot --help',
+  cleanupInstructionsFile: (filePath: string, dirPath: string | undefined, label: string) => {}
+};
 
 let tmpDirs: string[] = [];
 function makeTmpDir(): string {
@@ -60,7 +70,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
 
   test('execute handles work phase failure (line 140)', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     executor.setStoragePath(dir);
 
     // Mock work phase to fail
@@ -103,7 +113,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
 
   test('execute handles postchecks failure (line 160)', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     executor.setStoragePath(dir);
 
     // Mock work phase to succeed
@@ -150,7 +160,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel handles Windows process termination (lines 202-205)', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     const logger = createMockLogger();
     
     // Mock Windows platform
@@ -194,7 +204,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel handles Unix process termination (lines 202-205)', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     
     // Mock Unix platform
     const origPlatform = process.platform;
@@ -235,7 +245,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel handles process kill exception gracefully (lines 204-205)', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     
     // Mock an active execution with process that throws on kill
     const planId = 'test-plan';
@@ -265,7 +275,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel with no active execution (edge case)', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     
     // Should not throw when no execution exists
     assert.doesNotThrow(() => {
@@ -274,7 +284,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
   });
 
   test('cancel with execution but no process (edge case)', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     
     // Mock an active execution without process
     const planId = 'test-plan';
@@ -299,3 +309,5 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
     assert.strictEqual(execution.aborted, true);
   });
 });
+
+

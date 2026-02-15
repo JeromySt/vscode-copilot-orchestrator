@@ -16,6 +16,7 @@ import {
 import { JobExecutor } from './runner';
 import { Logger } from '../core/logger';
 import type { IGitOperations } from '../interfaces/IGitOperations';
+import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
 import { aggregateMetrics } from './metricsAggregator';
 import type { IEvidenceValidator } from '../interfaces';
 import type { PhaseContext } from '../interfaces/IPhaseExecutor';
@@ -59,12 +60,14 @@ export class DefaultJobExecutor implements JobExecutor {
   private evidenceValidator: IEvidenceValidator;
   private spawner: IProcessSpawner;
   private git: IGitOperations;
+  private copilotRunner: ICopilotRunner;
 
-  constructor(spawner: IProcessSpawner, evidenceValidator: IEvidenceValidator, processMonitor: IProcessMonitor, git: IGitOperations) {
+  constructor(spawner: IProcessSpawner, evidenceValidator: IEvidenceValidator, processMonitor: IProcessMonitor, git: IGitOperations, copilotRunner: ICopilotRunner) {
     this.spawner = spawner;
     this.evidenceValidator = evidenceValidator;
     this.processMonitor = processMonitor;
     this.git = git;
+    this.copilotRunner = copilotRunner;
   }
 
   setStoragePath(storagePath: string): void {
@@ -111,6 +114,7 @@ export class DefaultJobExecutor implements JobExecutor {
       getCopilotConfigDir: (wtp: string) => this.getCopilotConfigDir(wtp),
       spawner: this.spawner,
       git: this.git,
+      copilotRunner: this.copilotRunner,
       configManager: undefined, // TODO: Pass config manager if available
     });
     const makeCtx = (phase: ExecutionPhase): PhaseContext => ({

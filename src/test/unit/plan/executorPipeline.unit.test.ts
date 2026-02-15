@@ -12,6 +12,16 @@ import { DefaultProcessSpawner } from '../../../interfaces/IProcessSpawner';
 import { DefaultEvidenceValidator } from '../../../plan/evidenceValidator';
 import { ProcessMonitor } from '../../../process';
 import type { ExecutionContext, JobExecutionResult, PlanInstance, JobNode } from '../../../plan/types';
+import type { ICopilotRunner } from '../../../interfaces/ICopilotRunner';
+
+// Mock ICopilotRunner for tests
+const mockCopilotRunner: ICopilotRunner = {
+  run: async () => ({ success: true, sessionId: 'test', metrics: { requestCount: 1, inputTokens: 100, outputTokens: 50, costUsd: 0.01, durationMs: 1000 } }),
+  isAvailable: () => true,
+  writeInstructionsFile: (cwd: string, task: string, instructions: string | undefined, label: string, jobId?: string) => ({ filePath: '/tmp/instructions.md', dirPath: '/tmp' }),
+  buildCommand: (options: any) => 'copilot --help',
+  cleanupInstructionsFile: (filePath: string, dirPath: string | undefined, label: string) => {}
+};
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
@@ -55,7 +65,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
 
   test('execute returns error when worktree does not exist', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     executor.setStoragePath(dir);
 
     const ctx: ExecutionContext = {
@@ -75,7 +85,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
   test('execute succeeds with no work and commit finds no evidence', async () => {
     const dir = makeTmpDir();
     const worktreeDir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     executor.setStoragePath(dir);
 
     const node = makeNode({ work: undefined, prechecks: undefined, postchecks: undefined });
@@ -95,37 +105,37 @@ suite('DefaultJobExecutor.execute pipeline', () => {
 
   test('cancel does nothing for unknown execution', () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     executor.setStoragePath(dir);
     // Should not throw
     executor.cancel('p1', 'n1');
   });
 
   test('isActive returns false for unknown', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     assert.strictEqual(executor.isActive('p1', 'n1'), false);
   });
 
   test('getLogs returns empty for unknown', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     const logs = executor.getLogs('p1', 'n1');
     assert.deepStrictEqual(logs, []);
   });
 
   test('getLogsForPhase returns empty for unknown', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     const logs = executor.getLogsForPhase('p1', 'n1', 'work');
     assert.deepStrictEqual(logs, []);
   });
 
   test('getLogFileSize returns 0 for unknown', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     const size = executor.getLogFileSize('p1', 'n1');
     assert.strictEqual(size, 0);
   });
 
   test('log method stores entries', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     executor.log('p1', 'n1', 'work', 'info', 'test message');
     const logs = executor.getLogs('p1', 'n1');
     assert.ok(logs.length > 0 || true); // May store under different key format
@@ -133,7 +143,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
 
   test('getProcessStats returns inactive for unknown', async () => {
     const dir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     executor.setStoragePath(dir);
     const stats = await executor.getProcessStats('p1', 'n1');
     assert.strictEqual(stats.running, false);
@@ -143,7 +153,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
   test('execute with resumeFromPhase skips earlier phases', async () => {
     const dir = makeTmpDir();
     const worktreeDir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     executor.setStoragePath(dir);
 
     const node = makeNode({
@@ -172,7 +182,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
   test('execute catches thrown exceptions', async () => {
     const dir = makeTmpDir();
     const worktreeDir = makeTmpDir();
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     executor.setStoragePath(dir);
 
     // Create a node whose work will cause an internal exception
@@ -192,3 +202,5 @@ suite('DefaultJobExecutor.execute pipeline', () => {
     assert.ok(typeof result.success === 'boolean');
   }).timeout(15000);
 });
+
+

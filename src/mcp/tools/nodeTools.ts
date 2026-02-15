@@ -9,7 +9,7 @@
 
 import { McpTool } from '../types';
 import { PRODUCER_ID_PATTERN } from './planTools';
-import { discoverAvailableModels } from '../../agent/modelDiscovery';
+import { discoverAvailableModelsLegacy } from '../../agent/modelDiscovery';
 
 /**
  * Return all node-centric MCP tool definitions.
@@ -22,7 +22,7 @@ import { discoverAvailableModels } from '../../agent/modelDiscovery';
  * @returns Array of {@link McpTool} definitions.
  */
 export async function getNodeToolDefinitions(): Promise<McpTool[]> {
-  const modelResult = await discoverAvailableModels();
+  const modelResult = await discoverAvailableModelsLegacy();
   const modelEnum = modelResult.rawChoices.length > 0
     ? modelResult.rawChoices
     : ['gpt-5', 'claude-sonnet-4.5'];

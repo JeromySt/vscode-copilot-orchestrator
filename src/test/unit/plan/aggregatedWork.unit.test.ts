@@ -9,6 +9,16 @@ import { DefaultProcessSpawner } from '../../../interfaces/IProcessSpawner';
 import { DefaultEvidenceValidator } from '../../../plan/evidenceValidator';
 import { ProcessMonitor } from '../../../process';
 import type { JobNode } from '../../../plan/types';
+import type { ICopilotRunner } from '../../../interfaces/ICopilotRunner';
+
+// Mock ICopilotRunner for tests
+const mockCopilotRunner: ICopilotRunner = {
+  run: async () => ({ success: true, sessionId: 'test', metrics: { requestCount: 1, inputTokens: 100, outputTokens: 50, costUsd: 0.01, durationMs: 1000 } }),
+  isAvailable: () => true,
+  writeInstructionsFile: (cwd: string, task: string, instructions: string | undefined, label: string, jobId?: string) => ({ filePath: '/tmp/instructions.md', dirPath: '/tmp' }),
+  buildCommand: (options: any) => 'copilot --help',
+  cleanupInstructionsFile: (filePath: string, dirPath: string | undefined, label: string) => {}
+};
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
@@ -37,7 +47,7 @@ suite('computeAggregatedWorkSummary', () => {
 
   setup(() => {
     quiet = silenceConsole();
-    executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any);
+    executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), {} as any, mockCopilotRunner);
     
     // Stub git module functions
     const gitModule = require('../../../git');
@@ -237,3 +247,5 @@ suite('computeAggregatedWorkSummary', () => {
     assert.strictEqual(result.filesDeleted, 1);
   });
 });
+
+
