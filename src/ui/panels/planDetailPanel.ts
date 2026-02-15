@@ -97,6 +97,25 @@ export class planDetailPanel {
     // Initial render
     this._update();
     
+    // Subscribe to plan runner events for live state updates
+    const onNodeTransition = (event: any) => {
+      const eventPlanId = typeof event === 'string' ? event : event?.planId;
+      if (eventPlanId === this._planId) {
+        this._update();
+      }
+    };
+    const onPlanCompleted = (plan: any) => {
+      if (plan?.id === this._planId || plan === this._planId) {
+        this._update();
+      }
+    };
+    this._planRunner.on('nodeTransition', onNodeTransition);
+    this._planRunner.on('planCompleted', onPlanCompleted);
+    this._disposables.push({ dispose: () => {
+      this._planRunner.removeListener('nodeTransition', onNodeTransition);
+      this._planRunner.removeListener('planCompleted', onPlanCompleted);
+    }});
+    
     // Subscribe to pulse — forward to webview for client-side duration ticking.
     // Duration counters (plan header + node labels) update purely client-side
     // using data-started timestamps. No server data needed on every tick.
