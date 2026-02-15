@@ -63,6 +63,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     _planRunner.on('planCreated', (plan: PlanInstance) => {
       this._sendPlanAdded(plan);
     });
+    _planRunner.on('planStarted', (plan: PlanInstance) => {
+      this._sendPlanStateChange(plan.id);
+    });
     _planRunner.on('planCompleted', (plan: PlanInstance) => {
       this._sendPlanStateChange(plan.id);
     });
