@@ -1,6 +1,6 @@
 /**
  * @fileoverview Comprehensive tests for nodeHandlers.ts
- * Covers handleCreateNode, handleGetNode, handleListNodes, handleRetryNode,
+ * Covers handleGetNode, handleListNodes, handleRetryNode,
  * handleForceFailNode, handleNodeFailureContext, handleGetGroupStatus,
  * handleListGroups, handleCancelGroup, handleDeleteGroup, handleRetryGroup.
  */
@@ -71,112 +71,6 @@ suite('Node Handlers', () => {
 
   teardown(() => {
     sinon.restore();
-  });
-
-  suite('handleCreateNode', () => {
-    test('should return error for empty nodes array', async () => {
-      const { handleCreateNode } = require('../../../mcp/handlers/nodeHandlers');
-      const result = await handleCreateNode({ nodes: [] }, makeCtx());
-      assert.strictEqual(result.success, false);
-    });
-
-    test('should return error for missing producer_id', async () => {
-      const { handleCreateNode } = require('../../../mcp/handlers/nodeHandlers');
-      const result = await handleCreateNode({ nodes: [{ task: 'T', dependencies: [] }] }, makeCtx());
-      assert.strictEqual(result.success, false);
-    });
-
-    test('should return error for invalid producer_id format', async () => {
-      const { handleCreateNode } = require('../../../mcp/handlers/nodeHandlers');
-      const result = await handleCreateNode({ nodes: [{ producer_id: 'AB', task: 'T', dependencies: [] }] }, makeCtx());
-      assert.strictEqual(result.success, false);
-    });
-
-    test('should return error for duplicate producer_id', async () => {
-      const { handleCreateNode } = require('../../../mcp/handlers/nodeHandlers');
-      const result = await handleCreateNode({
-        nodes: [
-          { producer_id: 'build', task: 'T1', dependencies: [] },
-          { producer_id: 'build', task: 'T2', dependencies: [] },
-        ],
-      }, makeCtx());
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('Duplicate'));
-    });
-
-    test('should return error for missing task', async () => {
-      const { handleCreateNode } = require('../../../mcp/handlers/nodeHandlers');
-      const result = await handleCreateNode({ nodes: [{ producer_id: 'build', dependencies: [] }] }, makeCtx());
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('task'));
-    });
-
-    test('should return error for missing dependencies array', async () => {
-      const { handleCreateNode } = require('../../../mcp/handlers/nodeHandlers');
-      const result = await handleCreateNode({ nodes: [{ producer_id: 'build', task: 'T' }] }, makeCtx());
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('dependencies'));
-    });
-
-    test('should return error for unknown dependency', async () => {
-      const { handleCreateNode } = require('../../../mcp/handlers/nodeHandlers');
-      const result = await handleCreateNode({
-        nodes: [{ producer_id: 'build', task: 'T', dependencies: ['nonexistent'] }],
-      }, makeCtx());
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('unknown dependency'));
-    });
-
-    test('should return error for self-dependency', async () => {
-      const { handleCreateNode } = require('../../../mcp/handlers/nodeHandlers');
-      const result = await handleCreateNode({
-        nodes: [{ producer_id: 'build', task: 'T', dependencies: ['build'] }],
-      }, makeCtx());
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('cannot depend on itself'));
-    });
-
-    test.skip('should create single node', async () => {
-      const { handleCreateNode } = require('../../../mcp/handlers/nodeHandlers');
-      const plan = makeMockPlan({
-        roots: ['n1'],
-        producerIdToNodeId: new Map([['build', 'n1']]),
-      });
-      const ctx = makeCtx({ enqueueJob: sinon.stub().returns(plan) });
-      const result = await handleCreateNode({
-        nodes: [{ producer_id: 'build', task: 'Build it', dependencies: [] }],
-      }, ctx);
-      assert.strictEqual(result.success, true);
-      assert.ok(result.nodeId);
-      assert.ok(result.groupId);
-    });
-
-    test.skip('should create multiple nodes as plan', async () => {
-      const { handleCreateNode } = require('../../../mcp/handlers/nodeHandlers');
-      const plan = makeMockPlan({
-        nodes: new Map([['n1', {}], ['n2', {}]]),
-        producerIdToNodeId: new Map([['build', 'n1'], ['test-run', 'n2']]),
-      });
-      const ctx = makeCtx({ enqueue: sinon.stub().returns(plan) });
-      const result = await handleCreateNode({
-        nodes: [
-          { producer_id: 'build', task: 'Build', dependencies: [] },
-          { producer_id: 'test-run', task: 'Test', dependencies: ['build'] },
-        ],
-      }, ctx);
-      assert.strictEqual(result.success, true);
-      assert.ok(result.groupId);
-      assert.ok(result.nodeMapping);
-    });
-
-    test('should handle error from PlanRunner', async () => {
-      const { handleCreateNode } = require('../../../mcp/handlers/nodeHandlers');
-      const ctx = makeCtx({ enqueueJob: sinon.stub().throws(new Error('Failed')) });
-      const result = await handleCreateNode({
-        nodes: [{ producer_id: 'build', task: 'Build', dependencies: [] }],
-      }, ctx);
-      assert.strictEqual(result.success, false);
-    });
   });
 
   suite('handleGetNode', () => {

@@ -15,7 +15,6 @@ import {
   handleRetryNode,
   handleForceFailNode,
   handleNodeFailureContext,
-  handleCreateNode,
 } from '../../../mcp/handlers/nodeHandlers';
 import {
   adaptGetPlanStatus,
@@ -447,124 +446,6 @@ suite('Legacy Adapters', () => {
 suite('Node Handler Coverage Tests', () => {
   setup(() => { silenceConsole(); });
   teardown(() => { sinon.restore(); });
-
-  suite('handleCreateNode', () => {
-    test('returns error for empty nodes array', async () => {
-      const ctx = createContext();
-      const result = await handleCreateNode({ nodes: [] }, ctx);
-      assert.strictEqual(result.success, false);
-    });
-
-    test('returns error for missing nodes field', async () => {
-      const ctx = createContext();
-      const result = await handleCreateNode({}, ctx);
-      assert.strictEqual(result.success, false);
-    });
-
-    test('returns error for missing producer_id', async () => {
-      const ctx = createContext();
-      const result = await handleCreateNode({ nodes: [{ task: 'test', dependencies: [] }] }, ctx);
-      assert.strictEqual(result.success, false);
-    });
-
-    test('returns error for invalid producer_id format', async () => {
-      const ctx = createContext();
-      const result = await handleCreateNode({ nodes: [{ producer_id: 'A B', task: 'test', dependencies: [] }] }, ctx);
-      assert.strictEqual(result.success, false);
-    });
-
-    test('returns error for duplicate producer_ids', async () => {
-      const ctx = createContext();
-      const result = await handleCreateNode({
-        nodes: [
-          { producer_id: 'node-a', task: 'test1', dependencies: [] },
-          { producer_id: 'node-a', task: 'test2', dependencies: [] },
-        ],
-      }, ctx);
-      assert.strictEqual(result.success, false);
-    });
-
-    test('returns error for missing task', async () => {
-      const ctx = createContext();
-      const result = await handleCreateNode({ nodes: [{ producer_id: 'node-a', dependencies: [] }] }, ctx);
-      assert.strictEqual(result.success, false);
-    });
-
-    test('returns error for missing dependencies', async () => {
-      const ctx = createContext();
-      const result = await handleCreateNode({ nodes: [{ producer_id: 'node-a', task: 'test' }] }, ctx);
-      assert.strictEqual(result.success, false);
-    });
-
-    test('returns error for unknown dependency', async () => {
-      const ctx = createContext();
-      const result = await handleCreateNode({
-        nodes: [{ producer_id: 'node-a', task: 'test', dependencies: ['nonexistent'] }],
-      }, ctx);
-      assert.strictEqual(result.success, false);
-    });
-
-    test('returns error for self-dependency', async () => {
-      const ctx = createContext();
-      const result = await handleCreateNode({
-        nodes: [{ producer_id: 'node-a', task: 'test', dependencies: ['node-a'] }],
-      }, ctx);
-      assert.strictEqual(result.success, false);
-    });
-
-    test('creates single node successfully', async () => {
-      const mockPlan = createTestPlan();
-      const ctx = createContext();
-      (ctx.PlanRunner as any).enqueueJob = sinon.stub().returns(mockPlan);
-      // Stub git operations that resolveBaseBranch/resolveTargetBranch need
-      const git = require('../../../git');
-      sinon.stub(git.branches, 'currentOrNull').resolves('main');
-      sinon.stub(git.branches, 'isDefaultBranch').resolves(false);
-      sinon.stub(git.branches, 'exists').resolves(true);
-      sinon.stub(git.orchestrator, 'resolveTargetBranchRoot').resolves({ targetBranchRoot: 'copilot_plan/test', needsCreation: false });
-      const vscode = require('vscode');
-      sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
-      const result = await handleCreateNode({
-        nodes: [{ producer_id: 'my-task', task: 'Build project', dependencies: [] }],
-      }, ctx);
-      assert.strictEqual(result.success, true);
-      assert.ok(result.nodeId);
-      assert.ok(result.groupId);
-    });
-
-    test('creates batch of nodes successfully', async () => {
-      const mockPlan = createTestPlan();
-      mockPlan.producerIdToNodeId.set('task-a', 'uuid-a');
-      mockPlan.producerIdToNodeId.set('task-b', 'uuid-b');
-      mockPlan.nodes.set('uuid-b', { id: 'uuid-b', producerId: 'task-b', name: 'Task B', type: 'job', task: 'x', dependencies: [], dependents: [] } as any);
-      const ctx = createContext();
-      (ctx.PlanRunner as any).enqueue = sinon.stub().returns(mockPlan);
-      // Stub git operations
-      const git = require('../../../git');
-      sinon.stub(git.branches, 'currentOrNull').resolves('main');
-      sinon.stub(git.orchestrator, 'resolveTargetBranchRoot').resolves({ targetBranchRoot: 'copilot_plan/batch', needsCreation: false });
-      const vscode = require('vscode');
-      sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
-      const result = await handleCreateNode({
-        nodes: [
-          { producer_id: 'task-a', task: 'Task A', dependencies: [] },
-          { producer_id: 'task-b', task: 'Task B', dependencies: ['task-a'] },
-        ],
-      }, ctx);
-      assert.strictEqual(result.success, true);
-      assert.ok(result.nodeMapping);
-      assert.ok(result.nodeCount);
-    });
-
-    test('catches enqueue errors', async () => {
-      const ctx = createContext();
-      (ctx.PlanRunner as any).enqueueJob = sinon.stub().throws(new Error('enqueue failed'));
-      const result = await handleCreateNode({
-        nodes: [{ producer_id: 'my-task', task: 'test', dependencies: [] }],
-      }, ctx);
-      assert.strictEqual(result.success, false);
-    });
-  });
 
   suite('handleRetryGroup extended', () => {
     test('retries all failed nodes in group', async () => {

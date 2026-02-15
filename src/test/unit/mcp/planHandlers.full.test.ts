@@ -632,47 +632,6 @@ suite('Plan Handlers', () => {
     });
   });
 
-  suite('handleCreateJob', () => {
-    test('should return error when name is missing', async () => {
-      const { handleCreateJob } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const result = await handleCreateJob({}, makeCtx());
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('name'));
-    });
-
-    test('should return error when task is missing', async () => {
-      const { handleCreateJob } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const result = await handleCreateJob({ name: 'Build' }, makeCtx());
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('task'));
-    });
-
-    test.skip('should create a job successfully', async () => {
-      const { handleCreateJob } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const plan = makeMockPlan({ isPaused: false });
-      const ctx = makeCtx({ enqueueJob: sinon.stub().returns(plan) });
-      const result = await handleCreateJob({ name: 'Build', task: 'Build it', work: 'npm build' }, ctx);
-      assert.strictEqual(result.success, true);
-      assert.ok(result.planId);
-    });
-
-    test.skip('should create paused job', async () => {
-      const { handleCreateJob } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const plan = makeMockPlan({ isPaused: true });
-      const ctx = makeCtx({ enqueueJob: sinon.stub().returns(plan) });
-      const result = await handleCreateJob({ name: 'Build', task: 'Build it', startPaused: true }, ctx);
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.paused, true);
-    });
-
-    test('should handle enqueueJob throwing error', async () => {
-      const { handleCreateJob } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const ctx = makeCtx({ enqueueJob: sinon.stub().throws(new Error('Failed')) });
-      const result = await handleCreateJob({ name: 'Build', task: 'Build it' }, ctx);
-      assert.strictEqual(result.success, false);
-    });
-  });
-
   // ===== retryPlanHandler =====
   suite('handleRetryPlan', () => {
     test('should return error when id is missing', async () => {
@@ -1021,38 +980,5 @@ suite('Plan Handlers', () => {
     });
   });
 
-  // ===== Validation failure tests for createJob =====
-  suite('handleCreateJob validation failures', () => {
-    test('should return error when allowedFolders invalid', async () => {
-      const { handleCreateJob } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const result = await handleCreateJob({
-        name: 'Build', task: 'Build it',
-        work: { type: 'agent', allowedFolders: ['/nonexistent/path/abc123'] },
-      }, makeCtx());
-      assert.strictEqual(result.success, false);
-    });
-
-    test('should return error when allowedUrls invalid', async () => {
-      const { handleCreateJob } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const result = await handleCreateJob({
-        name: 'Build', task: 'Build it',
-        work: { type: 'agent', allowedUrls: ['ftp://evil.com'] },
-      }, makeCtx());
-      assert.strictEqual(result.success, false);
-    });
-
-    test.skip('should return error when agent model invalid', async () => {
-      const { handleCreateJob } = require('../../../mcp/handlers/plan/createPlanHandler');
-      sinon.stub(modelDiscovery, 'getCachedModels').resolves({
-        models: [{ id: 'gpt-5', vendor: 'openai' as const, family: 'gpt-5', tier: 'standard' as const }],
-        rawChoices: ['gpt-5'],
-        discoveredAt: Date.now(),
-      });
-      const result = await handleCreateJob({
-        name: 'Build', task: 'Build it',
-        work: { type: 'agent', agentModel: 'nonexistent-model-xyz' },
-      }, makeCtx());
-      assert.strictEqual(result.success, false);
-    });
-  });
 });
+

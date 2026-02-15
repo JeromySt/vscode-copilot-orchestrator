@@ -161,7 +161,6 @@ suite('McpHandler', () => {
       const res = await handler.handleRequest(makeRequest('tools/list'));
       const names = res.result.tools.map((t: any) => t.name);
       assert.ok(names.includes('create_copilot_plan'));
-      assert.ok(names.includes('create_copilot_job'));
       assert.ok(names.includes('get_copilot_plan_status'));
       assert.ok(names.includes('list_copilot_plans'));
       assert.ok(names.includes('cancel_copilot_plan'));
@@ -172,21 +171,18 @@ suite('McpHandler', () => {
   // tools/call - routing
   // =========================================================================
   suite('tools/call', () => {
-    test.skip('routes create_copilot_job and returns content array', async () => {
+    test.skip('routes create_copilot_plan and returns content array', async () => {
       const mockPlan = makeMockPlan();
       const mockRunner = makeMockPlanRunner({
-        enqueueJob: () => mockPlan,
+        enqueue: () => mockPlan,
       });
       const h = new McpHandler(mockRunner, '/workspace', {} as any);
 
       const res = await h.handleRequest(makeRequest('tools/call', {
-        name: 'create_copilot_job',
+        name: 'create_copilot_plan',
         arguments: { 
-          name: 'Test Job', 
-          task: 'Do something', 
-          work: 'echo ok',
-          baseBranch: 'main',       // Provide explicit branch to skip git resolution
-          targetBranch: 'feature/test',  // Provide explicit branch to skip git resolution
+          name: 'Test Plan', 
+          jobs: [{ producer_id: 'build', task: 'Build', dependencies: [] }],
         },
       }));
 

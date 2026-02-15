@@ -34,7 +34,7 @@ export const PRODUCER_ID_PATTERN = /^[a-z0-9-]{3,64}$/;
  * documentation.
  *
  * Tools are grouped into three categories:
- * 1. **Creation** – `create_copilot_plan`, `create_copilot_job`
+ * 1. **Creation** – `create_copilot_plan`
  * 2. **Status & Queries** – `get_copilot_plan_status`, `list_copilot_plans`,
  *    `get_copilot_node_details`, `get_copilot_node_logs`, `get_copilot_node_attempts`
  * 3. **Control** – `cancel_copilot_plan`, `delete_copilot_plan`,
@@ -262,66 +262,6 @@ Groups do NOT have dependencies - jobs describe the full dependency graph.`,
           }
         },
         required: ['name', 'jobs']
-      }
-    },
-    
-    // =========================================================================
-    // SINGLE JOB (CONVENIENCE)
-    // =========================================================================
-    {
-      name: 'create_copilot_job',
-      description: `Create a single job (internally becomes a Plan with one node). 
-Use this for simple one-off tasks. For multiple related tasks, use create_copilot_plan instead.
-
-EXECUTION CONTEXT:
-- Commands run in a shell (cmd.exe on Windows, /bin/sh on Unix)
-- Job gets its own git worktree for isolated work
-- Use @agent prefix for AI delegation
-
-EXAMPLES:
-- Shell: { "name": "Build", "task": "Build the app", "work": "npm run build" }
-- Agent: { "name": "Refactor", "task": "Refactor auth", "work": "@agent Refactor the authentication module" }`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          name: { 
-            type: 'string', 
-            description: 'Job name (required)' 
-          },
-          task: { 
-            type: 'string', 
-            description: 'Task description (required)' 
-          },
-          work: { 
-            type: 'string', 
-            description: 'Shell command OR "@agent <task>"' 
-          },
-          prechecks: { 
-            type: 'string', 
-            description: 'Validation before work' 
-          },
-          postchecks: { 
-            type: 'string', 
-            description: 'Validation after work' 
-          },
-          instructions: { 
-            type: 'string', 
-            description: 'Additional context for @agent. MUST be in Markdown format (# headers, 1. numbered lists, - bullet lists).' 
-          },
-          baseBranch: { 
-            type: 'string', 
-            description: 'Branch to start from (default: main)' 
-          },
-          targetBranch: { 
-            type: 'string', 
-            description: 'Branch to merge results into' 
-          },
-          startPaused: {
-            type: 'boolean',
-            description: 'Create the job in paused state for review before execution (default: false). Set to true to pause.'
-          }
-        },
-        required: ['name', 'task']
       }
     },
     

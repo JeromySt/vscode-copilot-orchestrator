@@ -8,16 +8,14 @@
  */
 
 import { McpTool } from '../types';
-import { PRODUCER_ID_PATTERN } from './planTools';
 import { discoverAvailableModelsLegacy } from '../../agent/modelDiscovery';
 
 /**
  * Return all node-centric MCP tool definitions.
  *
  * Tools are grouped into three categories:
- * 1. **Creation** – `create_copilot_node`
- * 2. **Status & Queries** – `get_copilot_node`, `list_copilot_nodes`
- * 3. **Control** – `retry_copilot_node`, `get_copilot_node_failure_context`
+ * 1. **Status & Queries** – `get_copilot_node`, `list_copilot_nodes`
+ * 2. **Control** – `retry_copilot_node`, `get_copilot_node_failure_context`
  *
  * @returns Array of {@link McpTool} definitions.
  */
@@ -28,118 +26,6 @@ export async function getNodeToolDefinitions(): Promise<McpTool[]> {
     : ['gpt-5', 'claude-sonnet-4.5'];
 
   return [
-    // =========================================================================
-    // NODE CREATION
-    // =========================================================================
-    {
-      name: 'create_copilot_node',
-      description: `Create one or more work nodes.
-
-PRODUCER_ID IS REQUIRED:
-- Every node MUST have a 'producer_id' field
-- Format: lowercase letters (a-z), numbers (0-9), and hyphens (-) only, 3-64 characters
-- Used in 'dependencies' arrays to establish execution order
-
-VISUAL GROUPING:
-- Nodes with the same 'group' tag are rendered together in a Mermaid subgraph
-- Group is purely visual, it does not affect scheduling or execution
-
-WORK OPTIONS (work/prechecks/postchecks accept):
-1. String: "npm run build" or "@agent Implement feature"
-2. Process spec: { type: "process", executable: "dotnet", args: ["build"] }
-3. Shell spec: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
-4. Agent spec: { type: "agent", instructions: "# Task\\n1. Step one" }
-
-Agent instructions MUST be in Markdown format.`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          nodes: {
-            type: 'array',
-            description: 'Array of node specifications',
-            items: {
-              type: 'object',
-              properties: {
-                producer_id: {
-                  type: 'string',
-                  description: 'REQUIRED. Unique identifier (3-64 chars, lowercase/numbers/hyphens)',
-                  pattern: '^[a-z0-9-]{3,64}$'
-                },
-                name: {
-                  type: 'string',
-                  description: 'Display name (defaults to producer_id)'
-                },
-                task: {
-                  type: 'string',
-                  description: 'Task description (required)'
-                },
-                work: {
-                  description: `Work to perform. Can be:
-1. STRING: Shell command like "npm run build" or "@agent Do something" for AI
-2. PROCESS OBJECT: { "type": "process", "executable": "node", "args": ["script.js"] }
-3. SHELL OBJECT: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "${modelEnum[0]}" }
-
-For process type, args is an array - no shell quoting needed.
-For shell type, shell can be: cmd, powershell, pwsh, bash, sh
-For agent type, model goes INSIDE the work object. Available models: ${modelEnum.join(', ')}
-Fast models (haiku/mini) for simple tasks, premium models (opus) for complex reasoning.
-
-Agent instructions MUST be in Markdown format with headers, numbered lists, bullet lists.`,
-                },
-                prechecks: {
-                  description: 'Validation before work'
-                },
-                postchecks: {
-                  description: 'Validation after work'
-                },
-                instructions: {
-                  type: 'string',
-                  description: 'Additional agent instructions in Markdown format'
-                },
-                dependencies: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Array of producer_id values this node depends on. Empty [] for root nodes.'
-                },
-                base_branch: {
-                  type: 'string',
-                  description: 'Override base branch (root nodes only)'
-                },
-                expects_no_changes: {
-                  type: 'boolean',
-                  description: 'If true, node succeeds without requiring file changes or evidence. Use for validation/check nodes.'
-                },
-                group: {
-                  type: 'string',
-                  description: 'Visual grouping tag. Nodes with the same group tag are rendered together in a Mermaid subgraph.'
-                }
-              },
-              required: ['producer_id', 'task', 'dependencies']
-            }
-          },
-          base_branch: {
-            type: 'string',
-            description: 'Base branch for all root nodes (default: main)'
-          },
-          target_branch: {
-            type: 'string',
-            description: 'Target branch for final merge'
-          },
-          max_parallel: {
-            type: 'integer',
-            minimum: 1,
-            description: 'Max concurrent nodes (default: 4)'
-          },
-          clean_up_successful_work: {
-            type: 'boolean',
-            description: 'Clean up worktrees after merge (default: true)'
-          }
-        },
-        required: ['nodes']
-      }
-    },
-
     // =========================================================================
     // STATUS & QUERIES
     // =========================================================================

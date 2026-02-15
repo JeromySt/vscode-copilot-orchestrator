@@ -32,7 +32,6 @@ suite('MCP Tool Definitions', () => {
       assert.ok(tools.length > 0);
       const names = tools.map((t: any) => t.name);
       assert.ok(names.includes('create_copilot_plan'));
-      assert.ok(names.includes('create_copilot_job'));
       assert.ok(names.includes('get_copilot_plan_status'));
       assert.ok(names.includes('list_copilot_plans'));
       assert.ok(names.includes('get_copilot_node_details'));
@@ -87,7 +86,6 @@ suite('MCP Tool Definitions', () => {
       assert.ok(Array.isArray(tools));
       assert.ok(tools.length > 0);
       const names = tools.map((t: any) => t.name);
-      assert.ok(names.includes('create_copilot_node'));
       assert.ok(names.includes('get_copilot_node'));
       assert.ok(names.includes('list_copilot_nodes'));
       assert.ok(names.includes('retry_copilot_node'));
@@ -124,7 +122,7 @@ suite('MCP Tool Definitions', () => {
       // Should have both plan and node tools
       const names = tools.map((t: any) => t.name);
       assert.ok(names.includes('create_copilot_plan'));
-      assert.ok(names.includes('create_copilot_node'));
+      assert.ok(names.includes('get_copilot_node'));
     });
   });
 });

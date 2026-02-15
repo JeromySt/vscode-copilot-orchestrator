@@ -66,8 +66,7 @@ suite('MCP Validation Unit Tests', () => {
   suite('hasSchema', () => {
     test.skip('should return true for known tools', () => {
       assert.strictEqual(hasSchema('create_copilot_plan'), true);
-      assert.strictEqual(hasSchema('create_copilot_job'), true);
-      assert.strictEqual(hasSchema('get_plan_status'), true);
+      assert.strictEqual(hasSchema('get_copilot_plan_status'), true);
       assert.strictEqual(hasSchema('list_plans'), true);
       assert.strictEqual(hasSchema('get_node_details'), true);
     });

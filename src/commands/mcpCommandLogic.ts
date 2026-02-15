@@ -58,7 +58,6 @@ No manual configuration needed - just use "MCP: List Servers" and start it.
 
 Available tools:
 - create_copilot_plan - Create a dependency graph of work
-- create_copilot_job - Create a single job (plan with one node)
 - get_copilot_plan_status - Get plan execution status
 - list_copilot_plans - List all plans
 - cancel_copilot_plan - Cancel a running plan

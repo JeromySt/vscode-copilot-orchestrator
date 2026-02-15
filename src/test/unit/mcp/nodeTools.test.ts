@@ -84,7 +84,6 @@ suite('MCP Node Tool Definitions', () => {
   // =========================================================================
   suite('Tool existence', () => {
     const expectedTools = [
-      'create_copilot_node',
       'get_copilot_node',
       'list_copilot_nodes',
       'retry_copilot_node',
@@ -98,37 +97,6 @@ suite('MCP Node Tool Definitions', () => {
         assert.ok(found, `Expected tool ${toolName} not found`);
       });
     }
-  });
-
-  // =========================================================================
-  // create_copilot_node SCHEMA
-  // =========================================================================
-  suite('create_copilot_node schema', () => {
-    test('requires nodes array', async () => {
-      const tools = await getNodeToolDefinitions();
-      const tool = tools.find(t => t.name === 'create_copilot_node')!;
-      assert.ok(tool.inputSchema.required?.includes('nodes'));
-    });
-
-    test('nodes items require producer_id, task, dependencies', async () => {
-      const tools = await getNodeToolDefinitions();
-      const tool = tools.find(t => t.name === 'create_copilot_node')!;
-      const nodesSchema = tool.inputSchema.properties?.nodes as any;
-      assert.ok(nodesSchema);
-      assert.ok(nodesSchema.items?.required?.includes('producer_id'));
-      assert.ok(nodesSchema.items?.required?.includes('task'));
-      assert.ok(nodesSchema.items?.required?.includes('dependencies'));
-    });
-
-    test('has optional group property on nodes', async () => {
-      const tools = await getNodeToolDefinitions();
-      const tool = tools.find(t => t.name === 'create_copilot_node')!;
-      const nodesSchema = tool.inputSchema.properties?.nodes as any;
-      // group is optional per-node for visual grouping in Mermaid
-      assert.ok(nodesSchema.items?.properties?.group);
-      // group is NOT in required
-      assert.ok(!nodesSchema.items?.required?.includes('group'));
-    });
   });
 
   // =========================================================================
