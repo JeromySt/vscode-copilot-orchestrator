@@ -130,6 +130,18 @@ export interface AgentSpec {
   
   /** Resume existing Copilot session if available (default: true) */
   resumeSession?: boolean;
+
+  /**
+   * Whether to augment instructions with skill context before execution.
+   * Defaults to `true`. Set to `false` to skip instruction augmentation.
+   */
+  augmentInstructions?: boolean;
+
+  /**
+   * Snapshot of the original instructions before augmentation.
+   * Populated automatically by the instruction augmenter.
+   */
+  originalInstructions?: string;
   
   /**
    * Additional folder paths the agent is allowed to access beyond the worktree.

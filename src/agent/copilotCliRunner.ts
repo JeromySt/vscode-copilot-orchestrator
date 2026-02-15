@@ -49,6 +49,8 @@ export interface CopilotRunOptions {
   allowedFolders?: string[];
   /** URLs or URL patterns the agent is allowed to access. Secure by default (none allowed). */
   allowedUrls?: string[];
+  /** Maximum agent turns/iterations (e.g., 1 for single-turn augmentation calls). */
+  maxTurns?: number;
 }
 
 /**
@@ -160,6 +162,7 @@ export class CopilotCliRunner {
       cwd,
       allowedFolders: options.allowedFolders,
       allowedUrls: options.allowedUrls,
+      maxTurns: options.maxTurns,
     });
     
     this.logger.info(`[${label}] Running: ${copilotCmd.substring(0, 100)}...`);
@@ -500,6 +503,7 @@ export interface BuildCommandOptions {
   cwd?: string;
   allowedFolders?: string[];
   allowedUrls?: string[];
+  maxTurns?: number;
 }
 
 /**
@@ -520,7 +524,7 @@ export function buildCommand(
 ): string {
   const log = deps?.logger ?? noopLogger;
   const exists = deps?.existsSync ?? fs.existsSync;
-  const { task, sessionId, model, logDir, sharePath, configDir, cwd, allowedFolders, allowedUrls } = options;
+  const { task, sessionId, model, logDir, sharePath, configDir, cwd, allowedFolders, allowedUrls, maxTurns } = options;
 
   const allowedPaths: string[] = [];
   if (cwd) {
@@ -598,6 +602,7 @@ export function buildCommand(
   if (logDir) { cmd += ` --log-dir ${JSON.stringify(logDir)} --log-level debug`; }
   if (sharePath) { cmd += ` --share ${JSON.stringify(sharePath)}`; }
   if (sessionId) { cmd += ` --resume ${sessionId}`; }
+  if (maxTurns && maxTurns > 0) { cmd += ` --max-turns ${maxTurns}`; }
   log.info(`[SECURITY] Copilot CLI command: copilot ${cmd}`);
   return cmd;
 }
