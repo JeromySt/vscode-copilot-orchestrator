@@ -97,14 +97,11 @@ export class planDetailPanel {
     // Initial render
     this._update();
     
-    // Subscribe to pulse — send fresh status data on every tick so duration
-    // counters stay updated. The _update() method skips entirely if stateVersion
-    // hasn't changed, but duration counters need startedAt/endedAt on every pulse.
+    // Subscribe to pulse — forward to webview for client-side duration ticking.
+    // Duration counters (plan header + node labels) update purely client-side
+    // using data-started timestamps. No server data needed on every tick.
     this._pulseSubscription = this._pulse.onPulse(() => {
       this._panel.webview.postMessage({ type: 'pulse' });
-      // Force a status update even if stateVersion hasn't changed,
-      // because duration counters need fresh startedAt/endedAt data
-      this._sendIncrementalUpdate();
     });
     
     // Handle panel disposal
