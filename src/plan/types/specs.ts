@@ -193,6 +193,21 @@ export interface AgentSpec {
    * ```
    */
   allowedUrls?: string[];
+  
+  /**
+   * Whether to augment the agent instructions with project context before execution.
+   * When true, the orchestrator enriches the instructions with worktree context,
+   * project structure, and relevant metadata. Defaults to the global setting
+   * `copilotOrchestrator.instructionEnrichment.augmentInstructions`.
+   */
+  augmentInstructions?: boolean;
+  
+  /**
+   * The original unmodified instructions before any augmentation was applied.
+   * Populated automatically by the orchestrator when `augmentInstructions` is true.
+   * Useful for debugging and retry scenarios where the raw instructions are needed.
+   */
+  originalInstructions?: string;
 }
 
 /**
