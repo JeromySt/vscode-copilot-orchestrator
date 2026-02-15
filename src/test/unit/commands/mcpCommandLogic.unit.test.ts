@@ -53,7 +53,6 @@ suite('MCP Command Logic Unit Tests', () => {
       assert.ok(result.includes('Copilot Orchestrator MCP Server'));
       assert.ok(result.includes('stdio transport'));
       assert.ok(result.includes('create_copilot_plan'));
-      assert.ok(result.includes('create_copilot_job'));
       assert.ok(result.includes('get_copilot_plan_status'));
       assert.ok(result.includes('list_copilot_plans'));
       assert.ok(result.includes('cancel_copilot_plan'));

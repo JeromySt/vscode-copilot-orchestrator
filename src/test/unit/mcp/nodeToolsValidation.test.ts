@@ -96,45 +96,6 @@ suite('Node Tool Schema Validation', () => {
   });
   
   // =========================================================================
-  // create_copilot_node Validation
-  // =========================================================================
-  suite('create_copilot_node', () => {
-    test('rejects unknown properties', () => {
-      const result = validateInput('create_copilot_node', {
-        nodes: [{ producer_id: 'test', task: 'Test', dependencies: [] }],
-        unknownProp: 'value'
-      });
-      
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes("Unknown property 'unknownProp'"), `Error should mention 'unknownProp': ${result.error}`);
-    });
-    
-    test('requires nodes array', () => {
-      const result = validateInput('create_copilot_node', {});
-      
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes("Missing required field 'nodes'"), `Error should mention missing nodes: ${result.error}`);
-    });
-
-    test('accepts valid minimal nodes', () => {
-      const result = validateInput('create_copilot_node', {
-        nodes: [{ producer_id: 'test-job', task: 'Test task', dependencies: [] }]
-      });
-      
-      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
-    });
-
-    test('rejects invalid producer_id pattern in nodes', () => {
-      const result = validateInput('create_copilot_node', {
-        nodes: [{ producer_id: 'INVALID_UPPERCASE', task: 'Test', dependencies: [] }]
-      });
-      
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes('pattern'), `Error should mention pattern: ${result.error}`);
-    });
-  });
-  
-  // =========================================================================
   // get_copilot_node Validation
   // =========================================================================
   suite('get_copilot_node', () => {

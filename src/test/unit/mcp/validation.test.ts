@@ -56,7 +56,6 @@ suite('MCP Schema Validation', () => {
   suite('Schema Registration', () => {
     test('hasSchema returns true for registered tools', () => {
       assert.ok(hasSchema('create_copilot_plan'));
-      assert.ok(hasSchema('create_copilot_job'));
       assert.ok(hasSchema('get_copilot_plan_status'));
     });
 
@@ -69,7 +68,6 @@ suite('MCP Schema Validation', () => {
       const tools = getRegisteredTools();
       assert.ok(Array.isArray(tools));
       assert.ok(tools.includes('create_copilot_plan'));
-      assert.ok(tools.includes('create_copilot_job'));
       assert.ok(tools.includes('cancel_copilot_plan'));
       assert.ok(tools.includes('delete_copilot_plan'));
     });
@@ -328,56 +326,6 @@ suite('MCP Schema Validation', () => {
         ]
       });
       assert.ok(result.valid, `Expected valid, got: ${result.error}`);
-    });
-  });
-
-  // =========================================================================
-  // create_copilot_job Validation
-  // =========================================================================
-  suite('create_copilot_job validation', () => {
-    test('accepts valid job', () => {
-      const result = validateInput('create_copilot_job', {
-        name: 'Build',
-        task: 'Build the project'
-      });
-      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
-    });
-
-    test('accepts job with optional fields', () => {
-      const result = validateInput('create_copilot_job', {
-        name: 'Build',
-        task: 'Build the project',
-        work: 'npm run build',
-        baseBranch: 'main',
-        targetBranch: 'feature'
-      });
-      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
-    });
-
-    test('rejects job without name', () => {
-      const result = validateInput('create_copilot_job', {
-        task: 'Build'
-      });
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes('name'), `Error should mention 'name': ${result.error}`);
-    });
-
-    test('rejects job without task', () => {
-      const result = validateInput('create_copilot_job', {
-        name: 'Build'
-      });
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes('task'), `Error should mention 'task': ${result.error}`);
-    });
-
-    test('rejects unknown properties', () => {
-      const result = validateInput('create_copilot_job', {
-        name: 'Build',
-        task: 'Build',
-        unknownField: 'bad'
-      });
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes('unknownField'), `Error should mention 'unknownField': ${result.error}`);
     });
   });
 

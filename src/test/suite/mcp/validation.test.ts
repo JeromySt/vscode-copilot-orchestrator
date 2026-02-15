@@ -27,7 +27,6 @@ suite('MCP Validation', () => {
   suite('hasSchema', () => {
     test('returns true for known tools', () => {
       assert.strictEqual(hasSchema('create_copilot_plan'), true);
-      assert.strictEqual(hasSchema('create_copilot_job'), true);
       assert.strictEqual(hasSchema('get_copilot_plan_status'), true);
     });
 
@@ -131,34 +130,6 @@ suite('MCP Validation', () => {
         name: 'Plan',
         maxParallel: 100, // max is 32
         jobs: [{ producer_id: 'abc', task: 'x', dependencies: [] }],
-      });
-      assert.strictEqual(result.valid, false);
-    });
-  });
-
-  // =========================================================================
-  // validateInput - create_copilot_job
-  // =========================================================================
-
-  suite('validateInput - create_copilot_job', () => {
-    test('valid input passes', () => {
-      const result = validateInput('create_copilot_job', {
-        name: 'My Job',
-        task: 'Do something',
-      });
-      assert.strictEqual(result.valid, true);
-    });
-
-    test('missing name fails', () => {
-      const result = validateInput('create_copilot_job', {
-        task: 'Do something',
-      });
-      assert.strictEqual(result.valid, false);
-    });
-
-    test('missing task fails', () => {
-      const result = validateInput('create_copilot_job', {
-        name: 'Job',
       });
       assert.strictEqual(result.valid, false);
     });

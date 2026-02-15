@@ -437,7 +437,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     <span>Jobs: <span id="runningJobs">0</span>/<span id="maxParallel">8</span></span>
     <span style="margin-left: 8px;" id="queuedSection">Queued: <span id="queuedJobs">0</span></span>
   </div>
-  <div id="plans"><div class="empty">No plans yet. Use <code>create_copilot_plan</code> or <code>create_copilot_job</code> MCP tool.</div></div>
+  <div id="plans"><div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div></div>
   
   <script>
     const vscode = acquireVsCodeApi();
@@ -655,7 +655,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       
       // If no plans, show empty state
       if (!plans || plans.length === 0) {
-        container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> or <code>create_copilot_job</code> MCP tool.</div>';
+        container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div>';
         for (var entry of this.planCards.values()) {
           entry.dispose();
         }
@@ -774,7 +774,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (this.planCards.size === 0) {
         var container = this.getElement(this.containerId);
         if (container) {
-          container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> or <code>create_copilot_job</code> MCP tool.</div>';
+          container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div>';
         }
       }
       this._managePulseSub();
