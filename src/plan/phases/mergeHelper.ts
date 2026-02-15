@@ -10,7 +10,6 @@
 import type { PhaseContext } from '../../interfaces/IPhaseExecutor';
 import type { ExecutionPhase, CopilotUsageMetrics } from '../types';
 import type { ICopilotRunner } from '../../interfaces/ICopilotRunner';
-import { CopilotCliRunner } from '../../agent/copilotCliRunner';
 
 interface MergeConflictContext {
   planId: string;

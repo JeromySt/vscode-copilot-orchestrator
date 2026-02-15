@@ -128,7 +128,7 @@ export async function discoverAvailableModels(deps?: ModelDiscoveryDeps): Promis
   const spawner = deps?.spawner;
 
   if (!spawner) {
-    throw new Error('ModelDiscoveryDeps.spawner is required. Use discoverAvailableModelsLegacy() for backward compatibility.');
+    throw new Error('ModelDiscoveryDeps.spawner is required but was not provided. Ensure a ProcessSpawner is passed via the deps parameter, or call discoverAvailableModelsLegacy() for backward compatibility.');
   }
 
   // Check if we recently failed and should wait

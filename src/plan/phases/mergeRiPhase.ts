@@ -13,7 +13,6 @@ import type { CopilotUsageMetrics } from '../types';
 import { resolveMergeConflictWithCopilot } from './mergeHelper';
 import type { IGitOperations } from '../../interfaces/IGitOperations';
 import type { ICopilotRunner } from '../../interfaces/ICopilotRunner';
-import { aggregateMetrics } from '../metricsAggregator';
 
 /**
  * Executor for the reverse integration merge phase.
@@ -63,15 +62,8 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
     
     context.logInfo('========== REVERSE INTEGRATION MERGE START ==========');
     
-    // Determine merge source (completed commit or base commit)
-    const mergeSource = completedCommit || baseCommit;
-    if (!mergeSource) {
-      context.logInfo('No commit to merge (validation-only root node)');
-      context.logInfo('==========================================');
-      return { success: true };
-    }
-    
     // Check if there are any changes to merge
+    const mergeSource = completedCommit;
     const diffBase = baseCommitAtStart;
     try {
       const hasDiff = await this.git.repository.hasChangesBetween(diffBase, mergeSource, repoPath);

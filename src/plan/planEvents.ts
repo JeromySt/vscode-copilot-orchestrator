@@ -120,7 +120,7 @@ export class PlanEventEmitter extends EventEmitter {
     newStatus: NodeStatus;
     reason: string;
   }): void {
-    this.emit('nodeTransition', event.planId, event.nodeId, event.previousStatus, event.newStatus);
+    this.emit('nodeTransition', event);
     this.emit('nodeUpdated', event.planId, event.nodeId);
     this.emit('planUpdated', event.planId);
   }

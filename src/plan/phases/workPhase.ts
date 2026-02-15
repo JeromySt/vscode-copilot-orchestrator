@@ -68,8 +68,8 @@ function spawnAndTrack(
         if (timeoutHandle) clearTimeout(timeoutHandle);
         ctx.setProcess(undefined);
         ctx.logInfo(`${label} exited: PID ${proc.pid}, code ${code}, duration ${Date.now() - startTime}ms`);
-        if (stdout.trim()) ctx.logInfo(`${label} stdout (${stdout.split('\\n').length} lines)`);
-        if (stderr.trim()) ctx.logInfo(`${label} stderr (${stderr.split('\\n').length} lines, informational)`);
+        if (stdout.trim()) ctx.logInfo(`${label} stdout (${stdout.split('\n').length} lines)`);
+        if (stderr.trim()) ctx.logInfo(`${label} stderr (${stderr.split('\n').length} lines, informational)`);
         if (ctx.isAborted()) resolve({ success: false, error: 'Execution canceled' });
         else if (code === 0) resolve({ success: true });
         else resolve({ success: false, error: `Exit code ${code}`, exitCode: code ?? undefined });

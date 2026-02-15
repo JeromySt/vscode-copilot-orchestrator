@@ -237,7 +237,7 @@ export function getRegisteredTools(): string[] {
  * @returns The parsed object if it was a JSON string, otherwise the original value
  */
 function tryParseWorkSpec(value: unknown): unknown {
-  if (typeof value === 'string' && value.startsWith('{')) {
+  if (typeof value === 'string' && ((value.startsWith('{') && value.endsWith('}')) || (value.startsWith('[') && value.endsWith(']')))) {
     try {
       return JSON.parse(value);
     } catch {

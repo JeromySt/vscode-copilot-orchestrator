@@ -30,18 +30,15 @@ import type {
   NodeTransitionEvent,
   PlanCompletionEvent,
 } from './types';
-import { normalizeWorkSpec, nodePerformsWork } from './types';
+import { normalizeWorkSpec } from './types';
 import { PlanStateMachine } from './stateMachine';
 import { PlanPersistence } from './persistence';
 import { PlanEventEmitter } from './planEvents';
 import { PlanConfigManager } from './configManager';
 import {
-  formatLogEntries,
   appendWorkSummary as appendWorkSummaryHelper,
 } from './helpers';
 import type { IGitOperations } from '../interfaces/IGitOperations';
-import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
-import { aggregateMetrics } from './metricsAggregator';
 import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
 import type { JobExecutor } from './runner';
 import { NodeManager } from './nodeManager';
@@ -226,8 +223,6 @@ export class JobExecutionEngine {
       // This allows dependency worktrees to be cleaned up as soon as all consumers have FI'd
       await this.acknowledgeConsumption(plan, sm, node);
       
-      // Track whether executor succeeded (or was skipped for RI-only retry)
-      let executorSuccess = false;
       let autoHealSucceeded = false; // Track if success came from auto-heal
       
       // Check if resuming from merge-ri phase - skip executor entirely
@@ -235,7 +230,6 @@ export class JobExecutionEngine {
         this.log.info(`Resuming from merge-ri phase - skipping executor for ${node.name}`);
         this.execLog(plan.id, node.id, 'work', 'info', '========== WORK PHASES (SKIPPED - RESUMING FROM RI) ==========', nodeState.attempts);
         // The completedCommit is already set from the previous successful work phase
-        executorSuccess = true;
         // Clear resumeFromPhase since we're handling the retry now
         nodeState.resumeFromPhase = undefined;
       } else {
@@ -311,7 +305,6 @@ export class JobExecutionEngine {
         nodeState.resumeFromPhase = undefined;
         
         if (result.success) {
-          executorSuccess = true;
           this.log.info(`[executeNode] Executor succeeded for ${node.name}`, { planId: plan.id, nodeId: node.id });
           // Store completed commit.
           // If the executor produced no commit (e.g., expectsNoChanges validation
@@ -604,11 +597,6 @@ export class JobExecutionEngine {
             // the full stdout/stderr streams plus timing info
             const phaseLogs = this.nodeManager.getNodeLogs(plan.id, node.id, failedPhase as ExecutionPhase);
             // Truncate to last ~200 lines to avoid overwhelming the agent
-            const logLines = phaseLogs.split('\n');
-            const truncatedLogs = logLines.length > 200
-              ? `... (${logLines.length - 200} earlier lines omitted)\n` + logLines.slice(-200).join('\n')
-              : phaseLogs;
-            
             // Get security settings from the original failed spec
             const originalAgentSpec = normalizedFailedSpec?.type === 'agent' ? normalizedFailedSpec : null;
 

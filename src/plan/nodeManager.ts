@@ -17,7 +17,6 @@ import type {
   WorkSpec,
   LogEntry,
 } from './types';
-import { normalizeWorkSpec } from './types';
 import { PlanStateMachine } from './stateMachine';
 import { PlanEventEmitter } from './planEvents';
 import { PlanPersistence } from './persistence';
