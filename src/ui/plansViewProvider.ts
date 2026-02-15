@@ -659,15 +659,13 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (fEl) fEl.textContent = '✗ ' + data.counts.failed;
       var rEl = this.element.querySelector('.plan-running');
       if (rEl) rEl.textContent = '⏳ ' + data.counts.running;
-      var durEl = this.element.querySelector('.plan-duration');
-      if (data.startedAt) {
-        if (!durEl) {
-          durEl = document.createElement('span');
-          durEl.className = 'plan-duration';
-          var detailsEl = this.element.querySelector('.plan-details');
-          if (detailsEl) detailsEl.appendChild(durEl);
-        }
-        durEl.textContent = formatDuration(data.startedAt, data.endedAt);
+      // Duration is managed by _tickDuration via PULSE — don't overwrite here.
+      // Just ensure the element exists if startedAt is set.
+      if (data.startedAt && !this.element.querySelector('.plan-duration')) {
+        var durEl = document.createElement('span');
+        durEl.className = 'plan-duration';
+        var detailsEl = this.element.querySelector('.plan-details');
+        if (detailsEl) detailsEl.appendChild(durEl);
       }
       var barEl = this.element.querySelector('.plan-progress-bar');
       if (barEl) { barEl.className = 'plan-progress-bar ' + progressClass; barEl.style.width = data.progress + '%'; }
