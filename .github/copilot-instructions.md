@@ -142,3 +142,16 @@ src/
 ├── commands/     # VS Code command registrations
 └── test/         # unit/ (headless), suite/ (VS Code host)
 ```
+
+## Agent Skills
+
+This repository includes specialized skills in `.github/skills/` for detailed task-specific guidance.
+Load the relevant skill when performing these tasks:
+
+| Task | Skill |
+|---|---|
+| Writing or fixing tests | `.github/skills/test-writer/SKILL.md` |
+| Adding services, interfaces, or DI wiring | `.github/skills/di-refactor/SKILL.md` |
+| Security review, path validation, sandboxing | `.github/skills/security-hardener/SKILL.md` |
+| Fixing failed build/test/phase errors | `.github/skills/auto-heal/SKILL.md` |
+| Writing or updating documentation | `.github/skills/documentation-writer/SKILL.md` |

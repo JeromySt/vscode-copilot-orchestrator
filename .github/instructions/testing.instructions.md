@@ -4,6 +4,8 @@ applyTo: "src/test/**/*.ts"
 
 # Testing Patterns
 
+> **Detailed guide**: See `.github/skills/test-writer/SKILL.md` for full examples, mock patterns, and verification steps.
+
 ## Framework & Style
 
 - **Mocha TDD**: Use `suite()`, `test()`, `setup()`, `teardown()` — never `describe`/`it`

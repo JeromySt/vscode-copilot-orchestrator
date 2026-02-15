@@ -1,13 +1,16 @@
-# Skill: Test Writer
+---
+name: test-writer
+description: Writing unit tests for this TypeScript VS Code extension. Use when asked to write tests, add coverage, create test files, or fix failing tests. Knows Mocha TDD style, sinon mocking, DI mock patterns, and 95% coverage requirements.
+---
 
-You are writing tests for a TypeScript VS Code extension that uses dependency injection.
+# Test Writing Conventions
 
 ## Framework
 
 - **Mocha TDD** style: use `suite()`, `test()`, `setup()`, `teardown()` — never `describe`/`it`
 - **Sinon** for mocking: stubs, spies, sandboxes, fake timers
 - **Assert**: Node.js `assert` module (`assert.strictEqual`, `assert.ok`, `assert.deepStrictEqual`, `assert.throws`)
-- **Coverage**: 95% line coverage enforced. Every new source line needs a test.
+- **Coverage**: 95% line coverage enforced via c8. Every new source line needs a test.
 
 ## Test File Structure
 
@@ -39,6 +42,12 @@ suite('ClassName', () => {
 });
 ```
 
+## File Naming
+
+- `src/foo/bar.ts` → `src/test/unit/foo/bar.unit.test.ts`
+- Coverage gaps: `*.coverage.unit.test.ts`
+- Comprehensive: `*.comprehensive.test.ts`
+
 ## Mocking DI Dependencies
 
 This project uses symbol-based DI. In tests, mock dependencies as plain objects — do NOT import concrete implementations:
@@ -58,6 +67,33 @@ const mockConfig: any = {
 
 // ❌ Wrong — never stub concrete classes in unit tests
 import { Logger } from '../../../core/logger';
+```
+
+For MCP handler tests, use the `makeMockPlanRunner` pattern:
+```typescript
+function makeMockPlanRunner(overrides?: Record<string, any>): any {
+  return {
+    enqueue: sinon.stub().returns(makeMockPlan()),
+    get: sinon.stub().returns(undefined),
+    getPlan: sinon.stub().returns(undefined),
+    getAll: sinon.stub().returns([]),
+    cancel: sinon.stub().returns(true),
+    delete: sinon.stub().returns(true),
+    pause: sinon.stub().returns(true),
+    resume: sinon.stub().resolves(true),
+    savePlan: sinon.stub(),
+    retryNode: sinon.stub().resolves({ success: true }),
+    forceFailNode: sinon.stub().resolves(),
+    ...overrides,
+  };
+}
+```
+
+## VS Code Mocking
+
+Unit tests automatically mock `vscode` via `register-vscode-mock.js`. Import normally:
+```typescript
+import * as vscode from 'vscode';  // Gets mock in unit tests
 ```
 
 ## Async & Timer Testing
@@ -87,22 +123,7 @@ cpModule.spawn = sandbox.stub().returns(mockProcess);
 teardown(() => { cpModule.spawn = origSpawn; });
 ```
 
-## VS Code Mocking
+## Verification
 
-Unit tests automatically mock `vscode` via `register-vscode-mock.js`. Import normally:
-```typescript
-import * as vscode from 'vscode';  // Gets mock in unit tests
-```
-
-## File Naming
-
-- `src/foo/bar.ts` → `src/test/unit/foo/bar.unit.test.ts`
-- Coverage gaps: `*.coverage.unit.test.ts`
-
-## Checklist Before Committing
-
-- [ ] All tests use `suite`/`test` (not `describe`/`it`)
-- [ ] `sandbox.restore()` called in `teardown`
-- [ ] No concrete class imports for DI services
-- [ ] Error paths and edge cases covered
-- [ ] Run `npm run test:unit` passes
+- Run `npm run test:unit` — all tests must pass
+- Run `npm run test:coverage` — must meet 95% line coverage

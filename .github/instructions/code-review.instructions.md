@@ -4,6 +4,8 @@ applyTo: "**"
 
 # Code Review Standards
 
+> **Skill references**: Verify changes against `.github/skills/test-writer/SKILL.md` (test patterns), `.github/skills/di-refactor/SKILL.md` (DI rules), and `.github/skills/security-hardener/SKILL.md` (security checks).
+
 When reviewing pull requests in this repository, enforce these critical rules:
 
 ## Must-Fix (Block PR)

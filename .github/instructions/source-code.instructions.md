@@ -4,6 +4,8 @@ applyTo: "src/**/*.ts,!src/test/**"
 
 # Source Code Conventions
 
+> **Detailed guides**: See `.github/skills/di-refactor/SKILL.md` for the full DI pipeline and `.github/skills/security-hardener/SKILL.md` for security patterns.
+
 ## TypeScript Patterns
 
 - **Strict mode**: `tsconfig.json` has strict checks enabled

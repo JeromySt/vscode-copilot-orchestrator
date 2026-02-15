@@ -1,6 +1,9 @@
-# Skill: Security Hardener
+---
+name: security-hardener
+description: Reviewing and hardening security in this VS Code extension that spawns isolated AI agents. Use when asked about path validation, agent sandboxing, URL sanitization, input validation, or security review.
+---
 
-You are reviewing and hardening security in a VS Code extension that spawns isolated AI agents.
+# Security Hardening Guide
 
 ## Path Traversal Prevention
 

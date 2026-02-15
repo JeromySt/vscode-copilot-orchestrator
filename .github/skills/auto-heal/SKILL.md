@@ -1,10 +1,15 @@
-# Skill: Auto-Heal Specialist
+---
+name: auto-heal
+description: Fixing a failed execution phase in the orchestrator pipeline. Use when asked to fix build errors, test failures, merge conflicts, or any phase failure in a plan node. Do NOT re-execute the original task — only fix the error.
+---
 
-You are fixing a failed execution phase. Do NOT re-execute the original task. Your only job is to diagnose and fix the error.
+# Auto-Heal: Fix Failed Phase
+
+Do NOT re-execute the original task. Your only job is to diagnose and fix the error.
 
 ## Diagnosis Process
 
-1. **Read the log file** provided in the instructions — focus on the ERROR and ERR lines
+1. **Read the log file** provided in the instructions — focus on ERROR and ERR lines
 2. **Identify the phase** that failed (merge-fi, prechecks, work, commit, postchecks, merge-ri)
 3. **Apply the phase-specific fix** below
 
@@ -25,7 +30,7 @@ You are fixing a failed execution phase. Do NOT re-execute the original task. Yo
 - **Fix**: Check if the agent left partial changes. If so, complete them. If not, start fresh.
 - **Key**: `error: killed by signal` means the process was OOM-killed or timed out
 
-### commit Phase Failures  
+### commit Phase Failures
 - **Cause**: Nothing to commit (no changes made), or git config issues
 - **Fix**: If no changes, the work phase didn't produce output — check worktree state
 - **Key**: Run `git status` and `git diff` to see what's there

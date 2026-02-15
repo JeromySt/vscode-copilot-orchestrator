@@ -1,6 +1,9 @@
-# Skill: DI Refactor
+---
+name: di-refactor
+description: Refactoring code to use the dependency injection architecture. Use when asked to add services, create interfaces, wire DI, refactor to use abstractions, or remove direct vscode API calls from business logic.
+---
 
-You are refactoring code to use the dependency injection architecture of this VS Code extension.
+# DI Refactoring Guide
 
 ## The DI Pipeline (follow every step)
 
@@ -8,11 +11,6 @@ You are refactoring code to use the dependency injection architecture of this VS
 
 Create `src/interfaces/IMyService.ts`:
 ```typescript
-/**
- * @fileoverview Interface for MyService.
- * @module interfaces/IMyService
- */
-
 export interface IMyService {
   doWork(input: string): Promise<Result>;
   getStatus(): ServiceStatus;
@@ -23,10 +21,6 @@ export interface IMyService {
 
 Add to `src/core/tokens.ts`:
 ```typescript
-/**
- * Token for IMyService service.
- * Provides [describe what it does].
- */
 export const IMyService = Symbol('IMyService');
 ```
 
@@ -39,17 +33,17 @@ export { IMyService } from './IMyService';
 
 ### Step 4: Implement the Concrete Class
 
-The implementation accepts **interfaces** via constructor, never concrete classes:
+Constructor accepts **interfaces** via DI, never concrete classes:
 ```typescript
 export class DefaultMyService implements IMyService {
   constructor(
-    private readonly logger: ILogger,       // ← interface
-    private readonly config: IConfigProvider, // ← interface
+    private readonly logger: ILogger,
+    private readonly config: IConfigProvider,
   ) {}
   
   async doWork(input: string): Promise<Result> {
     this.logger.info('Processing', { input });
-    // ...
+    // implementation
   }
 }
 ```
@@ -65,7 +59,7 @@ container.registerSingleton<IMyService>(Tokens.IMyService, (c) => {
 });
 ```
 
-### Step 6: Resolve (never `new`)
+### Step 6: Resolve (never `new` in business logic)
 
 ```typescript
 const myService = container.resolve<IMyService>(Tokens.IMyService);
@@ -85,10 +79,7 @@ const myService = container.resolve<IMyService>(Tokens.IMyService);
 | `child_process.spawn()` | `IProcessSpawner.spawn()` |
 
 Only these files may import `vscode` directly:
-- `src/vscode/adapters.ts`
-- `src/extension.ts`
-- `src/composition.ts`
-- `src/ui/**` (webview/panel code)
+- `src/vscode/adapters.ts`, `src/extension.ts`, `src/composition.ts`, `src/ui/**`
 
 ## Existing Tokens (don't duplicate)
 
@@ -99,7 +90,7 @@ Only these files may import `vscode` directly:
 
 ## Logger Pattern
 
-Use the static factory (the one acceptable service locator):
+The one acceptable service locator — static factory initialized in composition root:
 ```typescript
 const log = Logger.for('my-component');
 log.info('Started', { context });

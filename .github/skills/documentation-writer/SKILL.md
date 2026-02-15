@@ -1,6 +1,9 @@
-# Skill: Documentation Writer
+---
+name: documentation-writer
+description: Updating documentation for this VS Code extension. Use when asked to write or update README, CHANGELOG, architecture docs, DI guides, or any Markdown documentation files.
+---
 
-You are updating documentation for a VS Code extension with DI architecture and DAG-based execution.
+# Documentation Writing Guide
 
 ## Documentation Files
 
@@ -15,6 +18,7 @@ You are updating documentation for a VS Code extension with DI architecture and 
 | `docs/WORKTREES_AND_MERGING.md` | Git worktree strategy, merge phases |
 | `docs/COPILOT_INTEGRATION.md` | MCP protocol, agent delegation |
 | `docs/GROUPS.md` | Node grouping and visual composition |
+| `docs/INSTRUCTION_ENRICHMENT.md` | Agent skill enrichment pipeline design |
 
 ## Changelog Format
 
@@ -39,13 +43,13 @@ You are updating documentation for a VS Code extension with DI architecture and 
 - Include Mermaid diagrams for component relationships
 - Document the DI token → interface → implementation mapping
 - Show the 7-phase execution pipeline with data flow
-- Keep diagrams in sync with code (composition.ts is source of truth)
+- Keep diagrams in sync with code (`src/composition.ts` is source of truth)
 
 ## Style
 
 - **User-facing docs** (README, CHANGELOG): Clear, concise, no internal jargon
 - **Developer docs** (ARCHITECTURE, DI_GUIDE): Technical depth, code examples, rationale
-- **All docs**: Use present tense, active voice, avoid passive constructions
+- **All docs**: Use present tense, active voice
 - **Code examples**: Must be valid TypeScript that compiles
 
 ## What NOT to Include
