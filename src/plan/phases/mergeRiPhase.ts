@@ -50,7 +50,12 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       return { success: false, error: 'targetBranch is required for reverse integration merge' };
     }
     if (!completedCommit) {
-      return { success: false, error: 'completedCommit is required for reverse integration merge' };
+      // No completed commit — nothing to merge back.
+      // This happens for expects_no_changes nodes or validation-only nodes.
+      context.logInfo('========== REVERSE INTEGRATION MERGE START ==========');
+      context.logInfo('No completed commit — skipping RI merge (expects_no_changes or validation-only node)');
+      context.logInfo('========== REVERSE INTEGRATION MERGE END ==========');
+      return { success: true };
     }
     if (!baseCommitAtStart) {
       return { success: false, error: 'baseCommitAtStart is required for reverse integration merge' };

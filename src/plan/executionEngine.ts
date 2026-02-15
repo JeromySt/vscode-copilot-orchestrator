@@ -264,7 +264,9 @@ export class JobExecutionEngine {
           // Merge-specific fields
           dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
           repoPath: plan.repoPath,
-          targetBranch: plan.targetBranch,
+          // RI merge only applies to leaf nodes (nodes with no dependents).
+          // Non-leaf nodes' commits are forward-integrated into children instead.
+          targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
           baseCommitAtStart: plan.baseCommitAtStart,
           onProgress: (step) => {
             this.log.debug(`Job progress: ${node.name} - ${step}`);
