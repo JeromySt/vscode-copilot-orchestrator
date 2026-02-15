@@ -260,9 +260,11 @@ export class PlanRunner extends EventEmitter {
     return this._lifecycle.delete(planId);
   }
 
-  savePlan(planId: string): void {
+  savePlan(planId: string): boolean {
     const plan = this._state.plans.get(planId);
-    if (plan) this._state.persistence.save(plan);
+    if (!plan) return false;
+    this._state.persistence.save(plan);
+    return true;
   }
 
   // -- Node control ----------------------------------------------------------

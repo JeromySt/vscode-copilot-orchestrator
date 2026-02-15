@@ -99,7 +99,8 @@ export function appendToLogFile(
   try {
     if (storagePath) {
       const workspacePath = path.resolve(storagePath, '..');
-      if (!ensuredDirs.has(workspacePath)) {
+      const logsDirPath = path.join(workspacePath, '.orchestrator', 'logs');
+      if (!ensuredDirs.has(workspacePath) || !fs.existsSync(logsDirPath)) {
         ensureOrchestratorDirs(workspacePath);
         ensuredDirs.add(workspacePath);
       }
