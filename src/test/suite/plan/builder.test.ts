@@ -132,6 +132,22 @@ suite('Plan Builder', () => {
       );
     });
 
+    test('throws on missing producerId', () => {
+      const badJob = { name: 'Bad', task: 'fail' } as any; // missing producerId
+      assert.throws(
+        () => buildPlan({ name: 'Test', jobs: [badJob] }),
+        (err: any) => err instanceof PlanValidationError && (err.details?.some((d: string) => d.includes('producerId')) ?? false)
+      );
+    });
+
+    test('throws on empty producerId', () => {
+      const badJob = makeJob(''); // empty producerId
+      assert.throws(
+        () => buildPlan({ name: 'Test', jobs: [badJob] }),
+        (err: any) => err instanceof PlanValidationError
+      );
+    });
+
     test('PlanValidationError has correct name', () => {
       try {
         buildPlan({ name: 'Test', jobs: [] });
@@ -148,6 +164,16 @@ suite('Plan Builder', () => {
       } catch (e: any) {
         assert.ok(e.details);
         assert.ok(e.details.length > 0);
+      }
+    });
+
+    test('PlanValidationError message and details property', () => {
+      try {
+        buildPlan({ name: 'Test', jobs: [] });
+        assert.fail('should have thrown');
+      } catch (e: any) {
+        assert.ok(e.message);
+        assert.ok(Array.isArray(e.details));
       }
     });
   });
@@ -238,6 +264,43 @@ suite('buildSingleJobPlan', () => {
     });
     const node = [...plan.nodes.values()][0] as any;
     assert.strictEqual(node.expectsNoChanges, true);
+  });
+
+  test('defaults expectsNoChanges to undefined when not specified', () => {
+    const plan = buildSingleJobPlan({
+      name: 'Check', task: 'validate',
+    });
+    const node = [...plan.nodes.values()][0] as any;
+    assert.strictEqual(node.expectsNoChanges, undefined);
+  });
+
+  test('handles special characters in name', () => {
+    const plan = buildSingleJobPlan({ name: 'My@Build Task!', task: 'build' });
+    const node = [...plan.nodes.values()][0];
+    assert.ok(node.producerId);
+    // Should sanitize to valid producerId
+    assert.ok(node.producerId.length > 0);
+  });
+
+  test('uses process.cwd() as default repoPath', () => {
+    const plan = buildSingleJobPlan({ name: 'Build', task: 'build' });
+    assert.ok(plan.repoPath);
+    assert.ok(plan.repoPath.length > 0);
+  });
+
+  test('generates unique UUIDs for id and planId', () => {
+    const plan1 = buildSingleJobPlan({ name: 'Build', task: 'build' });
+    const plan2 = buildSingleJobPlan({ name: 'Build', task: 'build' });
+    
+    assert.notStrictEqual(plan1.id, plan2.id);
+    const node1 = [...plan1.nodes.values()][0];
+    const node2 = [...plan2.nodes.values()][0];
+    assert.notStrictEqual(node1.id, node2.id);
+  });
+
+  test('uses default maxParallel from buildPlan (4)', () => {
+    const plan = buildSingleJobPlan({ name: 'Build', task: 'build' });
+    assert.strictEqual(plan.maxParallel, 4);
   });
 });
 
@@ -336,6 +399,26 @@ suite('buildPlan with groups', () => {
     const plan = buildPlan({ name: 'T', repoPath: '/from/spec', jobs: [makeJob('a')] });
     assert.strictEqual(plan.repoPath, '/from/spec');
   });
+
+  test('handles broken group parent reference gracefully', () => {
+    // Create a scenario where a group references a missing parent
+    // This is an edge case that might occur with corrupted data
+    const plan = buildPlan({
+      name: 'BrokenParent',
+      jobs: [
+        makeJob('a', [], { group: 'child' })
+      ],
+      groups: [{
+        name: 'child',
+        // This would normally auto-create parents, but let's try to break it manually
+        // by creating a group state that references a missing parent internally
+      }]
+    });
+    
+    // Plan should still be created successfully
+    assert.strictEqual(plan.nodes.size, 1);
+    assert.ok(plan.groupPathToId.has('child'));
+  });
 });
 
 suite('buildNodes', () => {
@@ -410,5 +493,113 @@ suite('buildNodes', () => {
   test('passes repoPath option', () => {
     const result = buildNodes([makeNodeSpec('a')], { repoPath: '/my/repo' });
     assert.strictEqual(result.nodes[0].repoPath, '/my/repo');
+  });
+
+  test('defaults repoPath to process.cwd()', () => {
+    const result = buildNodes([makeNodeSpec('a')]);
+    assert.ok(result.nodes[0].repoPath);
+    assert.strictEqual(result.nodes[0].repoPath, process.cwd());
+  });
+
+  test('initializes node with correct defaults', () => {
+    const result = buildNodes([makeNodeSpec('a')]);
+    const node = result.nodes[0];
+    assert.strictEqual(node.attempts, 0);
+    assert.ok(node.id);
+    assert.ok(node.id.length === 36); // UUID length
+  });
+
+  test('three-node cycle detection', () => {
+    assert.throws(
+      () => buildNodes([
+        makeNodeSpec('a', ['c']),
+        makeNodeSpec('b', ['a']),
+        makeNodeSpec('c', ['b'])
+      ]),
+      (err: any) => err instanceof PlanValidationError && (err.details?.some((d: string) => d.includes('Circular dependency')) ?? false)
+    );
+  });
+
+  test('cycle error message includes producer IDs', () => {
+    try {
+      buildNodes([makeNodeSpec('alpha', ['beta']), makeNodeSpec('beta', ['alpha'])]);
+      assert.fail('should throw');
+    } catch (e: any) {
+      assert.ok(e.details);
+      assert.ok(e.details.some((d: string) => d.includes('alpha') && d.includes('beta')));
+    }
+  });
+});
+
+suite('Complex dependency scenarios', () => {
+  let quiet: { restore: () => void };
+  setup(() => { quiet = silenceConsole(); });
+  teardown(() => { quiet.restore(); });
+
+  test('diamond dependency structure', () => {
+    const plan = buildPlan({
+      name: 'Diamond',
+      jobs: [
+        makeJob('root'),
+        makeJob('left', ['root']),
+        makeJob('right', ['root']), 
+        makeJob('leaf', ['left', 'right'])
+      ]
+    });
+    assert.strictEqual(plan.nodes.size, 4);
+    assert.strictEqual(plan.roots.length, 1);
+    assert.strictEqual(plan.leaves.length, 1);
+  });
+
+  test('long chain dependency', () => {
+    const plan = buildPlan({
+      name: 'Chain',
+      jobs: [
+        makeJob('a'),
+        makeJob('b', ['a']),
+        makeJob('c', ['b']),
+        makeJob('d', ['c']),
+        makeJob('e', ['d'])
+      ]
+    });
+    assert.strictEqual(plan.nodes.size, 5);
+    assert.strictEqual(plan.roots.length, 1);
+    assert.strictEqual(plan.leaves.length, 1);
+    
+    // Verify the chain
+    const nodeE = [...plan.nodes.values()].find(n => n.producerId === 'e')!;
+    const nodeD = [...plan.nodes.values()].find(n => n.producerId === 'd')!;
+    assert.ok(nodeE.dependencies.includes(nodeD.id));
+  });
+
+  test('complex multi-root multi-leaf structure', () => {
+    const plan = buildPlan({
+      name: 'Complex',
+      jobs: [
+        makeJob('root1'),
+        makeJob('root2'),
+        makeJob('middle1', ['root1']),
+        makeJob('middle2', ['root2']),
+        makeJob('leaf1', ['middle1']),
+        makeJob('leaf2', ['middle2'])
+      ]
+    });
+    assert.strictEqual(plan.nodes.size, 6);
+    assert.strictEqual(plan.roots.length, 2);
+    assert.strictEqual(plan.leaves.length, 2);
+  });
+
+  test('node with multiple dependencies becomes ready only when all deps are done', () => {
+    const plan = buildPlan({
+      name: 'MultiDep',
+      jobs: [
+        makeJob('a'),
+        makeJob('b'),
+        makeJob('c', ['a', 'b'])
+      ]
+    });
+    const nodeC = [...plan.nodes.values()].find(n => n.producerId === 'c')!;
+    assert.strictEqual(nodeC.dependencies.length, 2);
+    assert.strictEqual(plan.nodeStates.get(nodeC.id)?.status, 'pending');
   });
 });

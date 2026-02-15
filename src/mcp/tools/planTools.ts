@@ -8,7 +8,7 @@
  */
 
 import { McpTool } from '../types';
-import { discoverAvailableModels } from '../../agent/modelDiscovery';
+import { discoverAvailableModelsLegacy } from '../../agent/modelDiscovery';
 
 /**
  * Regex pattern for valid `producer_id` values.
@@ -50,7 +50,7 @@ export const PRODUCER_ID_PATTERN = /^[a-z0-9-]{3,64}$/;
  * ```
  */
 export async function getPlanToolDefinitions(): Promise<McpTool[]> {
-  const modelResult = await discoverAvailableModels();
+  const modelResult = await discoverAvailableModelsLegacy();
   const modelEnum = modelResult.rawChoices.length > 0
     ? modelResult.rawChoices
     : ['gpt-5', 'claude-sonnet-4.5'];
@@ -161,6 +161,11 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
           cleanUpSuccessfulWork: { 
             type: 'boolean', 
             description: 'Clean up worktrees after successful merges (default: true)' 
+          },
+          additionalSymlinkDirs: {
+            type: 'array',
+            description: "Additional directories to symlink from the main repo into worktrees (e.g. '.venv', 'vendor'). Merged with built-in list (node_modules). Must be .gitignored, read-only directories.",
+            items: { type: 'string' }
           },
           startPaused: {
             type: 'boolean',

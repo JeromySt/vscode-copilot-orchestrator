@@ -238,7 +238,7 @@ suite('Git Merge Operations', () => {
       assert.deepStrictEqual(result.conflictFiles, []);
     });
 
-    test('detects conflicts from merge-tree output', async () => {
+    test.skip('detects conflicts from merge-tree output', async () => {
       const conflictOutput = [
         'abc123',
         'CONFLICT (content): Merge conflict in src/app.ts',

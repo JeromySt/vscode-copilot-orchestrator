@@ -8,6 +8,7 @@ import { suite, test } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { PlanTreeViewManager } from '../../../ui/planTreeProvider';
+import { PulseEmitter } from '../../../core/pulse';
 
 // Mock PlanRunner for testing
 class MockPlanRunner {
@@ -50,7 +51,7 @@ suite('Activity Bar Badge', () => {
 
   function setup() {
     mockPlanRunner = new MockPlanRunner();
-    manager = new PlanTreeViewManager(mockPlanRunner as any);
+    manager = new PlanTreeViewManager(mockPlanRunner as any, new PulseEmitter());
     
     // Mock TreeView
     mockTreeView = {

@@ -5,8 +5,47 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { DefaultJobExecutor } from '../../../plan/executor';
+import { DefaultProcessSpawner } from '../../../interfaces/IProcessSpawner';
+import { DefaultEvidenceValidator } from '../../../plan/evidenceValidator';
+import { ProcessMonitor } from '../../../process';
 import type { JobNode } from '../../../plan/types';
-// git module used transitively via executor
+import type { ICopilotRunner } from '../../../interfaces/ICopilotRunner';
+
+// Mock ICopilotRunner for tests
+const mockCopilotRunner: ICopilotRunner = {
+  run: async () => ({ success: true, sessionId: 'test', metrics: { requestCount: 1, inputTokens: 100, outputTokens: 50, costUsd: 0.01, durationMs: 1000 } }),
+  isAvailable: () => true,
+  writeInstructionsFile: (cwd: string, task: string, instructions: string | undefined, label: string, jobId?: string) => ({ filePath: '/tmp/instructions.md', dirPath: '/tmp' }),
+  buildCommand: (options: any) => 'copilot --help',
+  cleanupInstructionsFile: (filePath: string, dirPath: string | undefined, label: string) => {}
+};
+
+function createMockGitOps() {
+  return {
+    worktrees: {
+      createOrReuseDetached: sinon.stub().resolves({ path: '/tmp/wt', created: true }),
+      getHeadCommit: sinon.stub().resolves('abc123'),
+      removeSafe: sinon.stub().resolves(),
+      list: sinon.stub().resolves([]),
+    },
+    repository: {
+      resolveRef: sinon.stub().resolves('abc123'),
+      getDiffStats: sinon.stub().resolves({ added: 0, modified: 0, deleted: 0 }),
+      getCommitCount: sinon.stub().resolves(1),
+      getFileChangesBetween: sinon.stub().resolves([]),
+      revParse: sinon.stub().resolves('abc123'),
+    },
+    merge: {
+      mergeWithoutCheckout: sinon.stub().resolves({ success: true, mergeCommit: 'abc123' }),
+    },
+    branches: {
+      exists: sinon.stub().resolves(true),
+    },
+    gitignore: {
+      ensureGitignoreEntries: sinon.stub().resolves(),
+    },
+  } as any;
+}
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
@@ -17,8 +56,7 @@ function silenceConsole(): { restore: () => void } {
 suite('computeAggregatedWorkSummary', () => {
   let quiet: { restore: () => void };
   let executor: DefaultJobExecutor;
-  let gitWorktreesStub: sinon.SinonStub;
-  let gitExecutorStub: sinon.SinonStub;
+  let mockGitOps: ReturnType<typeof createMockGitOps>;
 
   const createJobNode = (id: string, name: string, task: string): JobNode => ({
     id,
@@ -33,12 +71,8 @@ suite('computeAggregatedWorkSummary', () => {
 
   setup(() => {
     quiet = silenceConsole();
-    executor = new DefaultJobExecutor();
-    
-    // Stub git module functions
-    const gitModule = require('../../../git');
-    gitWorktreesStub = sinon.stub(gitModule.worktrees, 'getHeadCommit');
-    gitExecutorStub = sinon.stub(gitModule.executor, 'execAsync');
+    mockGitOps = createMockGitOps();
+    executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), mockGitOps, mockCopilotRunner);
   });
 
   teardown(() => {
@@ -53,23 +87,11 @@ suite('computeAggregatedWorkSummary', () => {
     const repoPath = '/test/repo';
     
     const headCommit = 'abc123';
-    gitWorktreesStub.resolves(headCommit);
+    mockGitOps.worktrees.getHeadCommit.resolves(headCommit);
     
-    // Return same commit for baseBranch
-    gitExecutorStub.withArgs(['rev-parse', baseBranch], sinon.match.any)
-      .resolves({ success: true, stdout: headCommit + '\n', stderr: '' });
-    
-    // Diff returns empty (no changes)
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['diff']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: '', stderr: '' });
-    
-    // Commit count is 0
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['rev-list']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: '0\n', stderr: '' });
+    mockGitOps.repository.resolveRef.resolves(headCommit);
+    mockGitOps.repository.getDiffStats.resolves({ added: 0, modified: 0, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(0);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -87,24 +109,10 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    const headCommit = 'def456';
-    const baseCommit = 'abc123';
-    
-    gitWorktreesStub.resolves(headCommit);
-    
-    gitExecutorStub.withArgs(['rev-parse', baseBranch], sinon.match.any)
-      .resolves({ success: true, stdout: baseCommit + '\n', stderr: '' });
-    
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['diff']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: '', stderr: '' });
-    
-    // 3 commits in range
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['rev-list']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: '3\n', stderr: '' });
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    mockGitOps.repository.getDiffStats.resolves({ added: 0, modified: 0, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(3);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -118,25 +126,10 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    const headCommit = 'def456';
-    const baseCommit = 'abc123';
-    
-    gitWorktreesStub.resolves(headCommit);
-    
-    gitExecutorStub.withArgs(['rev-parse', baseBranch], sinon.match.any)
-      .resolves({ success: true, stdout: baseCommit + '\n', stderr: '' });
-    
-    // Diff with file changes: 2 added, 1 modified
-    const diffOutput = 'A\tfile1.ts\nA\tfile2.ts\nM\tfile3.ts\n';
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['diff']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: diffOutput, stderr: '' });
-    
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['rev-list']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: '2\n', stderr: '' });
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    mockGitOps.repository.getDiffStats.resolves({ added: 2, modified: 1, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(2);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -152,31 +145,16 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    const headCommit = 'def456';
-    const baseCommit = 'abc123';
-    
-    gitWorktreesStub.resolves(headCommit);
-    
-    gitExecutorStub.withArgs(['rev-parse', baseBranch], sinon.match.any)
-      .resolves({ success: true, stdout: baseCommit + '\n', stderr: '' });
-    
-    // Diff with renamed file (R status) - should not count in added/modified/deleted
-    const diffOutput = 'R\told.ts\tnew.ts\nM\tfile.ts\n';
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['diff']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: diffOutput, stderr: '' });
-    
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['rev-list']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: '1\n', stderr: '' });
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    // getDiffStats counts renames as modified
+    mockGitOps.repository.getDiffStats.resolves({ added: 0, modified: 2, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(1);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
-    // Renamed files (R status) are not counted as A, M, or D
     assert.strictEqual(result.filesAdded, 0);
-    assert.strictEqual(result.filesModified, 1);
+    assert.strictEqual(result.filesModified, 2);
     assert.strictEqual(result.filesDeleted, 0);
   });
 
@@ -186,23 +164,10 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/develop';
     const repoPath = '/test/repo';
     
-    const headCommit = 'def456';
-    const baseCommit = 'abc123';
-    
-    gitWorktreesStub.resolves(headCommit);
-    
-    gitExecutorStub.withArgs(['rev-parse', baseBranch], sinon.match.any)
-      .resolves({ success: true, stdout: baseCommit + '\n', stderr: '' });
-    
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['diff']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: '', stderr: '' });
-    
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['rev-list']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: '1\n', stderr: '' });
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    mockGitOps.repository.getDiffStats.resolves({ added: 0, modified: 0, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(1);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -217,25 +182,10 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    const headCommit = 'def456';
-    const baseCommit = 'abc123';
-    
-    gitWorktreesStub.resolves(headCommit);
-    
-    gitExecutorStub.withArgs(['rev-parse', baseBranch], sinon.match.any)
-      .resolves({ success: true, stdout: baseCommit + '\n', stderr: '' });
-    
-    // Diff with deleted files
-    const diffOutput = 'D\tfile1.ts\nD\tfile2.ts\nA\tfile3.ts\n';
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['diff']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: diffOutput, stderr: '' });
-    
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['rev-list']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: '2\n', stderr: '' });
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    mockGitOps.repository.getDiffStats.resolves({ added: 1, modified: 0, deleted: 2 });
+    mockGitOps.repository.getCommitCount.resolves(2);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -250,7 +200,7 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    gitWorktreesStub.resolves(null);
+    mockGitOps.worktrees.getHeadCommit.resolves(null);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -266,10 +216,8 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    gitWorktreesStub.resolves('abc123');
-    
-    gitExecutorStub.withArgs(['rev-parse', baseBranch], sinon.match.any)
-      .resolves({ success: false, stdout: '', stderr: 'branch not found' });
+    mockGitOps.worktrees.getHeadCommit.resolves('abc123');
+    mockGitOps.repository.resolveRef.rejects(new Error('branch not found'));
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -283,24 +231,11 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    const headCommit = 'def456';
-    const baseCommit = 'abc123';
-    
-    gitWorktreesStub.resolves(headCommit);
-    
-    gitExecutorStub.withArgs(['rev-parse', baseBranch], sinon.match.any)
-      .resolves({ success: true, stdout: baseCommit + '\n', stderr: '' });
-    
-    // Diff fails
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['diff']),
-      sinon.match.any
-    ).resolves({ success: false, stdout: '', stderr: 'diff error' });
-    
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['rev-list']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: '1\n', stderr: '' });
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    // getDiffStats returns zeros on failure
+    mockGitOps.repository.getDiffStats.resolves({ added: 0, modified: 0, deleted: 0 });
+    mockGitOps.repository.getCommitCount.resolves(1);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -317,25 +252,10 @@ suite('computeAggregatedWorkSummary', () => {
     const baseBranch = 'origin/main';
     const repoPath = '/test/repo';
     
-    const headCommit = 'def456';
-    const baseCommit = 'abc123';
-    
-    gitWorktreesStub.resolves(headCommit);
-    
-    gitExecutorStub.withArgs(['rev-parse', baseBranch], sinon.match.any)
-      .resolves({ success: true, stdout: baseCommit + '\n', stderr: '' });
-    
-    // Diff with mixed statuses
-    const diffOutput = 'A\tnew1.ts\nA\tnew2.ts\nM\tmodified1.ts\nM\tmodified2.ts\nM\tmodified3.ts\nD\tdeleted.ts\n';
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['diff']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: diffOutput, stderr: '' });
-    
-    gitExecutorStub.withArgs(
-      sinon.match.array.contains(['rev-list']),
-      sinon.match.any
-    ).resolves({ success: true, stdout: '5\n', stderr: '' });
+    mockGitOps.worktrees.getHeadCommit.resolves('def456');
+    mockGitOps.repository.resolveRef.resolves('abc123');
+    mockGitOps.repository.getDiffStats.resolves({ added: 2, modified: 3, deleted: 1 });
+    mockGitOps.repository.getCommitCount.resolves(5);
     
     const result = await executor.computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath);
     
@@ -345,3 +265,5 @@ suite('computeAggregatedWorkSummary', () => {
     assert.strictEqual(result.filesDeleted, 1);
   });
 });
+
+

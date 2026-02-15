@@ -19,6 +19,7 @@ import type {
   FileChange,
   WorktreeCreateOptions,
 } from '../git';
+import type { CreateTiming } from '../git/core/worktrees';
 
 /**
  * Interface for git branch operations.
@@ -37,9 +38,9 @@ export interface IGitBranches {
   list(repoPath: string): Promise<string[]>;
   getCommit(branchName: string, repoPath: string): Promise<string | null>;
   getMergeBase(branch1: string, branch2: string, repoPath: string): Promise<string | null>;
-  remove(branchName: string, repoPath: string, options?: { remote?: boolean; force?: boolean; log?: GitLogger }): Promise<void>;
-  deleteLocal(branchName: string, repoPath: string, force?: boolean, log?: GitLogger): Promise<void>;
-  deleteRemote(branchName: string, repoPath: string, remote?: string, log?: GitLogger): Promise<void>;
+  remove(branchName: string, repoPath: string, options?: { force?: boolean; log?: GitLogger }): Promise<void>;
+  deleteLocal(repoPath: string, branchName: string, options?: { force?: boolean; log?: GitLogger }): Promise<boolean>;
+  deleteRemote(repoPath: string, branchName: string, options?: { remote?: string; log?: GitLogger }): Promise<boolean>;
 }
 
 /**
@@ -49,8 +50,11 @@ export interface IGitBranches {
  */
 export interface IGitWorktrees {
   create(options: WorktreeCreateOptions): Promise<void>;
+  createWithTiming(options: WorktreeCreateOptions): Promise<CreateTiming>;
+  createDetachedWithTiming(repoPath: string, worktreePath: string, commitish: string, log?: GitLogger, additionalSymlinkDirs?: string[]): Promise<CreateTiming & { baseCommit: string }>;
+  createOrReuseDetached(repoPath: string, worktreePath: string, commitish: string, log?: GitLogger, additionalSymlinkDirs?: string[]): Promise<CreateTiming & { baseCommit: string; reused: boolean }>;
   remove(worktreePath: string, repoPath: string, log?: GitLogger): Promise<void>;
-  removeSafe(worktreePath: string, repoPath: string, log?: GitLogger): Promise<void>;
+  removeSafe(repoPath: string, worktreePath: string, options?: { force?: boolean; log?: GitLogger }): Promise<boolean>;
   isValid(worktreePath: string): Promise<boolean>;
   getBranch(worktreePath: string): Promise<string | null>;
   getHeadCommit(worktreePath: string): Promise<string | null>;
@@ -66,6 +70,8 @@ export interface IGitWorktrees {
 export interface IGitMerge {
   merge(options: MergeOptions): Promise<MergeResult>;
   mergeWithoutCheckout(options: MergeTreeOptions): Promise<MergeTreeResult>;
+  commitTree(treeSha: string, parents: string[], message: string, repoPath: string, log?: GitLogger): Promise<string>;
+  continueAfterResolve(cwd: string, message: string, log?: GitLogger): Promise<boolean>;
   abort(cwd: string, log?: GitLogger): Promise<void>;
   listConflicts(cwd: string): Promise<string[]>;
   isInProgress(cwd: string): Promise<boolean>;
@@ -81,6 +87,7 @@ export interface IGitRepository {
   pull(cwd: string, log?: GitLogger): Promise<boolean>;
   push(cwd: string, options?: { remote?: string; branch?: string; force?: boolean; log?: GitLogger }): Promise<boolean>;
   stageAll(cwd: string, log?: GitLogger): Promise<void>;
+  stageFile(cwd: string, filePath: string, log?: GitLogger): Promise<void>;
   commit(cwd: string, message: string, options?: { allowEmpty?: boolean; log?: GitLogger }): Promise<boolean>;
   hasChanges(cwd: string): Promise<boolean>;
   hasStagedChanges(cwd: string): Promise<boolean>;
@@ -90,9 +97,34 @@ export interface IGitRepository {
   getCommitLog(from: string, to: string, cwd: string): Promise<CommitInfo[]>;
   getCommitChanges(commitHash: string, cwd: string): Promise<FileChange[]>;
   getDiffStats(from: string, to: string, cwd: string): Promise<{ added: number; modified: number; deleted: number }>;
+  getFileDiff(repoPath: string, filePath: string): Promise<string | null>;
+  getStagedFileDiff(repoPath: string, filePath: string): Promise<string | null>;
+  getFileChangesBetween(from: string, to: string, cwd: string): Promise<FileChange[]>;
+  hasChangesBetween(from: string, to: string, repoPath: string): Promise<boolean>;
+  getCommitCount(from: string, to: string, cwd: string): Promise<number>;
+  getDirtyFiles(cwd: string): Promise<string[]>;
+  checkoutFile(cwd: string, filePath: string, log?: GitLogger): Promise<void>;
+  resetHard(cwd: string, ref: string, log?: GitLogger): Promise<void>;
+  clean(cwd: string, log?: GitLogger): Promise<void>;
+  updateRef(cwd: string, refName: string, commit: string, log?: GitLogger): Promise<void>;
   stashPush(cwd: string, message: string, log?: GitLogger): Promise<boolean>;
   stashPop(cwd: string, log?: GitLogger): Promise<boolean>;
+  stashDrop(cwd: string, index?: number, log?: GitLogger): Promise<boolean>;
   stashList(cwd: string): Promise<string[]>;
+  stashShowFiles(repoPath: string): Promise<string[]>;
+  stashShowPatch(repoPath: string): Promise<string | null>;
+}
+
+/**
+ * Interface for git gitignore operations.
+ * 
+ * @see src/git/core/gitignore.ts for the concrete implementation.
+ */
+export interface IGitGitignore {
+  ensureGitignoreEntries(repoPath: string, entries?: string[], logger?: GitLogger): Promise<boolean>;
+  isIgnored(repoPath: string, relativePath: string): Promise<boolean>;
+  isOrchestratorGitIgnoreConfigured(workspaceRoot: string): Promise<boolean>;
+  ensureOrchestratorGitIgnore(workspaceRoot: string): Promise<boolean>;
 }
 
 /**
@@ -139,5 +171,5 @@ export interface IGitOperations {
   readonly worktrees: IGitWorktrees;
   readonly merge: IGitMerge;
   readonly repository: IGitRepository;
-  readonly executor: IGitExecutor;
+  readonly gitignore: IGitGitignore;
 }

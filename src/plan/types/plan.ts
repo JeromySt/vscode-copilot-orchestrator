@@ -39,6 +39,11 @@ export interface PlanSpec {
   /** Whether to create the plan in a paused state (default: true for plans, false for single jobs) */
   startPaused?: boolean;
   
+  /** Additional directories to symlink from the main repo into worktrees.
+   *  Merged with the built-in list (node_modules). Must be .gitignored,
+   *  read-only directories (e.g. '.venv', 'vendor', '.gradle'). */
+  additionalSymlinkDirs?: string[];
+  
   /** Job nodes at the top level of this Plan */
   jobs: JobNodeSpec[];
   
@@ -414,6 +419,15 @@ export interface PlanInstance {
   /** Base branch */
   baseBranch: string;
   
+  /**
+   * The resolved commit SHA of baseBranch at plan creation time.
+   * 
+   * This is captured once when the plan starts and never changes,
+   * ensuring RI merge diffs are computed against the original starting
+   * point even if the base branch moves forward during execution.
+   */
+  baseCommitAtStart?: string;
+  
   /** Target branch */
   targetBranch?: string;
   
@@ -590,6 +604,16 @@ export interface ExecutionContext {
     postchecks?: PhaseStatus;
     'merge-ri'?: PhaseStatus;
   };
+  
+  // --- Merge phase specific fields ---
+  /** Dependency commits for forward integration (merge-fi phase) */
+  dependencyCommits?: Array<{ nodeId: string; nodeName: string; commit: string }>;
+  /** Main repository path (not worktree) for reverse integration (merge-ri phase) */
+  repoPath?: string;
+  /** Target branch for reverse integration merge */
+  targetBranch?: string;
+  /** Base commit at the start of plan execution */
+  baseCommitAtStart?: string;
 }
 
 // ============================================================================

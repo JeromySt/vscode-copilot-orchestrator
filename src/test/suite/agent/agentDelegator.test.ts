@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
+import type { IGitOperations } from '../../../interfaces/IGitOperations';
 
 const cp = require('child_process');
 
@@ -61,6 +62,8 @@ function makeLogger(): { log: (m: string) => void; messages: string[] } {
   return { log: (m: string) => messages.push(m), messages };
 }
 
+const mockGitOps = {} as any as IGitOperations;
+
 function makeOpts(tmpDir: string) {
   return {
     jobId: 'job-1', taskDescription: 'test', label: 'work',
@@ -105,7 +108,7 @@ suite('AgentDelegator', () => {
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.success, true);
       assert.ok(fs.existsSync(path.join(tmpDir, '.copilot-task.md')));
@@ -122,7 +125,7 @@ suite('AgentDelegator', () => {
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const cbs = { onProcessSpawned: sandbox.stub(), onSessionCaptured: sandbox.stub(), onProcessExited: sandbox.stub() };
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger, cbs);
+      const delegator = new AgentDelegator(logger, mockGitOps, cbs);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.sessionId, sid);
@@ -138,7 +141,7 @@ suite('AgentDelegator', () => {
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.sessionId, sid);
     });
@@ -150,7 +153,7 @@ suite('AgentDelegator', () => {
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.success, false);
       assert.ok(result.error?.includes('exited with code 1'));
@@ -163,7 +166,7 @@ suite('AgentDelegator', () => {
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.success, false);
       assert.ok(result.error?.includes('spawn failed'));
@@ -177,7 +180,7 @@ suite('AgentDelegator', () => {
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
       const result = await delegator.delegate({ ...makeOpts(tmpDir), sessionId: sid });
       assert.strictEqual(result.sessionId, sid);
     });
@@ -193,7 +196,7 @@ suite('AgentDelegator', () => {
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.sessionId, sid);
     });
@@ -209,7 +212,7 @@ suite('AgentDelegator', () => {
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.sessionId, sid);
     });
@@ -219,7 +222,7 @@ suite('AgentDelegator', () => {
     test('delegates to cliCheckCore', () => {
       sandbox.stub(cliCheck, 'isCopilotCliAvailable').returns(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
       assert.strictEqual(delegator.isCopilotAvailable(), true);
     });
   });
@@ -230,7 +233,7 @@ suite('AgentDelegator', () => {
       sandbox.stub(cliCheck, 'isCopilotCliAvailable').returns(false);
       sandbox.stub(gitExec, 'execAsync').rejects(new Error('git fail'));
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger);
+      const delegator = new AgentDelegator(logger, mockGitOps);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.success, true);
       assert.ok(logger.messages.some(m => m.includes('Could not create marker commit')));

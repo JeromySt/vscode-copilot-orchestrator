@@ -5,6 +5,43 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-02-15
+
+### Architecture
+- **Dependency Injection Container**: New `ServiceContainer` (`core/container.ts`) with Symbol-based type-safe registration, singleton/transient lifecycle, lazy initialization, and scoped child containers for per-plan overrides
+- **Service Tokens**: 20 DI tokens (`core/tokens.ts`) covering all major subsystems — `ILogger`, `IGitOperations`, `INodeExecutor`, `IConfigProvider`, `IDialogService`, `IClipboardService`, `IPulseEmitter`, `IProcessSpawner`, `ICopilotRunner`, `IEnvironment`, `IGlobalCapacity`, `IPlanConfigManager`, and more
+- **VS Code Adapter Pattern**: Business logic fully decoupled from VS Code APIs via thin adapter wrappers (`vscode/adapters.ts`) — `VsCodeConfigProvider`, `VsCodeDialogService`, `VsCodeClipboardService` implement framework-agnostic interfaces (`IConfigProvider`, `IDialogService`, `IClipboardService`, `IEnvironment`)
+- **Composition Root**: Separate production (`composition.ts`) and test (`compositionTest.ts`) composition roots — `createContainer()` wires all production bindings in one place; test root substitutes controllable doubles
+- **Event-Driven Architecture**: `PulseEmitter` (`core/pulse.ts`) provides a single 1 s heartbeat replacing per-component `setInterval` timers with auto-start/stop based on subscriber count; `PlanEventEmitter` (`plan/planEvents.ts`) provides typed events for plan/node lifecycle (`planCreated`, `planStarted`, `planCompleted`, `planDeleted`, `nodeTransition`, `nodeStarted`, `nodeCompleted`, `nodeRetry`, `nodeUpdated`)
+- **Decomposed Phase Executors**: Monolithic executor split into 6 dedicated phase modules (`plan/phases/`): `MergeFiPhaseExecutor`, `PrecheckPhaseExecutor`, `WorkPhaseExecutor`, `CommitPhaseExecutor`, `PostcheckPhaseExecutor`, `MergeRiPhaseExecutor`, plus shared `resolveMergeConflictWithCopilot` helper
+
+### Execution Engine
+- **JobExecutionEngine** (`plan/executionEngine.ts`): New node-centric engine handling end-to-end node execution — FI merges from dependencies, executor invocation, auto-heal, RI merges to target branch, worktree cleanup, and work summary accumulation. RI merges serialized via async mutex to prevent index.lock conflicts
+- **NodeManager** (`plan/nodeManager.ts`): Centralized node state management — retry, force-fail, spec update, log queries, process stats, and failure context extraction
+- **ExecutionPump** (`plan/executionPump.ts`): Async pump loop that checks for ready nodes and dispatches work, managing wake locks and node scheduling
+- **PlanLifecycleManager** (`plan/planLifecycle.ts`): Plan CRUD operations and lifecycle transitions — create, cancel, pause, resume, delete with file watcher integration and progress computation
+
+### UI
+- **Webview Controls**: 15 reusable UI components (`ui/webview/controls/`): `StatusBadge`, `ProgressBar`, `NodeCard`, `GroupContainer`, `MermaidNodeStyle`, `LayoutManager`, `ProcessTree`, `LogViewer`, `PhaseTabBar`, `AttemptCard`, `AiUsageStats`, `WorkSummary`, `ConfigDisplay`, `PlanListCard`, `DurationCounter`
+- **EventBus** (`ui/webview/eventBus.ts`): Lightweight zero-dependency pub/sub event bus for webview communication with `on`/`once`/`emit`/`clear` API, snapshot-safe iteration, and automatic cleanup on unsubscribe
+- **SubscribableControl** (`ui/webview/subscribableControl.ts`): Base class for controls that auto-subscribe to EventBus topics and re-render on data changes
+- **Template Decomposition**: Plan detail templates split into `headerTemplate`, `controlsTemplate`, `dagTemplate`, `summaryTemplate`, `nodeCardTemplate`, `scriptsTemplate`; node detail templates split into `headerTemplate`, `actionButtonsTemplate`, `configTemplate`, `attemptsTemplate`, `metricsTemplate`, `logViewerTemplate`, `processTreeTemplate`, `scriptsTemplate`
+
+### Testing
+- **95% Line Coverage Target**: Enforced via `c8 --check-coverage --lines 95` in `test:coverage` script with dual-runner architecture (mocha for unit tests)
+- **Test Adapter Mocks** (`vscode/testAdapters.ts`): Controllable VS Code API doubles for `IConfigProvider`, `IDialogService`, `IClipboardService`, `IProcessSpawner`, and `IEnvironment` — used by `compositionTest.ts` to create fully isolated test containers
+- **Phase-Level Tests**: Dedicated unit tests for each decomposed phase executor (`precheckPhase`, `workPhase`, `postcheckPhase`, `commitPhase`, `mergeFiPhase`, `mergeRiPhase`)
+
+### Infrastructure
+- **ESLint Flat Config**: Migrated from `.eslintrc.js` to `eslint.config.js` flat config format
+- **Removed `.copilot-cli` session artifacts**: Cleaned up committed session state files from repository
+- **Updated `.gitignore`**: Added `.copilot-cli/` and auto-generated healing instruction exclusions
+
+### Bug Fixes
+- Fixed 78 test failures from DI migration (model discovery spawner injection, execution engine git mock, template assertions)
+- Fixed executor cancel to use `killProcessTree` abstraction instead of direct process signals
+- Fixed log file header creation on first access to avoid empty log files
+
 ## [0.9.5] - 2026-02-13
 
 ### Fixed

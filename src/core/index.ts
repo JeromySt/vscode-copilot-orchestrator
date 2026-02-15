@@ -7,10 +7,10 @@
  */
 
 export { detectWorkspace, Detected } from './detector';
-export { ensureDir, readJSON, writeJSON, cpuCountMinusOne, ensureOrchestratorDirs, ensureDirectory } from './utils';
+export { ensureDir, readJSON, writeJSON, cpuCountMinusOne, ensureOrchestratorDirs } from './utils';
 export * from './planInitialization';
 export { Logger, ComponentLogger } from './logger';
-export { powerManager, PowerManager, PowerManagerImpl } from './powerManager';
+export { PowerManager, PowerManagerImpl } from './powerManager';
 export {
   GlobalCapacityManager,
   GlobalCapacityStats,

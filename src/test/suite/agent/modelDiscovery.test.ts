@@ -14,51 +14,76 @@ import {
   suggestModel,
   resetModelCache,
 } from '../../../agent/modelDiscovery';
-
-const cp = require('child_process');
+import type { ModelDiscoveryDeps } from '../../../agent/modelDiscovery';
+import type { IProcessSpawner, ChildProcessLike } from '../../../interfaces/IProcessSpawner';
+import { EventEmitter } from 'events';
 
 function silenceConsole() {
   sinon.stub(console, 'error');
   sinon.stub(console, 'warn');
 }
 
+// Helper: create a mock spawner whose spawn() emits stdout then closes
+function createMockSpawner(exitCode: number, stdout = ''): IProcessSpawner {
+  return {
+    spawn(): ChildProcessLike {
+      const proc = new EventEmitter() as EventEmitter & ChildProcessLike;
+      const stdoutEmitter = new EventEmitter();
+      const stderrEmitter = new EventEmitter();
+      Object.assign(proc, {
+        pid: 1,
+        exitCode: null as number | null,
+        killed: false,
+        stdout: stdoutEmitter,
+        stderr: stderrEmitter,
+        kill() { return true; },
+      });
+      setTimeout(() => {
+        if (stdout) {
+          stdoutEmitter.emit('data', Buffer.from(stdout));
+        }
+        (proc as any).exitCode = exitCode;
+        proc.emit('close', exitCode);
+      }, 5);
+      return proc as unknown as ChildProcessLike;
+    },
+  };
+}
+
+// Helper: create a mock spawner whose spawn() emits an error
+function createErrorSpawner(): IProcessSpawner {
+  return {
+    spawn(): ChildProcessLike {
+      const proc = new EventEmitter() as EventEmitter & ChildProcessLike;
+      const stdoutEmitter = new EventEmitter();
+      const stderrEmitter = new EventEmitter();
+      Object.assign(proc, {
+        pid: 1,
+        exitCode: null as number | null,
+        killed: false,
+        stdout: stdoutEmitter,
+        stderr: stderrEmitter,
+        kill() { return true; },
+      });
+      setTimeout(() => proc.emit('error', new Error('not found')), 5);
+      return proc as unknown as ChildProcessLike;
+    },
+  };
+}
+
 suite('modelDiscovery', () => {
-  let spawnStub: sinon.SinonStub;
+  let deps: ModelDiscoveryDeps;
 
   setup(() => {
     silenceConsole();
     resetModelCache();
-    spawnStub = sinon.stub(cp, 'spawn');
+    deps = { spawner: createMockSpawner(0, '') };
   });
 
   teardown(() => {
     sinon.restore();
     resetModelCache();
   });
-
-  // Helper: create a fake process that emits stdout then closes
-  function fakeProc(exitCode: number, stdout = '') {
-    const proc: any = new (require('events').EventEmitter)();
-    proc.stdout = new (require('events').EventEmitter)();
-    proc.stderr = new (require('events').EventEmitter)();
-    proc.kill = sinon.stub();
-    setTimeout(() => {
-      if (stdout) {
-        proc.stdout.emit('data', Buffer.from(stdout));
-      }
-      proc.emit('close', exitCode);
-    }, 5);
-    return proc;
-  }
-
-  function fakeErrorProc() {
-    const proc: any = new (require('events').EventEmitter)();
-    proc.stdout = new (require('events').EventEmitter)();
-    proc.stderr = new (require('events').EventEmitter)();
-    proc.kill = sinon.stub();
-    setTimeout(() => proc.emit('error', new Error('not found')), 5);
-    return proc;
-  }
 
   const HELP_OUTPUT = `Usage: copilot [options]
 
@@ -157,9 +182,9 @@ Options:
 
   suite('discoverAvailableModels', () => {
     test('discovers models from copilot --help', async () => {
-      spawnStub.callsFake(() => fakeProc(0, HELP_OUTPUT));
+      deps = { spawner: createMockSpawner(0, HELP_OUTPUT) };
 
-      const result = await discoverAvailableModels();
+      const result = await discoverAvailableModels(deps);
       assert.strictEqual(result.models.length, 6);
       assert.strictEqual(result.rawChoices.length, 6);
       assert.ok(result.discoveredAt > 0);
@@ -168,29 +193,29 @@ Options:
     });
 
     test('returns empty result on spawn error', async () => {
-      spawnStub.callsFake(() => fakeErrorProc());
+      deps = { spawner: createErrorSpawner() };
 
-      const result = await discoverAvailableModels();
+      const result = await discoverAvailableModels(deps);
       assert.strictEqual(result.models.length, 0);
       assert.strictEqual(result.rawChoices.length, 0);
     });
 
     test('returns empty result when no choices in output', async () => {
-      spawnStub.callsFake(() => fakeProc(0, 'no model info here'));
+      deps = { spawner: createMockSpawner(0, 'no model info here') };
 
-      const result = await discoverAvailableModels();
+      const result = await discoverAvailableModels(deps);
       assert.strictEqual(result.models.length, 0);
     });
 
     test('caches failure for 5 minutes', async () => {
-      spawnStub.callsFake(() => fakeErrorProc());
+      deps = { spawner: createErrorSpawner() };
 
-      const result1 = await discoverAvailableModels();
+      const result1 = await discoverAvailableModels(deps);
       assert.strictEqual(result1.models.length, 0);
 
       // Second call should not spawn again (failure cached)
-      spawnStub.callsFake(() => fakeProc(0, HELP_OUTPUT));
-      const result2 = await discoverAvailableModels();
+      deps = { spawner: createMockSpawner(0, HELP_OUTPUT) };
+      const result2 = await discoverAvailableModels(deps);
       assert.strictEqual(result2.models.length, 0);
     });
   });
@@ -201,14 +226,14 @@ Options:
 
   suite('getCachedModels', () => {
     test('returns cached result if fresh', async () => {
-      spawnStub.callsFake(() => fakeProc(0, HELP_OUTPUT));
+      deps = { spawner: createMockSpawner(0, HELP_OUTPUT) };
 
-      const first = await getCachedModels();
+      const first = await getCachedModels(deps);
       assert.strictEqual(first.models.length, 6);
 
-      // Change the stub to return nothing - should still get cached result
-      spawnStub.callsFake(() => fakeProc(0, 'nothing'));
-      const second = await getCachedModels();
+      // Change the spawner to return nothing - should still get cached result
+      deps = { spawner: createMockSpawner(0, 'nothing') };
+      const second = await getCachedModels(deps);
       assert.strictEqual(second.models.length, 6);
       assert.strictEqual(second.discoveredAt, first.discoveredAt);
     });
@@ -220,14 +245,14 @@ Options:
 
   suite('refreshModelCache', () => {
     test('forces re-discovery', async () => {
-      spawnStub.callsFake(() => fakeProc(0, HELP_OUTPUT));
-      const first = await getCachedModels();
+      deps = { spawner: createMockSpawner(0, HELP_OUTPUT) };
+      const first = await getCachedModels(deps);
       assert.strictEqual(first.models.length, 6);
 
       // Change output
       const newHelp = '--model <model>  Set the AI model to use (choices: "gpt-5")';
-      spawnStub.callsFake(() => fakeProc(0, newHelp));
-      const refreshed = await refreshModelCache();
+      deps = { spawner: createMockSpawner(0, newHelp) };
+      const refreshed = await refreshModelCache(deps);
       assert.strictEqual(refreshed.models.length, 1);
       assert.strictEqual(refreshed.models[0].id, 'gpt-5');
     });
@@ -239,13 +264,13 @@ Options:
 
   suite('isValidModel', () => {
     test('returns true for a known model', async () => {
-      spawnStub.callsFake(() => fakeProc(0, HELP_OUTPUT));
-      assert.strictEqual(await isValidModel('gpt-5'), true);
+      deps = { spawner: createMockSpawner(0, HELP_OUTPUT) };
+      assert.strictEqual(await isValidModel('gpt-5', deps), true);
     });
 
     test('returns false for an unknown model', async () => {
-      spawnStub.callsFake(() => fakeProc(0, HELP_OUTPUT));
-      assert.strictEqual(await isValidModel('unknown-model'), false);
+      deps = { spawner: createMockSpawner(0, HELP_OUTPUT) };
+      assert.strictEqual(await isValidModel('unknown-model', deps), false);
     });
   });
 
@@ -255,37 +280,37 @@ Options:
 
   suite('suggestModel', () => {
     test('suggests fast model for fast task', async () => {
-      spawnStub.callsFake(() => fakeProc(0, HELP_OUTPUT));
-      const model = await suggestModel('fast');
+      deps = { spawner: createMockSpawner(0, HELP_OUTPUT) };
+      const model = await suggestModel('fast', deps);
       assert.ok(model);
       assert.strictEqual(model!.tier, 'fast');
     });
 
     test('suggests premium model for premium task', async () => {
-      spawnStub.callsFake(() => fakeProc(0, HELP_OUTPUT));
-      const model = await suggestModel('premium');
+      deps = { spawner: createMockSpawner(0, HELP_OUTPUT) };
+      const model = await suggestModel('premium', deps);
       assert.ok(model);
       assert.strictEqual(model!.tier, 'premium');
     });
 
     test('suggests standard model for standard task', async () => {
-      spawnStub.callsFake(() => fakeProc(0, HELP_OUTPUT));
-      const model = await suggestModel('standard');
+      deps = { spawner: createMockSpawner(0, HELP_OUTPUT) };
+      const model = await suggestModel('standard', deps);
       assert.ok(model);
       assert.strictEqual(model!.tier, 'standard');
     });
 
     test('falls back to standard if no matching tier', async () => {
       const limitedHelp = '--model <model>  Set the AI model to use (choices: "gpt-5")';
-      spawnStub.callsFake(() => fakeProc(0, limitedHelp));
-      const model = await suggestModel('fast');
+      deps = { spawner: createMockSpawner(0, limitedHelp) };
+      const model = await suggestModel('fast', deps);
       assert.ok(model);
       assert.strictEqual(model!.id, 'gpt-5');
     });
 
     test('returns undefined when no models available', async () => {
-      spawnStub.callsFake(() => fakeErrorProc());
-      const model = await suggestModel('standard');
+      deps = { spawner: createErrorSpawner() };
+      const model = await suggestModel('standard', deps);
       assert.strictEqual(model, undefined);
     });
   });

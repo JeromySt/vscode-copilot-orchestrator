@@ -6,11 +6,11 @@
  * ## Architecture
  * 
  * ### Core Operations (git/core/)
- * - `executor` - Low-level git command execution
  * - `branches` - Branch management (create, delete, query)
  * - `worktrees` - Worktree management (create, remove, query)
  * - `merge` - Merge operations and conflict handling
  * - `repository` - General repository operations (fetch, pull, push, commit)
+ * - (executor - Low-level git command execution — internal to git module)
  * 
  * ### Orchestrator Operations (git/orchestrator)
  * - Job worktree management
@@ -43,7 +43,6 @@ export * as branches from './core/branches';
 export * as worktrees from './core/worktrees';
 export * as merge from './core/merge';
 export * as repository from './core/repository';
-export * as executor from './core/executor';
 export * as gitignore from './core/gitignore';
 
 // =============================================================================
@@ -59,6 +58,12 @@ export * as orchestrator from './orchestrator';
 export type { GitLogger, CommandResult, ExecuteOptions } from './core/executor';
 export type { MergeResult, MergeOptions, MergeTreeResult, MergeTreeOptions } from './core/merge';
 export type { CommitInfo, FileChange } from './core/repository';
-export type { CreateOptions as WorktreeCreateOptions } from './core/worktrees';
+export type { CreateOptions as WorktreeCreateOptions, CreateTiming } from './core/worktrees';
 export type { JobWorktreeOptions } from './orchestrator';
+
+// =============================================================================
+// Implementations
+// =============================================================================
+
+export { DefaultGitOperations } from './DefaultGitOperations';
 

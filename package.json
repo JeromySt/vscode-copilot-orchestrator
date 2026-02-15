@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.9.5",
+  "version": "0.10.0",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -146,7 +146,7 @@
         "copilotOrchestrator.mcp.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable the MCP server for GitHub Copilot integration"
+          "description": "Enable the Model Context Protocol (MCP) server for GitHub Copilot Chat integration. When enabled, the extension provides native tools that allow Copilot Chat to create, manage, and monitor orchestrator plans directly through natural language."
         },
         "copilotOrchestrator.worktreeRoot": {
           "type": "string",
@@ -161,14 +161,14 @@
         "copilotOrchestrator.maxConcurrentJobs": {
           "type": "number",
           "default": 0,
-          "description": "Maximum concurrent jobs (0 = auto, based on CPU count minus 1). Plans do not count against this limit."
+          "description": "Maximum concurrent jobs (agents) to run in parallel. Set to 0 for automatic detection (CPU count minus 1). Plans with multiple nodes respect this limit to prevent system overload. Each job runs in an isolated git worktree with dedicated resources."
         },
         "copilotOrchestrator.globalMaxParallel": {
           "type": "number",
           "default": 16,
           "minimum": 1,
           "maximum": 32,
-          "description": "Maximum concurrent jobs across all VS Code instances"
+          "description": "Maximum concurrent jobs across all VS Code instances on the same machine. Uses a shared capacity registry to coordinate job scheduling when multiple instances are running. Prevents system overload from multiple orchestrators."
         },
         "copilotOrchestrator.copilotCli.required": {
           "type": "boolean",
@@ -243,6 +243,42 @@
           "type": "boolean",
           "default": false,
           "description": "Enable debug logging for extension lifecycle events"
+        },
+        "copilotOrchestrator.logging.level": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info",
+          "description": "Global log level for all Copilot Orchestrator components. Controls which messages are displayed in the Output panel. Debug messages also require per-component debug flags to be enabled."
+        },
+        "copilotOrchestrator.logging.components": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "mcp",
+              "http",
+              "jobs",
+              "plans",
+              "git",
+              "ui",
+              "extension",
+              "scheduler",
+              "plan",
+              "plan-runner",
+              "plan-state",
+              "plan-persistence",
+              "job-executor",
+              "init",
+              "global-capacity"
+            ]
+          },
+          "default": [],
+          "description": "Array of component names to enable debug logging for. When non-empty, debug logging is enabled only for these components. When empty, uses the individual copilotOrchestrator.logging.debug.* settings. Useful for focused debugging of specific subsystems."
         }
       }
     }
@@ -261,7 +297,7 @@
     "test": "node ./out/test/runTest.js",
     "test:unit": "npm run compile:tsc && mocha --ui tdd --exit \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
     "test:watch": "tsc -watch -p ./ & node ./out/test/runTest.js",
-    "test:coverage": "npm run compile:tsc && c8 --reporter=text --reporter=lcov --check-coverage --lines 40 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js mocha --ui tdd --exit \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js",
+    "test:coverage": "npm run compile:tsc && c8 --reporter=text --reporter=lcov --check-coverage --lines 95 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js --exclude=out/vscode/adapters.js --exclude=out/core/planInitialization.js mocha --ui tdd --exit \"out/test/unit/**/*.test.js\" --require src/test/unit/register-vscode-mock.js --timeout 60000",
     "lint": "eslint src --ext ts || echo 'Linting complete'",
     "package:vsix": "npx @vscode/vsce package --no-dependencies",
     "local-install": "npm version patch --no-git-tag-version && npm run package:vsix && node -e \"const fs=require('fs');const v=require('./package.json').version;require('child_process').execSync('code --install-extension vscode-copilot-orchestrator-'+v+'.vsix --force',{stdio:'inherit'})\""
@@ -286,10 +322,12 @@
     "npm-run-all2": "^8.0.4",
     "sharp": "^0.34.5",
     "sinon": "^21.0.1",
-    "typescript": "^5.4.0"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@types/markdown-it": "^14.1.2",
     "ajv": "^8.17.1",
+    "markdown-it": "^14.1.1",
     "micromatch": "^4.0.5",
     "uuid": "^11.1.0"
   }

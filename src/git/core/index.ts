@@ -4,11 +4,11 @@
  * This module provides a clean, focused API for all git operations.
  * Each sub-module has a single responsibility:
  * 
- * - executor: Low-level command execution
  * - branches: Branch management
  * - worktrees: Worktree management
  * - merge: Merge and conflict handling
  * - repository: General repository operations
+ * - (executor: Low-level command execution — internal to git module)
  * 
  * @module git/core
  * 
@@ -39,7 +39,6 @@
  */
 
 // Re-export all sub-modules
-export * as executor from './executor';
 export * as branches from './branches';
 export * as worktrees from './worktrees';
 export * as merge from './merge';

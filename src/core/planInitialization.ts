@@ -10,18 +10,25 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
-import { PlanRunner, PlanRunnerConfig, DefaultJobExecutor } from '../plan';
-import { ProcessMonitor } from '../process/processMonitor';
-import { StdioMcpServerManager } from '../mcp/mcpServerManager';
+import { PlanRunner, PlanRunnerConfig } from '../plan';
 import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
-import { McpHandler } from '../mcp/handler';
 import { McpIpcServer } from '../mcp/ipc/server';
 import { Logger } from './logger';
-import { CopilotCliRunner, CopilotCliLogger } from '../agent/copilotCliRunner';
+
 import { CopilotStatsParser } from '../agent/copilotStatsParser';
 import { IMcpManager } from '../interfaces/IMcpManager';
+import type { IMcpRequestRouter } from '../interfaces/IMcpManager';
+import type { IConfigProvider } from '../interfaces/IConfigProvider';
+import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
+import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
 import type { CopilotUsageMetrics } from '../plan/types';
-import * as git from '../git';
+import type { ServiceContainer } from './container';
+import type { DefaultJobExecutor } from '../plan/executor';
+import * as Tokens from './tokens';
+import type { IGitOperations } from '../interfaces/IGitOperations';
+import { PlanConfigManager } from '../plan/configManager';
+import { PlanPersistence } from '../plan/persistence';
+import { PlanStateMachine } from '../plan/stateMachine';
 
 
 const log = Logger.for('init');
@@ -41,9 +48,20 @@ export interface ExtensionConfig {
 }
 
 /**
- * Load extension configuration from VS Code settings
+ * Load extension configuration from VS Code settings.
+ *
+ * @param configProvider - Optional injected config provider. Falls back to direct vscode API.
  */
-export function loadConfiguration(): ExtensionConfig {
+export function loadConfiguration(configProvider?: IConfigProvider): ExtensionConfig {
+  if (configProvider) {
+    return {
+      mcp: {
+        enabled: configProvider.getConfig('copilotOrchestrator.mcp', 'enabled', true),
+      },
+      maxParallel: configProvider.getConfig('copilotOrchestrator', 'maxWorkers', 0) || os.cpus().length,
+    };
+  }
+
   const mcpCfg = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
   const rootCfg = vscode.workspace.getConfiguration('copilotOrchestrator');
 
@@ -67,19 +85,9 @@ export function loadConfiguration(): ExtensionConfig {
  * Create an agent delegator adapter for the executor.
  * 
  * This bridges the executor's expected interface to the Copilot CLI.
- * Uses the unified CopilotCliRunner for all Copilot CLI interactions.
+ * Uses the DI-resolved ICopilotRunner for all Copilot CLI interactions.
  */
-function createAgentDelegatorAdapter(log: any) {
-  // Create a logger adapter for CopilotCliRunner
-  const cliLogger: CopilotCliLogger = {
-    info: (msg) => log.info(msg),
-    warn: (msg) => log.warn(msg),
-    error: (msg) => log.error(msg),
-    debug: (msg) => log.debug(msg),
-  };
-  
-  const runner = new CopilotCliRunner(cliLogger);
-  
+function createAgentDelegatorAdapter(runner: ICopilotRunner, log: any) {
   return {
     async delegate(options: {
       task: string;
@@ -94,6 +102,7 @@ function createAgentDelegatorAdapter(log: any) {
       onProcess?: (proc: any) => void;
       configDir?: string;
       allowedFolders?: string[];
+      allowedUrls?: string[];
     }): Promise<{
       success: boolean;
       sessionId?: string;
@@ -101,7 +110,7 @@ function createAgentDelegatorAdapter(log: any) {
       exitCode?: number;
       metrics?: CopilotUsageMetrics;
     }> {
-      const { task, instructions, worktreePath, sessionId, logOutput, onProcess, model, jobId, configDir, allowedFolders } = options;
+      const { task, instructions, worktreePath, sessionId, logOutput, onProcess, model, jobId, configDir, allowedFolders, allowedUrls } = options;
       
       const statsParser = new CopilotStatsParser();
       
@@ -115,6 +124,7 @@ function createAgentDelegatorAdapter(log: any) {
         jobId,
         configDir,
         allowedFolders,
+        allowedUrls,
         timeout: 0, // No timeout — agent work can run for a long time
         onOutput: logOutput ? (line) => {
           statsParser.feedLine(line);
@@ -139,8 +149,10 @@ function createAgentDelegatorAdapter(log: any) {
  * Initialize the Plan Runner and executor
  */
 export async function initializePlanRunner(
-  context: vscode.ExtensionContext
-): Promise<{ planRunner: PlanRunner; executor: DefaultJobExecutor; processMonitor: ProcessMonitor }> {
+  context: vscode.ExtensionContext,
+  container: ServiceContainer,
+  git: IGitOperations
+): Promise<{ planRunner: PlanRunner; processMonitor: IProcessMonitor }> {
   log.info('Initializing Plan Runner...');
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
@@ -157,9 +169,17 @@ export async function initializePlanRunner(
     pumpInterval: 1000,
   };
   
-  const planRunner = new PlanRunner(config);
-  const executor = new DefaultJobExecutor();
-  const processMonitor = new ProcessMonitor();
+  // Resolve DI services needed by PlanRunner
+  const executor = container.resolve<DefaultJobExecutor>(Tokens.INodeExecutor);
+  const processMonitor = container.resolve<IProcessMonitor>(Tokens.IProcessMonitor);
+  
+  const planRunner = new PlanRunner(config, {
+    configManager: new PlanConfigManager(),
+    persistence: new PlanPersistence(storagePath),
+    processMonitor,
+    stateMachineFactory: (plan) => new PlanStateMachine(plan),
+    git,
+  });
   
   // Wire up executor with logs in the same .orchestrator directory
   const logsPath = workspacePath 
@@ -167,8 +187,9 @@ export async function initializePlanRunner(
     : path.join(context.globalStorageUri.fsPath);
   executor.setStoragePath(logsPath);
   
-  // Create agent delegator adapter for the executor
-  const agentDelegator = createAgentDelegatorAdapter(log);
+  // Create agent delegator adapter using DI-resolved ICopilotRunner
+  const copilotRunner = container.resolve<ICopilotRunner>(Tokens.ICopilotRunner);
+  const agentDelegator = createAgentDelegatorAdapter(copilotRunner, log);
   executor.setAgentDelegator(agentDelegator);
   
   planRunner.setExecutor(executor);
@@ -200,7 +221,7 @@ export async function initializePlanRunner(
     }
   });
   
-  return { planRunner, executor, processMonitor };
+  return { planRunner, processMonitor };
 }
 
 // ============================================================================
@@ -216,7 +237,8 @@ export async function initializePlanRunner(
 export async function initializeMcpServer(
   context: vscode.ExtensionContext,
   planRunner: PlanRunner,
-  mcpConfig: McpServerConfig
+  mcpConfig: McpServerConfig,
+  container: ServiceContainer
 ): Promise<IMcpManager | undefined> {
   if (!mcpConfig.enabled) {
     log.info('MCP registration disabled');
@@ -225,13 +247,21 @@ export async function initializeMcpServer(
   
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
 
-  // Create the McpHandler that wraps our PlanRunner
-  const mcpHandler = new McpHandler(planRunner, workspacePath);
+  // Resolve McpHandler from a scoped container with runtime dependencies
+  const scope = container.createScope();
+  const { McpHandler } = require('../mcp/handler');
+  // eslint-disable-next-line no-restricted-syntax -- constructed inside scoped DI factory
+  scope.register(Tokens.IMcpRequestRouter, (c) => {
+    const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+    return new McpHandler(planRunner, workspacePath, git);
+  });
+  const mcpHandler = scope.resolve<IMcpRequestRouter>(Tokens.IMcpRequestRouter);
 
   // Create and start the IPC server
   // The stdio child process will connect to this server
   const ipcServer = new McpIpcServer();
-  ipcServer.setHandler(mcpHandler);
+  // setHandler expects concrete McpHandler; the scoped resolve returns one
+  ipcServer.setHandler(mcpHandler as any);
   
   try {
     await ipcServer.start();
@@ -245,8 +275,8 @@ export async function initializeMcpServer(
     ipcServer.stop();
   }});
 
-  // Create stdio manager - VS Code manages the child process
-  const manager: IMcpManager = new StdioMcpServerManager(context);
+  // Resolve MCP manager from DI container
+  const manager: IMcpManager = container.resolve<IMcpManager>(Tokens.IMcpManager);
   
   manager.start();
   context.subscriptions.push({ dispose: () => {
@@ -306,14 +336,18 @@ export async function initializeMcpServer(
  */
 export function initializePlansView(
   context: vscode.ExtensionContext,
-  planRunner: PlanRunner
+  planRunner: PlanRunner,
+  pulse?: import('../interfaces/IPulseEmitter').IPulseEmitter
 ): void {
   log.info('Initializing Plans view...');
+  
+  // Default no-op pulse if not provided
+  const effectivePulse = pulse ?? { onPulse: () => ({ dispose: () => {} }), isRunning: false };
   
   // Import the view provider
   const { plansViewProvider } = require('../ui/plansViewProvider');
   
-  const plansView = new plansViewProvider(context, planRunner);
+  const plansView = new plansViewProvider(context, planRunner, effectivePulse);
   
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
@@ -321,7 +355,7 @@ export function initializePlansView(
 
   // Initialize TreeView for badge functionality - AFTER plan recovery is complete
   const { PlanTreeViewManager } = require('../ui/planTreeProvider');
-  const treeViewManager = new PlanTreeViewManager(planRunner);
+  const treeViewManager = new PlanTreeViewManager(planRunner, effectivePulse);
   treeViewManager.createTreeView(context);
   context.subscriptions.push(treeViewManager);
   
@@ -333,7 +367,8 @@ export function initializePlansView(
  */
 export function registerPlanCommands(
   context: vscode.ExtensionContext,
-  planRunner: PlanRunner
+  planRunner: PlanRunner,
+  pulse?: import('../interfaces/IPulseEmitter').IPulseEmitter
 ): void {
   log.info('Registering Plan commands...');
   
@@ -365,7 +400,7 @@ export function registerPlanCommands(
       }
       
       const { planDetailPanel } = require('../ui/panels/planDetailPanel');
-      planDetailPanel.createOrShow(context.extensionUri, planId, planRunner, { preserveFocus });
+      planDetailPanel.createOrShow(context.extensionUri, planId, planRunner, { preserveFocus }, undefined, pulse);
     })
   );
   
@@ -431,7 +466,7 @@ export function registerPlanCommands(
       }
       
       const { NodeDetailPanel } = require('../ui/panels/nodeDetailPanel');
-      NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, planRunner);
+      NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, planRunner, pulse);
     })
   );
   

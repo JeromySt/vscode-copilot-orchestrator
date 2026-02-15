@@ -22,26 +22,37 @@ import {
 import { GlobalCapacityManager } from './core/globalCapacity';
 import { registerUtilityCommands } from './commands';
 import { IMcpManager } from './interfaces/IMcpManager';
-import { ProcessMonitor } from './process/processMonitor';
+import type { IProcessMonitor } from './interfaces/IProcessMonitor';
 import { PlanRunner } from './plan';
 import { Logger } from './core/logger';
 import { cleanupOrphanedWorktrees } from './core/orphanedWorktreeCleanup';
 import { BranchChangeWatcher } from './git/branchWatcher';
 import { ensureOrchestratorGitIgnore } from './git/core/gitignore';
 import type { PlanInstance } from './plan/types/plan';
+import { createContainer } from './composition';
+import * as Tokens from './core/tokens';
+import type { ServiceContainer } from './core/container';
+import type { IConfigProvider } from './interfaces';
+import type { IPulseEmitter } from './interfaces/IPulseEmitter';
 
 // ============================================================================
 // MODULE STATE
 // ============================================================================
 
+/** DI container - retained for service resolution */
+let container: ServiceContainer | undefined;
+
 /** MCP Server Manager - retained for cleanup */
 let mcpManager: IMcpManager | undefined;
 
 /** Process Monitor - retained for cleanup */
-let processMonitor: ProcessMonitor | undefined;
+let processMonitor: IProcessMonitor | undefined;
 
 /** Plan Runner - retained for shutdown persistence */
 let planRunner: PlanRunner | undefined;
+
+/** Power Manager - retained for cleanup */
+let powerMgr: import('./core/powerManager').PowerManager | undefined;
 
 /** Global Capacity Manager - retained for cleanup */
 let globalCapacity: GlobalCapacityManager | undefined;
@@ -63,19 +74,36 @@ let globalCapacity: GlobalCapacityManager | undefined;
  * @param context - VS Code extension context
  */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  // ── DI Container ───────────────────────────────────────────────────────
+  container = createContainer(context);
+
   // ── Logger ─────────────────────────────────────────────────────────────
-  const log = Logger.initialize(context);
+  // Resolve from container — this initializes Logger and wires its IConfigProvider
+  container.resolve<Logger>(Tokens.ILogger);
   const extLog = Logger.for('extension');
   extLog.info('Extension activating...');
 
   // ── Configuration ──────────────────────────────────────────────────────
-  const config = loadConfiguration();
+  const configProvider = container.resolve<IConfigProvider>(Tokens.IConfigProvider);
+  const config = loadConfiguration(configProvider);
   extLog.debug('Configuration loaded', config);
 
   // ── Plan Runner ─────────────────────────────────────────────────────────
-  const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context);
+  const git = container.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+  const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context, container, git);
   processMonitor = pm;
   planRunner = runner;
+
+  // ── Power Manager ──────────────────────────────────────────────────────
+  const spawner = container.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+  const { PowerManagerImpl } = require('./core/powerManager');
+  powerMgr = new PowerManagerImpl(spawner);
+  planRunner.setPowerManager(powerMgr!);
+  // Register process exit handlers for wake lock cleanup
+  const pmRef = powerMgr;
+  process.on('exit', () => pmRef?.releaseAll());
+  process.on('SIGINT', () => pmRef?.releaseAll());
+  process.on('SIGTERM', () => pmRef?.releaseAll());
 
   // ── Global Capacity Manager ────────────────────────────────────────────
   const globalMaxParallel = vscode.workspace.getConfiguration('copilotOrchestrator').get<number>('globalMaxParallel', 16);
@@ -91,13 +119,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   // ── MCP Server (stdio transport via IPC) ───────────────────────────────
-  mcpManager = await initializeMcpServer(context, planRunner, config.mcp);
+  mcpManager = await initializeMcpServer(context, planRunner, config.mcp, container);
 
   // ── Plans view ──────────────────────────────────────────────────────────
-  initializePlansView(context, planRunner);
+  const pulse = container.resolve<IPulseEmitter>(Tokens.IPulseEmitter);
+  initializePlansView(context, planRunner, pulse);
 
   // ── Commands ───────────────────────────────────────────────────────────
-  registerPlanCommands(context, planRunner);
+  registerPlanCommands(context, planRunner, pulse);
   registerUtilityCommands(context);
 
   // ── Branch Change Watcher ──────────────────────────────────────────────
@@ -134,7 +163,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Orphaned Worktree Cleanup ──────────────────────────────────────────
   // Trigger cleanup asynchronously after extension is fully activated
-  triggerOrphanedWorktreeCleanup(planRunner, context).catch(err => {
+  triggerOrphanedWorktreeCleanup(planRunner, context, git).catch(err => {
     extLog.warn('Orphaned worktree cleanup failed', { error: err.message });
   });
 
@@ -156,7 +185,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
  */
 async function triggerOrphanedWorktreeCleanup(
   planRunner: PlanRunner,
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  git: import('./interfaces/IGitOperations').IGitOperations
 ): Promise<void> {
   const log = Logger.for('git');
   
@@ -203,6 +233,7 @@ async function triggerOrphanedWorktreeCleanup(
   const result = await cleanupOrphanedWorktrees({
     repoPaths: Array.from(repoPaths),
     activePlans,
+    git,
     logger: (msg) => log.debug(msg)
   });
   
@@ -239,8 +270,7 @@ async function triggerOrphanedWorktreeCleanup(
  */
 export function deactivate(): void {
   // Release all wake locks
-  const { powerManager } = require('./core/powerManager');
-  powerManager.releaseAll();
+  powerMgr?.releaseAll();
   
   // Persist state synchronously before shutdown
   try {
@@ -264,4 +294,5 @@ export function deactivate(): void {
   
   processMonitor = undefined;
   planRunner = undefined;
+  powerMgr = undefined;
 }

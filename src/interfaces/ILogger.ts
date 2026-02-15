@@ -67,4 +67,18 @@ export interface ILogger {
    * @returns true if debug logging is enabled
    */
   isDebugEnabled(): boolean;
+
+  /**
+   * Set the log level for this logger.
+   * 
+   * @param level - The log level to set
+   */
+  setLevel(level: 'debug' | 'info' | 'warn' | 'error'): void;
+
+  /**
+   * Get the current log level.
+   * 
+   * @returns The current log level as a string
+   */
+  getLevel(): string;
 }

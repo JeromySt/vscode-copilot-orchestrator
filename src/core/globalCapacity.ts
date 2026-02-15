@@ -391,7 +391,7 @@ export class GlobalCapacityManager extends EventEmitter {
 
     // Stop heartbeat
     if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
+      clearTimeout(this.heartbeatInterval);
       this.heartbeatInterval = undefined;
     }
 
@@ -662,21 +662,28 @@ export class GlobalCapacityManager extends EventEmitter {
   }
 
   /**
-   * Start the heartbeat interval.
+   * Start the heartbeat loop using recursive setTimeout (avoids stacking).
    */
   private startHeartbeat(): void {
     if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
+      clearTimeout(this.heartbeatInterval);
     }
-    
-    this.heartbeatInterval = setInterval(async () => {
+    this.scheduleHeartbeat();
+  }
+
+  /** Schedule the next heartbeat tick. */
+  private scheduleHeartbeat(): void {
+    this.heartbeatInterval = setTimeout(async () => {
       try {
         await this.updateRegistry();
       } catch (error) {
         log.error('Heartbeat update failed', error);
       }
+      if (this.heartbeatInterval !== undefined) {
+        this.scheduleHeartbeat();
+      }
     }, HEARTBEAT_INTERVAL_MS);
-    
+
     // Don't keep process alive if this is the only thing running
     this.heartbeatInterval.unref();
   }

@@ -37,6 +37,8 @@ try {
   vscode = undefined;
 }
 
+import { IConfigProvider } from '../interfaces/IConfigProvider';
+
 /**
  * Log levels supported by the logger
  */
@@ -46,6 +48,12 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  * Components that can have logging enabled
  */
 export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler' | 'plan' | 'plan-runner' | 'plan-state' | 'plan-persistence' | 'job-executor' | 'init' | 'global-capacity';
+
+/**
+ * Configuration keys for logging settings
+ */
+export const LOGGING_LEVEL_KEY = 'copilotOrchestrator.logging.level';
+export const LOGGING_COMPONENTS_KEY = 'copilotOrchestrator.logging.components';
 
 /**
  * Debug configuration per component
@@ -96,8 +104,12 @@ export class Logger {
     'global-capacity': false
   };
   private configListener: { dispose: () => void } | undefined;
+  private configProvider?: IConfigProvider;
+  private currentLogLevel: LogLevel = 'info';
 
-  private constructor() {
+  constructor(configProvider?: IConfigProvider) {
+    this.configProvider = configProvider;
+    
     if (vscode) {
       this.outputChannel = vscode.window.createOutputChannel('Copilot Orchestrator');
       this.loadConfig();
@@ -138,6 +150,14 @@ export class Logger {
   }
 
   /**
+   * Set a config provider for the logger instance.
+   */
+  setConfigProvider(provider: IConfigProvider): void {
+    this.configProvider = provider;
+    this.loadConfig();
+  }
+
+  /**
    * Create a component-scoped logger.
    * 
    * @param component - The component name for log prefixes
@@ -155,33 +175,57 @@ export class Logger {
   }
 
   /**
-   * Load debug configuration from VS Code settings.
+   * Load debug configuration from VS Code settings or config provider.
    */
   private loadConfig(): void {
-    if (!vscode) {
-      // Not in VS Code, keep default config (all false)
+    if (this.configProvider) {
+      // Use injected config provider
+      this.currentLogLevel = this.configProvider.getConfig(LOGGING_LEVEL_KEY, '', 'info') as LogLevel;
+      
+      // Load debug config for each component
+      this.debugConfig = {
+        mcp: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'mcp', false),
+        http: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'http', false),
+        jobs: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'jobs', false),
+        plans: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'plans', false),
+        git: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'git', false),
+        ui: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'ui', false),
+        extension: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'extension', false),
+        scheduler: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'scheduler', false),
+        plan: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'plan', false),
+        'plan-runner': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'plan-runner', false),
+        'plan-state': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'plan-state', false),
+        'plan-persistence': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'plan-persistence', false),
+        'job-executor': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'job-executor', false),
+        init: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'init', false),
+        'global-capacity': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'global-capacity', false),
+      };
+    } else if (vscode) {
+      // Use VS Code directly (backward compatibility)
+      const vscodeConfig = vscode.workspace.getConfiguration('copilotOrchestrator.logging');
+      this.currentLogLevel = vscodeConfig.get('level', 'info') as LogLevel;
+      
+      this.debugConfig = {
+        mcp: vscodeConfig.get('debug.mcp', false),
+        http: vscodeConfig.get('debug.http', false),
+        jobs: vscodeConfig.get('debug.jobs', false),
+        plans: vscodeConfig.get('debug.plans', false),
+        git: vscodeConfig.get('debug.git', false),
+        ui: vscodeConfig.get('debug.ui', false),
+        extension: vscodeConfig.get('debug.extension', false),
+        scheduler: vscodeConfig.get('debug.scheduler', false),
+        plan: vscodeConfig.get('debug.plan', false),
+        'plan-runner': vscodeConfig.get('debug.plan-runner', false),
+        'plan-state': vscodeConfig.get('debug.plan-state', false),
+        'plan-persistence': vscodeConfig.get('debug.plan-persistence', false),
+        'job-executor': vscodeConfig.get('debug.job-executor', false),
+        init: vscodeConfig.get('debug.init', false),
+        'global-capacity': vscodeConfig.get('debug.global-capacity', false),
+      };
+    } else {
+      // Not in VS Code and no provider, keep default config (all false)
       return;
     }
-    
-    const config = vscode.workspace.getConfiguration('copilotOrchestrator.logging');
-    
-    this.debugConfig = {
-      mcp: config.get<boolean>('debug.mcp', false),
-      http: config.get<boolean>('debug.http', false),
-      jobs: config.get<boolean>('debug.jobs', false),
-      plans: config.get<boolean>('debug.plans', false),
-      git: config.get<boolean>('debug.git', false),
-      ui: config.get<boolean>('debug.ui', false),
-      extension: config.get<boolean>('debug.extension', false),
-      scheduler: config.get<boolean>('debug.scheduler', false),
-      plan: config.get<boolean>('debug.plan', false),
-      'plan-runner': config.get<boolean>('debug.plan-runner', false),
-      'plan-state': config.get<boolean>('debug.plan-state', false),
-      'plan-persistence': config.get<boolean>('debug.plan-persistence', false),
-      'job-executor': config.get<boolean>('debug.job-executor', false),
-      init: config.get<boolean>('debug.init', false),
-      'global-capacity': config.get<boolean>('debug.global-capacity', false),
-    };
   }
 
   /**
@@ -224,6 +268,15 @@ export class Logger {
       return;
     }
 
+    // Skip logs below current log level
+    const logLevels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
+    const currentLevelIndex = logLevels.indexOf(this.currentLogLevel);
+    const messageLevelIndex = logLevels.indexOf(level);
+    
+    if (messageLevelIndex < currentLevelIndex) {
+      return;
+    }
+
     const formattedMessage = this.formatMessage(level, component, message) + this.formatData(data);
     
     // Write to output channel if available (VS Code context)
@@ -245,6 +298,20 @@ export class Logger {
                         console.log;
       consoleFn(`[Orchestrator:${component}] ${message}`, data ?? '');
     }
+  }
+
+  /**
+   * Set the log level.
+   */
+  setLevel(level: LogLevel): void {
+    this.currentLogLevel = level;
+  }
+
+  /**
+   * Get the current log level.
+   */
+  getLevel(): string {
+    return this.currentLogLevel;
   }
 
   /**
@@ -341,5 +408,19 @@ export class ComponentLogger {
    */
   isDebugEnabled(): boolean {
     return this.getInstance()?.isDebugEnabled(this.component) ?? false;
+  }
+
+  /**
+   * Set the log level.
+   */
+  setLevel(level: 'debug' | 'info' | 'warn' | 'error'): void {
+    this.getInstance()?.setLevel(level);
+  }
+
+  /**
+   * Get the current log level.
+   */
+  getLevel(): string {
+    return this.getInstance()?.getLevel() ?? 'info';
   }
 }

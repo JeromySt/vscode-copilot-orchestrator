@@ -15,43 +15,21 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec, AttemptRecord, CopilotUsageMetrics } from '../../plan';
+import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec } from '../../plan';
 import { escapeHtml, formatDuration, errorPageHtml, loadingPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
-import { getNodeMetrics, formatPremiumRequests, formatDurationSeconds, formatTokenCount, formatCodeChanges } from '../../plan/metricsAggregator';
-
-/**
- * Truncate a log file path for display, keeping the drive letter,
- * an ellipsis, and the filename with attempt number visible.
- * Full path is preserved in the title attribute for tooltip.
- *
- * @param filePath - The full log file path.
- * @returns A truncated display string like "C:\...\filename_1.log"
- */
-function truncateLogPath(filePath: string): string {
-  if (!filePath) return '';
-  
-  // Get the filename (last part of the path)
-  const separator = filePath.includes('\\') ? '\\' : '/';
-  const parts = filePath.split(separator);
-  const filename = parts[parts.length - 1];
-  
-  // Get the drive letter or first folder
-  const prefix = parts[0] + separator;
-  
-  // Truncate the filename too if it's a UUID-based log file
-  // Pattern: {planId}_{nodeId}_{attempt}.log -> {first8}....{last12}_N.log
-  let truncatedFilename = filename;
-  const logMatch = filename.match(/^([a-f0-9]{8})-[a-f0-9-]+_[a-f0-9-]+-([a-f0-9]{12})_(\d+\.log)$/i);
-  if (logMatch) {
-    truncatedFilename = `${logMatch[1]}....${logMatch[2]}_${logMatch[3]}`;
-  }
-  
-  // If the path is short enough, return as-is
-  if (filePath.length <= 50) return filePath;
-  
-  // Truncate the middle
-  return `${prefix}....${separator}${truncatedFilename}`;
-}
+import { getNodeMetrics } from '../../plan/metricsAggregator';
+import {
+  breadcrumbHtml, headerRowHtml, executionStateHtml,
+  retryButtonsHtml, forceFailButtonHtml, bottomActionsHtml,
+  processTreeSectionHtml, logViewerSectionHtml,
+  dependenciesSectionHtml, gitInfoSectionHtml,
+  metricsSummaryHtml, attemptMetricsHtml as attemptMetricsTemplateHtml,
+  attemptHistoryHtml, webviewScripts,
+  renderSpecContent, getSpecTypeInfo,
+} from '../templates/nodeDetail';
+import type { AttemptCardData } from '../templates/nodeDetail';
+import { NodeDetailController, NodeDetailCommands } from './nodeDetailController';
+import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
 
 /**
  * Format a {@link WorkSpec} as a plain-text summary string.
@@ -318,6 +296,31 @@ function formatInline(text: string, escapeHtml: (s: string) => string): string {
 }
 
 /**
+ * Get the current execution phase from node state.
+ */
+function getCurrentExecutionPhase(state: NodeExecutionState | undefined): string | undefined {
+  if (!state?.stepStatuses) return undefined;
+  
+  // Check which phase is currently running (includes merge phases)
+  for (const [phase, status] of Object.entries(state.stepStatuses)) {
+    if (status === 'running') {
+      return phase;
+    }
+  }
+  
+  // If nothing is currently running, return the first incomplete phase
+  const phaseOrder = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+  for (const phase of phaseOrder) {
+    const status = state.stepStatuses[phase as keyof typeof state.stepStatuses];
+    if (!status || status === 'pending') {
+      return phase;
+    }
+  }
+  
+  return undefined;
+}
+
+/**
  * Webview panel that shows detailed information for a single Plan node.
  *
  * Displays execution state with phase tabs (merge-fi, prechecks, work, commit,
@@ -349,26 +352,62 @@ export class NodeDetailPanel {
   private _planId: string;
   private _nodeId: string;
   private _disposables: vscode.Disposable[] = [];
-  private _updateInterval?: NodeJS.Timeout;
+  private _pulseSubscription?: PulseDisposable;
   private _currentPhase: string | null = null;
   private _lastStatus: string | null = null;
   private _lastWorktreeCleanedUp: boolean | undefined = undefined;
+  private _controller: NodeDetailController;
   
   /**
    * @param panel - The VS Code webview panel instance.
    * @param planId - The Plan ID that contains this node.
    * @param nodeId - The unique identifier of the node to display.
    * @param _planRunner - The {@link PlanRunner} instance for querying state and logs.
+   * @param _pulse - Pulse emitter for periodic updates.
    */
   private constructor(
     panel: vscode.WebviewPanel,
     planId: string,
     nodeId: string,
-    private _planRunner: PlanRunner
+    private _planRunner: PlanRunner,
+    private _pulse: IPulseEmitter
   ) {
     this._panel = panel;
     this._planId = planId;
     this._nodeId = nodeId;
+    
+    // Create controller with VS Code service adapters
+    const commands: NodeDetailCommands = {
+      executeCommand: (cmd, ...args) => vscode.commands.executeCommand(cmd, ...args),
+      openFolder: (p) => vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(p), { forceNewWindow: true }),
+      refresh: () => this._update(),
+      sendLog: (phase) => { this._currentPhase = phase; this._sendLog(phase); },
+      sendProcessStats: () => this._sendProcessStats(),
+      retryNode: (pid, nid, resume) => this._retryNode(pid, nid, resume),
+      forceFailNode: (pid, nid) => this._forceFailNode(pid, nid),
+      openFile: (p) => {
+        if (path.isAbsolute(p) && fs.existsSync(p)) {
+          vscode.commands.executeCommand('vscode.open', vscode.Uri.file(p));
+        }
+      },
+      getWorktreePath: () => {
+        const plan = this._planRunner.get(this._planId);
+        const state = plan?.nodeStates.get(this._nodeId);
+        return state?.worktreePath;
+      },
+    };
+    const dialogService = {
+      showInfo: async (msg: string) => { vscode.window.showInformationMessage(msg); },
+      showError: async (msg: string) => { vscode.window.showErrorMessage(msg); },
+      showWarning: async (msg: string, opts?: { modal?: boolean }, ...actions: string[]) => {
+        return vscode.window.showWarningMessage(msg, opts || {}, ...actions);
+      },
+      showQuickPick: async (items: string[], opts?: any) => vscode.window.showQuickPick(items, opts) as Promise<string | undefined>,
+    };
+    const clipboardService = {
+      writeText: async (text: string) => { await vscode.env.clipboard.writeText(text); },
+    };
+    this._controller = new NodeDetailController(planId, nodeId, dialogService, clipboardService, commands);
     
     // Show loading state immediately
     this._panel.webview.html = this._getLoadingHtml();
@@ -385,26 +424,44 @@ export class NodeDetailPanel {
       this._update();
     });
     
-    // Setup update interval for running nodes
-    this._updateInterval = setInterval(() => {
+    // Subscribe to pulse for periodic state checks
+    this._pulseSubscription = this._pulse.onPulse(() => {
+      // Forward pulse to webview for DurationCounter ticking
+      this._panel.webview.postMessage({ type: 'pulse' });
+
       const plan = this._planRunner.get(this._planId);
       const state = plan?.nodeStates.get(this._nodeId);
+
+      // Always send incremental state change so header phase indicator updates
+      if (state) {
+        const phaseStatus = this._getPhaseStatus(state);
+        const currentPhase = getCurrentExecutionPhase(state);
+        this._panel.webview.postMessage({
+          type: 'stateChange',
+          status: state.status,
+          phaseStatus,
+          currentPhase,
+        });
+      }
+
       if (state?.status === 'running' || state?.status === 'scheduled') {
         // Status changed - do full update
         if (this._lastStatus !== state.status) {
           this._lastStatus = state.status;
           this._update();
         } else if (this._currentPhase) {
-          // Just refresh the current log view
+          // Push log lines on arrival
           this._sendLog(this._currentPhase);
         }
+        // Push process stats on each pulse while active
+        this._sendProcessStats();
       } else if (this._lastStatus === 'running' || this._lastStatus === 'scheduled') {
         // Transitioned from running to terminal - do full update
         this._lastStatus = state?.status || null;
         this._update();
         // Send final log update
         if (this._currentPhase) {
-          setTimeout(() => this._sendLog(this._currentPhase!), 100);
+          this._sendLog(this._currentPhase);
         }
       } else {
         // Terminal state - check for worktree cleanup or other state changes
@@ -413,7 +470,7 @@ export class NodeDetailPanel {
           this._update();
         }
       }
-    }, 500);
+    });
     
     // Handle panel disposal
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -442,7 +499,8 @@ export class NodeDetailPanel {
     extensionUri: vscode.Uri,
     planId: string,
     nodeId: string,
-    planRunner: PlanRunner
+    planRunner: PlanRunner,
+    pulse?: IPulseEmitter
   ) {
     const key = `${planId}:${nodeId}`;
     
@@ -467,7 +525,10 @@ export class NodeDetailPanel {
       }
     );
     
-    const nodePanel = new NodeDetailPanel(panel, planId, nodeId, planRunner);
+    // Default pulse emitter (no-op) if not provided
+    const effectivePulse: IPulseEmitter = pulse ?? { onPulse: () => ({ dispose: () => {} }), isRunning: false };
+    
+    const nodePanel = new NodeDetailPanel(panel, planId, nodeId, planRunner, effectivePulse);
     NodeDetailPanel.panels.set(key, nodePanel);
   }
   
@@ -497,8 +558,8 @@ export class NodeDetailPanel {
     const key = `${this._planId}:${this._nodeId}`;
     NodeDetailPanel.panels.delete(key);
     
-    if (this._updateInterval) {
-      clearInterval(this._updateInterval);
+    if (this._pulseSubscription) {
+      this._pulseSubscription.dispose();
     }
     
     this._panel.dispose();
@@ -510,69 +571,12 @@ export class NodeDetailPanel {
   }
   
   /**
-   * Handle incoming messages from the webview.
+   * Handle incoming messages from the webview by delegating to the controller.
    *
    * @param message - The message object received from the webview's `postMessage`.
    */
   private _handleMessage(message: any) {
-    switch (message.type) {
-      case 'openPlan':
-        vscode.commands.executeCommand('orchestrator.showPlanDetails', message.planId);
-        break;
-      case 'openWorktree':
-        const plan = this._planRunner.get(this._planId);
-        const state = plan?.nodeStates.get(this._nodeId);
-        if (state?.worktreePath) {
-          vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(state.worktreePath), { forceNewWindow: true });
-        }
-        break;
-      case 'refresh':
-        this._update();
-        break;
-      case 'getLog':
-        this._currentPhase = message.phase;
-        this._sendLog(message.phase);
-        break;
-      case 'getProcessStats':
-        this._sendProcessStats();
-        break;
-      case 'copyToClipboard':
-        if (message.text) {
-          vscode.env.clipboard.writeText(message.text);
-          vscode.window.showInformationMessage('Copied to clipboard');
-        }
-        break;
-      case 'retryNode':
-        this._retryNode(message.planId, message.nodeId, message.resumeSession).catch(err => {
-          vscode.window.showErrorMessage(`Retry failed: ${err?.message || err}`);
-        });
-        break;
-      case 'confirmForceFailNode':
-        // Show VS Code native confirmation dialog (browser confirm() doesn't work in webviews)
-        vscode.window.showWarningMessage(
-          'Force-fail this node? This will mark it as failed and may affect downstream nodes.',
-          { modal: true },
-          'Force Fail'
-        ).then(choice => {
-          if (choice === 'Force Fail') {
-            this._forceFailNode(message.planId || this._planId, message.nodeId || this._nodeId).catch(err => {
-              vscode.window.showErrorMessage(`Force fail failed: ${err?.message || err}`);
-            });
-          }
-        });
-        break;
-      case 'forceFailNode':
-        // Direct force fail without confirmation (for programmatic use)
-        this._forceFailNode(message.planId || this._planId, message.nodeId || this._nodeId).catch(err => {
-          vscode.window.showErrorMessage(`Force fail failed: ${err?.message || err}`);
-        });
-        break;
-      case 'openLogFile':
-        if (message.path && path.isAbsolute(message.path) && fs.existsSync(message.path)) {
-          vscode.commands.executeCommand('vscode.open', vscode.Uri.file(message.path));
-        }
-        break;
-    }
+    this._controller.handleMessage(message);
   }
   
   /**
@@ -663,6 +667,85 @@ export class NodeDetailPanel {
       logFilePath,
     });
   }
+
+  /** Send config update to webview for live config display updates. */
+  private _sendConfigUpdate() {
+    const plan = this._planRunner.get(this._planId);
+    const node = plan?.nodes.get(this._nodeId);
+    const state = plan?.nodeStates.get(this._nodeId);
+    
+    if (!node || node.type !== 'job') return;
+    
+    // Pre-render spec HTML server-side so the webview gets formatted HTML
+    this._panel.webview.postMessage({
+      type: 'configUpdate',
+      data: {
+        work: node.work ? renderSpecContent(node.work) : undefined,
+        workType: node.work ? getSpecTypeInfo(node.work) : undefined,
+        prechecks: node.prechecks ? renderSpecContent(node.prechecks) : undefined,
+        prechecksType: node.prechecks ? getSpecTypeInfo(node.prechecks) : undefined,
+        postchecks: node.postchecks ? renderSpecContent(node.postchecks) : undefined,
+        postchecksType: node.postchecks ? getSpecTypeInfo(node.postchecks) : undefined,
+        task: node.task,
+        currentPhase: getCurrentExecutionPhase(state),
+      }
+    });
+  }
+  
+  /**
+   * Push attempt history updates to the webview for dynamic rendering.
+   *
+   * @param state - The current node execution state.
+   */
+  private _sendAttemptUpdate(state: NodeExecutionState): void {
+    if (!state.attemptHistory || state.attemptHistory.length === 0) return;
+    this._panel.webview.postMessage({
+      type: 'attemptUpdate',
+      attempts: state.attemptHistory.map(a => ({
+        attemptNumber: a.attemptNumber,
+        status: a.status,
+        triggerType: a.triggerType,
+        startedAt: a.startedAt,
+        endedAt: a.endedAt,
+        error: a.error,
+        failedPhase: a.failedPhase,
+      })),
+    });
+  }
+
+  /**
+   * Push AI usage metrics to the webview.
+   *
+   * @param state - The current node execution state.
+   */
+  private _sendAiUsageUpdate(state: NodeExecutionState): void {
+    const metrics = getNodeMetrics(state);
+    if (!metrics) return;
+    this._panel.webview.postMessage({
+      type: 'aiUsageUpdate',
+      premiumRequests: metrics.premiumRequests,
+      apiTimeSeconds: metrics.apiTimeSeconds,
+      sessionTimeSeconds: metrics.sessionTimeSeconds,
+      modelBreakdown: metrics.modelBreakdown,
+    });
+  }
+
+  /**
+   * Push work summary data to the webview.
+   *
+   * @param state - The current node execution state.
+   */
+  private _sendWorkSummary(state: NodeExecutionState): void {
+    if (!state.workSummary) return;
+    const ws = state.workSummary;
+    this._panel.webview.postMessage({
+      type: 'workSummary',
+      totalCommits: ws.commits || 0,
+      filesAdded: ws.filesAdded || 0,
+      filesModified: ws.filesModified || 0,
+      filesDeleted: ws.filesDeleted || 0,
+    });
+  }
   
   /** Re-render the panel HTML with current node state. */
   private _update() {
@@ -681,6 +764,9 @@ export class NodeDetailPanel {
     }
     
     this._panel.webview.html = this._getHtml(plan, node, state);
+    
+    // Send config update after rendering
+    this._sendConfigUpdate();
   }
   
   /**
@@ -740,13 +826,51 @@ export class NodeDetailPanel {
     const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, state.attempts || 1);
 
     // Build attempt history HTML (only if multiple attempts)
-    const attemptHistoryHtml = (state.attemptHistory && state.attemptHistory.length > 0)
-      ? this._buildAttemptHistoryHtml(state)
-      : '';
+    const attemptCards: AttemptCardData[] = [];
+    if (state.attemptHistory && state.attemptHistory.length > 0) {
+      for (const attempt of state.attemptHistory) {
+        const card: AttemptCardData = {
+          attemptNumber: attempt.attemptNumber,
+          status: attempt.status,
+          triggerType: attempt.triggerType,
+          startedAt: attempt.startedAt,
+          endedAt: attempt.endedAt,
+          failedPhase: attempt.failedPhase,
+          error: attempt.error,
+          exitCode: attempt.exitCode,
+          copilotSessionId: attempt.copilotSessionId,
+          stepStatuses: attempt.stepStatuses as any,
+          worktreePath: attempt.worktreePath,
+          baseCommit: attempt.baseCommit,
+          logFilePath: attempt.logFilePath,
+          workUsedHtml: attempt.workUsed ? formatWorkSpecHtml(attempt.workUsed, escapeHtml) : undefined,
+          logs: attempt.logs || '',
+          metricsHtml: attempt.metrics ? attemptMetricsTemplateHtml(attempt.metrics, attempt.phaseMetrics) : '',
+        };
+        attemptCards.push(card);
+      }
+    }
+    const attemptHistorySection = attemptHistoryHtml({ attempts: attemptCards });
 
     // Compute aggregated metrics across all attempts
     const nodeMetrics = getNodeMetrics(state);
-    const nodeMetricsHtml = nodeMetrics ? this._buildMetricsSummaryHtml(nodeMetrics, state.phaseMetrics) : '';
+    const nodeMetricsHtml = nodeMetrics ? metricsSummaryHtml(nodeMetrics, state.phaseMetrics) : '';
+
+    // Build dependencies data
+    const dependencies = node.dependencies.map(depId => {
+      const depNode = plan.nodes.get(depId);
+      const depState = plan.nodeStates.get(depId);
+      return { name: depNode?.name || depId, status: depState?.status || 'pending' };
+    });
+
+    // Build action buttons data
+    const actionData = {
+      status: state.status,
+      planId: plan.id,
+      nodeId: node.id,
+      worktreePath: state.worktreePath,
+      worktreeCleanedUp: state.worktreeCleanedUp,
+    };
 
     return `<!DOCTYPE html>
 <html>
@@ -758,534 +882,72 @@ export class NodeDetailPanel {
   </style>
 </head>
 <body>
-  <div class="breadcrumb">
-    <a onclick="openPlan('${plan.id}')">${escapeHtml(plan.spec.name)}</a> / ${escapeHtml(node.name)}
+  <div class="sticky-header">
+  ${breadcrumbHtml(plan.id, plan.spec.name, node.name)}
+  
+  ${headerRowHtml(node.name, state.status, state.startedAt, state.endedAt)}
   </div>
   
-  <div class="header">
-    <h2>${escapeHtml(node.name)}</h2>
-    <span class="status-badge ${state.status}">${state.status.toUpperCase()}</span>
-  </div>
-  
-  <!-- Execution State -->
-  <div class="section">
-    <h3>Execution State</h3>
-    <div class="meta-grid">
-      <div class="meta-item">
-        <div class="meta-label">Type</div>
-        <div class="meta-value">${node.type === 'job' ? 'Job' : 'sub-plan'}</div>
-      </div>
-      <div class="meta-item">
-        <div class="meta-label">Attempts</div>
-        <div class="meta-value">${state.attempts}${state.attempts > 1 ? ' ⟳' : ''}</div>
-      </div>
-      ${state.startedAt ? `
-      <div class="meta-item">
-        <div class="meta-label">Started</div>
-        <div class="meta-value">${new Date(state.startedAt).toLocaleString()}</div>
-      </div>
-      ` : ''}
-      ${duration ? `
-      <div class="meta-item">
-        <div class="meta-label">Duration</div>
-        <div class="meta-value" id="duration-timer"${!state.endedAt && state.startedAt ? ` data-started-at="${state.startedAt}"` : ''}>${duration}</div>
-      </div>
-      ` : ''}
-      ${state.copilotSessionId ? `
-      <div class="meta-item full-width">
-        <div class="meta-label">Copilot Session</div>
-        <div class="meta-value session-id" data-session="${state.copilotSessionId}" title="Click to copy">
-          ${state.copilotSessionId.substring(0, 12)}... 📋
-        </div>
-      </div>
-      ` : ''}
-    </div>
-    ${state.error ? `
-    <div class="error-box">
-      <strong>${state.failureReason === 'crashed' ? 'Crashed:' : 'Error:'}</strong> 
-      <span class="error-message ${state.failureReason === 'crashed' ? 'crashed' : ''}">${escapeHtml(state.error)}</span>
-      ${state.lastAttempt?.phase ? `<div class="error-phase">Failed in phase: <strong>${state.lastAttempt.phase}</strong></div>` : ''}
-      ${state.lastAttempt?.exitCode !== undefined ? `<div class="error-phase">Exit code: <strong>${state.lastAttempt.exitCode}</strong></div>` : ''}
-    </div>
-    ` : ''}
-    ${state.status === 'failed' ? `
-    <div class="retry-section">
-      <button class="retry-btn" data-action="retry-node" data-plan-id="${plan.id}" data-node-id="${node.id}">
-        🔄 Retry Node
-      </button>
-      <button class="retry-btn secondary" data-action="retry-node-fresh" data-plan-id="${plan.id}" data-node-id="${node.id}">
-        🆕 Retry (Fresh Session)
-      </button>
-    </div>
-    ` : ''}
-    ${state.status === 'running' ? `
-    <div class="force-fail-section">
-      <p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 8px;">
-        If the process has crashed or is stuck, you can force fail this node to enable retry.
-      </p>
-      <button class="retry-btn secondary" data-action="force-fail-node" data-plan-id="${plan.id}" data-node-id="${node.id}">
-        ⚠️ Force Fail (Enable Retry)
-      </button>
-    </div>
-    ` : ''}
-  </div>
-  
-  ${(state.status === 'running' || state.status === 'scheduled') ? `
-  <!-- Process Tree (only for running jobs) -->
-  <div class="section process-tree-section" id="processTreeSection">
-    <div class="process-tree-header" data-expanded="true">
-      <span class="process-tree-chevron">▼</span>
-      <span class="process-tree-icon">⚡</span>
-      <span class="process-tree-title" id="processTreeTitle">Running Processes</span>
-    </div>
-    <div class="process-tree" id="processTree">
-      <div class="process-loading">Loading process tree...</div>
-    </div>
-  </div>
-  ` : ''}
+  ${executionStateHtml({
+    planId: plan.id,
+    planName: plan.spec.name,
+    nodeName: node.name,
+    nodeType: node.type,
+    status: state.status,
+    attempts: state.attempts,
+    startedAt: state.startedAt,
+    endedAt: state.endedAt,
+    copilotSessionId: state.copilotSessionId,
+    error: state.error,
+    failureReason: state.failureReason,
+    lastAttemptPhase: state.lastAttempt?.phase,
+    lastAttemptExitCode: state.lastAttempt?.exitCode,
+  })}
+  ${retryButtonsHtml(actionData)}
+  ${forceFailButtonHtml(actionData)}
   
   ${nodeMetricsHtml}
+  <div id="aiUsageStatsContainer" style="display:none;"></div>
   
-  <!-- Job Configuration -->
-  <div class="section">
-    <h3>Job Configuration</h3>
-    <div class="config-item">
-      <div class="config-label">Task</div>
-      <div class="config-value">${escapeHtml(node.task)}</div>
-    </div>
-    ${node.work ? `
-    <div class="config-item work-item">
-      <div class="config-label">Work</div>
-      <div class="config-value work-content">${formatWorkSpecHtml(node.work, escapeHtml)}</div>
-    </div>
-    ` : ''}
-    ${node.instructions ? `
-    <div class="config-item">
-      <div class="config-label">Instructions</div>
-      <div class="config-value">${escapeHtml(node.instructions)}</div>
-    </div>
-    ` : ''}
-  </div>
+  <div id="configDisplayContainer"></div>
   
-  <!-- Phase Progress -->
-  <div class="section">
-    <h3>Execution Phases</h3>
-    <div class="phase-tabs">
-      ${this._buildPhaseTabs(phaseStatus, state.status === 'running')}
-    </div>
-    ${logFilePath ? `<div class="log-file-path" id="logFilePath" data-path="${escapeHtml(logFilePath)}" title="${escapeHtml(logFilePath)}">📄 ${escapeHtml(truncateLogPath(logFilePath))}</div>` : ''}
-    <div class="log-viewer" id="logViewer">
-      <div class="log-placeholder">Select a phase tab to view logs</div>
-    </div>
-  </div>
+  ${logViewerSectionHtml({
+    phaseStatus,
+    isRunning: state.status === 'running',
+    logFilePath,
+  })}
+  
+  ${processTreeSectionHtml({ status: state.status })}
   
   ${workSummaryHtml}
+  <div id="workSummaryContainer" style="display:none;"></div>
   
-  <!-- Dependencies -->
-  <div class="section">
-    <h3>Dependencies</h3>
-    ${node.dependencies.length > 0 ? `
-    <div class="deps-list">
-      ${node.dependencies.map(depId => {
-        const depNode = plan.nodes.get(depId);
-        const depState = plan.nodeStates.get(depId);
-        return `<span class="dep-badge ${depState?.status || 'pending'}">${escapeHtml(depNode?.name || depId)}</span>`;
-      }).join('')}
-    </div>
-    ` : '<div class="config-value">No dependencies (root node)</div>'}
-  </div>
+  ${dependenciesSectionHtml(dependencies)}
   
-  <!-- Attempt History -->
-  ${attemptHistoryHtml}
+  ${attemptHistorySection}
+  <div class="attempt-history-container"></div>
   
-  <!-- Git Information -->
-  ${state.worktreePath || state.baseCommit || state.completedCommit ? `
-  <div class="section">
-    <h3>Git Information</h3>
-    <div class="meta-grid">
-      ${state.baseCommit ? `
-      <div class="meta-item">
-        <div class="meta-label">Base Commit</div>
-        <div class="meta-value mono">${state.baseCommit.slice(0, 12)}</div>
-      </div>
-      ` : ''}
-      ${state.completedCommit ? `
-      <div class="meta-item">
-        <div class="meta-label">Completed Commit</div>
-        <div class="meta-value mono">${state.completedCommit.slice(0, 12)}</div>
-      </div>
-      ` : ''}
-    </div>
-    ${state.worktreePath ? `
-    <div class="config-item">
-      <div class="config-label">Worktree${state.worktreeCleanedUp ? ' (cleaned up)' : ' (detached HEAD)'}</div>
-      <div class="config-value mono" style="${state.worktreeCleanedUp ? 'text-decoration: line-through; opacity: 0.6;' : ''}">${escapeHtml(state.worktreePath)}</div>
-    </div>
-    ` : ''}
-  </div>
-  ` : ''}
+  ${gitInfoSectionHtml({
+    worktreePath: state.worktreePath,
+    worktreeCleanedUp: state.worktreeCleanedUp,
+    baseCommit: state.baseCommit,
+    completedCommit: state.completedCommit,
+    workCommit: state.completedCommit, // In current implementation, work commit and completed commit are the same
+    baseBranch: plan.baseBranch,
+    targetBranch: plan.targetBranch,
+    mergedToTarget: state.mergedToTarget,
+  })}
   
-  <!-- Actions -->
-  <div class="actions">
-    ${state.worktreePath && !state.worktreeCleanedUp ? '<button class="action-btn" onclick="openWorktree()">Open Worktree</button>' : ''}
-    <button class="action-btn" onclick="refresh()">Refresh</button>
-  </div>
+  ${bottomActionsHtml(actionData)}
   
   <script>
-    const vscode = acquireVsCodeApi();
-    const PLAN_ID = ${JSON.stringify(plan.id)};
-    const NODE_ID = ${JSON.stringify(node.id)};
-    let currentPhase = ${this._currentPhase ? JSON.stringify(this._currentPhase) : 'null'};
-    const initialPhase = ${initialPhase ? JSON.stringify(initialPhase) : 'null'};
-    
-    // Global Ctrl+C handler for copying selected text in webview
-    document.addEventListener('keydown', function(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-        const selectedText = window.getSelection().toString();
-        if (selectedText) {
-          e.preventDefault();
-          vscode.postMessage({ type: 'copyToClipboard', text: selectedText });
-        }
-      }
-    });
-    
-    // Auto-select a phase on load: restore previous selection, or use initial phase
-    const phaseToSelect = currentPhase || initialPhase;
-    if (phaseToSelect) {
-      setTimeout(() => selectPhase(phaseToSelect), 50);
-    }
-    
-    function openPlan(planId) {
-      vscode.postMessage({ type: 'openPlan', planId });
-    }
-    
-    function openWorktree() {
-      vscode.postMessage({ type: 'openWorktree' });
-    }
-    
-    function refresh() {
-      vscode.postMessage({ type: 'refresh' });
-    }
-    
-    // Session ID copy handler - using event delegation for dynamic content
-    document.body.addEventListener('click', (e) => {
-      if (!(e.target instanceof Element)) return;
-      const target = e.target.closest('.session-id');
-      if (target) {
-        const sessionId = target.getAttribute('data-session');
-        vscode.postMessage({ type: 'copyToClipboard', text: sessionId });
-      }
-    });
-    
-    // Log file path click handler - using event delegation
-    document.body.addEventListener('click', (e) => {
-      if (!(e.target instanceof Element)) return;
-      const target = e.target.closest('.log-file-path');
-      if (target) {
-        const path = target.getAttribute('data-path');
-        if (path) {
-          vscode.postMessage({ type: 'openLogFile', path });
-        }
-      }
-    });
-    
-    // Retry button handlers - using event delegation for dynamic content
-    document.body.addEventListener('click', (e) => {
-      if (!(e.target instanceof Element)) return;
-      const btn = e.target.closest('.retry-btn');
-      if (!btn) return;
-      
-      const action = btn.getAttribute('data-action');
-      // Use global constants for planId/nodeId - more reliable than data attributes
-      const planId = PLAN_ID;
-      const nodeId = NODE_ID;
-      
-      if (action === 'retry-node') {
-        vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: true });
-      } else if (action === 'retry-node-fresh') {
-        vscode.postMessage({ type: 'retryNode', planId, nodeId, resumeSession: false });
-      } else if (action === 'force-fail-node') {
-        // Request confirmation from extension (browser confirm() doesn't work in webviews)
-        vscode.postMessage({ type: 'confirmForceFailNode', planId, nodeId });
-      }
-    });
-    
-    // Attempt card toggle handlers - using event delegation
-    document.body.addEventListener('click', (e) => {
-      if (!(e.target instanceof Element)) return;
-      const header = e.target.closest('.attempt-header');
-      if (!header) return;
-      
-      const card = header.closest('.attempt-card');
-      const body = card.querySelector('.attempt-body');
-      const chevron = header.querySelector('.chevron');
-      const isExpanded = header.getAttribute('data-expanded') === 'true';
-      
-      if (isExpanded) {
-        body.style.display = 'none';
-        chevron.classList.remove('expanded');
-        chevron.textContent = '▶';
-        header.setAttribute('data-expanded', 'false');
-      } else {
-        body.style.display = 'block';
-        chevron.classList.add('expanded');
-        chevron.textContent = '▼';
-        header.setAttribute('data-expanded', 'true');
-      }
-    });
-    
-    // Attempt phase tab click handlers - using event delegation
-    document.body.addEventListener('click', (e) => {
-      const tab = e.target.closest('.attempt-phase-tab');
-      if (!tab) return;
-      
-      e.stopPropagation();
-      const phase = tab.getAttribute('data-phase');
-      const attemptNum = tab.getAttribute('data-attempt');
-      const phasesContainer = tab.closest('.attempt-phases');
-      
-      // Update active tab
-      phasesContainer.querySelectorAll('.attempt-phase-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      
-      // Get logs data from the JSON script element
-      const dataEl = phasesContainer.querySelector('.attempt-logs-data[data-attempt="' + attemptNum + '"]');
-      if (dataEl) {
-        try {
-          const logsData = JSON.parse(dataEl.textContent);
-          const viewer = phasesContainer.querySelector('.attempt-log-viewer[data-attempt="' + attemptNum + '"]');
-          if (viewer && logsData[phase]) {
-            viewer.textContent = logsData[phase];
-          }
-        } catch (err) {
-          console.error('Failed to parse attempt logs data:', err);
-        }
-      }
-    });
-    
-    function selectPhase(phase) {
-      currentPhase = phase;
-      
-      // Update tab selection
-      document.querySelectorAll('.phase-tab').forEach(t => t.classList.remove('active'));
-      document.querySelector('[data-phase="' + phase + '"]').classList.add('active');
-      
-      // Show loading state
-      document.getElementById('logViewer').innerHTML = '<div class="log-loading">Loading logs...</div>';
-      
-      // Request log content
-      vscode.postMessage({ type: 'getLog', phase });
-    }
-    
-    // Handle log content messages
-    // Track last log content to avoid unnecessary updates
-    let lastLogContent = '';
-    
-    window.addEventListener('message', event => {
-      const msg = event.data;
-      if (msg.type === 'logContent' && msg.phase === currentPhase) {
-        const viewer = document.getElementById('logViewer');
-        
-        // Skip update if content hasn't changed
-        if (msg.content === lastLogContent) {
-          return;
-        }
-        
-        // Skip update if user has text selected (don't disrupt their selection)
-        const selection = window.getSelection();
-        if (selection && selection.toString().length > 0) {
-          // User has selection - defer update (will get it on next refresh when they deselect)
-          return;
-        }
-        
-        lastLogContent = msg.content;
-        
-        // Check if user was at bottom before updating content
-        // Allow some tolerance (50px) for "at bottom" detection
-        const wasAtBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 50;
-        
-        viewer.innerHTML = '<pre class="log-content" tabindex="0">' + escapeHtml(msg.content) + '</pre>';
-        
-        // Only auto-scroll if user was already at bottom (respect manual scrolling)
-        if (wasAtBottom) {
-          viewer.scrollTop = viewer.scrollHeight;
-        }
-        
-        // Setup log viewer keyboard shortcuts
-        const logContent = viewer.querySelector('.log-content');
-        if (logContent) {
-          logContent.addEventListener('click', () => logContent.focus());
-          logContent.addEventListener('keydown', function(e) {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
-              e.preventDefault();
-              e.stopPropagation();
-              const selection = window.getSelection();
-              const range = document.createRange();
-              range.selectNodeContents(logContent);
-              selection.removeAllRanges();
-              selection.addRange(range);
-            }
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              window.getSelection().removeAllRanges();
-            }
-            if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-              const selectedText = window.getSelection().toString();
-              if (selectedText) {
-                e.preventDefault();
-                vscode.postMessage({ type: 'copyToClipboard', text: selectedText });
-              }
-            }
-          });
-        }
-      }
-      
-      // Handle process stats messages
-      if (msg.type === 'processStats') {
-        renderProcessTree(msg);
-      }
-    });
-    
-    // Process tree rendering
-    let lastKnownTree = [];
-    
-    function renderProcessTree(stats) {
-      const treeEl = document.getElementById('processTree');
-      const titleEl = document.getElementById('processTreeTitle');
-      if (!treeEl || !titleEl) return;
-      
-      // Handle agent work without a process (waiting for CLI to start)
-      if (stats.isAgentWork && !stats.pid && stats.running) {
-        const duration = stats.duration ? formatDuration(stats.duration) : '';
-        treeEl.innerHTML = '<div class="agent-work-indicator"><span class="agent-icon">🤖</span> Copilot Agent starting...' + (duration ? ' <span class="agent-duration">(' + duration + ')</span>' : '') + '</div>';
-        titleEl.innerHTML = 'Agent Work <span style="opacity: 0.7; font-weight: normal;">(starting)</span>';
-        return;
-      }
-      
-      if (!stats.pid || !stats.running) {
-        if (lastKnownTree.length === 0) {
-          treeEl.innerHTML = '<div class="process-loading">No active process</div>';
-          titleEl.textContent = 'Processes';
-        }
-        return;
-      }
-      
-      const tree = stats.tree || [];
-      lastKnownTree = tree;
-      
-      // Add agent indicator to title if this is agent work
-      const agentPrefix = stats.isAgentWork ? '🤖 ' : '';
-      
-      if (tree.length === 0) {
-        treeEl.innerHTML = '<div class="process-loading">' + agentPrefix + 'Process running (PID ' + stats.pid + ')</div>';
-        titleEl.innerHTML = (stats.isAgentWork ? 'Copilot Agent' : 'Processes') + ' <span style="opacity: 0.7; font-weight: normal;">PID ' + stats.pid + '</span>';
-        return;
-      }
-      
-      // Count processes and sum stats
-      function countAndSum(proc) {
-        let count = 1;
-        let cpu = proc.cpu || 0;
-        let memory = proc.memory || 0;
-        if (proc.children) {
-          for (const child of proc.children) {
-            const childStats = countAndSum(child);
-            count += childStats.count;
-            cpu += childStats.cpu;
-            memory += childStats.memory;
-          }
-        }
-        return { count, cpu, memory };
-      }
-      
-      const totals = tree.reduce((acc, proc) => {
-        const s = countAndSum(proc);
-        return { count: acc.count + s.count, cpu: acc.cpu + s.cpu, memory: acc.memory + s.memory };
-      }, { count: 0, cpu: 0, memory: 0 });
-      
-      const memMB = (totals.memory / 1024 / 1024).toFixed(1);
-      const titleLabel = stats.isAgentWork ? 'Copilot Agent' : 'Processes';
-      titleEl.innerHTML = titleLabel + ' <span style="opacity: 0.7; font-weight: normal;">(' + totals.count + ' • ' + totals.cpu.toFixed(0) + '% CPU • ' + memMB + ' MB)</span>';
-      
-      // Render process nodes
-      function renderNode(proc, depth) {
-        const memMB = ((proc.memory || 0) / 1024 / 1024).toFixed(1);
-        const cpuPct = (proc.cpu || 0).toFixed(0);
-        const indent = depth * 16;
-        const arrow = depth > 0 ? '↳ ' : '';
-        
-        let html = '<div class="process-node" style="margin-left: ' + indent + 'px;">';
-        html += '<div class="process-node-header">';
-        html += '<span class="process-node-icon">⚙️</span>';
-        html += '<span class="process-node-name">' + arrow + escapeHtml(proc.name) + '</span>';
-        html += '<span class="process-node-pid">PID ' + proc.pid + '</span>';
-        html += '</div>';
-        html += '<div class="process-node-stats">';
-        html += '<span class="process-stat">CPU: ' + cpuPct + '%</span>';
-        html += '<span class="process-stat">Mem: ' + memMB + ' MB</span>';
-        html += '</div>';
-        if (proc.commandLine) {
-          html += '<div class="process-node-cmdline">' + escapeHtml(proc.commandLine) + '</div>';
-        }
-        html += '</div>';
-        
-        if (proc.children) {
-          for (const child of proc.children) {
-            html += renderNode(child, depth + 1);
-          }
-        }
-        
-        return html;
-      }
-      
-      treeEl.innerHTML = tree.map(p => renderNode(p, 0)).join('');
-    }
-    
-    function formatDuration(ms) {
-      const sec = Math.floor(ms / 1000);
-      if (sec < 60) return sec + 's';
-      const min = Math.floor(sec / 60);
-      const remSec = sec % 60;
-      return min + 'm ' + remSec + 's';
-    }
-    
-    // Poll for process stats if running
-    const processTreeSection = document.getElementById('processTreeSection');
-    if (processTreeSection) {
-      vscode.postMessage({ type: 'getProcessStats' });
-      setInterval(() => {
-        vscode.postMessage({ type: 'getProcessStats' });
-      }, 1000);
-    }
-
-    // Live duration timer for running jobs
-    const durationTimer = document.getElementById('duration-timer');
-    if (durationTimer && durationTimer.hasAttribute('data-started-at')) {
-      const startedAt = parseInt(durationTimer.getAttribute('data-started-at'), 10);
-      const nodeStatus = ${JSON.stringify(state.status)};
-      
-      // Clear any existing timer to prevent duplicates
-      if (window.nodeDurationTimer) {
-        clearInterval(window.nodeDurationTimer);
-      }
-      
-      // Only run timer if node is running
-      if (nodeStatus === 'running' && startedAt) {
-        window.nodeDurationTimer = setInterval(() => {
-          const elapsed = Math.round((Date.now() - startedAt) / 1000);
-          const elem = document.getElementById('duration-timer');
-          if (elem) {
-            elem.textContent = formatDuration(elapsed * 1000);
-          }
-        }, 1000);
-      }
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
+    ${webviewScripts({
+      planId: plan.id,
+      nodeId: node.id,
+      currentPhase: this._currentPhase,
+      initialPhase,
+      nodeStatus: state.status,
+    })}
   </script>
 </body>
 </html>`;
@@ -1434,70 +1096,6 @@ export class NodeDetailPanel {
   }
   
   /**
-   * Build HTML for the execution phase tab bar.
-   *
-   * Each tab shows a phase icon and label, with the active phase highlighted.
-   * Clicking a tab sends a `getLog` message to load that phase's logs.
-   *
-   * @param phaseStatus - Phase-to-status mapping from {@link _getPhaseStatus}.
-   * @param isRunning - Whether the node is currently running (affects tab styling).
-   * @returns HTML fragment string for the tab bar.
-   */
-  private _buildPhaseTabs(phaseStatus: Record<string, string>, isRunning: boolean): string {
-    const phases = [
-      { id: 'all', name: 'Full Log', icon: '📋' },
-      { id: 'merge-fi', name: 'Merge FI', icon: this._getMergeIcon(phaseStatus['merge-fi'], '↓') },
-      { id: 'prechecks', name: 'Prechecks', icon: this._getPhaseIcon(phaseStatus.prechecks) },
-      { id: 'work', name: 'Work', icon: this._getPhaseIcon(phaseStatus.work) },
-      { id: 'commit', name: 'Commit', icon: this._getPhaseIcon(phaseStatus.commit) },
-      { id: 'postchecks', name: 'Postchecks', icon: this._getPhaseIcon(phaseStatus.postchecks) },
-      { id: 'merge-ri', name: 'Merge RI', icon: this._getMergeIcon(phaseStatus['merge-ri'], '↑') },
-    ];
-    
-    return phases.map(p => `
-      <button class="phase-tab phase-${phaseStatus[p.id] || 'pending'}" 
-              data-phase="${p.id}" 
-              onclick="selectPhase('${p.id}')">
-        <span class="phase-icon">${p.icon}</span>
-        ${p.name}
-      </button>
-    `).join('');
-  }
-  
-  /**
-   * Map a phase status to a Unicode icon character.
-   *
-   * @param status - The phase status string.
-   * @returns A single Unicode icon character.
-   */
-  private _getPhaseIcon(status: string): string {
-    switch (status) {
-      case 'success': return '✓';
-      case 'failed': return '✗';
-      case 'running': return '⟳';
-      case 'skipped': return '⊘';
-      default: return '○';
-    }
-  }
-  
-  /**
-   * Map a merge status to a directional merge icon.
-   *
-   * @param status - The merge phase status string.
-   * @param arrow - Direction indicator (`'→'` for forward-integrate, `'←'` for reverse-integrate).
-   * @returns A styled merge icon string.
-   */
-  private _getMergeIcon(status: string, arrow: string): string {
-    switch (status) {
-      case 'success': return `✓${arrow}`;
-      case 'failed': return `✗${arrow}`;
-      case 'running': return `⟳${arrow}`;
-      case 'skipped': return `○${arrow}`;
-      default: return `○${arrow}`;
-    }
-  }
-  
-  /**
    * Build an HTML work summary section from a node's {@link JobWorkSummary}.
    *
    * Renders stat cards (commits, files added/modified/deleted) and commit
@@ -1564,390 +1162,6 @@ export class NodeDetailPanel {
   }
   
   /**
-   * Build attempt history HTML with collapsible cards.
-   *
-   * Renders a reverse-chronological list of past execution attempts,
-   * each showing duration, status, error (if any), and phase-level log tabs.
-   *
-   * @param state - The node execution state containing `attemptHistory`.
-   * @returns HTML fragment string, or empty string if there are no past attempts.
-   */
-  private _buildAttemptHistoryHtml(state: NodeExecutionState): string {
-    const attempts = state.attemptHistory;
-    if (!attempts || attempts.length === 0) {
-      return '';
-    }
-    
-    // Build cards in reverse order (latest first)
-    const cards = attempts.slice().reverse().map((attempt, _reverseIdx) => {
-      // All attempt cards start collapsed
-      const duration = formatDuration(Math.round((attempt.endedAt - attempt.startedAt) / 1000));
-      const timestamp = new Date(attempt.startedAt).toLocaleString();
-      
-      // Step indicators - use same icons as main execution section
-      const stepIcon = (status?: string): string => {
-        const icon = status === 'success' ? '✓' 
-          : status === 'failed' ? '✗'
-          : status === 'running' ? '⟳'
-          : status === 'skipped' ? '⊘'
-          : '○';
-        return `<span class="step-icon ${status || 'pending'}">${icon}</span>`;
-      };
-      
-      const stepIndicators = `
-        ${stepIcon(attempt.stepStatuses?.['merge-fi'])}
-        ${stepIcon(attempt.stepStatuses?.prechecks)}
-        ${stepIcon(attempt.stepStatuses?.work)}
-        ${stepIcon(attempt.stepStatuses?.commit)}
-        ${stepIcon(attempt.stepStatuses?.postchecks)}
-        ${stepIcon(attempt.stepStatuses?.['merge-ri'])}
-      `;
-      
-      const sessionHtml = attempt.copilotSessionId
-        ? `<div class="attempt-meta-row"><strong>Session:</strong> <span class="session-id" data-session="${attempt.copilotSessionId}" title="Click to copy">${attempt.copilotSessionId.substring(0, 12)}... 📋</span></div>`
-        : '';
-      
-      const errorHtml = attempt.error
-        ? `<div class="attempt-error">
-            <strong>Error:</strong> <span class="error-message">${escapeHtml(attempt.error)}</span>
-            ${attempt.failedPhase ? `<div style="margin-top: 4px;">Failed in phase: <strong>${attempt.failedPhase}</strong></div>` : ''}
-            ${attempt.exitCode !== undefined ? `<div>Exit code: <strong>${attempt.exitCode}</strong></div>` : ''}
-           </div>`
-        : '';
-      
-      // Context details (worktree, base commit, work used, log file)
-      const attemptLogFileHtml = attempt.logFilePath 
-        ? `<div class="attempt-meta-row"><strong>Log:</strong> <span class="log-file-path" data-path="${escapeHtml(attempt.logFilePath)}" title="${escapeHtml(attempt.logFilePath)}">📄 ${escapeHtml(truncateLogPath(attempt.logFilePath))}</span></div>`
-        : '';
-      
-      const contextHtml = (attempt.worktreePath || attempt.baseCommit || attempt.workUsed || attempt.logFilePath) 
-        ? `<div class="attempt-context">
-            ${attempt.baseCommit ? `<div class="attempt-meta-row"><strong>Base:</strong> <code>${attempt.baseCommit.slice(0, 8)}</code></div>` : ''}
-            ${attempt.worktreePath ? `<div class="attempt-meta-row"><strong>Worktree:</strong> <code>${escapeHtml(attempt.worktreePath)}</code></div>` : ''}
-            ${attemptLogFileHtml}
-            ${attempt.workUsed ? `<div class="attempt-meta-row attempt-work-row"><strong>Work:</strong> <div class="attempt-work-content">${formatWorkSpecHtml(attempt.workUsed, escapeHtml)}</div></div>` : ''}
-           </div>`
-        : '';
-      
-      // Trigger type badge
-      const triggerBadge = attempt.triggerType === 'auto-heal'
-        ? '<span class="trigger-badge auto-heal">🔧 Auto-Heal</span>'
-        : attempt.triggerType === 'retry'
-          ? '<span class="trigger-badge retry">🔄 Retry</span>'
-          : '';
-      
-      // Use in-memory logs; log file is opened on demand via clickable path
-      let attemptLogs = attempt.logs || '';
-      const phaseTabsHtml = attemptLogs ? this._buildAttemptPhaseTabs({ ...attempt, logs: attemptLogs }) : '';
-      
-      // Build compact metrics row for this attempt
-      const attemptMetricsHtml = attempt.metrics ? this._buildAttemptMetricsHtml(attempt.metrics, attempt.phaseMetrics) : '';
-      
-      return `
-        <div class="attempt-card" data-attempt="${attempt.attemptNumber}">
-          <div class="attempt-header" data-expanded="false">
-            <div class="attempt-header-left">
-              <span class="attempt-badge">#${attempt.attemptNumber}</span>
-              ${triggerBadge}
-              <span class="step-indicators">${stepIndicators}</span>
-              <span class="attempt-time">${timestamp}</span>
-              <span class="attempt-duration">(${duration})</span>
-            </div>
-            <span class="chevron">▶</span>
-          </div>
-          <div class="attempt-body" style="display: none;">
-            <div class="attempt-meta">
-              <div class="attempt-meta-row"><strong>Status:</strong> <span class="status-${attempt.status}">${attempt.status}</span></div>
-              ${sessionHtml}
-            </div>
-            ${attemptMetricsHtml}
-            ${contextHtml}
-            ${errorHtml}
-            ${phaseTabsHtml}
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    return `
-    <div class="section">
-      <h3>Attempt History (${attempts.length})</h3>
-      ${cards}
-    </div>
-    `;
-  }
-  
-  /**
-   * Build a prominent metrics summary card for aggregated node metrics.
-   *
-   * @param metrics - The aggregated CopilotUsageMetrics to display.
-   * @returns HTML fragment string for the metrics card.
-   */
-  private _buildMetricsSummaryHtml(metrics: CopilotUsageMetrics, phaseMetrics?: Record<string, CopilotUsageMetrics>): string {
-    const statsHtml: string[] = [];
-    
-    if (metrics.premiumRequests !== undefined) {
-      statsHtml.push(`<div class="metrics-stat">🎫 ${formatPremiumRequests(metrics.premiumRequests)}</div>`);
-    }
-    if (metrics.apiTimeSeconds !== undefined) {
-      statsHtml.push(`<div class="metrics-stat">⏱ API: ${formatDurationSeconds(metrics.apiTimeSeconds)}</div>`);
-    }
-    if (metrics.sessionTimeSeconds !== undefined) {
-      statsHtml.push(`<div class="metrics-stat">🕐 Session: ${formatDurationSeconds(metrics.sessionTimeSeconds)}</div>`);
-    }
-    if (metrics.codeChanges) {
-      statsHtml.push(`<div class="metrics-stat">📝 Code: ${formatCodeChanges(metrics.codeChanges)}</div>`);
-    }
-    
-    let modelBreakdownHtml = '';
-    if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
-      const rows = metrics.modelBreakdown.map(b => {
-        const cached = b.cachedTokens ? `, ${formatTokenCount(b.cachedTokens)} cached` : '';
-        const reqs = b.premiumRequests !== undefined ? ` (${b.premiumRequests} req)` : '';
-        return `<div class="model-row">
-          <span class="model-name">${escapeHtml(b.model)}</span>
-          <span class="model-tokens">${formatTokenCount(b.inputTokens)} in, ${formatTokenCount(b.outputTokens)} out${cached}${reqs}</span>
-        </div>`;
-      }).join('');
-      
-      modelBreakdownHtml = `
-        <div class="model-breakdown">
-          <div class="model-breakdown-label">Model Breakdown:</div>
-          <div class="model-breakdown-list">${rows}</div>
-        </div>`;
-    }
-    
-    // Per-phase AI usage breakdown
-    let phaseBreakdownHtml = '';
-    if (phaseMetrics && Object.keys(phaseMetrics).length > 0) {
-      const phaseLabels: Record<string, string> = {
-        'prechecks': '🔍 Prechecks',
-        'merge-fi': '↙↘ Merge FI',
-        'work': '⚙ Work',
-        'commit': '📝 Commit Review',
-        'postchecks': '✅ Postchecks',
-        'merge-ri': '↗↙ Merge RI',
-      };
-      const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
-      
-      const phaseRows = phaseOrder
-        .filter(phase => phaseMetrics[phase])
-        .map(phase => {
-          const pm = phaseMetrics[phase];
-          const parts: string[] = [];
-          if (pm.premiumRequests !== undefined) parts.push(`${pm.premiumRequests} req`);
-          if (pm.apiTimeSeconds !== undefined) parts.push(`${formatDurationSeconds(pm.apiTimeSeconds)} API`);
-          if (pm.sessionTimeSeconds !== undefined) parts.push(`${formatDurationSeconds(pm.sessionTimeSeconds)} session`);
-          if (pm.codeChanges) parts.push(`${formatCodeChanges(pm.codeChanges)}`);
-          
-          const modelInfo = pm.modelBreakdown?.map(b => escapeHtml(b.model)).join(', ') || '';
-          
-          return `<div class="phase-metrics-row">
-            <span class="phase-metrics-label">${phaseLabels[phase] || phase}</span>
-            <span class="phase-metrics-stats">${parts.join(' · ')}${modelInfo ? ` · ${modelInfo}` : ''}</span>
-          </div>`;
-        }).join('');
-      
-      if (phaseRows) {
-        phaseBreakdownHtml = `
-          <div class="phase-metrics-breakdown">
-            <div class="model-breakdown-label">Phase Breakdown:</div>
-            ${phaseRows}
-          </div>`;
-      }
-    }
-    
-    return `
-    <div class="section metrics-card">
-      <h3>⚡ AI Usage</h3>
-      <div class="metrics-stats-grid">${statsHtml.join('')}</div>
-      ${modelBreakdownHtml}
-      ${phaseBreakdownHtml}
-    </div>`;
-  }
-  
-  /**
-   * Build a compact metrics row for an individual attempt.
-   *
-   * @param metrics - The CopilotUsageMetrics for a single attempt.
-   * @returns HTML fragment string for a compact metrics display.
-   */
-  private _buildAttemptMetricsHtml(metrics: CopilotUsageMetrics, phaseMetrics?: Record<string, CopilotUsageMetrics>): string {
-    const statsHtml: string[] = [];
-    
-    if (metrics.premiumRequests !== undefined) {
-      statsHtml.push(`<div class="metrics-stat">🎫 ${formatPremiumRequests(metrics.premiumRequests)}</div>`);
-    }
-    if (metrics.apiTimeSeconds !== undefined) {
-      statsHtml.push(`<div class="metrics-stat">⏱ API: ${formatDurationSeconds(metrics.apiTimeSeconds)}</div>`);
-    }
-    if (metrics.sessionTimeSeconds !== undefined) {
-      statsHtml.push(`<div class="metrics-stat">🕐 Session: ${formatDurationSeconds(metrics.sessionTimeSeconds)}</div>`);
-    }
-    if (metrics.codeChanges) {
-      statsHtml.push(`<div class="metrics-stat">📝 Code: ${formatCodeChanges(metrics.codeChanges)}</div>`);
-    }
-    
-    let modelBreakdownHtml = '';
-    if (metrics.modelBreakdown && metrics.modelBreakdown.length > 0) {
-      const rows = metrics.modelBreakdown.map(b => {
-        const cached = b.cachedTokens ? `, ${formatTokenCount(b.cachedTokens)} cached` : '';
-        const reqs = b.premiumRequests !== undefined ? ` (${b.premiumRequests} req)` : '';
-        return `<div class="model-row">
-          <span class="model-name">${escapeHtml(b.model)}</span>
-          <span class="model-tokens">${formatTokenCount(b.inputTokens)} in, ${formatTokenCount(b.outputTokens)} out${cached}${reqs}</span>
-        </div>`;
-      }).join('');
-      
-      modelBreakdownHtml = `
-        <div class="model-breakdown">
-          <div class="model-breakdown-label">Model Breakdown:</div>
-          <div class="model-breakdown-list">${rows}</div>
-        </div>`;
-    }
-    
-    // Per-phase breakdown for this attempt
-    let phaseBreakdownHtml = '';
-    if (phaseMetrics && Object.keys(phaseMetrics).length > 1) {
-      const phaseLabels: Record<string, string> = {
-        'prechecks': '🔍 Prechecks',
-        'merge-fi': '↙↘ Merge FI',
-        'work': '⚙ Work',
-        'commit': '📝 Commit Review',
-        'postchecks': '✅ Postchecks',
-        'merge-ri': '↗↙ Merge RI',
-      };
-      const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
-      
-      const phaseRows = phaseOrder
-        .filter(phase => phaseMetrics[phase])
-        .map(phase => {
-          const pm = phaseMetrics[phase];
-          const parts: string[] = [];
-          if (pm.premiumRequests !== undefined) parts.push(`${pm.premiumRequests} req`);
-          if (pm.apiTimeSeconds !== undefined) parts.push(`${formatDurationSeconds(pm.apiTimeSeconds)} API`);
-          if (pm.codeChanges) parts.push(`${formatCodeChanges(pm.codeChanges)}`);
-          return `<div class="phase-metrics-row">
-            <span class="phase-metrics-label">${phaseLabels[phase] || phase}</span>
-            <span class="phase-metrics-stats">${parts.join(' · ')}</span>
-          </div>`;
-        }).join('');
-      
-      if (phaseRows) {
-        phaseBreakdownHtml = `
-          <div class="phase-metrics-breakdown">
-            <div class="model-breakdown-label">Phase Breakdown:</div>
-            ${phaseRows}
-          </div>`;
-      }
-    }
-    
-    return `
-    <div class="attempt-metrics-card">
-      <div class="metrics-stats-grid">${statsHtml.join('')}</div>
-      ${modelBreakdownHtml}
-      ${phaseBreakdownHtml}
-    </div>`;
-  }
-  
-  /**
-   * Build phase tabs for a specific historical attempt record.
-   *
-   * Parses the attempt's combined log output to extract per-phase sections
-   * and renders them as selectable tabs with inline log content.
-   *
-   * @param attempt - The attempt record containing logs and phase data.
-   * @returns HTML fragment string for the phase tab UI, or empty string if no logs.
-   */
-  private _buildAttemptPhaseTabs(attempt: AttemptRecord): string {
-    if (!attempt.logs) return '';
-    
-    // Parse logs to extract phase sections
-    const logs = attempt.logs;
-    const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
-    
-    const phaseLabels: Record<string, string> = {
-      'all': '📄 Full Log',
-      'merge-fi': '↙↘ Merge FI',
-      'prechecks': '✓ Prechecks',
-      'work': '⚙ Work',
-      'commit': '💾 Commit',
-      'postchecks': '✓ Postchecks',
-      'merge-ri': '↗↙ Merge RI',
-    };
-    
-    const getPhaseStatus = (phase: string): string => {
-      if (phase === 'all') return '';
-      const status = (attempt.stepStatuses as any)?.[phase];
-      if (status === 'success') return 'success';
-      if (status === 'failed') return 'failed';
-      if (status === 'skipped') return 'skipped';
-      return '';
-    };
-    
-    const tabs = phases.map(phase => {
-      const status = getPhaseStatus(phase);
-      const statusIcon = status === 'success' ? '✓' : status === 'failed' ? '✗' : status === 'skipped' ? '○' : '';
-      return `<button class="attempt-phase-tab ${phase === 'all' ? 'active' : ''} ${status}" 
-                      data-phase="${phase}" data-attempt="${attempt.attemptNumber}">
-                ${statusIcon} ${phaseLabels[phase]}
-              </button>`;
-    }).join('');
-    
-    // Pre-extract logs for each phase
-    const extractPhaseLogs = (phase: string): string => {
-      if (phase === 'all') return logs;
-      
-      const phaseMarkers: Record<string, string> = {
-        'merge-fi': 'FORWARD INTEGRATION',
-        'prechecks': 'PRECHECKS',
-        'work': 'WORK',
-        'commit': 'COMMIT',
-        'postchecks': 'POSTCHECKS',
-        'merge-ri': 'REVERSE INTEGRATION',
-      };
-      
-      const marker = phaseMarkers[phase];
-      if (!marker) return '';
-      
-      // Find section between START and END markers
-      const startPattern = new RegExp(`=+ ${marker}.*START =+`, 'i');
-      const endPattern = new RegExp(`=+ ${marker}.*END =+`, 'i');
-      
-      const startMatch = logs.match(startPattern);
-      const endMatch = logs.match(endPattern);
-      
-      if (startMatch && endMatch) {
-        const startIdx = logs.indexOf(startMatch[0]);
-        const endIdx = logs.indexOf(endMatch[0]) + endMatch[0].length;
-        return logs.slice(startIdx, endIdx);
-      }
-      
-      // Fallback: filter lines containing section markers
-      const lines = logs.split('\n');
-      const filtered = lines.filter(line => {
-        const upper = line.toUpperCase();
-        return upper.includes(`[${phase.toUpperCase()}]`) || upper.includes(marker);
-      });
-      return filtered.length > 0 ? filtered.join('\n') : `No logs for ${phase} phase.`;
-    };
-    
-    // Store logs data as escaped JSON in hidden element
-    const phaseLogsData: Record<string, string> = {};
-    phases.forEach(p => phaseLogsData[p] = extractPhaseLogs(p));
-    
-    return `
-      <div class="attempt-phases" data-attempt="${attempt.attemptNumber}">
-        <div class="attempt-phase-tabs">${tabs}</div>
-        <pre class="attempt-log-viewer" data-attempt="${attempt.attemptNumber}">${escapeHtml(phaseLogsData['all'])}</pre>
-        <script type="application/json" class="attempt-logs-data" data-attempt="${attempt.attemptNumber}">
-          ${JSON.stringify(phaseLogsData)}
-        </script>
-      </div>
-    `;
-  }
-  
-  /**
    * Generate the shared CSS styles used across the node detail panel.
    *
    * Includes styles for phase tabs, log viewer, status badges, meta grid,
@@ -1960,10 +1174,27 @@ export class NodeDetailPanel {
     * { box-sizing: border-box; }
     body {
       font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      padding: 16px;
+      padding: 0;
       color: var(--vscode-foreground);
       background: var(--vscode-editor-background);
       line-height: 1.5;
+    }
+    
+    /* Sticky header */
+    .sticky-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--vscode-editor-background);
+      padding: 12px 16px 8px 16px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .sticky-header + * {
+      padding-top: 8px;
+    }
+    body > *:not(.sticky-header) {
+      padding-left: 16px;
+      padding-right: 16px;
     }
     
     /* Header */
@@ -1971,9 +1202,45 @@ export class NodeDetailPanel {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 16px;
+      margin-bottom: 4px;
     }
-    .header h2 { margin: 0; font-size: 18px; }
+    .header h2 { margin: 0; font-size: 18px; flex: 1; margin-left: 12px; }
+    
+    /* Phase indicator in header */
+    .header-phase {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 10px;
+      background: rgba(0, 122, 204, 0.15);
+      color: #3794ff;
+      white-space: nowrap;
+      margin-right: 12px;
+      animation: pulse-phase-badge 2s infinite;
+    }
+    @keyframes pulse-phase-badge {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    
+    /* Duration display in header */
+    .header-duration {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: var(--vscode-descriptionForeground);
+      white-space: nowrap;
+    }
+    .duration-icon { font-size: 16px; }
+    .duration-value {
+      font-family: var(--vscode-editor-font-family);
+      font-weight: 600;
+      color: var(--vscode-foreground);
+    }
+    .duration-value.running { color: #3794ff; }
+    .duration-value.succeeded { color: #4ec9b0; }
+    .duration-value.failed { color: #f48771; }
     
     .status-badge {
       padding: 4px 12px;
@@ -2029,6 +1296,29 @@ export class NodeDetailPanel {
       margin-bottom: 2px;
     }
     .meta-value { font-size: 13px; }
+    
+    /* Git Info - stacked vertical list */
+    .git-info-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .git-info-row {
+      display: flex;
+      flex-direction: row;
+      align-items: baseline;
+      gap: 12px;
+    }
+    .git-info-label {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      min-width: 120px;
+      flex-shrink: 0;
+    }
+    .git-info-value {
+      font-size: 13px;
+      word-break: break-all;
+    }
     .meta-value.mono, .config-value.mono {
       font-family: 'Consolas', 'Courier New', monospace;
       font-size: 12px;
@@ -2046,6 +1336,44 @@ export class NodeDetailPanel {
       margin-bottom: 4px;
     }
     .config-value { }
+    
+    /* Config Phase Sections (Prechecks / Work / Postchecks) */
+    .config-phases { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+    .config-phase { border: 1px solid var(--vscode-panel-border); border-radius: 6px; overflow: hidden; }
+    .config-phase-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--vscode-sideBarSectionHeader-background);
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .config-phase-header.collapsed {
+      cursor: pointer;
+      border-bottom: none;
+    }
+    .config-phase-header.collapsed:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .config-phase-header.non-collapsible {
+      cursor: default;
+    }
+    .config-collapsible-toggle { cursor: pointer; }
+    .config-collapsible-toggle:hover { background: var(--vscode-list-hoverBackground); }
+    .phase-label { font-size: 12px; font-weight: 600; }
+    .phase-type-badge {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(128, 128, 128, 0.2);
+      color: var(--vscode-descriptionForeground);
+    }
+    .phase-type-badge.shell { background: rgba(72, 187, 120, 0.2); color: #48bb78; }
+    .phase-type-badge.process { background: rgba(237, 137, 54, 0.2); color: #ed8936; }
+    .phase-type-badge.agent { background: rgba(99, 179, 237, 0.2); color: #63b3ed; }
+    .config-phase-body { padding: 8px 12px; }
     
     /* Work Display Formatting */
     .work-item .config-value {
@@ -2104,6 +1432,38 @@ export class NodeDetailPanel {
       color: var(--vscode-descriptionForeground);
       font-style: italic;
     }
+    
+    /* Agent instructions markdown rendering */
+    .agent-instructions {
+      padding: 8px 12px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .agent-instructions h3 { font-size: 15px; margin: 12px 0 6px; color: var(--vscode-foreground); }
+    .agent-instructions h4 { font-size: 14px; margin: 10px 0 4px; color: var(--vscode-foreground); }
+    .agent-instructions h5 { font-size: 13px; margin: 8px 0 4px; color: var(--vscode-descriptionForeground); }
+    .agent-instructions p { margin: 4px 0; }
+    .agent-instructions ul { margin: 4px 0 4px 16px; padding: 0; }
+    .agent-instructions li { margin: 2px 0; }
+    .agent-instructions pre.spec-code {
+      background: var(--vscode-textCodeBlock-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin: 6px 0;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+    .agent-instructions code.inline-code {
+      background: var(--vscode-textCodeBlock-background);
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+    .agent-instructions strong { color: var(--vscode-foreground); }
+    .spec-meta { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
+    .spec-meta .spec-field { font-size: 11px; margin: 2px 0; }
+    .spec-meta .spec-label { color: var(--vscode-descriptionForeground); }
     
     /* Code content area */
     .work-code {
@@ -2316,8 +1676,10 @@ export class NodeDetailPanel {
     .phase-icon { font-size: 11px; }
     .phase-tab.phase-success .phase-icon { color: #4ec9b0; }
     .phase-tab.phase-failed .phase-icon { color: #f48771; }
-    .phase-tab.phase-running .phase-icon { color: #3794ff; animation: pulse 1s infinite; }
-    @keyframes pulse { 50% { opacity: 0.5; } }
+    .phase-tab.phase-running .phase-icon { color: #3794ff; animation: pulse-phase 1.2s infinite; }
+    .phase-tab.active.phase-running .phase-icon { color: #ffffff; animation: pulse-phase-active 1.2s infinite; }
+    @keyframes pulse-phase { 50% { opacity: 0.4; } }
+    @keyframes pulse-phase-active { 0%, 100% { opacity: 1; text-shadow: 0 0 6px rgba(255,255,255,0.8); } 50% { opacity: 0.5; text-shadow: none; } }
     
     /* Log File Path */
     .log-file-path {

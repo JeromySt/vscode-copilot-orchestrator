@@ -12,8 +12,10 @@ import * as path from 'path';
 import { isCopilotCliAvailable } from './cliCheckCore';
 import { CopilotCliRunner, CopilotCliLogger } from './copilotCliRunner';
 import { isValidModel } from './modelDiscovery';
-import * as git from '../git';
+import type { IGitOperations } from '../interfaces/IGitOperations';
 import { TokenUsage, CopilotUsageMetrics } from '../plan/types';
+import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
+import type { IFileSystem } from '../interfaces/IFileSystem';
 
 // ============================================================================
 // TYPES
@@ -169,16 +171,27 @@ export interface DelegatorCallbacks {
 export class AgentDelegator {
   private readonly logger: DelegatorLogger;
   private readonly callbacks: DelegatorCallbacks;
+  private readonly runner?: ICopilotRunner;
+  private readonly gitOps: IGitOperations;
 
   /**
    * Create a new agent delegator.
    * 
    * @param logger - Logger for output messages
    * @param callbacks - Optional callbacks for delegation events
+   * @param runner - Optional ICopilotRunner (defaults to new CopilotCliRunner)
+   * @param gitOps - Git operations interface
    */
-  constructor(logger: DelegatorLogger, callbacks: DelegatorCallbacks = {}) {
+  constructor(
+    logger: DelegatorLogger,
+    gitOps: IGitOperations,
+    callbacks: DelegatorCallbacks = {},
+    runner?: ICopilotRunner
+  ) {
     this.logger = logger;
     this.callbacks = callbacks;
+    this.runner = runner;
+    this.gitOps = gitOps;
   }
 
   /**
@@ -297,14 +310,16 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       this.logger.log(`[${label}] Warning: Model '${model}' not in discovered models`);
     }
 
-    // Create CLI runner with logger adapter
-    const cliLogger: CopilotCliLogger = {
-      info: (msg) => this.logger.log(msg),
-      warn: (msg) => this.logger.log(msg),
-      error: (msg) => this.logger.log(msg),
-      debug: (msg) => this.logger.log(msg),
-    };
-    const cliRunner = new CopilotCliRunner(cliLogger);
+    // Create CLI runner with logger adapter, or use injected runner
+    const cliRunner: ICopilotRunner = this.runner ?? (() => {
+      const cliLogger: CopilotCliLogger = {
+        info: (msg) => this.logger.log(msg),
+        warn: (msg) => this.logger.log(msg),
+        error: (msg) => this.logger.log(msg),
+        debug: (msg) => this.logger.log(msg),
+      };
+      return new CopilotCliRunner(cliLogger);
+    })();
 
     // Store Copilot config/sessions in worktree's .orchestrator directory
     // This ensures session state is cleaned up when worktree is removed
@@ -554,12 +569,14 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
    */
   private async createMarkerCommit(worktreePath: string, jobId: string, taskDescription: string, label: string): Promise<void> {
     try {
-      // Stage the task file using git/* module
-      await git.executor.execAsync(['add', '.copilot-task.md'], { cwd: worktreePath });
+      const repository = this.gitOps.repository;
+
+      // Stage the task file
+      await repository.stageFile(worktreePath, '.copilot-task.md');
       
-      // Create the marker commit using git/* module
+      // Create the marker commit
       const commitMessage = `orchestrator(${jobId}): AI agent task created\n\n${taskDescription}`;
-      const committed = await git.repository.commit(worktreePath, commitMessage, { allowEmpty: true });
+      const committed = await repository.commit(worktreePath, commitMessage, { allowEmpty: true });
 
       if (committed) {
         this.logger.log(`[${label}] Created marker commit for agent delegation`);

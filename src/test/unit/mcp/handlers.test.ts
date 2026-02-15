@@ -53,6 +53,7 @@ function makeMockContext(overrides?: Record<string, any>): PlanHandlerContext {
     runner: null as any,
     plans: null as any,
     workspacePath: '/workspace',
+    git: {} as any,
   };
 }
 

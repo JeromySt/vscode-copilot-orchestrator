@@ -5,6 +5,7 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { ProcessMonitor } from '../../../process/processMonitor';
+import { DefaultProcessSpawner } from '../../../interfaces/IProcessSpawner';
 import { ProcessInfo } from '../../../types';
 
 function silenceConsole() {
@@ -12,12 +13,14 @@ function silenceConsole() {
   sinon.stub(console, 'warn');
 }
 
+const defaultSpawner = new DefaultProcessSpawner();
+
 suite('ProcessMonitor', () => {
   let monitor: ProcessMonitor;
 
   setup(() => {
     silenceConsole();
-    monitor = new ProcessMonitor(0); // zero TTL to avoid caching
+    monitor = new ProcessMonitor(defaultSpawner, 0); // zero TTL to avoid caching
   });
 
   teardown(() => {
@@ -153,7 +156,7 @@ suite('ProcessMonitor', () => {
     });
 
     test('returns cached snapshot within TTL', async () => {
-      const cachedMonitor = new ProcessMonitor(60000); // long TTL
+      const cachedMonitor = new ProcessMonitor(defaultSpawner, 60000); // long TTL
       const first = await cachedMonitor.getSnapshot();
       const second = await cachedMonitor.getSnapshot();
       // Second call should be same reference (cached)

@@ -292,5 +292,101 @@ suite('Node Builder (buildNodes)', () => {
         }
       );
     });
+
+    test('throws on three-node cycle', () => {
+      const specs = [
+        makeSpec('a', ['c']),
+        makeSpec('b', ['a']),
+        makeSpec('c', ['b']),
+      ];
+      assert.throws(
+        () => buildNodes(specs),
+        (err: any) => {
+          assert.ok(err instanceof PlanValidationError);
+          assert.ok(err.details?.some((d: string) => d.includes('Circular')));
+          return true;
+        }
+      );
+    });
+
+    test('cycle error message includes producerId names', () => {
+      const specs = [
+        makeSpec('alpha', ['beta']),
+        makeSpec('beta', ['alpha']),
+      ];
+      try {
+        buildNodes(specs);
+        assert.fail('should throw');
+      } catch (err: any) {
+        assert.ok(err instanceof PlanValidationError);
+        assert.ok(err.details?.some((d: string) => d.includes('alpha') && d.includes('beta')));
+      }
+    });
+  });
+
+  suite('Edge cases', () => {
+    test('handles empty producerId validation', () => {
+      const specs = [makeSpec('')];
+      assert.throws(
+        () => buildNodes(specs),
+        (err: any) => err instanceof PlanValidationError
+      );
+    });
+
+    test('defaults repoPath to process.cwd()', () => {
+      const specs = [makeSpec('build')];
+      const result = buildNodes(specs);
+      assert.strictEqual(result.nodes[0].repoPath, process.cwd());
+    });
+
+    test('passes repoPath option correctly', () => {
+      const specs = [makeSpec('build')];
+      const result = buildNodes(specs, { repoPath: '/custom/path' });
+      assert.strictEqual(result.nodes[0].repoPath, '/custom/path');
+    });
+
+    test('passes group option correctly', () => {
+      const group = {
+        id: 'g1',
+        name: 'Group1',
+        baseBranch: 'main',
+        maxParallel: 4,
+        cleanUpSuccessfulWork: true,
+        worktreeRoot: '/wt',
+        createdAt: Date.now()
+      };
+      const specs = [makeSpec('build')];
+      const result = buildNodes(specs, { group });
+      assert.strictEqual(result.group, group);
+      assert.strictEqual(result.nodes[0].group, group);
+    });
+
+    test('initializes node with correct defaults', () => {
+      const specs = [makeSpec('build')];
+      const result = buildNodes(specs);
+      const node = result.nodes[0];
+      assert.strictEqual(node.attempts, 0);
+      assert.ok(node.id);
+      assert.strictEqual(node.id.length, 36); // UUID length
+    });
+
+    test('properly handles node with all optional fields', () => {
+      const specs = [makeSpec('build', [], {
+        name: 'Custom Build',
+        work: 'npm run build',
+        prechecks: 'npm test',
+        postchecks: 'npm run lint',
+        instructions: 'Special instructions',
+        baseBranch: 'develop'
+      })];
+      const result = buildNodes(specs);
+      const node = result.nodes[0];
+      assert.strictEqual(node.name, 'Custom Build');
+      assert.strictEqual(node.work, 'npm run build');
+      assert.strictEqual(node.prechecks, 'npm test');
+      assert.strictEqual(node.postchecks, 'npm run lint');
+      assert.strictEqual(node.instructions, 'Special instructions');
+      assert.strictEqual(node.baseBranch, 'develop');
+    });
   });
 });

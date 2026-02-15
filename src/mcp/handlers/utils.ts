@@ -11,7 +11,7 @@ import * as vscode from 'vscode';
 import { ToolHandlerContext } from '../types';
 import { PlanInstance } from '../../plan/types';
 import { PlanRunner } from '../../plan/runner';
-import * as git from '../../git';
+import type { IGitOperations } from '../../interfaces/IGitOperations';
 
 /**
  * Extended handler context with access to the {@link PlanRunner} instance.
@@ -23,6 +23,8 @@ import * as git from '../../git';
 export interface PlanHandlerContext extends ToolHandlerContext {
   /** The singleton PlanRunner orchestrating all plan execution. */
   PlanRunner: PlanRunner;
+  /** Git operations interface */
+  git: IGitOperations;
 }
 
 /**
@@ -145,10 +147,14 @@ export type NodeHandlerContext = PlanHandlerContext;
  * @param requested - Explicitly requested branch name (used as-is if provided).
  * @returns Resolved base branch name.
  */
-export async function resolveBaseBranch(repoPath: string, requested?: string): Promise<string> {
+export async function resolveBaseBranch(repoPath: string, git: IGitOperations, requested?: string): Promise<string> {
   if (requested) return requested;
-  const current = await git.branches.currentOrNull(repoPath);
-  return current || 'main';
+  try {
+    const current = await git.branches.currentOrNull(repoPath);
+    return current || 'main';
+  } catch {
+    return 'main';
+  }
 }
 
 /**
@@ -167,6 +173,7 @@ export async function resolveBaseBranch(repoPath: string, requested?: string): P
 export async function resolveTargetBranch(
   baseBranch: string,
   repoPath: string,
+  git: IGitOperations,
   requested?: string,
   planName?: string
 ): Promise<string> {
@@ -178,14 +185,20 @@ export async function resolveTargetBranch(
     const prefix = userPrefix || 'copilot_plan';
     
     // Generate a readable branch suffix from the plan name, or use short UUID
-    const branchSuffix = planName ? git.orchestrator.slugify(planName) : undefined;
+    // TODO: Add git.orchestrator to IGitOperations interface
+    // const branchSuffix = planName ? git.orchestrator.slugify(planName) : undefined;
+    const branchSuffix = planName ? planName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : undefined;
     
-    const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
-      baseBranch,
-      repoPath,
-      prefix,
-      branchSuffix
-    );
+    // TODO: Add git.orchestrator to IGitOperations interface
+    // const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
+    //   baseBranch,
+    //   repoPath,
+    //   prefix,
+    //   branchSuffix
+    // );
+    // For now, use simple branch name generation
+    const targetBranchRoot = branchSuffix ? `${prefix}/${branchSuffix}` : `${prefix}/${Date.now()}`;
+    const needsCreation = true;
     if (needsCreation) {
       const exists = await git.branches.exists(targetBranchRoot, repoPath);
       if (!exists) {

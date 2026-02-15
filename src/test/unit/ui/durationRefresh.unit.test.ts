@@ -8,6 +8,7 @@ import { suite, test } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { PlanTreeViewManager } from '../../../ui/planTreeProvider';
+import { PulseEmitter } from '../../../core/pulse';
 import { formatDurationMs } from '../../../ui/templates/helpers';
 
 // Mock PlanRunner for testing
@@ -66,40 +67,39 @@ suite('Plan Tree Duration Refresh', () => {
   });
 
   suite('Duration refresh timer', () => {
-    test('should start timer on construction when plans are running', () => {
+    test('should start pulse subscription on construction when plans are running', () => {
       mockPlanRunner.setMockPlans([{ id: '1', status: 'running', startedAt: Date.now() }]);
-      const manager = new PlanTreeViewManager(mockPlanRunner as any);
-      const setIntervalSpy = sinon.spy(global, 'setInterval');
+      const pulse = new PulseEmitter();
+      const manager = new PlanTreeViewManager(mockPlanRunner as any, pulse);
       
-      // Create tree view which starts the timer only when plans are running
       const mockContext = { subscriptions: [] };
       manager.createTreeView(mockContext as any);
       
-      assert.strictEqual(setIntervalSpy.called, true, 'setInterval should be called to start timer');
-      assert.strictEqual(setIntervalSpy.getCall(0).args[1], 1000, 'Timer should be set to 1000ms interval');
+      // Pulse should be running since onPulse auto-starts it
+      assert.strictEqual(pulse.isRunning, true, 'Pulse should be running after createTreeView');
       
       manager.dispose();
-      setIntervalSpy.restore();
     });
 
-    test('should not start timer on construction when no plans are running', () => {
+    test('should subscribe to pulse on construction even when no plans running', () => {
       mockPlanRunner.setMockPlans([{ id: '1', status: 'completed' }]);
-      const manager = new PlanTreeViewManager(mockPlanRunner as any);
-      const setIntervalSpy = sinon.spy(global, 'setInterval');
+      const pulse = new PulseEmitter();
+      const manager = new PlanTreeViewManager(mockPlanRunner as any, pulse);
       
       const mockContext = { subscriptions: [] };
       manager.createTreeView(mockContext as any);
       
-      assert.strictEqual(setIntervalSpy.called, false, 'setInterval should not be called when no plans running');
+      // Pulse is still running (subscriber exists), but tree won't refresh without running plans
+      assert.strictEqual(pulse.isRunning, true, 'Pulse should be running (subscriber exists)');
       
       manager.dispose();
-      setIntervalSpy.restore();
     });
     
     test('should fire tree data change event every second when plans running', () => {
       mockPlanRunner.setMockPlans([{ id: '1', status: 'running', startedAt: Date.now() }]);
       
-      const manager = new PlanTreeViewManager(mockPlanRunner as any);
+      const pulse = new PulseEmitter();
+      const manager = new PlanTreeViewManager(mockPlanRunner as any, pulse);
       const mockContext = { subscriptions: [] };
       manager.createTreeView(mockContext as any);
       
@@ -118,7 +118,8 @@ suite('Plan Tree Duration Refresh', () => {
     test('should not fire event when no plans are running', () => {
       mockPlanRunner.setMockPlans([{ id: '1', status: 'completed' }]);
       
-      const manager = new PlanTreeViewManager(mockPlanRunner as any);
+      const pulse = new PulseEmitter();
+      const manager = new PlanTreeViewManager(mockPlanRunner as any, pulse);
       const mockContext = { subscriptions: [] };
       manager.createTreeView(mockContext as any);
       
@@ -134,24 +135,22 @@ suite('Plan Tree Duration Refresh', () => {
       manager.dispose();
     });
     
-    test('should stop timer when disposed', () => {
+    test('should stop pulse subscription when disposed', () => {
       mockPlanRunner.setMockPlans([{ id: '1', status: 'running', startedAt: Date.now() }]);
-      const manager = new PlanTreeViewManager(mockPlanRunner as any);
+      const pulse = new PulseEmitter();
+      const manager = new PlanTreeViewManager(mockPlanRunner as any, pulse);
       const mockContext = { subscriptions: [] };
       manager.createTreeView(mockContext as any);
       
-      const clearIntervalSpy = sinon.spy(global, 'clearInterval');
-      
       manager.dispose();
       
-      assert.strictEqual(clearIntervalSpy.called, true, 'clearInterval should be called');
-      assert.strictEqual((manager as any)._refreshTimer, undefined, 'Timer should be undefined after dispose');
-      
-      clearIntervalSpy.restore();
+      // After dispose, pulse should auto-stop (no subscribers)
+      assert.strictEqual(pulse.isRunning, false, 'Pulse should stop after manager dispose');
     });
     
     test('should check hasRunningPlans correctly', () => {
-      const manager = new PlanTreeViewManager(mockPlanRunner as any);
+      const pulse = new PulseEmitter();
+      const manager = new PlanTreeViewManager(mockPlanRunner as any, pulse);
       
       // No running plans
       mockPlanRunner.setMockPlans([

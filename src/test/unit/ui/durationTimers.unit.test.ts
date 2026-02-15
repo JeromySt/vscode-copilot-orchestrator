@@ -8,6 +8,7 @@ import { suite, test, setup, teardown } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { PlanTreeViewManager, PlanTreeDataProvider } from '../../../ui/planTreeProvider';
+import { PulseEmitter } from '../../../core/pulse';
 import { formatDurationMs } from '../../../ui/templates/helpers';
 
 // Mock PlanRunner for testing
@@ -130,7 +131,8 @@ suite('Duration Timer Updates', () => {
   
   suite('Tree View Timer', () => {
     test('should fire _onDidChangeTreeData every second when plans running', () => {
-      const manager = new PlanTreeViewManager(mockRunner as any);
+      const pulse = new PulseEmitter();
+      const manager = new PlanTreeViewManager(mockRunner as any, pulse);
       
       // Setup running plan
       mockRunner.setMockPlans([{
@@ -156,7 +158,8 @@ suite('Duration Timer Updates', () => {
     });
     
     test('should NOT fire when no running plans', () => {
-      const manager = new PlanTreeViewManager(mockRunner as any);
+      const pulse = new PulseEmitter();
+      const manager = new PlanTreeViewManager(mockRunner as any, pulse);
       
       // Setup completed plan
       mockRunner.setMockPlans([{

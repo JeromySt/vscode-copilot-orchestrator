@@ -10,6 +10,7 @@
 import * as vscode from 'vscode';
 import { PlanRunner, PlanInstance } from '../plan';
 import { formatDurationMs } from './templates/helpers';
+import type { IPulseEmitter, Disposable as PulseDisposable } from '../interfaces/IPulseEmitter';
 
 /**
  * Tree item representing a plan in the TreeView
@@ -141,10 +142,9 @@ export class PlanTreeDataProvider implements vscode.TreeDataProvider<PlanTreeIte
 export class PlanTreeViewManager {
   private treeView: vscode.TreeView<PlanTreeItem> | undefined;
   private treeDataProvider: PlanTreeDataProvider;
-  private _refreshTimer: NodeJS.Timeout | undefined;
-  private readonly DURATION_REFRESH_INTERVAL = 1000;  // 1 second
+  private _pulseSubscription: PulseDisposable | undefined;
 
-  constructor(private planRunner: PlanRunner) {
+  constructor(private planRunner: PlanRunner, private _pulse: IPulseEmitter) {
     this.treeDataProvider = new PlanTreeDataProvider(planRunner);
   }
 
@@ -164,8 +164,12 @@ export class PlanTreeViewManager {
     // Subscribe to events for badge updates
     this.setupEventHandlers();
 
-    // Start duration refresh timer only if needed
-    this.updateTimerBasedOnState();
+    // Subscribe to pulse for duration refresh
+    this._pulseSubscription = this._pulse.onPulse(() => {
+      if (this.hasRunningPlans()) {
+        this.treeDataProvider.refresh();
+      }
+    });
 
     context.subscriptions.push(this.treeView);
     return this.treeView;
@@ -210,59 +214,19 @@ export class PlanTreeViewManager {
     
     // Node transitions can change plan status from pending to running
     this.planRunner.on('nodeTransition', () => this.updateBadge());
-    
-    // Update timer state when plan status changes
-    this.planRunner.on('planStarted', () => this.updateTimerBasedOnState());
-    this.planRunner.on('planCompleted', () => this.updateTimerBasedOnState());
-    this.planRunner.on('planDeleted', () => this.updateTimerBasedOnState());
   }
 
   /**
-   * Start a timer that refreshes tree view periodically while plans are running.
-   * This ensures duration displays update in real-time.
+   * Clean up pulse subscription on dispose
    */
-  private startDurationRefreshTimer(): void {
-    // Clear any existing timer
-    if (this._refreshTimer) {
-      clearInterval(this._refreshTimer);
-    }
-    
-    this._refreshTimer = setInterval(() => {
-      // Only refresh if there are running plans
-      if (this.hasRunningPlans()) {
-        this.treeDataProvider.refresh();
-      }
-    }, this.DURATION_REFRESH_INTERVAL);
-  }
-
-  /**
-   * Smart timer management - only run timer when there are running plans
-   */
-  private updateTimerBasedOnState(): void {
-    const hasRunning = this.hasRunningPlans();
-    
-    if (hasRunning && !this._refreshTimer) {
-      // Start timer - plans are running
-      this.startDurationRefreshTimer();
-    } else if (!hasRunning && this._refreshTimer) {
-      // Stop timer - no plans running
-      this.stopDurationRefreshTimer();
-    }
-  }
-
-  /**
-   * Stop the duration refresh timer
-   */
-  private stopDurationRefreshTimer(): void {
-    if (this._refreshTimer) {
-      clearInterval(this._refreshTimer);
-      this._refreshTimer = undefined;
+  public dispose(): void {
+    if (this._pulseSubscription) {
+      this._pulseSubscription.dispose();
     }
   }
 
   /**
    * Check if any plans are currently running or pending.
-   * Uses the same pattern as plansViewProvider for consistency.
    */
   private hasRunningPlans(): boolean {
     const plans = this.planRunner.getAll();
@@ -274,12 +238,5 @@ export class PlanTreeViewManager {
       }
     }
     return false;
-  }
-
-  /**
-   * Clean up timer on dispose
-   */
-  public dispose(): void {
-    this.stopDurationRefreshTimer();
   }
 }

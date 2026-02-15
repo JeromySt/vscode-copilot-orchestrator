@@ -420,6 +420,91 @@ export async function stashList(cwd: string): Promise<string[]> {
 }
 
 /**
+ * Stage a specific file.
+ */
+export async function stageFile(cwd: string, filePath: string, log?: GitLogger): Promise<void> {
+  await execAsync(['add', filePath], { cwd, log });
+}
+
+/**
+ * Get the diff of a specific file (unstaged changes).
+ */
+export async function getFileDiff(repoPath: string, filePath: string): Promise<string | null> {
+  return execAsyncOrNull(['diff', filePath], repoPath);
+}
+
+/**
+ * Get the diff of a specific file (staged changes).
+ */
+export async function getStagedFileDiff(repoPath: string, filePath: string): Promise<string | null> {
+  return execAsyncOrNull(['diff', '--cached', filePath], repoPath);
+}
+
+/**
+ * List files modified in the most recent stash.
+ */
+export async function stashShowFiles(repoPath: string): Promise<string[]> {
+  const result = await execAsyncOrNull(['stash', 'show', '--name-only'], repoPath);
+  return result ? result.split(/\r?\n/).filter(Boolean) : [];
+}
+
+/**
+ * Get the patch (diff) of the most recent stash.
+ */
+export async function stashShowPatch(repoPath: string): Promise<string | null> {
+  return execAsyncOrNull(['stash', 'show', '-p'], repoPath);
+}
+
+/**
+ * Check if there are changes between two refs.
+ */
+export async function hasChangesBetween(from: string, to: string, repoPath: string): Promise<boolean> {
+  const stats = await getDiffStats(from, to, repoPath);
+  return (stats.added + stats.modified + stats.deleted) > 0;
+}
+
+/**
+ * Clean untracked files and directories.
+ */
+export async function clean(cwd: string, log?: GitLogger): Promise<void> {
+  log?.(`[git] Cleaning untracked files`);
+  const result = await execAsync(['clean', '-fd'], { cwd });
+  if (result.success) {
+    log?.(`[git] ✓ Clean complete`);
+    return;
+  }
+  throw new Error(`Failed to clean: ${result.stderr}`);
+}
+
+/**
+ * Count commits between two refs.
+ */
+export async function getCommitCount(from: string, to: string, cwd: string): Promise<number> {
+  const result = await execAsyncOrNull(['rev-list', '--count', `${from}..${to}`], cwd);
+  return result ? (parseInt(result.trim(), 10) || 0) : 0;
+}
+
+/**
+ * Get file changes between two refs with file paths grouped by status.
+ */
+export async function getFileChangesBetween(from: string, to: string, cwd: string): Promise<FileChange[]> {
+  const result = await execAsyncOrNull(['diff', '--name-status', `${from}..${to}`], cwd);
+  if (!result) return [];
+
+  const statusMap: Record<string, FileChange['status']> = {
+    'A': 'added', 'M': 'modified', 'D': 'deleted', 'R': 'renamed', 'C': 'copied'
+  };
+
+  return result.split(/\r?\n/).filter(Boolean).map(line => {
+    const [status, ...pathParts] = line.split('\t');
+    return {
+      status: statusMap[status.charAt(0)] || 'modified',
+      path: pathParts.join('\t'),
+    };
+  });
+}
+
+/**
  * Get list of ignored files for troubleshooting.
  * Uses git status --ignored to show files excluded by .gitignore.
  */

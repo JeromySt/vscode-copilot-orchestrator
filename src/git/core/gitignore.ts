@@ -7,6 +7,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import type { GitLogger } from './executor';
+import { execAsync } from './executor';
 
 /**
  * Ensure .gitignore contains required entries for orchestrator temporary files.
@@ -111,4 +112,16 @@ export async function isOrchestratorGitIgnoreConfigured(workspaceRoot: string): 
   } catch {
     return false;
   }
+}
+
+/**
+ * Check if a path is ignored by git (via `git check-ignore`).
+ *
+ * @param repoPath - Repository root path
+ * @param relativePath - Path relative to repo root to check
+ * @returns true if the path is gitignored, false otherwise
+ */
+export async function isIgnored(repoPath: string, relativePath: string): Promise<boolean> {
+  const result = await execAsync(['check-ignore', '-q', relativePath], { cwd: repoPath });
+  return result.success; // exit code 0 = ignored, 1 = not ignored
 }

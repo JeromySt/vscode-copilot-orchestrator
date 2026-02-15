@@ -7,51 +7,11 @@
  * @module process/processMonitor
  */
 
-import { spawn } from 'child_process';
 import * as os from 'os';
 import { ProcessInfo, ProcessNode } from '../types';
 import { IProcessMonitor } from '../interfaces/IProcessMonitor';
-
-/**
- * Execute a command asynchronously and return stdout.
- */
-function execAsync(command: string, args: string[], timeoutMs = 5000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(command, args, {
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true
-    });
-    
-    let stdout = '';
-    let stderr = '';
-    let killed = false;
-    
-    const timer = setTimeout(() => {
-      killed = true;
-      proc.kill('SIGTERM');
-      reject(new Error(`Command timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    
-    proc.stdout?.on('data', (data) => { stdout += data.toString(); });
-    proc.stderr?.on('data', (data) => { stderr += data.toString(); });
-    
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      if (killed) return;
-      if (code === 0 || stdout) {
-        resolve(stdout);
-      } else {
-        reject(new Error(`Command failed with code ${code}: ${stderr}`));
-      }
-    });
-    
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-  });
-}
+import type { IProcessSpawner } from '../interfaces/IProcessSpawner';
+import { execCommand } from './processHelpers';
 
 /**
  * Process monitor implementation supporting Windows and Unix systems.
@@ -62,7 +22,7 @@ function execAsync(command: string, args: string[], timeoutMs = 5000): Promise<s
  * 
  * @example
  * ```typescript
- * const monitor = new ProcessMonitor();
+ * const monitor = new ProcessMonitor(spawner);
  * const snapshot = await monitor.getSnapshot();
  * const tree = monitor.buildTree([1234, 5678], snapshot);
  * ```
@@ -80,12 +40,16 @@ export class ProcessMonitor implements IProcessMonitor {
   private lastErrorTime = 0;
   /** Error throttle cooldown in ms */
   private readonly errorCooldownMs = 30000;
+  /** Process spawner for executing commands */
+  private readonly spawner: IProcessSpawner;
   
   /**
    * Create a new ProcessMonitor.
+   * @param spawner - Process spawner for command execution
    * @param cacheTtlMs - How long to cache snapshots (default: 2000ms)
    */
-  constructor(cacheTtlMs = 2000) {
+  constructor(spawner: IProcessSpawner, cacheTtlMs = 2000) {
+    this.spawner = spawner;
     this.cacheTtlMs = cacheTtlMs;
   }
   
@@ -240,7 +204,7 @@ export class ProcessMonitor implements IProcessMonitor {
       const psCommand = `$procs = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,WorkingSetSize,CreationDate,ThreadCount,HandleCount,Priority,ExecutablePath; $perf = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Select-Object IDProcess,PercentProcessorTime; $cpuMap = @{}; foreach ($p in $perf) { if ($p.IDProcess) { $cpuMap[$p.IDProcess] = $p.PercentProcessorTime } }; $result = @(); foreach ($proc in $procs) { $result += @{ ProcessId = $proc.ProcessId; ParentProcessId = $proc.ParentProcessId; Name = $proc.Name; CommandLine = $proc.CommandLine; WorkingSetSize = $proc.WorkingSetSize; CPU = if ($cpuMap.ContainsKey($proc.ProcessId)) { $cpuMap[$proc.ProcessId] } else { 0 }; CreationDate = if ($proc.CreationDate) { $proc.CreationDate.ToString('o') } else { $null }; ThreadCount = $proc.ThreadCount; HandleCount = $proc.HandleCount; Priority = $proc.Priority; ExecutablePath = $proc.ExecutablePath } }; $result | ConvertTo-Json`;
       
       // Increased timeout to 15s for high-load scenarios (many parallel jobs)
-      const output = await execAsync('powershell', ['-NoProfile', '-Command', psCommand], 15000);
+      const output = await execCommand(this.spawner, 'powershell', ['-NoProfile', '-Command', psCommand], 15000);
       
       const data = JSON.parse(output);
       const procs = Array.isArray(data) ? data : [data];
@@ -270,7 +234,7 @@ export class ProcessMonitor implements IProcessMonitor {
    */
   private async getUnixProcesses(): Promise<ProcessInfo[]> {
     try {
-      const output = await execAsync('ps', ['-eo', 'pid,ppid,%cpu,rss,comm,args'], 3000);
+      const output = await execCommand(this.spawner, 'ps', ['-eo', 'pid,ppid,%cpu,rss,comm,args'], 3000);
       
       const lines = output.trim().split('\n').slice(1); // Skip header
       const processes: ProcessInfo[] = [];
@@ -309,7 +273,7 @@ export class ProcessMonitor implements IProcessMonitor {
   private async terminateWindows(pid: number, force: boolean): Promise<void> {
     try {
       const args = force ? ['/F', '/T', '/PID', String(pid)] : ['/T', '/PID', String(pid)];
-      await execAsync('taskkill', args, 5000);
+      await execCommand(this.spawner, 'taskkill', args, 5000);
     } catch (e) {
       console.error(`Failed to terminate Windows process ${pid}:`, e);
     }
@@ -323,7 +287,7 @@ export class ProcessMonitor implements IProcessMonitor {
       // Get all descendant PIDs asynchronously
       let childPids: number[] = [];
       try {
-        const result = await execAsync('pgrep', ['-P', String(pid)], 2000);
+        const result = await execCommand(this.spawner, 'pgrep', ['-P', String(pid)], 2000);
         childPids = result.trim().split('\n').filter(p => p).map(p => parseInt(p, 10));
       } catch {
         // pgrep returns non-zero if no children found
@@ -346,8 +310,3 @@ export class ProcessMonitor implements IProcessMonitor {
   }
 }
 
-/**
- * Singleton instance for convenience.
- * Use dependency injection for testability.
- */
-export const processMonitor = new ProcessMonitor();

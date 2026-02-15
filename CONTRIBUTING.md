@@ -41,10 +41,13 @@ Thank you for your interest in contributing to Copilot Orchestrator! This docume
 
 | Command | Description |
 |---------|-------------|
-| `npm run compile` | Compile TypeScript once |
+| `npm run compile` | Compile TypeScript + esbuild bundle |
+| `npm run compile:tsc` | Compile TypeScript only (for tests) |
 | `npm run watch` | Compile in watch mode |
 | `npm run lint` | Run ESLint |
-| `npm test` | Run tests |
+| `npm run test:unit` | Run unit tests (headless) |
+| `npm test` | Run integration tests (VS Code Electron) |
+| `npm run test:coverage` | Run tests with 95% coverage enforcement |
 | `npm run package` | Create VSIX package |
 | `npm run deploy:local` | Build, package, and install locally (see below) |
 
@@ -69,30 +72,72 @@ After running, **reload VS Code** (Developer: Reload Window) to activate the new
 
 ```
 src/
-├── extension.ts          # Extension entry point (activation/deactivation)
-├── core/                 # Core business logic
-│   ├── jobRunner.ts      # Job execution engine
-│   └── initialize.ts     # Extension initialization
-├── agent/                # AI agent integration
-│   └── AgentDelegator.ts # Copilot CLI delegation
-├── commands/             # VS Code commands
-│   └── index.ts          # Command handlers
-├── git/                  # Git operations
-│   └── GitOperations.ts  # Worktree and merge operations
-├── http/                 # HTTP REST API
-│   └── httpServer.ts     # Express server
-├── mcp/                  # Model Context Protocol
-│   └── McpServerManager.ts # MCP server management
-├── process/              # Process monitoring
-│   └── WebhookNotifier.ts # Webhook notifications
-├── process/              # Process monitoring
-│   └── ProcessMonitor.ts # Child process tracking
-├── types/                # TypeScript definitions
-│   └── index.ts          # Shared types
-└── ui/                   # User interface
-    ├── statusBar.ts      # Status bar items
-    ├── viewProvider.ts   # Sidebar tree view
-    └── webview.ts        # Job details webview
+├── extension.ts            # Extension entry point (activation/deactivation)
+├── composition.ts          # Production DI composition root
+├── compositionTest.ts      # Test DI composition root
+├── core/                   # Core infrastructure
+│   ├── container.ts        # Symbol-based DI container
+│   ├── tokens.ts           # Service registration tokens (30+)
+│   ├── logger.ts           # Per-component logging with debug flags
+│   ├── pulse.ts            # Single heartbeat emitter for UI subscriptions
+│   ├── globalCapacity.ts   # Cross-instance job coordination (file-based)
+│   ├── powerManager.ts     # Sleep prevention (platform-specific)
+│   └── planInitialization.ts # Extension activation and wiring
+├── interfaces/             # DI interface contracts
+│   ├── IConfigProvider.ts  # Configuration abstraction
+│   ├── ICopilotRunner.ts   # Copilot CLI abstraction
+│   ├── IDialogService.ts   # Dialog abstraction
+│   ├── IGitOperations.ts   # Git operations abstraction
+│   ├── ILogger.ts          # Logger interface
+│   ├── IPhaseExecutor.ts   # Phase execution interface
+│   ├── IProcessSpawner.ts  # Process spawning abstraction
+│   └── IPulseEmitter.ts    # UI heartbeat interface
+├── vscode/                 # VS Code adapter layer
+│   ├── adapters.ts         # Production VS Code API wrappers
+│   └── testAdapters.ts     # Test doubles with call tracking
+├── agent/                  # AI agent integration
+│   ├── agentDelegator.ts   # Copilot CLI delegation
+│   ├── copilotCliRunner.ts # CLI runner with security (--add-dir, --allow-url)
+│   └── modelDiscovery.ts   # Model availability discovery
+├── plan/                   # Plan execution engine
+│   ├── executionEngine.ts  # Node-centric job execution engine
+│   ├── executionPump.ts    # Async execution pump for scheduling
+│   ├── executor.ts         # 7-phase executor pipeline
+│   ├── nodeManager.ts      # Centralized node state management
+│   ├── planEvents.ts       # Event pub/sub for plan lifecycle
+│   ├── planLifecycle.ts    # Plan CRUD operations
+│   ├── phases/             # Decomposed phase executors
+│   │   ├── mergeFiPhase.ts #   Forward integration merge
+│   │   ├── precheckPhase.ts#   Pre-execution checks
+│   │   ├── workPhase.ts    #   AI/shell work execution
+│   │   ├── commitPhase.ts  #   Evidence-based commit
+│   │   ├── postcheckPhase.ts#  Post-execution checks
+│   │   └── mergeRiPhase.ts #   Reverse integration merge
+│   ├── runner.ts           # Legacy plan runner (delegating)
+│   └── persistence.ts      # Plan file persistence
+├── mcp/                    # Model Context Protocol (stdio IPC)
+│   ├── handlers/           # MCP tool handlers
+│   ├── validation/         # Input validation (Ajv schemas)
+│   └── stdio/              # stdio JSON-RPC server
+├── git/                    # Git operations
+│   ├── DefaultGitOperations.ts # IGitOperations implementation
+│   └── core/               # Low-level git commands
+├── ui/                     # User interface
+│   ├── panels/             # Webview panels (plan detail, node detail)
+│   ├── templates/          # HTML template modules
+│   ├── webview/            # Reusable webview controls
+│   │   ├── controls/       # 15+ UI components
+│   │   ├── eventBus.ts     # Pub/sub for webview messaging
+│   │   └── subscribableControl.ts # Reactive base class
+│   ├── planTreeProvider.ts # Sidebar tree view
+│   └── plansViewProvider.ts# Plans management view
+├── process/                # Process monitoring
+│   └── processMonitor.ts   # Child process tracking
+└── test/
+    ├── unit/               # Unit tests (mocha + c8, headless)
+    │   ├── register-vscode-mock.js # VS Code API mock registration
+    │   └── ...             # Mirrors src/ structure
+    └── suite/              # Integration tests (@vscode/test-electron)
 ```
 
 ## Coding Standards
@@ -199,15 +244,59 @@ For feature requests, please describe:
 ### Running Tests
 
 ```bash
+# Unit tests (headless, fast — ~2400 tests)
+npm run test:unit
+
+# Integration tests (launches VS Code Electron)
 npm test
+
+# Coverage report (95% line threshold enforced)
+npm run test:coverage
 ```
+
+### Dual-Runner Architecture
+
+| Runner | Command | Use | Coverage |
+|--------|---------|-----|----------|
+| **mocha** (direct) | `npm run test:unit` | Unit tests — all `src/test/unit/**/*.unit.test.ts` | ✅ c8 instrumented |
+| **@vscode/test-electron** | `npm test` | Integration tests requiring VS Code runtime | ❌ No coverage |
 
 ### Writing Tests
 
-- Place tests in `src/test/`
-- Use descriptive test names
-- Test both success and error cases
-- Mock external dependencies
+- Place unit tests in `src/test/unit/` mirroring the `src/` structure
+- Use Mocha TDD interface (`suite`, `test`, `setup`, `teardown`)
+- Use Sinon for mocking/stubbing
+- Tests run headless via `register-vscode-mock.js` — no VS Code required
+- **Use DI interfaces**: Inject mock services instead of stubbing modules
+
+```typescript
+// ✅ Good: Use mock via DI
+const mockGit = createMockGitOperations();
+const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
+
+// ❌ Avoid: Stub module internals
+sinon.stub(git.worktrees, 'createOrReuseDetached');
+```
+
+### Coverage Requirements
+
+All PRs must maintain **95% line coverage**. Coverage is enforced by c8:
+```bash
+c8 --check-coverage --lines 95 --all \
+   --include "out/**/*.js" --exclude "out/test/**" --exclude "out/ui/**" \
+   mocha --ui tdd --exit "out/test/unit/**/*.unit.test.js"
+```
+
+## Dependency Injection
+
+New services should use the DI container:
+
+1. **Define an interface** in `src/interfaces/`
+2. **Create a token** in `src/core/tokens.ts`
+3. **Register in composition root** (`src/composition.ts` for production, `src/compositionTest.ts` for tests)
+4. **Inject via constructor** — avoid importing concrete implementations
+
+See `docs/DI_GUIDE.md` for comprehensive patterns and examples.
 
 ## Release Process
 

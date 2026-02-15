@@ -20,19 +20,23 @@ export {
   CopilotRunOptions,
   CopilotRunResult,
   CopilotCliLogger,
-  getCopilotCliRunner,
-  runCopilotCli,
+  BuildCommandOptions,
+  sanitizeUrl,
+  buildCommand,
 } from './copilotCliRunner';
 
 export {
   ModelInfo,
   ModelDiscoveryResult,
+  ModelDiscoveryDeps,
   classifyModel,
   parseModelChoices,
   discoverAvailableModels,
+  discoverAvailableModelsLegacy,
   getCachedModels,
   refreshModelCache,
   isValidModel,
   suggestModel,
   resetModelCache,
+  runCopilotHelp,
 } from './modelDiscovery';

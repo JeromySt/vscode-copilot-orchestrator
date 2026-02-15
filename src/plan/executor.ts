@@ -1,1851 +1,369 @@
 /**
- * @fileoverview Job Executor
- * 
- * Handles the actual execution of job nodes:
- * - Running shell commands (prechecks, work, postchecks)
- * - Delegating to @agent for AI tasks
- * - Tracking process trees
- * - Committing changes
- * - Computing work summaries
- * 
+ * @fileoverview Job Executor — slim orchestrator delegating phases to `./phases/`.
  * @module plan/executor
  */
 
-import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn, ChildProcess } from 'child_process';
-import { ProcessMonitor } from '../process';
 import { ProcessNode } from '../types';
+import type { IProcessSpawner, ChildProcessLike } from '../interfaces/IProcessSpawner';
+import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
+import { killProcessTree } from '../process/processHelpers';
 import {
-  JobNode,
-  ExecutionContext,
-  JobExecutionResult,
-  JobWorkSummary,
-  CommitDetail,
-  ExecutionPhase,
-  LogEntry,
-  WorkSpec,
-  ProcessSpec,
-  ShellSpec,
-  AgentSpec,
-  AgentExecutionMetrics,
-  CopilotUsageMetrics,
-  normalizeWorkSpec,
+  JobNode, ExecutionContext, JobExecutionResult,
+  JobWorkSummary, CommitDetail, ExecutionPhase, LogEntry, CopilotUsageMetrics,
 } from './types';
 import { JobExecutor } from './runner';
 import { Logger } from '../core/logger';
-import * as git from '../git';
-import { DefaultEvidenceValidator } from './evidenceValidator';
+import type { IGitOperations } from '../interfaces/IGitOperations';
+import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
 import { aggregateMetrics } from './metricsAggregator';
 import type { IEvidenceValidator } from '../interfaces';
+import type { PhaseContext } from '../interfaces/IPhaseExecutor';
 import { ensureOrchestratorDirs } from '../core';
-import { parseAiReviewResult } from './aiReviewUtils';
+import {
+  PrecheckPhaseExecutor, WorkPhaseExecutor,
+  PostcheckPhaseExecutor, CommitPhaseExecutor,
+  MergeFiPhaseExecutor, MergeRiPhaseExecutor,
+} from './phases';
+import type { CommitPhaseContext } from './phases';
+import {
+  computeWorkSummary, computeAggregatedWorkSummary,
+} from './workSummaryHelper';
+import {
+  getLogFilePathByKey, appendToLogFile, readLogsFromFile, readLogsFromFileOffset,
+} from './logFileHelper';
 
 const log = Logger.for('job-executor');
 
-/**
- * Active execution tracking
- */
 interface ActiveExecution {
   planId: string;
   nodeId: string;
-  process?: ChildProcess;
+  process?: ChildProcessLike;
   aborted: boolean;
   startTime?: number;
-  isAgentWork?: boolean; // true when running @agent work
-}
-
-/**
- * Adapt a shell command for Windows PowerShell 5.x compatibility.
- * Converts bash-style `&&` chains to PowerShell semicolons with
- * `$?` error-propagation guards, and rewrites common Unix commands.
- */
-function adaptCommandForPowerShell(command: string): string {
-  // Replace '&&' with '; if (!$?) { exit 1 }; ' for error-propagation semantics
-  let adapted = command.replace(/\s*&&\s*/g, '; if (!$?) { exit 1 }; ');
-
-  // Rewrite common Unix-style commands that don't work in PowerShell
-  adapted = adapted.replace(/\bls\s+-la\b/g, 'Get-ChildItem');
-
-  return adapted;
+  isAgentWork?: boolean;
 }
 
 /**
  * Default {@link JobExecutor} implementation.
- *
- * Handles:
- * - Running prechecks, work, and postchecks as process/shell/agent specs
- * - Tracking child process trees for monitoring
- * - Committing changes and computing work summaries
- * - Persisting execution logs to disk
- *
- * Processes are killed on cancellation, and logs are stored both in memory
- * and on disk (under `{storagePath}/logs/`).
+ * Orchestrates phase pipeline and delegates each phase to specialised executors.
  */
 export class DefaultJobExecutor implements JobExecutor {
   private activeExecutions = new Map<string, ActiveExecution>();
-  private activeExecutionsByNode = new Map<string, string>(); // planId:nodeId -> full execution key with attempt
+  private activeExecutionsByNode = new Map<string, string>();
   private executionLogs = new Map<string, LogEntry[]>();
-  private logFiles = new Map<string, string>(); // execution key -> log file path
-  private agentDelegator?: any; // IAgentDelegator interface
+  private logFiles = new Map<string, string>();
+  private agentDelegator?: any;
   private storagePath?: string;
-  private processMonitor = new ProcessMonitor();
-  private evidenceValidator: IEvidenceValidator = new DefaultEvidenceValidator();
-  
-  /**
-   * Configure the directory for persisted log files.
-   * Creates the `logs/` subdirectory if it doesn't exist.
-   *
-   * @param storagePath - Root storage directory.
-   */
-  setStoragePath(storagePath: string): void {
-    this.storagePath = storagePath;
-    // Ensure logs directory exists
-    const logsDir = path.join(storagePath, 'logs');
-    if (!fs.existsSync(logsDir)) {
-      fs.mkdirSync(logsDir, { recursive: true });
-    }
-  }
-  
-  /**
-   * Set the agent delegator used for `@agent` / {@link AgentSpec} tasks.
-   *
-   * @param delegator - Agent delegator implementing `delegate()`.
-   */
-  setAgentDelegator(delegator: any): void {
-    this.agentDelegator = delegator;
+  private processMonitor: IProcessMonitor;
+  private evidenceValidator: IEvidenceValidator;
+  private spawner: IProcessSpawner;
+  private git: IGitOperations;
+  private copilotRunner: ICopilotRunner;
+
+  constructor(spawner: IProcessSpawner, evidenceValidator: IEvidenceValidator, processMonitor: IProcessMonitor, git: IGitOperations, copilotRunner: ICopilotRunner) {
+    this.spawner = spawner;
+    this.evidenceValidator = evidenceValidator;
+    this.processMonitor = processMonitor;
+    this.git = git;
+    this.copilotRunner = copilotRunner;
   }
 
-  /**
-   * Set the evidence validator used during the commit phase.
-   *
-   * @param validator - Evidence validator implementing {@link IEvidenceValidator}.
-   */
-  setEvidenceValidator(validator: IEvidenceValidator): void {
-    this.evidenceValidator = validator;
+  setStoragePath(storagePath: string): void {
+    this.storagePath = storagePath;
+    const logsDir = path.join(storagePath, 'logs');
+    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
   }
-  
-  /**
-   * Get the isolated Copilot CLI config directory path.
-   * Ensures the directory exists before returning.
-   * 
-   * @returns Path to the isolated .copilot-cli config directory
-   */
-  private getCopilotConfigDir(): string {
-    if (!this.storagePath) {
-      throw new Error('Storage path not configured. Call setStoragePath() first.');
-    }
-    const configDir = path.join(this.storagePath, '.copilot-cli');
-    if (!fs.existsSync(configDir)) {
-      fs.mkdirSync(configDir, { recursive: true });
-    }
+
+  setAgentDelegator(delegator: any): void { this.agentDelegator = delegator; }
+  setEvidenceValidator(validator: IEvidenceValidator): void { this.evidenceValidator = validator; }
+
+  private getCopilotConfigDir(worktreePath: string): string {
+    // Store Copilot CLI config inside the worktree so session state is
+    // isolated per node and cleaned up when the worktree is removed.
+    const configDir = path.join(worktreePath, '.copilot-cli');
+    if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
     return configDir;
   }
-  
-  /**
-   * Execute a job node: runs prechecks → work → postchecks → commit.
-   *
-   * Each phase is logged with section markers. If any phase fails, the
-   * remaining phases are skipped and the failure phase is recorded.
-   *
-   * @param context - Execution context (plan, node, worktree path, abort signal).
-   * @returns Result with success/failure, optional commit SHA, and per-phase statuses.
-   */
+
+  // ===========================================================================
+  // EXECUTE — Phase pipeline
+  // ===========================================================================
+
   async execute(context: ExecutionContext): Promise<JobExecutionResult> {
     const { plan, node, worktreePath, attemptNumber } = context;
-    // Include attempt number in execution key for separate log files per attempt
     const executionKey = `${plan.id}:${node.id}:${attemptNumber}`;
-    
-    // Track this execution
-    const execution: ActiveExecution = {
-      planId: plan.id,
-      nodeId: node.id,
-      aborted: false,
-    };
-    this.activeExecutions.set(executionKey, execution);
-    // Also track by node key for easy lookup without attempt number
     const nodeKey = `${plan.id}:${node.id}`;
+
+    const execution: ActiveExecution = { planId: plan.id, nodeId: node.id, aborted: false };
+    this.activeExecutions.set(executionKey, execution);
     this.activeExecutionsByNode.set(nodeKey, executionKey);
     this.executionLogs.set(executionKey, []);
-    
-    // Track per-phase statuses and captured session ID
-    // Start with previous statuses if resuming from a failed phase
-    const stepStatuses: JobExecutionResult['stepStatuses'] = context.previousStepStatuses 
-      ? { ...context.previousStepStatuses } 
-      : {};
+
+    const stepStatuses: JobExecutionResult['stepStatuses'] = context.previousStepStatuses ? { ...context.previousStepStatuses } : {};
     let capturedSessionId: string | undefined = context.copilotSessionId;
     let capturedMetrics: CopilotUsageMetrics | undefined;
     const phaseMetrics: Record<string, CopilotUsageMetrics> = {};
-    
-    // Determine which phases to skip based on resumeFromPhase
-    const phaseOrder = ['prechecks', 'work', 'postchecks', 'commit'] as const;
-    const resumeIndex = context.resumeFromPhase 
-      ? phaseOrder.indexOf(context.resumeFromPhase as any)
-      : 0;
-    const shouldSkipPhase = (phase: typeof phaseOrder[number]) => {
-      const phaseIndex = phaseOrder.indexOf(phase);
-      return phaseIndex < resumeIndex;
-    };
-    
+
+    const phaseOrder = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
+    const resumeIndex = context.resumeFromPhase ? phaseOrder.indexOf(context.resumeFromPhase as any) : 0;
+    const skip = (p: typeof phaseOrder[number]) => phaseOrder.indexOf(p) < resumeIndex;
+    const phaseDeps = () => ({ 
+      agentDelegator: this.agentDelegator, 
+      getCopilotConfigDir: (wtp: string) => this.getCopilotConfigDir(wtp),
+      spawner: this.spawner,
+      git: this.git,
+      copilotRunner: this.copilotRunner,
+      configManager: undefined, // TODO: Pass config manager if available
+    });
+    const makeCtx = (phase: ExecutionPhase): PhaseContext => ({
+      node, worktreePath, executionKey, phase,
+      logInfo: (m) => this.logEntry(executionKey, phase, 'info', m),
+      logError: (m) => this.logEntry(executionKey, phase, 'error', m),
+      logOutput: (t, m) => this.logEntry(executionKey, phase, t, m),
+      isAborted: () => execution.aborted,
+      setProcess: (p) => { execution.process = p; },
+      setStartTime: (t) => { execution.startTime = t; },
+      setIsAgentWork: (v) => { execution.isAgentWork = v; },
+    });
+    const pmk = (n: string) => Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined;
+
     try {
-      // Ensure worktree exists
-      if (!fs.existsSync(worktreePath)) {
-        return {
-          success: false,
-          error: `Worktree does not exist: ${worktreePath}`,
-          stepStatuses,
-          failedPhase: 'prechecks',
-          pid: execution.process?.pid,
-        };
-      }
-      
-      // Run prechecks (skip if resuming from later phase)
-      if (shouldSkipPhase('prechecks')) {
-        this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION (SKIPPED - RESUMING) ==========');
-        // stepStatuses.prechecks already preserved from previousStepStatuses
-      } else if (node.prechecks) {
-        context.onProgress?.('Running prechecks');
-        context.onStepStatusChange?.('prechecks', 'running');
-        this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION START ==========');
-        
-        const precheckResult = await this.runWorkSpec(
-          node.prechecks,
-          worktreePath,
-          execution,
-          executionKey,
-          'prechecks',
-          node
-        );
-        
-        // Capture session ID and metrics from prechecks (relevant for auto-heal agent specs)
-        if (precheckResult.copilotSessionId) {
-          capturedSessionId = precheckResult.copilotSessionId;
-        }
-        if (precheckResult.metrics) {
-          capturedMetrics = precheckResult.metrics;
-          phaseMetrics['prechecks'] = precheckResult.metrics;
-        }
-        
-        this.logInfo(executionKey, 'prechecks', '========== PRECHECKS SECTION END ==========');
-        
-        if (!precheckResult.success) {
-          stepStatuses.prechecks = 'failed';
-          context.onStepStatusChange?.('prechecks', 'failed');
-          return {
-            success: false,
-            error: `Prechecks failed: ${precheckResult.error}`,
-            stepStatuses,
-            copilotSessionId: capturedSessionId,
-            failedPhase: 'prechecks',
-            exitCode: precheckResult.exitCode,
-            metrics: capturedMetrics,
-            phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
-            pid: execution.process?.pid,
-          };
-        }
-        stepStatuses.prechecks = 'success';
-        context.onStepStatusChange?.('prechecks', 'success');
+      if (!fs.existsSync(worktreePath))
+        return { success: false, error: `Worktree does not exist: ${worktreePath}`, stepStatuses, failedPhase: 'merge-fi', pid: execution.process?.pid };
+
+      // ---- MERGE-FI ----
+      if (skip('merge-fi')) { this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION (SKIPPED - RESUMING) =========='); }
+      else if (context.dependencyCommits && context.dependencyCommits.length > 0) {
+        context.onProgress?.('Forward integration merge'); context.onStepStatusChange?.('merge-fi', 'running');
+        this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION START ==========');
+        const ctx = makeCtx('merge-fi'); 
+        ctx.dependencyCommits = context.dependencyCommits;
+        const r = await new MergeFiPhaseExecutor(phaseDeps()).execute(ctx);
+        if (r.metrics) { capturedMetrics = r.metrics; phaseMetrics['merge-fi'] = r.metrics; }
+        this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION END ==========');
+        if (!r.success) { stepStatuses['merge-fi'] = 'failed'; context.onStepStatusChange?.('merge-fi', 'failed'); return { success: false, error: `Forward integration merge failed: ${r.error}`, stepStatuses, failedPhase: 'merge-fi', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+        stepStatuses['merge-fi'] = 'success'; context.onStepStatusChange?.('merge-fi', 'success');
+      } else { stepStatuses['merge-fi'] = 'skipped'; context.onStepStatusChange?.('merge-fi', 'skipped'); }
+      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };
+
+      // ---- PRECHECKS ----
+      if (skip('prechecks')) { this.logEntry(executionKey, 'prechecks', 'info', '========== PRECHECKS SECTION (SKIPPED - RESUMING) =========='); }
+      else if (node.prechecks) {
+        context.onProgress?.('Running prechecks'); context.onStepStatusChange?.('prechecks', 'running');
+        this.logEntry(executionKey, 'prechecks', 'info', '========== PRECHECKS SECTION START ==========');
+        const ctx = makeCtx('prechecks'); ctx.workSpec = node.prechecks; ctx.sessionId = capturedSessionId;
+        const r = await new PrecheckPhaseExecutor(phaseDeps()).execute(ctx);
+        if (r.copilotSessionId) capturedSessionId = r.copilotSessionId;
+        if (r.metrics) { capturedMetrics = r.metrics; phaseMetrics['prechecks'] = r.metrics; }
+        this.logEntry(executionKey, 'prechecks', 'info', '========== PRECHECKS SECTION END ==========');
+        if (!r.success) { stepStatuses.prechecks = 'failed'; context.onStepStatusChange?.('prechecks', 'failed'); return { success: false, error: `Prechecks failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'prechecks', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+        stepStatuses.prechecks = 'success'; context.onStepStatusChange?.('prechecks', 'success');
+      } else { stepStatuses.prechecks = 'skipped'; context.onStepStatusChange?.('prechecks', 'skipped'); }
+      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };
+
+      // ---- WORK ----
+      if (skip('work')) { this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION (SKIPPED - RESUMING) =========='); }
+      else if (node.work) {
+        context.onProgress?.('Running work'); context.onStepStatusChange?.('work', 'running');
+        this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION START ==========');
+        const ctx = makeCtx('work'); ctx.workSpec = node.work; ctx.sessionId = capturedSessionId;
+        const r = await new WorkPhaseExecutor(phaseDeps()).execute(ctx);
+        if (r.copilotSessionId) capturedSessionId = r.copilotSessionId;
+        if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['work'] = r.metrics; }
+        this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION END ==========');
+        if (!r.success) { stepStatuses.work = 'failed'; context.onStepStatusChange?.('work', 'failed'); log.info(`[executor.execute] Returning failure: ${r.error}`, { planId: plan.id, nodeId: node.id }); return { success: false, error: `Work failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'work', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+        stepStatuses.work = 'success'; context.onStepStatusChange?.('work', 'success');
       } else {
-        stepStatuses.prechecks = 'skipped';
-        context.onStepStatusChange?.('prechecks', 'skipped');
+        this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION START ==========');
+        this.logEntry(executionKey, 'work', 'info', 'No work specified - skipping');
+        this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION END ==========');
+        log.warn(`Job ${node.name} has no work specified`); stepStatuses.work = 'skipped'; context.onStepStatusChange?.('work', 'skipped');
       }
-      
-      // Check if aborted
-      if (execution.aborted) {
-        return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };
-      }
-      
-      // Run main work (skip if resuming from later phase)
-      if (shouldSkipPhase('work')) {
-        this.logInfo(executionKey, 'work', '========== WORK SECTION (SKIPPED - RESUMING) ==========');
-        // stepStatuses.work already preserved from previousStepStatuses
-      } else if (node.work) {
-        context.onProgress?.('Running work');
-        context.onStepStatusChange?.('work', 'running');
-        this.logInfo(executionKey, 'work', '========== WORK SECTION START ==========');
-        
-        const workResult = await this.runWorkSpec(
-          node.work,
-          worktreePath,
-          execution,
-          executionKey,
-          'work',
-          node,
-          capturedSessionId // Pass existing session ID for resumption
-        );
-        
-        // Capture session ID from agent work
-        if (workResult.copilotSessionId) {
-          capturedSessionId = workResult.copilotSessionId;
-        }
-        
-        // Capture agent execution metrics
-        if (workResult.metrics) {
-          capturedMetrics = capturedMetrics
-            ? aggregateMetrics([capturedMetrics, workResult.metrics])
-            : workResult.metrics;
-          phaseMetrics['work'] = workResult.metrics;
-        }
-        
-        this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
-        
-        if (!workResult.success) {
-          stepStatuses.work = 'failed';
-          context.onStepStatusChange?.('work', 'failed');
-          log.info(`[executor.execute] Returning failure: ${workResult.error}`, { planId: plan.id, nodeId: node.id });
-          return {
-            success: false,
-            error: `Work failed: ${workResult.error}`,
-            stepStatuses,
-            copilotSessionId: capturedSessionId,
-            failedPhase: 'work',
-            exitCode: workResult.exitCode,
-            metrics: capturedMetrics,
-            phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
-            pid: execution.process?.pid,
-          };
-        }
-        stepStatuses.work = 'success';
-        context.onStepStatusChange?.('work', 'success');
-      } else {
-        // No work command - this is unusual but not an error
-        this.logInfo(executionKey, 'work', '========== WORK SECTION START ==========');
-        this.logInfo(executionKey, 'work', 'No work specified - skipping');
-        this.logInfo(executionKey, 'work', '========== WORK SECTION END ==========');
-        log.warn(`Job ${node.name} has no work specified`);
-        stepStatuses.work = 'skipped';
-        context.onStepStatusChange?.('work', 'skipped');
-      }
-      
-      // Check if aborted
-      if (execution.aborted) {
-        return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId, pid: execution.process?.pid };
-      }
-      
-      // Run postchecks (skip if resuming from later phase)
-      if (shouldSkipPhase('postchecks')) {
-        this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION (SKIPPED - RESUMING) ==========');
-        // stepStatuses.postchecks already preserved from previousStepStatuses
-      } else if (node.postchecks) {
-        context.onProgress?.('Running postchecks');
-        context.onStepStatusChange?.('postchecks', 'running');
-        this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION START ==========');
-        
-        const postcheckResult = await this.runWorkSpec(
-          node.postchecks,
-          worktreePath,
-          execution,
-          executionKey,
-          'postchecks',
-          node
-        );
-        
-        // Capture session ID and metrics from postchecks (relevant for auto-heal agent specs)
-        if (postcheckResult.copilotSessionId) {
-          capturedSessionId = postcheckResult.copilotSessionId;
-        }
-        if (postcheckResult.metrics) {
-          capturedMetrics = capturedMetrics
-            ? aggregateMetrics([capturedMetrics, postcheckResult.metrics])
-            : postcheckResult.metrics;
-          phaseMetrics['postchecks'] = postcheckResult.metrics;
-        }
-        
-        this.logInfo(executionKey, 'postchecks', '========== POSTCHECKS SECTION END ==========');
-        
-        if (!postcheckResult.success) {
-          stepStatuses.postchecks = 'failed';
-          context.onStepStatusChange?.('postchecks', 'failed');
-          return {
-            success: false,
-            error: `Postchecks failed: ${postcheckResult.error}`,
-            stepStatuses,
-            copilotSessionId: capturedSessionId,
-            failedPhase: 'postchecks',
-            exitCode: postcheckResult.exitCode,
-            metrics: capturedMetrics,
-            phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
-            pid: execution.process?.pid,
-          };
-        }
-        stepStatuses.postchecks = 'success';
-        context.onStepStatusChange?.('postchecks', 'success');
-      } else {
-        stepStatuses.postchecks = 'skipped';
-        context.onStepStatusChange?.('postchecks', 'skipped');
-      }
-      
-      // Check if aborted
-      if (execution.aborted) {
-        return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
-      }
-      
-      // Commit changes
-      // When resuming from postchecks or later, work was already validated
-      // in a prior attempt. If commitChanges finds no evidence (work was a
-      // no-op — e.g., files already committed by a dependency), that's OK.
-      const workWasSkipped = shouldSkipPhase('work');
-      context.onProgress?.('Committing changes');
-      context.onStepStatusChange?.('commit', 'running');
-      this.logInfo(executionKey, 'commit', '========== COMMIT SECTION START ==========');
-      const commitResult = await this.commitChanges(
-        node,
-        worktreePath,
-        executionKey,
-        context.baseCommit
-      );
-      this.logInfo(executionKey, 'commit', '========== COMMIT SECTION END ==========');
-      
-      // Merge any AI review metrics from the commit phase into captured metrics
-      if (commitResult.reviewMetrics) {
-        phaseMetrics['commit'] = commitResult.reviewMetrics;
-        capturedMetrics = capturedMetrics
-          ? aggregateMetrics([capturedMetrics, commitResult.reviewMetrics])
-          : commitResult.reviewMetrics;
-      }
-      
-      if (!commitResult.success) {
-        if (workWasSkipped) {
-          // Work was skipped (resume from postchecks or later). The prior work
-          // phase already validated — a no-op commit is acceptable.
-          this.logInfo(executionKey, 'commit',
-            'Commit found no evidence, but work was skipped (resuming). Succeeding without commit.');
-          stepStatuses.commit = 'success';
-          context.onStepStatusChange?.('commit', 'success');
-        } else {
-          stepStatuses.commit = 'failed';
-          context.onStepStatusChange?.('commit', 'failed');
-          return {
-            success: false,
-            error: `Commit failed: ${commitResult.error}`,
-            stepStatuses,
-            copilotSessionId: capturedSessionId,
-            failedPhase: 'commit',
-            metrics: capturedMetrics,
-            phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
-            pid: execution.process?.pid,
-          };
-        }
-      } else {
-        stepStatuses.commit = 'success';
-        context.onStepStatusChange?.('commit', 'success');
-      }
-      
-      // Get work summary
-      const workSummary = await this.computeWorkSummary(
-        node,
-        worktreePath,
-        context.baseCommit
-      );
-      
-      return {
-        success: true,
-        completedCommit: commitResult.commit,
-        workSummary,
-        stepStatuses,
-        copilotSessionId: capturedSessionId,
-        metrics: capturedMetrics,
-        phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
-        pid: execution.process?.pid,
-      };
-      
+      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId, pid: execution.process?.pid };
+
+      // ---- POSTCHECKS ----
+      if (skip('postchecks')) { this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION (SKIPPED - RESUMING) =========='); }
+      else if (node.postchecks) {
+        context.onProgress?.('Running postchecks'); context.onStepStatusChange?.('postchecks', 'running');
+        this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION START ==========');
+        const ctx = makeCtx('postchecks'); ctx.workSpec = node.postchecks; ctx.sessionId = capturedSessionId;
+        const r = await new PostcheckPhaseExecutor(phaseDeps()).execute(ctx);
+        if (r.copilotSessionId) capturedSessionId = r.copilotSessionId;
+        if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['postchecks'] = r.metrics; }
+        this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION END ==========');
+        if (!r.success) { stepStatuses.postchecks = 'failed'; context.onStepStatusChange?.('postchecks', 'failed'); return { success: false, error: `Postchecks failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'postchecks', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+        stepStatuses.postchecks = 'success'; context.onStepStatusChange?.('postchecks', 'success');
+      } else { stepStatuses.postchecks = 'skipped'; context.onStepStatusChange?.('postchecks', 'skipped'); }
+      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
+
+      // ---- COMMIT ----
+      const workWasSkipped = skip('work');
+      context.onProgress?.('Committing changes'); context.onStepStatusChange?.('commit', 'running');
+      this.logEntry(executionKey, 'commit', 'info', '========== COMMIT SECTION START ==========');
+      const commitCtx: CommitPhaseContext = { ...makeCtx('commit'), baseCommit: context.baseCommit, getExecutionLogs: () => this.executionLogs.get(executionKey) || [] };
+      const cr = await new CommitPhaseExecutor({ evidenceValidator: this.evidenceValidator, ...phaseDeps() }).execute(commitCtx);
+      this.logEntry(executionKey, 'commit', 'info', '========== COMMIT SECTION END ==========');
+      if (cr.reviewMetrics) { phaseMetrics['commit'] = cr.reviewMetrics; capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, cr.reviewMetrics]) : cr.reviewMetrics; }
+      if (!cr.success) {
+        if (workWasSkipped) { this.logEntry(executionKey, 'commit', 'info', 'Commit found no evidence, but work was skipped (resuming). Succeeding without commit.'); stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
+        else { stepStatuses.commit = 'failed'; context.onStepStatusChange?.('commit', 'failed'); return { success: false, error: `Commit failed: ${cr.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'commit', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+      } else { stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
+
+      // ---- POSTCHECKS ----
+      if (skip('postchecks')) { this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION (SKIPPED - RESUMING) =========='); }
+      else if (node.postchecks) {
+        context.onProgress?.('Running postchecks'); context.onStepStatusChange?.('postchecks', 'running');
+        this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION START ==========');
+        const ctx = makeCtx('postchecks'); ctx.workSpec = node.postchecks; ctx.sessionId = capturedSessionId;
+        const r = await new PostcheckPhaseExecutor(phaseDeps()).execute(ctx);
+        if (r.copilotSessionId) capturedSessionId = r.copilotSessionId;
+        if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['postchecks'] = r.metrics; }
+        this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION END ==========');
+        if (!r.success) { stepStatuses.postchecks = 'failed'; context.onStepStatusChange?.('postchecks', 'failed'); return { success: false, error: `Postchecks failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'postchecks', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+        stepStatuses.postchecks = 'success'; context.onStepStatusChange?.('postchecks', 'success');
+      } else { stepStatuses.postchecks = 'skipped'; context.onStepStatusChange?.('postchecks', 'skipped'); }
+      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
+
+      // ---- MERGE-RI ----
+      if (skip('merge-ri')) { this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION (SKIPPED - RESUMING) =========='); }
+      else if (context.targetBranch && context.repoPath) {
+        context.onProgress?.('Reverse integration merge'); context.onStepStatusChange?.('merge-ri', 'running');
+        this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION START ==========');
+        const ctx = makeCtx('merge-ri'); 
+        ctx.repoPath = context.repoPath;
+        ctx.targetBranch = context.targetBranch;
+        ctx.baseCommitAtStart = context.baseCommitAtStart;
+        ctx.completedCommit = cr.commit;
+        ctx.baseCommit = context.baseCommit;
+        const r = await new MergeRiPhaseExecutor(phaseDeps()).execute(ctx);
+        if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['merge-ri'] = r.metrics; }
+        this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION END ==========');
+        if (!r.success) { stepStatuses['merge-ri'] = 'failed'; context.onStepStatusChange?.('merge-ri', 'failed'); return { success: false, error: `Reverse integration merge failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'merge-ri', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+        stepStatuses['merge-ri'] = 'success'; context.onStepStatusChange?.('merge-ri', 'success');
+      } else { stepStatuses['merge-ri'] = 'skipped'; context.onStepStatusChange?.('merge-ri', 'skipped'); }
+
+      const ws = await computeWorkSummary(node, worktreePath, context.baseCommit, this.git);
+      return { success: true, completedCommit: cr.commit, workSummary: ws, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid };
     } catch (error: any) {
       log.error(`Execution error: ${node.name}`, { error: error.message });
-      return {
-        success: false,
-        error: error.message,
-        stepStatuses,
-        copilotSessionId: capturedSessionId,
-        metrics: capturedMetrics,
-        phaseMetrics: Object.keys(phaseMetrics).length > 0 ? phaseMetrics : undefined,
-        pid: execution.process?.pid,
-      };
+      return { success: false, error: error.message, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid };
     } finally {
       this.activeExecutions.delete(executionKey);
-      const nodeKey = `${plan.id}:${node.id}`;
       this.activeExecutionsByNode.delete(nodeKey);
     }
   }
-  
-  /**
-   * Cancel a running execution by killing its process tree.
-   *
-   * @param planId - Plan identifier.
-   * @param nodeId - Node identifier.
-   */
-  cancel(planId: string, nodeId: string): void {
+
+  // ===========================================================================
+  // CANCEL / QUERY
+  // ===========================================================================
+
+  async cancel(planId: string, nodeId: string): Promise<void> {
     const nodeKey = `${planId}:${nodeId}`;
     const executionKey = this.activeExecutionsByNode.get(nodeKey);
     if (!executionKey) return;
-    
     const execution = this.activeExecutions.get(executionKey);
-    
     if (execution) {
-      // Capture call stack for debugging
       const stack = new Error().stack;
-      log.warn(`Executor.cancel() called`, {
-        planId,
-        nodeId,
-        pid: execution.process?.pid,
-        stack: stack?.split('\n').slice(1, 5).join('\n'),
-      });
-
+      log.warn(`Executor.cancel() called`, { planId, nodeId, pid: execution.process?.pid, stack: stack?.split('\n').slice(1, 5).join('\n') });
       execution.aborted = true;
-      if (execution.process) {
+      if (execution.process?.pid) {
         log.info(`Killing process PID ${execution.process.pid} for execution: ${executionKey}`);
-        try {
-          // Kill the process tree
-          if (process.platform === 'win32') {
-            spawn('taskkill', ['/pid', String(execution.process.pid), '/f', '/t']);
-          } else {
-            execution.process.kill('SIGTERM');
-          }
-        } catch (e) {
-          // Ignore kill errors
-        }
+        try { 
+          await killProcessTree(this.spawner, execution.process.pid, true);
+        } catch { /* ignore */ }
       }
     }
   }
-  
-  /**
-   * Get all in-memory log entries for a job execution.
-   *
-   * @param planId - Plan identifier.
-   * @param nodeId - Node identifier.
-   * @returns Array of log entries, empty if no logs exist.
-   */
-  getLogs(planId: string, nodeId: string): LogEntry[] {
-    const executionKey = `${planId}:${nodeId}`;
-    return this.executionLogs.get(executionKey) || [];
+
+  getLogs(planId: string, nodeId: string): LogEntry[] { return this.executionLogs.get(`${planId}:${nodeId}`) || []; }
+  getLogsForPhase(planId: string, nodeId: string, phase: ExecutionPhase): LogEntry[] { return this.getLogs(planId, nodeId).filter(e => e.phase === phase); }
+  getLogFileSize(planId: string, nodeId: string): number { const f = getLogFilePathByKey(`${planId}:${nodeId}`, this.storagePath, this.logFiles); if (!f || !fs.existsSync(f)) return 0; try { return fs.statSync(f).size; } catch { return 0; } }
+  isActive(planId: string, nodeId: string): boolean { return this.activeExecutionsByNode.has(`${planId}:${nodeId}`); }
+
+  log(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string, attemptNumber?: number): void {
+    const executionKey = attemptNumber ? `${planId}:${nodeId}:${attemptNumber}` : `${planId}:${nodeId}`;
+    if (!this.executionLogs.has(executionKey)) this.executionLogs.set(executionKey, []);
+    this.logEntry(executionKey, phase, type, message);
   }
-  
-  /**
-   * Get log entries filtered to a specific execution phase.
-   *
-   * @param planId - Plan identifier.
-   * @param nodeId - Node identifier.
-   * @param phase  - The execution phase to filter by.
-   * @returns Filtered log entries.
-   */
-  getLogsForPhase(planId: string, nodeId: string, phase: ExecutionPhase): LogEntry[] {
-    return this.getLogs(planId, nodeId).filter(entry => entry.phase === phase);
-  }
-  
-  /**
-   * Get the current size of the log file for a job execution.
-   *
-   * @param planId - Plan identifier.
-   * @param nodeId - Node identifier.
-   * @returns File size in bytes, or 0 if no log file exists.
-   */
-  getLogFileSize(planId: string, nodeId: string): number {
-    const executionKey = `${planId}:${nodeId}`;
-    const logFile = this.getLogFilePathByKey(executionKey);
-    if (!logFile || !fs.existsSync(logFile)) return 0;
-    try {
-      return fs.statSync(logFile).size;
-    } catch {
-      return 0;
-    }
-  }
-  
-  /**
-   * Get OS-level process stats for a running execution.
-   *
-   * @param planId - Plan identifier.
-   * @param nodeId - Node identifier.
-   * @returns Process info; fields are `null` when the process is not tracked.
-   */
-  async getProcessStats(planId: string, nodeId: string): Promise<{
-    pid: number | null;
-    running: boolean;
-    tree: ProcessNode[];
-    duration: number | null;
-    isAgentWork?: boolean;
-  }> {
-    const nodeKey = `${planId}:${nodeId}`;
-    const executionKey = this.activeExecutionsByNode.get(nodeKey);
-    if (!executionKey) {
-      return { pid: null, running: false, tree: [], duration: null };
-    }
-    const execution = this.activeExecutions.get(executionKey);
-    
-    if (!execution) {
-      return { pid: null, running: false, tree: [], duration: null };
-    }
-    
-    const duration = execution.startTime ? Date.now() - execution.startTime : null;
-    
-    // Agent work without a process yet
-    if (execution.isAgentWork && !execution.process?.pid) {
-      return { pid: null, running: true, tree: [], duration, isAgentWork: true };
-    }
-    
-    if (!execution.process?.pid) {
-      return { pid: null, running: false, tree: [], duration: null };
-    }
-    
-    const pid = execution.process.pid;
-    const running = this.processMonitor.isRunning(pid);
-    
-    // Build process tree
+
+  // ===========================================================================
+  // PROCESS STATS
+  // ===========================================================================
+
+  async getProcessStats(planId: string, nodeId: string): Promise<{ pid: number | null; running: boolean; tree: ProcessNode[]; duration: number | null; isAgentWork?: boolean }> {
+    const ek = this.activeExecutionsByNode.get(`${planId}:${nodeId}`);
+    if (!ek) return { pid: null, running: false, tree: [], duration: null };
+    const ex = this.activeExecutions.get(ek);
+    if (!ex) return { pid: null, running: false, tree: [], duration: null };
+    const duration = ex.startTime ? Date.now() - ex.startTime : null;
+    if (ex.isAgentWork && !ex.process?.pid) return { pid: null, running: true, tree: [], duration, isAgentWork: true };
+    if (!ex.process?.pid) return { pid: null, running: false, tree: [], duration: null };
+    const pid = ex.process.pid, running = this.processMonitor.isRunning(pid);
     let tree: ProcessNode[] = [];
-    try {
-      const snapshot = await this.processMonitor.getSnapshot();
-      tree = this.processMonitor.buildTree([pid], snapshot);
-    } catch {
-      // Ignore process tree errors
-    }
-    
-    return { pid, running, tree, duration, isAgentWork: execution.isAgentWork };
+    try { const snap = await this.processMonitor.getSnapshot(); tree = this.processMonitor.buildTree([pid], snap); } catch { /* ignore */ }
+    return { pid, running, tree, duration, isAgentWork: ex.isAgentWork };
   }
-  
-  /**
-   * Get process stats for multiple executions in a single OS process snapshot.
-   *
-   * More efficient than individual {@link getProcessStats} calls when monitoring
-   * many nodes simultaneously.
-   *
-   * @param nodeKeys - Array of plan/node/name tuples to query.
-   * @returns Array of process stats in the same order as input (missing entries omitted).
-   */
-  async getAllProcessStats(nodeKeys: Array<{ planId: string; nodeId: string; nodeName: string }>): Promise<Array<{
-    planId: string;
-    nodeId: string;
-    nodeName: string;
-    pid: number | null;
-    running: boolean;
-    tree: ProcessNode[];
-    duration: number | null;
-    isAgentWork?: boolean;
-  }>> {
+
+  async getAllProcessStats(nodeKeys: Array<{ planId: string; nodeId: string; nodeName: string }>): Promise<Array<{ planId: string; nodeId: string; nodeName: string; pid: number | null; running: boolean; tree: ProcessNode[]; duration: number | null; isAgentWork?: boolean }>> {
     if (nodeKeys.length === 0) return [];
-    
-    // Fetch snapshot once for all nodes
-    let snapshot: any[] = [];
-    try {
-      snapshot = await this.processMonitor.getSnapshot();
-    } catch {
-      // Ignore snapshot errors
-    }
-    
-    const results: Array<{
-      planId: string;
-      nodeId: string;
-      nodeName: string;
-      pid: number | null;
-      running: boolean;
-      tree: ProcessNode[];
-      duration: number | null;
-      isAgentWork?: boolean;
-    }> = [];
-    
+    let snapshot: any[] = []; try { snapshot = await this.processMonitor.getSnapshot(); } catch { /* ignore */ }
+    const results: Array<{ planId: string; nodeId: string; nodeName: string; pid: number | null; running: boolean; tree: ProcessNode[]; duration: number | null; isAgentWork?: boolean }> = [];
     for (const { planId, nodeId, nodeName } of nodeKeys) {
-      const nodeKey = `${planId}:${nodeId}`;
-      const executionKey = this.activeExecutionsByNode.get(nodeKey);
-      if (!executionKey) {
-        continue;
-      }
-      const execution = this.activeExecutions.get(executionKey);
-      
-      if (!execution) {
-        continue;
-      }
-      
-      const duration = execution.startTime ? Date.now() - execution.startTime : null;
-      
-      // Handle agent work without a process yet
-      if (execution.isAgentWork && !execution.process?.pid) {
-        results.push({ planId, nodeId, nodeName, pid: null, running: true, tree: [], duration, isAgentWork: true });
-        continue;
-      }
-      
-      if (!execution.process?.pid) {
-        continue;
-      }
-      
-      const pid = execution.process.pid;
-      const running = this.processMonitor.isRunning(pid);
-      
-      // Build process tree from shared snapshot
+      const ek = this.activeExecutionsByNode.get(`${planId}:${nodeId}`);
+      if (!ek) continue;
+      const ex = this.activeExecutions.get(ek);
+      if (!ex) continue;
+      const duration = ex.startTime ? Date.now() - ex.startTime : null;
+      if (ex.isAgentWork && !ex.process?.pid) { results.push({ planId, nodeId, nodeName, pid: null, running: true, tree: [], duration, isAgentWork: true }); continue; }
+      if (!ex.process?.pid) continue;
+      const pid = ex.process.pid, running = this.processMonitor.isRunning(pid);
       let tree: ProcessNode[] = [];
-      if (running && snapshot.length > 0) {
-        try {
-          tree = this.processMonitor.buildTree([pid], snapshot);
-        } catch {
-          // Ignore tree building errors
-        }
-      }
-      
-      if (running || pid) {
-        // Include planId and isAgentWork flag for proper mapping and UI display hints
-        results.push({ planId, nodeId, nodeName, pid, running, tree, duration, isAgentWork: execution.isAgentWork });
-      }
+      if (running && snapshot.length > 0) { try { tree = this.processMonitor.buildTree([pid], snapshot); } catch { /* ignore */ } }
+      if (running || pid) results.push({ planId, nodeId, nodeName, pid, running, tree, duration, isAgentWork: ex.isAgentWork });
     }
-    
     return results;
   }
 
-  /**
-   * Check whether a job execution is currently active.
-   *
-   * @param planId - Plan identifier.
-   * @param nodeId - Node identifier.
-   * @returns `true` if the execution is tracked and not yet finished.
-   */
-  isActive(planId: string, nodeId: string): boolean {
-    const nodeKey = `${planId}:${nodeId}`;
-    return this.activeExecutionsByNode.has(nodeKey);
-  }
-  
-  /**
-   * Append a log entry for a node execution.
-   * Logs are stored both in memory and persisted to disk.
-   *
-   * @param planId  - Plan identifier.
-   * @param nodeId  - Node identifier.
-   * @param phase   - Current execution phase.
-   * @param type    - Log level.
-   * @param message - Log message text.
-   * @param attemptNumber - Optional attempt number for per-attempt log files.
-   */
-  log(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string, attemptNumber?: number): void {
-    const executionKey = attemptNumber ? `${planId}:${nodeId}:${attemptNumber}` : `${planId}:${nodeId}`;
-    
-    // Ensure logs array exists
-    if (!this.executionLogs.has(executionKey)) {
-      this.executionLogs.set(executionKey, []);
-    }
-    
-    const timestamp = Date.now();
-    const logs = this.executionLogs.get(executionKey);
-    
-    // Handle multi-line messages - create separate entry for each line
-    const lines = String(message).split('\n');
-    for (const line of lines) {
-      const entry: LogEntry = {
-        timestamp,
-        phase,
-        type,
-        message: line,
-      };
-      
-      if (logs) {
-        logs.push(entry);
-      }
-      
-      this.appendToLogFile(executionKey, entry);
-    }
+  // ===========================================================================
+  // WORK SUMMARY (delegates to helper)
+  // ===========================================================================
+
+  async computeAggregatedWorkSummary(node: JobNode, worktreePath: string, baseBranch: string, repoPath: string): Promise<JobWorkSummary> {
+    return computeAggregatedWorkSummary(node, worktreePath, baseBranch, repoPath, this.git);
   }
 
-  // ============================================================================
-  // PRIVATE METHODS
-  // ============================================================================
-  
-  /**
-   * Run a WorkSpec (dispatches to appropriate handler)
-   */
-  private async runWorkSpec(
-    spec: WorkSpec | undefined,
-    worktreePath: string,
-    execution: ActiveExecution,
-    executionKey: string,
-    phase: ExecutionPhase,
-    node: JobNode,
-    sessionId?: string
-  ): Promise<{ success: boolean; error?: string; isAgent?: boolean; copilotSessionId?: string; exitCode?: number; metrics?: CopilotUsageMetrics }> {
-    const normalized = normalizeWorkSpec(spec);
-    
-    if (!normalized) {
-      return { success: true }; // No work to do
-    }
-    
-    this.logInfo(executionKey, phase, `Work type: ${normalized.type}`);
-    
-    switch (normalized.type) {
-      case 'process':
-        return this.runProcess(normalized, worktreePath, execution, executionKey, phase);
-      
-      case 'shell':
-        return this.runShell(normalized, worktreePath, execution, executionKey, phase);
-      
-      case 'agent':
-        const result = await this.runAgent(normalized, worktreePath, execution, executionKey, node, phase, sessionId);
-        return { ...result, isAgent: true };
-      
-      default:
-        return { success: false, error: `Unknown work type: ${(normalized as any).type}` };
-    }
-  }
-  
-  /**
-   * Run a direct process (no shell)
-   */
-  private async runProcess(
-    spec: ProcessSpec,
-    worktreePath: string,
-    execution: ActiveExecution,
-    executionKey: string,
-    phase: ExecutionPhase
-  ): Promise<{ success: boolean; error?: string }> {
-    return new Promise((resolve) => {
-      const cwd = spec.cwd ? path.resolve(worktreePath, spec.cwd) : worktreePath;
-      const args = spec.args || [];
-      const env = { ...process.env, ...spec.env };
-      
-      // Log the process being spawned
-      this.logInfo(executionKey, phase, `Process: ${spec.executable}`);
-      this.logInfo(executionKey, phase, `Arguments: ${JSON.stringify(args)}`);
-      this.logInfo(executionKey, phase, `Working directory: ${cwd}`);
-      if (spec.env) {
-        this.logInfo(executionKey, phase, `Environment overrides: ${JSON.stringify(spec.env)}`);
-      }
-      
-      const proc = spawn(spec.executable, args, {
-        cwd,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-      
-      execution.process = proc;
-      
-      // Log process start with PID
-      const startTime = Date.now();
-      execution.startTime = startTime;
-      this.logInfo(executionKey, phase, `Process started: PID ${proc.pid}`);
-      
-      let stdout = '';
-      let stderr = '';
-      let timeoutHandle: NodeJS.Timeout | undefined;
-      
-      // Set timeout only when explicitly specified (> 0)
-      // Omitting timer when no timeout prevents keeping the event loop alive unnecessarily
-      const effectiveTimeout = spec.timeout && spec.timeout > 0
-        ? Math.min(spec.timeout, 2147483647) : 0;
-      if (effectiveTimeout > 0) {
-        timeoutHandle = setTimeout(() => {
-          this.logError(executionKey, phase, `Process timed out after ${effectiveTimeout}ms (PID: ${proc.pid})`);
-          try {
-            if (process.platform === 'win32') {
-              spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
-            } else {
-              proc.kill('SIGTERM');
-            }
-          } catch (e) { /* ignore */ }
-        }, effectiveTimeout);
-      }
-      proc.stderr?.setEncoding('utf8');
-      
-      proc.stdout?.on('data', (data: string) => {
-        stdout += data;
-        this.logOutput(executionKey, phase, 'stdout', data);
-      });
-      
-      proc.stderr?.on('data', (data: string) => {
-        stderr += data;
-        this.logOutput(executionKey, phase, 'stderr', data);
-      });
-      
-      proc.on('close', (code) => {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        execution.process = undefined;
-        
-        const duration = Date.now() - startTime;
-        this.logInfo(executionKey, phase, `Process exited: PID ${proc.pid}, code ${code}, duration ${duration}ms`);
-        
-        if (execution.aborted) {
-          resolve({ success: false, error: 'Execution canceled' });
-        } else if (code === 0) {
-          resolve({ success: true });
-        } else {
-          resolve({
-            success: false,
-            error: `Exit code ${code}: ${stderr || stdout}`.trim(),
-          });
-        }
-      });
-      
-      proc.on('error', (err) => {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        execution.process = undefined;
-        const duration = Date.now() - startTime;
-        this.logError(executionKey, phase, `Process error: PID ${proc.pid}, error: ${err.message}, duration ${duration}ms`);
-        resolve({ success: false, error: err.message });
-      });
-    });
-  }
-  
-  /**
-   * Run a shell command
-   */
-  private async runShell(
-    spec: ShellSpec,
-    worktreePath: string,
-    execution: ActiveExecution,
-    executionKey: string,
-    phase: ExecutionPhase
-  ): Promise<{ success: boolean; error?: string }> {
-    return new Promise((resolve) => {
-      const cwd = spec.cwd ? path.resolve(worktreePath, spec.cwd) : worktreePath;
-      const env = { ...process.env, ...spec.env };
-      
-      // Determine shell based on spec or platform default
-      const isWindows = process.platform === 'win32';
-      let shell: string;
-      let shellArgs: string[];
-      
-      switch (spec.shell) {
-        case 'cmd':
-          shell = 'cmd.exe';
-          shellArgs = ['/c', spec.command];
-          break;
-        case 'powershell':
-          shell = 'powershell.exe';
-          shellArgs = ['-NoProfile', '-NonInteractive', '-Command', spec.command];
-          break;
-        case 'pwsh':
-          shell = 'pwsh';
-          shellArgs = ['-NoProfile', '-NonInteractive', '-Command', spec.command];
-          break;
-        case 'bash':
-          shell = 'bash';
-          shellArgs = ['-c', spec.command];
-          break;
-        case 'sh':
-          shell = '/bin/sh';
-          shellArgs = ['-c', spec.command];
-          break;
-        default:
-          // Platform default - use PowerShell on Windows for better compatibility
-          if (isWindows) {
-            shell = 'powershell.exe';
-            shellArgs = ['-NoProfile', '-NonInteractive', '-Command', adaptCommandForPowerShell(spec.command)];
-          } else {
-            shell = '/bin/sh';
-            shellArgs = ['-c', spec.command];
-          }
-      }
-      
-      // Log the shell command being spawned
-      this.logInfo(executionKey, phase, `Shell: ${shell}`);
-      this.logInfo(executionKey, phase, `Command: ${spec.command}`);
-      this.logInfo(executionKey, phase, `Working directory: ${cwd}`);
-      if (spec.env) {
-        this.logInfo(executionKey, phase, `Environment overrides: ${JSON.stringify(spec.env)}`);
-      }
-      
-      const proc = spawn(shell, shellArgs, {
-        cwd,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-      
-      execution.process = proc;
-      
-      // Log process start with PID
-      const startTime = Date.now();
-      execution.startTime = startTime;
-      this.logInfo(executionKey, phase, `Shell started: PID ${proc.pid}`);
-      
-      let stdout = '';
-      let stderr = '';
-      let timeoutHandle: NodeJS.Timeout | undefined;
-      
-      // Set timeout only when explicitly specified (> 0)
-      const effectiveTimeout = spec.timeout && spec.timeout > 0
-        ? Math.min(spec.timeout, 2147483647) : 0;
-      if (effectiveTimeout > 0) {
-        timeoutHandle = setTimeout(() => {
-          this.logError(executionKey, phase, `Shell command timed out after ${effectiveTimeout}ms (PID: ${proc.pid})`);
-          try {
-            if (process.platform === 'win32') {
-              spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
-            } else {
-              proc.kill('SIGTERM');
-            }
-          } catch (e) { /* ignore */ }
-        }, effectiveTimeout);
-      }
-      
-      proc.stdout?.setEncoding('utf8');
-      proc.stderr?.setEncoding('utf8');
-      
-      proc.stdout?.on('data', (data: string) => {
-        stdout += data;
-        this.logOutput(executionKey, phase, 'stdout', data);
-      });
-      
-      proc.stderr?.on('data', (data: string) => {
-        stderr += data;
-        this.logOutput(executionKey, phase, 'stderr', data);
-      });
-      
-      proc.on('close', (code) => {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        execution.process = undefined;
-        
-        const duration = Date.now() - startTime;
-        this.logInfo(executionKey, phase, `Shell exited: PID ${proc.pid}, code ${code}, duration ${duration}ms`);
-        
-        if (execution.aborted) {
-          resolve({ success: false, error: 'Execution canceled' });
-        } else if (code === 0) {
-          resolve({ success: true });
-        } else {
-          resolve({
-            success: false,
-            error: `Exit code ${code}: ${stderr || stdout}`.trim(),
-          });
-        }
-      });
-      
-      proc.on('error', (err) => {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        execution.process = undefined;
-        const duration = Date.now() - startTime;
-        this.logError(executionKey, phase, `Shell error: PID ${proc.pid}, error: ${err.message}, duration ${duration}ms`);
-        resolve({ success: false, error: err.message });
-      });
-    });
-  }
-  
-  /**
-   * Run agent work with rich config
-   */
-  private async runAgent(
-    spec: AgentSpec,
-    worktreePath: string,
-    execution: ActiveExecution,
-    executionKey: string,
-    node: JobNode,
-    phase: ExecutionPhase,
-    sessionId?: string
-  ): Promise<{ success: boolean; error?: string; copilotSessionId?: string; exitCode?: number; metrics?: CopilotUsageMetrics }> {
-    if (!this.agentDelegator) {
-      return {
-        success: false,
-        error: 'Agent work requires an agent delegator to be configured',
-      };
-    }
-    
-    // Track agent work for process stats
-    execution.isAgentWork = true;
-    execution.startTime = Date.now();
-    
-    this.logInfo(executionKey, phase, `Agent instructions: ${spec.instructions}`);
-    if (spec.model) {
-      this.logInfo(executionKey, phase, `Using model: ${spec.model}`);
-    }
-    if (spec.contextFiles?.length) {
-      this.logInfo(executionKey, phase, `Agent context files: ${spec.contextFiles.join(', ')}`);
-    }
-    if (spec.maxTurns) {
-      this.logInfo(executionKey, phase, `Agent max turns: ${spec.maxTurns}`);
-    }
-    if (spec.context) {
-      this.logInfo(executionKey, phase, `Agent context: ${spec.context}`);
-    }
-    if (sessionId) {
-      this.logInfo(executionKey, phase, `Resuming Copilot session: ${sessionId}`);
-    }
-    if (spec.allowedFolders && spec.allowedFolders.length > 0) {
-      this.logInfo(executionKey, phase, `Agent allowed folders: ${spec.allowedFolders.join(', ')}`);
-    }
-    if (spec.allowedUrls && spec.allowedUrls.length > 0) {
-      this.logInfo(executionKey, phase, `Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);
-    }
-    
-    try {
-      // Get isolated config directory for Copilot CLI sessions
-      const configDir = this.getCopilotConfigDir();
-      
-      const result = await this.agentDelegator.delegate({
-        task: spec.instructions,
-        instructions: node.instructions || spec.context,
-        worktreePath,
-        model: spec.model,
-        contextFiles: spec.contextFiles,
-        maxTurns: spec.maxTurns,
-        sessionId, // Pass session ID for resumption
-        jobId: node.id,
-        configDir, // Isolate sessions from user's history
-        allowedFolders: spec.allowedFolders,  // Pass through allowed folders
-        allowedUrls: spec.allowedUrls,        // Pass through allowed URLs
-        logOutput: (line: string) => this.logInfo(executionKey, phase, line),
-        onProcess: (proc: any) => {
-          // Track the Copilot CLI process for monitoring (CPU/memory/tree)
-          execution.process = proc;
-          execution.isAgentWork = true; // Keep both flags for UI hints
-        },
-      });
-      
-      // Build metrics from delegation result
-      const durationMs = Date.now() - execution.startTime;
-      let metrics: CopilotUsageMetrics;
-      if (result.metrics) {
-        // Use rich parsed metrics from CopilotStatsParser
-        metrics = { ...result.metrics, durationMs };
-      } else {
-        // Fallback to legacy token usage
-        metrics = { durationMs };
-        if (result.tokenUsage) {
-          metrics.tokenUsage = result.tokenUsage;
-        }
-      }
-      
-      if (result.success) {
-        this.logInfo(executionKey, phase, 'Agent completed successfully');
-        if (result.sessionId) {
-          this.logInfo(executionKey, phase, `Captured session ID: ${result.sessionId}`);
-        }
-        return { success: true, copilotSessionId: result.sessionId, metrics };
-      } else {
-        this.logError(executionKey, phase, `Agent failed: ${result.error}`);
-        return { 
-          success: false, 
-          error: result.error, 
-          copilotSessionId: result.sessionId,
-          exitCode: result.exitCode,
-          metrics,
-        };
-      }
-    } catch (error: any) {
-      this.logError(executionKey, phase, `Agent error: ${error.message}`);
-      const durationMs = Date.now() - (execution.startTime || Date.now());
-      return { success: false, error: error.message, metrics: { durationMs } };
-    }
-  }
-  
-  /**
-   * Commit changes in the worktree
-   * 
-   * VALIDATION: Either the work stage made commits, or there must be uncommitted
-   * changes to commit. If neither is true, the job produced no work and we fail.
-   */
-  private async commitChanges(
-    node: JobNode,
-    worktreePath: string,
-    executionKey: string,
-    baseCommit: string
-  ): Promise<{ success: boolean; commit?: string; error?: string; reviewMetrics?: CopilotUsageMetrics }> {
-    try {
-      // Log git status for debugging
-      this.logInfo(executionKey, 'commit', `Checking git status in ${worktreePath}`);
-      const statusOutput = await this.getGitStatus(worktreePath);
-      if (statusOutput) {
-        this.logInfo(executionKey, 'commit', `Git status:\n${statusOutput}`);
-      } else {
-        this.logInfo(executionKey, 'commit', 'Git status: clean (no changes)');
-        // Show ignored files for troubleshooting when no changes detected
-        const ignoredFiles = await this.getIgnoredFiles(worktreePath);
-        if (ignoredFiles) {
-          this.logInfo(executionKey, 'commit', `Ignored files (not tracked by git):\n${ignoredFiles}`);
-        }
-      }
-      
-      // Check if there are uncommitted changes to commit
-      const hasChanges = await git.repository.hasUncommittedChanges(worktreePath);
-      this.logInfo(executionKey, 'commit', `hasUncommittedChanges: ${hasChanges}`);
-      
-      if (!hasChanges) {
-        // No uncommitted changes - check if commits were made during the work stage
-        this.logInfo(executionKey, 'commit', 'No uncommitted changes, checking for commits since base...');
-        
-        const head = await git.worktrees.getHeadCommit(worktreePath);
-        this.logInfo(executionKey, 'commit', `HEAD: ${head?.slice(0, 8) || 'unknown'}, baseCommit: ${baseCommit.slice(0, 8)}`);
-        
-        if (head && head !== baseCommit) {
-          // Commits were made during work stage (e.g., by @agent)
-          this.logInfo(executionKey, 'commit', `Work stage made commits, HEAD: ${head.slice(0, 8)}`);
-          return { success: true, commit: head };
-        }
-        
-        // Check for evidence file
-        const hasEvidence = await this.evidenceValidator.hasEvidenceFile(
-          worktreePath, node.id
-        );
-        if (hasEvidence) {
-          this.logInfo(executionKey, 'commit', 'Evidence file found, staging...');
-          await git.repository.stageAll(worktreePath);
-          const message = `[Plan] ${node.task} (evidence only)`;
-          await git.repository.commit(worktreePath, message);
-          const commit = await git.worktrees.getHeadCommit(worktreePath);
-          return { success: true, commit: commit || undefined };
-        }
-        
-        // Check expectsNoChanges flag
-        if (node.expectsNoChanges) {
-          this.logInfo(executionKey, 'commit',
-            'Node declares expectsNoChanges — succeeding without commit');
-          return { success: true, commit: undefined };
-        }
-        
-        // AI Review: Ask an agent to review the execution logs and determine
-        // whether "no changes" is a legitimate outcome (e.g., work was already
-        // done by a dependency, tests already pass, linter found no issues).
-        if (this.agentDelegator) {
-          this.logInfo(executionKey, 'commit',
-            'No file changes detected. Requesting AI review of execution logs...');
-          const reviewResult = await this.aiReviewNoChanges(
-            node, worktreePath, executionKey
-          );
-          if (reviewResult.legitimate) {
-            this.logInfo(executionKey, 'commit',
-              `AI review: No changes needed — ${reviewResult.reason}`);
-            return { success: true, commit: undefined, reviewMetrics: reviewResult.metrics };
-          } else {
-            this.logInfo(executionKey, 'commit',
-              `AI review: Changes were expected — ${reviewResult.reason}`);
-            // Fall through to failure — but preserve AI review metrics
-            const error =
-              'No work evidence produced. The node must either:\n' +
-              '  1. Modify files (results in a commit)\n' +
-              '  2. Create an evidence file at .orchestrator/evidence/<nodeId>.json\n' +
-              '  3. Declare expectsNoChanges: true in the node spec';
-            this.logError(executionKey, 'commit', error);
-            return { success: false, error, reviewMetrics: reviewResult.metrics };
-          }
-        }
-        
-        // No evidence — fail (no AI review available)
-        const error =
-          'No work evidence produced. The node must either:\n' +
-          '  1. Modify files (results in a commit)\n' +
-          '  2. Create an evidence file at .orchestrator/evidence/<nodeId>.json\n' +
-          '  3. Declare expectsNoChanges: true in the node spec';
-        this.logError(executionKey, 'commit', error);
-        return { success: false, error };
-      }
-      
-      // Stage all changes
-      this.logInfo(executionKey, 'commit', 'Staging all changes...');
-      await git.repository.stageAll(worktreePath);
-      
-      // Commit
-      const message = `[Plan] ${node.task}`;
-      this.logInfo(executionKey, 'commit', `Creating commit: "${message}"`);
-      await git.repository.commit(worktreePath, message);
-      
-      // Get the new commit SHA
-      const commit = await git.worktrees.getHeadCommit(worktreePath);
-      
-      this.logInfo(executionKey, 'commit', `✓ Committed: ${commit?.slice(0, 8)}`);
-      
-      return { success: true, commit: commit || undefined };
-    } catch (error: any) {
-      this.logError(executionKey, 'commit', `Commit error: ${error.message}`);
-      return { success: false, error: error.message };
-    }
-  }
-  
-  /**
-   * AI Review: Determine whether "no changes" is a legitimate outcome.
-   *
-   * When the commit phase finds no file changes and no evidence file,
-   * this method asks an AI agent to review the execution logs and judge
-   * whether the absence of changes is expected (e.g., work was already
-   * done by a dependency, tests passed with nothing to fix, linter found
-   * no issues) or whether the work genuinely failed to produce output.
-   *
-   * @returns `{ legitimate: true, reason, metrics? }` if no-op is acceptable,
-   *          `{ legitimate: false, reason, metrics? }` if changes were expected.
-   */
-  private async aiReviewNoChanges(
-    node: JobNode,
-    worktreePath: string,
-    executionKey: string
-  ): Promise<{ legitimate: boolean; reason: string; metrics?: CopilotUsageMetrics }> {
-    try {
-      // Gather execution logs — truncated to keep the prompt manageable
-      const logs = this.executionLogs.get(executionKey) || [];
-      const logText = logs
-        .map(e => `[${e.phase}] [${e.type}] ${e.message}`)
-        .join('\n');
-      const logLines = logText.split('\n');
-      const truncatedLogs = logLines.length > 150
-        ? `... (${logLines.length - 150} earlier lines omitted)\n` + logLines.slice(-150).join('\n')
-        : logText;
+  // ===========================================================================
+  // LOG FILE MANAGEMENT (delegates to helper)
+  // ===========================================================================
 
-      // Describe the original work spec for context
-      const workDesc = (() => {
-        const spec = normalizeWorkSpec(node.work);
-        if (!spec) return 'No work specified';
-        if (spec.type === 'shell') return `Shell: ${spec.command}`;
-        if (spec.type === 'process') return `Process: ${spec.executable} ${(spec.args || []).join(' ')}`;
-        if (spec.type === 'agent') return `Agent: ${spec.instructions.slice(0, 200)}`;
-        return 'Unknown work type';
-      })();
-
-      const taskDescription = `Node: ${node.name}\nTask: ${node.task}\nWork: ${workDesc}`;
-
-      this.logInfo(executionKey, 'commit', '========== AI REVIEW: NO-CHANGE ASSESSMENT ==========');
-
-      // Get isolated config directory for Copilot CLI sessions
-      const configDir = this.getCopilotConfigDir();
-
-      // Use standard agent invocation pattern - pass the full instructions content
-      // as the instructions parameter so CopilotCliRunner writes the proper file
-      const aiInstructions = `# AI Review: No-Change Assessment
-
-## Task
-You are reviewing the execution logs of an agent that completed without making file changes.
-Determine if this is a legitimate outcome or if the agent failed to do its work.
-
-## Original Task Description
-${taskDescription}
-
-## Execution Logs
-\`\`\`
-${truncatedLogs}
-\`\`\`
-
-## Your Response
-**IMPORTANT: Respond ONLY with a JSON object. No markdown, no explanation, no HTML.**
-
-Analyze the logs and respond with exactly this format:
-\`\`\`json
-{"legitimate": true, "reason": "Brief explanation why no changes were needed"}
-\`\`\`
-OR
-\`\`\`json
-{"legitimate": false, "reason": "Brief explanation of what went wrong"}
-\`\`\`
-
-### Legitimate No-Change Scenarios
-- Work was already completed in a prior commit/dependency
-- Task was verification/analysis only (no changes expected)
-- Agent correctly determined no changes were needed
-
-### NOT Legitimate (should return false)
-- Agent encountered errors and gave up
-- Agent misunderstood the task
-- Agent claimed success without evidence
-- Logs show the agent didn't attempt the work
-
-**YOUR RESPONSE (JSON ONLY):**`;
-
-      const result = await this.agentDelegator.delegate({
-        task: 'Complete the task described in the instructions.',
-        instructions: aiInstructions, // Pass instructions content to be written to file
-        worktreePath,
-        model: 'claude-haiku-4.5',
-        jobId: node.id, // Use node.id for proper file naming
-        configDir, // Isolate sessions from user's history
-        logOutput: (line: string) => this.logInfo(executionKey, 'commit', `[ai-review] ${line}`),
-        onProcess: () => {}, // No need to track this short-lived process
-      });
-
-      this.logInfo(executionKey, 'commit', '========== AI REVIEW: COMPLETE ==========');
-
-      // Capture metrics from the AI review delegation
-      const reviewMetrics = result.metrics;
-
-      if (!result.success) {
-        // AI review itself failed — don't block on it, fall through to normal fail
-        this.logInfo(executionKey, 'commit',
-          `AI review could not complete: ${result.error}. Falling through to standard validation.`);
-        return { legitimate: false, reason: 'AI review unavailable', metrics: reviewMetrics };
-      }
-
-      // Parse the AI's judgment from the execution logs.
-      // The agent writes to stdout via logOutput — look for the JSON verdict
-      // in the commit-phase logs written since we started the review.
-      const reviewLogs = (this.executionLogs.get(executionKey) || [])
-        .filter(e => e.phase === 'commit' && e.message.includes('[ai-review]'))
-        .map(e => e.message);
-
-      // Try parsing each log line individually (most likely location is the last line)
-      for (let i = reviewLogs.length - 1; i >= 0; i--) {
-        const parsed = parseAiReviewResult(reviewLogs[i]);
-        if (parsed) {
-          return {
-            legitimate: parsed.legitimate,
-            reason: parsed.reason,
-            metrics: reviewMetrics,
-          };
-        }
-      }
-
-      // Try parsing the combined log output
-      const combinedOutput = reviewLogs.join(' ');
-      const parsed = parseAiReviewResult(combinedOutput);
-      if (parsed) {
-        return {
-          legitimate: parsed.legitimate,
-          reason: parsed.reason,
-          metrics: reviewMetrics,
-        };
-      }
-
-      // Couldn't parse a structured response — fall through
-      this.logInfo(executionKey, 'commit',
-        'AI review did not return a parseable judgment. Falling through to standard validation.');
-      return { legitimate: false, reason: 'AI review returned no parseable judgment', metrics: reviewMetrics };
-    } catch (error: any) {
-      // Don't let AI review errors block the pipeline
-      this.logInfo(executionKey, 'commit',
-        `AI review error: ${error.message}. Falling through to standard validation.`);
-      return { legitimate: false, reason: `AI review error: ${error.message}` };
-    }
-  }
-  
-  /**
-   * Get git status output for debugging
-   */
-  private async getGitStatus(cwd: string): Promise<string | null> {
-    try {
-      const dirtyFiles = await git.repository.getDirtyFiles(cwd);
-      if (dirtyFiles.length === 0) {
-        return null;
-      }
-      // Format similar to --porcelain output for logging consistency
-      return dirtyFiles.map(file => `M  ${file}`).join('\n');
-    } catch (error) {
-      return null;
-    }
-  }
-  
-  /**
-   * Get list of ignored files for troubleshooting.
-   * Uses git status --ignored to show files excluded by .gitignore.
-   */
-  private async getIgnoredFiles(cwd: string): Promise<string | null> {
-    try {
-      const ignoredFiles = await git.repository.getIgnoredFiles(cwd);
-      if (ignoredFiles.length === 0) {
-        return null;
-      }
-      // Limit to 50 files to avoid huge output (same as before)
-      const limitedFiles = ignoredFiles.slice(0, 50);
-      const result = limitedFiles.join('\n');
-      return limitedFiles.length === 50 ? result + '\n... (truncated)' : result;
-    } catch (error) {
-      return null;
-    }
-  }
-  
-  /**
-   * Compute work summary for a job
-   */
-  private async computeWorkSummary(
-    node: JobNode,
-    worktreePath: string,
-    baseCommit: string
-  ): Promise<JobWorkSummary> {
-    try {
-      const head = await git.worktrees.getHeadCommit(worktreePath);
-      if (!head || (head === baseCommit && node.expectsNoChanges)) {
-        // expectsNoChanges nodes with no commits get a descriptive summary
-        if (node.expectsNoChanges) {
-          return {
-            nodeId: node.id,
-            nodeName: node.name,
-            commits: 0,
-            filesAdded: 0,
-            filesModified: 0,
-            filesDeleted: 0,
-            description: 'Node declared expectsNoChanges',
-            commitDetails: [],
-          };
-        }
-        return this.emptyWorkSummary(node);
-      }
-      
-      // Get commit details
-      const commitDetails = await this.getCommitDetails(worktreePath, baseCommit, head);
-      
-      // Aggregate counts
-      let filesAdded = 0;
-      let filesModified = 0;
-      let filesDeleted = 0;
-      
-      for (const detail of commitDetails) {
-        filesAdded += detail.filesAdded.length;
-        filesModified += detail.filesModified.length;
-        filesDeleted += detail.filesDeleted.length;
-      }
-      
-      return {
-        nodeId: node.id,
-        nodeName: node.name,
-        commits: commitDetails.length,
-        filesAdded,
-        filesModified,
-        filesDeleted,
-        description: node.task,
-        commitDetails,
-      };
-    } catch (error: any) {
-      log.warn(`Failed to compute work summary: ${error.message}`);
-      return this.emptyWorkSummary(node);
-    }
-  }
-  
-  /**
-   * Get detailed commit information
-   */
-  private async getCommitDetails(
-    worktreePath: string,
-    baseCommit: string,
-    headCommit: string
-  ): Promise<CommitDetail[]> {
-    // Simplified implementation - in production would parse git log
-    try {
-      const details: CommitDetail[] = [];
-      
-      // Get the diff stats
-      const diffResult = await git.executor.execAsync(
-        ['diff', '--stat', '--name-status', `${baseCommit}..${headCommit}`],
-        { cwd: worktreePath }
-      );
-      
-      if (diffResult.success) {
-        const lines = diffResult.stdout.split('\n').filter(l => l.trim());
-        const filesAdded: string[] = [];
-        const filesModified: string[] = [];
-        const filesDeleted: string[] = [];
-        
-        for (const line of lines) {
-          const parts = line.split('\t');
-          if (parts.length >= 2) {
-            const status = parts[0];
-            const file = parts[1];
-            
-            if (status === 'A') filesAdded.push(file);
-            else if (status === 'M') filesModified.push(file);
-            else if (status === 'D') filesDeleted.push(file);
-          }
-        }
-        
-        details.push({
-          hash: headCommit,
-          shortHash: headCommit.slice(0, 8),
-          message: 'Work completed',
-          author: 'Plan Runner',
-          date: new Date().toISOString(),
-          filesAdded,
-          filesModified,
-          filesDeleted,
-        });
-      }
-      
-      return details;
-    } catch (error) {
-      return [];
-    }
-  }
-  
-  /**
-   * Create an empty work summary
-   */
-  private emptyWorkSummary(node: JobNode): JobWorkSummary {
-    return {
-      nodeId: node.id,
-      nodeName: node.name,
-      commits: 0,
-      filesAdded: 0,
-      filesModified: 0,
-      filesDeleted: 0,
-      description: node.task,
-    };
-  }
-  
-  /**
-   * Compute aggregated work summary from baseBranch to current HEAD.
-   * This captures ALL work accumulated through the DAG, not just this job's work.
-   * Used for leaf nodes to show total work being merged to targetBranch.
-   * 
-   * The aggregated summary includes:
-   * - All commits from baseBranch to the node's completedCommit
-   * - All upstream dependency work merged through FI (Forward Integration)
-   * - The node's own work (if any)
-   * 
-   * This differs from `workSummary` which only shows the node's direct changes
-   * (baseCommit to completedCommit). For example, in a DAG like A → B → C (leaf),
-   * where A adds 3 files and B adds 2 files, C's aggregatedWorkSummary will
-   * show 5 files even if C itself makes no changes.
-   * 
-   * @param node - The job node to compute aggregated summary for.
-   * @param worktreePath - Path to the node's worktree.
-   * @param baseBranch - Base branch to diff from (e.g., 'origin/main').
-   * @param repoPath - Repository root path.
-   * @returns Aggregated work summary with total commit count and file changes.
-   */
-  async computeAggregatedWorkSummary(
-    node: JobNode,
-    worktreePath: string,
-    baseBranch: string,
-    repoPath: string
-  ): Promise<JobWorkSummary> {
-    try {
-      // Get HEAD commit of the worktree
-      const headCommit = await git.worktrees.getHeadCommit(worktreePath);
-      if (!headCommit) {
-        log.warn('No HEAD commit in worktree for aggregated summary');
-        return this.emptyWorkSummary(node);
-      }
-      
-      // Resolve baseBranch to commit SHA (may be remote ref like origin/main)
-      const baseBranchResult = await git.executor.execAsync(
-        ['rev-parse', baseBranch],
-        { cwd: repoPath }
-      );
-      
-      if (!baseBranchResult.success || !baseBranchResult.stdout.trim()) {
-        log.warn(`Failed to resolve baseBranch ${baseBranch}`);
-        return this.emptyWorkSummary(node);
-      }
-      
-      const baseBranchCommit = baseBranchResult.stdout.trim();
-      
-      // Get diff stats from baseBranch to HEAD
-      const diffResult = await git.executor.execAsync(
-        ['diff', '--name-status', `${baseBranchCommit}..${headCommit}`],
-        { cwd: worktreePath }
-      );
-      
-      let filesAdded = 0;
-      let filesModified = 0;
-      let filesDeleted = 0;
-      
-      if (diffResult.success) {
-        const lines = diffResult.stdout.split('\n').filter(l => l.trim());
-        
-        for (const line of lines) {
-          const parts = line.split('\t');
-          if (parts.length >= 2) {
-            const status = parts[0];
-            
-            if (status === 'A') filesAdded++;
-            else if (status === 'M') filesModified++;
-            else if (status === 'D') filesDeleted++;
-          }
-        }
-      }
-      
-      // Get commit count from baseBranch to HEAD
-      const commitCountResult = await git.executor.execAsync(
-        ['rev-list', '--count', `${baseBranchCommit}..${headCommit}`],
-        { cwd: worktreePath }
-      );
-      
-      const commits = commitCountResult.success 
-        ? parseInt(commitCountResult.stdout.trim(), 10) || 0
-        : 0;
-      
-      return {
-        nodeId: node.id,
-        nodeName: node.name,
-        commits,
-        filesAdded,
-        filesModified,
-        filesDeleted,
-        description: `Aggregated work from ${baseBranch}`,
-      };
-    } catch (error: any) {
-      log.warn(`Failed to compute aggregated work summary: ${error.message}`);
-      return this.emptyWorkSummary(node);
-    }
-  }
-  
-  // ============================================================================
-  // LOGGING
-  // ============================================================================
-  
-  /**
-   * Get or create log file path for an execution.
-   * 
-   * @param planId - Plan identifier.
-   * @param nodeId - Node identifier.
-   * @param attemptNumber - Optional 1-based attempt number. If provided, returns path for specific attempt.
-   * @returns Absolute path to the log file, or undefined if no storage path.
-   */
   getLogFilePath(planId: string, nodeId: string, attemptNumber?: number): string | undefined {
-    if (!this.storagePath) return undefined;
-    
-    // Include attempt number in key if provided
-    const executionKey = attemptNumber 
-      ? `${planId}:${nodeId}:${attemptNumber}`
-      : `${planId}:${nodeId}`;
-    let logFile = this.logFiles.get(executionKey);
-    if (!logFile) {
-      const logsDir = path.join(this.storagePath, 'logs');
-      const safeKey = executionKey.replace(/[^a-zA-Z0-9-_]/g, '_');
-      logFile = path.join(logsDir, `${safeKey}.log`);
-      this.logFiles.set(executionKey, logFile);
-    }
-    return logFile;
+    const ek = attemptNumber ? `${planId}:${nodeId}:${attemptNumber}` : `${planId}:${nodeId}`;
+    return getLogFilePathByKey(ek, this.storagePath, this.logFiles);
   }
 
-  /**
-   * Internal method to get log file path from execution key.
-   */
-  private getLogFilePathByKey(executionKey: string): string | undefined {
-    if (!this.storagePath) return undefined;
-    
-    let logFile = this.logFiles.get(executionKey);
-    if (!logFile) {
-      const logsDir = path.join(this.storagePath, 'logs');
-      const safeKey = executionKey.replace(/[^a-zA-Z0-9-_]/g, '_');
-      logFile = path.join(logsDir, `${safeKey}.log`);
-      this.logFiles.set(executionKey, logFile);
-    }
-    return logFile;
-  }
-  
-  /**
-   * Append a log entry to file
-   */
-  private appendToLogFile(executionKey: string, entry: LogEntry): void {
-    const logFile = this.getLogFilePathByKey(executionKey);
-    if (!logFile) return;
-    
-    try {
-      // Guard against deleted directories (storagePath is workspacePath/.orchestrator)
-      if (this.storagePath) {
-        const workspacePath = path.resolve(this.storagePath, '..');
-        ensureOrchestratorDirs(workspacePath);
-      }
-      
-      const time = new Date(entry.timestamp).toISOString();
-      const prefix = entry.type === 'stderr' ? '[ERR]' : 
-                     entry.type === 'error' ? '[ERROR]' :
-                     entry.type === 'info' ? '[INFO]' : '';
-      const line = `[${time}] [${entry.phase.toUpperCase()}] ${prefix} ${entry.message}\n`;
-      fs.appendFileSync(logFile, line, 'utf8');
-    } catch (err) {
-      // Ignore file write errors
-    }
-  }
-  
-  /**
-   * Read logs from file for a completed execution
-   */
   readLogsFromFile(planId: string, nodeId: string, attemptNumber?: number): string {
-    const executionKey = attemptNumber ? `${planId}:${nodeId}:${attemptNumber}` : `${planId}:${nodeId}`;
-    const logFile = this.getLogFilePathByKey(executionKey);
-    
-    if (!logFile || !fs.existsSync(logFile)) {
-      return 'No log file found.';
-    }
-    
-    try {
-      return fs.readFileSync(logFile, 'utf8');
-    } catch (err) {
-      return `Error reading log file: ${err}`;
-    }
+    const ek = attemptNumber ? `${planId}:${nodeId}:${attemptNumber}` : `${planId}:${nodeId}`;
+    return readLogsFromFile(ek, this.storagePath, this.logFiles);
   }
-  
-  /**
-   * Read logs from file starting at a byte offset.
-   * Used to capture only the logs produced during the current attempt.
-   */
+
   readLogsFromFileOffset(planId: string, nodeId: string, byteOffset: number, attemptNumber?: number): string {
-    const executionKey = attemptNumber ? `${planId}:${nodeId}:${attemptNumber}` : `${planId}:${nodeId}`;
-    const logFile = this.getLogFilePathByKey(executionKey);
-
-    if (!logFile) {
-      return 'No log file found.';
-    }
-
-    try {
-      if (byteOffset <= 0) {
-        return fs.readFileSync(logFile, 'utf8');
-      }
-
-      const fd = fs.openSync(logFile, 'r');
-      try {
-        const stats = fs.fstatSync(fd);
-        const fileSize = stats.size;
-
-        if (byteOffset >= fileSize) {
-          return '';
-        }
-
-        const length = fileSize - byteOffset;
-        const buffer = Buffer.alloc(length);
-        fs.readSync(fd, buffer, 0, length, byteOffset);
-        return buffer.toString('utf8');
-      } finally {
-        fs.closeSync(fd);
-      }
-    } catch (err: any) {
-      if (err.code === 'ENOENT') return 'No log file found.';
-      return `Error reading log file: ${err}`;
-    }
+    const ek = attemptNumber ? `${planId}:${nodeId}:${attemptNumber}` : `${planId}:${nodeId}`;
+    return readLogsFromFileOffset(ek, byteOffset, this.storagePath, this.logFiles);
   }
-  
-  private logOutput(
-    executionKey: string,
-    phase: ExecutionPhase,
-    type: 'stdout' | 'stderr',
-    message: string
-  ): void {
+
+  // ===========================================================================
+  // INTERNAL LOGGING
+  // ===========================================================================
+
+  private logEntry(executionKey: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string): void {
     const timestamp = Date.now();
     const logs = this.executionLogs.get(executionKey);
-    
-    // Handle multi-line messages - create separate entry for each line
-    const lines = String(message).split('\n');
-    for (const line of lines) {
-      const entry: LogEntry = {
-        timestamp,
-        phase,
-        type,
-        message: line,
-      };
-      
-      if (logs) {
-        logs.push(entry);
-      }
-      
-      this.appendToLogFile(executionKey, entry);
-    }
-  }
-  
-  private logInfo(executionKey: string, phase: ExecutionPhase, message: string): void {
-    const timestamp = Date.now();
-    const logs = this.executionLogs.get(executionKey);
-    
-    // Handle multi-line messages - create separate entry for each line
-    const lines = String(message).split('\n');
-    for (const line of lines) {
-      const entry: LogEntry = {
-        timestamp,
-        phase,
-        type: 'info',
-        message: line,
-      };
-      
-      if (logs) {
-        logs.push(entry);
-      }
-      
-      this.appendToLogFile(executionKey, entry);
-    }
-  }
-  
-  private logError(executionKey: string, phase: ExecutionPhase, message: string): void {
-    const timestamp = Date.now();
-    const logs = this.executionLogs.get(executionKey);
-    
-    // Handle multi-line messages - create separate entry for each line
-    const lines = String(message).split('\n');
-    for (const line of lines) {
-      const entry: LogEntry = {
-        timestamp,
-        phase,
-        type: 'error',
-        message: line,
-      };
-      
-      if (logs) {
-        logs.push(entry);
-      }
-      
-      this.appendToLogFile(executionKey, entry);
+    for (const line of String(message).split('\n')) {
+      const entry: LogEntry = { timestamp, phase, type, message: line };
+      if (logs) logs.push(entry);
+      appendToLogFile(executionKey, entry, this.storagePath, this.logFiles);
     }
   }
 }

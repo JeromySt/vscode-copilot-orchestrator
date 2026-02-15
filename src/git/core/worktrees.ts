@@ -132,6 +132,9 @@ export async function createWithTiming(options: CreateOptions): Promise<CreateTi
     // Setup submodules via symlinks (much faster than full checkout)
     const submoduleMs = await setupSubmoduleSymlinks(repoPath, worktreePath, log);
     
+    // Symlink shared directories (node_modules, etc.) for tool availability
+    await setupSharedDirectorySymlinks(repoPath, worktreePath, log);
+    
     const totalMs = Date.now() - totalStart;
     return { worktreeMs, submoduleMs, totalMs };
   } finally {
@@ -258,7 +261,8 @@ export async function createDetachedWithTiming(
   repoPath: string,
   worktreePath: string,
   commitish: string,
-  log?: GitLogger
+  log?: GitLogger,
+  additionalSymlinkDirs?: string[]
 ): Promise<CreateTiming & { baseCommit: string }> {
   // Acquire mutex to prevent race condition with parallel worktree operations
   const releaseMutex = await acquireRepoMutex(repoPath);
@@ -290,6 +294,9 @@ export async function createDetachedWithTiming(
     // Setup submodules via symlinks
     const submoduleMs = await setupSubmoduleSymlinks(repoPath, worktreePath, log);
     
+    // Symlink shared directories (node_modules, etc.) for tool availability
+    await setupSharedDirectorySymlinks(repoPath, worktreePath, log, additionalSymlinkDirs);
+    
     const totalMs = Date.now() - totalStart;
     return { worktreeMs, submoduleMs, totalMs, baseCommit };
   } finally {
@@ -313,7 +320,8 @@ export async function createOrReuseDetached(
   repoPath: string,
   worktreePath: string,
   commitish: string,
-  log?: GitLogger
+  log?: GitLogger,
+  additionalSymlinkDirs?: string[]
 ): Promise<CreateTiming & { baseCommit: string; reused: boolean }> {
   // Check if worktree already exists and is valid
   if (await isValid(worktreePath)) {
@@ -333,7 +341,7 @@ export async function createOrReuseDetached(
   }
   
   // Create new worktree
-  const result = await createDetachedWithTiming(repoPath, worktreePath, commitish, log);
+  const result = await createDetachedWithTiming(repoPath, worktreePath, commitish, log, additionalSymlinkDirs);
   return { ...result, reused: false };
 }
 
@@ -534,4 +542,70 @@ async function setupSubmoduleSymlinks(repoPath: string, worktreePath: string, lo
   await execAsync(['config', 'submodule.recurse', 'true'], { cwd: worktreePath });
   
   return submodTime;
+}
+
+// =============================================================================
+// SHARED DIRECTORY SYMLINKS
+// =============================================================================
+
+/**
+ * Directories to symlink from the main repo into worktrees.
+ *
+ * These are read-only, .gitignored directories that agents need for tooling
+ * (e.g. node_modules for eslint/tsc, .venv for Python). Adding a symlink is
+ * much faster than a full install and ensures the worktree has identical
+ * tool versions to the main repo.
+ *
+ * Requirements for a directory to be safe to symlink:
+ * - It MUST be in .gitignore (won't be committed)
+ * - It MUST be read-only from the agent's perspective (no npm install)
+ * - Internal paths must resolve relative to themselves (node_modules does)
+ */
+const SHARED_DIRECTORIES = [
+  'node_modules',
+];
+
+/**
+ * Symlink shared directories from the main repo into a worktree.
+ *
+ * For each directory in {@link SHARED_DIRECTORIES}, if it exists in the main
+ * repo and doesn't already exist in the worktree, creates a symlink
+ * (junction on Windows) so tools like eslint, tsc, etc. work without
+ * a separate `npm install`.
+ */
+async function setupSharedDirectorySymlinks(
+  repoPath: string,
+  worktreePath: string,
+  log?: GitLogger,
+  additionalDirs?: string[]
+): Promise<void> {
+  const dirs = [...SHARED_DIRECTORIES, ...(additionalDirs || [])];
+  // Deduplicate
+  const uniqueDirs = [...new Set(dirs)];
+  
+  for (const dirName of uniqueDirs) {
+    const sourceDir = path.join(repoPath, dirName);
+    const destDir = path.join(worktreePath, dirName);
+
+    try {
+      // Check source exists in main repo
+      const srcStats = await fs.promises.stat(sourceDir);
+      if (!srcStats.isDirectory()) continue;
+
+      // Skip if destination already exists (reused worktree)
+      try {
+        await fs.promises.lstat(destDir);
+        log?.(`[worktree] Shared directory '${dirName}' already exists in worktree, skipping`);
+        continue;
+      } catch {
+        // Doesn't exist — good, we'll create the symlink
+      }
+
+      const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+      await fs.promises.symlink(sourceDir, destDir, symlinkType);
+      log?.(`[worktree] ✓ Symlinked shared directory '${dirName}': ${destDir} -> ${sourceDir}`);
+    } catch (err: any) {
+      log?.(`[worktree] ⚠ Failed to symlink shared directory '${dirName}': ${err.message}`);
+    }
+  }
 }

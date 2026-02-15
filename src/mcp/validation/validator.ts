@@ -223,6 +223,31 @@ export function getRegisteredTools(): string[] {
 }
 
 // ============================================================================
+// SHARED HELPERS
+// ============================================================================
+
+/**
+ * Try to parse a value as a JSON object if it's a string.
+ * 
+ * Work specs can arrive as either parsed objects or JSON-encoded strings,
+ * depending on the MCP tool schema. This helper ensures validation always
+ * sees the parsed object form.
+ * 
+ * @param value - The value to potentially parse
+ * @returns The parsed object if it was a JSON string, otherwise the original value
+ */
+function tryParseWorkSpec(value: unknown): unknown {
+  if (typeof value === 'string' && ((value.startsWith('{') && value.endsWith('}')) || (value.startsWith('[') && value.endsWith(']')))) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+// ============================================================================
 // MODEL VALIDATION
 // ============================================================================
 
@@ -244,14 +269,15 @@ function extractModelValues(obj: any, path: string = ''): Array<{ value: string;
   // Recursively search in arrays and objects
   for (const [key, value] of Object.entries(obj)) {
     const currentPath = path ? `${path}.${key}` : key;
+    const parsed = tryParseWorkSpec(value);
     
-    if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) {
+    if (Array.isArray(parsed)) {
+      for (let i = 0; i < parsed.length; i++) {
         const itemPath = `${currentPath}[${i}]`;
-        models.push(...extractModelValues(value[i], itemPath));
+        models.push(...extractModelValues(parsed[i], itemPath));
       }
-    } else if (value && typeof value === 'object') {
-      models.push(...extractModelValues(value, currentPath));
+    } else if (parsed && typeof parsed === 'object') {
+      models.push(...extractModelValues(parsed, currentPath));
     }
   }
   
@@ -406,11 +432,12 @@ export async function validateAllowedUrls(
     if (!obj || typeof obj !== 'object') return;
     const record = obj as Record<string, unknown>;
     
-    // Check work specs for allowedUrls
+    // Check work specs for allowedUrls (parse JSON strings for security)
     const workFields = ['work', 'prechecks', 'postchecks', 'newWork', 'newPrechecks', 'newPostchecks'];
     for (const field of workFields) {
-      if (record[field] && typeof record[field] === 'object') {
-        const spec = record[field] as Record<string, unknown>;
+      const parsed = tryParseWorkSpec(record[field]);
+      if (parsed && typeof parsed === 'object') {
+        const spec = parsed as Record<string, unknown>;
         if (spec.type === 'agent' && spec.allowedUrls) {
           checkUrls(spec.allowedUrls, `${jsonPath}/${field}/allowedUrls`);
         }
@@ -501,11 +528,12 @@ export async function validateAllowedFolders(
     if (!obj || typeof obj !== 'object') return;
     const record = obj as Record<string, unknown>;
     
-    // Check work specs for allowedFolders
+    // Check work specs for allowedFolders (parse JSON strings for security)
     const workFields = ['work', 'prechecks', 'postchecks', 'newWork', 'newPrechecks', 'newPostchecks'];
     for (const field of workFields) {
-      if (record[field] && typeof record[field] === 'object') {
-        const spec = record[field] as Record<string, unknown>;
+      const parsed = tryParseWorkSpec(record[field]);
+      if (parsed && typeof parsed === 'object') {
+        const spec = parsed as Record<string, unknown>;
         if (spec.type === 'agent' && spec.allowedFolders) {
           await checkFolders(spec.allowedFolders, `${jsonPath}/${field}/allowedFolders`);
         }

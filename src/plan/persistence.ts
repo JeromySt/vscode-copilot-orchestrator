@@ -20,7 +20,7 @@ import {
   GroupExecutionState,
 } from './types';
 import { Logger } from '../core/logger';
-import { ensureOrchestratorDirs } from '../core';
+import { ensureOrchestratorDirs, ensureDir } from '../core';
 
 const log = Logger.for('plan-persistence');
 
@@ -109,9 +109,7 @@ export class PlanPersistence {
   }
   
   private ensureStorageDir(): void {
-    if (!fs.existsSync(this.storagePath)) {
-      fs.mkdirSync(this.storagePath, { recursive: true });
-    }
+    ensureDir(this.storagePath);
   }
   
   private getPlanFilePath(planId: string): string {
@@ -450,7 +448,10 @@ export class PlanPersistence {
     
     if (fs.existsSync(indexPath)) {
       try {
-        index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+        const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+        if (parsed && typeof parsed.plans === 'object') {
+          index = parsed;
+        }
       } catch {
         // Start fresh if corrupted
       }
