@@ -81,7 +81,7 @@ suite('Logger Unit Tests', () => {
 
     test('should support setConfigProvider method', () => {
       logger = new Logger();
-      mockConfigProvider.setConfig(LOGGING_LEVEL_KEY, '', 'debug');
+      mockConfigProvider.setConfig('copilotOrchestrator.logging', 'level', 'debug');
       
       logger.setConfigProvider(mockConfigProvider);
       assert.strictEqual(logger.getLevel(), 'debug');
@@ -117,7 +117,7 @@ suite('Logger Unit Tests', () => {
     });
 
     test('should respect log level from config provider', () => {
-      mockConfigProvider.setConfig(LOGGING_LEVEL_KEY, '', 'error');
+      mockConfigProvider.setConfig('copilotOrchestrator.logging', 'level', 'error');
       logger = new Logger(mockConfigProvider);
       
       assert.strictEqual(logger.getLevel(), 'error');
@@ -366,7 +366,7 @@ suite('Logger Unit Tests', () => {
     });
 
     test('should use configuration constants for config access', () => {
-      mockConfigProvider.setConfig(LOGGING_LEVEL_KEY, '', 'debug');
+      mockConfigProvider.setConfig('copilotOrchestrator.logging', 'level', 'debug');
       logger = new Logger(mockConfigProvider);
       
       assert.strictEqual(logger.getLevel(), 'debug');
@@ -420,7 +420,7 @@ suite('Logger Unit Tests', () => {
     test('should handle setConfigProvider after construction', () => {
       logger = new Logger();
       const newProvider = new MockConfigProvider();
-      newProvider.setConfig(LOGGING_LEVEL_KEY, '', 'error');
+      newProvider.setConfig('copilotOrchestrator.logging', 'level', 'error');
       
       logger.setConfigProvider(newProvider);
       assert.strictEqual(logger.getLevel(), 'error');

@@ -174,7 +174,7 @@ export async function initializePlanRunner(
   const processMonitor = container.resolve<IProcessMonitor>(Tokens.IProcessMonitor);
   
   const planRunner = new PlanRunner(config, {
-    configManager: new PlanConfigManager(),
+    configManager: new PlanConfigManager(container.resolve<IConfigProvider>(Tokens.IConfigProvider)),
     persistence: new PlanPersistence(storagePath),
     processMonitor,
     stateMachineFactory: (plan) => new PlanStateMachine(plan),

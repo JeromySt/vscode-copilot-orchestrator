@@ -580,10 +580,40 @@ async function setupSharedDirectorySymlinks(
   additionalDirs?: string[]
 ): Promise<void> {
   const dirs = [...SHARED_DIRECTORIES, ...(additionalDirs || [])];
-  // Deduplicate
-  const uniqueDirs = [...new Set(dirs)];
-  
-  for (const dirName of uniqueDirs) {
+
+  // Deduplicate and validate to prevent path traversal
+  const seen = new Set<string>();
+  const validatedDirs: string[] = [];
+  const repoPathNorm = path.resolve(repoPath);
+
+  for (const rawDirName of dirs) {
+    const dirName = rawDirName.trim();
+    if (!dirName || seen.has(dirName)) continue;
+    seen.add(dirName);
+
+    // Built-in shared directories are trusted
+    if (SHARED_DIRECTORIES.includes(dirName)) {
+      validatedDirs.push(dirName);
+      continue;
+    }
+
+    // Block dangerous directory names
+    if (dirName === '.' || dirName === '..' || dirName === '.git' ||
+        dirName.startsWith(`.git${path.sep}`)) {
+      log?.(`[worktree] Skipping directory '${dirName}': rejected dangerous name`);
+      continue;
+    }
+
+    const resolved = path.resolve(repoPath, dirName);
+    if (!resolved.startsWith(repoPathNorm + path.sep)) {
+      log?.(`[worktree] Skipping directory '${dirName}': resolves outside repo (path traversal blocked)`);
+      continue;
+    }
+
+    validatedDirs.push(dirName);
+  }
+
+  for (const dirName of validatedDirs) {
     const sourceDir = path.join(repoPath, dirName);
     const destDir = path.join(worktreePath, dirName);
 

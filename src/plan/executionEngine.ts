@@ -595,7 +595,6 @@ export class JobExecutionEngine {
             
             // Get the execution logs for the failed phase — these contain
             // the full stdout/stderr streams plus timing info
-            const phaseLogs = this.nodeManager.getNodeLogs(plan.id, node.id, failedPhase as ExecutionPhase);
             // Truncate to last ~200 lines to avoid overwhelming the agent
             // Get security settings from the original failed spec
             const originalAgentSpec = normalizedFailedSpec?.type === 'agent' ? normalizedFailedSpec : null;
