@@ -72,7 +72,19 @@ function createContext(plans: PlanInstance[] = []): PlanHandlerContext {
   const mockCounts = { pending: 0, ready: 0, scheduled: 0, running: 1, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
 
   return {
-    git: {} as any,
+    git: {
+      branches: {
+        currentOrNull: sinon.stub().resolves('main'),
+        isDefaultBranch: sinon.stub().resolves(false),
+        exists: sinon.stub().resolves(false),
+        create: sinon.stub().resolves(),
+        current: sinon.stub().resolves('main'),
+      },
+      worktrees: {},
+      merge: {},
+      repository: {},
+      orchestrator: {},
+    } as any,
     PlanRunner: {
       get: sinon.stub().callsFake((id: string) => planMap.get(id)),
       getPlan: sinon.stub().callsFake((id: string) => planMap.get(id)),
@@ -323,7 +335,19 @@ suite('Legacy Adapters', () => {
     const mockCounts = { pending: 0, ready: 0, scheduled: 0, running: 1, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
 
     return {
-      git: {} as any,
+      git: {
+        branches: {
+          currentOrNull: sinon.stub().resolves('main'),
+          isDefaultBranch: sinon.stub().resolves(false),
+          exists: sinon.stub().resolves(false),
+          create: sinon.stub().resolves(),
+          current: sinon.stub().resolves('main'),
+        },
+        worktrees: {},
+        merge: {},
+        repository: {},
+        orchestrator: {},
+      } as any,
       PlanRunner: {
         get: sinon.stub().callsFake((id: string) => planMap.get(id)),
         getPlan: sinon.stub().callsFake((id: string) => planMap.get(id)),

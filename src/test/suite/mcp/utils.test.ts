@@ -157,14 +157,14 @@ suite('MCP Handler Utils', () => {
 
     test('returns current branch if no request', async () => {
       sinon.stub(git.branches, 'currentOrNull').resolves('feature-branch');
-      const result = await resolveBaseBranch('/repo', {} as any);
+      const result = await resolveBaseBranch('/repo', git as any);
       assert.strictEqual(result, 'feature-branch');
       sinon.restore();
     });
 
     test('returns main when no current branch', async () => {
       sinon.stub(git.branches, 'currentOrNull').resolves(null);
-      const result = await resolveBaseBranch('/repo', {} as any);
+      const result = await resolveBaseBranch('/repo', git as any);
       assert.strictEqual(result, 'main');
       sinon.restore();
     });
@@ -174,26 +174,26 @@ suite('MCP Handler Utils', () => {
     test('generates feature branch when no request', async () => {
       const vscode = require('vscode');
       sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
-      sinon.stub(git.orchestrator, 'resolveTargetBranchRoot').resolves({ targetBranchRoot: 'copilot_plan/test', needsCreation: false });
-      const result = await resolveTargetBranch('main', '/repo', {} as any);
+      sinon.stub(git.branches, 'exists').resolves(false);
+      sinon.stub(git.branches, 'create').resolves();
+      const result = await resolveTargetBranch('main', '/repo', git as any);
       assert.ok(result.includes('copilot_plan'));
     });
 
     test('creates new branch when needsCreation is true', async () => {
       const vscode = require('vscode');
       sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
-      sinon.stub(git.orchestrator, 'resolveTargetBranchRoot').resolves({ targetBranchRoot: 'copilot_plan/new', needsCreation: true });
       sinon.stub(git.branches, 'exists').resolves(false);
       const createStub = sinon.stub(git.branches, 'create').resolves();
-      const result = await resolveTargetBranch('main', '/repo', {} as any);
+      const result = await resolveTargetBranch('main', '/repo', git as any);
       assert.ok(createStub.calledOnce);
-      assert.strictEqual(result, 'copilot_plan/new');
+      assert.ok(result.startsWith('copilot_plan/'));
     });
 
     test('uses requested branch when not default', async () => {
       sinon.stub(git.branches, 'isDefaultBranch').resolves(false);
       sinon.stub(git.branches, 'exists').resolves(true);
-      const result = await resolveTargetBranch('main', '/repo', {} as any, 'feature/my-branch');
+      const result = await resolveTargetBranch('main', '/repo', git as any, 'feature/my-branch');
       assert.strictEqual(result, 'feature/my-branch');
     });
 
@@ -201,7 +201,7 @@ suite('MCP Handler Utils', () => {
       sinon.stub(git.branches, 'isDefaultBranch').resolves(false);
       sinon.stub(git.branches, 'exists').resolves(false);
       const createStub = sinon.stub(git.branches, 'create').resolves();
-      const result = await resolveTargetBranch('main', '/repo', {} as any, 'new-branch');
+      const result = await resolveTargetBranch('main', '/repo', git as any, 'new-branch');
       assert.strictEqual(result, 'new-branch');
       assert.ok(createStub.calledOnce);
     });
@@ -210,27 +210,29 @@ suite('MCP Handler Utils', () => {
       const vscode = require('vscode');
       sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
       sinon.stub(git.branches, 'isDefaultBranch').resolves(true);
-      sinon.stub(git.orchestrator, 'resolveTargetBranchRoot').resolves({ targetBranchRoot: 'copilot_plan/safe', needsCreation: false });
-      const result = await resolveTargetBranch('main', '/repo', {} as any, 'main');
-      assert.strictEqual(result, 'copilot_plan/safe');
+      sinon.stub(git.branches, 'exists').resolves(false);
+      sinon.stub(git.branches, 'create').resolves();
+      const result = await resolveTargetBranch('main', '/repo', git as any, 'main');
+      assert.ok(result.startsWith('copilot_plan/'));
     });
 
     test('falls back to feature branch on error', async () => {
       const vscode = require('vscode');
       sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
       sinon.stub(git.branches, 'isDefaultBranch').rejects(new Error('git fail'));
-      sinon.stub(git.orchestrator, 'resolveTargetBranchRoot').resolves({ targetBranchRoot: 'copilot_plan/fallback', needsCreation: false });
-      const result = await resolveTargetBranch('main', '/repo', {} as any, 'bad-branch');
-      assert.strictEqual(result, 'copilot_plan/fallback');
+      sinon.stub(git.branches, 'exists').resolves(false);
+      sinon.stub(git.branches, 'create').resolves();
+      const result = await resolveTargetBranch('main', '/repo', git as any, 'bad-branch');
+      assert.ok(result.startsWith('copilot_plan/'));
     });
 
     test('uses planName for branch suffix', async () => {
       const vscode = require('vscode');
       sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
-      sinon.stub(git.orchestrator, 'resolveTargetBranchRoot').resolves({ targetBranchRoot: 'copilot_plan/my-plan', needsCreation: false });
-      sinon.stub(git.orchestrator, 'slugify').returns('my-plan');
-      const result = await resolveTargetBranch('main', '/repo', {} as any, undefined, 'My Plan');
-      assert.ok(result);
+      sinon.stub(git.branches, 'exists').resolves(false);
+      sinon.stub(git.branches, 'create').resolves();
+      const result = await resolveTargetBranch('main', '/repo', git as any, undefined, 'My Plan');
+      assert.ok(result.includes('copilot_plan'));
     });
   });
 });

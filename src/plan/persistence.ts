@@ -89,6 +89,8 @@ interface SerializedNode {
  */
 export class PlanPersistence {
   private storagePath: string;
+  /** Cached workspace root — only set when storagePath follows workspace/.orchestrator/plans */
+  private workspacePath: string | undefined;
   
   /**
    * @param storagePath - Directory where plan JSON files are stored. Created if it doesn't exist.
@@ -102,8 +104,8 @@ export class PlanPersistence {
     const parentDirName = path.basename(parentDir);
 
     if (storageDirName === 'plans' && parentDirName === '.orchestrator') {
-      const workspacePath = path.dirname(parentDir);
-      ensureOrchestratorDirs(workspacePath);
+      this.workspacePath = path.dirname(parentDir);
+      ensureOrchestratorDirs(this.workspacePath);
     }
     this.ensureStorageDir();
   }
@@ -129,8 +131,11 @@ export class PlanPersistence {
   save(plan: PlanInstance): void {
     try {
       // Guard against deleted directories
-      const workspacePath = path.resolve(this.storagePath, '../..');
-      ensureOrchestratorDirs(workspacePath);
+      if (this.workspacePath) {
+        ensureOrchestratorDirs(this.workspacePath);
+      } else {
+        this.ensureStorageDir();
+      }
       
       const serialized = this.serialize(plan);
       const filePath = this.getPlanFilePath(plan.id);
@@ -460,8 +465,11 @@ export class PlanPersistence {
     index.plans[planId] = { name, createdAt };
     
     // Guard against deleted directories
-    const workspacePath = path.resolve(this.storagePath, '../..');
-    ensureOrchestratorDirs(workspacePath);
+    if (this.workspacePath) {
+      ensureOrchestratorDirs(this.workspacePath);
+    } else {
+      this.ensureStorageDir();
+    }
     fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
   }
   
@@ -477,8 +485,11 @@ export class PlanPersistence {
       delete index.plans[planId];
       
       // Guard against deleted directories
-      const workspacePath = path.resolve(this.storagePath, '../..');
-      ensureOrchestratorDirs(workspacePath);
+      if (this.workspacePath) {
+        ensureOrchestratorDirs(this.workspacePath);
+      } else {
+        this.ensureStorageDir();
+      }
       fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
     } catch {
       // Ignore errors

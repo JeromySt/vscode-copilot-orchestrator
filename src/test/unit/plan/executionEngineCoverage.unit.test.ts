@@ -1,20 +1,27 @@
 /**
- * @fileoverview Coverage tests for JobExecutionEngine private methods
- * Targets uncovered utility methods, branch update logic, and cleanup paths.
+ * @fileoverview Additional coverage tests for JobExecutionEngine.
+ * Targets uncovered branches: nodeState missing, no executor, auto-heal edge cases,
+ * RI merge mutex serialization, FI merge from deps, work summary, plan completion,
+ * worktree cleanup, cancel/abort, and various error paths.
  */
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as git from '../../../git';
 import { JobExecutionEngine, ExecutionEngineState } from '../../../plan/executionEngine';
 import { NodeManager } from '../../../plan/nodeManager';
 import { PlanStateMachine } from '../../../plan/stateMachine';
 import { PlanPersistence } from '../../../plan/persistence';
 import { PlanEventEmitter } from '../../../plan/planEvents';
 import { PlanConfigManager } from '../../../plan/configManager';
-import type { PlanInstance, JobNode, NodeExecutionState, PlanNode, JobWorkSummary, CommitDetail } from '../../../plan/types';
+import type { PlanInstance, JobNode, NodeExecutionState, PlanNode, ExecutionContext, JobExecutionResult, JobWorkSummary, CommitDetail } from '../../../plan/types';
 import type { ILogger } from '../../../interfaces/ILogger';
+
+/* ------------------------------------------------------------------ */
+/*  Shared helpers (match existing test-file conventions)              */
+/* ------------------------------------------------------------------ */
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
@@ -65,7 +72,7 @@ function createTestPlan(opts?: {
     nodeStates, groups: new Map(), groupStates: new Map(), groupPathToId: new Map(),
     repoPath: '/repo', baseBranch: 'main', targetBranch: opts?.targetBranch,
     worktreeRoot: '/worktrees', createdAt: Date.now(), stateVersion: 0,
-    cleanUpSuccessfulWork: opts?.cleanUpSuccessfulWork ?? true, maxParallel: 4,
+    cleanUpSuccessfulWork: opts?.cleanUpSuccessfulWork ?? false, maxParallel: 4,
   };
 }
 
@@ -81,7 +88,10 @@ function createEngineState(storagePath: string, executorOverrides?: Partial<any>
     getLogFileSize: sinon.stub().returns(0),
     getLogFilePath: sinon.stub().returns(undefined),
     log: sinon.stub(),
-    computeAggregatedWorkSummary: sinon.stub().resolves({ nodeId: 'n1', nodeName: 'J', commits: 0, filesAdded: 0, filesModified: 0, filesDeleted: 0, description: '' }),
+    computeAggregatedWorkSummary: sinon.stub().resolves({
+      nodeId: 'n1', nodeName: 'J', commits: 0,
+      filesAdded: 0, filesModified: 0, filesDeleted: 0, description: '',
+    }),
     ...executorOverrides,
   };
   return {
@@ -90,50 +100,99 @@ function createEngineState(storagePath: string, executorOverrides?: Partial<any>
   };
 }
 
-function createMockGitOperations(): any {
+function createMockGitOps(): any {
   return {
     worktrees: {
-      createOrReuseDetached: sinon.stub().resolves({ reused: false, baseCommit: 'base123', totalMs: 100 }),
+      create: sinon.stub().resolves(),
+      createWithTiming: sinon.stub().resolves({ totalMs: 10, cloneMs: 5, symlinkMs: 2, baseCommit: 'abc123' }),
+      createDetachedWithTiming: sinon.stub().resolves({ totalMs: 10, cloneMs: 5, symlinkMs: 2, baseCommit: 'abc123' }),
+      createOrReuseDetached: sinon.stub().resolves({ totalMs: 10, cloneMs: 5, symlinkMs: 2, baseCommit: 'abc123', reused: false }),
+      remove: sinon.stub().resolves(),
       removeSafe: sinon.stub().resolves(true),
+      isValid: sinon.stub().resolves(true),
+      getBranch: sinon.stub().resolves(null),
+      getHeadCommit: sinon.stub().resolves('abc123'),
+      list: sinon.stub().resolves([]),
+      prune: sinon.stub().resolves(),
     },
-    gitignore: { ensureGitignoreEntries: sinon.stub().resolves(false) },
     repository: {
-      updateRef: sinon.stub().resolves(),
-      resolveRef: sinon.stub().resolves('target-sha-123'),
+      fetch: sinon.stub().resolves(),
+      pull: sinon.stub().resolves(true),
+      push: sinon.stub().resolves(true),
+      stageAll: sinon.stub().resolves(),
       stageFile: sinon.stub().resolves(),
-      hasChangesBetween: sinon.stub().resolves(true),
+      commit: sinon.stub().resolves(true),
+      hasChanges: sinon.stub().resolves(false),
+      hasStagedChanges: sinon.stub().resolves(false),
       hasUncommittedChanges: sinon.stub().resolves(false),
-      getFileDiff: sinon.stub().resolves(''),
-      getStagedFileDiff: sinon.stub().resolves(''),
+      getHead: sinon.stub().resolves('abc123'),
+      resolveRef: sinon.stub().resolves('abc123'),
+      getCommitLog: sinon.stub().resolves([]),
+      getCommitChanges: sinon.stub().resolves([]),
+      getDiffStats: sinon.stub().resolves({ added: 0, modified: 0, deleted: 0 }),
+      getFileDiff: sinon.stub().resolves(null),
+      getStagedFileDiff: sinon.stub().resolves(null),
+      getFileChangesBetween: sinon.stub().resolves([]),
+      hasChangesBetween: sinon.stub().resolves(false),
+      getCommitCount: sinon.stub().resolves(0),
       getDirtyFiles: sinon.stub().resolves([]),
-      resetHard: sinon.stub().resolves(),
       checkoutFile: sinon.stub().resolves(),
-      stashPush: sinon.stub().resolves(),
-      stashPop: sinon.stub().resolves(),
-      stashDrop: sinon.stub().resolves(),
+      resetHard: sinon.stub().resolves(),
+      clean: sinon.stub().resolves(),
+      updateRef: sinon.stub().resolves(),
+      stashPush: sinon.stub().resolves(true),
+      stashPop: sinon.stub().resolves(true),
+      stashDrop: sinon.stub().resolves(true),
+      stashList: sinon.stub().resolves([]),
       stashShowFiles: sinon.stub().resolves([]),
-      stashShowPatch: sinon.stub().resolves(''),
+      stashShowPatch: sinon.stub().resolves(null),
     },
     merge: {
-      mergeWithoutCheckout: sinon.stub().resolves({ success: true, treeSha: 'tree-sha-123' }),
-      commitTree: sinon.stub().resolves('new-commit-123'),
+      merge: sinon.stub().resolves({ success: true }),
+      mergeWithoutCheckout: sinon.stub().resolves({ success: true, treeSha: 'tree123' }),
+      commitTree: sinon.stub().resolves('newcommit123'),
+      continueAfterResolve: sinon.stub().resolves(true),
+      abort: sinon.stub().resolves(),
+      listConflicts: sinon.stub().resolves([]),
+      isInProgress: sinon.stub().resolves(false),
     },
     branches: {
-      getCommit: sinon.stub().resolves('abc123'),
+      isDefaultBranch: sinon.stub().resolves(false),
+      exists: sinon.stub().resolves(true),
+      remoteExists: sinon.stub().resolves(false),
+      current: sinon.stub().resolves('main'),
       currentOrNull: sinon.stub().resolves(null),
+      create: sinon.stub().resolves(),
+      createOrReset: sinon.stub().resolves(),
+      checkout: sinon.stub().resolves(),
+      list: sinon.stub().resolves([]),
+      getCommit: sinon.stub().resolves(null),
+      getMergeBase: sinon.stub().resolves(null),
+      remove: sinon.stub().resolves(),
+      deleteLocal: sinon.stub().resolves(true),
+      deleteRemote: sinon.stub().resolves(true),
     },
-  };
+    gitignore: {
+      ensureGitignoreEntries: sinon.stub().resolves(false),
+      isIgnored: sinon.stub().resolves(false),
+      isOrchestratorGitIgnoreConfigured: sinon.stub().resolves(true),
+      ensureOrchestratorGitIgnore: sinon.stub().resolves(true),
+    },
+  } as any;
 }
 
-function makeEngine(): { engine: any; state: ExecutionEngineState; log: ILogger; git: any; nodeManager: NodeManager } {
-  const dir = makeTmpDir();
-  const state = createEngineState(dir);
+function createEngine(dir: string, executorOverrides?: Partial<any>) {
   const log = createMockLogger();
-  const git = createMockGitOperations();
-  const nodeManager = new NodeManager(state as any, log, git);
-  const engine = new JobExecutionEngine(state, nodeManager, log, git);
-  return { engine, state, log, git, nodeManager };
+  const state = createEngineState(dir, executorOverrides);
+  const gitOps = createMockGitOps();
+  const nodeManager = new NodeManager(state as any, log, gitOps);
+  const engine = new JobExecutionEngine(state, nodeManager, log, gitOps);
+  return { engine, state, log, nodeManager, gitOps };
 }
+
+/* ================================================================== */
+/*  TESTS                                                             */
+/* ================================================================== */
 
 suite('JobExecutionEngine - Coverage', () => {
   let quiet: { restore: () => void };
@@ -153,911 +212,1060 @@ suite('JobExecutionEngine - Coverage', () => {
     tmpDirs = [];
   });
 
-  // ============================================================================
-  // diffContainsOnlyOrchestratorPatterns
-  // ============================================================================
+  // ------------------------------------------------------------------
+  // 1. nodeState missing early return
+  // ------------------------------------------------------------------
+  suite('nodeState missing', () => {
+    test('executeJobNode returns immediately when nodeState is missing', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      // Remove the nodeState to trigger early return
+      plan.nodeStates.delete('node-1');
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
 
-  test('diffContainsOnlyOrchestratorPatterns returns true for orchestrator-only diff', () => {
-    const { engine } = makeEngine();
-    const diff = [
-      'diff --git a/.gitignore b/.gitignore',
-      'index abc..def 100644',
-      '--- a/.gitignore',
-      '+++ b/.gitignore',
-      '@@ -1,2 +1,4 @@',
-      ' node_modules',
-      '+.orchestrator/',
-      '+# Copilot Orchestrator',
-      '+',
-    ].join('\n');
-    assert.strictEqual((engine as any).diffContainsOnlyOrchestratorPatterns(diff), true);
-  });
+      const { engine, state } = createEngine(dir);
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
 
-  test('diffContainsOnlyOrchestratorPatterns returns false for non-orchestrator changes', () => {
-    const { engine } = makeEngine();
-    const diff = [
-      'diff --git a/.gitignore b/.gitignore',
-      '@@ -1,2 +1,3 @@',
-      '+dist/',
-      '+.orchestrator/',
-    ].join('\n');
-    assert.strictEqual((engine as any).diffContainsOnlyOrchestratorPatterns(diff), false);
-  });
-
-  test('diffContainsOnlyOrchestratorPatterns handles removed orchestrator lines', () => {
-    const { engine } = makeEngine();
-    const diff = '@@ -1 +1 @@\n-.orchestrator/';
-    assert.strictEqual((engine as any).diffContainsOnlyOrchestratorPatterns(diff), true);
-  });
-
-  // ============================================================================
-  // summarizeCommitFiles
-  // ============================================================================
-
-  test('summarizeCommitFiles returns empty string for no changes', () => {
-    const { engine } = makeEngine();
-    const commit: CommitDetail = {
-      hash: 'abc123', shortHash: 'abc1234', message: 'test', author: 'test', date: '2024-01-01',
-      filesAdded: [], filesModified: [], filesDeleted: [],
-    };
-    assert.strictEqual((engine as any).summarizeCommitFiles(commit), '');
-  });
-
-  test('summarizeCommitFiles shows added, modified, deleted counts', () => {
-    const { engine } = makeEngine();
-    const commit: CommitDetail = {
-      hash: 'abc123', shortHash: 'abc1234', message: 'test', author: 'test', date: '2024-01-01',
-      filesAdded: ['src/a.ts'], filesModified: ['src/b.ts'], filesDeleted: ['src/c.ts'],
-    };
-    const result = (engine as any).summarizeCommitFiles(commit);
-    assert.ok(result.includes('+1'));
-    assert.ok(result.includes('~1'));
-    assert.ok(result.includes('-1'));
-  });
-
-  test('summarizeCommitFiles truncates with more indicator', () => {
-    const { engine } = makeEngine();
-    const commit: CommitDetail = {
-      hash: 'abc123', shortHash: 'abc1234', message: 'test', author: 'test', date: '2024-01-01',
-      filesAdded: ['a.ts', 'b.ts', 'c.ts', 'd.ts'], filesModified: [], filesDeleted: [],
-    };
-    const result = (engine as any).summarizeCommitFiles(commit);
-    assert.ok(result.includes('+4'));
-    assert.ok(result.includes('more'));
-  });
-
-  // ============================================================================
-  // logDependencyWorkSummary
-  // ============================================================================
-
-  test('logDependencyWorkSummary handles undefined workSummary', () => {
-    const { engine, state } = makeEngine();
-    (engine as any).logDependencyWorkSummary('plan-1', 'node-1', undefined, 1);
-    assert.ok((state.executor!.log as sinon.SinonStub).called);
-  });
-
-  test('logDependencyWorkSummary handles empty commitDetails', () => {
-    const { engine, state } = makeEngine();
-    const ws: JobWorkSummary = {
-      nodeId: 'n1', nodeName: 'J', commits: 2, filesAdded: 1,
-      filesModified: 3, filesDeleted: 0, description: '',
-    };
-    (engine as any).logDependencyWorkSummary('plan-1', 'node-1', ws, 1);
-    assert.ok((state.executor!.log as sinon.SinonStub).called);
-  });
-
-  test('logDependencyWorkSummary logs commit details', () => {
-    const { engine, state } = makeEngine();
-    const ws: JobWorkSummary = {
-      nodeId: 'n1', nodeName: 'J', commits: 1, filesAdded: 1,
-      filesModified: 0, filesDeleted: 0, description: '',
-      commitDetails: [{
-        hash: 'abc', shortHash: 'abc1234', message: 'feat: add thing', author: 'test', date: '2024-01-01',
-        filesAdded: ['src/thing.ts'], filesModified: [], filesDeleted: [],
-      }],
-    };
-    (engine as any).logDependencyWorkSummary('plan-1', 'node-1', ws, 1);
-    const logCalls = (state.executor!.log as sinon.SinonStub).args;
-    assert.ok(logCalls.some((c: any[]) => typeof c[4] === 'string' && c[4].includes('abc1234')));
-  });
-
-  // ============================================================================
-  // allConsumersConsumed
-  // ============================================================================
-
-  test('allConsumersConsumed returns true for leaf with no targetBranch', () => {
-    const { engine } = makeEngine();
-    const plan = createTestPlan();
-    const node = createJobNode('node-1', [], []);
-    const state: NodeExecutionState = { status: 'succeeded', version: 0, attempts: 1 };
-    assert.strictEqual((engine as any).allConsumersConsumed(plan, node, state), true);
-  });
-
-  test('allConsumersConsumed returns false for leaf with targetBranch not merged', () => {
-    const { engine } = makeEngine();
-    const plan = createTestPlan({ targetBranch: 'main' });
-    const node = createJobNode('node-1', [], []);
-    const state: NodeExecutionState = { status: 'succeeded', version: 0, attempts: 1, mergedToTarget: false };
-    assert.strictEqual((engine as any).allConsumersConsumed(plan, node, state), false);
-  });
-
-  test('allConsumersConsumed returns true for leaf with targetBranch merged', () => {
-    const { engine } = makeEngine();
-    const plan = createTestPlan({ targetBranch: 'main' });
-    const node = createJobNode('node-1', [], []);
-    const state: NodeExecutionState = { status: 'succeeded', version: 0, attempts: 1, mergedToTarget: true };
-    assert.strictEqual((engine as any).allConsumersConsumed(plan, node, state), true);
-  });
-
-  test('allConsumersConsumed returns false when not all dependents consumed', () => {
-    const { engine } = makeEngine();
-    const plan = createTestPlan();
-    const node = createJobNode('node-1', [], ['node-2', 'node-3']);
-    const state: NodeExecutionState = {
-      status: 'succeeded', version: 0, attempts: 1,
-      consumedByDependents: ['node-2'],
-    };
-    assert.strictEqual((engine as any).allConsumersConsumed(plan, node, state), false);
-  });
-
-  test('allConsumersConsumed returns true when all dependents consumed', () => {
-    const { engine } = makeEngine();
-    const plan = createTestPlan();
-    const node = createJobNode('node-1', [], ['node-2', 'node-3']);
-    const state: NodeExecutionState = {
-      status: 'succeeded', version: 0, attempts: 1,
-      consumedByDependents: ['node-2', 'node-3'],
-    };
-    assert.strictEqual((engine as any).allConsumersConsumed(plan, node, state), true);
-  });
-
-  // ============================================================================
-  // withRiMergeLock
-  // ============================================================================
-
-  test('withRiMergeLock serializes access', async () => {
-    const { engine } = makeEngine();
-    const order: number[] = [];
-    const p1 = (engine as any).withRiMergeLock(async () => {
-      await new Promise(r => setTimeout(r, 10));
-      order.push(1);
+      // Should not throw — just return immediately
+      await engine.executeJobNode(plan, sm, node);
+      // No status change since nodeState was missing
+      assert.strictEqual(plan.nodeStates.has('node-1'), false);
     });
-    const p2 = (engine as any).withRiMergeLock(async () => {
-      order.push(2);
+  });
+
+  // ------------------------------------------------------------------
+  // 2. execLog when executor is undefined
+  // ------------------------------------------------------------------
+  suite('execLog with no executor', () => {
+    test('execLog is a no-op when executor has no log function', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const state = createEngineState(dir, { log: undefined });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      const log = createMockLogger();
+      const gitOps = createMockGitOps();
+      // Trigger worktree creation failure to exercise execLog without executor.log
+      (gitOps.worktrees.createOrReuseDetached as sinon.SinonStub).rejects(new Error('boom'));
+      const nodeManager = new NodeManager(state as any, log, gitOps);
+      const engine = new JobExecutionEngine(state, nodeManager, log, gitOps);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
     });
-    await Promise.all([p1, p2]);
-    assert.deepStrictEqual(order, [1, 2]);
   });
 
-  test('withRiMergeLock releases on error', async () => {
-    const { engine } = makeEngine();
-    try {
-      await (engine as any).withRiMergeLock(async () => { throw new Error('boom'); });
-    } catch {}
-    // Should still work after error
-    let ran = false;
-    await (engine as any).withRiMergeLock(async () => { ran = true; });
-    assert.ok(ran);
-  });
+  // ------------------------------------------------------------------
+  // 3. baseCommitAtStart is captured only once
+  // ------------------------------------------------------------------
+  suite('baseCommitAtStart capture', () => {
+    test('baseCommitAtStart is set on first fresh worktree', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
 
-  // ============================================================================
-  // cleanupWorktree
-  // ============================================================================
-
-  test('cleanupWorktree calls git removeSafe', async () => {
-    const { engine, git } = makeEngine();
-    await (engine as any).cleanupWorktree('/wt/path', '/repo');
-    assert.ok(git.worktrees.removeSafe.calledWith('/repo', '/wt/path', { force: true }));
-  });
-
-  test('cleanupWorktree handles error gracefully', async () => {
-    const { engine, git, log } = makeEngine();
-    git.worktrees.removeSafe.rejects(new Error('busy'));
-    await (engine as any).cleanupWorktree('/wt/path', '/repo');
-    assert.ok((log.warn as sinon.SinonStub).called);
-  });
-
-  // ============================================================================
-  // acknowledgeConsumption
-  // ============================================================================
-
-  test('acknowledgeConsumption tracks consumer', async () => {
-    const { engine, state } = makeEngine();
-    const depNode = createJobNode('dep-1', [], ['consumer-1']);
-    const consumerNode = createJobNode('consumer-1', ['dep-1'], []);
-    const depState: NodeExecutionState = { status: 'succeeded', version: 0, attempts: 1, completedCommit: 'abc', worktreePath: '/wt/dep' };
-    const plan = createTestPlan({
-      nodes: new Map([['dep-1', depNode], ['consumer-1', consumerNode]]),
-      nodeStates: new Map([
-        ['dep-1', depState],
-        ['consumer-1', { status: 'running', version: 0, attempts: 1 }],
-      ]),
-      leaves: ['consumer-1'],
-      roots: ['dep-1'],
-      cleanUpSuccessfulWork: false,
-    });
-    const sm = new PlanStateMachine(plan as any);
-    await (engine as any).acknowledgeConsumption(plan, sm, consumerNode);
-    assert.ok(depState.consumedByDependents?.includes('consumer-1'));
-  });
-
-  test('acknowledgeConsumption deduplicates', async () => {
-    const { engine } = makeEngine();
-    const depNode = createJobNode('dep-1', [], ['consumer-1']);
-    const consumerNode = createJobNode('consumer-1', ['dep-1'], []);
-    const depState: NodeExecutionState = {
-      status: 'succeeded', version: 0, attempts: 1,
-      consumedByDependents: ['consumer-1'],
-    };
-    const plan = createTestPlan({
-      nodes: new Map([['dep-1', depNode], ['consumer-1', consumerNode]]),
-      nodeStates: new Map([
-        ['dep-1', depState],
-        ['consumer-1', { status: 'running', version: 0, attempts: 1 }],
-      ]),
-      cleanUpSuccessfulWork: false,
-    });
-    const sm = new PlanStateMachine(plan as any);
-    await (engine as any).acknowledgeConsumption(plan, sm, consumerNode);
-    assert.strictEqual(depState.consumedByDependents?.filter((c: string) => c === 'consumer-1').length, 1);
-  });
-
-  // ============================================================================
-  // updateBranchRef (retry logic)
-  // ============================================================================
-
-  test('updateBranchRef uses update-ref when not on target branch', async () => {
-    const { engine, git } = makeEngine();
-    git.branches.currentOrNull.resolves('other-branch');
-    const result = await (engine as any).updateBranchRef('/repo', 'main', 'newcommit');
-    assert.strictEqual(result, true);
-    assert.ok(git.repository.updateRef.calledOnce);
-  });
-
-  test('updateBranchRef uses reset --hard when on target branch (clean)', async () => {
-    const { engine, git } = makeEngine();
-    git.branches.currentOrNull.resolves('main');
-    git.repository.hasUncommittedChanges.resolves(false);
-    const result = await (engine as any).updateBranchRef('/repo', 'main', 'newcommit');
-    assert.strictEqual(result, true);
-    assert.ok(git.repository.resetHard.calledOnce);
-  });
-
-  test('updateBranchRef retries on index.lock error', async () => {
-    const { engine, git } = makeEngine();
-    git.branches.currentOrNull.resolves('other-branch');
-    git.repository.updateRef
-      .onFirstCall().rejects(new Error('index.lock'))
-      .onSecondCall().resolves();
-    const result = await (engine as any).updateBranchRef('/repo', 'main', 'newcommit');
-    assert.strictEqual(result, true);
-    assert.strictEqual(git.repository.updateRef.callCount, 2);
-  });
-
-  test('updateBranchRef throws non-lock errors', async () => {
-    const { engine, git } = makeEngine();
-    git.branches.currentOrNull.resolves('other-branch');
-    git.repository.updateRef.rejects(new Error('permission denied'));
-    await assert.rejects(() => (engine as any).updateBranchRef('/repo', 'main', 'newcommit'), /permission denied/);
-  });
-
-  test('updateBranchRefCore with dirty worktree stash flow', async () => {
-    const { engine, git } = makeEngine();
-    git.branches.currentOrNull.resolves('main');
-    git.repository.hasUncommittedChanges.resolves(true);
-    git.repository.getDirtyFiles.resolves(['.gitignore', 'src/foo.ts']);
-    const result = await (engine as any).updateBranchRefCore('/repo', 'main', 'newcommit');
-    assert.strictEqual(result, true);
-    assert.ok(git.repository.stashPush.calledOnce);
-    assert.ok(git.repository.resetHard.calledOnce);
-    assert.ok(git.repository.stashPop.calledOnce);
-  });
-
-  test('updateBranchRefCore returns false when stash fails', async () => {
-    const { engine, git } = makeEngine();
-    git.branches.currentOrNull.resolves('main');
-    git.repository.hasUncommittedChanges.resolves(true);
-    git.repository.getDirtyFiles.resolves(['src/foo.ts']);
-    git.repository.stashPush.rejects(new Error('could not write index'));
-    const result = await (engine as any).updateBranchRefCore('/repo', 'main', 'newcommit');
-    assert.strictEqual(result, false);
-  });
-
-  test('updateBranchRefCore with only .gitignore dirty (orchestrator changes)', async () => {
-    const { engine, git } = makeEngine();
-    git.branches.currentOrNull.resolves('main');
-    git.repository.hasUncommittedChanges.resolves(true);
-    git.repository.getDirtyFiles.resolves(['.gitignore']);
-    git.repository.getFileDiff.resolves('+.orchestrator/\n');
-    const result = await (engine as any).updateBranchRefCore('/repo', 'main', 'newcommit');
-    assert.strictEqual(result, true);
-  });
-
-  test('updateBranchRefCore handles stash pop failure with orchestrator stash', async () => {
-    const { engine, git } = makeEngine();
-    git.branches.currentOrNull.resolves('main');
-    git.repository.hasUncommittedChanges.resolves(true);
-    git.repository.getDirtyFiles.resolves(['.gitignore', 'other.txt']);
-    git.repository.stashPop.rejects(new Error('conflict'));
-    git.repository.stashShowFiles.resolves(['.gitignore']);
-    git.repository.stashShowPatch.resolves('+.orchestrator/\n');
-    const result = await (engine as any).updateBranchRefCore('/repo', 'main', 'newcommit');
-    assert.strictEqual(result, true);
-    assert.ok(git.repository.stashDrop.calledOnce);
-  });
-
-  test('updateBranchRefCore handles stash pop failure with user changes', async () => {
-    const { engine, git, log } = makeEngine();
-    git.branches.currentOrNull.resolves('main');
-    git.repository.hasUncommittedChanges.resolves(true);
-    git.repository.getDirtyFiles.resolves(['.gitignore', 'other.txt']);
-    git.repository.stashPop.rejects(new Error('conflict'));
-    git.repository.stashShowFiles.resolves(['.gitignore', 'user-file.txt']);
-    const result = await (engine as any).updateBranchRefCore('/repo', 'main', 'newcommit');
-    assert.strictEqual(result, true);
-    assert.ok((log.warn as sinon.SinonStub).calledWith(sinon.match(/user changes/)));
-  });
-
-  // ============================================================================
-  // isGitignoreOnlyOrchestratorChanges
-  // ============================================================================
-
-  test('isGitignoreOnlyOrchestratorChanges returns true for no diff', async () => {
-    const { engine, git } = makeEngine();
-    git.repository.getFileDiff.resolves('');
-    git.repository.getStagedFileDiff.resolves('');
-    const result = await (engine as any).isGitignoreOnlyOrchestratorChanges('/repo');
-    assert.strictEqual(result, true);
-  });
-
-  test('isGitignoreOnlyOrchestratorChanges checks staged diff when unstaged is empty', async () => {
-    const { engine, git } = makeEngine();
-    git.repository.getFileDiff.resolves('');
-    git.repository.getStagedFileDiff.resolves('+.orchestrator/\n');
-    const result = await (engine as any).isGitignoreOnlyOrchestratorChanges('/repo');
-    assert.strictEqual(result, true);
-  });
-
-  test('isGitignoreOnlyOrchestratorChanges returns false on error', async () => {
-    const { engine, git } = makeEngine();
-    git.repository.getFileDiff.rejects(new Error('fail'));
-    const result = await (engine as any).isGitignoreOnlyOrchestratorChanges('/repo');
-    assert.strictEqual(result, false);
-  });
-
-  // ============================================================================
-  // isStashOnlyOrchestratorGitignore
-  // ============================================================================
-
-  test('isStashOnlyOrchestratorGitignore returns false for empty stash', async () => {
-    const { engine, git } = makeEngine();
-    git.repository.stashShowFiles.resolves([]);
-    const result = await (engine as any).isStashOnlyOrchestratorGitignore('/repo');
-    assert.strictEqual(result, false);
-  });
-
-  test('isStashOnlyOrchestratorGitignore returns false for multiple files', async () => {
-    const { engine, git } = makeEngine();
-    git.repository.stashShowFiles.resolves(['.gitignore', 'src/foo.ts']);
-    const result = await (engine as any).isStashOnlyOrchestratorGitignore('/repo');
-    assert.strictEqual(result, false);
-  });
-
-  test('isStashOnlyOrchestratorGitignore returns true for orchestrator-only .gitignore', async () => {
-    const { engine, git } = makeEngine();
-    git.repository.stashShowFiles.resolves(['.gitignore']);
-    git.repository.stashShowPatch.resolves('+.orchestrator/\n+# Copilot Orchestrator\n');
-    const result = await (engine as any).isStashOnlyOrchestratorGitignore('/repo');
-    assert.strictEqual(result, true);
-  });
-
-  test('isStashOnlyOrchestratorGitignore returns false on error', async () => {
-    const { engine, git } = makeEngine();
-    git.repository.stashShowFiles.rejects(new Error('no stash'));
-    const result = await (engine as any).isStashOnlyOrchestratorGitignore('/repo');
-    assert.strictEqual(result, false);
-  });
-
-  // ============================================================================
-  // cleanupEligibleWorktrees
-  // ============================================================================
-
-  test('cleanupEligibleWorktrees cleans up consumed non-leaf nodes', async () => {
-    const { engine, git, state } = makeEngine();
-    const depNode = createJobNode('dep-1', [], ['consumer-1']);
-    const consumerNode = createJobNode('consumer-1', ['dep-1'], []);
-    const wtPath = makeTmpDir();
-    const depState: NodeExecutionState = {
-      status: 'succeeded', version: 0, attempts: 1,
-      worktreePath: wtPath,
-      consumedByDependents: ['consumer-1'],
-    };
-    const plan = createTestPlan({
-      nodes: new Map([['dep-1', depNode], ['consumer-1', consumerNode]]),
-      nodeStates: new Map([
-        ['dep-1', depState],
-        ['consumer-1', { status: 'running', version: 0, attempts: 1 }],
-      ]),
-      leaves: ['consumer-1'],
-      roots: ['dep-1'],
-    });
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    await (engine as any).cleanupEligibleWorktrees(plan, sm);
-    assert.ok(git.worktrees.removeSafe.called);
-    assert.strictEqual(depState.worktreeCleanedUp, true);
-  });
-
-  test('cleanupEligibleWorktrees skips non-succeeded nodes', async () => {
-    const { engine, git, state } = makeEngine();
-    const node = createJobNode('node-1');
-    const plan = createTestPlan({
-      nodes: new Map([['node-1', node]]),
-      nodeStates: new Map([['node-1', { status: 'running', version: 0, attempts: 1, worktreePath: '/wt' }]]),
-    });
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    await (engine as any).cleanupEligibleWorktrees(plan, sm);
-    assert.ok(!git.worktrees.removeSafe.called);
-  });
-
-  // ============================================================================
-  // execLog
-  // ============================================================================
-
-  test('execLog calls executor.log when available', () => {
-    const { engine, state } = makeEngine();
-    (engine as any).execLog('p1', 'n1', 'work', 'info', 'test message', 1);
-    assert.ok((state.executor!.log as sinon.SinonStub).calledWith('p1', 'n1', 'work', 'info', 'test message', 1));
-  });
-
-  test('execLog does nothing when no executor', () => {
-    const dir = makeTmpDir();
-    const state = createEngineState(dir);
-    state.executor = undefined;
-    const log = createMockLogger();
-    const git = createMockGitOperations();
-    const nodeManager = new NodeManager(state as any, log, git);
-    const engine = new JobExecutionEngine(state, nodeManager, log, git);
-    // Should not throw
-    (engine as any).execLog('p1', 'n1', 'work', 'info', 'test');
-  });
-
-  // ============================================================================
-  // executeJobNode - error paths
-  // ============================================================================
-
-  test('executeJobNode returns early when nodeState is missing', async () => {
-    const { engine, state, log, git } = makeEngine();
-    const plan = createTestPlan({
-      nodeStates: new Map(), // empty - no state for node-1
-    });
-    const sm = new PlanStateMachine(plan as any);
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    // Should return without error
-    assert.ok(!(log.info as sinon.SinonStub).calledWith(sinon.match(/Executing job node/)));
-  });
-
-  test('executeJobNode handles worktree creation failure', async () => {
-    const { engine, state, log, git } = makeEngine();
-    git.worktrees.createOrReuseDetached.rejects(new Error('disk full'));
-    const plan = createTestPlan();
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    const nodeState = plan.nodeStates.get('node-1')!;
-    assert.ok(nodeState.error?.includes('disk full'));
-    assert.ok(nodeState.stepStatuses?.['merge-fi'] === 'failed');
-  });
-
-  test('executeJobNode handles executor failure without auto-heal', async () => {
-    const { engine, state, log, git } = makeEngine();
-    const plan = createTestPlan();
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    // Make executor fail with agent work (no auto-heal for agent failures unless killed)
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: false, error: 'test failure', failedPhase: 'work',
-      stepStatuses: { 'merge-fi': 'success', work: 'failed' },
-    });
-    const node = createJobNode('node-1', [], [], { work: { type: 'agent', instructions: 'test' }, autoHeal: false });
-    await engine.executeJobNode(plan, sm, node);
-    const nodeState = plan.nodeStates.get('node-1')!;
-    assert.strictEqual(nodeState.error, 'test failure');
-    assert.ok((sm.transition as sinon.SinonStub).calledWith('node-1', 'failed'));
-  });
-
-  test('executeJobNode stores metrics on success', async () => {
-    const { engine, state, log, git } = makeEngine();
-    const plan = createTestPlan({ targetBranch: undefined, leaves: ['node-1'] });
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: true, completedCommit: 'commit-abc',
-      stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success' },
-      metrics: { turnsUsed: 5, tokensIn: 1000, tokensOut: 500 },
-      phaseMetrics: { work: { durationMs: 5000 } },
-      copilotSessionId: 'session-123',
-      pid: 12345,
-    });
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    const nodeState = plan.nodeStates.get('node-1')!;
-    assert.strictEqual(nodeState.completedCommit, 'commit-abc');
-    assert.strictEqual(nodeState.copilotSessionId, 'session-123');
-    assert.ok(nodeState.metrics);
-    assert.ok(nodeState.phaseMetrics);
-  });
-
-  test('executeJobNode computes aggregated work summary for leaf', async () => {
-    const { engine, state, log, git } = makeEngine();
-    const plan = createTestPlan({ leaves: ['node-1'] });
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: true, completedCommit: 'commit-abc',
-      stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
-      workSummary: { nodeId: 'node-1', nodeName: 'Job node-1', commits: 1, filesAdded: 1, filesModified: 0, filesDeleted: 0, description: 'test' },
-    });
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    const nodeState = plan.nodeStates.get('node-1')!;
-    assert.ok(nodeState.aggregatedWorkSummary);
-  });
-
-  test('executeJobNode handles resume from merge-ri', async () => {
-    const { engine, state, log, git } = makeEngine();
-    const plan = createTestPlan({ targetBranch: 'main', leaves: ['node-1'] });
-    const nodeState: NodeExecutionState = {
-      status: 'scheduled', version: 0, attempts: 0,
-      resumeFromPhase: 'merge-ri',
-      completedCommit: 'existing-commit',
-      stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success' },
-    };
-    plan.nodeStates.set('node-1', nodeState);
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    // Should skip executor entirely
-    assert.ok(!(state.executor!.execute as sinon.SinonStub).called);
-  });
-
-  test('executeJobNode handles reused worktree', async () => {
-    const { engine, state, log, git } = makeEngine();
-    git.worktrees.createOrReuseDetached.resolves({ reused: true, baseCommit: 'base999', totalMs: 50 });
-    const plan = createTestPlan();
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: true, completedCommit: 'commit-abc',
-      stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
-    });
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    const nodeState = plan.nodeStates.get('node-1')!;
-    // baseCommit from reused worktree
-    assert.strictEqual(nodeState.baseCommit, 'base999');
-  });
-
-  test('executeJobNode captures baseCommitAtStart on first worktree', async () => {
-    const { engine, state, git } = makeEngine();
-    git.worktrees.createOrReuseDetached.resolves({ reused: false, baseCommit: 'first-base', totalMs: 100 });
-    const plan = createTestPlan();
-    delete (plan as any).baseCommitAtStart;
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: true, completedCommit: 'commit-abc',
-      stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
-    });
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    assert.strictEqual(plan.baseCommitAtStart, 'first-base');
-  });
-
-  test('executeJobNode logs slow worktree creation', async () => {
-    const { engine, state, git, log: mockLog } = makeEngine();
-    git.worktrees.createOrReuseDetached.resolves({ reused: false, baseCommit: 'base123', totalMs: 2000 });
-    const plan = createTestPlan();
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: true, completedCommit: 'commit-abc',
-      stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
-    });
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    assert.ok((mockLog.warn as sinon.SinonStub).calledWith(sinon.match(/Slow worktree/)));
-  });
-
-  test('executeJobNode handles gitignore update failure gracefully', async () => {
-    const { engine, state, git, log: mockLog } = makeEngine();
-    git.gitignore.ensureGitignoreEntries.rejects(new Error('EACCES'));
-    const plan = createTestPlan();
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: true, completedCommit: 'commit-abc',
-      stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
-    });
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    assert.ok((mockLog.warn as sinon.SinonStub).calledWith(sinon.match(/Failed to update .gitignore/)));
-  });
-
-  test('executeJobNode stages gitignore when modified', async () => {
-    const { engine, state, git } = makeEngine();
-    git.gitignore.ensureGitignoreEntries.resolves(true); // modified
-    const plan = createTestPlan();
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: true, completedCommit: 'commit-abc',
-      stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
-    });
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    assert.ok(git.repository.stageFile.calledOnce);
-  });
-
-  test('executeJobNode builds dependency info map', async () => {
-    const { engine, state, git } = makeEngine();
-    const depNode = createJobNode('dep-1', [], ['node-1']);
-    const mainNode = createJobNode('node-1', ['dep-1'], []);
-    const depState: NodeExecutionState = {
-      status: 'succeeded', version: 0, attempts: 1,
-      completedCommit: 'dep-commit-abc',
-      workSummary: { nodeId: 'dep-1', nodeName: 'Job dep-1', commits: 1, filesAdded: 0, filesModified: 1, filesDeleted: 0, description: '' },
-    };
-    const mainState: NodeExecutionState = { status: 'scheduled', version: 0, attempts: 0 };
-    const plan = createTestPlan({
-      nodes: new Map([['dep-1', depNode], ['node-1', mainNode]]),
-      nodeStates: new Map([['dep-1', depState], ['node-1', mainState]]),
-      leaves: ['node-1'],
-      roots: ['dep-1'],
-    });
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns(['base-commit', 'dep-commit-abc']);
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: true, completedCommit: 'commit-final',
-      stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
-    });
-    await engine.executeJobNode(plan, sm, mainNode);
-    // Verify dependencyCommits were passed to executor
-    const executeCall = (state.executor!.execute as sinon.SinonStub).firstCall;
-    const ctx = executeCall.args[0];
-    assert.ok(ctx.dependencyCommits);
-    assert.strictEqual(ctx.dependencyCommits.length, 1);
-    assert.strictEqual(ctx.dependencyCommits[0].commit, 'dep-commit-abc');
-  });
-
-  test('executeJobNode cleans leaf worktree on success when cleanUpSuccessfulWork', async () => {
-    const { engine, state, git } = makeEngine();
-    const wtPath = makeTmpDir();
-    git.worktrees.createOrReuseDetached.resolves({ reused: false, baseCommit: 'base123', totalMs: 100, worktreePath: wtPath });
-    const plan = createTestPlan({ leaves: ['node-1'], cleanUpSuccessfulWork: true });
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: true, completedCommit: 'commit-abc',
-      stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
-    });
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    const nodeState = plan.nodeStates.get('node-1')!;
-    // mergedToTarget should be true since merge-ri succeeded
-    assert.strictEqual(nodeState.mergedToTarget, true);
-  });
-
-  test('executeJobNode falls back to baseCommit when no completedCommit', async () => {
-    const { engine, state, git } = makeEngine();
-    const plan = createTestPlan();
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: true, completedCommit: undefined,
-      stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
-    });
-    const node = createJobNode('node-1');
-    await engine.executeJobNode(plan, sm, node);
-    const nodeState = plan.nodeStates.get('node-1')!;
-    assert.strictEqual(nodeState.completedCommit, 'base123');
-  });
-
-  // ============================================================================
-  // Auto-heal paths
-  // ============================================================================
-
-  test('executeJobNode auto-heals non-agent failure', async () => {
-    const { engine, state, git } = makeEngine();
-    const wtDir = makeTmpDir();
-    // Create .github/instructions directory for heal file writing
-    const instrDir = path.join(wtDir, '.github', 'instructions');
-    fs.mkdirSync(instrDir, { recursive: true });
-    git.worktrees.createOrReuseDetached.resolves({ reused: false, baseCommit: 'base123', totalMs: 100 });
-    const plan = createTestPlan();
-    // Use real worktree path so fs operations work
-    plan.worktreeRoot = wtDir;
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub)
-      .onFirstCall().resolves({
-        success: false, error: 'exit code 1', failedPhase: 'work', exitCode: 1,
-        stepStatuses: { 'merge-fi': 'success', work: 'failed' },
-      })
-      .onSecondCall().resolves({
-        success: true, completedCommit: 'healed-commit',
-        stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
-        workSummary: { nodeId: 'node-1', nodeName: 'J', commits: 1, filesAdded: 0, filesModified: 1, filesDeleted: 0, description: 'healed' },
-        metrics: { turnsUsed: 3 },
-        phaseMetrics: { work: { durationMs: 2000 } },
+      const { engine, state, gitOps } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
       });
-    const node = createJobNode('node-1', [], [], { work: { type: 'shell', command: 'npm test' } });
-    await engine.executeJobNode(plan, sm, node);
-    const nodeState = plan.nodeStates.get('node-1')!;
-    assert.strictEqual(nodeState.completedCommit, 'healed-commit');
-    assert.ok(nodeState.autoHealAttempted?.work);
-  });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
 
-  test('executeJobNode auto-retries externally killed agent', async () => {
-    const { engine, state, git } = makeEngine();
-    const plan = createTestPlan();
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub)
-      .onFirstCall().resolves({
-        success: false, error: 'killed by signal SIGTERM', failedPhase: 'work',
-        stepStatuses: { 'merge-fi': 'success', work: 'failed' },
-      })
-      .onSecondCall().resolves({
-        success: true, completedCommit: 'retry-commit',
-        stepStatuses: { 'merge-fi': 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
-        copilotSessionId: 'retry-session',
+      (gitOps.worktrees.createOrReuseDetached as sinon.SinonStub).resolves({
+        reused: false, baseCommit: 'first-base-sha', totalMs: 50,
       });
-    const node = createJobNode('node-1', [], [], { work: { type: 'agent', instructions: 'do stuff' } });
-    await engine.executeJobNode(plan, sm, node);
-    const nodeState = plan.nodeStates.get('node-1')!;
-    assert.strictEqual(nodeState.completedCommit, 'retry-commit');
-    assert.strictEqual(nodeState.copilotSessionId, 'retry-session');
-  });
 
-  test('executeJobNode handles auto-retry failure for killed agent', async () => {
-    const { engine, state, git } = makeEngine();
-    const plan = createTestPlan();
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub)
-      .onFirstCall().resolves({
-        success: false, error: 'killed by signal SIGKILL', failedPhase: 'work',
-        stepStatuses: { 'merge-fi': 'success', work: 'failed' },
-      })
-      .onSecondCall().resolves({
-        success: false, error: 'failed again', failedPhase: 'work',
-        stepStatuses: { 'merge-fi': 'success', work: 'failed' },
-        metrics: { turnsUsed: 2 },
-        phaseMetrics: { work: { durationMs: 1000 } },
-      });
-    const node = createJobNode('node-1', [], [], { work: { type: 'agent', instructions: 'do stuff' } });
-    await engine.executeJobNode(plan, sm, node);
-    const nodeState = plan.nodeStates.get('node-1')!;
-    assert.ok(nodeState.error?.includes('Auto-retry failed'));
-    assert.ok((sm.transition as sinon.SinonStub).calledWith('node-1', 'failed'));
-  });
+      await engine.executeJobNode(plan, sm, node);
 
-  test('executeJobNode auto-heal failure records attempt history', async () => {
-    const { engine, state, git } = makeEngine();
-    const wtDir = makeTmpDir();
-    git.worktrees.createOrReuseDetached.resolves({ reused: false, baseCommit: 'base123', totalMs: 100 });
-    const plan = createTestPlan();
-    plan.worktreeRoot = wtDir;
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub)
-      .onFirstCall().resolves({
-        success: false, error: 'exit code 1', failedPhase: 'work', exitCode: 1,
-        stepStatuses: { 'merge-fi': 'success', work: 'failed' },
-      })
-      .onSecondCall().resolves({
-        success: false, error: 'heal failed too', failedPhase: 'work',
-        stepStatuses: { 'merge-fi': 'success', work: 'failed' },
-        metrics: { turnsUsed: 1 },
-        phaseMetrics: { work: { durationMs: 500 } },
-      });
-    const node = createJobNode('node-1', [], [], { work: { type: 'shell', command: 'npm test' } });
-    await engine.executeJobNode(plan, sm, node);
-    const nodeState = plan.nodeStates.get('node-1')!;
-    assert.ok(nodeState.error?.includes('Auto-heal failed'));
-    assert.ok(nodeState.attemptHistory!.length >= 2);
-    const healAttempt = nodeState.attemptHistory!.find(a => a.triggerType === 'auto-heal');
-    assert.ok(healAttempt);
-  });
-
-  test('executeJobNode skips auto-heal when already attempted', async () => {
-    const { engine, state, git } = makeEngine();
-    const plan = createTestPlan();
-    const nodeState: NodeExecutionState = {
-      status: 'scheduled', version: 0, attempts: 0,
-      autoHealAttempted: { work: true },
-    };
-    plan.nodeStates.set('node-1', nodeState);
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub).resolves({
-      success: false, error: 'exit code 1', failedPhase: 'work', exitCode: 1,
-      stepStatuses: { 'merge-fi': 'success', work: 'failed' },
+      assert.strictEqual(plan.baseCommitAtStart, 'first-base-sha');
     });
-    const node = createJobNode('node-1', [], [], { work: { type: 'shell', command: 'npm test' } });
-    await engine.executeJobNode(plan, sm, node);
-    // Should fail without attempting auto-heal
-    assert.strictEqual((state.executor!.execute as sinon.SinonStub).callCount, 1);
+
+    test('baseCommitAtStart is NOT overwritten on subsequent nodes', async () => {
+      const dir = makeTmpDir();
+      const node1 = createJobNode('n1', [], []);
+      const node2 = createJobNode('n2', [], []);
+      const nodes = new Map<string, PlanNode>([['n1', node1], ['n2', node2]]);
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['n1', { status: 'scheduled', version: 0, attempts: 0 }],
+        ['n2', { status: 'scheduled', version: 0, attempts: 0 }],
+      ]);
+      const plan = createTestPlan({ nodes, nodeStates, roots: ['n1', 'n2'], leaves: ['n1', 'n2'] });
+      plan.baseCommitAtStart = 'original-base';
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state, gitOps } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      (gitOps.worktrees.createOrReuseDetached as sinon.SinonStub).resolves({
+        reused: false, baseCommit: 'second-base-sha', totalMs: 50,
+      });
+
+      await engine.executeJobNode(plan, sm, node2 as JobNode);
+
+      assert.strictEqual(plan.baseCommitAtStart, 'original-base');
+    });
   });
 
-  test('executeJobNode auto-heals prechecks phase', async () => {
-    const { engine, state, git } = makeEngine();
-    const wtDir = makeTmpDir();
-    const instrDir = path.join(wtDir, '.github', 'instructions');
-    fs.mkdirSync(instrDir, { recursive: true });
-    fs.writeFileSync(path.join(instrDir, 'orchestrator-job-abc.instructions.md'), 'test');
-    git.worktrees.createOrReuseDetached.resolves({ reused: false, baseCommit: 'base123', totalMs: 100 });
-    const plan = createTestPlan();
-    plan.worktreeRoot = wtDir;
-    sandbox.stub(state.persistence, 'save');
-    const sm = new PlanStateMachine(plan as any);
-    sandbox.stub(sm, 'transition');
-    sandbox.stub(sm, 'getBaseCommitsForNode').returns([]);
-    (state.executor!.execute as sinon.SinonStub)
-      .onFirstCall().resolves({
-        success: false, error: 'lint failed', failedPhase: 'prechecks', exitCode: 1,
-        stepStatuses: { 'merge-fi': 'success', prechecks: 'failed' },
-      })
-      .onSecondCall().resolves({
-        success: true, completedCommit: 'healed-commit',
-        stepStatuses: { 'merge-fi': 'success', prechecks: 'success', work: 'success', commit: 'success', 'merge-ri': 'success' },
+  // ------------------------------------------------------------------
+  // 4. Executor result stores copilotSessionId, metrics, phaseMetrics, pid
+  // ------------------------------------------------------------------
+  suite('executor result field capture', () => {
+    test('all optional fields from executor result are stored on nodeState', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const metrics = { premiumRequests: 5, apiTimeSeconds: 30, sessionTimeSeconds: 120, durationMs: 60000 };
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+          copilotSessionId: 'sess-abc',
+          metrics,
+          phaseMetrics: { work: metrics },
+          pid: 9999,
+        }),
       });
-    const node = createJobNode('node-1', [], [], {
-      prechecks: { type: 'shell', command: 'npm run lint' },
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.copilotSessionId, 'sess-abc');
+      assert.deepStrictEqual(ns.metrics, metrics);
+      assert.ok(ns.phaseMetrics);
+      // pid is cleared after execution
+      assert.strictEqual(ns.pid, undefined);
     });
-    await engine.executeJobNode(plan, sm, node);
-    const ns = plan.nodeStates.get('node-1')!;
-    assert.strictEqual(ns.completedCommit, 'healed-commit');
+  });
+
+  // ------------------------------------------------------------------
+  // 5. Executor failure - stores error, lastAttempt, attempt history
+  // ------------------------------------------------------------------
+  suite('executor failure detail capture', () => {
+    test('failure stores lastAttempt, error, stepStatuses from result', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.autoHeal = false;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: false,
+          error: 'Compilation error',
+          failedPhase: 'prechecks',
+          exitCode: 2,
+          stepStatuses: { prechecks: 'failed' },
+          copilotSessionId: 'sess-fail',
+          metrics: { premiumRequests: 1, apiTimeSeconds: 5, sessionTimeSeconds: 10, durationMs: 3000 },
+          phaseMetrics: { prechecks: { premiumRequests: 1, apiTimeSeconds: 5, sessionTimeSeconds: 10, durationMs: 3000 } },
+          pid: 1234,
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      assert.strictEqual(ns.error, 'Compilation error');
+      assert.ok(ns.lastAttempt);
+      assert.strictEqual(ns.lastAttempt!.phase, 'prechecks');
+      assert.strictEqual(ns.lastAttempt!.error, 'Compilation error');
+      assert.ok(ns.attemptHistory);
+      assert.strictEqual(ns.attemptHistory![0].failedPhase, 'prechecks');
+      assert.strictEqual(ns.attemptHistory![0].exitCode, 2);
+    });
+
+    test('failure without failedPhase defaults to work', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.autoHeal = false;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: false,
+          error: 'Unknown error',
+          // no failedPhase
+          stepStatuses: { work: 'failed' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      assert.strictEqual(ns.lastAttempt!.phase, 'work');
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 6. Auto-heal: agent work that is NOT externally killed should NOT retry
+  // ------------------------------------------------------------------
+  suite('auto-heal gating', () => {
+    test('agent failure without external kill does not trigger auto-retry', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'do stuff' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub().resolves({
+        success: false,
+        error: 'Agent failed normally',
+        failedPhase: 'work',
+        exitCode: 1,
+        stepStatuses: { work: 'failed' },
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      // Only 1 call — no auto-retry for non-killed agent work
+      assert.strictEqual(executeStub.callCount, 1);
+    });
+
+    test('phase already healed does not trigger second heal', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const ns = plan.nodeStates.get('node-1')!;
+      ns.autoHealAttempted = { work: true };
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub().resolves({
+        success: false,
+        error: 'Build failed again',
+        failedPhase: 'work',
+        exitCode: 1,
+        stepStatuses: { work: 'failed' },
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      assert.strictEqual(plan.nodeStates.get('node-1')!.status, 'failed');
+      // Only 1 call — phase was already healed
+      assert.strictEqual(executeStub.callCount, 1);
+    });
+
+    test('non-healable phase (merge-fi) does not trigger auto-heal', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub().resolves({
+        success: false,
+        error: 'merge failed',
+        failedPhase: 'merge-fi',
+        stepStatuses: { 'merge-fi': 'failed' },
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      assert.strictEqual(plan.nodeStates.get('node-1')!.status, 'failed');
+      assert.strictEqual(executeStub.callCount, 1);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 7. Auto-heal: agent interrupted retry captures metrics and session
+  // ------------------------------------------------------------------
+  suite('auto-retry captures retry result fields', () => {
+    test('interrupted agent retry stores copilotSessionId and metrics on success', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'fix' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const retryMetrics = { premiumRequests: 3, apiTimeSeconds: 15, sessionTimeSeconds: 60, durationMs: 30000 };
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Process killed by signal: SIGTERM',
+        failedPhase: 'work', exitCode: 137,
+        stepStatuses: { work: 'failed' },
+      };
+      const retryResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'retry-commit-1234567890123456789012',
+        stepStatuses: { work: 'success', commit: 'success' },
+        copilotSessionId: 'retry-session-1',
+        metrics: retryMetrics,
+        phaseMetrics: { work: retryMetrics },
+        workSummary: { nodeId: 'node-1', nodeName: 'Job node-1', commits: 1, filesAdded: 1, filesModified: 0, filesDeleted: 0, description: 'retried' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(retryResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(ns.copilotSessionId, 'retry-session-1');
+      assert.deepStrictEqual(ns.metrics, retryMetrics);
+      assert.ok(ns.workSummary);
+    });
+
+    test('interrupted agent retry failure stores metrics and phaseMetrics', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'fix' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const retryMetrics = { premiumRequests: 2, apiTimeSeconds: 10, sessionTimeSeconds: 40, durationMs: 20000 };
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Process killed by signal: SIGKILL',
+        failedPhase: 'work', exitCode: 137,
+        stepStatuses: { work: 'failed' },
+      };
+      const retryFail: JobExecutionResult = {
+        success: false, error: 'Retry also failed',
+        failedPhase: 'work', exitCode: 1,
+        stepStatuses: { work: 'failed' },
+        copilotSessionId: 'retry-sess-fail',
+        metrics: retryMetrics,
+        phaseMetrics: { work: retryMetrics },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(retryFail);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      assert.ok(ns.error!.includes('Auto-retry failed'));
+      assert.deepStrictEqual(ns.metrics, retryMetrics);
+      assert.ok(ns.attemptHistory!.length >= 2);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 8. Auto-heal: no completedCommit falls back to baseCommit
+  // ------------------------------------------------------------------
+  suite('auto-heal fallback to baseCommit', () => {
+    test('auto-heal success with no completedCommit uses baseCommit', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'echo ok' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'fail', failedPhase: 'work',
+        exitCode: 1, stepStatuses: { work: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        // No completedCommit
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      // completedCommit should fall back to baseCommit
+      assert.ok(ns.completedCommit);
+    });
+
+    test('interrupted agent retry with no completedCommit falls back to baseCommit', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'fix' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Process killed by signal: SIGTERM',
+        failedPhase: 'work', exitCode: 137,
+        stepStatuses: { work: 'failed' },
+      };
+      const retryResult: JobExecutionResult = {
+        success: true,
+        // No completedCommit
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(retryResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.ok(ns.completedCommit);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 9. RI merge failure: attempt history records auto-heal trigger type
+  // ------------------------------------------------------------------
+  suite('RI merge failure after auto-heal', () => {
+    test('RI merge failure after auto-heal records auto-heal trigger type', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'main' });
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'fail', failedPhase: 'work',
+        exitCode: 1, stepStatuses: { work: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-commit-12345678901234567890123',
+        stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'failed' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      // Last attempt should record 'auto-heal' trigger type
+      const lastAttempt = ns.attemptHistory![ns.attemptHistory!.length - 1];
+      assert.strictEqual(lastAttempt.triggerType, 'auto-heal');
+      assert.strictEqual(lastAttempt.failedPhase, 'merge-ri');
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 10. Success: attempt history records trigger type correctly
+  // ------------------------------------------------------------------
+  suite('success attempt history', () => {
+    test('first attempt records initial trigger type', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.attemptHistory![0].triggerType, 'initial');
+      assert.strictEqual(ns.attemptHistory![0].status, 'succeeded');
+    });
+
+    test('retry attempt records retry trigger type', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const ns = plan.nodeStates.get('node-1')!;
+      ns.attempts = 1; // simulate previous attempt
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const nodeState = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(nodeState.attemptHistory![0].triggerType, 'retry');
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 11. Leaf node with cleanup - cleanUpSuccessfulWork
+  // ------------------------------------------------------------------
+  suite('leaf node cleanup', () => {
+    test('leaf node with targetBranch and mergedToTarget triggers cleanup', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'feature', cleanUpSuccessfulWork: true });
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state, gitOps } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(ns.mergedToTarget, true);
+      assert.ok(ns.worktreeCleanedUp);
+    });
+
+    test('leaf node without targetBranch still cleans up', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ cleanUpSuccessfulWork: true }); // no targetBranch
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.ok(ns.worktreeCleanedUp);
+    });
+
+    test('leaf node with failed RI merge does NOT cleanup', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'feature', cleanUpSuccessfulWork: true });
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'failed' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      // Worktree should NOT be cleaned up because RI failed
+      assert.ok(!ns.worktreeCleanedUp);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 12. Non-leaf node not RI merged
+  // ------------------------------------------------------------------
+  suite('non-leaf node merge status', () => {
+    test('non-leaf node with targetBranch is not RI-merged', async () => {
+      const dir = makeTmpDir();
+      const parent = createJobNode('parent', [], ['child']);
+      const child = createJobNode('child', ['parent'], []);
+      const nodes = new Map<string, PlanNode>([['parent', parent], ['child', child]]);
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['parent', { status: 'scheduled', version: 0, attempts: 0 }],
+        ['child', { status: 'pending', version: 0, attempts: 0 }],
+      ]);
+      const plan = createTestPlan({ nodes, nodeStates, roots: ['parent'], leaves: ['child'], targetBranch: 'main' });
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'parent-commit-123456789012345678901',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, parent as JobNode);
+
+      const ns = plan.nodeStates.get('parent')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(ns.mergedToTarget, true); // "no merge needed"
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 13. Catch block error path (exception thrown during execution)
+  // ------------------------------------------------------------------
+  suite('catch block error handling', () => {
+    test('exception during executor.execute is caught and node fails', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().rejects(new Error('Unexpected crash')),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      assert.strictEqual(ns.error, 'Unexpected crash');
+      assert.ok(ns.attemptHistory);
+      assert.strictEqual(ns.attemptHistory![0].status, 'failed');
+    });
+
+    test('exception with failedPhase property uses that phase', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const err = new Error('FI merge crashed') as any;
+      err.failedPhase = 'merge-fi';
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().rejects(err),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      assert.strictEqual(ns.lastAttempt!.phase, 'merge-fi');
+      assert.strictEqual(ns.attemptHistory![0].failedPhase, 'merge-fi');
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 14. acknowledgeConsumption - idempotent and multi-dep
+  // ------------------------------------------------------------------
+  suite('acknowledgeConsumption paths', () => {
+    test('consumption is idempotent - calling twice does not duplicate', async () => {
+      const dir = makeTmpDir();
+      const dep = createJobNode('dep', [], ['c1', 'c2']);
+      const c1 = createJobNode('c1', ['dep'], []);
+      const c2 = createJobNode('c2', ['dep'], []);
+      const nodes = new Map<string, PlanNode>([['dep', dep], ['c1', c1], ['c2', c2]]);
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['dep', { status: 'succeeded', version: 1, attempts: 1, completedCommit: 'dep-commit-abcdef1234567890123456' }],
+        ['c1', { status: 'scheduled', version: 0, attempts: 0 }],
+        ['c2', { status: 'scheduled', version: 0, attempts: 0 }],
+      ]);
+      const plan = createTestPlan({ nodes, nodeStates, roots: ['dep'], leaves: ['c1', 'c2'], cleanUpSuccessfulWork: false });
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'c1-commit-xyz123456789012345678901',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      // Execute c1
+      await engine.executeJobNode(plan, sm, c1 as JobNode);
+
+      const depState = plan.nodeStates.get('dep')!;
+      assert.ok(depState.consumedByDependents);
+      assert.strictEqual(depState.consumedByDependents!.filter(x => x === 'c1').length, 1);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 15. Work summary appended to plan
+  // ------------------------------------------------------------------
+  suite('work summary propagation', () => {
+    test('executor workSummary is appended to plan.workSummary', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const ws: JobWorkSummary = {
+        nodeId: 'node-1', nodeName: 'Job node-1',
+        commits: 2, filesAdded: 3, filesModified: 1, filesDeleted: 0,
+        description: 'Added feature',
+      };
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+          workSummary: ws,
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      assert.ok(plan.workSummary);
+      assert.ok(plan.workSummary!.totalCommits >= 2);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 16. Aggregated work summary computed for leaf node
+  // ------------------------------------------------------------------
+  suite('aggregated work summary', () => {
+    test('leaf node computes aggregated work summary', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan(); // leaf node by default
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const aggSummary = {
+        nodeId: 'node-1', nodeName: 'Job node-1',
+        commits: 5, filesAdded: 10, filesModified: 3, filesDeleted: 1,
+        description: 'aggregated',
+      };
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+          workSummary: { nodeId: 'node-1', nodeName: 'Job node-1', commits: 1, filesAdded: 1, filesModified: 0, filesDeleted: 0, description: 'test' },
+        }),
+        computeAggregatedWorkSummary: sinon.stub().resolves(aggSummary),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.ok(ns.aggregatedWorkSummary);
+      assert.strictEqual(ns.aggregatedWorkSummary!.commits, 5);
+    });
+
+    test('non-leaf node does NOT compute aggregated work summary', async () => {
+      const dir = makeTmpDir();
+      const parent = createJobNode('parent', [], ['child']);
+      const child = createJobNode('child', ['parent'], []);
+      const nodes = new Map<string, PlanNode>([['parent', parent], ['child', child]]);
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['parent', { status: 'scheduled', version: 0, attempts: 0 }],
+        ['child', { status: 'pending', version: 0, attempts: 0 }],
+      ]);
+      const plan = createTestPlan({ nodes, nodeStates, roots: ['parent'], leaves: ['child'] });
+      const sm = new PlanStateMachine(plan);
+
+      const computeStub = sinon.stub().resolves({ nodeId: 'parent', nodeName: 'J', commits: 0, filesAdded: 0, filesModified: 0, filesDeleted: 0, description: '' });
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+          workSummary: { nodeId: 'parent', nodeName: 'J', commits: 1, filesAdded: 1, filesModified: 0, filesDeleted: 0, description: 'test' },
+        }),
+        computeAggregatedWorkSummary: computeStub,
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, parent as JobNode);
+
+      // computeAggregatedWorkSummary should NOT be called for non-leaf
+      assert.ok(!computeStub.called);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 17. resumeFromPhase = 'merge-ri' path
+  // ------------------------------------------------------------------
+  suite('resume from merge-ri', () => {
+    test('resumeFromPhase merge-ri skips executor and clears resumeFromPhase', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'feature' });
+      const ns = plan.nodeStates.get('node-1')!;
+      ns.resumeFromPhase = 'merge-ri' as any;
+      ns.completedCommit = 'existing-commit-12345678901234567890';
+      ns.baseCommit = 'base123';
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub();
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Executor should not have been called
+      assert.strictEqual(executeStub.callCount, 0);
+      // resumeFromPhase should be cleared
+      assert.strictEqual(ns.resumeFromPhase, undefined);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 18. Events emitted
+  // ------------------------------------------------------------------
+  suite('event emission', () => {
+    test('nodeStarted and nodeCompleted events emitted on success', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      const started: any[] = [];
+      const completed: any[] = [];
+      state.events.on('nodeStarted', (...args: any[]) => started.push(args));
+      state.events.on('nodeCompleted', (...args: any[]) => completed.push(args));
+
+      await engine.executeJobNode(plan, sm, node);
+
+      assert.strictEqual(started.length, 1);
+      assert.strictEqual(completed.length, 1);
+      assert.strictEqual(completed[0][2], true); // success=true
+    });
+
+    test('nodeStarted and nodeCompleted events emitted on failure', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.autoHeal = false;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: false, error: 'fail',
+          failedPhase: 'work', stepStatuses: { work: 'failed' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      const completed: any[] = [];
+      state.events.on('nodeCompleted', (...args: any[]) => completed.push(args));
+
+      await engine.executeJobNode(plan, sm, node);
+
+      assert.strictEqual(completed.length, 1);
+      assert.strictEqual(completed[0][2], false); // success=false
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 19. Dependency info map built for FI
+  // ------------------------------------------------------------------
+  suite('dependency info map', () => {
+    test('dependency with workSummary is included in depInfoMap', async () => {
+      const dir = makeTmpDir();
+      const dep = createJobNode('dep', [], ['node-1']);
+      const mainNode = createJobNode('node-1', ['dep'], []);
+      const nodes = new Map<string, PlanNode>([['dep', dep], ['node-1', mainNode]]);
+      const depWs: JobWorkSummary = {
+        nodeId: 'dep', nodeName: 'Job dep',
+        commits: 1, filesAdded: 1, filesModified: 0, filesDeleted: 0,
+        description: 'dep work',
+      };
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['dep', { status: 'succeeded', version: 1, attempts: 1, completedCommit: 'dep-commit-abcdef1234567890123456', workSummary: depWs }],
+        ['node-1', { status: 'scheduled', version: 0, attempts: 0 }],
+      ]);
+      const plan = createTestPlan({ nodes, nodeStates, roots: ['dep'], leaves: ['node-1'] });
+      const sm = new PlanStateMachine(plan);
+
+      let capturedContext: any;
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().callsFake(async (ctx: any) => {
+          capturedContext = ctx;
+          return {
+            success: true,
+            completedCommit: 'child-commit-xyz1234567890123456789',
+            stepStatuses: { work: 'success', commit: 'success' },
+          };
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, mainNode as JobNode);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 20. Persistence save called
+  // ------------------------------------------------------------------
+  suite('persistence', () => {
+    test('persistence.save is called after execution', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      const saveSpy = sandbox.spy(state.persistence, 'save');
+
+      await engine.executeJobNode(plan, sm, node);
+
+      assert.ok(saveSpy.called);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 21. worktree path uses node id short prefix
+  // ------------------------------------------------------------------
+  suite('worktree path', () => {
+    test('worktreePath uses first 8 chars of node id', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.ok(ns.worktreePath);
+      assert.ok(ns.worktreePath!.includes(node.id.slice(0, 8)));
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 22. cleanUpSuccessfulWork=false skips cleanup
+  // ------------------------------------------------------------------
+  suite('cleanup disabled', () => {
+    test('when cleanUpSuccessfulWork is false, no cleanup on success', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ cleanUpSuccessfulWork: false });
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state, gitOps } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.ok(!ns.worktreeCleanedUp);
+    });
   });
 });

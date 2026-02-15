@@ -39,7 +39,7 @@ export function execCommand(
     
     const timer = setTimeout(() => {
       killed = true;
-      proc.kill('SIGTERM');
+      proc?.kill('SIGTERM');
       reject(new Error(`Command timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     
