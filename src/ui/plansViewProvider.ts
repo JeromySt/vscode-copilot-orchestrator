@@ -547,6 +547,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       SubscribableControl.call(this, bus, controlId);
       this.element = element;
       this.planId = planId;
+      this._pulseSub = null;
       this.element.dataset.id = planId;
       this.element.classList.add('plan-item');
       this.element.tabIndex = 0;
@@ -571,6 +572,41 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     // Inherit from SubscribableControl
     PlanListCardControl.prototype = Object.create(SubscribableControl.prototype);
     PlanListCardControl.prototype.constructor = PlanListCardControl;
+    
+    /** Manage this card's own PULSE subscription based on status. */
+    PlanListCardControl.prototype._managePulse = function() {
+      var isActive = this.element.dataset.status === 'running' || this.element.dataset.status === 'pending';
+      var hasStarted = !!this.element.dataset.startedAt;
+      if (isActive && hasStarted && !this._pulseSub) {
+        var self = this;
+        this._pulseSub = this.bus.on(Topics.PULSE, function() {
+          self._tickDuration();
+        });
+      } else if (!isActive && this._pulseSub) {
+        this._pulseSub.unsubscribe();
+        this._pulseSub = null;
+      }
+    };
+    
+    /** Tick this card's duration display. Called by own PULSE subscription. */
+    PlanListCardControl.prototype._tickDuration = function() {
+      var el = this.element;
+      var startedAt = parseInt(el.dataset.startedAt || '0', 10);
+      if (!startedAt) return;
+      var endedAt = parseInt(el.dataset.endedAt || '0', 10);
+      var durEl = el.querySelector('.plan-duration');
+      if (!durEl) {
+        durEl = document.createElement('span');
+        durEl.className = 'plan-duration';
+        var detailsEl = el.querySelector('.plan-details');
+        if (detailsEl) {
+          detailsEl.appendChild(durEl);
+        } else {
+          return;
+        }
+      }
+      durEl.textContent = formatDuration(startedAt, endedAt || 0);
+    };
     
     PlanListCardControl.prototype._initDom = function(data) {
       var progressClass = data.status === 'failed' ? 'failed' : 
@@ -597,7 +633,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       
       this.element.className = 'plan-item ' + data.status;
       this.element.dataset.status = data.status;
-      // Store timestamps for client-side duration ticking
       if (data.startedAt) this.element.dataset.startedAt = String(data.startedAt);
       if (data.endedAt) this.element.dataset.endedAt = String(data.endedAt);
       else delete this.element.dataset.endedAt;
@@ -605,13 +640,13 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (!this._rendered) {
         this._rendered = true;
         this._initDom(data);
+        this._managePulse();
         this.publishUpdate(data);
         return;
       }
 
       var progressClass = data.status === 'failed' ? 'failed' : 
                          data.status === 'succeeded' ? 'succeeded' : '';
-      // Targeted DOM updates (no innerHTML on refresh)
       var nameEl = this.element.querySelector('.plan-name-text');
       if (nameEl) nameEl.textContent = data.name;
       var statusEl = this.element.querySelector('.plan-status');
@@ -636,8 +671,18 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       }
       var barEl = this.element.querySelector('.plan-progress-bar');
       if (barEl) { barEl.className = 'plan-progress-bar ' + progressClass; barEl.style.width = data.progress + '%'; }
-        
+      
+      // Manage own PULSE subscription based on new status
+      this._managePulse();
       this.publishUpdate(data);
+    };
+    
+    PlanListCardControl.prototype.dispose = function() {
+      if (this._pulseSub) {
+        this._pulseSub.unsubscribe();
+        this._pulseSub = null;
+      }
+      SubscribableControl.prototype.dispose.call(this);
     };
     
     function escapeHtml(text) {
@@ -793,55 +838,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       this._managePulseSub();
     };
     
-    /** Subscribe/unsubscribe PULSE based on whether any cards are running. */
-    PlanListContainerControl.prototype._managePulseSub = function() {
-      var hasRunning = false;
-      for (var entry of this.planCards.values()) {
-        var s = entry.element && entry.element.dataset.status;
-        if (s === 'running' || s === 'pending') { hasRunning = true; break; }
-      }
-      if (hasRunning && !this._pulseSub) {
-        var self2 = this;
-        this._pulseSub = this.bus.on(Topics.PULSE, function() {
-          self2._tickDurations();
-        });
-      } else if (!hasRunning && this._pulseSub) {
-        this._pulseSub.unsubscribe();
-        this._pulseSub = null;
-      }
-    };
-    
-    PlanListContainerControl.prototype._tickDurations = function() {
-      var cards = this.planCards;
-      for (var entry of cards.values()) {
-        var el = entry.element;
-        if (!el) continue;
-        var status = el.dataset.status;
-        if (status !== 'running' && status !== 'pending') continue;
-        var startedAt = parseInt(el.dataset.startedAt || '0', 10);
-        if (!startedAt) continue;
-        var endedAt = parseInt(el.dataset.endedAt || '0', 10);
-        var durEl = el.querySelector('.plan-duration');
-        if (!durEl) {
-          // Duration element doesn't exist yet — create it
-          durEl = document.createElement('span');
-          durEl.className = 'plan-duration';
-          var detailsEl = el.querySelector('.plan-details');
-          if (detailsEl) {
-            detailsEl.appendChild(durEl);
-          } else {
-            continue;
-          }
-        }
-        durEl.textContent = formatDuration(startedAt, endedAt || 0);
-      }
-    };
+    /** No-op — each card manages its own PULSE subscription. */
+    PlanListContainerControl.prototype._managePulseSub = function() {};
 
     PlanListContainerControl.prototype.dispose = function() {
-      if (this._pulseSub) {
-        this._pulseSub.unsubscribe();
-        this._pulseSub = null;
-      }
       for (var card of this.planCards.values()) {
         card.dispose();
       }
