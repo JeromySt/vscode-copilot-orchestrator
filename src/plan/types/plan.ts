@@ -142,10 +142,11 @@ export interface NodeExecutionState {
 
   /**
    * Per-phase execution status for detailed UI display.
-   * Tracks all 6 phases: merge-fi, prechecks, work, commit, postchecks, merge-ri.
+   * Tracks all 7 phases: merge-fi, setup, prechecks, work, commit, postchecks, merge-ri.
    */
   stepStatuses?: {
     'merge-fi'?: PhaseStatus;
+    setup?: PhaseStatus;
     prechecks?: PhaseStatus;
     work?: PhaseStatus;
     commit?: PhaseStatus;
@@ -192,7 +193,7 @@ export interface NodeExecutionState {
    */
   lastAttempt?: {
     /** Which phase failed or was running */
-    phase: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri';
+    phase: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup';
     /** When the attempt started */
     startTime: number;
     /** When the attempt ended */
@@ -218,9 +219,9 @@ export interface NodeExecutionState {
   /**
    * Per-phase AI usage metrics breakdown.
    * Keys are phase names for which metrics are available:
-   * 'prechecks', 'work', 'commit', 'postchecks', 'merge-fi', 'merge-ri'.
+   * 'prechecks', 'work', 'commit', 'postchecks', 'merge-fi', 'merge-ri', 'setup'.
    */
-  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri', CopilotUsageMetrics>>;
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup', CopilotUsageMetrics>>;
 }
 
 /**
@@ -243,7 +244,7 @@ export interface AttemptRecord {
   endedAt: number;
   
   /** Which phase failed (if failed) */
-  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri';
+  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup';
   
   /** Error message (if failed) */
   error?: string;
@@ -257,6 +258,7 @@ export interface AttemptRecord {
   /** Per-phase status at end of attempt */
   stepStatuses?: {
     'merge-fi'?: PhaseStatus;
+    setup?: PhaseStatus;
     prechecks?: PhaseStatus;
     work?: PhaseStatus;
     commit?: PhaseStatus;
@@ -286,7 +288,7 @@ export interface AttemptRecord {
   metrics?: CopilotUsageMetrics;
 
   /** Per-phase AI usage metrics breakdown */
-  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri', CopilotUsageMetrics>>;
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup', CopilotUsageMetrics>>;
 }
 
 // ============================================================================
@@ -541,6 +543,7 @@ export interface JobExecutionResult {
   /** Per-phase status for UI display */
   stepStatuses?: {
     'merge-fi'?: PhaseStatus;
+    setup?: PhaseStatus;
     prechecks?: PhaseStatus;
     work?: PhaseStatus;
     commit?: PhaseStatus;
@@ -550,13 +553,13 @@ export interface JobExecutionResult {
   /** Copilot session ID captured during agent work (for session resumption) */
   copilotSessionId?: string;
   /** Which phase failed (for retry context) */
-  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri';
+  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup';
   /** Exit code from failed process */
   exitCode?: number;
   /** Agent execution metrics (token usage, duration, turns, tool calls) */
   metrics?: CopilotUsageMetrics;
   /** Per-phase metrics breakdown */
-  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri', CopilotUsageMetrics>>;
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup', CopilotUsageMetrics>>;
   /** Process ID of the main running process (for crash detection) */
   pid?: number;
 }
@@ -598,6 +601,7 @@ export interface ExecutionContext {
   /** Previous step statuses to preserve (from failed attempt) */
   previousStepStatuses?: {
     'merge-fi'?: PhaseStatus;
+    setup?: PhaseStatus;
     prechecks?: PhaseStatus;
     work?: PhaseStatus;
     commit?: PhaseStatus;

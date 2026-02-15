@@ -8,6 +8,8 @@
  * @module plan/phases/commitPhase
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces/IPhaseExecutor';
 import type { IEvidenceValidator } from '../../interfaces/IEvidenceValidator';
 import type {
@@ -18,6 +20,7 @@ import type {
 import { normalizeWorkSpec } from '../types';
 import type { IGitOperations } from '../../interfaces/IGitOperations';
 import { parseAiReviewResult } from '../aiReviewUtils';
+import { ORCHESTRATOR_SKILL_DIR } from './setupPhase';
 
 /**
  * Extended context for the commit phase (adds access to execution logs
@@ -54,6 +57,9 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
     const { node, worktreePath, baseCommit } = ctx;
 
     try {
+      // Remove projected orchestrator skill directory before staging
+      this.removeOrchestratorSkillDir(worktreePath, ctx);
+
       ctx.logInfo(`Checking git status in ${worktreePath}`);
       const statusOutput = await this.getGitStatus(worktreePath);
       if (statusOutput) {
@@ -138,6 +144,18 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
   }
 
   // ---------- private helpers ----------
+
+  private removeOrchestratorSkillDir(worktreePath: string, ctx: CommitPhaseContext): void {
+    const skillDir = path.join(worktreePath, ORCHESTRATOR_SKILL_DIR);
+    try {
+      if (fs.existsSync(skillDir)) {
+        fs.rmSync(skillDir, { recursive: true, force: true });
+        ctx.logInfo(`Removed projected orchestrator skill directory: ${ORCHESTRATOR_SKILL_DIR}`);
+      }
+    } catch {
+      // Non-fatal: directory may already be gone
+    }
+  }
 
   private noEvidenceError(): string {
     return (
