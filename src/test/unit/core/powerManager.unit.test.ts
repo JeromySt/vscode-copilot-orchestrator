@@ -112,7 +112,7 @@ suite('PowerManager', function() {
       spawnStub.returns(mockProc);
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       const cleanup = await pm.acquireWakeLock('test');
       
@@ -132,7 +132,7 @@ suite('PowerManager', function() {
       spawnStub.returns(mockProc);
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       await pm.acquireWakeLock('test reason');
 
@@ -150,7 +150,7 @@ suite('PowerManager', function() {
       spawnStub.returns(mockProc);
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       await pm.acquireWakeLock('test reason');
 
@@ -167,7 +167,7 @@ suite('PowerManager', function() {
       spawnStub.returns(mockProc);
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       await pm.acquireWakeLock('test reason');
 
@@ -190,7 +190,7 @@ suite('PowerManager', function() {
       spawnStub.onSecondCall().returns(mockProc2);
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       const cleanup1 = await pm.acquireWakeLock('plan-1');
       const cleanup2 = await pm.acquireWakeLock('plan-2');
@@ -216,7 +216,7 @@ suite('PowerManager', function() {
       spawnStub.onCall(2).returns(mockProc3);
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       const cleanup1 = await pm.acquireWakeLock('plan-1');
       const cleanup2 = await pm.acquireWakeLock('plan-2');
@@ -246,7 +246,7 @@ suite('PowerManager', function() {
       spawnStub.onSecondCall().returns(mockProc2);
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       await pm.acquireWakeLock('plan-1');
       await pm.acquireWakeLock('plan-2');
@@ -262,7 +262,7 @@ suite('PowerManager', function() {
 
     test('releaseAll handles empty lock list', () => {
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       assert.doesNotThrow(() => {
         pm.releaseAll();
@@ -276,7 +276,7 @@ suite('PowerManager', function() {
       spawnStub.returns(mockProc);
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       await pm.acquireWakeLock('test');
 
@@ -322,7 +322,7 @@ suite('PowerManager', function() {
         spawnStub.returns(mockProc);
 
         const { PowerManagerImpl } = require('../../../core/powerManager');
-        const pm = new PowerManagerImpl();
+        const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
         await pm.acquireWakeLock(`test-${platform}`);
 
@@ -340,7 +340,7 @@ suite('PowerManager', function() {
       platformStub = sandbox.stub(require('os'), 'platform').returns('unknown');
       
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       const cleanup = await pm.acquireWakeLock('test');
 
@@ -362,7 +362,7 @@ suite('PowerManager', function() {
       spawnStub.returns(mockProc);
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       // Simulate command not found
       const cleanup = await pm.acquireWakeLock('test');
@@ -379,7 +379,7 @@ suite('PowerManager', function() {
       spawnStub.returns(mockProc);
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       // Process exits immediately (simulate by setting exitCode before timeout)
       const lockPromise = pm.acquireWakeLock('test');
@@ -393,7 +393,7 @@ suite('PowerManager', function() {
       spawnStub.throws(new Error('spawn failed'));
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       // Should not throw, should return no-op cleanup
       const cleanup = await pm.acquireWakeLock('test');
@@ -423,7 +423,7 @@ suite('PowerManager', function() {
       });
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       const cleanup = await pm.acquireWakeLock('test');
 
@@ -437,7 +437,7 @@ suite('PowerManager', function() {
       spawnStub.returns(mockProc);
 
       const { PowerManagerImpl } = require('../../../core/powerManager');
-      const pm = new PowerManagerImpl();
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
 
       const cleanup = await pm.acquireWakeLock('test');
 
@@ -447,6 +447,114 @@ suite('PowerManager', function() {
       // Call cleanup again
       cleanup();
       assert.ok((mockProc.kill as sinon.SinonStub).calledOnce, 'Should not kill process again');
+    });
+
+    test('handles function cleanup types', async () => {
+      const { PowerManagerImpl } = require('../../../core/powerManager');
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
+      
+      // Mock a function cleanup instead of process
+      const cleanupFn = sinon.stub();
+      pm.activeLocks = new Map([['test-lock', cleanupFn]]);
+      
+      pm.releaseAll();
+      
+      assert.ok(cleanupFn.called, 'Function cleanup should be called');
+      assert.strictEqual(pm.activeLocks.size, 0, 'Lock should be removed');
+    });
+
+    test('handles mixed cleanup types during releaseAll', async () => {
+      const { PowerManagerImpl } = require('../../../core/powerManager');
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
+      
+      const mockProc = createMockChildProcess();
+      const cleanupFn = sinon.stub();
+      
+      pm.activeLocks = new Map([
+        ['proc-lock', mockProc as any],
+        ['func-lock', cleanupFn as any]
+      ] as any);
+      
+      pm.releaseAll();
+      
+      assert.ok((mockProc.kill as sinon.SinonStub).called, 'Process should be killed');
+      assert.ok(cleanupFn.called, 'Function should be called');
+      assert.strictEqual(pm.activeLocks.size, 0, 'All locks should be removed');
+    });
+
+    test('handles Linux fallback failure', async () => {
+      platformStub = sandbox.stub(require('os'), 'platform').returns('linux');
+      
+      let callCount = 0;
+      spawnStub.callsFake((command: string) => {
+        callCount++;
+        const mockProc = createMockChildProcess();
+        
+        if (command === 'systemd-inhibit') {
+          // First call to systemd-inhibit fails immediately
+          (mockProc as any).exitCode = 1;
+        } else if (command === 'sh') {
+          // Fallback also fails
+          setTimeout(() => mockProc.emit('error', new Error('Shell failed')), 10);
+        }
+        
+        return mockProc;
+      });
+
+      const { PowerManagerImpl } = require('../../../core/powerManager');
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
+
+      const cleanup = await pm.acquireWakeLock('test');
+
+      assert.ok(callCount >= 1, 'Should have attempted spawn');
+      assert.ok(typeof cleanup === 'function', 'Should still return cleanup function');
+      assert.doesNotThrow(() => cleanup(), 'Cleanup should not throw even on fallback failure');
+    });
+
+    test('handles timeout scenarios for Windows', async () => {
+      platformStub = sandbox.stub(require('os'), 'platform').returns('win32');
+      
+      const mockProc = createMockChildProcess();
+      // Process is still running (exitCode = null) after timeout
+      spawnStub.returns(mockProc);
+
+      const { PowerManagerImpl } = require('../../../core/powerManager');
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
+
+      const cleanup = await pm.acquireWakeLock('test');
+
+      assert.ok(typeof cleanup === 'function', 'Should return cleanup function');
+      assert.ok(pm.isWakeLockActive(), 'Wake lock should be active');
+    });
+
+    test('handles timeout scenarios for macOS', async () => {
+      platformStub = sandbox.stub(require('os'), 'platform').returns('darwin');
+      
+      const mockProc = createMockChildProcess();
+      spawnStub.returns(mockProc);
+
+      const { PowerManagerImpl } = require('../../../core/powerManager');
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
+
+      const cleanup = await pm.acquireWakeLock('test');
+
+      assert.ok(typeof cleanup === 'function', 'Should return cleanup function');
+      assert.ok(pm.isWakeLockActive(), 'Wake lock should be active');
+    });
+
+    test('handles timeout scenarios for Linux', async () => {
+      platformStub = sandbox.stub(require('os'), 'platform').returns('linux');
+      
+      const mockProc = createMockChildProcess();
+      spawnStub.returns(mockProc);
+
+      const { PowerManagerImpl } = require('../../../core/powerManager');
+      const pm = new PowerManagerImpl({ spawn: spawnStub } as any);
+
+      const cleanup = await pm.acquireWakeLock('test');
+
+      assert.ok(typeof cleanup === 'function', 'Should return cleanup function');
+      assert.ok(pm.isWakeLockActive(), 'Wake lock should be active');
     });
   });
 });
