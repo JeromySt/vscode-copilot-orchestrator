@@ -37,7 +37,7 @@ interface MergeConflictResult {
  * @param targetBranch - Target branch receiving the merge
  * @param commitMessage - Message for the final merge commit
  * @param conflictedFiles - List of files with conflicts (optional)
- * @param copilotRunner - ICopilotRunner instance (optional, will create if needed)
+ * @param copilotRunner - ICopilotRunner instance for conflict resolution
  * @param configManager - Config manager for getting merge preferences
  */
 export async function resolveMergeConflictWithCopilot(

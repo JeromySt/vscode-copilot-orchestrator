@@ -38,7 +38,6 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       targetBranch, 
       baseCommitAtStart, 
       completedCommit, 
-      baseCommit 
     } = context;
     
     // Validate required parameters

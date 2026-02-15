@@ -237,11 +237,14 @@ export function getRegisteredTools(): string[] {
  * @returns The parsed object if it was a JSON string, otherwise the original value
  */
 function tryParseWorkSpec(value: unknown): unknown {
-  if (typeof value === 'string' && ((value.startsWith('{') && value.endsWith('}')) || (value.startsWith('[') && value.endsWith(']')))) {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return value;
+      }
     }
   }
   return value;

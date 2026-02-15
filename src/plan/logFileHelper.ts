@@ -12,6 +12,8 @@ import * as path from 'path';
 import type { LogEntry } from './types';
 import { ensureOrchestratorDirs } from '../core';
 
+const ensuredDirs = new Set<string>();
+
 export function getLogFilePathByKey(
   executionKey: string,
   storagePath: string | undefined,
@@ -46,9 +48,9 @@ function buildLogFileHeader(executionKey: string): string {
   let version = 'unknown';
   let commit = 'unknown';
   
-  // Read version from package.json (bundled in dist/)
+  // Read version from package.json (two levels up from out/plan/)
   try {
-    const pkgPath = path.resolve(__dirname, '..', 'package.json');
+    const pkgPath = path.resolve(__dirname, '..', '..', 'package.json');
     if (fs.existsSync(pkgPath)) {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
       version = pkg.version || 'unknown';
@@ -97,7 +99,10 @@ export function appendToLogFile(
   try {
     if (storagePath) {
       const workspacePath = path.resolve(storagePath, '..');
-      ensureOrchestratorDirs(workspacePath);
+      if (!ensuredDirs.has(workspacePath)) {
+        ensureOrchestratorDirs(workspacePath);
+        ensuredDirs.add(workspacePath);
+      }
     }
     const time = new Date(entry.timestamp).toISOString();
     const prefix = entry.type === 'stderr' ? '[ERR]' :

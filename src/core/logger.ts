@@ -180,7 +180,7 @@ export class Logger {
   private loadConfig(): void {
     if (this.configProvider) {
       // Use injected config provider
-      this.currentLogLevel = this.configProvider.getConfig(LOGGING_LEVEL_KEY, '', 'info') as LogLevel;
+      this.currentLogLevel = this.configProvider.getConfig('copilotOrchestrator.logging', 'level', 'info') as LogLevel;
       
       // Load debug config for each component
       this.debugConfig = {

@@ -40,6 +40,19 @@ export interface PlanRunnerEvents {
  * matching {@link PlanRunnerEvents}.
  */
 export class PlanEventEmitter extends EventEmitter {
+  // Typed overloads for type-safe event subscription
+  on<K extends keyof PlanRunnerEvents>(event: K, listener: PlanRunnerEvents[K]): this;
+  on(event: string | symbol, listener: (...args: any[]) => void): this;
+  on(event: string | symbol, listener: (...args: any[]) => void): this {
+    return super.on(event, listener);
+  }
+
+  emit<K extends keyof PlanRunnerEvents>(event: K, ...args: Parameters<PlanRunnerEvents[K]>): boolean;
+  emit(event: string | symbol, ...args: any[]): boolean;
+  emit(event: string | symbol, ...args: any[]): boolean {
+    return super.emit(event, ...args);
+  }
+
   /**
    * Emit a planCreated event.
    */

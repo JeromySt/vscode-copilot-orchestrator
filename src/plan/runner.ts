@@ -260,6 +260,11 @@ export class PlanRunner extends EventEmitter {
     return this._lifecycle.delete(planId);
   }
 
+  savePlan(planId: string): void {
+    const plan = this._state.plans.get(planId);
+    if (plan) this._state.persistence.save(plan);
+  }
+
   // -- Node control ----------------------------------------------------------
 
   async retryNode(planId: string, nodeId: string, options?: RetryNodeOptions): Promise<{ success: boolean; error?: string }> {

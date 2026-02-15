@@ -18,8 +18,6 @@ import {
   resolveTargetBranch,
 } from '../utils';
 import { validateAgentModels } from '../../validation';
-import * as path from 'path';
-import * as fs from 'fs';
 import type { IGitOperations } from '../../../interfaces/IGitOperations';
 
 // ============================================================================

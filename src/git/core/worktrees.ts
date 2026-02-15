@@ -583,6 +583,17 @@ async function setupSharedDirectorySymlinks(
   // Deduplicate
   const uniqueDirs = [...new Set(dirs)];
   
+  // Validate additionalDirs to prevent path traversal
+  const repoPathNorm = path.resolve(repoPath);
+  for (const dirName of uniqueDirs) {
+    if (SHARED_DIRECTORIES.includes(dirName)) continue; // built-in dirs are trusted
+    const resolved = path.resolve(repoPath, dirName);
+    if (!resolved.startsWith(repoPathNorm + path.sep) && resolved !== repoPathNorm) {
+      log?.(`[worktree] Skipping directory '${dirName}': resolves outside repo (path traversal blocked)`);
+      uniqueDirs.splice(uniqueDirs.indexOf(dirName), 1);
+    }
+  }
+  
   for (const dirName of uniqueDirs) {
     const sourceDir = path.join(repoPath, dirName);
     const destDir = path.join(worktreePath, dirName);
