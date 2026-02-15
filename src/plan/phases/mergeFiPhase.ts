@@ -146,6 +146,7 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
     }
     
     context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
+    
     return { success: true, metrics: accumulatedMetrics };
   }
   
