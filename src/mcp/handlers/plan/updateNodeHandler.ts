@@ -6,6 +6,7 @@
  * @module mcp/handlers/plan/updateNodeHandler
  */
 
+import * as vscode from 'vscode';
 import { JobNode, normalizeWorkSpec } from '../../../plan/types';
 import { validateAllowedFolders, validateAllowedUrls } from '../../validation';
 import {
@@ -17,6 +18,11 @@ import {
   isError,
 } from '../utils';
 import { validateAgentModels } from '../../validation';
+import { Logger } from '../../../core/logger';
+import { augmentInstructions } from '../../../agent/instructionAugmenter';
+import type { AgentSpec } from '../../../plan/types/specs';
+
+const log = Logger.for('mcp');
 
 /**
  * Handle the `update_copilot_plan_node` MCP tool call.
@@ -90,6 +96,26 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
   }
   if (args.postchecks !== undefined) {
     jobNode.postchecks = args.postchecks === null ? undefined : normalizeWorkSpec(args.postchecks);
+  }
+  
+  // Augment agent instructions if the updated work is an opted-in AgentSpec
+  if (args.work !== undefined && jobNode.work &&
+      typeof jobNode.work === 'object' && 'type' in jobNode.work && jobNode.work.type === 'agent') {
+    const agentWork = jobNode.work as AgentSpec;
+    const globalAugment = vscode.workspace
+      .getConfiguration('copilotOrchestrator.instructionEnrichment')
+      .get<boolean>('augmentInstructions', true);
+    if (globalAugment && agentWork.augmentInstructions !== false && ctx.copilotRunner && ctx.workspacePath) {
+      try {
+        await augmentInstructions({
+          nodes: [{ id: args.nodeId, work: agentWork }],
+          repoPath: ctx.workspacePath,
+          runner: ctx.copilotRunner,
+        });
+      } catch (err: any) {
+        log.warn('Instruction augmentation failed for node update, using original instructions', { error: err.message });
+      }
+    }
   }
   
   // Handle resetToStage: clear step statuses from that stage onward

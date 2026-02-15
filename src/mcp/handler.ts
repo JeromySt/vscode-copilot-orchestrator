@@ -97,12 +97,14 @@ export class McpHandler implements IMcpRequestRouter {
    * @param PlanRunner    - Singleton {@link PlanRunner} that manages plan lifecycle.
    * @param workspacePath - Absolute path to the workspace root (git repository).
    * @param git          - Git operations interface.
+   * @param copilotRunner - Optional Copilot CLI runner for instruction augmentation.
    */
-  constructor(PlanRunner: PlanRunner, workspacePath: string, git: import('../interfaces/IGitOperations').IGitOperations) {
+  constructor(PlanRunner: PlanRunner, workspacePath: string, git: import('../interfaces/IGitOperations').IGitOperations, copilotRunner?: import('../interfaces/ICopilotRunner').ICopilotRunner) {
     this.context = { 
       PlanRunner, 
       workspacePath,
       git,
+      copilotRunner,
       // Legacy fields - kept for type compatibility
       runner: null as any,
       plans: null as any,

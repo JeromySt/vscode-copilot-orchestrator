@@ -6,6 +6,7 @@
  * @module mcp/handlers/plan/createPlanHandler
  */
 
+import * as vscode from 'vscode';
 import { 
   PlanSpec, 
   JobNodeSpec, 
@@ -19,6 +20,11 @@ import {
 } from '../utils';
 import { validateAgentModels } from '../../validation';
 import type { IGitOperations } from '../../../interfaces/IGitOperations';
+import { Logger } from '../../../core/logger';
+import { augmentInstructions, AugmentableNode } from '../../../agent/instructionAugmenter';
+import type { AgentSpec } from '../../../plan/types/specs';
+
+const log = Logger.for('mcp');
 
 // ============================================================================
 // GROUP FLATTENING
@@ -319,6 +325,31 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
   try {
     validation.spec.repoPath = ctx.workspacePath;
     const repoPath = ctx.workspacePath;
+    
+    // Augment agent instructions with skill context if enabled
+    const globalAugment = vscode.workspace
+      .getConfiguration('copilotOrchestrator.instructionEnrichment')
+      .get<boolean>('augmentInstructions', true);
+    
+    if (globalAugment && ctx.copilotRunner) {
+      const augmentableNodes: AugmentableNode[] = [];
+      for (const job of validation.spec.jobs) {
+        const work = job.work;
+        if (work && typeof work === 'object' && 'type' in work && work.type === 'agent') {
+          const agentWork = work as AgentSpec;
+          if (agentWork.augmentInstructions !== false) {
+            augmentableNodes.push({ id: job.producerId, work: agentWork });
+          }
+        }
+      }
+      if (augmentableNodes.length > 0) {
+        try {
+          await augmentInstructions({ nodes: augmentableNodes, repoPath, runner: ctx.copilotRunner });
+        } catch (err: any) {
+          log.warn('Instruction augmentation failed, using original instructions', { error: err.message });
+        }
+      }
+    }
     
     const baseBranch = await resolveBaseBranch(repoPath, ctx.git, validation.spec.baseBranch);
     validation.spec.baseBranch = baseBranch;
