@@ -80,7 +80,7 @@ Each phase is a separate file in `src/plan/phases/`. When adding a new phase:
 
 - **Detached HEAD**: Worktrees created with `--detach` (no branch tracking)
 - **Forward Integration (FI)**: Merge dependency commits into worktree before work
-- **Reverse Integration (RI)**: Squash-merge final commit to target branch after work
+- **Reverse Integration (RI)**: Squash-merge final commit to target branch after work only if the node is a leafNode (no downstream dependencies)
 - **Never modify user's working directory**: All agent work happens in isolated worktrees
 
 ## Security
@@ -108,6 +108,22 @@ export async function handleMyTool(
   return { content: [{ type: 'text', text: JSON.stringify(result) }] };
 }
 ```
+
+### MCP Schema Validation (create_* tools)
+
+All `create_copilot_plan` and `create_copilot_job` inputs are validated through a single schema validation framework:
+
+1. **JSON Schema** in `src/mcp/validation/schemas.ts` — Ajv validates structure, types, required fields, patterns
+2. **Semantic validation** in handler (`validatePlanInput()`) — dependency resolution, duplicate producer_ids, group flattening
+3. **Security validation** — `validateAllowedFolders()`, `validateAllowedUrls()`, `validateAgentModels()`, `validateAdditionalSymlinkDirs()`
+
+When adding new fields to `create_*` APIs:
+1. Add the field to the TypeScript interface in `schemas.ts`
+2. Add the JSON schema property in the corresponding schema object
+3. Add the field to the MCP tool `inputSchema` in `planTools.ts`
+4. Add validation in the handler if the field requires semantic/security checks
+5. Wire through to `PlanSpec` in `src/plan/types/plan.ts`
+6. Add to `_buildPlanData()` / handler response if it needs to flow to the client
 
 ## Code Organization Rules
 
