@@ -4,6 +4,7 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
+import * as path from 'path';
 import { resolveMergeConflictWithCopilot } from '../../../../plan/phases/mergeHelper';
 import type { PhaseContext } from '../../../../interfaces/IPhaseExecutor';
 import type { ICopilotRunner } from '../../../../interfaces/ICopilotRunner';
@@ -101,6 +102,8 @@ suite('mergeHelper', () => {
       assert.strictEqual(runCall.args[0].label, 'merge-conflict');
       assert.strictEqual(runCall.args[0].jobId, 'test-node');
       assert.strictEqual(runCall.args[0].timeout, 600000);
+      // configDir must be derived from cwd to isolate CLI sessions per worktree
+      assert.strictEqual(runCall.args[0].configDir, path.join('/tmp/repo', '.orchestrator', '.copilot-cli'));
     });
 
     test('uses provided CopilotCliRunner', async () => {
@@ -315,6 +318,28 @@ suite('mergeHelper', () => {
 
       const runCall = (runner.run as sinon.SinonStub).getCall(0);
       assert.strictEqual(runCall.args[0].timeout, 600000); // 10 minutes in ms
+    });
+
+    test('passes configDir derived from cwd for CLI session isolation', async () => {
+      const runner = createMockCopilotRunner();
+      const context = createMockContext();
+
+      await resolveMergeConflictWithCopilot(
+        context,
+        '/my/worktree/path',
+        'feature',
+        'main',
+        'Merge commit',
+        runner,
+        []
+      );
+
+      const runCall = (runner.run as sinon.SinonStub).getCall(0);
+      assert.strictEqual(
+        runCall.args[0].configDir,
+        path.join('/my/worktree/path', '.orchestrator', '.copilot-cli'),
+        'configDir should be <cwd>/.orchestrator/.copilot-cli to keep sessions out of VS Code UI'
+      );
     });
 
     test('logs session ID when available', async () => {

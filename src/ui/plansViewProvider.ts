@@ -325,12 +325,23 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .plan-name-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+      flex: 1;
     }
     .plan-status {
       font-size: 10px;
       padding: 2px 6px;
       border-radius: 8px;
       text-transform: uppercase;
+      flex-shrink: 0;
+      white-space: nowrap;
     }
     .plan-status.running { background: rgba(0, 122, 204, 0.2); color: var(--vscode-progressBar-background); }
     .plan-status.succeeded { background: rgba(78, 201, 176, 0.2); color: var(--vscode-testing-iconPassed); }
@@ -574,7 +585,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
                          data.status === 'succeeded' ? 'succeeded' : '';
       this.element.innerHTML = 
         '<div class="plan-name">' +
-          '<span class="plan-name-text">' + escapeHtml(data.name) + '</span>' +
+          '<span class="plan-name-text" title="' + escapeHtml(data.name) + '">' + escapeHtml(data.name) + '</span>' +
           '<span class="plan-status ' + data.status + '">' + data.status + '</span>' +
         '</div>' +
         '<div class="plan-details">' +
@@ -603,7 +614,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       }
 
       var nameEl = this.element.querySelector('.plan-name-text');
-      if (nameEl) nameEl.textContent = data.name;
+      if (nameEl) { nameEl.textContent = data.name; nameEl.title = data.name; }
       var statusEl = this.element.querySelector('.plan-status');
       if (statusEl) { statusEl.className = 'plan-status ' + data.status; statusEl.textContent = data.status; }
       var countEl = this.element.querySelector('.plan-node-count');
