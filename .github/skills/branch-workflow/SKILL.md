@@ -1,7 +1,6 @@
 ---
 name: branch-workflow
 description: Enforce feature branch workflow — never commit directly to main
-user-invokable: false
 ---
 
 # Branch Workflow

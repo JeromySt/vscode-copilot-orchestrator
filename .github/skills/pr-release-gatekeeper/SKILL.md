@@ -1,7 +1,6 @@
 ---
 name: pr-release-gatekeeper
 description: Enforce PR review feedback resolution and release quality gates before merging
-user-invokable: false
 ---
 
 # PR & Release Gatekeeper
