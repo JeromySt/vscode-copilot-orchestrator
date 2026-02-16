@@ -49,5 +49,8 @@ yarn-error.log*
 .orchestrator/
 .worktrees/
 
+# Copilot CLI session state
+.copilot-cli/
+
 # Auto-generated orchestrator instruction files (per-job UUID patterns)
 .github/instructions/orchestrator-*.instructions.md
