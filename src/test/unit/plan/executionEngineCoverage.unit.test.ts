@@ -743,6 +743,66 @@ suite('JobExecutionEngine - Coverage', () => {
       assert.strictEqual(healContext.repoPath, dir, 'healContext must include repoPath');
       assert.strictEqual(healContext.baseCommitAtStart, 'base-start-commit', 'healContext must include baseCommitAtStart');
     });
+
+    test('auto-retry preserves targetBranch and repoPath for leaf nodes', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'main' });
+      plan.repoPath = dir;
+      plan.baseCommitAtStart = 'base-start-commit';
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'do work' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'killed by signal SIGTERM', failedPhase: 'work',
+        exitCode: 137, stepStatuses: { work: 'failed' },
+      };
+      const retryResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'retry-commit-1234567890123456789012',
+        stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(retryResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const retryCall = executeStub.secondCall;
+      const retryContext = retryCall.args[0];
+      assert.strictEqual(retryContext.targetBranch, 'main', 'retryContext must include targetBranch for leaf node');
+      assert.strictEqual(retryContext.repoPath, dir, 'retryContext must include repoPath');
+      assert.strictEqual(retryContext.baseCommitAtStart, 'base-start-commit', 'retryContext must include baseCommitAtStart');
+    });
+
+    test('RI merge skipped status treated as failure for leaf nodes', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'main' });
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const result: JobExecutionResult = {
+        success: true,
+        completedCommit: 'commit-12345678901234567890123456',
+        stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'skipped' },
+      };
+      const executeStub = sinon.stub().resolves(result);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed', 'skipped RI merge on leaf node should fail the node');
+      assert.ok(ns.error?.includes('merge'), 'error should mention merge');
+    });
   });
 
   // ------------------------------------------------------------------

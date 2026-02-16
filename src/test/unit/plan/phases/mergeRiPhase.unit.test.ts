@@ -445,6 +445,32 @@ suite('MergeRiPhaseExecutor', () => {
     assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/Run 'git reset --hard/)));
   });
 
+  test('updateBranchRef passes arguments in correct order (repoPath, refName, commit)', async () => {
+    const git = mockGitOperations();
+    (git.repository.hasChangesBetween as sinon.SinonStub).resolves(true);
+    (git.merge.mergeWithoutCheckout as sinon.SinonStub).resolves({
+      success: true,
+      treeSha: 'tree123456789012345678901234567890abcdef12',
+      hasConflicts: false,
+      conflictFiles: []
+    });
+    (git.repository.resolveRef as sinon.SinonStub).resolves('target789012345678901234567890abcdef123456');
+    (git.merge.commitTree as sinon.SinonStub).resolves('merge456789012345678901234567890abcdef123');
+    (git.repository.updateRef as sinon.SinonStub).resolves();
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+
+    await executor.execute(context);
+
+    const updateRefStub = git.repository.updateRef as sinon.SinonStub;
+    assert.ok(updateRefStub.calledOnce, 'updateRef should be called once');
+    const [repoPath, refName, commit] = updateRefStub.firstCall.args;
+    assert.strictEqual(repoPath, context.repoPath, 'first arg should be repoPath');
+    assert.strictEqual(refName, 'refs/heads/main', 'second arg should be ref name');
+    assert.strictEqual(commit, 'merge456789012345678901234567890abcdef123', 'third arg should be commit');
+  });
+
   test('push failure is handled gracefully', async () => {
     const git = mockGitOperations();
     (git.repository.hasChangesBetween as sinon.SinonStub).resolves(true);
