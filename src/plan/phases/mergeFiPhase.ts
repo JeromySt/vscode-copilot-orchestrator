@@ -125,13 +125,73 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
               : cliResult.metrics;
           }
         } else {
-          context.logError(`  ✗ Merge failed: ${mergeResult.error}`);
-          context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
-          return { 
-            success: false, 
-            error: `Merge failed for dependency ${nodeName} (${shortSha}): ${mergeResult.error}`,
-            metrics: accumulatedMetrics 
-          };
+          // Merge rejected — check if it's due to local uncommitted changes
+          const isLocalChangesError = mergeResult.error?.includes('local changes') || 
+                                      mergeResult.error?.includes('would be overwritten');
+          
+          if (isLocalChangesError) {
+            // Stash local changes, retry the merge, then pop
+            context.logInfo(`  ⚠ Merge blocked by local changes — stashing and retrying`);
+            let stashed = false;
+            try {
+              stashed = await this.git.repository.stashPush(worktreePath, `fi-pre-merge-${Date.now()}`);
+            } catch {
+              // stash failed — fall through to error
+            }
+            
+            if (stashed) {
+              // Retry the merge on clean worktree
+              const retryResult = await this.git.merge.merge({
+                source: sourceCommit,
+                target: 'HEAD',
+                cwd: worktreePath,
+                message: `Merge parent commit ${shortSha} for job ${node.name}`,
+                fastForward: true,
+              });
+              
+              if (retryResult.success) {
+                context.logInfo(`  ✓ Merged successfully (after stash)`);
+              } else if (retryResult.hasConflicts) {
+                // AI conflict resolution on retry
+                context.logInfo(`  ⚠ Merge conflict on retry — invoking AI resolution`);
+                const cliResult = await resolveMergeConflictWithCopilot(
+                  context, worktreePath, sourceCommit, 'HEAD',
+                  `Merge parent commit ${shortSha} for job ${node.name}`,
+                  this.copilotRunner, retryResult.conflictFiles, this.configManager
+                );
+                if (!cliResult.success) {
+                  await this.git.merge.abort(worktreePath, s => context.logInfo(s));
+                  await this.popStash(worktreePath, true, context);
+                  context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
+                  return { success: false, error: `Failed to resolve conflict for ${nodeName} (${shortSha}) after stash retry`, metrics: accumulatedMetrics };
+                }
+                context.logInfo(`  ✓ Conflict resolved after stash retry`);
+                if (cliResult.metrics) {
+                  accumulatedMetrics = accumulatedMetrics ? aggregateMetrics([accumulatedMetrics, cliResult.metrics]) : cliResult.metrics;
+                }
+              } else {
+                // Retry also failed for non-conflict reason
+                await this.popStash(worktreePath, true, context);
+                context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
+                return { success: false, error: `Merge failed for ${nodeName} (${shortSha}) even after stash: ${retryResult.error}`, metrics: accumulatedMetrics };
+              }
+              
+              // Pop stash — if it fails, AI resolves
+              await this.popStash(worktreePath, true, context);
+            } else {
+              context.logError(`  ✗ Could not stash local changes`);
+              context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
+              return { success: false, error: `Merge failed for ${nodeName} (${shortSha}): ${mergeResult.error}`, metrics: accumulatedMetrics };
+            }
+          } else {
+            context.logError(`  ✗ Merge failed: ${mergeResult.error}`);
+            context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
+            return { 
+              success: false, 
+              error: `Merge failed for dependency ${nodeName} (${shortSha}): ${mergeResult.error}`,
+              metrics: accumulatedMetrics 
+            };
+          }
         }
         
       } catch (error: any) {
@@ -146,6 +206,7 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
     }
     
     context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
+    
     return { success: true, metrics: accumulatedMetrics };
   }
   
@@ -161,6 +222,46 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
     if (lines.length > maxLines) {
       const remaining = lines.length - maxLines;
       context.logInfo(`    ... (${remaining} more lines)`);
+    }
+  }
+  
+  /** Pop stash with AI-assisted conflict resolution fallback. */
+  private async popStash(worktreePath: string, didStash: boolean, context: PhaseContext): Promise<void> {
+    if (!didStash) return;
+    try {
+      await this.git.repository.stashPop(worktreePath);
+      context.logInfo('  Restored stashed changes after merge');
+    } catch (popErr: any) {
+      context.logInfo(`  Stash pop failed: ${popErr.message} — attempting AI resolution`);
+      try {
+        const conflicts = await this.git.merge.listConflicts(worktreePath).catch(() => []);
+        if (conflicts.length > 0) {
+          const result = await resolveMergeConflictWithCopilot(
+            context, worktreePath, 'stash@{0}', 'HEAD',
+            'Resolve stash pop conflicts after FI merge',
+            this.copilotRunner, conflicts, this.configManager
+          );
+          if (result.success) {
+            await this.git.repository.stageAll(worktreePath);
+            await this.git.repository.stashDrop(worktreePath);
+            context.logInfo('  AI resolved stash conflicts');
+            return;
+          }
+        }
+        // No conflicts or AI failed — check if orchestrator-only, else drop
+        const stashDiff = await this.git.repository.stashShowPatch(worktreePath).catch(() => null);
+        if (stashDiff && this.git.gitignore.isDiffOnlyOrchestratorChanges(stashDiff)) {
+          await this.git.repository.stashDrop(worktreePath);
+          context.logInfo('  Dropped orchestrator-only stash');
+        } else {
+          await this.git.repository.stashDrop(worktreePath);
+          context.logInfo('  Dropped unresolvable stash (merged content is authoritative in worktree)');
+        }
+      } catch {
+        // Last resort — drop the stash in worktrees since merged content is authoritative
+        try { await this.git.repository.stashDrop(worktreePath); } catch { /* ignore */ }
+        context.logInfo('  Dropped stash (worktree merge content is authoritative)');
+      }
     }
   }
 }
