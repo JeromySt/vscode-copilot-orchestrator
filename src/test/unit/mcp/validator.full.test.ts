@@ -86,25 +86,6 @@ suite('MCP Validator', () => {
       assert.ok(result.error!.includes('Invalid value') || result.error!.includes('Allowed'));
     });
 
-    test('should validate create_copilot_job', () => {
-      const { validateInput } = require('../../../mcp/validation/validator');
-      const result = validateInput('create_copilot_job', {
-        name: 'Test Job',
-        task: 'Build it',
-      });
-      assert.strictEqual(result.valid, true);
-    });
-
-    test('should detect minLength violations', () => {
-      const { validateInput } = require('../../../mcp/validation/validator');
-      const result = validateInput('create_copilot_job', {
-        name: '',
-        task: 'Build',
-      });
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error!.includes('too short'));
-    });
-
     test('should validate cancel_copilot_plan', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
       assert.strictEqual(validateInput('cancel_copilot_plan', { id: 'test' }).valid, true);
@@ -141,13 +122,6 @@ suite('MCP Validator', () => {
       assert.strictEqual(validateInput('update_copilot_plan_node', { planId: 'p', nodeId: 'n' }).valid, true);
       assert.strictEqual(validateInput('update_copilot_plan_node', {
         planId: 'p', nodeId: 'n', work: 'npm build', resetToStage: 'work',
-      }).valid, true);
-    });
-
-    test('should validate create_copilot_node', () => {
-      const { validateInput } = require('../../../mcp/validation/validator');
-      assert.strictEqual(validateInput('create_copilot_node', {
-        nodes: [{ producer_id: 'build', task: 'Build', dependencies: [] }],
       }).valid, true);
     });
 
@@ -197,7 +171,6 @@ suite('MCP Validator', () => {
     test('should return true for known tools', () => {
       const { hasSchema } = require('../../../mcp/validation/validator');
       assert.strictEqual(hasSchema('create_copilot_plan'), true);
-      assert.strictEqual(hasSchema('create_copilot_job'), true);
       assert.strictEqual(hasSchema('get_copilot_plan_status'), true);
     });
 
@@ -213,7 +186,7 @@ suite('MCP Validator', () => {
       const tools = getRegisteredTools();
       assert.ok(Array.isArray(tools));
       assert.ok(tools.includes('create_copilot_plan'));
-      assert.ok(tools.includes('create_copilot_node'));
+      assert.ok(tools.includes('get_copilot_node'));
     });
   });
 
@@ -449,7 +422,6 @@ suite('MCP Validator', () => {
       const { schemas } = require('../../../mcp/validation/schemas');
       assert.ok(schemas);
       assert.ok(schemas.create_copilot_plan);
-      assert.ok(schemas.create_copilot_job);
       assert.ok(schemas.get_copilot_plan_status);
       assert.ok(schemas.list_copilot_plans);
       assert.ok(schemas.get_copilot_node_details);
@@ -459,7 +431,6 @@ suite('MCP Validator', () => {
       assert.ok(schemas.delete_copilot_plan);
       assert.ok(schemas.retry_copilot_plan);
       assert.ok(schemas.retry_copilot_plan_node);
-      assert.ok(schemas.create_copilot_node);
       assert.ok(schemas.get_copilot_node);
       assert.ok(schemas.list_copilot_nodes);
       assert.ok(schemas.retry_copilot_node);

@@ -40,3 +40,15 @@ export {
   resetModelCache,
   runCopilotHelp,
 } from './modelDiscovery';
+
+export {
+  SkillDescription,
+  AugmentableNode,
+  AugmentInstructionsOptions,
+  AugmentedResult,
+  readSkillDescriptions,
+  augmentInstructions,
+  parseYamlFrontmatter,
+  buildAugmentationPrompt,
+  parseAugmentedOutput,
+} from './instructionAugmenter';

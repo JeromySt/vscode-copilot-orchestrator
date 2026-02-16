@@ -36,7 +36,6 @@ suite('MCP Plan Tools Unit Tests', () => {
       
       // Core plan management tools
       assert.ok(toolNames.includes('create_copilot_plan'));
-      assert.ok(toolNames.includes('create_copilot_job'));
       assert.ok(toolNames.includes('get_plan_status'));
       assert.ok(toolNames.includes('list_plans'));
       
@@ -156,36 +155,6 @@ suite('MCP Plan Tools Unit Tests', () => {
       assert.ok(schema.properties.maxParallel);
       assert.ok(schema.properties.startPaused);
       assert.ok(schema.properties.cleanUpSuccessfulWork);
-    });
-  });
-  
-  suite('create_copilot_job tool', () => {
-    let createJobTool: McpTool;
-    
-    setup(() => {
-      createJobTool = planTools.find(tool => tool.name === 'create_copilot_job')!;
-      assert.ok(createJobTool, 'create_copilot_job tool should exist');
-    });
-    
-    test('should have simpler schema than create_copilot_plan', () => {
-      const schema = createJobTool.inputSchema;
-      
-      assert.strictEqual(schema.type, 'object');
-      assert.ok(schema.properties);
-      assert.ok(schema.required);
-      
-      // Required fields for single job
-      assert.ok(schema.required && schema.required.includes('name'));
-      assert.ok(schema.required && schema.required.includes('task'));
-      
-      // Should not have jobs array
-      assert.ok(!schema.properties.jobs);
-    });
-    
-    test('should have work property', () => {
-      const schema = createJobTool.inputSchema;
-      
-      assert.ok(schema.properties.work);
     });
   });
   

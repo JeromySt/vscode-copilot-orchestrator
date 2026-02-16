@@ -6,6 +6,7 @@
  * @module mcp/handlers/plan/createPlanHandler
  */
 
+import * as vscode from 'vscode';
 import { 
   PlanSpec, 
   JobNodeSpec, 
@@ -19,6 +20,11 @@ import {
 } from '../utils';
 import { validateAgentModels } from '../../validation';
 import type { IGitOperations } from '../../../interfaces/IGitOperations';
+import { Logger } from '../../../core/logger';
+import { augmentInstructions, AugmentableNode } from '../../../agent/instructionAugmenter';
+import type { AgentSpec } from '../../../plan/types/specs';
+
+const log = Logger.for('mcp');
 
 // ============================================================================
 // GROUP FLATTENING
@@ -320,6 +326,31 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
     validation.spec.repoPath = ctx.workspacePath;
     const repoPath = ctx.workspacePath;
     
+    // Augment agent instructions with skill context if enabled
+    const globalAugment = vscode.workspace
+      .getConfiguration('copilotOrchestrator.instructionEnrichment')
+      .get<boolean>('augmentInstructions', true);
+    
+    if (globalAugment && ctx.copilotRunner) {
+      const augmentableNodes: AugmentableNode[] = [];
+      for (const job of validation.spec.jobs) {
+        const work = job.work;
+        if (work && typeof work === 'object' && 'type' in work && work.type === 'agent') {
+          const agentWork = work as AgentSpec;
+          if (agentWork.augmentInstructions !== false) {
+            augmentableNodes.push({ id: job.producerId, work: agentWork });
+          }
+        }
+      }
+      if (augmentableNodes.length > 0) {
+        try {
+          await augmentInstructions({ nodes: augmentableNodes, repoPath, runner: ctx.copilotRunner });
+        } catch (err: any) {
+          log.warn('Instruction augmentation failed, using original instructions', { error: err.message });
+        }
+      }
+    }
+    
     const baseBranch = await resolveBaseBranch(repoPath, ctx.git, validation.spec.baseBranch);
     validation.spec.baseBranch = baseBranch;
     
@@ -358,104 +389,6 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
         roots: plan.roots.length,
         leaves: plan.leaves.length,
       },
-    };
-  } catch (error: any) {
-    return errorResult(error.message);
-  }
-}
-
-/**
- * Handle the `create_copilot_job` MCP tool call.
- *
- * Convenience wrapper that creates a Plan containing a single job node.
- * Resolves base/target branches and delegates to {@link PlanRunner.enqueueJob}.
- *
- * @param args - Raw tool arguments matching the `create_copilot_job` input schema.
- *               Must include `name` and `task`; other fields are optional.
- * @param ctx  - Handler context providing {@link PlanRunner} and workspace path.
- * @returns On success: `{ success: true, planId, nodeId, baseBranch, targetBranch, message }`.
- *          On failure: `{ success: false, error }`.
- *
- * @example
- * ```jsonc
- * // MCP tools/call request
- * {
- *   "name": "create_copilot_job",
- *   "arguments": { "name": "Lint", "task": "Run linter", "work": "npm run lint" }
- * }
- * ```
- */
-export async function handleCreateJob(args: any, ctx: PlanHandlerContext): Promise<any> {
-  if (!args.name) {
-    return errorResult('Job must have a name');
-  }
-  
-  if (!args.task) {
-    return errorResult('Job must have a task');
-  }
-
-  // Validate allowedFolders paths exist
-  const folderValidation = await validateAllowedFolders(args, 'create_copilot_job');
-  if (!folderValidation.valid) {
-    return { success: false, error: folderValidation.error };
-  }
-
-  // Validate allowedUrls are well-formed HTTP/HTTPS
-  const urlValidation = await validateAllowedUrls(args, 'create_copilot_job');
-  if (!urlValidation.valid) {
-    return { success: false, error: urlValidation.error };
-  }
-  
-  // Validate agent model names
-  const modelValidation = await validateAgentModels(args, 'create_copilot_job');
-  if (!modelValidation.valid) {
-    return { success: false, error: modelValidation.error };
-  }
-  
-  // Validate additionalSymlinkDirs: must exist in workspace and be gitignored
-  if (args.additionalSymlinkDirs?.length && ctx.workspacePath) {
-    // TODO: Implement validateAdditionalSymlinkDirs with git parameter
-    // const symlinkValidation = await validateAdditionalSymlinkDirs(
-    //   args.additionalSymlinkDirs, ctx.workspacePath, 'create_copilot_job', ctx.git
-    // );
-    // if (!symlinkValidation.valid) {
-    //   return { success: false, error: symlinkValidation.error };
-    // }
-  }
-  
-  try {
-    const repoPath = ctx.workspacePath;
-    const baseBranch = await resolveBaseBranch(repoPath, ctx.git, args.baseBranch);
-    const targetBranch = await resolveTargetBranch(baseBranch, repoPath, ctx.git, args.targetBranch, args.name);
-    
-    const plan = ctx.PlanRunner.enqueueJob({
-      name: args.name,
-      task: args.task,
-      work: args.work,
-      prechecks: args.prechecks,
-      postchecks: args.postchecks,
-      instructions: args.instructions,
-      baseBranch,
-      targetBranch,
-      startPaused: args.startPaused,
-    });
-    
-    // Get the single node ID
-    const nodeId = plan.roots[0];
-    
-    const isPaused = plan.isPaused === true;
-    const pauseNote = isPaused
-      ? ' Job is PAUSED. Use resume_copilot_plan to start execution.'
-      : '';
-    
-    return {
-      success: true,
-      planId: plan.id,
-      nodeId,
-      baseBranch: plan.baseBranch,
-      targetBranch: plan.targetBranch,
-      paused: isPaused,
-      message: `Job '${args.name}' created. Base: ${plan.baseBranch}, Target: ${plan.targetBranch}.${pauseNote} Use planId '${plan.id}' to monitor progress.`,
     };
   } catch (error: any) {
     return errorResult(error.message);

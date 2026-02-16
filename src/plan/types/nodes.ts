@@ -333,7 +333,7 @@ export interface NodeSpec {
  */
 export interface AttemptContext {
   /** Which phase failed or was running */
-  phase: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri';
+  phase: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup';
   /** When the attempt started */
   startTime: number;
   /** When the attempt ended */
@@ -415,6 +415,7 @@ export interface NodeInstance {
 
   /** Phase-level status */
   stepStatuses?: {
+    setup?: PhaseStatus;
     prechecks?: PhaseStatus;
     work?: PhaseStatus;
     commit?: PhaseStatus;

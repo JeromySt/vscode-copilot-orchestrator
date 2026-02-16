@@ -128,15 +128,6 @@ suite('McpHandler Full Coverage', () => {
       assert.ok(res.result.content);
     });
 
-    test('create_copilot_job routes correctly', async () => {
-      const plan = makeMockPlan({ isPaused: false });
-      mockRunner.enqueueJob.returns(plan);
-      const res = await handler.handleRequest(toolCall('create_copilot_job', {
-        name: 'Build', task: 'Build it',
-      }));
-      assert.ok(res.result);
-    });
-
     test('get_copilot_plan_status routes correctly', async () => {
       const res = await handler.handleRequest(toolCall('get_copilot_plan_status', { id: 'p1' }));
       assert.ok(res.result);
@@ -199,13 +190,6 @@ suite('McpHandler Full Coverage', () => {
 
     test('update_copilot_plan_node routes correctly', async () => {
       const res = await handler.handleRequest(toolCall('update_copilot_plan_node', { planId: 'p', nodeId: 'n' }));
-      assert.ok(res.result);
-    });
-
-    test('create_copilot_node routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('create_copilot_node', {
-        nodes: [{ producer_id: 'build', task: 'Build', dependencies: [] }],
-      }));
       assert.ok(res.result);
     });
 

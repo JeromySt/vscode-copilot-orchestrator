@@ -11,7 +11,7 @@
  */
 
 import * as vscode from 'vscode';
-import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState, computeMergedLeafWorkSummary } from '../../plan';
+import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState, computeMergedLeafWorkSummary, normalizeWorkSpec } from '../../plan';
 import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 import { renderWorkSummaryPanelHtml } from '../templates/workSummaryPanel';
 import type { WorkSummaryPanelData, WsPanelJob, WsJourneyNode } from '../templates/workSummaryPanel';
@@ -1575,6 +1575,12 @@ export class planDetailPanel {
       const displayLabel = this._truncateLabel(label, DURATION_TEMPLATE, MAX_NODE_LABEL_CHARS);
       if (displayLabel !== label) {
         nodeTooltips[sanitizedId] = node.name;
+      }
+      
+      // Add sparkle to tooltip for augmented nodes
+      const normalizedWork = node.work ? normalizeWorkSpec(node.work) : undefined;
+      if (normalizedWork?.type === 'agent' && normalizedWork.originalInstructions) {
+        nodeTooltips[sanitizedId] = '✨ ' + (nodeTooltips[sanitizedId] || node.name);
       }
       
       lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);

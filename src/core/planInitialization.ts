@@ -253,7 +253,8 @@ export async function initializeMcpServer(
   // eslint-disable-next-line no-restricted-syntax -- constructed inside scoped DI factory
   scope.register(Tokens.IMcpRequestRouter, (c) => {
     const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
-    return new McpHandler(planRunner, workspacePath, git);
+    const copilotRunner = c.resolve<import('../interfaces/ICopilotRunner').ICopilotRunner>(Tokens.ICopilotRunner);
+    return new McpHandler(planRunner, workspacePath, git, copilotRunner);
   });
   const mcpHandler = scope.resolve<IMcpRequestRouter>(Tokens.IMcpRequestRouter);
 

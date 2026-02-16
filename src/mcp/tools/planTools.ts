@@ -34,7 +34,7 @@ export const PRODUCER_ID_PATTERN = /^[a-z0-9-]{3,64}$/;
  * documentation.
  *
  * Tools are grouped into three categories:
- * 1. **Creation** – `create_copilot_plan`, `create_copilot_job`
+ * 1. **Creation** – `create_copilot_plan`
  * 2. **Status & Queries** – `get_copilot_plan_status`, `list_copilot_plans`,
  *    `get_copilot_node_details`, `get_copilot_node_logs`, `get_copilot_node_attempts`
  * 3. **Control** – `cancel_copilot_plan`, `delete_copilot_plan`,
@@ -195,12 +195,13 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
 1. STRING: Shell command like "npm run build" or "@agent Do something" for AI
 2. PROCESS OBJECT: { "type": "process", "executable": "node", "args": ["script.js"] }
 3. SHELL OBJECT: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "${modelEnum[0]}" }
+4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "claude-sonnet-4.5", "augmentInstructions": true }
 
 For process type, args is an array - no shell quoting needed.
 For shell type, shell can be: cmd, powershell, pwsh, bash, sh
 For agent type, model goes INSIDE the work object. Available models: ${modelEnum.join(', ')}
 Fast models (haiku/mini) for simple tasks, premium models (opus) for complex reasoning.
+augmentInstructions (optional, boolean) enriches agent instructions with project context before execution.
 
 Agent instructions MUST be in Markdown format with headers, numbered lists, bullet lists.`,
                 },
@@ -262,66 +263,6 @@ Groups do NOT have dependencies - jobs describe the full dependency graph.`,
           }
         },
         required: ['name', 'jobs']
-      }
-    },
-    
-    // =========================================================================
-    // SINGLE JOB (CONVENIENCE)
-    // =========================================================================
-    {
-      name: 'create_copilot_job',
-      description: `Create a single job (internally becomes a Plan with one node). 
-Use this for simple one-off tasks. For multiple related tasks, use create_copilot_plan instead.
-
-EXECUTION CONTEXT:
-- Commands run in a shell (cmd.exe on Windows, /bin/sh on Unix)
-- Job gets its own git worktree for isolated work
-- Use @agent prefix for AI delegation
-
-EXAMPLES:
-- Shell: { "name": "Build", "task": "Build the app", "work": "npm run build" }
-- Agent: { "name": "Refactor", "task": "Refactor auth", "work": "@agent Refactor the authentication module" }`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          name: { 
-            type: 'string', 
-            description: 'Job name (required)' 
-          },
-          task: { 
-            type: 'string', 
-            description: 'Task description (required)' 
-          },
-          work: { 
-            type: 'string', 
-            description: 'Shell command OR "@agent <task>"' 
-          },
-          prechecks: { 
-            type: 'string', 
-            description: 'Validation before work' 
-          },
-          postchecks: { 
-            type: 'string', 
-            description: 'Validation after work' 
-          },
-          instructions: { 
-            type: 'string', 
-            description: 'Additional context for @agent. MUST be in Markdown format (# headers, 1. numbered lists, - bullet lists).' 
-          },
-          baseBranch: { 
-            type: 'string', 
-            description: 'Branch to start from (default: main)' 
-          },
-          targetBranch: { 
-            type: 'string', 
-            description: 'Branch to merge results into' 
-          },
-          startPaused: {
-            type: 'boolean',
-            description: 'Create the job in paused state for review before execution (default: false). Set to true to pause.'
-          }
-        },
-        required: ['name', 'task']
       }
     },
     

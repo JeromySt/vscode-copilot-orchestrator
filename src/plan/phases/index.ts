@@ -4,6 +4,8 @@
  * @module plan/phases
  */
 
+export { SetupPhaseExecutor } from './setupPhase';
+export { ORCHESTRATOR_SKILL_DIR } from './setupPhase';
 export { PrecheckPhaseExecutor } from './precheckPhase';
 export { WorkPhaseExecutor, runProcess, runShell, runAgent, adaptCommandForPowerShell } from './workPhase';
 export { PostcheckPhaseExecutor } from './postcheckPhase';

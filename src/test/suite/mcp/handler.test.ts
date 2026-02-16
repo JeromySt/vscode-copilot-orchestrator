@@ -270,11 +270,6 @@ suite('McpHandler', () => {
       assert.ok(response.result);
     });
 
-    test('routes create_copilot_node', async () => {
-      const response = await handler.handleRequest(makeToolCall('create_copilot_node', {}));
-      assert.ok(response.result);
-    });
-
     test('routes get_copilot_node', async () => {
       const response = await handler.handleRequest(makeToolCall('get_copilot_node', {}));
       assert.ok(response.result);

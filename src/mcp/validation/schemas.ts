@@ -34,6 +34,8 @@ export interface WorkSpec {
   allowedFolders?: string[];
   /** URLs or URL patterns the agent is allowed to access */
   allowedUrls?: string[];
+  /** Whether to augment agent instructions with project context */
+  augmentInstructions?: boolean;
 }
 
 /**
@@ -76,20 +78,6 @@ export interface CreatePlanInput {
   groups?: GroupInput[];
 }
 
-/**
- * Create job (simple) input
- */
-export interface CreateJobInput {
-  name: string;
-  task: string;
-  work?: string;
-  prechecks?: string;
-  postchecks?: string;
-  instructions?: string;
-  baseBranch?: string;
-  targetBranch?: string;
-}
-
 // ============================================================================
 // JSON SCHEMAS
 // ============================================================================
@@ -119,7 +107,8 @@ const workSpecObjectSchema = {
       items: { type: 'string', maxLength: 500 },
       maxItems: 50,
       description: 'URLs or URL patterns the agent is allowed to access. Default: none (no network access).'
-    }
+    },
+    augmentInstructions: { type: 'boolean' }
   },
   additionalProperties: false
 } as const;
@@ -228,27 +217,6 @@ export const createPlanSchema = {
   $defs: {
     group: groupSchema
   }
-} as const;
-
-/**
- * Schema for create_copilot_job input
- */
-export const createJobSchema = {
-  $id: 'create_copilot_job',
-  type: 'object',
-  properties: {
-    name: { type: 'string', minLength: 1, maxLength: 200 },
-    task: { type: 'string', minLength: 1, maxLength: 5000 },
-    work: { type: 'string', maxLength: 50000 },
-    prechecks: { type: 'string', maxLength: 10000 },
-    postchecks: { type: 'string', maxLength: 10000 },
-    instructions: { type: 'string', maxLength: 100000 },
-    baseBranch: { type: 'string', maxLength: 200 },
-    targetBranch: { type: 'string', maxLength: 200 },
-    startPaused: { type: 'boolean' }
-  },
-  required: ['name', 'task'],
-  additionalProperties: false
 } as const;
 
 /**
@@ -460,28 +428,6 @@ export const addNodeSchema = {
 // ============================================================================
 
 /**
- * Schema for create_copilot_node input
- */
-export const createNodeSchema = {
-  $id: 'create_copilot_node',
-  type: 'object',
-  properties: {
-    nodes: {
-      type: 'array',
-      items: jobSchema,
-      minItems: 1,
-      maxItems: 100
-    },
-    base_branch: { type: 'string', maxLength: 200 },
-    target_branch: { type: 'string', maxLength: 200 },
-    max_parallel: { type: 'number', minimum: 1, maximum: 32 },
-    clean_up_successful_work: { type: 'boolean' }
-  },
-  required: ['nodes'],
-  additionalProperties: false
-} as const;
-
-/**
  * Schema for get_copilot_node input
  */
 export const getNodeSchema = {
@@ -614,7 +560,6 @@ export const updateCopilotPlanNodeSchema = {
 export const schemas: Record<string, object> = {
   // Existing plan tools
   create_copilot_plan: createPlanSchema,
-  create_copilot_job: createJobSchema,
   get_copilot_plan_status: getPlanStatusSchema,
   list_copilot_plans: listPlansSchema,
   get_copilot_node_details: getNodeDetailsSchema,
@@ -628,7 +573,6 @@ export const schemas: Record<string, object> = {
   add_copilot_node: addNodeSchema,
   
   // Node-centric tools (NEW)
-  create_copilot_node: createNodeSchema,
   get_copilot_node: getNodeSchema,
   list_copilot_nodes: listNodesSchema,
   retry_copilot_node: retryNodeCentricSchema,

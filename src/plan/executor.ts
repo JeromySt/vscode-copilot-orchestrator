@@ -22,6 +22,7 @@ import type { IEvidenceValidator } from '../interfaces';
 import type { PhaseContext } from '../interfaces/IPhaseExecutor';
 import { ensureOrchestratorDirs } from '../core';
 import {
+  SetupPhaseExecutor,
   PrecheckPhaseExecutor, WorkPhaseExecutor,
   PostcheckPhaseExecutor, CommitPhaseExecutor,
   MergeFiPhaseExecutor, MergeRiPhaseExecutor,
@@ -106,7 +107,7 @@ export class DefaultJobExecutor implements JobExecutor {
     let capturedMetrics: CopilotUsageMetrics | undefined;
     const phaseMetrics: Record<string, CopilotUsageMetrics> = {};
 
-    const phaseOrder = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
+    const phaseOrder = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
     const resumeIndex = context.resumeFromPhase ? phaseOrder.indexOf(context.resumeFromPhase as any) : 0;
     const skip = (p: typeof phaseOrder[number]) => phaseOrder.indexOf(p) < resumeIndex;
     const phaseDeps = () => ({ 
@@ -146,6 +147,19 @@ export class DefaultJobExecutor implements JobExecutor {
         if (!r.success) { stepStatuses['merge-fi'] = 'failed'; context.onStepStatusChange?.('merge-fi', 'failed'); return { success: false, error: `Forward integration merge failed: ${r.error}`, stepStatuses, failedPhase: 'merge-fi', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
         stepStatuses['merge-fi'] = 'success'; context.onStepStatusChange?.('merge-fi', 'success');
       } else { stepStatuses['merge-fi'] = 'skipped'; context.onStepStatusChange?.('merge-fi', 'skipped'); }
+      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };
+
+      // ---- SETUP ----
+      if (skip('setup')) { this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION (SKIPPED - RESUMING) =========='); }
+      else {
+        context.onProgress?.('Running setup'); context.onStepStatusChange?.('setup', 'running');
+        this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION START ==========');
+        const ctx = makeCtx('setup');
+        const r = await new SetupPhaseExecutor(phaseDeps()).execute(ctx);
+        this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION END ==========');
+        if (!r.success) { stepStatuses.setup = 'failed'; context.onStepStatusChange?.('setup', 'failed'); return { success: false, error: `Setup failed: ${r.error}`, stepStatuses, failedPhase: 'setup', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+        stepStatuses.setup = 'success'; context.onStepStatusChange?.('setup', 'success');
+      }
       if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };
 
       // ---- PRECHECKS ----

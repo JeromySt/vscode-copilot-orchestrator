@@ -21,7 +21,6 @@ import { validateInput, hasSchema } from './validation';
 import {
   PlanHandlerContext,
   handleCreatePlan,
-  handleCreateJob,
   handleGetPlanStatus,
   handleListPlans,
   handleGetNodeDetails,
@@ -35,7 +34,6 @@ import {
   handleGetNodeFailureContext,
   handleRetryPlanNode,
   handleUpdatePlanNode,
-  handleCreateNode,
   handleGetNode,
   handleListNodes,
   handleRetryNode,
@@ -99,12 +97,14 @@ export class McpHandler implements IMcpRequestRouter {
    * @param PlanRunner    - Singleton {@link PlanRunner} that manages plan lifecycle.
    * @param workspacePath - Absolute path to the workspace root (git repository).
    * @param git          - Git operations interface.
+   * @param copilotRunner - Optional Copilot CLI runner for instruction augmentation.
    */
-  constructor(PlanRunner: PlanRunner, workspacePath: string, git: import('../interfaces/IGitOperations').IGitOperations) {
+  constructor(PlanRunner: PlanRunner, workspacePath: string, git: import('../interfaces/IGitOperations').IGitOperations, copilotRunner?: import('../interfaces/ICopilotRunner').ICopilotRunner) {
     this.context = { 
       PlanRunner, 
       workspacePath,
       git,
+      copilotRunner,
       // Legacy fields - kept for type compatibility
       runner: null as any,
       plans: null as any,
@@ -235,10 +235,6 @@ export class McpHandler implements IMcpRequestRouter {
         result = await handleCreatePlan(args || {}, this.context);
         break;
         
-      case 'create_copilot_job':
-        result = await handleCreateJob(args || {}, this.context);
-        break;
-        
       case 'get_copilot_plan_status':
         result = await handleGetPlanStatus(args || {}, this.context);
         break;
@@ -292,10 +288,6 @@ export class McpHandler implements IMcpRequestRouter {
         break;
         
       // --- New node-centric tools ---
-      case 'create_copilot_node':
-        result = await handleCreateNode(args || {}, this.context);
-        break;
-        
       case 'get_copilot_node':
         result = await handleGetNode(args || {}, this.context);
         break;
