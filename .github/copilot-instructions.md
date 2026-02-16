@@ -156,6 +156,11 @@ Load the relevant skill when performing these tasks:
 | Fixing failed build/test/phase errors | `.github/skills/auto-heal/SKILL.md` |
 | Writing or updating documentation | `.github/skills/documentation-writer/SKILL.md` |
 | PR merging, release, or version tagging | `.github/skills/pr-release-gatekeeper/SKILL.md` |
+| Committing code, creating branches | `.github/skills/branch-workflow/SKILL.md` |
+
+## Branch Workflow (MANDATORY)
+
+**Never commit directly to `main`.** Before every `git commit`, check the current branch with `git branch --show-current`. If on `main`, create a feature branch first (`git checkout -b <branch-name>`), then commit. All changes reach main through pull requests only.
 
 ## PR & Release Process (MANDATORY)
 
