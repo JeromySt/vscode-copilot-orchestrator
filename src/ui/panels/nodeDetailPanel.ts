@@ -38,7 +38,7 @@ import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfa
  * @returns A human-readable text representation of the work spec, or empty string if undefined.
  */
 function formatWorkSpec(spec: WorkSpec | undefined): string {
-  if (!spec) return '';
+  if (!spec) {return '';}
   
   if (typeof spec === 'string') {
     return spec;
@@ -72,19 +72,19 @@ function formatWorkSpec(spec: WorkSpec | undefined): string {
  * Get a display-friendly shell type name for the badge.
  */
 function getShellDisplayName(shell: string | undefined): { name: string; lang: string } {
-  if (!shell) return { name: 'Shell', lang: 'shell' };
+  if (!shell) {return { name: 'Shell', lang: 'shell' };}
   const lower = shell.toLowerCase();
-  if (lower.includes('powershell')) return { name: 'PowerShell', lang: 'powershell' };
-  if (lower.includes('pwsh')) return { name: 'PowerShell', lang: 'powershell' };
-  if (lower.includes('bash')) return { name: 'Bash', lang: 'bash' };
-  if (lower.includes('zsh')) return { name: 'Zsh', lang: 'bash' };
-  if (lower.includes('cmd')) return { name: 'CMD', lang: 'batch' };
-  if (lower.includes('sh')) return { name: 'Shell', lang: 'shell' };
+  if (lower.includes('powershell')) {return { name: 'PowerShell', lang: 'powershell' };}
+  if (lower.includes('pwsh')) {return { name: 'PowerShell', lang: 'powershell' };}
+  if (lower.includes('bash')) {return { name: 'Bash', lang: 'bash' };}
+  if (lower.includes('zsh')) {return { name: 'Zsh', lang: 'bash' };}
+  if (lower.includes('cmd')) {return { name: 'CMD', lang: 'batch' };}
+  if (lower.includes('sh')) {return { name: 'Shell', lang: 'shell' };}
   return { name: shell, lang: 'shell' };
 }
 
 function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) => string): string {
-  if (!spec) return '';
+  if (!spec) {return '';}
   
   if (typeof spec === 'string') {
     return `<div class="work-code-block">
@@ -134,7 +134,7 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
  * Breaks long commands at semicolons and pipes for multi-line display.
  */
 function formatShellCommand(cmd: string): string {
-  if (!cmd || cmd.length < 80) return cmd;
+  if (!cmd || cmd.length < 80) {return cmd;}
   
   // Replace semicolons with semicolon + newline (but preserve quoted strings)
   // Simple approach: break at ; and | that aren't inside quotes
@@ -299,7 +299,7 @@ function formatInline(text: string, escapeHtml: (s: string) => string): string {
  * Get the current execution phase from node state.
  */
 function getCurrentExecutionPhase(state: NodeExecutionState | undefined): string | undefined {
-  if (!state?.stepStatuses) return undefined;
+  if (!state?.stepStatuses) {return undefined;}
   
   // Check which phase is currently running (includes merge phases)
   for (const [phase, status] of Object.entries(state.stepStatuses)) {
@@ -566,7 +566,7 @@ export class NodeDetailPanel {
     
     while (this._disposables.length) {
       const d = this._disposables.pop();
-      if (d) d.dispose();
+      if (d) {d.dispose();}
     }
   }
   
@@ -674,7 +674,7 @@ export class NodeDetailPanel {
     const node = plan?.nodes.get(this._nodeId);
     const state = plan?.nodeStates.get(this._nodeId);
     
-    if (!node || node.type !== 'job') return;
+    if (!node || node.type !== 'job') {return;}
     
     // Extract originalInstructions from AgentSpec if augmented
     const normalizedWork = node.work ? normalizeWorkSpec(node.work) : undefined;
@@ -703,7 +703,7 @@ export class NodeDetailPanel {
    * @param state - The current node execution state.
    */
   private _sendAttemptUpdate(state: NodeExecutionState): void {
-    if (!state.attemptHistory || state.attemptHistory.length === 0) return;
+    if (!state.attemptHistory || state.attemptHistory.length === 0) {return;}
     this._panel.webview.postMessage({
       type: 'attemptUpdate',
       attempts: state.attemptHistory.map(a => ({
@@ -725,7 +725,7 @@ export class NodeDetailPanel {
    */
   private _sendAiUsageUpdate(state: NodeExecutionState): void {
     const metrics = getNodeMetrics(state);
-    if (!metrics) return;
+    if (!metrics) {return;}
     this._panel.webview.postMessage({
       type: 'aiUsageUpdate',
       premiumRequests: metrics.premiumRequests,
@@ -741,7 +741,7 @@ export class NodeDetailPanel {
    * @param state - The current node execution state.
    */
   private _sendWorkSummary(state: NodeExecutionState): void {
-    if (!state.workSummary) return;
+    if (!state.workSummary) {return;}
     const ws = state.workSummary;
     this._panel.webview.postMessage({
       type: 'workSummary',

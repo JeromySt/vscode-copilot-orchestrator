@@ -108,7 +108,7 @@ export function buildPlan(
     parentPath: string,
     parentGroupId: string | undefined
   ): void {
-    if (!groupSpecs) return;
+    if (!groupSpecs) {return;}
     
     for (const groupSpec of groupSpecs) {
       const groupId = uuidv4();
@@ -282,10 +282,10 @@ export function buildPlan(
   
   for (const nodeSpec of allSpecs) {
     const nodeId = producerIdToNodeId.get(nodeSpec.producerId);
-    if (!nodeId) continue;
+    if (!nodeId) {continue;}
     
     const node = nodes.get(nodeId);
-    if (!node) continue;
+    if (!node) {continue;}
     
     const resolvedDeps: string[] = [];
     for (const depProducerId of nodeSpec.dependencies) {
@@ -417,7 +417,7 @@ function detectCycles(nodes: Map<string, PlanNode>): string | null {
     if (node) {
       for (const depId of node.dependencies) {
         const error = dfs(depId);
-        if (error) return error;
+        if (error) {return error;}
       }
     }
     
@@ -430,7 +430,7 @@ function detectCycles(nodes: Map<string, PlanNode>): string | null {
   
   for (const nodeId of nodes.keys()) {
     const error = dfs(nodeId);
-    if (error) return error;
+    if (error) {return error;}
   }
   
   return null;
@@ -559,10 +559,10 @@ export function buildNodes(
   // Second pass: Resolve dependencies (producerId -> nodeId)
   for (const spec of specs) {
     const nodeId = producerIdToNodeId.get(spec.producerId);
-    if (!nodeId) continue;
+    if (!nodeId) {continue;}
 
     const node = nodeMap.get(nodeId);
-    if (!node) continue;
+    if (!node) {continue;}
 
     const resolvedDeps: string[] = [];
     for (const depProducerId of spec.dependencies) {
@@ -655,7 +655,7 @@ function detectNodeCycles(nodes: Map<string, { id: string; producerId: string; d
     if (node) {
       for (const depId of node.dependencies) {
         const error = dfs(depId);
-        if (error) return error;
+        if (error) {return error;}
       }
     }
 
@@ -668,7 +668,7 @@ function detectNodeCycles(nodes: Map<string, { id: string; producerId: string; d
 
   for (const nodeId of nodes.keys()) {
     const error = dfs(nodeId);
-    if (error) return error;
+    if (error) {return error;}
   }
 
   return null;

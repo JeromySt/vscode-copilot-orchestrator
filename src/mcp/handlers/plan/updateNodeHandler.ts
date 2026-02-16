@@ -38,7 +38,7 @@ const log = Logger.for('mcp');
  */
 export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['planId', 'nodeId']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
 
   // Validate at least one stage is provided (use 'in' to allow falsy values like null)
   if (!('prechecks' in args) && !('work' in args) && !('postchecks' in args)) {
@@ -64,11 +64,11 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
   }
   
   const planResult = lookupPlan(ctx, args.planId, 'getPlan');
-  if (isError(planResult)) return planResult;
+  if (isError(planResult)) {return planResult;}
   const plan = planResult;
   
   const nodeResult = lookupNode(plan, args.nodeId);
-  if (isError(nodeResult)) return nodeResult;
+  if (isError(nodeResult)) {return nodeResult;}
   const { node } = nodeResult;
   
   if (node.type !== 'job') {

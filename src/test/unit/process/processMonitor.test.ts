@@ -25,12 +25,12 @@ function silenceConsole(): { restore: () => void } {
   const origDebug = console.debug;
   const origWarn = console.warn;
   const origError = console.error;
-  /* eslint-disable no-console */
+   
   console.log = () => {};
   console.debug = () => {};
   console.warn = () => {};
   console.error = () => {};
-  /* eslint-enable no-console */
+   
   return {
     restore() {
       console.log = origLog;
@@ -81,7 +81,7 @@ suite('ProcessMonitor', () => {
   suite('buildTree', () => {
     // Lazily require so sandbox can intercept child_process if needed
     function getMonitorClass() {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+       
       const { ProcessMonitor } = require('../../../process/processMonitor');
       return ProcessMonitor;
     }
@@ -284,7 +284,7 @@ suite('ProcessMonitor', () => {
   // =========================================================================
   suite('isRunning', () => {
     function getMonitorClass() {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+       
       const { ProcessMonitor } = require('../../../process/processMonitor');
       return ProcessMonitor;
     }
@@ -328,7 +328,7 @@ suite('ProcessMonitor', () => {
   // =========================================================================
   suite('getSnapshot caching', () => {
     function getMonitorClass() {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+       
       const { ProcessMonitor } = require('../../../process/processMonitor');
       return ProcessMonitor;
     }
@@ -367,7 +367,7 @@ suite('ProcessMonitor', () => {
   // =========================================================================
   suite('getSnapshot error handling', () => {
     function getMonitorClass() {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+       
       const { ProcessMonitor } = require('../../../process/processMonitor');
       return ProcessMonitor;
     }
@@ -456,7 +456,7 @@ suite('ProcessMonitor', () => {
   // =========================================================================
   suite('platform-specific process listing', () => {
     function getMonitorClass() {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+       
       const { ProcessMonitor } = require('../../../process/processMonitor');
       return ProcessMonitor;
     }
@@ -492,7 +492,7 @@ suite('ProcessMonitor', () => {
       setTimeout(() => {
         mockProc.stdout.on.firstCall.args[1](mockOutput);
         const closeHandler = mockProc.on.args.find(([event]: any[]) => event === 'close');
-        if (closeHandler) closeHandler[1](0);
+        if (closeHandler) {closeHandler[1](0);}
       }, 10);
       
       const result = await (monitor as any).getWindowsProcesses();
@@ -528,7 +528,7 @@ suite('ProcessMonitor', () => {
       setTimeout(() => {
         mockProc.stdout.on.firstCall.args[1](mockOutput);
         const closeHandler = mockProc.on.args.find(([event]) => event === 'close');
-        if (closeHandler) closeHandler[1](0);
+        if (closeHandler) {closeHandler[1](0);}
       }, 10);
       
       const result = await (monitor as any).getWindowsProcesses();
@@ -557,7 +557,7 @@ suite('ProcessMonitor', () => {
       setTimeout(() => {
         mockProc.stdout.on.firstCall.args[1](mockOutput);
         const closeHandler = mockProc.on.args.find(([event]) => event === 'close');
-        if (closeHandler) closeHandler[1](0);
+        if (closeHandler) {closeHandler[1](0);}
       }, 10);
       
       const result = await (monitor as any).getUnixProcesses();
@@ -592,7 +592,7 @@ suite('ProcessMonitor', () => {
       setTimeout(() => {
         mockProc.stdout.on.firstCall.args[1](mockOutput);
         const closeHandler = mockProc.on.args.find(([event]) => event === 'close');
-        if (closeHandler) closeHandler[1](0);
+        if (closeHandler) {closeHandler[1](0);}
       }, 10);
       
       const result = await (monitor as any).getUnixProcesses();
@@ -608,7 +608,7 @@ suite('ProcessMonitor', () => {
   // =========================================================================
   suite('terminate', () => {
     function getMonitorClass() {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+       
       const { ProcessMonitor } = require('../../../process/processMonitor');
       return ProcessMonitor;
     }
@@ -660,7 +660,7 @@ suite('ProcessMonitor', () => {
         };
         setTimeout(() => {
           const closeHandler = mp.on.args.find((a: any[]) => a[0] === 'close');
-          if (closeHandler) closeHandler[1](0);
+          if (closeHandler) {closeHandler[1](0);}
         }, 10);
         return mp;
       }
@@ -700,13 +700,13 @@ suite('ProcessMonitor', () => {
           // First spawn call (pgrep for main PID) returns children
           if (callIdx === 1) {
             const dataHandler = mp.stdout.on.args.find((a: any[]) => a[0] === 'data');
-            if (dataHandler) dataHandler[1]('5678\n9999\n');
+            if (dataHandler) {dataHandler[1]('5678\n9999\n');}
             const closeHandler = mp.on.args.find((a: any[]) => a[0] === 'close');
-            if (closeHandler) closeHandler[1](0);
+            if (closeHandler) {closeHandler[1](0);}
           } else {
             // Subsequent pgrep calls for children return no children
             const closeHandler = mp.on.args.find((a: any[]) => a[0] === 'close');
-            if (closeHandler) closeHandler[1](1);
+            if (closeHandler) {closeHandler[1](1);}
           }
         }, 10);
         return mp;
@@ -738,7 +738,7 @@ suite('ProcessMonitor', () => {
       
       setTimeout(() => {
         const closeHandler = mockProc.on.args.find((a: any[]) => a[0] === 'close');
-        if (closeHandler) closeHandler[1](1);
+        if (closeHandler) {closeHandler[1](1);}
       }, 10);
       
       await (monitor as any).terminateUnix(1234, true);
@@ -765,7 +765,7 @@ suite('ProcessMonitor', () => {
       
       setTimeout(() => {
         const closeHandler = mockProc.on.args.find((a: any[]) => a[0] === 'close');
-        if (closeHandler) closeHandler[1](1);
+        if (closeHandler) {closeHandler[1](1);}
       }, 10);
       
       const err = new Error('Process not found') as NodeJS.ErrnoException;
@@ -786,7 +786,7 @@ suite('ProcessMonitor', () => {
   // =========================================================================
   suite('buildTree BFS descendant discovery', () => {
     function getMonitorClass() {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+       
       const { ProcessMonitor } = require('../../../process/processMonitor');
       return ProcessMonitor;
     }
@@ -868,7 +868,7 @@ suite('ProcessMonitor', () => {
       setTimeout(() => {
         mockProc.stdout.on.firstCall.args[1]('test output');
         const closeHandler = mockProc.on.args.find((a: any[]) => a[0] === 'close');
-        if (closeHandler) closeHandler[1](0);
+        if (closeHandler) {closeHandler[1](0);}
       }, 10);
       
       const processMonitorModule = require('../../../process/processMonitor');
@@ -937,7 +937,7 @@ suite('ProcessMonitor', () => {
       setTimeout(() => {
         mockProc.stderr.on.firstCall.args[1]('Command failed');
         const closeHandler = mockProc.on.args.find((a: any[]) => a[0] === 'close');
-        if (closeHandler) closeHandler[1](1); // Non-zero exit
+        if (closeHandler) {closeHandler[1](1);} // Non-zero exit
       }, 10);
       
       const Monitor = require('../../../process/processMonitor').ProcessMonitor;
@@ -975,7 +975,7 @@ suite('ProcessMonitor', () => {
       
       setTimeout(() => {
         const errorHandler = mockProc.on.args.find((a: any[]) => a[0] === 'error');
-        if (errorHandler) errorHandler[1](new Error('Spawn failed'));
+        if (errorHandler) {errorHandler[1](new Error('Spawn failed'));}
       }, 10);
       
       const Monitor = require('../../../process/processMonitor').ProcessMonitor;

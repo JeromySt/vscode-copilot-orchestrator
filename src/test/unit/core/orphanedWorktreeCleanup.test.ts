@@ -35,12 +35,12 @@ function silenceConsole(): { restore: () => void } {
   const origDebug = console.debug;
   const origWarn = console.warn;
   const origError = console.error;
-  /* eslint-disable no-console */
+   
   console.log = () => {};
   console.debug = () => {};
   console.warn = () => {};
   console.error = () => {};
-  /* eslint-enable no-console */
+   
   return {
     restore() {
       console.log = origLog;
@@ -503,7 +503,7 @@ suite('cleanupOrphanedWorktrees', () => {
     const originalRm = fs.promises.rm;
     
     (fs as any).existsSync = (path: string) => {
-      if (path === orphanPath) return true;
+      if (path === orphanPath) {return true;}
       return originalExistsSync(path);
     };
     

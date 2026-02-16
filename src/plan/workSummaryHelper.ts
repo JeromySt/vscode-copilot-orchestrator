@@ -20,12 +20,12 @@ function emptyWorkSummary(node: JobNode): JobWorkSummary {
 async function getCommitDetails(worktreePath: string, baseCommit: string, headCommit: string, git: IGitOperations): Promise<CommitDetail[]> {
   try {
     const changes = await git.repository.getFileChangesBetween(baseCommit, headCommit, worktreePath);
-    if (changes.length === 0) return [];
+    if (changes.length === 0) {return [];}
     const filesAdded: string[] = [], filesModified: string[] = [], filesDeleted: string[] = [];
     for (const change of changes) {
-      if (change.status === 'added') filesAdded.push(change.path);
-      else if (change.status === 'modified') filesModified.push(change.path);
-      else if (change.status === 'deleted') filesDeleted.push(change.path);
+      if (change.status === 'added') {filesAdded.push(change.path);}
+      else if (change.status === 'modified') {filesModified.push(change.path);}
+      else if (change.status === 'deleted') {filesDeleted.push(change.path);}
     }
     return [{
       hash: headCommit, shortHash: headCommit.slice(0, 8),
@@ -39,7 +39,7 @@ export async function computeWorkSummary(node: JobNode, worktreePath: string, ba
   try {
     const head = await git.worktrees.getHeadCommit(worktreePath);
     if (!head || (head === baseCommit && node.expectsNoChanges)) {
-      if (node.expectsNoChanges) return { ...emptyWorkSummary(node), description: 'Node declared expectsNoChanges', commitDetails: [] };
+      if (node.expectsNoChanges) {return { ...emptyWorkSummary(node), description: 'Node declared expectsNoChanges', commitDetails: [] };}
       return emptyWorkSummary(node);
     }
     const commitDetails = await getCommitDetails(worktreePath, baseCommit, head, git);

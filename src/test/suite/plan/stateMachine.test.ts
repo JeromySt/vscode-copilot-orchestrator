@@ -781,7 +781,7 @@ suite('PlanStateMachine', () => {
 
       let readyEmitted = false;
       sm.on('nodeReady', (_planId, nodeId) => {
-        if (nodeId === 'b') readyEmitted = true;
+        if (nodeId === 'b') {readyEmitted = true;}
       });
 
       sm.resetNodeToPending('b');

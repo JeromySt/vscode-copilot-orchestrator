@@ -193,17 +193,17 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   
   /** Send a per-plan state change to the webview. */
   private _sendPlanStateChange(planId: string) {
-    if (!this._view) return;
+    if (!this._view) {return;}
     const plan = this._planRunner.get(planId);
-    if (!plan || plan.parentPlanId) return; // skip sub-plans
+    if (!plan || plan.parentPlanId) {return;} // skip sub-plans
     const data = this._buildPlanData(plan);
     this._view.webview.postMessage({ type: 'planStateChange', plan: data });
   }
   
   /** Send notification that a new plan was added. */
   private _sendPlanAdded(plan: PlanInstance) {
-    if (!this._view) return;
-    if (plan.parentPlanId) return; // skip sub-plans
+    if (!this._view) {return;}
+    if (plan.parentPlanId) {return;} // skip sub-plans
     const data = this._buildPlanData(plan);
     this._view.webview.postMessage({ type: 'planAdded', plan: data });
     // Update total badge
@@ -213,7 +213,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   
   /** Send notification that a plan was deleted. */
   private _sendPlanDeleted(planId: string) {
-    if (!this._view) return;
+    if (!this._view) {return;}
     this._view.webview.postMessage({ type: 'planDeleted', planId });
     const total = this._planRunner.getAll().filter(p => !p.parentPlanId).length;
     this._view.webview.postMessage({ type: 'badgeUpdate', total });
@@ -221,7 +221,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   
   /** Refresh capacity stats independently (called on its own cadence). */
   private async _refreshCapacity() {
-    if (!this._view) return;
+    if (!this._view) {return;}
     const globalStats = this._planRunner.getGlobalStats();
     const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
     this._view.webview.postMessage({
@@ -242,7 +242,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
    * After this, only per-plan events are sent.
    */
   async refresh() {
-    if (!this._view) return;
+    if (!this._view) {return;}
     
     const Plans = this._planRunner.getAll();
     Plans.sort((a, b) => b.createdAt - a.createdAt);

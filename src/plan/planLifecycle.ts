@@ -206,7 +206,7 @@ export class PlanLifecycleManager {
   } | undefined {
     const plan = this.state.plans.get(planId);
     const sm = this.state.stateMachines.get(planId);
-    if (!plan || !sm) return undefined;
+    if (!plan || !sm) {return undefined;}
 
     const counts = sm.getStatusCounts();
     const progress = computeProgress(counts, plan.nodes.size);
@@ -220,13 +220,13 @@ export class PlanLifecycleManager {
 
     for (const [planId, plan] of this.state.plans) {
       const sm = this.state.stateMachines.get(planId);
-      if (!sm) continue;
+      if (!sm) {continue;}
       for (const [nodeId, state] of plan.nodeStates) {
         const node = plan.nodes.get(nodeId);
-        if (!node) continue;
+        if (!node) {continue;}
         if (nodePerformsWork(node)) {
-          if (state.status === 'running' || state.status === 'scheduled') running++;
-          else if (state.status === 'ready') queued++;
+          if (state.status === 'running' || state.status === 'scheduled') {running++;}
+          else if (state.status === 'ready') {queued++;}
         }
       }
     }
@@ -236,20 +236,20 @@ export class PlanLifecycleManager {
 
   getEffectiveEndedAt(planId: string): number | undefined {
     const plan = this.state.plans.get(planId);
-    if (!plan) return undefined;
+    if (!plan) {return undefined;}
     let max: number | undefined;
     for (const [, state] of plan.nodeStates) {
-      if (state.endedAt && (!max || state.endedAt > max)) max = state.endedAt;
+      if (state.endedAt && (!max || state.endedAt > max)) {max = state.endedAt;}
     }
     return max;
   }
 
   getEffectiveStartedAt(planId: string): number | undefined {
     const plan = this.state.plans.get(planId);
-    if (!plan) return undefined;
+    if (!plan) {return undefined;}
     let min: number | undefined;
     for (const [, state] of plan.nodeStates) {
-      if (state.startedAt && (!min || state.startedAt < min)) min = state.startedAt;
+      if (state.startedAt && (!min || state.startedAt < min)) {min = state.startedAt;}
     }
     return min;
   }
@@ -261,7 +261,7 @@ export class PlanLifecycleManager {
     };
     const result = { totalNodes: 0, counts: { ...defaultCounts } };
     const plan = this.state.plans.get(planId);
-    if (!plan) return result;
+    if (!plan) {return result;}
     for (const [, state] of plan.nodeStates) {
       result.totalNodes++;
       result.counts[state.status]++;
@@ -275,7 +275,7 @@ export class PlanLifecycleManager {
 
   pause(planId: string, updateWakeLock: () => Promise<void>): boolean {
     const plan = this.state.plans.get(planId);
-    if (!plan) return false;
+    if (!plan) {return false;}
     if (plan.isPaused) {
       this.log.info(`Plan already paused: ${planId}`);
       return true;
@@ -291,7 +291,7 @@ export class PlanLifecycleManager {
   cancel(planId: string, options?: { skipPersist?: boolean }, updateWakeLock?: () => Promise<void>): boolean {
     const plan = this.state.plans.get(planId);
     const sm = this.state.stateMachines.get(planId);
-    if (!plan || !sm) return false;
+    if (!plan || !sm) {return false;}
 
     this.log.info(`Canceling Plan: ${planId}`);
 
@@ -318,7 +318,7 @@ export class PlanLifecycleManager {
 
   delete(planId: string): boolean {
     const hadPlan = this.state.plans.has(planId);
-    if (!hadPlan) return false;
+    if (!hadPlan) {return false;}
 
     const plan = this.state.plans.get(planId)!;
     this.log.info(`Deleting Plan: ${planId}`);
@@ -344,7 +344,7 @@ export class PlanLifecycleManager {
 
   async resume(planId: string, startPump: () => void): Promise<boolean> {
     const plan = this.state.plans.get(planId);
-    if (!plan) return false;
+    if (!plan) {return false;}
 
     this.log.info(`Resuming Plan: ${planId}`);
 
@@ -360,7 +360,7 @@ export class PlanLifecycleManager {
       this.state.events.emitPlanUpdated(planId);
     }
 
-    if (plan.endedAt) plan.endedAt = undefined;
+    if (plan.endedAt) {plan.endedAt = undefined;}
 
     startPump();
     this.state.persistence.save(plan);
@@ -379,7 +379,7 @@ export class PlanLifecycleManager {
       this.state.events.emitNodeCompleted(plan.id, nodeId, false);
     };
     for (const [nodeId, nodeState] of plan.nodeStates.entries()) {
-      if (nodeState.status !== 'running') continue;
+      if (nodeState.status !== 'running') {continue;}
       if (nodeState.pid && !this.state.processMonitor.isRunning(nodeState.pid)) {
         this.log.warn(`Node ${nodeId} process (PID ${nodeState.pid}) not found - marking as crashed`);
         markCrashed(nodeId, nodeState, `Process crashed or was terminated unexpectedly (PID: ${nodeState.pid})`);
@@ -435,7 +435,7 @@ export class PlanLifecycleManager {
     const worktreePaths: string[] = [];
 
     for (const [, state] of plan.nodeStates) {
-      if (state.worktreePath) worktreePaths.push(state.worktreePath);
+      if (state.worktreePath) {worktreePaths.push(state.worktreePath);}
     }
 
     this.log.info(`Cleaning up Plan resources`, { planId: plan.id, worktrees: worktreePaths.length });
@@ -465,7 +465,7 @@ export class PlanLifecycleManager {
                 }
               }
             }
-            if (removedCount > 0) this.log.debug(`Removed ${removedCount} log files for plan ${plan.id}`);
+            if (removedCount > 0) {this.log.debug(`Removed ${removedCount} log files for plan ${plan.id}`);}
           }
         }
       } catch (error: any) {

@@ -17,7 +17,7 @@ class MockPlanRunner {
   private mockPlans: Array<{ id: string; status: string; startedAt?: number; nodes?: Map<string, any> }> = [];
 
   on(event: string, listener: Function) {
-    if (!this.listeners[event]) this.listeners[event] = [];
+    if (!this.listeners[event]) {this.listeners[event] = [];}
     this.listeners[event].push(listener);
   }
 

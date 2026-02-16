@@ -39,14 +39,14 @@ export function escapeHtml(str: string): string {
  * ```
  */
 export function formatDuration(seconds: number): string {
-  if (seconds < 0) return '0s';
+  if (seconds < 0) {return '0s';}
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const secs = seconds % 60;
   const parts: string[] = [];
-  if (hours > 0) parts.push(`${hours}h`);
-  if (minutes > 0) parts.push(`${minutes}m`);
-  if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
+  if (hours > 0) {parts.push(`${hours}h`);}
+  if (minutes > 0) {parts.push(`${minutes}m`);}
+  if (secs > 0 || parts.length === 0) {parts.push(`${secs}s`);}
   return parts.join(' ');
 }
 
@@ -59,12 +59,12 @@ export function formatDuration(seconds: number): string {
  * @returns A string like `"2h 30m"`, `"45s"`, or `"< 1s"`.
  */
 export function formatDurationMs(ms: number): string {
-  if (ms < 1000) return '< 1s';
+  if (ms < 1000) {return '< 1s';}
   const secs = Math.floor(ms / 1000);
-  if (secs < 60) return secs + 's';
+  if (secs < 60) {return secs + 's';}
   const mins = Math.floor(secs / 60);
   const remSecs = secs % 60;
-  if (mins < 60) return mins + 'm ' + remSecs + 's';
+  if (mins < 60) {return mins + 'm ' + remSecs + 's';}
   const hours = Math.floor(mins / 60);
   const remMins = mins % 60;
   return hours + 'h ' + remMins + 'm';

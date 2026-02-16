@@ -74,7 +74,7 @@ export class DefaultJobExecutor implements JobExecutor {
   setStoragePath(storagePath: string): void {
     this.storagePath = storagePath;
     const logsDir = path.join(storagePath, 'logs');
-    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+    if (!fs.existsSync(logsDir)) {fs.mkdirSync(logsDir, { recursive: true });}
   }
 
   setAgentDelegator(delegator: any): void { this.agentDelegator = delegator; }
@@ -84,7 +84,7 @@ export class DefaultJobExecutor implements JobExecutor {
     // Store Copilot CLI config inside the worktree so session state is
     // isolated per node and cleaned up when the worktree is removed.
     const configDir = path.join(worktreePath, '.orchestrator', '.copilot-cli');
-    if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+    if (!fs.existsSync(configDir)) {fs.mkdirSync(configDir, { recursive: true });}
     return configDir;
   }
 
@@ -132,7 +132,7 @@ export class DefaultJobExecutor implements JobExecutor {
 
     try {
       if (!fs.existsSync(worktreePath))
-        return { success: false, error: `Worktree does not exist: ${worktreePath}`, stepStatuses, failedPhase: 'merge-fi', pid: execution.process?.pid };
+        {return { success: false, error: `Worktree does not exist: ${worktreePath}`, stepStatuses, failedPhase: 'merge-fi', pid: execution.process?.pid };}
 
       // ---- MERGE-FI ----
       if (skip('merge-fi')) { this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION (SKIPPED - RESUMING) =========='); }
@@ -147,7 +147,7 @@ export class DefaultJobExecutor implements JobExecutor {
         if (!r.success) { stepStatuses['merge-fi'] = 'failed'; context.onStepStatusChange?.('merge-fi', 'failed'); return { success: false, error: `Forward integration merge failed: ${r.error}`, stepStatuses, failedPhase: 'merge-fi', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
         stepStatuses['merge-fi'] = 'success'; context.onStepStatusChange?.('merge-fi', 'success');
       } else { stepStatuses['merge-fi'] = 'skipped'; context.onStepStatusChange?.('merge-fi', 'skipped'); }
-      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };
+      if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };}
 
       // ---- SETUP ----
       if (skip('setup')) { this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION (SKIPPED - RESUMING) =========='); }
@@ -160,7 +160,7 @@ export class DefaultJobExecutor implements JobExecutor {
         if (!r.success) { stepStatuses.setup = 'failed'; context.onStepStatusChange?.('setup', 'failed'); return { success: false, error: `Setup failed: ${r.error}`, stepStatuses, failedPhase: 'setup', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
         stepStatuses.setup = 'success'; context.onStepStatusChange?.('setup', 'success');
       }
-      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };
+      if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };}
 
       // ---- PRECHECKS ----
       if (skip('prechecks')) { this.logEntry(executionKey, 'prechecks', 'info', '========== PRECHECKS SECTION (SKIPPED - RESUMING) =========='); }
@@ -169,13 +169,13 @@ export class DefaultJobExecutor implements JobExecutor {
         this.logEntry(executionKey, 'prechecks', 'info', '========== PRECHECKS SECTION START ==========');
         const ctx = makeCtx('prechecks'); ctx.workSpec = node.prechecks; ctx.sessionId = capturedSessionId;
         const r = await new PrecheckPhaseExecutor(phaseDeps()).execute(ctx);
-        if (r.copilotSessionId) capturedSessionId = r.copilotSessionId;
+        if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = r.metrics; phaseMetrics['prechecks'] = r.metrics; }
         this.logEntry(executionKey, 'prechecks', 'info', '========== PRECHECKS SECTION END ==========');
         if (!r.success) { stepStatuses.prechecks = 'failed'; context.onStepStatusChange?.('prechecks', 'failed'); return { success: false, error: `Prechecks failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'prechecks', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
         stepStatuses.prechecks = 'success'; context.onStepStatusChange?.('prechecks', 'success');
       } else { stepStatuses.prechecks = 'skipped'; context.onStepStatusChange?.('prechecks', 'skipped'); }
-      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };
+      if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };}
 
       // ---- WORK ----
       if (skip('work')) { this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION (SKIPPED - RESUMING) =========='); }
@@ -184,7 +184,7 @@ export class DefaultJobExecutor implements JobExecutor {
         this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION START ==========');
         const ctx = makeCtx('work'); ctx.workSpec = node.work; ctx.sessionId = capturedSessionId;
         const r = await new WorkPhaseExecutor(phaseDeps()).execute(ctx);
-        if (r.copilotSessionId) capturedSessionId = r.copilotSessionId;
+        if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['work'] = r.metrics; }
         this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION END ==========');
         if (!r.success) { stepStatuses.work = 'failed'; context.onStepStatusChange?.('work', 'failed'); log.info(`[executor.execute] Returning failure: ${r.error}`, { planId: plan.id, nodeId: node.id }); return { success: false, error: `Work failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'work', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
@@ -195,7 +195,7 @@ export class DefaultJobExecutor implements JobExecutor {
         this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION END ==========');
         log.warn(`Job ${node.name} has no work specified`); stepStatuses.work = 'skipped'; context.onStepStatusChange?.('work', 'skipped');
       }
-      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId, pid: execution.process?.pid };
+      if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId, pid: execution.process?.pid };}
 
       // ---- POSTCHECKS ----
       if (skip('postchecks')) { this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION (SKIPPED - RESUMING) =========='); }
@@ -204,13 +204,13 @@ export class DefaultJobExecutor implements JobExecutor {
         this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION START ==========');
         const ctx = makeCtx('postchecks'); ctx.workSpec = node.postchecks; ctx.sessionId = capturedSessionId;
         const r = await new PostcheckPhaseExecutor(phaseDeps()).execute(ctx);
-        if (r.copilotSessionId) capturedSessionId = r.copilotSessionId;
+        if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['postchecks'] = r.metrics; }
         this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION END ==========');
         if (!r.success) { stepStatuses.postchecks = 'failed'; context.onStepStatusChange?.('postchecks', 'failed'); return { success: false, error: `Postchecks failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'postchecks', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
         stepStatuses.postchecks = 'success'; context.onStepStatusChange?.('postchecks', 'success');
       } else { stepStatuses.postchecks = 'skipped'; context.onStepStatusChange?.('postchecks', 'skipped'); }
-      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
+      if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };}
 
       // ---- COMMIT ----
       const workWasSkipped = skip('work');
@@ -232,13 +232,13 @@ export class DefaultJobExecutor implements JobExecutor {
         this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION START ==========');
         const ctx = makeCtx('postchecks'); ctx.workSpec = node.postchecks; ctx.sessionId = capturedSessionId;
         const r = await new PostcheckPhaseExecutor(phaseDeps()).execute(ctx);
-        if (r.copilotSessionId) capturedSessionId = r.copilotSessionId;
+        if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['postchecks'] = r.metrics; }
         this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION END ==========');
         if (!r.success) { stepStatuses.postchecks = 'failed'; context.onStepStatusChange?.('postchecks', 'failed'); return { success: false, error: `Postchecks failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'postchecks', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
         stepStatuses.postchecks = 'success'; context.onStepStatusChange?.('postchecks', 'success');
       } else { stepStatuses.postchecks = 'skipped'; context.onStepStatusChange?.('postchecks', 'skipped'); }
-      if (execution.aborted) return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };
+      if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId };}
 
       // ---- MERGE-RI ----
       if (skip('merge-ri')) { this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION (SKIPPED - RESUMING) =========='); }
@@ -276,7 +276,7 @@ export class DefaultJobExecutor implements JobExecutor {
   async cancel(planId: string, nodeId: string): Promise<void> {
     const nodeKey = `${planId}:${nodeId}`;
     const executionKey = this.activeExecutionsByNode.get(nodeKey);
-    if (!executionKey) return;
+    if (!executionKey) {return;}
     const execution = this.activeExecutions.get(executionKey);
     if (execution) {
       const stack = new Error().stack;
@@ -293,12 +293,12 @@ export class DefaultJobExecutor implements JobExecutor {
 
   getLogs(planId: string, nodeId: string): LogEntry[] { return this.executionLogs.get(`${planId}:${nodeId}`) || []; }
   getLogsForPhase(planId: string, nodeId: string, phase: ExecutionPhase): LogEntry[] { return this.getLogs(planId, nodeId).filter(e => e.phase === phase); }
-  getLogFileSize(planId: string, nodeId: string): number { const f = getLogFilePathByKey(`${planId}:${nodeId}`, this.storagePath, this.logFiles); if (!f || !fs.existsSync(f)) return 0; try { return fs.statSync(f).size; } catch { return 0; } }
+  getLogFileSize(planId: string, nodeId: string): number { const f = getLogFilePathByKey(`${planId}:${nodeId}`, this.storagePath, this.logFiles); if (!f || !fs.existsSync(f)) {return 0;} try { return fs.statSync(f).size; } catch { return 0; } }
   isActive(planId: string, nodeId: string): boolean { return this.activeExecutionsByNode.has(`${planId}:${nodeId}`); }
 
   log(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string, attemptNumber?: number): void {
     const executionKey = attemptNumber ? `${planId}:${nodeId}:${attemptNumber}` : `${planId}:${nodeId}`;
-    if (!this.executionLogs.has(executionKey)) this.executionLogs.set(executionKey, []);
+    if (!this.executionLogs.has(executionKey)) {this.executionLogs.set(executionKey, []);}
     this.logEntry(executionKey, phase, type, message);
   }
 
@@ -308,12 +308,12 @@ export class DefaultJobExecutor implements JobExecutor {
 
   async getProcessStats(planId: string, nodeId: string): Promise<{ pid: number | null; running: boolean; tree: ProcessNode[]; duration: number | null; isAgentWork?: boolean }> {
     const ek = this.activeExecutionsByNode.get(`${planId}:${nodeId}`);
-    if (!ek) return { pid: null, running: false, tree: [], duration: null };
+    if (!ek) {return { pid: null, running: false, tree: [], duration: null };}
     const ex = this.activeExecutions.get(ek);
-    if (!ex) return { pid: null, running: false, tree: [], duration: null };
+    if (!ex) {return { pid: null, running: false, tree: [], duration: null };}
     const duration = ex.startTime ? Date.now() - ex.startTime : null;
-    if (ex.isAgentWork && !ex.process?.pid) return { pid: null, running: true, tree: [], duration, isAgentWork: true };
-    if (!ex.process?.pid) return { pid: null, running: false, tree: [], duration: null };
+    if (ex.isAgentWork && !ex.process?.pid) {return { pid: null, running: true, tree: [], duration, isAgentWork: true };}
+    if (!ex.process?.pid) {return { pid: null, running: false, tree: [], duration: null };}
     const pid = ex.process.pid, running = this.processMonitor.isRunning(pid);
     let tree: ProcessNode[] = [];
     try { const snap = await this.processMonitor.getSnapshot(); tree = this.processMonitor.buildTree([pid], snap); } catch { /* ignore */ }
@@ -321,21 +321,21 @@ export class DefaultJobExecutor implements JobExecutor {
   }
 
   async getAllProcessStats(nodeKeys: Array<{ planId: string; nodeId: string; nodeName: string }>): Promise<Array<{ planId: string; nodeId: string; nodeName: string; pid: number | null; running: boolean; tree: ProcessNode[]; duration: number | null; isAgentWork?: boolean }>> {
-    if (nodeKeys.length === 0) return [];
+    if (nodeKeys.length === 0) {return [];}
     let snapshot: any[] = []; try { snapshot = await this.processMonitor.getSnapshot(); } catch { /* ignore */ }
     const results: Array<{ planId: string; nodeId: string; nodeName: string; pid: number | null; running: boolean; tree: ProcessNode[]; duration: number | null; isAgentWork?: boolean }> = [];
     for (const { planId, nodeId, nodeName } of nodeKeys) {
       const ek = this.activeExecutionsByNode.get(`${planId}:${nodeId}`);
-      if (!ek) continue;
+      if (!ek) {continue;}
       const ex = this.activeExecutions.get(ek);
-      if (!ex) continue;
+      if (!ex) {continue;}
       const duration = ex.startTime ? Date.now() - ex.startTime : null;
       if (ex.isAgentWork && !ex.process?.pid) { results.push({ planId, nodeId, nodeName, pid: null, running: true, tree: [], duration, isAgentWork: true }); continue; }
-      if (!ex.process?.pid) continue;
+      if (!ex.process?.pid) {continue;}
       const pid = ex.process.pid, running = this.processMonitor.isRunning(pid);
       let tree: ProcessNode[] = [];
       if (running && snapshot.length > 0) { try { tree = this.processMonitor.buildTree([pid], snapshot); } catch { /* ignore */ } }
-      if (running || pid) results.push({ planId, nodeId, nodeName, pid, running, tree, duration, isAgentWork: ex.isAgentWork });
+      if (running || pid) {results.push({ planId, nodeId, nodeName, pid, running, tree, duration, isAgentWork: ex.isAgentWork });}
     }
     return results;
   }
@@ -376,7 +376,7 @@ export class DefaultJobExecutor implements JobExecutor {
     const logs = this.executionLogs.get(executionKey);
     for (const line of String(message).split('\n')) {
       const entry: LogEntry = { timestamp, phase, type, message: line };
-      if (logs) logs.push(entry);
+      if (logs) {logs.push(entry);}
       appendToLogFile(executionKey, entry, this.storagePath, this.logFiles);
     }
   }

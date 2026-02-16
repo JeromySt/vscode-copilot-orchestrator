@@ -38,9 +38,9 @@ export async function fetch(cwd: string, options: { remote?: string; all?: boole
   const { remote = 'origin', all = false, tags = false, log } = options;
   
   const args = ['fetch'];
-  if (all) args.push('--all');
-  if (tags) args.push('--tags');
-  if (!all) args.push(remote);
+  if (all) {args.push('--all');}
+  if (tags) {args.push('--tags');}
+  if (!all) {args.push(remote);}
   
   log?.(`[git] Fetching${all ? ' all remotes' : ` from ${remote}`}`);
   await execAsyncOrThrow(args, cwd);
@@ -76,8 +76,8 @@ export async function push(cwd: string, options: { remote?: string; branch?: str
   const { remote = 'origin', branch, force = false, log } = options;
   
   const args = ['push', remote];
-  if (branch) args.push(branch);
-  if (force) args.push('--force-with-lease');
+  if (branch) {args.push(branch);}
+  if (force) {args.push('--force-with-lease');}
   
   log?.(`[git] Pushing to ${remote}${branch ? `/${branch}` : ''}`);
   const result = await execAsync(args, { cwd });
@@ -107,7 +107,7 @@ export async function commit(cwd: string, message: string, options: { allowEmpty
   log?.(`[git] Creating commit`);
   
   const args = ['commit', '-m', message];
-  if (allowEmpty) args.push('--allow-empty');
+  if (allowEmpty) {args.push('--allow-empty');}
   
   const result = await execAsync(args, { cwd });
   
@@ -163,7 +163,7 @@ export async function getCommitLog(from: string, to: string, cwd: string): Promi
   const format = '%H|%h|%an|%ai|%s';
   const result = await execAsyncOrNull(['log', `${from}..${to}`, `--pretty=format:${format}`, '--reverse'], cwd);
   
-  if (!result) return [];
+  if (!result) {return [];}
   
   return result.split(/\r?\n/).filter(Boolean).map(line => {
     const [hash, shortHash, author, date, ...messageParts] = line.split('|');
@@ -183,7 +183,7 @@ export async function getCommitLog(from: string, to: string, cwd: string): Promi
 export async function getCommitChanges(commitHash: string, cwd: string): Promise<FileChange[]> {
   const result = await execAsyncOrNull(['diff-tree', '--no-commit-id', '--name-status', '-r', commitHash], cwd);
   
-  if (!result) return [];
+  if (!result) {return [];}
   
   return result.split(/\r?\n/).filter(Boolean).map(line => {
     const [status, ...pathParts] = line.split('\t');
@@ -215,11 +215,11 @@ export async function getDiffStats(from: string, to: string, cwd: string): Promi
   if (result) {
     for (const line of result.split(/\r?\n/).filter(Boolean)) {
       const status = line.charAt(0);
-      if (status === 'A') added++;
-      else if (status === 'M') modified++;
-      else if (status === 'D') deleted++;
-      else if (status === 'R') modified++; // Rename counts as modified
-      else if (status === 'C') added++;    // Copy counts as added
+      if (status === 'A') {added++;}
+      else if (status === 'M') {modified++;}
+      else if (status === 'D') {deleted++;}
+      else if (status === 'R') {modified++;} // Rename counts as modified
+      else if (status === 'C') {added++;}    // Copy counts as added
     }
   }
   
@@ -415,7 +415,7 @@ export async function updateRef(cwd: string, refName: string, commit: string, lo
  */
 export async function stashList(cwd: string): Promise<string[]> {
   const result = await execAsyncOrNull(['stash', 'list'], cwd);
-  if (!result) return [];
+  if (!result) {return [];}
   return result.split(/\r?\n/).filter(Boolean);
 }
 
@@ -489,7 +489,7 @@ export async function getCommitCount(from: string, to: string, cwd: string): Pro
  */
 export async function getFileChangesBetween(from: string, to: string, cwd: string): Promise<FileChange[]> {
   const result = await execAsyncOrNull(['diff', '--name-status', `${from}..${to}`], cwd);
-  if (!result) return [];
+  if (!result) {return [];}
 
   const statusMap: Record<string, FileChange['status']> = {
     'A': 'added', 'M': 'modified', 'D': 'deleted', 'R': 'renamed', 'C': 'copied'

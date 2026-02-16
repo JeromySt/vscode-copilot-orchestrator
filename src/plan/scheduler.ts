@@ -132,7 +132,7 @@ export class PlanScheduler {
       const nodeA = plan.nodes.get(a);
       const nodeB = plan.nodes.get(b);
       
-      if (!nodeA || !nodeB) return 0;
+      if (!nodeA || !nodeB) {return 0;}
       
       // Primary sort: More dependents = higher priority
       // Nodes with more dependents appear first in the returned array

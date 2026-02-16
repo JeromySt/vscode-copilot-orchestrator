@@ -95,7 +95,7 @@ export class McpIpcClient {
         authBuffer = lines.pop() || '';
         
         for (const line of lines) {
-          if (!line.trim()) continue;
+          if (!line.trim()) {continue;}
           try {
             const response = JSON.parse(line);
             if (response.type === 'auth_success') {

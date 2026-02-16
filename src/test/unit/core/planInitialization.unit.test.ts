@@ -730,7 +730,7 @@ suite('initializeMcpServer', () => {
       // MCP initialization may fail in test env - code paths still exercised
     } finally {
       for (const sub of mockContext.subscriptions) {
-        try { if (sub && sub.dispose) sub.dispose(); } catch { /* ignore */ }
+        try { if (sub && sub.dispose) {sub.dispose();} } catch { /* ignore */ }
       }
       vscode.workspace.workspaceFolders = undefined;
     }
@@ -771,7 +771,7 @@ suite('initializeMcpServer', () => {
     } finally {
       cmdDisp.dispose();
       for (const sub of mockContext.subscriptions) {
-        try { if (sub && sub.dispose) sub.dispose(); } catch { /* ignore */ }
+        try { if (sub && sub.dispose) {sub.dispose();} } catch { /* ignore */ }
       }
       vscode.workspace.workspaceFolders = undefined;
     }

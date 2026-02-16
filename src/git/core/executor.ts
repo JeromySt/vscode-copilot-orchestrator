@@ -111,8 +111,8 @@ export function execShell(cmd: string, options: ExecuteOptions): CommandResult {
   };
   
   if (log) {
-    if (commandResult.stdout) log(commandResult.stdout.trim());
-    if (commandResult.stderr && !commandResult.success) log(commandResult.stderr.trim());
+    if (commandResult.stdout) {log(commandResult.stdout.trim());}
+    if (commandResult.stderr && !commandResult.success) {log(commandResult.stderr.trim());}
   }
   
   if (!commandResult.success && throwOnError) {

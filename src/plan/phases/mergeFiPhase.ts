@@ -227,7 +227,7 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
   
   /** Pop stash with AI-assisted conflict resolution fallback. */
   private async popStash(worktreePath: string, didStash: boolean, context: PhaseContext): Promise<void> {
-    if (!didStash) return;
+    if (!didStash) {return;}
     try {
       await this.git.repository.stashPop(worktreePath);
       context.logInfo('  Restored stashed changes after merge');

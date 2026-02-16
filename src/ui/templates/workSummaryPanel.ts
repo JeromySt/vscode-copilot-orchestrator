@@ -139,7 +139,7 @@ function renderCommitDetail(commit: WsPanelCommit): string {
  * Render a collapsible job card.
  */
 function renderJobCard(job: WsPanelJob): string {
-  const durationStr = job.durationMs != null ? ` (${formatDurationMs(job.durationMs)})` : '';
+  const durationStr = job.durationMs !== null && job.durationMs !== undefined ? ` (${formatDurationMs(job.durationMs)})` : '';
   const commitsHtml = job.commitDetails.length > 0
     ? job.commitDetails.map(c => renderCommitDetail(c)).join('')
     : '<div class="no-commits">No commit details available</div>';

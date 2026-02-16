@@ -23,7 +23,7 @@ import {
  */
 export async function handleCancelPlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
   
   const success = ctx.PlanRunner.cancel(args.id);
   
@@ -46,7 +46,7 @@ export async function handleCancelPlan(args: any, ctx: PlanHandlerContext): Prom
  */
 export async function handleDeletePlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
   
   const success = ctx.PlanRunner.delete(args.id);
   

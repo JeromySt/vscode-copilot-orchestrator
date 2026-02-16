@@ -319,7 +319,7 @@ export async function abort(cwd: string, log?: GitLogger): Promise<void> {
  */
 export async function listConflicts(cwd: string): Promise<string[]> {
   const result = await execAsyncOrNull(['diff', '--name-only', '--diff-filter=U'], cwd);
-  if (!result) return [];
+  if (!result) {return [];}
   return result.split(/\r?\n/).filter(Boolean);
 }
 
@@ -328,7 +328,7 @@ export async function listConflicts(cwd: string): Promise<string[]> {
  */
 export async function isInProgress(cwd: string): Promise<boolean> {
   const result = await execAsync(['rev-parse', '--git-path', 'MERGE_HEAD'], { cwd });
-  if (!result.success) return false;
+  if (!result.success) {return false;}
   
   const mergeHead = path.join(cwd, result.stdout.trim());
   try {

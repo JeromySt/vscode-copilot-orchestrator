@@ -725,7 +725,7 @@ suite('JobExecutionEngine - helper methods', () => {
       });
       // Configure pushOnSuccess
       state.configManager.getConfig = ((section: string, key: string, def: any) => {
-        if (key === 'pushOnSuccess') return true;
+        if (key === 'pushOnSuccess') {return true;}
         return def;
       }) as any;
       state.plans.set(plan.id, plan);
@@ -752,7 +752,7 @@ suite('JobExecutionEngine - helper methods', () => {
         }),
       });
       state.configManager.getConfig = ((section: string, key: string, def: any) => {
-        if (key === 'pushOnSuccess') return true;
+        if (key === 'pushOnSuccess') {return true;}
         return def;
       }) as any;
       state.plans.set(plan.id, plan);
@@ -993,7 +993,7 @@ suite('JobExecutionEngine - helper methods', () => {
 
       // Create executor that calls the callbacks
       const executeStub = sinon.stub().callsFake(async (ctx: any) => {
-        if (ctx.onProgress) ctx.onProgress('Running work');
+        if (ctx.onProgress) {ctx.onProgress('Running work');}
         if (ctx.onStepStatusChange) {
           ctx.onStepStatusChange('work', 'running');
           ctx.onStepStatusChange('work', 'success');
@@ -1090,8 +1090,8 @@ suite('JobExecutionEngine - helper methods', () => {
       executeStub.onFirstCall().resolves(failResult);
       executeStub.onSecondCall().callsFake(async (ctx: any) => {
         // Invoke callbacks for coverage
-        if (ctx.onProgress) ctx.onProgress('Auto-heal in progress');
-        if (ctx.onStepStatusChange) ctx.onStepStatusChange('work', 'success');
+        if (ctx.onProgress) {ctx.onProgress('Auto-heal in progress');}
+        if (ctx.onStepStatusChange) {ctx.onStepStatusChange('work', 'success');}
         return healResult;
       });
 

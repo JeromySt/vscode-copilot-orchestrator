@@ -38,7 +38,7 @@ suite('cliCheckCore', () => {
     proc.stderr = new (require('events').EventEmitter)();
     proc.kill = sinon.stub();
     setTimeout(() => {
-      if (stdout) proc.stdout.emit('data', Buffer.from(stdout));
+      if (stdout) {proc.stdout.emit('data', Buffer.from(stdout));}
       proc.emit('close', exitCode);
     }, 5);
     return proc;
@@ -125,9 +125,9 @@ suite('cliCheckCore', () => {
       spawnStub.callsFake((cmd: string, args: string[]) => {
         callCount++;
         // First call (gh copilot --help) fails
-        if (callCount === 1) return fakeErrorProc();
+        if (callCount === 1) {return fakeErrorProc();}
         // Second call (gh extension list) succeeds with copilot extension
-        if (args && args[0] === 'extension') return fakeProc(0, 'github/gh-copilot');
+        if (args && args[0] === 'extension') {return fakeProc(0, 'github/gh-copilot');}
         return fakeErrorProc();
       });
       const result = await checkCopilotCliAsync();
@@ -139,7 +139,7 @@ suite('cliCheckCore', () => {
       spawnStub.callsFake(() => {
         callCount++;
         // First 2 commands fail, third (copilot --help) succeeds
-        if (callCount <= 2) return fakeErrorProc();
+        if (callCount <= 2) {return fakeErrorProc();}
         return fakeProc(0);
       });
       const result = await checkCopilotCliAsync();

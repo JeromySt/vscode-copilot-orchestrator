@@ -71,7 +71,7 @@ export class ExecutionPump {
    * Start the pump loop.
    */
   startPump(): void {
-    if (this.pumpTimer) return;
+    if (this.pumpTimer) {return;}
     this.schedulePump();
     this.log.debug('Pump started', { interval: this.state.config.pumpInterval || 1000 });
   }
@@ -106,7 +106,7 @@ export class ExecutionPump {
     for (const plan of this.state.plans.values()) {
       const sm = this.state.stateMachines.get(plan.id);
       const status = sm?.computePlanStatus();
-      if (status === 'running') return true;
+      if (status === 'running') {return true;}
     }
     return false;
   }
@@ -141,7 +141,7 @@ export class ExecutionPump {
    * Main pump loop — called periodically to advance plan execution.
    */
   private async pump(): Promise<void> {
-    if (!this.state.executor) return;
+    if (!this.state.executor) {return;}
 
     // =========================================================================
     // LIVENESS WATCHDOG: Detect stale processes after hibernate/crash
@@ -153,7 +153,7 @@ export class ExecutionPump {
       this._livenessCheckCounter = 0;
       for (const [planId, plan] of this.state.plans) {
         const sm = this.state.stateMachines.get(planId);
-        if (!sm) continue;
+        if (!sm) {continue;}
         for (const [nodeId, state] of plan.nodeStates) {
           if (state.status === 'running' && state.pid) {
             if (!this.state.processMonitor.isRunning(state.pid)) {
@@ -186,15 +186,15 @@ export class ExecutionPump {
 
     for (const [planId, plan] of this.state.plans) {
       const sm = this.state.stateMachines.get(planId);
-      if (!sm) continue;
+      if (!sm) {continue;}
 
       const status = sm.computePlanStatus();
-      if (status === 'running') activePlanIds.push(planId);
+      if (status === 'running') {activePlanIds.push(planId);}
 
       for (const [nodeId, state] of plan.nodeStates) {
         if (state.status === 'running' || state.status === 'scheduled') {
           const node = plan.nodes.get(nodeId);
-          if (node && nodePerformsWork(node)) localRunning++;
+          if (node && nodePerformsWork(node)) {localRunning++;}
         }
       }
     }
@@ -216,11 +216,11 @@ export class ExecutionPump {
     // Process each plan
     for (const [planId, plan] of this.state.plans) {
       const sm = this.state.stateMachines.get(planId);
-      if (!sm) continue;
+      if (!sm) {continue;}
 
       const status = sm.computePlanStatus();
-      if (status !== 'pending' && status !== 'running' && status !== 'paused') continue;
-      if (plan.isPaused) continue;
+      if (status !== 'pending' && status !== 'running' && status !== 'paused') {continue;}
+      if (plan.isPaused) {continue;}
 
       // Mark plan as started
       if (!plan.startedAt && status === 'running') {
@@ -257,7 +257,7 @@ export class ExecutionPump {
       // Schedule and execute each node
       for (const nodeId of nodesToSchedule) {
         const node = plan.nodes.get(nodeId);
-        if (!node) continue;
+        if (!node) {continue;}
         sm.transition(nodeId, 'scheduled');
         this.executeNode(plan, sm, node as JobNode);
       }

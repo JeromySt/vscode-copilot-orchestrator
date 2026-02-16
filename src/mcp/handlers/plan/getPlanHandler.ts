@@ -25,7 +25,7 @@ import {
  */
 export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
   
   const status = ctx.PlanRunner.getStatus(args.id);
   if (!status) {
@@ -53,10 +53,10 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
       }
       const grp = groupStatusMap.get(nodeGroup)!;
       grp.nodes++;
-      if (state.status === 'succeeded') grp.succeeded++;
-      else if (state.status === 'failed' || state.status === 'blocked') grp.failed++;
-      else if (state.status === 'running' || state.status === 'scheduled') grp.running++;
-      else grp.pending++;
+      if (state.status === 'succeeded') {grp.succeeded++;}
+      else if (state.status === 'failed' || state.status === 'blocked') {grp.failed++;}
+      else if (state.status === 'running' || state.status === 'scheduled') {grp.running++;}
+      else {grp.pending++;}
     }
     
     nodes.push({

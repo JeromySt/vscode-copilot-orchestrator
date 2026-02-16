@@ -65,18 +65,18 @@ function spawnAndTrack(
     // final data events) are processed before we log the exit summary.
     proc.on('close', (code) => {
       setImmediate(() => {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (timeoutHandle) {clearTimeout(timeoutHandle);}
         ctx.setProcess(undefined);
         ctx.logInfo(`${label} exited: PID ${proc.pid}, code ${code}, duration ${Date.now() - startTime}ms`);
-        if (stdout.trim()) ctx.logInfo(`${label} stdout (${stdout.split('\n').length} lines)`);
-        if (stderr.trim()) ctx.logInfo(`${label} stderr (${stderr.split('\n').length} lines, informational)`);
-        if (ctx.isAborted()) resolve({ success: false, error: 'Execution canceled' });
-        else if (code === 0) resolve({ success: true });
-        else resolve({ success: false, error: `Exit code ${code}`, exitCode: code ?? undefined });
+        if (stdout.trim()) {ctx.logInfo(`${label} stdout (${stdout.split('\n').length} lines)`);}
+        if (stderr.trim()) {ctx.logInfo(`${label} stderr (${stderr.split('\n').length} lines, informational)`);}
+        if (ctx.isAborted()) {resolve({ success: false, error: 'Execution canceled' });}
+        else if (code === 0) {resolve({ success: true });}
+        else {resolve({ success: false, error: `Exit code ${code}`, exitCode: code ?? undefined });}
       });
     });
     proc.on('error', (err) => {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (timeoutHandle) {clearTimeout(timeoutHandle);}
       ctx.setProcess(undefined);
       ctx.logError(`${label} error: PID ${proc.pid}, error: ${err.message}, duration ${Date.now() - startTime}ms`);
       resolve({ success: false, error: err.message });
@@ -89,7 +89,7 @@ export function runProcess(spec: ProcessSpec, ctx: PhaseContext, spawner: IProce
   const cwd = spec.cwd ? path.resolve(ctx.worktreePath, spec.cwd) : ctx.worktreePath;
   const args = spec.args || [];
   ctx.logInfo(`Arguments: ${JSON.stringify(args)}`);
-  if (spec.env) ctx.logInfo(`Environment overrides: ${JSON.stringify(spec.env)}`);
+  if (spec.env) {ctx.logInfo(`Environment overrides: ${JSON.stringify(spec.env)}`);}
   return spawnAndTrack(spawner, spec.executable, args, cwd, { ...process.env, ...spec.env }, spec.timeout || 0, ctx, 'Process');
 }
 
@@ -109,7 +109,7 @@ export function runShell(spec: ShellSpec, ctx: PhaseContext, spawner: IProcessSp
       else { shell = '/bin/sh'; shellArgs = ['-c', spec.command]; }
   }
   ctx.logInfo(`Command: ${spec.command}`);
-  if (spec.env) ctx.logInfo(`Environment overrides: ${JSON.stringify(spec.env)}`);
+  if (spec.env) {ctx.logInfo(`Environment overrides: ${JSON.stringify(spec.env)}`);}
   return spawnAndTrack(spawner, shell, shellArgs, cwd, { ...process.env, ...spec.env }, spec.timeout || 0, ctx, 'Shell');
 }
 
@@ -118,18 +118,18 @@ export async function runAgent(
   spec: AgentSpec, ctx: PhaseContext,
   agentDelegator: any | undefined, getCopilotConfigDir: (worktreePath: string) => string,
 ): Promise<PhaseResult> {
-  if (!agentDelegator) return { success: false, error: 'Agent work requires an agent delegator to be configured' };
+  if (!agentDelegator) {return { success: false, error: 'Agent work requires an agent delegator to be configured' };}
   ctx.setIsAgentWork(true);
   const startTime = Date.now();
   ctx.setStartTime(startTime);
   ctx.logInfo(`Agent instructions: ${spec.instructions}`);
-  if (spec.model) ctx.logInfo(`Using model: ${spec.model}`);
-  if (spec.contextFiles?.length) ctx.logInfo(`Agent context files: ${spec.contextFiles.join(', ')}`);
-  if (spec.maxTurns) ctx.logInfo(`Agent max turns: ${spec.maxTurns}`);
-  if (spec.context) ctx.logInfo(`Agent context: ${spec.context}`);
-  if (ctx.sessionId) ctx.logInfo(`Resuming Copilot session: ${ctx.sessionId}`);
-  if (spec.allowedFolders?.length) ctx.logInfo(`Agent allowed folders: ${spec.allowedFolders.join(', ')}`);
-  if (spec.allowedUrls?.length) ctx.logInfo(`Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);
+  if (spec.model) {ctx.logInfo(`Using model: ${spec.model}`);}
+  if (spec.contextFiles?.length) {ctx.logInfo(`Agent context files: ${spec.contextFiles.join(', ')}`);}
+  if (spec.maxTurns) {ctx.logInfo(`Agent max turns: ${spec.maxTurns}`);}
+  if (spec.context) {ctx.logInfo(`Agent context: ${spec.context}`);}
+  if (ctx.sessionId) {ctx.logInfo(`Resuming Copilot session: ${ctx.sessionId}`);}
+  if (spec.allowedFolders?.length) {ctx.logInfo(`Agent allowed folders: ${spec.allowedFolders.join(', ')}`);}
+  if (spec.allowedUrls?.length) {ctx.logInfo(`Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);}
   try {
     const configDir = getCopilotConfigDir(ctx.worktreePath);
     const result = await agentDelegator.delegate({
@@ -145,10 +145,10 @@ export async function runAgent(
     const durationMs = Date.now() - startTime;
     let metrics: CopilotUsageMetrics;
     if (result.metrics) { metrics = { ...result.metrics, durationMs }; }
-    else { metrics = { durationMs }; if (result.tokenUsage) metrics.tokenUsage = result.tokenUsage; }
+    else { metrics = { durationMs }; if (result.tokenUsage) {metrics.tokenUsage = result.tokenUsage;} }
     if (result.success) {
       ctx.logInfo('Agent completed successfully');
-      if (result.sessionId) ctx.logInfo(`Captured session ID: ${result.sessionId}`);
+      if (result.sessionId) {ctx.logInfo(`Captured session ID: ${result.sessionId}`);}
       return { success: true, copilotSessionId: result.sessionId, metrics };
     }
     ctx.logError(`Agent failed: ${result.error}`);
@@ -177,7 +177,7 @@ export class WorkPhaseExecutor implements IPhaseExecutor {
   
   async execute(context: PhaseContext): Promise<PhaseResult> {
     const normalized = normalizeWorkSpec(context.workSpec);
-    if (!normalized) return { success: true };
+    if (!normalized) {return { success: true };}
     context.logInfo(`Work type: ${normalized.type}`);
     switch (normalized.type) {
       case 'process': return runProcess(normalized as ProcessSpec, context, this.spawner);

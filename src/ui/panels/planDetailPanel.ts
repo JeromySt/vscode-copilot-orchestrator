@@ -229,7 +229,7 @@ export class planDetailPanel {
     
     while (this._disposables.length) {
       const d = this._disposables.pop();
-      if (d) d.dispose();
+      if (d) {d.dispose();}
     }
   }
   
@@ -513,7 +513,7 @@ export class planDetailPanel {
    */
   private async _sendIncrementalUpdate() {
     const plan = this._planRunner.get(this._planId);
-    if (!plan) return;
+    if (!plan) {return;}
     
     const sm = this._planRunner.getStateMachine(this._planId);
     const status = sm?.computePlanStatus() || 'pending';
@@ -1494,7 +1494,7 @@ export class planDetailPanel {
     
     // Truncate branch names for display (they can be very long)
     const truncBranch = (name: string, maxLen: number) => {
-      if (name.length <= maxLen) return name;
+      if (name.length <= maxLen) {return name;}
       // Show the last segment after / for readability
       const lastSlash = name.lastIndexOf('/');
       if (lastSlash > 0 && name.length - lastSlash < maxLen) {
@@ -1508,7 +1508,7 @@ export class planDetailPanel {
       const truncBase = truncBranch(baseBranchName, MAX_NODE_LABEL_CHARS);
       lines.push(`  BASE_BRANCH["🔀 ${this._escapeForMermaid(truncBase)}"]`);
       lines.push('  class BASE_BRANCH baseBranchNode');
-      if (truncBase !== baseBranchName) nodeTooltips['BASE_BRANCH'] = baseBranchName;
+      if (truncBase !== baseBranchName) {nodeTooltips['BASE_BRANCH'] = baseBranchName;}
     }
     
     // Add source target branch node
@@ -1516,7 +1516,7 @@ export class planDetailPanel {
       const truncTarget = truncBranch(targetBranchName, MAX_NODE_LABEL_CHARS);
       lines.push(`  TARGET_SOURCE["📍 ${this._escapeForMermaid(truncTarget)}"]`);
       lines.push('  class TARGET_SOURCE branchNode');
-      if (truncTarget !== targetBranchName) nodeTooltips['TARGET_SOURCE'] = targetBranchName;
+      if (truncTarget !== targetBranchName) {nodeTooltips['TARGET_SOURCE'] = targetBranchName;}
       
       if (showBaseBranch) {
         lines.push('  BASE_BRANCH --> TARGET_SOURCE');
@@ -1588,7 +1588,7 @@ export class planDetailPanel {
       
       nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
       
-      if (isRoot) localRoots.push(sanitizedId);
+      if (isRoot) {localRoots.push(sanitizedId);}
       if (isLeaf) {
         localLeaves.push(sanitizedId);
         leafnodeStates.set(sanitizedId, state);
@@ -1677,11 +1677,11 @@ export class planDetailPanel {
         let maxW = 0;
         for (const { nodeId } of treeNode.nodes) {
           const w = nodeLabelWidths.get(nodeId) || 0;
-          if (w > maxW) maxW = w;
+          if (w > maxW) {maxW = w;}
         }
         for (const child of treeNode.children.values()) {
           const w = computeMaxGroupWidth(child);
-          if (w > maxW) maxW = w;
+          if (w > maxW) {maxW = w;}
         }
         return maxW;
       };
@@ -1830,7 +1830,7 @@ export class planDetailPanel {
       lines.push('');
       lines.push(`  TARGET_DEST["🎯 ${this._escapeForMermaid(truncBranch(targetBranchName, MAX_NODE_LABEL_CHARS))}"]`);
       lines.push('  class TARGET_DEST branchNode');
-      if (targetBranchName.length > MAX_NODE_LABEL_CHARS) nodeTooltips['TARGET_DEST'] = targetBranchName;
+      if (targetBranchName.length > MAX_NODE_LABEL_CHARS) {nodeTooltips['TARGET_DEST'] = targetBranchName;}
       
       for (const leafId of mainResult.leaves) {
         const mapping = nodeEntryExitMap.get(leafId);
@@ -1945,7 +1945,7 @@ export class planDetailPanel {
    * @returns Human-readable duration string, or `'--'` if `startedAt` is not set.
    */
   private _formatPlanDuration(startedAt?: number, endedAt?: number): string {
-    if (!startedAt) return '--';
+    if (!startedAt) {return '--';}
     const duration = (endedAt || Date.now()) - startedAt;
     return formatDurationMs(duration);
   }

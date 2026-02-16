@@ -130,7 +130,7 @@ export class Logger {
    */
   static initialize(context: { subscriptions: { push: (d: { dispose: () => void }) => void } }): Logger {
     if (!Logger.instance) {
-      Logger.instance = new Logger();
+      Logger.instance = new Logger(); // eslint-disable-line no-restricted-syntax -- singleton bootstrap
       if (Logger.instance.outputChannel) {
         context.subscriptions.push(Logger.instance.outputChannel);
       }
@@ -248,7 +248,7 @@ export class Logger {
    * Format additional data for logging.
    */
   private formatData(data?: any): string {
-    if (data === undefined) return '';
+    if (data === undefined) {return '';}
     if (data instanceof Error) {
       return `\n  Error: ${data.message}${data.stack ? `\n  Stack: ${data.stack}` : ''}`;
     }

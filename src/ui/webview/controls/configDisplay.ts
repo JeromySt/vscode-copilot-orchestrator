@@ -62,7 +62,7 @@ export class ConfigDisplay extends SubscribableControl {
 
   private autoExpandPhase(currentPhase: string): void {
     // Only auto-expand if user hasn't manually toggled
-    if (this.userExpanded[currentPhase] !== undefined) return;
+    if (this.userExpanded[currentPhase] !== undefined) {return;}
 
     // Collapse all auto-expanded phases
     ['prechecks', 'postchecks'].forEach(phase => {
@@ -82,16 +82,16 @@ export class ConfigDisplay extends SubscribableControl {
     const body = this.getElement(`config-phase-${phase}-body`);
     const chevron = header?.querySelector('.chevron');
 
-    if (!header || !body) return;
+    if (!header || !body) {return;}
 
     if (expanded) {
       body.style.display = 'block';
       header.classList.replace('collapsed', 'expanded');
-      if (chevron) chevron.textContent = '▼';
+      if (chevron) {chevron.textContent = '▼';}
     } else {
       body.style.display = 'none';
       header.classList.replace('expanded', 'collapsed');
-      if (chevron) chevron.textContent = '▶';
+      if (chevron) {chevron.textContent = '▶';}
     }
   }
 

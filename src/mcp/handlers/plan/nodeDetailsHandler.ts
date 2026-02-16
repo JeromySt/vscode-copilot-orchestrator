@@ -28,10 +28,10 @@ import {
  */
 export async function handleGetNodeDetails(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['planId', 'nodeId']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
   
   const planResult = lookupPlan(ctx, args.planId);
-  if (isError(planResult)) return planResult;
+  if (isError(planResult)) {return planResult;}
   const plan = planResult;
   
   // Try to find node by ID or producer_id
@@ -98,14 +98,14 @@ export async function handleGetNodeDetails(args: any, ctx: PlanHandlerContext): 
  */
 export async function handleGetNodeLogs(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['planId', 'nodeId']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
   
   const planResult = lookupPlan(ctx, args.planId);
-  if (isError(planResult)) return planResult;
+  if (isError(planResult)) {return planResult;}
   const plan = planResult;
   
   const nodeResult = lookupNode(plan, args.nodeId);
-  if (isError(nodeResult)) return nodeResult;
+  if (isError(nodeResult)) {return nodeResult;}
   const { node } = nodeResult;
   
   const phase = args.phase || 'all';
@@ -136,14 +136,14 @@ export async function handleGetNodeLogs(args: any, ctx: PlanHandlerContext): Pro
  */
 export async function handleGetNodeAttempts(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['planId', 'nodeId']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
   
   const planResult = lookupPlan(ctx, args.planId);
-  if (isError(planResult)) return planResult;
+  if (isError(planResult)) {return planResult;}
   const plan = planResult;
   
   const nodeResult = lookupNode(plan, args.nodeId);
-  if (isError(nodeResult)) return nodeResult;
+  if (isError(nodeResult)) {return nodeResult;}
   const { node } = nodeResult;
   
   // Get specific attempt or all attempts
@@ -193,7 +193,7 @@ export async function handleGetNodeAttempts(args: any, ctx: PlanHandlerContext):
  */
 export async function handleGetNodeFailureContext(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['planId', 'nodeId']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
   
   const result = ctx.PlanRunner.getNodeFailureContext(args.planId, args.nodeId);
   

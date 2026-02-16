@@ -34,12 +34,12 @@ function silenceConsole(): { restore: () => void } {
   const origDebug = console.debug;
   const origWarn = console.warn;
   const origError = console.error;
-  /* eslint-disable no-console */
+   
   console.log = () => {};
   console.debug = () => {};
   console.warn = () => {};
   console.error = () => {};
-  /* eslint-enable no-console */
+   
   return {
     restore() {
       console.log = origLog;
@@ -109,8 +109,8 @@ function buildPlan(
     nodes.set(id, factory(id, deps, dependents));
     nodeStates.set(id, makeState());
     producerIdToNodeId.set(id, id);
-    if (deps.length === 0) roots.push(id);
-    if (dependents.length === 0) leaves.push(id);
+    if (deps.length === 0) {roots.push(id);}
+    if (dependents.length === 0) {leaves.push(id);}
   }
 
   return {

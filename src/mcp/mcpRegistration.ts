@@ -28,11 +28,11 @@ export async function promptMcpServerStart(
 ): Promise<void> {
   // Check if already prompted
   const hasPrompted = context.globalState.get<boolean>(PROMPTED_STATE_KEY, false);
-  if (hasPrompted) return;
+  if (hasPrompted) {return;}
   
   // Check if MCP is enabled
   const mcpConfig = vscode.workspace.getConfiguration('copilotOrchestrator.mcp');
-  if (!mcpConfig.get<boolean>('enabled', true)) return;
+  if (!mcpConfig.get<boolean>('enabled', true)) {return;}
   
   const choice = await vscode.window.showInformationMessage(
     'Copilot Orchestrator MCP server is available! Start it from "MCP: List Servers" to use orchestrator tools in Copilot Chat.',

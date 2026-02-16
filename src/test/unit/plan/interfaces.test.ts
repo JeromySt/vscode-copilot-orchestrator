@@ -89,7 +89,7 @@ suite('DI Interfaces', () => {
         getByProducerId(producerId: string, groupId?: string): NodeInstance | undefined {
           for (const node of this.nodes.values()) {
             if (node.producerId === producerId) {
-              if (!groupId || node.group?.id === groupId) return node;
+              if (!groupId || node.group?.id === groupId) {return node;}
             }
           }
           return undefined;
@@ -205,14 +205,14 @@ suite('DI Interfaces', () => {
 
         transition(nodeId: string, newStatus: NodeStatus): boolean {
           const node = this.nodes.get(nodeId);
-          if (!node) return false;
+          if (!node) {return false;}
           node.status = newStatus;
           return true;
         }
 
         areDependenciesMet(nodeId: string): boolean {
           const node = this.nodes.get(nodeId);
-          if (!node) return false;
+          if (!node) {return false;}
           return node.dependencies.every(depId => {
             const dep = this.nodes.get(depId);
             return dep?.status === 'succeeded';
@@ -221,7 +221,7 @@ suite('DI Interfaces', () => {
 
         propagateBlocked(failedNodeId: string): void {
           const failed = this.nodes.get(failedNodeId);
-          if (!failed) return;
+          if (!failed) {return;}
           for (const depId of failed.dependents) {
             this.transition(depId, 'blocked');
           }

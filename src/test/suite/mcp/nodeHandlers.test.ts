@@ -90,7 +90,7 @@ function createContext(plans: PlanInstance[] = []): PlanHandlerContext {
       getAll: sinon.stub().returns(plans),
       getStatus: sinon.stub().callsFake((id: string) => {
         const p = planMap.get(id);
-        if (!p) return undefined;
+        if (!p) {return undefined;}
         return { plan: p, status: 'running', counts: mockCounts, progress: 0.5 };
       }),
       getStateMachine: sinon.stub().callsFake(() => ({
@@ -353,7 +353,7 @@ suite('Legacy Adapters', () => {
         getAll: sinon.stub().returns(plans),
         getStatus: sinon.stub().callsFake((id: string) => {
           const p = planMap.get(id);
-          if (!p) return undefined;
+          if (!p) {return undefined;}
           return { plan: p, status: 'running', counts: mockCounts, progress: 0.5 };
         }),
         getStateMachine: sinon.stub().callsFake(() => ({

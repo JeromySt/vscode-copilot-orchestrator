@@ -33,9 +33,9 @@ function buildPlan(
   const producerIdToNodeId = new Map<string, string>();
   const dependentsMap = new Map<string, string[]>();
 
-  for (const [id] of topology) dependentsMap.set(id, []);
+  for (const [id] of topology) {dependentsMap.set(id, []);}
   for (const [id, deps] of topology) {
-    for (const dep of deps) dependentsMap.get(dep)!.push(id);
+    for (const dep of deps) {dependentsMap.get(dep)!.push(id);}
   }
 
   const roots: string[] = [];
@@ -46,8 +46,8 @@ function buildPlan(
     nodes.set(id, makeNode(id, deps, dependents));
     nodeStates.set(id, makeState(deps.length === 0 ? 'ready' : 'pending'));
     producerIdToNodeId.set(id, id);
-    if (deps.length === 0) roots.push(id);
-    if (dependents.length === 0) leaves.push(id);
+    if (deps.length === 0) {roots.push(id);}
+    if (dependents.length === 0) {leaves.push(id);}
   }
 
   return {

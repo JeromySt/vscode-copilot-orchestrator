@@ -139,7 +139,7 @@ export class ProcessMonitor implements IProcessMonitor {
     // Build tree recursively
     const buildNode = (pid: number, depth = 0): ProcessNode | null => {
       const proc = processMap.get(pid);
-      if (!proc || depth > 10) return null;
+      if (!proc || depth > 10) {return null;}
       
       const children: ProcessNode[] = [];
       for (const [childPid, childProc] of processMap.entries()) {
@@ -241,7 +241,7 @@ export class ProcessMonitor implements IProcessMonitor {
       
       for (const line of lines) {
         const parts = line.trim().split(/\s+/);
-        if (parts.length < 5) continue;
+        if (parts.length < 5) {continue;}
         
         const pid = parseInt(parts[0], 10);
         const parentPid = parseInt(parts[1], 10);

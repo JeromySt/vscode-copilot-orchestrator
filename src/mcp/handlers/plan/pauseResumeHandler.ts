@@ -23,7 +23,7 @@ import {
  */
 export async function handlePausePlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
   
   const success = ctx.PlanRunner.pause(args.id);
   
@@ -46,7 +46,7 @@ export async function handlePausePlan(args: any, ctx: PlanHandlerContext): Promi
  */
 export async function handleResumePlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
   
   const success = await ctx.PlanRunner.resume(args.id);
   

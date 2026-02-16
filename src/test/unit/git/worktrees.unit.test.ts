@@ -44,7 +44,7 @@ suite('Git Core Worktrees Unit Tests', () => {
 
   teardown(() => {
     sinon.restore();
-    if (clock) clock.restore();
+    if (clock) {clock.restore();}
   });
 
   // Helper functions for creating mock objects

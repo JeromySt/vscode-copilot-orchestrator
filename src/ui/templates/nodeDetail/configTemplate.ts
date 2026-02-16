@@ -44,14 +44,14 @@ export interface ConfigData {
  * Get spec type info for badge display
  */
 export function getSpecTypeInfo(spec: WorkSpec | undefined): { type: string; label: string } {
-  if (!spec) return { type: 'none', label: 'None' };
+  if (!spec) {return { type: 'none', label: 'None' };}
   
   if (typeof spec === 'string') {
     return { type: 'shell', label: 'Shell' };
   }
 
   const normalized = normalizeWorkSpec(spec);
-  if (!normalized) return { type: 'none', label: 'None' };
+  if (!normalized) {return { type: 'none', label: 'None' };}
 
   switch (normalized.type) {
     case 'agent': {
@@ -73,14 +73,14 @@ export function getSpecTypeInfo(spec: WorkSpec | undefined): { type: string; lab
  * Render spec content as HTML
  */
 export function renderSpecContent(spec: WorkSpec | undefined): string {
-  if (!spec) return '<div class="spec-empty">No specification defined</div>';
+  if (!spec) {return '<div class="spec-empty">No specification defined</div>';}
   
   if (typeof spec === 'string') {
     return `<div class="spec-content"><pre class="spec-code"><code>${escapeHtml(spec)}</code></pre></div>`;
   }
 
   const normalized = normalizeWorkSpec(spec);
-  if (!normalized) return '<div class="spec-empty">Invalid specification</div>';
+  if (!normalized) {return '<div class="spec-empty">Invalid specification</div>';}
 
   switch (normalized.type) {
     case 'agent':
@@ -300,7 +300,7 @@ export function gitInfoSectionHtml(data: {
   targetBranch?: string;    // NEW
   mergedToTarget?: boolean; // NEW
 }): string {
-  if (!data.worktreePath && !data.baseCommit && !data.completedCommit && !data.workCommit && !data.baseBranch && !data.targetBranch && data.mergedToTarget === undefined) return '';
+  if (!data.worktreePath && !data.baseCommit && !data.completedCommit && !data.workCommit && !data.baseBranch && !data.targetBranch && data.mergedToTarget === undefined) {return '';}
 
   return `<!-- Git Information -->
   <div class="section">

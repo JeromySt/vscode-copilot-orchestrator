@@ -192,7 +192,7 @@ export async function removeSafe(
   try {
     log?.(`[worktree] Removing worktree at '${worktreePath}'`);
     const args = ['worktree', 'remove', worktreePath];
-    if (force) args.push('--force');
+    if (force) {args.push('--force');}
     const result = await execAsync(args, { cwd: repoPath });
     
     if (!result.success) {
@@ -379,7 +379,7 @@ export async function getBranch(worktreePath: string): Promise<string | null> {
  */
 export async function list(repoPath: string): Promise<Array<{ path: string; branch: string | null }>> {
   const result = await execAsyncOrNull(['worktree', 'list', '--porcelain'], repoPath);
-  if (!result) return [];
+  if (!result) {return [];}
   
   const worktrees: Array<{ path: string; branch: string | null }> = [];
   let currentPath: string | null = null;
@@ -465,7 +465,7 @@ async function setupSubmoduleSymlinks(repoPath: string, worktreePath: string, lo
   
   for (const line of lines) {
     const match = line.match(/^submodule\.(.*?)\.path\s+(.*)$/);
-    if (!match) continue;
+    if (!match) {continue;}
     
     const submoduleName = match[1];
     const submodulePath = match[2];
@@ -588,7 +588,7 @@ async function setupSharedDirectorySymlinks(
 
   for (const rawDirName of dirs) {
     const dirName = rawDirName.trim();
-    if (!dirName || seen.has(dirName)) continue;
+    if (!dirName || seen.has(dirName)) {continue;}
     seen.add(dirName);
 
     // Built-in shared directories are trusted
@@ -620,7 +620,7 @@ async function setupSharedDirectorySymlinks(
     try {
       // Check source exists in main repo
       const srcStats = await fs.promises.stat(sourceDir);
-      if (!srcStats.isDirectory()) continue;
+      if (!srcStats.isDirectory()) {continue;}
 
       // Skip if destination already exists (reused worktree)
       try {

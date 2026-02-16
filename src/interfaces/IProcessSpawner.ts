@@ -55,7 +55,7 @@ export interface IProcessSpawner {
  */
 export class DefaultProcessSpawner implements IProcessSpawner {
   spawn(command: string, args: string[], options: SpawnOptions): ChildProcessLike {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+     
     const cp = require('child_process');
     return cp.spawn(command, args, options) as ChildProcess;
   }

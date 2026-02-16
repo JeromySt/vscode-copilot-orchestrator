@@ -106,10 +106,10 @@ export function metricsSummaryHtml(metrics: MetricsData, phaseMetrics?: PhaseMet
       .map(phase => {
         const pm = phaseMetrics[phase];
         const parts: string[] = [];
-        if (pm.premiumRequests !== undefined) parts.push(`${pm.premiumRequests} req`);
-        if (pm.apiTimeSeconds !== undefined) parts.push(`${formatDurationSeconds(pm.apiTimeSeconds)} API`);
-        if (pm.sessionTimeSeconds !== undefined) parts.push(`${formatDurationSeconds(pm.sessionTimeSeconds)} session`);
-        if (pm.codeChanges) parts.push(`${formatCodeChanges(pm.codeChanges)}`);
+        if (pm.premiumRequests !== undefined) {parts.push(`${pm.premiumRequests} req`);}
+        if (pm.apiTimeSeconds !== undefined) {parts.push(`${formatDurationSeconds(pm.apiTimeSeconds)} API`);}
+        if (pm.sessionTimeSeconds !== undefined) {parts.push(`${formatDurationSeconds(pm.sessionTimeSeconds)} session`);}
+        if (pm.codeChanges) {parts.push(`${formatCodeChanges(pm.codeChanges)}`);}
 
         const modelInfo = pm.modelBreakdown?.map(b => escapeHtml(b.model)).join(', ') || '';
 
@@ -195,9 +195,9 @@ export function attemptMetricsHtml(metrics: MetricsData, phaseMetrics?: PhaseMet
       .map(phase => {
         const pm = phaseMetrics[phase];
         const parts: string[] = [];
-        if (pm.premiumRequests !== undefined) parts.push(`${pm.premiumRequests} req`);
-        if (pm.apiTimeSeconds !== undefined) parts.push(`${formatDurationSeconds(pm.apiTimeSeconds)} API`);
-        if (pm.codeChanges) parts.push(`${formatCodeChanges(pm.codeChanges)}`);
+        if (pm.premiumRequests !== undefined) {parts.push(`${pm.premiumRequests} req`);}
+        if (pm.apiTimeSeconds !== undefined) {parts.push(`${formatDurationSeconds(pm.apiTimeSeconds)} API`);}
+        if (pm.codeChanges) {parts.push(`${formatCodeChanges(pm.codeChanges)}`);}
         return `<div class="phase-metrics-row">
             <span class="phase-metrics-label">${phaseLabels[phase] || phase}</span>
             <span class="phase-metrics-stats">${parts.join(' · ')}</span>

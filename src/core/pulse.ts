@@ -55,7 +55,7 @@ export class PulseEmitter extends EventEmitter implements IPulseEmitter {
     let disposed = false;
     return {
       dispose: () => {
-        if (disposed) return;
+        if (disposed) {return;}
         disposed = true;
         this.removeListener(PULSE_EVENT, callback);
         this._subscriberCount--;
@@ -68,13 +68,13 @@ export class PulseEmitter extends EventEmitter implements IPulseEmitter {
 
   /** Manually start the interval (idempotent). */
   start(): void {
-    if (this._timer !== undefined) return;
+    if (this._timer !== undefined) {return;}
     this._timer = setInterval(() => this.emit(PULSE_EVENT), PULSE_INTERVAL_MS);
   }
 
   /** Manually stop the interval (idempotent). */
   stop(): void {
-    if (this._timer === undefined) return;
+    if (this._timer === undefined) {return;}
     clearInterval(this._timer);
     this._timer = undefined;
   }

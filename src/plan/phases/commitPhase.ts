@@ -169,7 +169,7 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
   private async getGitStatus(cwd: string): Promise<string | null> {
     try {
       const dirtyFiles = await this.git.repository.getDirtyFiles(cwd);
-      if (dirtyFiles.length === 0) return null;
+      if (dirtyFiles.length === 0) {return null;}
       return dirtyFiles.map(file => `M  ${file}`).join('\n');
     } catch {
       return null;
@@ -181,7 +181,7 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
       // TODO: Add getIgnoredFiles to IGitOperations interface
       // const ignoredFiles = await this.git.repository.getIgnoredFiles(cwd);
       const ignoredFiles: string[] = []; // Temporary placeholder
-      if (ignoredFiles.length === 0) return null;
+      if (ignoredFiles.length === 0) {return null;}
       const limitedFiles = ignoredFiles.slice(0, 50);
       const result = limitedFiles.join('\n');
       return limitedFiles.length === 50 ? result + '\n... (truncated)' : result;
@@ -207,10 +207,10 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
 
       const workDesc = (() => {
         const spec = normalizeWorkSpec(node.work);
-        if (!spec) return 'No work specified';
-        if (spec.type === 'shell') return `Shell: ${spec.command}`;
-        if (spec.type === 'process') return `Process: ${spec.executable} ${(spec.args || []).join(' ')}`;
-        if (spec.type === 'agent') return `Agent: ${spec.instructions.slice(0, 200)}`;
+        if (!spec) {return 'No work specified';}
+        if (spec.type === 'shell') {return `Shell: ${spec.command}`;}
+        if (spec.type === 'process') {return `Process: ${spec.executable} ${(spec.args || []).join(' ')}`;}
+        if (spec.type === 'agent') {return `Agent: ${spec.instructions.slice(0, 200)}`;}
         return 'Unknown work type';
       })();
 

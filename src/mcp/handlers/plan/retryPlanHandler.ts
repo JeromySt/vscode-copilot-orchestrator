@@ -42,7 +42,7 @@ import { validateAgentModels } from '../../validation';
  */
 export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
 
   // Validate allowedFolders paths exist
   const folderValidation = await validateAllowedFolders(args, 'retry_copilot_plan');
@@ -65,7 +65,7 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   }
   
   const planResult = lookupPlan(ctx, args.id, 'getPlan');
-  if (isError(planResult)) return planResult;
+  if (isError(planResult)) {return planResult;}
   const plan = planResult;
   
   // Determine which nodes to retry

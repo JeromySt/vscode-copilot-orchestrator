@@ -53,7 +53,7 @@ suite('DefaultJobExecutor', () => {
 
   teardown(() => {
     quiet.restore();
-    for (const dir of tmpDirs) rmrf(dir);
+    for (const dir of tmpDirs) {rmrf(dir);}
   });
 
   suite('setStoragePath()', () => {

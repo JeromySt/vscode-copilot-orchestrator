@@ -71,8 +71,8 @@ function fakeSpawnProc(exitCode: number | null = 0, stdoutData = '', stderrData 
   proc.stderr = new EventEmitter();
   proc.stdin = null;
   setTimeout(() => {
-    if (stdoutData) proc.stdout.emit('data', Buffer.from(stdoutData));
-    if (stderrData) proc.stderr.emit('data', Buffer.from(stderrData));
+    if (stdoutData) {proc.stdout.emit('data', Buffer.from(stdoutData));}
+    if (stderrData) {proc.stderr.emit('data', Buffer.from(stderrData));}
     setTimeout(() => {
       proc.emit('exit', exitCode);
       proc.emit('close', exitCode);

@@ -234,7 +234,7 @@ export async function checkout(repoPath: string, branchName: string, log?: GitLo
  */
 export async function list(repoPath: string): Promise<string[]> {
   const result = await execAsyncOrNull(['branch', '--format=%(refname:short)'], repoPath);
-  if (!result) return [];
+  if (!result) {return [];}
   return result.split(/\r?\n/).filter(Boolean);
 }
 

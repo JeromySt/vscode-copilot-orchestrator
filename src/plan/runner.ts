@@ -262,7 +262,7 @@ export class PlanRunner extends EventEmitter {
 
   savePlan(planId: string): boolean {
     const plan = this._state.plans.get(planId);
-    if (!plan) return false;
+    if (!plan) {return false;}
     this._state.persistence.save(plan);
     return true;
   }

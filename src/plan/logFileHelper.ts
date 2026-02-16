@@ -19,7 +19,7 @@ export function getLogFilePathByKey(
   storagePath: string | undefined,
   logFiles: Map<string, string>,
 ): string | undefined {
-  if (!storagePath) return undefined;
+  if (!storagePath) {return undefined;}
   let logFile = logFiles.get(executionKey);
   if (!logFile) {
     const logsDir = path.join(storagePath, 'logs');
@@ -59,7 +59,7 @@ function buildLogFileHeader(executionKey: string): string {
   
   // Try to get git commit from the workspace
   try {
-    const { execSync } = require('child_process');
+    const { execSync } = require('child_process'); // eslint-disable-line no-restricted-syntax -- one-shot git metadata read
     commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000 }).trim();
   } catch { /* ignore - not in a git repo or git not available */ }
   
@@ -95,7 +95,7 @@ export function appendToLogFile(
   logFiles: Map<string, string>,
 ): void {
   const logFile = getLogFilePathByKey(executionKey, storagePath, logFiles);
-  if (!logFile) return;
+  if (!logFile) {return;}
   try {
     if (storagePath) {
       const workspacePath = path.resolve(storagePath, '..');
@@ -120,7 +120,7 @@ export function readLogsFromFile(
   logFiles: Map<string, string>,
 ): string {
   const logFile = getLogFilePathByKey(executionKey, storagePath, logFiles);
-  if (!logFile || !fs.existsSync(logFile)) return 'No log file found.';
+  if (!logFile || !fs.existsSync(logFile)) {return 'No log file found.';}
   try { return fs.readFileSync(logFile, 'utf8'); } catch (err) { return `Error reading log file: ${err}`; }
 }
 
@@ -131,20 +131,20 @@ export function readLogsFromFileOffset(
   logFiles: Map<string, string>,
 ): string {
   const logFile = getLogFilePathByKey(executionKey, storagePath, logFiles);
-  if (!logFile) return 'No log file found.';
+  if (!logFile) {return 'No log file found.';}
   try {
-    if (byteOffset <= 0) return fs.readFileSync(logFile, 'utf8');
+    if (byteOffset <= 0) {return fs.readFileSync(logFile, 'utf8');}
     const fd = fs.openSync(logFile, 'r');
     try {
       const fileSize = fs.fstatSync(fd).size;
-      if (byteOffset >= fileSize) return '';
+      if (byteOffset >= fileSize) {return '';}
       const length = fileSize - byteOffset;
       const buffer = Buffer.alloc(length);
       fs.readSync(fd, buffer, 0, length, byteOffset);
       return buffer.toString('utf8');
     } finally { fs.closeSync(fd); }
   } catch (err: any) {
-    if (err.code === 'ENOENT') return 'No log file found.';
+    if (err.code === 'ENOENT') {return 'No log file found.';}
     return `Error reading log file: ${err}`;
   }
 }

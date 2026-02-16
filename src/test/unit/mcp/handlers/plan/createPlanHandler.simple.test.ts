@@ -51,8 +51,8 @@ suite('createPlanHandler', () => {
       // Create a spy that allows us to override the require calls
       const originalRequire = require;
       (global as any).require = (id: string) => {
-        if (id.includes('validation')) return mockValidation;
-        if (id.includes('utils')) return { resolveBaseBranch, resolveTargetBranch };
+        if (id.includes('validation')) {return mockValidation;}
+        if (id.includes('utils')) {return { resolveBaseBranch, resolveTargetBranch };}
         return originalRequire(id);
       };
       

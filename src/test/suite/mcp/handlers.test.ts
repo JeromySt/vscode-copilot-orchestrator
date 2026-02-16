@@ -102,7 +102,7 @@ function createContext(plans: PlanInstance[] = []): PlanHandlerContext {
       getPlans: sinon.stub().returns(plans),
       getStatus: sinon.stub().callsFake((id: string) => {
         const p = planMap.get(id);
-        if (!p) return undefined;
+        if (!p) {return undefined;}
         return { plan: p, status: 'running', counts: { running: 1, succeeded: 0, failed: 0, pending: 0, ready: 0, scheduled: 0, blocked: 0, canceled: 0 }, progress: 0 };
       }),
       getStateMachine: sinon.stub().returns(null),

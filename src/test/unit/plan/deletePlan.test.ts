@@ -49,7 +49,7 @@ function createMockRunner(options: { fsUnlink?: sinon.SinonStub } = {}): MockRun
   // Simple implementation that mimics PlanRunner.delete() logic
   runner.delete = function(planId: string): boolean {
     const hadPlan = this.plans.has(planId);
-    if (!hadPlan) return false;
+    if (!hadPlan) {return false;}
     
     // Clear memory state first
     this.plans.delete(planId);

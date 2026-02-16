@@ -35,7 +35,7 @@ export interface ActionButtonsData {
  * @returns HTML fragment string, or empty string if not applicable.
  */
 export function retryButtonsHtml(data: ActionButtonsData): string {
-  if (data.status !== 'failed') return '';
+  if (data.status !== 'failed') {return '';}
 
   return `<div class="retry-section">
       <button class="retry-btn" data-action="retry-node" data-plan-id="${data.planId}" data-node-id="${data.nodeId}">

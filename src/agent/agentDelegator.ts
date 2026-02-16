@@ -318,7 +318,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
         error: (msg) => this.logger.log(msg),
         debug: (msg) => this.logger.log(msg),
       };
-      return new CopilotCliRunner(cliLogger);
+      return new CopilotCliRunner(cliLogger); // eslint-disable-line no-restricted-syntax -- legacy fallback before DI
     })();
 
     // Store Copilot config/sessions in worktree's .orchestrator directory

@@ -99,7 +99,7 @@ export async function cleanupOrphanedWorktrees(
       const entries = await fs.promises.readdir(worktreesDir, { withFileTypes: true });
       
       for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
+        if (!entry.isDirectory()) {continue;}
         
         const worktreePath = path.join(worktreesDir, entry.name);
         const normalizedPath = path.normalize(worktreePath).toLowerCase();

@@ -69,7 +69,7 @@ export interface AttemptHistoryData {
  * @returns Truncated display string.
  */
 function truncateLogPath(filePath: string): string {
-  if (!filePath) return '';
+  if (!filePath) {return '';}
 
   const separator = filePath.includes('\\') ? '\\' : '/';
   const parts = filePath.split(separator);
@@ -82,7 +82,7 @@ function truncateLogPath(filePath: string): string {
     truncatedFilename = `${logMatch[1]}....${logMatch[2]}_${logMatch[3]}`;
   }
 
-  if (filePath.length <= 50) return filePath;
+  if (filePath.length <= 50) {return filePath;}
 
   return `${prefix}....${separator}${truncatedFilename}`;
 }
@@ -109,7 +109,7 @@ function stepIconHtml(status?: string): string {
  * @returns HTML fragment string for the phase tab UI, or empty string if no logs.
  */
 export function attemptPhaseTabsHtml(attempt: AttemptCardData): string {
-  if (!attempt.logs) return '';
+  if (!attempt.logs) {return '';}
 
   const logs = attempt.logs;
   const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
@@ -125,11 +125,11 @@ export function attemptPhaseTabsHtml(attempt: AttemptCardData): string {
   };
 
   const getPhaseStatus = (phase: string): string => {
-    if (phase === 'all') return '';
+    if (phase === 'all') {return '';}
     const status = (attempt.stepStatuses as any)?.[phase];
-    if (status === 'success') return 'success';
-    if (status === 'failed') return 'failed';
-    if (status === 'skipped') return 'skipped';
+    if (status === 'success') {return 'success';}
+    if (status === 'failed') {return 'failed';}
+    if (status === 'skipped') {return 'skipped';}
     return '';
   };
 
@@ -143,7 +143,7 @@ export function attemptPhaseTabsHtml(attempt: AttemptCardData): string {
   }).join('');
 
   const extractPhaseLogs = (phase: string): string => {
-    if (phase === 'all') return logs;
+    if (phase === 'all') {return logs;}
 
     const phaseMarkers: Record<string, string> = {
       'merge-fi': 'FORWARD INTEGRATION',
@@ -155,7 +155,7 @@ export function attemptPhaseTabsHtml(attempt: AttemptCardData): string {
     };
 
     const marker = phaseMarkers[phase];
-    if (!marker) return '';
+    if (!marker) {return '';}
 
     const startPattern = new RegExp(`=+ ${marker}.*START =+`, 'i');
     const endPattern = new RegExp(`=+ ${marker}.*END =+`, 'i');
@@ -278,7 +278,7 @@ export function attemptCardHtml(attempt: AttemptCardData): string {
  * @returns HTML fragment string, or empty string if no attempts.
  */
 export function attemptHistoryHtml(data: AttemptHistoryData): string {
-  if (!data.attempts || data.attempts.length === 0) return '';
+  if (!data.attempts || data.attempts.length === 0) {return '';}
 
   const cards = data.attempts.slice().reverse().map(attempt => attemptCardHtml(attempt)).join('');
 

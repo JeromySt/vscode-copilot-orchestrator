@@ -107,7 +107,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Global Capacity Manager ────────────────────────────────────────────
   const globalMaxParallel = vscode.workspace.getConfiguration('copilotOrchestrator').get<number>('globalMaxParallel', 16);
-  const globalCapacityManager = new GlobalCapacityManager(context.globalStorageUri.fsPath);
+  const globalCapacityManager = new GlobalCapacityManager(context.globalStorageUri.fsPath); // eslint-disable-line no-restricted-syntax -- composition root
   await globalCapacityManager.initialize();
   await globalCapacityManager.setGlobalMaxParallel(globalMaxParallel);
   planRunner.setGlobalCapacityManager(globalCapacityManager);

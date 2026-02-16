@@ -478,7 +478,7 @@ export class PlanPersistence {
    */
   private removeFromIndex(planId: string): void {
     const indexPath = this.getIndexFilePath();
-    if (!fs.existsSync(indexPath)) return;
+    if (!fs.existsSync(indexPath)) {return;}
     
     try {
       const index: PlanIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));

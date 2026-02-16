@@ -87,7 +87,7 @@ function formatErrors(errors: ErrorObject[] | null | undefined, toolName: string
     
     // Deduplicate errors for the same path
     const key = `${path}:${err.keyword}`;
-    if (seenPaths.has(key)) continue;
+    if (seenPaths.has(key)) {continue;}
     seenPaths.add(key);
 
     // Format based on error keyword
@@ -375,11 +375,11 @@ export async function validateAllowedUrls(
   const BLOCKED_SCHEMES = ['file:', 'javascript:', 'data:', 'vbscript:', 'about:', 'blob:'];
   
   function checkUrls(urls: unknown, jsonPath: string): void {
-    if (!Array.isArray(urls)) return;
+    if (!Array.isArray(urls)) {return;}
     
     for (let i = 0; i < urls.length; i++) {
       const url = urls[i];
-      if (typeof url !== 'string') continue;
+      if (typeof url !== 'string') {continue;}
       
       const fullPath = `${jsonPath}[${i}]`;
       const lowerUrl = url.toLowerCase();
@@ -396,7 +396,7 @@ export async function validateAllowedUrls(
           break;
         }
       }
-      if (blockedScheme) continue;
+      if (blockedScheme) {continue;}
       
       // If it has a scheme, must be http or https
       if (url.includes('://')) {
@@ -432,7 +432,7 @@ export async function validateAllowedUrls(
   }
   
   function traverseForUrls(obj: unknown, jsonPath: string): void {
-    if (!obj || typeof obj !== 'object') return;
+    if (!obj || typeof obj !== 'object') {return;}
     const record = obj as Record<string, unknown>;
     
     // Check work specs for allowedUrls (parse JSON strings for security)
@@ -492,11 +492,11 @@ export async function validateAllowedFolders(
   const path = await import('path');
   
   async function checkFolders(folders: unknown, jsonPath: string): Promise<void> {
-    if (!Array.isArray(folders)) return;
+    if (!Array.isArray(folders)) {return;}
     
     for (let i = 0; i < folders.length; i++) {
       const folder = folders[i];
-      if (typeof folder !== 'string') continue;
+      if (typeof folder !== 'string') {continue;}
       
       const fullPath = `${jsonPath}[${i}]`;
       
@@ -528,7 +528,7 @@ export async function validateAllowedFolders(
   }
   
   async function traverseForFolders(obj: unknown, jsonPath: string): Promise<void> {
-    if (!obj || typeof obj !== 'object') return;
+    if (!obj || typeof obj !== 'object') {return;}
     const record = obj as Record<string, unknown>;
     
     // Check work specs for allowedFolders (parse JSON strings for security)

@@ -280,14 +280,14 @@ export function runCopilotHelp(spawner: IProcessSpawner): Promise<string> {
     });
 
     proc.on('close', (code: number | null) => {
-      if (settled) return;
+      if (settled) {return;}
       settled = true;
       clearTimeout(timeout);
       resolve(stdout || stderr);
     });
 
     proc.on('error', (err: Error) => {
-      if (settled) return;
+      if (settled) {return;}
       settled = true;
       clearTimeout(timeout);
       reject(err);
@@ -295,7 +295,7 @@ export function runCopilotHelp(spawner: IProcessSpawner): Promise<string> {
 
     // Timeout after 10 seconds
     const timeout = setTimeout(() => {
-      if (settled) return;
+      if (settled) {return;}
       settled = true;
       if (!proc.killed && proc.exitCode === null) {
         proc.kill();

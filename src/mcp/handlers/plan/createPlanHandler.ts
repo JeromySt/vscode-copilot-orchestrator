@@ -63,7 +63,7 @@ function flattenGroupsToJobs(
       // Resolve dependencies - local refs become qualified, already-qualified refs pass through
       const resolvedDeps = (j.dependencies || []).map((dep: string) => {
         // If dep contains '/', it's already qualified
-        if (dep.includes('/')) return dep;
+        if (dep.includes('/')) {return dep;}
         // Otherwise, qualify it with our group path
         return `${currentPath}/${dep}`;
       });
@@ -110,18 +110,18 @@ function validateGroupsRecursively(
   validGlobalRefs: Set<string>,
   errors: string[]
 ): void {
-  if (!groups || !Array.isArray(groups)) return;
+  if (!groups || !Array.isArray(groups)) {return;}
   
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i];
-    if (!group.name) continue; // Schema validation catches this
+    if (!group.name) {continue;} // Schema validation catches this
     
     const currentPath = groupPath ? `${groupPath}/${group.name}` : group.name;
     
     // Validate job dependencies in this group
     for (let j = 0; j < (group.jobs || []).length; j++) {
       const job = group.jobs[j];
-      if (!job.producer_id) continue; // Schema validation catches this
+      if (!job.producer_id) {continue;} // Schema validation catches this
       
       const qualifiedId = `${currentPath}/${job.producer_id}`;
       
@@ -148,7 +148,7 @@ function validateGroupsRecursively(
  * Collect all producer_ids from groups recursively (for reference validation).
  */
 function collectGroupProducerIds(groups: any[] | undefined, groupPath: string, ids: Set<string>): void {
-  if (!groups || !Array.isArray(groups)) return;
+  if (!groups || !Array.isArray(groups)) {return;}
   
   for (const g of groups) {
     const currentPath = groupPath ? `${groupPath}/${g.name}` : g.name;
@@ -186,7 +186,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
   
   // Collect root job producer_ids and check for duplicates
   for (const job of args.jobs || []) {
-    if (!job.producer_id) continue; // Schema validation catches this
+    if (!job.producer_id) {continue;} // Schema validation catches this
     
     if (allProducerIds.has(job.producer_id)) {
       errors.push(`Duplicate producer_id: '${job.producer_id}'`);
@@ -200,7 +200,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
   
   // Validate root-level job dependencies
   for (const job of args.jobs || []) {
-    if (!job.producer_id || !Array.isArray(job.dependencies)) continue;
+    if (!job.producer_id || !Array.isArray(job.dependencies)) {continue;}
     
     for (const dep of job.dependencies) {
       if (!allProducerIds.has(dep)) {

@@ -53,7 +53,7 @@ export function execCommand(
     
     proc.on('close', (code) => {
       clearTimeout(timer);
-      if (killed) return;
+      if (killed) {return;}
       
       if (code === 0 || stdout) {
         resolve(stdout);

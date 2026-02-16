@@ -179,7 +179,7 @@ export class PlanTreeViewManager {
    * Update the activity bar badge based on running plans
    */
   private updateBadge(): void {
-    if (!this.treeView) return;
+    if (!this.treeView) {return;}
 
     const runningCount = this.getRunningPlanCount();
     

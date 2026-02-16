@@ -221,6 +221,53 @@ When a **prechecks**, **work**, or **postchecks** phase fails due to a process o
 
 Auto-heal attempts are tracked in the node's **attempt history** with `triggerType: 'auto-heal'`, visible in the node detail panel.
 
+### 📝 Repository Instructions & Agent Skills
+
+Copilot CLI agents launched by the orchestrator **automatically discover and use** repo-level instructions and skills — no extra configuration needed.
+
+**Copilot Instructions** (`.github/copilot-instructions.md`):
+A repo-wide markdown file that all Copilot CLI agents read automatically. Use it to describe project conventions, preferred libraries, code style, and architectural patterns. Every agent invocation (work, prechecks, postchecks, auto-heal) receives this context.
+
+**Path-Scoped Instructions** (`.github/instructions/*.instructions.md`):
+Fine-grained instruction files with YAML frontmatter `applyTo` globs. Copilot CLI loads only the instructions whose globs match the files being edited:
+
+```markdown
+---
+applyTo: "src/test/**"
+---
+Use Mocha TDD (suite/test) with sinon stubs. Target 95% branch coverage.
+```
+
+**Agent Skills** (`.github/skills/*/SKILL.md`):
+Reusable capabilities that Copilot CLI auto-loads when relevant. Each skill has a `description` in its YAML frontmatter — when the agent's task matches the description, the skill body is loaded into context automatically:
+
+```markdown
+---
+name: test-writer
+description: Write comprehensive unit tests with high coverage
+---
+## How to write tests
+- Use Mocha TDD with `suite()` / `test()`
+- Stub external dependencies with sinon
+```
+
+Skills can also be invoked explicitly via `/skill-name` slash commands in agent instructions.
+
+**Instruction Augmentation** (`augmentInstructions`):
+When creating or updating plans, the orchestrator can automatically augment agent instructions to better trigger matching skills. This is controlled per-node via the `augmentInstructions` field on agent work specs (defaults to `true`):
+
+```json
+{
+  "work": {
+    "type": "agent",
+    "instructions": "Add input validation to the form",
+    "augmentInstructions": true
+  }
+}
+```
+
+When enabled, a single Copilot CLI call at plan creation reviews all opted-in agent instructions and rephrases them to naturally trigger relevant skills — without adding new work scope. The original instructions are preserved in `originalInstructions` for comparison in the UI.
+
 ### 🛡️ Default Branch Protection
 
 When targeting a **default branch** (`main`, `master`), the orchestrator **auto-creates a feature branch**:
@@ -337,14 +384,15 @@ The extension implements VS Code's `McpServerDefinitionProvider` API to automati
 - **VS Code manages lifecycle** — No manual process management needed
 - **Workspace-scoped** — Each workspace gets its own MCP server instance
 
-### 20 MCP Tools
+### 18 MCP Tools
 
 **Plan Management (14 tools):**
 
 | Tool | Description |
 |------|-------------|
 | `create_copilot_plan` | Create a multi-node plan with DAG dependencies and groups |
-| `create_copilot_job` | Create a single job (auto-wrapped in a plan) |
+| `update_copilot_plan` | Update plan configuration or node specs |
+| `update_copilot_plan_node` | Update a specific node's work spec or configuration |
 | `get_copilot_plan_status` | Get plan progress, node states, and group summary |
 | `list_copilot_plans` | List all plans with optional status filter |
 | `cancel_copilot_plan` | Cancel a plan and all running nodes |
@@ -356,15 +404,12 @@ The extension implements VS Code's `McpServerDefinitionProvider` API to automati
 | `get_copilot_plan_node_failure_context` | Get AI-friendly failure context for a node |
 | `get_copilot_node_details` | Get detailed node info (config, state, work summary) |
 | `get_copilot_node_logs` | Get execution logs filtered by phase |
-| `get_copilot_node_attempts` | Get full attempt history with per-attempt logs |
 
-**Node Management (6 tools):**
+**Node Operations (4 tools):**
 
 | Tool | Description |
 |------|-------------|
-| `create_copilot_node` | Create standalone or grouped nodes with dependencies |
-| `get_copilot_node` | Get node details by ID |
-| `list_copilot_nodes` | List nodes with filtering (group, status, name) |
+| `get_copilot_node_attempts` | Get full attempt history with per-attempt logs |
 | `retry_copilot_node` | Retry a specific failed node |
 | `force_fail_copilot_node` | Force-fail a stuck node to unblock dependents |
 | `get_copilot_node_failure_context` | Get structured failure details for retry |

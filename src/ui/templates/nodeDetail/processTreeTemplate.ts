@@ -25,7 +25,7 @@ export interface ProcessTreeData {
  * @returns HTML fragment string, or empty string if not applicable.
  */
 export function processTreeSectionHtml(data: ProcessTreeData): string {
-  if (data.status !== 'running' && data.status !== 'scheduled') return '';
+  if (data.status !== 'running' && data.status !== 'scheduled') {return '';}
 
   return `<!-- Process Tree (only for running jobs) -->
   <div class="section process-tree-section" id="processTreeSection">

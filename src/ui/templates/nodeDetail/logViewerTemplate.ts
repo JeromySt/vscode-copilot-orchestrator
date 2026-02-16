@@ -120,7 +120,7 @@ export function logViewerSectionHtml(data: LogViewerData): string {
  * @returns A truncated display string.
  */
 export function truncateLogPath(filePath: string): string {
-  if (!filePath) return '';
+  if (!filePath) {return '';}
 
   const separator = filePath.includes('\\') ? '\\' : '/';
   const parts = filePath.split(separator);
@@ -133,7 +133,7 @@ export function truncateLogPath(filePath: string): string {
     truncatedFilename = `${logMatch[1]}....${logMatch[2]}_${logMatch[3]}`;
   }
 
-  if (filePath.length <= 50) return filePath;
+  if (filePath.length <= 50) {return filePath;}
 
   return `${prefix}....${separator}${truncatedFilename}`;
 }

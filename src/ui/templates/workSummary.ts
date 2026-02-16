@@ -40,7 +40,7 @@ export interface CommitItemData {
  * ```
  */
 export function commitDetailsHtml(commits: CommitItemData[]): string {
-  if (!commits || commits.length === 0) return '';
+  if (!commits || commits.length === 0) {return '';}
 
   const items = commits.map(commit => {
     let filesHtml = '';

@@ -28,12 +28,12 @@ function silenceConsole(): { restore: () => void } {
   const origDebug = console.debug;
   const origWarn = console.warn;
   const origError = console.error;
-  /* eslint-disable no-console */
+   
   console.log = () => {};
   console.debug = () => {};
   console.warn = () => {};
   console.error = () => {};
-  /* eslint-enable no-console */
+   
   return {
     restore() {
       console.log = origLog;

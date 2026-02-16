@@ -52,7 +52,7 @@ class MockFileSystemWatcher {
     this._onDidCreateCallbacks.push(listener);
     return new vscode.Disposable(() => {
       const idx = this._onDidCreateCallbacks.indexOf(listener);
-      if (idx >= 0) this._onDidCreateCallbacks.splice(idx, 1);
+      if (idx >= 0) {this._onDidCreateCallbacks.splice(idx, 1);}
     });
   }
 
@@ -65,7 +65,7 @@ class MockFileSystemWatcher {
     this._onDidDeleteCallbacks.push(listener);
     return new vscode.Disposable(() => {
       const idx = this._onDidDeleteCallbacks.indexOf(listener);
-      if (idx >= 0) this._onDidDeleteCallbacks.splice(idx, 1);
+      if (idx >= 0) {this._onDidDeleteCallbacks.splice(idx, 1);}
     });
   }
 

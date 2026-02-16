@@ -95,7 +95,7 @@ export function computeProgress(
   counts: Record<NodeStatus, number>,
   total: number
 ): number {
-  if (total <= 0) return 0;
+  if (total <= 0) {return 0;}
   const completed = counts.succeeded + counts.failed + counts.blocked + counts.canceled;
   return completed / total;
 }
@@ -292,7 +292,7 @@ export function mergeWorkSummary(
 ): WorkSummary {
   const ws = parent ?? createEmptyWorkSummary();
   
-  if (!child) return ws;
+  if (!child) {return ws;}
   
   ws.totalCommits += child.totalCommits;
   ws.totalFilesAdded += child.totalFilesAdded;

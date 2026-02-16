@@ -114,7 +114,7 @@ export class JobExecutionEngine {
     node: JobNode
   ): Promise<void> {
     const nodeState = plan.nodeStates.get(node.id);
-    if (!nodeState) return;
+    if (!nodeState) {return;}
     
     this.log.info(`Executing job node: ${node.name}`, {
       planId: plan.id,
@@ -175,7 +175,7 @@ export class JobExecutionEngine {
       } catch (wtError: any) {
         // Worktree creation is part of FI phase - log and set correct phase
         this.execLog(plan.id, node.id, 'merge-fi', 'error', `Failed to create worktree: ${wtError.message}`, nodeState.attempts);
-        if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+        if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};}
         nodeState.stepStatuses['merge-fi'] = 'failed';
         const fiError = new Error(wtError.message) as Error & { failedPhase: string };
         fiError.failedPhase = 'merge-fi';
@@ -258,7 +258,7 @@ export class JobExecutionEngine {
             this.log.debug(`Job progress: ${node.name} - ${step}`);
           },
           onStepStatusChange: (phase, status) => {
-            if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+            if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};}
             (nodeState.stepStatuses as any)[phase] = status;
           },
         };
@@ -421,7 +421,7 @@ export class JobExecutionEngine {
           this.state.persistence.save(plan);
           
           if (shouldAttemptAutoRetry) {
-            if (!nodeState.autoHealAttempted) nodeState.autoHealAttempted = {};
+            if (!nodeState.autoHealAttempted) {nodeState.autoHealAttempted = {};}
             nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = true;
             
             if (isAgentWork && wasExternallyKilled) {
@@ -465,7 +465,7 @@ export class JobExecutionEngine {
                   this.log.debug(`Auto-retry progress: ${node.name} - ${step}`);
                 },
                 onStepStatusChange: (phase, status) => {
-                  if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+                  if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};}
                   (nodeState.stepStatuses as any)[phase] = status;
                 },
               };
@@ -585,9 +585,9 @@ export class JobExecutionEngine {
             // 2. The full execution logs (stdout/stderr) from the failed phase
             const originalCommand = (() => {
               const spec = normalizeWorkSpec(failedWorkSpec);
-              if (!spec) return 'Unknown command';
-              if (spec.type === 'shell') return spec.command;
-              if (spec.type === 'process') return `${spec.executable} ${(spec.args || []).join(' ')}`;
+              if (!spec) {return 'Unknown command';}
+              if (spec.type === 'shell') {return spec.command;}
+              if (spec.type === 'process') {return `${spec.executable} ${(spec.args || []).join(' ')}`;}
               return 'Unknown command';
             })();
             
@@ -701,7 +701,7 @@ export class JobExecutionEngine {
                 this.log.debug(`Auto-heal progress: ${node.name} - ${step}`);
               },
               onStepStatusChange: (phase, status) => {
-                if (!nodeState.stepStatuses) nodeState.stepStatuses = {};
+                if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};}
                 (nodeState.stepStatuses as any)[phase] = status;
               },
             };
@@ -1189,7 +1189,7 @@ export class JobExecutionEngine {
       const result = await this.git.repository.getFileDiff(repoPath, '.gitignore');
       if (!result || !result.trim()) {
         const stagedResult = await this.git.repository.getStagedFileDiff(repoPath, '.gitignore');
-        if (!stagedResult || !stagedResult.trim()) return true;
+        if (!stagedResult || !stagedResult.trim()) {return true;}
         return this.git.gitignore.isDiffOnlyOrchestratorChanges(stagedResult);
       }
       return this.git.gitignore.isDiffOnlyOrchestratorChanges(result);
@@ -1204,9 +1204,9 @@ export class JobExecutionEngine {
   private async isStashOnlyOrchestratorGitignore(repoPath: string): Promise<boolean> {
     try {
       const files = await this.git.repository.stashShowFiles(repoPath);
-      if (files.length !== 1 || files[0] !== '.gitignore') return false;
+      if (files.length !== 1 || files[0] !== '.gitignore') {return false;}
       const diffResult = await this.git.repository.stashShowPatch(repoPath);
-      if (!diffResult) return false;
+      if (!diffResult) {return false;}
       return this.git.gitignore.isDiffOnlyOrchestratorChanges(diffResult);
     } catch {
       return false;
@@ -1264,9 +1264,9 @@ export class JobExecutionEngine {
     }
     
     const parts: string[] = [];
-    if (added > 0) parts.push(`+${added}`);
-    if (modified > 0) parts.push(`~${modified}`);
-    if (deleted > 0) parts.push(`-${deleted}`);
+    if (added > 0) {parts.push(`+${added}`);}
+    if (modified > 0) {parts.push(`~${modified}`);}
+    if (deleted > 0) {parts.push(`-${deleted}`);}
     
     const summary = parts.join(' ');
     
@@ -1367,7 +1367,7 @@ export class JobExecutionEngine {
       }
       
       const node = plan.nodes.get(nodeId);
-      if (!node) continue;
+      if (!node) {continue;}
       
       // Check if all consumers have consumed this node's output
       const consumersReady = this.allConsumersConsumed(plan, node, state);

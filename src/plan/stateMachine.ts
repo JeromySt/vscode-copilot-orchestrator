@@ -195,7 +195,7 @@ export class PlanStateMachine extends EventEmitter {
    */
   private updateGroupState(nodeId: string, _from: NodeStatus, _to: NodeStatus): void {
     const node = this.plan.nodes.get(nodeId);
-    if (!node || !node.groupId) return;
+    if (!node || !node.groupId) {return;}
     
     // Recompute the group state from its direct children and propagate up
     this.recomputeGroupState(node.groupId);
@@ -219,7 +219,7 @@ export class PlanStateMachine extends EventEmitter {
   private recomputeGroupState(groupId: string): void {
     const group = this.plan.groups.get(groupId);
     const groupState = this.plan.groupStates.get(groupId);
-    if (!group || !groupState) return;
+    if (!group || !groupState) {return;}
     
     const oldStatus = groupState.status;
     const now = Date.now();
@@ -231,7 +231,7 @@ export class PlanStateMachine extends EventEmitter {
     
     for (const nodeId of group.nodeIds) {
       const nodeState = this.plan.nodeStates.get(nodeId);
-      if (!nodeState) continue;
+      if (!nodeState) {continue;}
       
       if (nodeState.startedAt && (!minStartedAt || nodeState.startedAt < minStartedAt)) {
         minStartedAt = nodeState.startedAt;
@@ -253,7 +253,7 @@ export class PlanStateMachine extends EventEmitter {
     // Also count from child groups (each child group counts as one entity)
     for (const childGroupId of group.childGroupIds) {
       const childState = this.plan.groupStates.get(childGroupId);
-      if (!childState) continue;
+      if (!childState) {continue;}
       
       if (childState.startedAt && (!minStartedAt || childState.startedAt < minStartedAt)) {
         minStartedAt = childState.startedAt;
@@ -342,7 +342,7 @@ export class PlanStateMachine extends EventEmitter {
    */
   private checkDependentsReady(succeededNodeId: string): void {
     const node = this.plan.nodes.get(succeededNodeId);
-    if (!node) return;
+    if (!node) {return;}
     
     for (const dependentId of node.dependents) {
       if (this.areDependenciesMet(dependentId)) {
@@ -365,10 +365,10 @@ export class PlanStateMachine extends EventEmitter {
     while (queue.length > 0) {
       const nodeId = queue.shift()!;
       const node = this.plan.nodes.get(nodeId);
-      if (!node) continue;
+      if (!node) {continue;}
       
       for (const dependentId of node.dependents) {
-        if (visited.has(dependentId)) continue;
+        if (visited.has(dependentId)) {continue;}
         visited.add(dependentId);
         
         const dependentState = this.plan.nodeStates.get(dependentId);
@@ -390,7 +390,7 @@ export class PlanStateMachine extends EventEmitter {
    */
   areDependenciesMet(nodeId: string): boolean {
     const node = this.plan.nodes.get(nodeId);
-    if (!node) return false;
+    if (!node) {return false;}
     
     for (const depId of node.dependencies) {
       const depState = this.plan.nodeStates.get(depId);
@@ -410,7 +410,7 @@ export class PlanStateMachine extends EventEmitter {
    */
   hasDependencyFailed(nodeId: string): boolean {
     const node = this.plan.nodes.get(nodeId);
-    if (!node) return false;
+    if (!node) {return false;}
     
     for (const depId of node.dependencies) {
       const depState = this.plan.nodeStates.get(depId);
@@ -550,7 +550,7 @@ export class PlanStateMachine extends EventEmitter {
    */
   private unblockDownstream(nodeId: string): void {
     const node = this.plan.nodes.get(nodeId);
-    if (!node) return;
+    if (!node) {return;}
     
     for (const dependentId of node.dependents) {
       const dependentState = this.plan.nodeStates.get(dependentId);
@@ -605,7 +605,7 @@ export class PlanStateMachine extends EventEmitter {
    */
   getBaseCommitsForNode(nodeId: string): string[] {
     const node = this.plan.nodes.get(nodeId);
-    if (!node) return [];
+    if (!node) {return [];}
     
     // If no dependencies, use the Plan's base branch (caller handles this)
     if (node.dependencies.length === 0) {
@@ -650,7 +650,7 @@ export class PlanStateMachine extends EventEmitter {
     
     // First try the computed value from node data
     const computed = this.computeEffectiveEndedAt();
-    if (computed) return computed;
+    if (computed) {return computed;}
     
     // Fall back to stored value
     return this.plan.endedAt;

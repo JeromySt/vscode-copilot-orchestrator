@@ -205,7 +205,7 @@ suite('Utility Command Logic Unit Tests', () => {
       // Mock the import to throw a non-Error exception
       Module.prototype.require = function(id: string) {
         if (id === '../agent/modelDiscovery') {
-          throw 'String error'; // Direct string throw, not wrapped by sinon
+          throw 'String error'; // eslint-disable-line no-throw-literal -- intentionally testing non-Error throw
         }
         return originalModuleRequire.call(this, id);
       };
@@ -237,7 +237,7 @@ suite('Utility Command Logic Unit Tests', () => {
       // Mock the import to throw a complex object that's not a string or Error
       Module.prototype.require = function(id: string) {
         if (id === '../agent/modelDiscovery') {
-          throw { complex: 'object', nested: { value: 123 } };
+          throw { complex: 'object', nested: { value: 123 } }; // eslint-disable-line no-throw-literal -- intentionally testing non-Error throw
         }
         return originalModuleRequire.call(this, id);
       };

@@ -54,7 +54,7 @@ export class NodeManager {
   // ── Queries ────────────────────────────────────────────────────────
 
   getNodeLogs(planId: string, nodeId: string, phase?: 'all' | ExecutionPhase, attemptNumber?: number): string {
-    if (!this.state.executor) return 'No executor available.';
+    if (!this.state.executor) {return 'No executor available.';}
 
     let logs: LogEntry[] = [];
     if (phase && phase !== 'all' && this.state.executor.getLogsForPhase) {
@@ -63,7 +63,7 @@ export class NodeManager {
       logs = this.state.executor.getLogs(planId, nodeId);
     }
 
-    if (logs.length > 0) return formatLogEntries(logs);
+    if (logs.length > 0) {return formatLogEntries(logs);}
 
     if ('readLogsFromFile' in this.state.executor && typeof (this.state.executor as any).readLogsFromFile === 'function') {
       const fileContent = (this.state.executor as any).readLogsFromFile(planId, nodeId, attemptNumber);
@@ -81,12 +81,12 @@ export class NodeManager {
   }
 
   getNodeLogFilePath(planId: string, nodeId: string, attemptNumber?: number): string | undefined {
-    if (!this.state.executor?.getLogFilePath) return undefined;
+    if (!this.state.executor?.getLogFilePath) {return undefined;}
     return this.state.executor.getLogFilePath(planId, nodeId, attemptNumber);
   }
 
   getNodeLogsFromOffset(planId: string, nodeId: string, memoryOffset: number, fileByteOffset: number, attemptNumber?: number): string {
-    if (!this.state.executor) return 'No executor available.';
+    if (!this.state.executor) {return 'No executor available.';}
 
     if (this.state.executor.getLogs) {
       const allLogs = this.state.executor.getLogs(planId, nodeId);
@@ -98,7 +98,7 @@ export class NodeManager {
 
     if ('readLogsFromFileOffset' in this.state.executor && typeof (this.state.executor as any).readLogsFromFileOffset === 'function') {
       const fileContent = (this.state.executor as any).readLogsFromFileOffset(planId, nodeId, fileByteOffset, attemptNumber) as string;
-      if (fileContent && !fileContent.startsWith('No log file')) return fileContent;
+      if (fileContent && !fileContent.startsWith('No log file')) {return fileContent;}
     }
 
     return 'No logs available.';
@@ -106,15 +106,15 @@ export class NodeManager {
 
   getNodeAttempt(planId: string, nodeId: string, attemptNumber: number): AttemptRecord | null {
     const plan = this.state.plans.get(planId);
-    if (!plan) return null;
+    if (!plan) {return null;}
     const state = plan.nodeStates.get(nodeId);
-    if (!state || !state.attemptHistory) return null;
+    if (!state || !state.attemptHistory) {return null;}
     return state.attemptHistory.find(a => a.attemptNumber === attemptNumber) || null;
   }
 
   getNodeAttempts(planId: string, nodeId: string): AttemptRecord[] {
     const plan = this.state.plans.get(planId);
-    if (!plan) return [];
+    if (!plan) {return [];}
     const state = plan.nodeStates.get(nodeId);
     return state?.attemptHistory || [];
   }
@@ -140,7 +140,7 @@ export class NodeManager {
    */
   async getAllProcessStats(planId: string): Promise<{ flat: any[]; hierarchy: any[] }> {
     const plan = this.state.plans.get(planId);
-    if (!plan || !this.state.executor) return { flat: [], hierarchy: [] };
+    if (!plan || !this.state.executor) {return { flat: [], hierarchy: [] };}
 
     const nodeKeys: Array<{ planId: string; nodeId: string; nodeName: string; planName?: string }> = [];
     const rootJobs: any[] = [];
@@ -148,8 +148,8 @@ export class NodeManager {
 
     for (const [nodeId, state] of plan.nodeStates) {
       const node = plan.nodes.get(nodeId);
-      if (!node || node.type !== 'job') continue;
-      if (state.status !== 'running' && state.status !== 'scheduled') continue;
+      if (!node || node.type !== 'job') {continue;}
+      if (state.status !== 'running' && state.status !== 'scheduled') {continue;}
       const name = node.name || nodeId.slice(0, 8);
       nodeKeys.push({ planId: plan.id, nodeId, nodeName: name });
       rootJobs.push({ nodeId, nodeName: name, status: state.status, pid: null, running: false, tree: [], duration: null });
@@ -160,7 +160,7 @@ export class NodeManager {
     if (nodeKeys.length > 0 && 'getAllProcessStats' in this.state.executor) {
       try {
         const stats = await (this.state.executor as any).getAllProcessStats(nodeKeys);
-        for (const stat of stats) processStats.set(`${stat.planId}:${stat.nodeId}`, stat);
+        for (const stat of stats) {processStats.set(`${stat.planId}:${stat.nodeId}`, stat);}
       } catch { /* fallback: individual fetches */ }
     }
 
@@ -169,13 +169,13 @@ export class NodeManager {
       const s = processStats.get(`${pId}:${job.nodeId}`);
       if (s) { job.pid = s.pid; job.running = s.running; job.tree = s.tree; job.duration = s.duration; }
     };
-    for (const job of rootJobs) fillJob(job, plan.id);
+    for (const job of rootJobs) {fillJob(job, plan.id);}
 
     const fillHierarchy = (h: any) => {
-      for (const job of h.jobs) fillJob(job, h.planId);
-      for (const child of h.children) fillHierarchy(child);
+      for (const job of h.jobs) {fillJob(job, h.planId);}
+      for (const child of h.children) {fillHierarchy(child);}
     };
-    for (const h of rootHierarchy) fillHierarchy(h);
+    for (const h of rootHierarchy) {fillHierarchy(h);}
 
     // Build flat list
     const flat: any[] = [];
@@ -191,9 +191,9 @@ export class NodeManager {
     const collectHierarchyFlat = (h: any, parentPath?: string) => {
       const pp = parentPath ? `${parentPath} → ${h.planName}` : h.planName;
       collectFlat(h.jobs, h.planId, pp);
-      for (const child of h.children) collectHierarchyFlat(child, pp);
+      for (const child of h.children) {collectHierarchyFlat(child, pp);}
     };
-    for (const h of rootHierarchy) collectHierarchyFlat(h);
+    for (const h of rootHierarchy) {collectHierarchyFlat(h);}
 
     return { flat, hierarchy: rootHierarchy, rootJobs } as any;
   }
@@ -207,11 +207,11 @@ export class NodeManager {
     worktreePath?: string;
   } | { error: string } {
     const plan = this.state.plans.get(planId);
-    if (!plan) return { error: `Plan not found: ${planId}` };
+    if (!plan) {return { error: `Plan not found: ${planId}` };}
     const node = plan.nodes.get(nodeId);
-    if (!node) return { error: `Node not found: ${nodeId}` };
+    if (!node) {return { error: `Node not found: ${nodeId}` };}
     const nodeState = plan.nodeStates.get(nodeId);
-    if (!nodeState) return { error: `Node state not found: ${nodeId}` };
+    if (!nodeState) {return { error: `Node state not found: ${nodeId}` };}
 
     const logsText = this.getNodeLogs(planId, nodeId);
     return {
@@ -228,11 +228,11 @@ export class NodeManager {
 
   async forceFailNode(planId: string, nodeId: string): Promise<void> {
     const plan = this.state.plans.get(planId);
-    if (!plan) throw new Error(`Plan ${planId} not found`);
+    if (!plan) {throw new Error(`Plan ${planId} not found`);}
     const node = plan.nodes.get(nodeId);
-    if (!node) throw new Error(`Node ${nodeId} not found in plan ${planId}`);
+    if (!node) {throw new Error(`Node ${nodeId} not found in plan ${planId}`);}
     const nodeState = plan.nodeStates.get(nodeId);
-    if (!nodeState) throw new Error(`Node state ${nodeId} not found in plan ${planId}`);
+    if (!nodeState) {throw new Error(`Node state ${nodeId} not found in plan ${planId}`);}
 
     this.log.info(`Force failing node ${nodeId} (current status: ${nodeState.status}, attempts: ${nodeState.attempts}, pid: ${nodeState.pid})`);
 
@@ -259,7 +259,7 @@ export class NodeManager {
     nodeState.error = 'Manually failed by user (Force Fail)';
     nodeState.forceFailed = true;
     nodeState.pid = undefined;
-    if (previousStatus === 'running') nodeState.attempts = (nodeState.attempts || 0) + 1;
+    if (previousStatus === 'running') {nodeState.attempts = (nodeState.attempts || 0) + 1;}
     nodeState.endedAt = Date.now();
     nodeState.version = (nodeState.version || 0) + 1;
     plan.stateVersion = (plan.stateVersion || 0) + 1;
@@ -281,14 +281,14 @@ export class NodeManager {
 
   async retryNode(planId: string, nodeId: string, options?: RetryNodeOptions, startPump?: () => void): Promise<{ success: boolean; error?: string }> {
     const plan = this.state.plans.get(planId);
-    if (!plan) return { success: false, error: `Plan not found: ${planId}` };
+    if (!plan) {return { success: false, error: `Plan not found: ${planId}` };}
     const node = plan.nodes.get(nodeId);
-    if (!node) return { success: false, error: `Node not found: ${nodeId}` };
+    if (!node) {return { success: false, error: `Node not found: ${nodeId}` };}
     const nodeState = plan.nodeStates.get(nodeId);
-    if (!nodeState) return { success: false, error: `Node state not found: ${nodeId}` };
-    if (nodeState.status !== 'failed') return { success: false, error: `Node is not in failed state: ${nodeState.status}` };
+    if (!nodeState) {return { success: false, error: `Node state not found: ${nodeId}` };}
+    if (nodeState.status !== 'failed') {return { success: false, error: `Node is not in failed state: ${nodeState.status}` };}
     const sm = this.state.stateMachines.get(planId);
-    if (!sm) return { success: false, error: `State machine not found for Plan: ${planId}` };
+    if (!sm) {return { success: false, error: `State machine not found for Plan: ${planId}` };}
 
     this.log.info(`Retrying failed node: ${node.name}`, {
       planId,
@@ -303,10 +303,10 @@ export class NodeManager {
       const newWork = options.newWork;
       if (typeof newWork === 'string') {
         jobNode.work = newWork;
-        if (!newWork.startsWith('@agent')) nodeState.copilotSessionId = undefined;
+        if (!newWork.startsWith('@agent')) {nodeState.copilotSessionId = undefined;}
       } else if (newWork.type === 'agent') {
-        if (newWork.instructions) jobNode.work = newWork;
-        if (newWork.resumeSession === false) nodeState.copilotSessionId = undefined;
+        if (newWork.instructions) {jobNode.work = newWork;}
+        if (newWork.resumeSession === false) {nodeState.copilotSessionId = undefined;}
       } else {
         jobNode.work = newWork;
         nodeState.copilotSessionId = undefined;
@@ -402,7 +402,7 @@ export class NodeManager {
       }
     }
 
-    if (plan.endedAt) plan.endedAt = undefined;
+    if (plan.endedAt) {plan.endedAt = undefined;}
 
     const readyNodes = sm.getReadyNodes();
     if (!readyNodes.includes(nodeId)) {

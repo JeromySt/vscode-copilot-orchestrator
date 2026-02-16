@@ -39,8 +39,8 @@ function makeFakeProc(exitCode: number | null = 0, stdoutData = '', stderrData =
   proc.stderr = new EventEmitter();
   proc.stdin = null;
   setTimeout(() => {
-    if (stdoutData) proc.stdout.emit('data', Buffer.from(stdoutData));
-    if (stderrData) proc.stderr.emit('data', Buffer.from(stderrData));
+    if (stdoutData) {proc.stdout.emit('data', Buffer.from(stdoutData));}
+    if (stderrData) {proc.stderr.emit('data', Buffer.from(stderrData));}
     setTimeout(() => proc.emit('exit', exitCode), 10);
   }, 10);
   return proc as ChildProcess;
@@ -97,7 +97,7 @@ suite('AgentDelegator', () => {
   teardown(() => {
     sandbox.restore();
     quiet.restore();
-    for (const d of tmpDirs) rmrf(d);
+    for (const d of tmpDirs) {rmrf(d);}
     tmpDirs = [];
   });
 

@@ -361,9 +361,9 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
   private async isStashOrchestratorOnly(repoPath: string): Promise<boolean> {
     try {
       const files = await this.git.repository.stashShowFiles(repoPath);
-      if (files.length !== 1 || files[0] !== '.gitignore') return false;
+      if (files.length !== 1 || files[0] !== '.gitignore') {return false;}
       const diff = await this.git.repository.stashShowPatch(repoPath);
-      if (!diff) return false;
+      if (!diff) {return false;}
       return this.git.gitignore.isDiffOnlyOrchestratorChanges(diff);
     } catch {
       return false;

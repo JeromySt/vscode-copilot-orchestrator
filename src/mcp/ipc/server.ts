@@ -189,7 +189,7 @@ export class McpIpcServer {
       buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
       for (const line of lines) {
-        if (!line.trim()) continue;
+        if (!line.trim()) {continue;}
 
         if (!authenticated) {
           // First message must be auth

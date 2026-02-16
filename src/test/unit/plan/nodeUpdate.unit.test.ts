@@ -101,22 +101,22 @@ function createMockRunner(): MockRunner {
   // Add updateNode method with actual implementation logic
   runner.updateNode = async function(planId: string, nodeId: string, updates) {
     const plan = this.plans.get(planId);
-    if (!plan) throw new Error(`Plan ${planId} not found`);
+    if (!plan) {throw new Error(`Plan ${planId} not found`);}
     
     const node = plan.nodes.get(nodeId);
-    if (!node) throw new Error(`Node ${nodeId} not found`);
+    if (!node) {throw new Error(`Node ${nodeId} not found`);}
     
     const nodeState = plan.nodeStates.get(nodeId);
-    if (!nodeState) throw new Error(`Node state ${nodeId} not found`);
+    if (!nodeState) {throw new Error(`Node state ${nodeId} not found`);}
     
     // Determine which stage to reset to
     let resetTo: 'prechecks' | 'work' | 'postchecks' | null = updates.resetToStage || null;
     
     // If no explicit reset, find earliest updated stage
     if (!resetTo) {
-      if (updates.prechecks) resetTo = 'prechecks';
-      else if (updates.work) resetTo = 'work';
-      else if (updates.postchecks) resetTo = 'postchecks';
+      if (updates.prechecks) {resetTo = 'prechecks';}
+      else if (updates.work) {resetTo = 'work';}
+      else if (updates.postchecks) {resetTo = 'postchecks';}
     }
     
     // Apply spec updates to job node

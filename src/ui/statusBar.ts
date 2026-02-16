@@ -51,7 +51,7 @@ export function attachStatusBar(context: vscode.ExtensionContext, planRunner: Pl
       let runningNodes = 0;
       for (const plan of runningPlans) {
         for (const state of plan.nodeStates.values()) {
-          if (state.status === 'running') runningNodes++;
+          if (state.status === 'running') {runningNodes++;}
         }
       }
       item.text = `Orchestrator: ${runningPlans.length} Plan${runningPlans.length > 1 ? 's' : ''} (${runningNodes} jobs)`;

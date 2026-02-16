@@ -16,7 +16,7 @@ export async function ensureCopilotCliInteractive(reason: string, configProvider
 
   const cliAvailable = isCliCachePopulated() ? isCopilotCliAvailable() : await checkCopilotCliAsync();
   const decision = evaluateCliAvailability(cliConfig, cliAvailable);
-  if (decision === 'not-required' || decision === 'available') return true;
+  if (decision === 'not-required' || decision === 'available') {return true;}
 
   const hasGh = await cmdOkAsync('gh --version');
   const installMethod = determineInstallMethod(cliConfig.preferredInstall, hasGh);
@@ -25,7 +25,7 @@ export async function ensureCopilotCliInteractive(reason: string, configProvider
   const actions = installMethod === 'gh' ? [instructions.label, 'Install via npm'] : ['Install via npm'];
   const choice = await dialogs.showWarning(`GitHub Copilot CLI was not found${reason ? ` (${reason})` : ''}. Some orchestrations may rely on it.`, undefined, ...actions, 'Learn more');
 
-  if (!choice) return false;
+  if (!choice) {return false;}
   if (choice === 'Learn more') { vscode.env.openExternal(vscode.Uri.parse('https://github.com/github/gh-copilot')); return false; }
 
   const selectedInstructions = choice === 'Install via npm' ? getInstallInstructions('npm') : instructions;

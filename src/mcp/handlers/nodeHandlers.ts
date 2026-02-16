@@ -26,7 +26,7 @@ import {
  */
 export async function handleGetNode(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['node_id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
 
   // Search across all plans for the node
   const plans = ctx.PlanRunner.getAll();
@@ -98,18 +98,18 @@ export async function handleListNodes(args: any, ctx: PlanHandlerContext): Promi
 
   for (const plan of allPlans) {
     // Filter by group_id
-    if (args.group_id && plan.id !== args.group_id) continue;
+    if (args.group_id && plan.id !== args.group_id) {continue;}
 
     // Filter by group_name
     if (args.group_name &&
-        !plan.spec.name.toLowerCase().includes(args.group_name.toLowerCase())) continue;
+        !plan.spec.name.toLowerCase().includes(args.group_name.toLowerCase())) {continue;}
 
     for (const [nodeId, state] of plan.nodeStates) {
       // Filter by status
-      if (args.status && state.status !== args.status) continue;
+      if (args.status && state.status !== args.status) {continue;}
 
       const node = plan.nodes.get(nodeId);
-      if (!node) continue;
+      if (!node) {continue;}
 
       nodes.push({
         id: nodeId,
@@ -141,7 +141,7 @@ export async function handleListNodes(args: any, ctx: PlanHandlerContext): Promi
  */
 export async function handleGetGroupStatus(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['group_id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
 
   const status = ctx.PlanRunner.getStatus(args.group_id);
   if (!status) {
@@ -230,7 +230,7 @@ export async function handleListGroups(args: any, ctx: PlanHandlerContext): Prom
  */
 export async function handleCancelGroup(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['group_id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
 
   const plan = ctx.PlanRunner.getPlan(args.group_id);
   if (!plan) {
@@ -250,7 +250,7 @@ export async function handleCancelGroup(args: any, ctx: PlanHandlerContext): Pro
  */
 export async function handleDeleteGroup(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['group_id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
 
   const plan = ctx.PlanRunner.getPlan(args.group_id);
   if (!plan) {
@@ -270,7 +270,7 @@ export async function handleDeleteGroup(args: any, ctx: PlanHandlerContext): Pro
  */
 export async function handleRetryGroup(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['group_id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
 
   const plan = ctx.PlanRunner.getPlan(args.group_id);
   if (!plan) {
@@ -337,7 +337,7 @@ export async function handleRetryGroup(args: any, ctx: PlanHandlerContext): Prom
  */
 export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['node_id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
 
   // Validate agent model names if any new specs are provided
   if (args.newWork || args.newPrechecks || args.newPostchecks) {
@@ -397,7 +397,7 @@ export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promi
  */
 export async function handleForceFailNode(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['node_id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
 
   // Find the node across all plans
   const plans = ctx.PlanRunner.getAll();
@@ -431,7 +431,7 @@ export async function handleForceFailNode(args: any, ctx: PlanHandlerContext): P
  */
 export async function handleNodeFailureContext(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['node_id']);
-  if (fieldError) return fieldError;
+  if (fieldError) {return fieldError;}
 
   const plans = ctx.PlanRunner.getAll();
   for (const plan of plans) {
