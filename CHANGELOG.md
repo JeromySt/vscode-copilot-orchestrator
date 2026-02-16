@@ -5,6 +5,12 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.15] - 2026-02-16
+
+### Changed
+- **Deferred branch creation**: Target branch is no longer created at plan creation time. Instead, the branch is created when the plan is first started/resumed. This avoids creating orphan branches for plans that are never started.
+- **Gitignore auto-commit**: When the target branch is created on resume, orchestrator `.gitignore` entries are committed as the first commit on that branch. This prevents `.gitignore` changes from appearing as dirty files in every worktree.
+
 ## [0.11.14] - 2026-02-16
 
 ### Fixed

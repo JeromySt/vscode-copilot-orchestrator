@@ -160,16 +160,20 @@ export async function resolveBaseBranch(repoPath: string, git: IGitOperations, r
 }
 
 /**
- * Resolve the target branch for a plan, creating it if necessary.
+ * Resolve the target branch for a plan.
  *
  * When no explicit target is provided, generates a branch name under
- * the `copilot_plan/` namespace and creates it from the base branch
- * if it does not already exist.
+ * the `copilot_plan/` namespace. Branch creation is controlled by
+ * the `createBranch` option (default: false). When false, only the
+ * branch name is resolved without creating it in git.
  *
- * @param baseBranch - The resolved base branch name.
- * @param repoPath   - Absolute path to the git repository.
- * @param requested  - Explicitly requested target branch name (used as-is if provided).
- * @param planName   - Optional plan/job name to use for generating a readable branch name.
+ * @param baseBranch     - The resolved base branch name.
+ * @param repoPath       - Absolute path to the git repository.
+ * @param git            - Git operations interface.
+ * @param requested      - Explicitly requested target branch name (used as-is if provided).
+ * @param planName       - Optional plan/job name to use for generating a readable branch name.
+ * @param configProvider - Optional configuration provider for reading VS Code settings.
+ * @param createBranch   - Whether to create the branch in git (default: false).
  * @returns Resolved target branch name.
  */
 export async function resolveTargetBranch(
@@ -178,9 +182,10 @@ export async function resolveTargetBranch(
   git: IGitOperations,
   requested?: string,
   planName?: string,
-  configProvider?: IConfigProvider
+  configProvider?: IConfigProvider,
+  createBranch: boolean = false
 ): Promise<string> {
-  // Helper to generate a new feature branch
+  // Helper to generate a new feature branch name (and optionally create it)
   const generateFeatureBranch = async (): Promise<string> => {
     // Use git.branchPrefix setting if configured, otherwise fallback to 'copilot_plan'
     const rawPrefix = configProvider
@@ -189,22 +194,10 @@ export async function resolveTargetBranch(
     const userPrefix = (rawPrefix || '').trim().replace(/\/+$/, '');
     const prefix = userPrefix || 'copilot_plan';
     
-    // Generate a readable branch suffix from the plan name, or use short UUID
-    // TODO: Add git.orchestrator to IGitOperations interface
-    // const branchSuffix = planName ? git.orchestrator.slugify(planName) : undefined;
     const branchSuffix = planName ? planName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() : undefined;
-    
-    // TODO: Add git.orchestrator to IGitOperations interface
-    // const { targetBranchRoot, needsCreation } = await git.orchestrator.resolveTargetBranchRoot(
-    //   baseBranch,
-    //   repoPath,
-    //   prefix,
-    //   branchSuffix
-    // );
-    // For now, use simple branch name generation
     const targetBranchRoot = branchSuffix ? `${prefix}/${branchSuffix}` : `${prefix}/${Date.now()}`;
-    const needsCreation = true;
-    if (needsCreation) {
+
+    if (createBranch) {
       const exists = await git.branches.exists(targetBranchRoot, repoPath);
       if (!exists) {
         await git.branches.create(targetBranchRoot, baseBranch, repoPath);
@@ -223,10 +216,12 @@ export async function resolveTargetBranch(
         return await generateFeatureBranch();
       }
       
-      // Not a default branch - ensure it exists (create from base if needed)
-      const exists = await git.branches.exists(requested, repoPath);
-      if (!exists) {
-        await git.branches.create(requested, baseBranch, repoPath);
+      // Not a default branch - create from base if needed and requested
+      if (createBranch) {
+        const exists = await git.branches.exists(requested, repoPath);
+        if (!exists) {
+          await git.branches.create(requested, baseBranch, repoPath);
+        }
       }
       return requested;
     } catch (err) {

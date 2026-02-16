@@ -116,10 +116,6 @@ export class PlanLifecycleManager {
       repoPath: spec.repoPath || this.state.config.defaultRepoPath,
     });
 
-    this.git.gitignore.ensureGitignoreEntries(plan.repoPath).catch((err: any) => {
-      this.log.warn(`Failed to update main repo .gitignore: ${err.message}`);
-    });
-
     this.state.plans.set(plan.id, plan);
 
     const shouldPause = spec.startPaused !== undefined ? spec.startPaused : true;
@@ -355,6 +351,15 @@ export class PlanLifecycleManager {
       this.log.warn(`Git fetch failed before resume (continuing anyway): ${e.message}`);
     }
 
+    // Ensure target branch exists (deferred from plan creation) and commit .gitignore
+    if (plan.spec.targetBranch && plan.spec.baseBranch) {
+      try {
+        await this.ensureTargetBranchAndGitignore(plan);
+      } catch (e: any) {
+        this.log.warn(`Failed to ensure target branch/gitignore (continuing): ${e.message}`);
+      }
+    }
+
     if (plan.isPaused) {
       plan.isPaused = false;
       this.state.events.emitPlanUpdated(planId);
@@ -365,6 +370,43 @@ export class PlanLifecycleManager {
     startPump();
     this.state.persistence.save(plan);
     return true;
+  }
+
+  /**
+   * Ensure the target branch exists and .gitignore has orchestrator entries committed.
+   * Called on first resume — the branch is NOT created at plan creation time.
+   */
+  private async ensureTargetBranchAndGitignore(plan: PlanInstance): Promise<void> {
+    const { repoPath } = plan;
+    const targetBranch = plan.spec.targetBranch!;
+    const baseBranch = plan.spec.baseBranch!;
+
+    const exists = await this.git.branches.exists(targetBranch, repoPath);
+    if (!exists) {
+      await this.git.branches.create(targetBranch, baseBranch, repoPath);
+      this.log.info(`Created target branch '${targetBranch}' from '${baseBranch}'`);
+    }
+
+    // Checkout target branch, ensure .gitignore entries, and commit if modified
+    const currentBranch = await this.git.branches.currentOrNull(repoPath);
+    try {
+      await this.git.branches.checkout(repoPath, targetBranch);
+
+      const modified = await this.git.gitignore.ensureGitignoreEntries(repoPath);
+      if (modified) {
+        await this.git.repository.stageFile(repoPath, '.gitignore');
+        await this.git.repository.commit(
+          repoPath,
+          'chore: add orchestrator .gitignore entries',
+          { allowEmpty: false },
+        );
+        this.log.info(`Committed .gitignore orchestrator entries to '${targetBranch}'`);
+      }
+    } finally {
+      if (currentBranch && currentBranch !== targetBranch) {
+        await this.git.branches.checkout(repoPath, currentBranch);
+      }
+    }
   }
 
   // ── Internal ───────────────────────────────────────────────────────
