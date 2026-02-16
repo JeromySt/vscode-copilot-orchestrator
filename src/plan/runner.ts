@@ -129,6 +129,13 @@ export class PlanRunner extends EventEmitter {
     this._engine = new JobExecutionEngine(state, this._nodeManager, log, deps.git);
     this._pump = new ExecutionPump(state, log, (plan, sm, node) => {
       this._engine.executeJobNode(plan, sm, node);
+    }, async (plan) => {
+      await this._lifecycle.ensureTargetBranch(plan);
+      try {
+        await this._lifecycle.commitGitignoreEntries(plan);
+      } catch (e: any) {
+        log.warn(`Failed to commit .gitignore entries (continuing): ${e.message}`);
+      }
     });
 
     this._wireEvents();

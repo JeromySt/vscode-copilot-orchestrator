@@ -52,6 +52,7 @@ interface SerializedPlan {
   maxParallel: number;
   workSummary?: WorkSummary;
   isPaused?: boolean;
+  branchReady?: boolean;
 }
 
 interface SerializedNode {
@@ -346,6 +347,7 @@ export class PlanPersistence {
       maxParallel: plan.maxParallel,
       workSummary: plan.workSummary,
       isPaused: plan.isPaused,
+      branchReady: plan.branchReady,
     };
   }
   
@@ -441,6 +443,7 @@ export class PlanPersistence {
       maxParallel: data.maxParallel,
       workSummary: data.workSummary,
       isPaused: data.isPaused,
+      branchReady: data.branchReady,
     };
   }
   
