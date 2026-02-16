@@ -71,15 +71,11 @@ suite('Node Detail Action Button Templates', () => {
   });
 
   suite('forceFailButtonHtml', () => {
-    test('renders force-fail button for running status', () => {
+    test('renders visible force-fail button for running status', () => {
       const html = forceFailButtonHtml({ ...baseData, status: 'running' });
-      assert.ok(html.includes('force-fail-section'));
-      assert.ok(html.includes('⚠️ Force Fail (Enable Retry)'));
-    });
-
-    test('includes description text about stuck processes', () => {
-      const html = forceFailButtonHtml({ ...baseData, status: 'running' });
-      assert.ok(html.includes('crashed or is stuck'));
+      assert.ok(html.includes('force-fail-btn'));
+      assert.ok(html.includes('Force Fail'));
+      assert.ok(!html.includes('display:none'));
     });
 
     test('includes correct data-action attribute', () => {
@@ -93,24 +89,30 @@ suite('Node Detail Action Button Templates', () => {
       assert.ok(html.includes('data-node-id="node-456"'));
     });
 
-    test('returns empty string for failed status', () => {
+    test('has forceFailBtn id', () => {
+      const html = forceFailButtonHtml({ ...baseData, status: 'running' });
+      assert.ok(html.includes('id="forceFailBtn"'));
+    });
+
+    test('renders hidden button for failed status', () => {
       const html = forceFailButtonHtml({ ...baseData, status: 'failed' });
-      assert.strictEqual(html, '');
+      assert.ok(html.includes('display:none'));
+      assert.ok(html.includes('force-fail-btn'));
     });
 
-    test('returns empty string for succeeded status', () => {
+    test('renders hidden button for succeeded status', () => {
       const html = forceFailButtonHtml({ ...baseData, status: 'succeeded' });
-      assert.strictEqual(html, '');
+      assert.ok(html.includes('display:none'));
     });
 
-    test('returns empty string for pending status', () => {
+    test('renders hidden button for pending status', () => {
       const html = forceFailButtonHtml({ ...baseData, status: 'pending' });
-      assert.strictEqual(html, '');
+      assert.ok(html.includes('display:none'));
     });
 
-    test('returns empty string for scheduled status', () => {
+    test('renders hidden button for scheduled status', () => {
       const html = forceFailButtonHtml({ ...baseData, status: 'scheduled' });
-      assert.strictEqual(html, '');
+      assert.ok(html.includes('display:none'));
     });
   });
 

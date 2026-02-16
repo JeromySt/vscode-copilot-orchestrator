@@ -217,6 +217,11 @@ export function webviewScripts(config: ScriptsConfig): string {
             phaseEl.style.display = 'none';
           }
         }
+        // Toggle force-fail button visibility
+        var ffBtn = document.getElementById('forceFailBtn');
+        if (ffBtn) {
+          ffBtn.style.display = (data.status === 'running') ? '' : 'none';
+        }
         this.publishUpdate(data);
       };
       return SBC;
@@ -738,7 +743,7 @@ export function webviewScripts(config: ScriptsConfig): string {
     // ── Retry / force-fail button handlers ──────────────────────────────
     document.body.addEventListener('click', function(e) {
       if (!(e.target instanceof Element)) return;
-      var btn = e.target.closest('.retry-btn');
+      var btn = e.target.closest('.retry-btn') || e.target.closest('.force-fail-btn');
       if (!btn) return;
 
       var action = btn.getAttribute('data-action');
