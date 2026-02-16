@@ -155,3 +155,16 @@ Load the relevant skill when performing these tasks:
 | Security review, path validation, sandboxing | `.github/skills/security-hardener/SKILL.md` |
 | Fixing failed build/test/phase errors | `.github/skills/auto-heal/SKILL.md` |
 | Writing or updating documentation | `.github/skills/documentation-writer/SKILL.md` |
+| PR merging, release, or version tagging | `.github/skills/pr-release-gatekeeper/SKILL.md` |
+
+## PR & Release Process (MANDATORY)
+
+Before merging ANY pull request, you **MUST** query the GitHub API for all review feedback and resolve it:
+
+1. `get_review_comments` — check for inline code review threads
+2. `get_reviews` — check for CHANGES_REQUESTED or review comments
+3. `get_comments` — check for general PR conversation
+4. Verify all CI checks are passing (including CodeQL)
+5. Only after ALL feedback is addressed and all checks pass, merge with `--squash`
+
+**Never merge a PR without completing this checklist.** See the `pr-release-gatekeeper` skill for the full process.
