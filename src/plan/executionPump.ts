@@ -49,22 +49,35 @@ export type ExecuteNodeCallback = (
 ) => void;
 
 /**
+ * Async callback invoked once per plan to ensure target branch setup
+ * (branch creation + .gitignore commit) before any nodes execute.
+ */
+export type EnsureBranchReadyCallback = (plan: PlanInstance) => Promise<void>;
+
+/**
  * Manages the periodic pump loop that advances plan execution.
  */
 export class ExecutionPump {
   private readonly state: ExecutionPumpState;
   private readonly log: ILogger;
   private readonly executeNode: ExecuteNodeCallback;
+  private readonly ensureBranchReady?: EnsureBranchReadyCallback;
   private pumpTimer?: NodeJS.Timeout;
   private wakeLockCleanup?: () => void;
   private _acquiringWakeLock = false;
   /** Tracks how many pump cycles since last liveness check (check every ~10 seconds) */
   private _livenessCheckCounter = 0;
 
-  constructor(state: ExecutionPumpState, log: ILogger, executeNode: ExecuteNodeCallback) {
+  constructor(
+    state: ExecutionPumpState,
+    log: ILogger,
+    executeNode: ExecuteNodeCallback,
+    ensureBranchReady?: EnsureBranchReadyCallback,
+  ) {
     this.state = state;
     this.log = log;
     this.executeNode = executeNode;
+    this.ensureBranchReady = ensureBranchReady;
   }
 
   /**
@@ -221,6 +234,19 @@ export class ExecutionPump {
       const status = sm.computePlanStatus();
       if (status !== 'pending' && status !== 'running' && status !== 'paused') {continue;}
       if (plan.isPaused) {continue;}
+
+      // Ensure target branch is created before any nodes execute.
+      // This is a one-time setup per plan — once branchReady is set, it's skipped.
+      if (!plan.branchReady && plan.targetBranch && this.ensureBranchReady) {
+        try {
+          await this.ensureBranchReady(plan);
+          plan.branchReady = true;
+          this.state.persistence.save(plan);
+        } catch (e: any) {
+          this.log.error(`Failed to create target branch '${plan.targetBranch}' for plan ${planId}: ${e.message}`);
+          continue; // Skip this plan until branch can be created
+        }
+      }
 
       // Mark plan as started
       if (!plan.startedAt && status === 'running') {

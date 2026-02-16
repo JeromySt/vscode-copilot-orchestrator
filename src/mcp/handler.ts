@@ -39,6 +39,7 @@ import {
   handleRetryNode,
   handleForceFailNode,
   handleNodeFailureContext,
+  handleReshapePlan,
 } from './handlers';
 
 /** MCP component logger */
@@ -290,6 +291,10 @@ export class McpHandler implements IMcpRequestRouter {
         
       case 'update_copilot_plan_node':
         result = await handleUpdatePlanNode(args || {}, this.context);
+        break;
+        
+      case 'reshape_copilot_plan':
+        result = await handleReshapePlan(args || {}, this.context);
         break;
         
       // --- New node-centric tools ---

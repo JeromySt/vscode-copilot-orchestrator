@@ -311,9 +311,9 @@ suite('PlanLifecycleManager', () => {
     assert.strictEqual(await mgr.resume('nonexistent', sinon.stub()), false);
   });
 
-  // ── ensureTargetBranchAndGitignore (via resume) ─────────────────
+  // ── ensureTargetBranch / commitGitignoreEntries ─────────────────
 
-  suite('resume with targetBranch (ensureTargetBranchAndGitignore)', () => {
+  suite('ensureTargetBranch and commitGitignoreEntries', () => {
     function createMockGit() {
       return {
         repository: {
@@ -339,10 +339,8 @@ suite('PlanLifecycleManager', () => {
       const plan = createTestPlan();
       plan.spec.targetBranch = 'feature/my-plan';
       plan.spec.baseBranch = 'main';
-      plan.isPaused = true;
-      state.plans.set(plan.id, plan);
 
-      await localMgr.resume(plan.id, sinon.stub());
+      await localMgr.ensureTargetBranch(plan);
       assert.ok(mockGit.branches.create.calledOnce);
       assert.strictEqual(mockGit.branches.create.firstCall.args[0], 'feature/my-plan');
       assert.strictEqual(mockGit.branches.create.firstCall.args[1], 'main');
@@ -355,11 +353,23 @@ suite('PlanLifecycleManager', () => {
       const plan = createTestPlan();
       plan.spec.targetBranch = 'feature/my-plan';
       plan.spec.baseBranch = 'main';
-      plan.isPaused = true;
-      state.plans.set(plan.id, plan);
 
-      await localMgr.resume(plan.id, sinon.stub());
+      await localMgr.ensureTargetBranch(plan);
       assert.ok(mockGit.branches.create.notCalled);
+    });
+
+    test('throws when branch creation fails', async () => {
+      const mockGit = createMockGit();
+      mockGit.branches.exists.rejects(new Error('git broken'));
+      const localMgr = new PlanLifecycleManager(state, log, mockGit as any);
+      const plan = createTestPlan();
+      plan.spec.targetBranch = 'feature/my-plan';
+      plan.spec.baseBranch = 'main';
+
+      await assert.rejects(
+        () => localMgr.ensureTargetBranch(plan),
+        /git broken/,
+      );
     });
 
     test('commits .gitignore when entries are missing', async () => {
@@ -368,11 +378,8 @@ suite('PlanLifecycleManager', () => {
       const localMgr = new PlanLifecycleManager(state, log, mockGit as any);
       const plan = createTestPlan();
       plan.spec.targetBranch = 'feature/my-plan';
-      plan.spec.baseBranch = 'main';
-      plan.isPaused = true;
-      state.plans.set(plan.id, plan);
 
-      await localMgr.resume(plan.id, sinon.stub());
+      await localMgr.commitGitignoreEntries(plan);
       assert.ok(mockGit.repository.stageFile.calledOnce);
       assert.ok(mockGit.repository.commit.calledOnce);
       assert.ok(mockGit.repository.commit.firstCall.args[1].includes('.gitignore'));
@@ -384,11 +391,8 @@ suite('PlanLifecycleManager', () => {
       const localMgr = new PlanLifecycleManager(state, log, mockGit as any);
       const plan = createTestPlan();
       plan.spec.targetBranch = 'feature/my-plan';
-      plan.spec.baseBranch = 'main';
-      plan.isPaused = true;
-      state.plans.set(plan.id, plan);
 
-      await localMgr.resume(plan.id, sinon.stub());
+      await localMgr.commitGitignoreEntries(plan);
       assert.ok(mockGit.repository.stageFile.notCalled);
       assert.ok(mockGit.repository.commit.notCalled);
     });
@@ -399,32 +403,12 @@ suite('PlanLifecycleManager', () => {
       const localMgr = new PlanLifecycleManager(state, log, mockGit as any);
       const plan = createTestPlan();
       plan.spec.targetBranch = 'feature/my-plan';
-      plan.spec.baseBranch = 'main';
-      plan.isPaused = true;
-      state.plans.set(plan.id, plan);
 
-      await localMgr.resume(plan.id, sinon.stub());
-      // Should checkout target, then restore original
+      await localMgr.commitGitignoreEntries(plan);
       const checkoutCalls = mockGit.branches.checkout.args;
       assert.strictEqual(checkoutCalls.length, 2);
       assert.strictEqual(checkoutCalls[0][1], 'feature/my-plan');
       assert.strictEqual(checkoutCalls[1][1], 'develop');
-    });
-
-    test('continues resume even if ensureTargetBranch fails', async () => {
-      const mockGit = createMockGit();
-      mockGit.branches.exists.rejects(new Error('git broken'));
-      const localMgr = new PlanLifecycleManager(state, log, mockGit as any);
-      const plan = createTestPlan();
-      plan.spec.targetBranch = 'feature/my-plan';
-      plan.spec.baseBranch = 'main';
-      plan.isPaused = true;
-      state.plans.set(plan.id, plan);
-      const pumpStub = sinon.stub();
-
-      const result = await localMgr.resume(plan.id, pumpStub);
-      assert.strictEqual(result, true);
-      assert.ok(pumpStub.called);
     });
   });
 

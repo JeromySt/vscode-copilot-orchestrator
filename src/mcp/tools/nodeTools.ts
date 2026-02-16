@@ -148,6 +148,7 @@ Returns:
     {
       name: 'update_copilot_plan_node',
       description: `Update a node's job specification. Any provided stage (prechecks, work, postchecks) will replace the existing definition and reset execution to re-run from that stage.
+For topology changes (add/remove nodes, change dependencies), use reshape_copilot_plan instead.
 
 RESTRICTIONS:
 - Cannot update a node that is currently running (wait for completion or force-fail first)
