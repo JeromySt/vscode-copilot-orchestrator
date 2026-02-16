@@ -7,6 +7,7 @@
  * @module plan/phases/mergeHelper
  */
 
+import * as path from 'path';
 import type { PhaseContext } from '../../interfaces/IPhaseExecutor';
 import type { ExecutionPhase, CopilotUsageMetrics } from '../types';
 import type { ICopilotRunner } from '../../interfaces/ICopilotRunner';
@@ -84,12 +85,17 @@ ${conflictList}
 
   ctx.logInfo(`Running Copilot CLI to resolve conflicts...`);
   
+  // Derive configDir from cwd so Copilot CLI sessions are isolated per worktree
+  // and don't appear in the VS Code Sessions UI.
+  const configDir = path.join(cwd, '.orchestrator', '.copilot-cli');
+
   const result = await copilotRunner.run({
     cwd,
     task: 'Resolve all git merge conflicts in this repository.',
     instructions: mergeInstructions,
     label: 'merge-conflict',
     jobId: ctx.node.id,
+    configDir,
     timeout: 600000, // 10 minutes — merge resolution needs time for multi-file conflicts
     onOutput: (line) => {
       if (line.trim()) {
