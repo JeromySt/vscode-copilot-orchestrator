@@ -231,7 +231,10 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           var textEl = ng.querySelector('.nodeLabel') || ng.querySelector('span');
           if (textEl && textEl.textContent) {
             var gId = ng.getAttribute('id') || '';
-            nodeTextLengths[gId] = textEl.textContent.length;
+            var len = textEl.textContent.length;
+            nodeTextLengths[gId] = len;
+            // Store as HTML attribute for client-side update code
+            ng.setAttribute('data-max-text-len', String(len));
           }
         });
         // Capture rendered text lengths for cluster/subgraph labels
@@ -239,24 +242,31 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           var textEl = cg.querySelector('.cluster-label .nodeLabel') || cg.querySelector('.cluster-label span') || cg.querySelector('.cluster-label text');
           if (textEl && textEl.textContent) {
             var gId = cg.getAttribute('id') || '';
-            nodeTextLengths[gId] = textEl.textContent.length;
+            var len = textEl.textContent.length;
+            nodeTextLengths[gId] = len;
+            // Store as HTML attribute for client-side update code
+            cg.setAttribute('data-max-text-len', String(len));
           }
         });
 
-        // Strip duration from non-started nodes (they were sized with a template)
+        // Strip duration from ALL nodes — initial render shows only "<icon> <title>"
         element.querySelectorAll('.node').forEach(function(ng) {
-          // Find which nodeData entry this is
-          var gId = ng.getAttribute('id') || '';
-          var matchedId = null;
-          for (var sid in nodeData) {
-            if (gId.includes(sid)) { matchedId = sid; break; }
-          }
-          if (!matchedId) return;
-          var nd = nodeData[matchedId];
-          // Only strip from nodes that haven't started
-          if (nd && nd.startedAt) return;
-          // Find the text element and strip ' | 00m 00s'
           var textEls = ng.querySelectorAll('foreignObject *, text, tspan, .nodeLabel, .label');
+          for (var i = 0; i < textEls.length; i++) {
+            var el = textEls[i];
+            if (!el.childNodes.length || el.children.length > 0) continue;
+            var t = el.textContent || '';
+            var pipeIdx = t.lastIndexOf(' | ');
+            if (pipeIdx > 0) {
+              el.textContent = t.substring(0, pipeIdx);
+            }
+            break;
+          }
+        });
+
+        // Strip duration from ALL cluster/subgraph labels — initial render shows only "<icon> <title>"
+        element.querySelectorAll('.cluster').forEach(function(cg) {
+          var textEls = cg.querySelectorAll('.cluster-label .nodeLabel, .cluster-label text, .cluster-label span');
           for (var i = 0; i < textEls.length; i++) {
             var el = textEls[i];
             if (!el.childNodes.length || el.children.length > 0) continue;
