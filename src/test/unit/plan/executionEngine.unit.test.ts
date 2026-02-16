@@ -574,7 +574,7 @@ suite('JobExecutionEngine', () => {
       assert.ok((log.warn as sinon.SinonStub).calledWithMatch(sinon.match(/[Ss]low/)));
     });
 
-    test('gitignore update modifies and stages', async () => {
+    test('gitignore is NOT managed per-worktree (handled at repo level)', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
       const node = plan.nodes.get('node-1')! as JobNode;
@@ -590,16 +590,14 @@ suite('JobExecutionEngine', () => {
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
       const mockGit = createMockGitOperations();
-      // Override gitignore to return true (modified)
       mockGit.gitignore.ensureGitignoreEntries = sinon.stub().resolves(true);
       const nodeManager = new NodeManager(state as any, log, mockGit);
       const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
 
       await engine.executeJobNode(plan, sm, node);
 
-      assert.ok(mockGit.gitignore.ensureGitignoreEntries.calledOnce);
-      // git add .gitignore should have been called via stageFile
-      assert.ok(mockGit.repository.stageFile.calledOnce);
+      // Per-worktree gitignore was removed — managed at repo level in planInitialization
+      assert.ok(!mockGit.gitignore.ensureGitignoreEntries.called);
     });
 
     test('RI merge failure marks node as failed with preserved worktree', async () => {

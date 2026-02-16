@@ -179,8 +179,8 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
     newCommit: string
   ): Promise<boolean> {
     try {
-      // Try to update the branch reference
-      await this.git.repository.updateRef(`refs/heads/${targetBranch}`, newCommit, repoPath);
+      // Try to update the branch reference — args: (cwd, refName, commit)
+      await this.git.repository.updateRef(repoPath, `refs/heads/${targetBranch}`, newCommit);
       return true;
     } catch (error: any) {
       context.logError(`Failed to update branch ${targetBranch}: ${error.message}`);

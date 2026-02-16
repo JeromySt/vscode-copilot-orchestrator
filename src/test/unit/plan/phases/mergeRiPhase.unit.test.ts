@@ -568,16 +568,18 @@ suite('MergeRiPhaseExecutor', () => {
     assert.ok(!(git.branches.checkout as sinon.SinonStub).called);
   });
 
-  test('mergeWithConflictResolution stash pop failure', async () => {
+  test('mergeWithConflictResolution stash pop failure with AI resolution', async () => {
     const git = mockGitOperations();
     (git.branches.currentOrNull as sinon.SinonStub).resolves('feature-branch');
     (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(true);
     (git.repository.stashPush as sinon.SinonStub).resolves(true);
     (git.branches.checkout as sinon.SinonStub).resolves();
-    (git.merge.listConflicts as sinon.SinonStub).resolves(['conflict.txt']);
+    (git.merge.listConflicts as sinon.SinonStub)
+      .onFirstCall().resolves(['conflict.txt'])  // merge conflicts
+      .onSecondCall().resolves(['stash-conflict.txt']); // stash pop conflicts
     (git.repository.stashPop as sinon.SinonStub).rejects(new Error('Stash pop failed'));
 
-    // Mock resolveMergeConflictWithCopilot
+    // Mock resolveMergeConflictWithCopilot — called for both merge and stash conflicts
     const resolveMergeConflictStub = sandbox.stub().resolves({
       success: true,
       metrics: { durationMs: 5000 }
@@ -592,7 +594,8 @@ suite('MergeRiPhaseExecutor', () => {
     const result = await mergeWithConflictMethod.call(executor, context, '/repo', 'source123', 'main', 'Test merge');
 
     assert.strictEqual(result.success, true);
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith('Could not auto-restore stash: Stash pop failed'));
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith('Run `git stash list` and `git stash pop` manually if needed'));
+    // Stash pop failure now triggers AI-assisted resolution
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('Stash pop failed: Stash pop failed'));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('Attempting AI-assisted resolution of stash conflicts...'));
   });
 });

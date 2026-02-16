@@ -5,6 +5,28 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-02-15
+
+### Added
+- **Instruction Enrichment**: Skill-aware instruction augmentation system — Copilot CLI augments AgentSpec instructions at plan creation to trigger matching `.github/skills/` based on task relevance
+- **`augmentInstructions` flag**: Per-AgentSpec control (`augmentInstructions: boolean`, default `true`) on MCP `create_copilot_plan`, `update_copilot_plan`, and `update_copilot_plan_node` APIs
+- **`originalInstructions` field**: Stores pre-augmentation instructions on AgentSpec for UI diff view
+- **Setup phase**: New `setup` phase in executor (runs after merge-FI) projects orchestrator skill files into worktrees
+- **Mermaid text clamp**: Mermaid diagram node text clamped to rendered box width
+- **Plan detail `planStarted` listener**: Ensures job count updates when plans start
+
+### Fixed
+- **Critical: RI merge lost after auto-heal/retry** — Auto-heal and auto-retry execution contexts were missing `targetBranch`, `repoPath`, `baseCommitAtStart`, and `dependencyCommits`, causing RI merge to be silently skipped for leaf nodes after successful auto-heal
+- **Critical: RI merge `updateRef` argument order** — `updateRef(repoPath, refName, commit)` parameters were swapped, preventing branch ref updates
+- **RI merge skipped status treated as failure** — Leaf nodes with `'skipped'` RI merge status now correctly detected and reported as failures instead of silent success
+- **FI merge blocked by per-worktree `.gitignore`** — Removed per-worktree gitignore management (now handled at repo level in `planInitialization.ts`)
+- **RI stash pop failures** — Stash pop conflicts now use AI-assisted resolution via Copilot CLI before falling back to manual instructions
+- **FI merge dirty worktree** — FI merge no longer blocked by dirty worktree; uses stash + AI conflict resolution
+
+### Changed
+- **Force Fail button** restyled and moved to sticky header in node detail panel
+- **Removed simplified MCP APIs**: `create_copilot_job` and `create_copilot_node` tools removed in favor of full plan-based workflows
+
 ## [0.10.3] - 2026-02-15
 
 ### Added

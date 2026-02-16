@@ -706,6 +706,43 @@ suite('JobExecutionEngine - Coverage', () => {
       assert.strictEqual(lastAttempt.triggerType, 'auto-heal');
       assert.strictEqual(lastAttempt.failedPhase, 'merge-ri');
     });
+
+    test('auto-heal preserves targetBranch and repoPath for leaf nodes', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'main' });
+      plan.repoPath = dir;
+      plan.baseCommitAtStart = 'base-start-commit';
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'fail', failedPhase: 'work',
+        exitCode: 1, stepStatuses: { work: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-commit-12345678901234567890123',
+        stepStatuses: { work: 'success', commit: 'success', 'merge-ri': 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Verify the heal context included merge-specific fields
+      const healCall = executeStub.secondCall;
+      const healContext = healCall.args[0];
+      assert.strictEqual(healContext.targetBranch, 'main', 'healContext must include targetBranch for leaf node');
+      assert.strictEqual(healContext.repoPath, dir, 'healContext must include repoPath');
+      assert.strictEqual(healContext.baseCommitAtStart, 'base-start-commit', 'healContext must include baseCommitAtStart');
+    });
   });
 
   // ------------------------------------------------------------------

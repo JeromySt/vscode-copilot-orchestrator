@@ -446,6 +446,7 @@ export class JobExecutionEngine {
               const retryLogFileOffset = this.state.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
 
               // Execute with resumeFromPhase to skip already-passed phases
+              // Critical: preserve merge-specific fields so RI merge runs for leaf nodes
               const retryContext: ExecutionContext = {
                 plan,
                 node,
@@ -455,6 +456,11 @@ export class JobExecutionEngine {
                 copilotSessionId: nodeState.copilotSessionId,
                 resumeFromPhase: failedPhase as ExecutionContext['resumeFromPhase'],
                 previousStepStatuses: nodeState.stepStatuses,
+                // Merge-specific fields (must match original context)
+                dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
+                repoPath: plan.repoPath,
+                targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
+                baseCommitAtStart: plan.baseCommitAtStart,
                 onProgress: (step) => {
                   this.log.debug(`Auto-retry progress: ${node.name} - ${step}`);
                 },
@@ -670,6 +676,7 @@ export class JobExecutionEngine {
             const healLogFileOffset = this.state.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
             
             // Execute with resumeFromPhase to skip already-passed phases
+            // Critical: preserve merge-specific fields so RI merge runs for leaf nodes
             const healContext: ExecutionContext = {
               plan,
               node,
@@ -679,6 +686,11 @@ export class JobExecutionEngine {
               copilotSessionId: nodeState.copilotSessionId,
               resumeFromPhase: failedPhase as ExecutionContext['resumeFromPhase'],
               previousStepStatuses: nodeState.stepStatuses,
+              // Merge-specific fields (must match original context)
+              dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
+              repoPath: plan.repoPath,
+              targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
+              baseCommitAtStart: plan.baseCommitAtStart,
               onProgress: (step) => {
                 this.log.debug(`Auto-heal progress: ${node.name} - ${step}`);
               },
@@ -819,14 +831,21 @@ export class JobExecutionEngine {
       if (isLeaf && plan.targetBranch) {
         // The executor's merge-ri phase will handle reverse integration
         // We'll check the nodeState step status to determine if RI succeeded
-        const riSuccess = nodeState.stepStatuses?.['merge-ri'] === 'success';
+        const riStatus = nodeState.stepStatuses?.['merge-ri'];
+        const riSuccess = riStatus === 'success';
         nodeState.mergedToTarget = riSuccess;
+        
+        // Detect when RI merge was unexpectedly skipped for a leaf node
+        if (riStatus === 'skipped' || !riStatus) {
+          this.log.warn(`RI merge was ${riStatus || 'missing'} for leaf node ${node.name} — expected success or failure`);
+        }
       } else {
         nodeState.mergedToTarget = true; // No merge needed
       }
       
-      // Check if RI merge failed based on executor result
-      const riMergeFailed = isLeaf && plan.targetBranch && nodeState.stepStatuses?.['merge-ri'] === 'failed';
+      // Check if RI merge failed or was unexpectedly skipped
+      const riMergeFailed = isLeaf && plan.targetBranch && 
+        (nodeState.stepStatuses?.['merge-ri'] === 'failed' || nodeState.stepStatuses?.['merge-ri'] === 'skipped');
       
       // If RI merge failed, treat the node as failed (work succeeded but merge did not)
       if (riMergeFailed) {
