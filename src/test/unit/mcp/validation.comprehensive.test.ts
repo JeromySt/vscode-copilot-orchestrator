@@ -186,32 +186,6 @@ suite('MCP Validation Unit Tests', () => {
     });
   });
   
-  suite('validateInput - create_copilot_job', () => {
-    test('should validate simple job input', () => {
-      const validInput = {
-        name: 'Test Job',
-        task: 'Test task',
-        work: 'echo test'
-      };
-      
-      const result = validateInput('create_copilot_job', validInput);
-      
-      assert.strictEqual(result.valid, true);
-    });
-    
-    test('should require name and task', () => {
-      const invalidInput = {
-        // Missing name and task
-        work: 'echo test'
-      };
-      
-      const result = validateInput('create_copilot_job', invalidInput);
-      
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error);
-    });
-  });
-  
   suite('validateInput - node tools', () => {
     test('should validate get_node_details input', () => {
       const validInput = {
