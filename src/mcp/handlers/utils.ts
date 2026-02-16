@@ -162,10 +162,15 @@ export async function resolveBaseBranch(repoPath: string, git: IGitOperations, r
 /**
  * Resolve the target branch for a plan.
  *
- * When no explicit target is provided, generates a branch name under
- * the `copilot_plan/` namespace. Branch creation is controlled by
- * the `createBranch` option (default: false). When false, only the
- * branch name is resolved without creating it in git.
+ * Resolution order:
+ * 1. If an explicit target is provided and is not a default branch, use it.
+ * 2. If no target is provided and the repo is already on a non-default feature
+ *    branch, adopt that branch as the target.
+ * 3. Otherwise, generate a new branch name under the configured prefix
+ *    (default: `copilot_plan/`).
+ *
+ * Branch creation is controlled by the `createBranch` option (default: false).
+ * When false, only the branch name is resolved without creating it in git.
  *
  * @param baseBranch     - The resolved base branch name.
  * @param repoPath       - Absolute path to the git repository.
@@ -230,6 +235,21 @@ export async function resolveTargetBranch(
     }
   }
 
-  // No explicit request or error in validation - generate a new feature branch
+  // No explicit request — if already on a non-default feature branch, use it
+  if (!requested) {
+    try {
+      const current = await git.branches.currentOrNull(repoPath);
+      if (current) {
+        const isDefault = await git.branches.isDefaultBranch(current, repoPath);
+        if (!isDefault) {
+          return current;
+        }
+      }
+    } catch {
+      // Fall through to generate a new feature branch
+    }
+  }
+
+  // On a default branch or error — generate a new feature branch
   return await generateFeatureBranch();
 }

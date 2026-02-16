@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Deferred branch creation**: Target branch is no longer created at plan creation time. Instead, the branch is created when the plan is first started/resumed. This avoids creating orphan branches for plans that are never started.
+- **Auto-adopt current branch**: When no `targetBranch` is specified, `resolveTargetBranch` now checks the current branch first. If the repo is already on a non-default feature branch, that branch is adopted as the target instead of generating a new one.
 - **Gitignore auto-commit**: When the target branch is created on resume, orchestrator `.gitignore` entries are committed as the first commit on that branch. This prevents `.gitignore` changes from appearing as dirty files in every worktree.
 
 ## [0.11.14] - 2026-02-16
