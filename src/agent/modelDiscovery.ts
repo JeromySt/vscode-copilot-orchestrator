@@ -191,21 +191,29 @@ export async function discoverAvailableModelsLegacy(deps?: Omit<ModelDiscoveryDe
 
 /**
  * Return cached models if fresh (within TTL), otherwise re-discover.
+ * Falls back to legacy discovery (DefaultProcessSpawner) when no spawner is provided.
  */
 export async function getCachedModels(deps?: ModelDiscoveryDeps): Promise<ModelDiscoveryResult> {
   const clock = deps?.clock ?? Date.now;
   if (cachedResult && (clock() - cachedResult.discoveredAt) < CACHE_TTL_MS) {
     return cachedResult;
   }
+  if (!deps?.spawner) {
+    return discoverAvailableModelsLegacy(deps);
+  }
   return discoverAvailableModels(deps);
 }
 
 /**
  * Force re-discovery of available models, ignoring cache.
+ * Falls back to legacy discovery (DefaultProcessSpawner) when no spawner is provided.
  */
 export async function refreshModelCache(deps?: ModelDiscoveryDeps): Promise<ModelDiscoveryResult> {
   cachedResult = null;
   lastFailureTime = null;
+  if (!deps?.spawner) {
+    return discoverAvailableModelsLegacy(deps);
+  }
   return discoverAvailableModels(deps);
 }
 

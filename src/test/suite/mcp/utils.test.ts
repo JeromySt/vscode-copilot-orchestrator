@@ -171,17 +171,35 @@ suite('MCP Handler Utils', () => {
   });
 
   suite('resolveTargetBranch', () => {
-    test('generates feature branch when no request', async () => {
+    test('generates feature branch when no request and on default branch', async () => {
+      sinon.stub(git.branches, 'currentOrNull').resolves('main');
+      sinon.stub(git.branches, 'isDefaultBranch').resolves(true);
       sinon.stub(git.branches, 'exists').resolves(false);
       sinon.stub(git.branches, 'create').resolves();
       const result = await resolveTargetBranch('main', '/repo', git as any);
       assert.ok(result.includes('copilot_plan'));
     });
 
-    test('creates new branch when needsCreation is true', async () => {
+    test('uses current branch when no request and on non-default branch', async () => {
+      sinon.stub(git.branches, 'currentOrNull').resolves('feature/existing');
+      sinon.stub(git.branches, 'isDefaultBranch').resolves(false);
+      const result = await resolveTargetBranch('main', '/repo', git as any);
+      assert.strictEqual(result, 'feature/existing');
+    });
+
+    test('generates feature branch when no request and currentOrNull returns null', async () => {
+      sinon.stub(git.branches, 'currentOrNull').resolves(null);
+      sinon.stub(git.branches, 'exists').resolves(false);
+      sinon.stub(git.branches, 'create').resolves();
+      const result = await resolveTargetBranch('main', '/repo', git as any);
+      assert.ok(result.includes('copilot_plan'));
+    });
+
+    test('creates new branch when createBranch is true', async () => {
+      sinon.stub(git.branches, 'currentOrNull').resolves(null);
       sinon.stub(git.branches, 'exists').resolves(false);
       const createStub = sinon.stub(git.branches, 'create').resolves();
-      const result = await resolveTargetBranch('main', '/repo', git as any);
+      const result = await resolveTargetBranch('main', '/repo', git as any, undefined, undefined, undefined, true);
       assert.ok(createStub.calledOnce);
       assert.ok(result.startsWith('copilot_plan/'));
     });
@@ -193,11 +211,11 @@ suite('MCP Handler Utils', () => {
       assert.strictEqual(result, 'feature/my-branch');
     });
 
-    test('creates requested branch when it does not exist', async () => {
+    test('creates requested branch when it does not exist and createBranch is true', async () => {
       sinon.stub(git.branches, 'isDefaultBranch').resolves(false);
       sinon.stub(git.branches, 'exists').resolves(false);
       const createStub = sinon.stub(git.branches, 'create').resolves();
-      const result = await resolveTargetBranch('main', '/repo', git as any, 'new-branch');
+      const result = await resolveTargetBranch('main', '/repo', git as any, 'new-branch', undefined, undefined, true);
       assert.strictEqual(result, 'new-branch');
       assert.ok(createStub.calledOnce);
     });
@@ -212,13 +230,16 @@ suite('MCP Handler Utils', () => {
 
     test('falls back to feature branch on error', async () => {
       sinon.stub(git.branches, 'isDefaultBranch').rejects(new Error('git fail'));
+      sinon.stub(git.branches, 'currentOrNull').resolves(null);
       sinon.stub(git.branches, 'exists').resolves(false);
       sinon.stub(git.branches, 'create').resolves();
       const result = await resolveTargetBranch('main', '/repo', git as any, 'bad-branch');
       assert.ok(result.startsWith('copilot_plan/'));
     });
 
-    test('uses planName for branch suffix', async () => {
+    test('uses planName for branch suffix when on default branch', async () => {
+      sinon.stub(git.branches, 'currentOrNull').resolves('main');
+      sinon.stub(git.branches, 'isDefaultBranch').resolves(true);
       sinon.stub(git.branches, 'exists').resolves(false);
       sinon.stub(git.branches, 'create').resolves();
       const result = await resolveTargetBranch('main', '/repo', git as any, undefined, 'My Plan');
@@ -230,6 +251,8 @@ suite('MCP Handler Utils', () => {
         getConfig: (section: string, key: string, def: any) =>
           section === 'git' && key === 'branchPrefix' ? 'users/jstatia/' : def
       };
+      sinon.stub(git.branches, 'currentOrNull').resolves('main');
+      sinon.stub(git.branches, 'isDefaultBranch').resolves(true);
       sinon.stub(git.branches, 'exists').resolves(false);
       sinon.stub(git.branches, 'create').resolves();
       const result = await resolveTargetBranch('main', '/repo', git as any, undefined, 'My Plan', mockConfig);
@@ -242,6 +265,8 @@ suite('MCP Handler Utils', () => {
         getConfig: (section: string, key: string, def: any) =>
           section === 'git' && key === 'branchPrefix' ? 'users/jstatia///' : def
       };
+      sinon.stub(git.branches, 'currentOrNull').resolves('main');
+      sinon.stub(git.branches, 'isDefaultBranch').resolves(true);
       sinon.stub(git.branches, 'exists').resolves(false);
       sinon.stub(git.branches, 'create').resolves();
       const result = await resolveTargetBranch('main', '/repo', git as any, undefined, 'My Plan', mockConfig);
