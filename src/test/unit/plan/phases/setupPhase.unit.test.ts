@@ -98,7 +98,7 @@ suite('SetupPhaseExecutor', () => {
       const content = fs.readFileSync(skillPath, 'utf-8');
       assert.ok(!content.includes('**Worktree Path:**'), 'Should not include worktree path');
       assert.ok(configManager.getConfig.calledWith(
-        'copilotOrchestrator.instructionEnrichment',
+        'copilotOrchestrator.setup',
         'projectWorktreeContext',
         true,
       ));

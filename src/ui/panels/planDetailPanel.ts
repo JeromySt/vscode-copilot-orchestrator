@@ -1577,12 +1577,6 @@ export class planDetailPanel {
         nodeTooltips[sanitizedId] = node.name;
       }
       
-      // Add sparkle to tooltip for augmented nodes
-      const normalizedWork = node.work ? normalizeWorkSpec(node.work) : undefined;
-      if (normalizedWork?.type === 'agent' && normalizedWork.originalInstructions) {
-        nodeTooltips[sanitizedId] = '✨ ' + (nodeTooltips[sanitizedId] || node.name);
-      }
-      
       lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);
       lines.push(`${indent}class ${sanitizedId} ${status}`);
       

@@ -608,14 +608,10 @@ export function webviewScripts(config: ScriptsConfig): string {
         // Work (always expanded, not collapsible)
         if (cfg.work) {
           var workType = cfg.workType || { type: 'agent', label: 'Agent' };
-          var augBadge = cfg.originalInstructions
-            ? ' <span class="phase-type-badge agent" style="margin-left: 4px;">✨ Augmented</span>'
-            : '';
           phasesHtml += '<div class="config-phase">'
             + '<div class="config-phase-header non-collapsible">'
             + '<span class="phase-label">Work</span>'
             + '<span class="phase-type-badge ' + (workType.type || '').toLowerCase() + '">' + escapeHtml(workType.label) + '</span>'
-            + augBadge
             + '</div>'
             + '<div class="config-phase-body">' + cfg.work + '</div>'
             + '</div>';
@@ -635,18 +631,6 @@ export function webviewScripts(config: ScriptsConfig): string {
           + '<div class="config-item"><div class="config-label">Task</div>'
           + '<div class="config-value">' + escapeHtml(cfg.task || '') + '</div></div>'
           + '<div class="config-phases">' + phasesHtml + '</div>';
-
-        // Original instructions: augmented badge + collapsible View Original
-        if (cfg.originalInstructions) {
-          html += '<div class="config-phase">'
-            + '<div class="config-phase-header collapsed config-collapsible-toggle" data-phase="original-instructions">'
-            + '<span class="chevron">▶</span>'
-            + '<span class="phase-label">View Original</span>'
-            + '</div>'
-            + '<div class="config-phase-body" style="display:none">'
-            + '<div class="config-value">' + escapeHtml(cfg.originalInstructions) + '</div>'
-            + '</div></div>';
-        }
 
         html += '</div>';
 

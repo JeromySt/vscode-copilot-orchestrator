@@ -7,12 +7,11 @@
  * @module mcp/handlers/utils
  */
 
-import * as vscode from 'vscode';
 import { ToolHandlerContext } from '../types';
 import { PlanInstance } from '../../plan/types';
 import { PlanRunner } from '../../plan/runner';
 import type { IGitOperations } from '../../interfaces/IGitOperations';
-import type { ICopilotRunner } from '../../interfaces/ICopilotRunner';
+import type { IConfigProvider } from '../../interfaces/IConfigProvider';
 
 /**
  * Extended handler context with access to the {@link PlanRunner} instance.
@@ -26,8 +25,8 @@ export interface PlanHandlerContext extends ToolHandlerContext {
   PlanRunner: PlanRunner;
   /** Git operations interface */
   git: IGitOperations;
-  /** Copilot CLI runner for instruction augmentation (optional for backward compat). */
-  copilotRunner?: ICopilotRunner;
+  /** Configuration provider for reading VS Code settings without direct API coupling. */
+  configProvider?: IConfigProvider;
 }
 
 /**
@@ -178,13 +177,16 @@ export async function resolveTargetBranch(
   repoPath: string,
   git: IGitOperations,
   requested?: string,
-  planName?: string
+  planName?: string,
+  configProvider?: IConfigProvider
 ): Promise<string> {
   // Helper to generate a new feature branch
   const generateFeatureBranch = async (): Promise<string> => {
-    // Use VS Code's git.branchPrefix setting if configured, otherwise fallback to 'copilot_plan'
-    const gitConfig = vscode.workspace.getConfiguration('git');
-    const userPrefix = gitConfig.get<string>('branchPrefix', '').trim();
+    // Use git.branchPrefix setting if configured, otherwise fallback to 'copilot_plan'
+    const rawPrefix = configProvider
+      ? configProvider.getConfig<string>('git', 'branchPrefix', '')
+      : '';
+    const userPrefix = (rawPrefix || '').trim().replace(/\/+$/, '');
     const prefix = userPrefix || 'copilot_plan';
     
     // Generate a readable branch suffix from the plan name, or use short UUID

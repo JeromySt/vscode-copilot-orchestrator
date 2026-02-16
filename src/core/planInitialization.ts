@@ -253,8 +253,8 @@ export async function initializeMcpServer(
    
   scope.register(Tokens.IMcpRequestRouter, (c) => {
     const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
-    const copilotRunner = c.resolve<import('../interfaces/ICopilotRunner').ICopilotRunner>(Tokens.ICopilotRunner);
-    return new McpHandler(planRunner, workspacePath, git, copilotRunner);
+    const configProvider = c.resolve<import('../interfaces/IConfigProvider').IConfigProvider>(Tokens.IConfigProvider);
+    return new McpHandler(planRunner, workspacePath, git, configProvider);
   });
   const mcpHandler = scope.resolve<IMcpRequestRouter>(Tokens.IMcpRequestRouter);
 

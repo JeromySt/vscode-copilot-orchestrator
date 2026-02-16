@@ -5,12 +5,17 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.14] - 2026-02-16
+
+### Fixed
+- **Double-slash in auto-generated branch names**: When `git.branchPrefix` ends with `/` (e.g. `users/jstatia/`), `resolveTargetBranch` produced `users/jstatia//plan_name`. Now strips trailing slashes from the prefix before composing the branch name.
+
+### Removed
+- **Instruction Enrichment / Augmentation**: Removed the `augmentInstructions` feature, `instructionAugmenter`, and related MCP schema fields. Agents use native Copilot CLI skill discovery instead.
+
 ## [0.11.0] - 2026-02-15
 
 ### Added
-- **Instruction Enrichment**: Skill-aware instruction augmentation system — Copilot CLI augments AgentSpec instructions at plan creation to trigger matching `.github/skills/` based on task relevance
-- **`augmentInstructions` flag**: Per-AgentSpec control (`augmentInstructions: boolean`, default `true`) on MCP `create_copilot_plan`, `update_copilot_plan`, and `update_copilot_plan_node` APIs
-- **`originalInstructions` field**: Stores pre-augmentation instructions on AgentSpec for UI diff view
 - **Setup phase**: New `setup` phase in executor (runs after merge-FI) projects orchestrator skill files into worktrees
 - **Mermaid text clamp**: Mermaid diagram node text clamped to rendered box width
 - **Plan detail `planStarted` listener**: Ensures job count updates when plans start
@@ -32,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Copilot Agent Instructions**: Repo-wide instructions (`.github/copilot-instructions.md`), path-scoped instruction files for source code, testing, and code review
 - **Agent Skills**: 5 agent skills (`.github/skills/`): `test-writer`, `di-refactor`, `security-hardener`, `auto-heal`, `documentation-writer` — auto-loaded by Copilot CLI based on task relevance
-- **Instruction Enrichment Spec**: Design spec for skill-aware instruction augmentation at plan creation time (`docs/INSTRUCTION_ENRICHMENT.md`)
+- **Instruction Enrichment Spec**: Design spec for skill-aware instruction augmentation at plan creation time (removed in v0.11.14)
 - **Gitignore Single Source of Truth**: `ORCHESTRATOR_GITIGNORE_ENTRIES` constant and `isDiffOnlyOrchestratorChanges()` centralized in `git/core/gitignore.ts`, eliminating duplicated pattern lists
 
 ### Fixed

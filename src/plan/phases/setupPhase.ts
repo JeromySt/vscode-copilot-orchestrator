@@ -75,7 +75,7 @@ export class SetupPhaseExecutor implements IPhaseExecutor {
     try {
       const projectWorktreeContext: boolean =
         this.configManager?.getConfig(
-          'copilotOrchestrator.instructionEnrichment',
+          'copilotOrchestrator.setup',
           'projectWorktreeContext',
           true,
         ) ?? true;

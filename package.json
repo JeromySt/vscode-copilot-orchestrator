@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.11.0",
+  "version": "0.11.14",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -280,20 +280,10 @@
           "default": [],
           "description": "Array of component names to enable debug logging for. When non-empty, debug logging is enabled only for these components. When empty, uses the individual copilotOrchestrator.logging.debug.* settings. Useful for focused debugging of specific subsystems."
         },
-        "copilotOrchestrator.instructionEnrichment.augmentInstructions": {
+        "copilotOrchestrator.setup.projectWorktreeContext": {
           "type": "boolean",
           "default": true,
-          "description": "Augment agent instructions with project context (worktree structure, conventions, metadata) before execution. Individual jobs can override this via the augmentInstructions field in their agent work spec."
-        },
-        "copilotOrchestrator.instructionEnrichment.augmentTimeoutMs": {
-          "type": "number",
-          "default": 30000,
-          "description": "Maximum time in milliseconds to spend gathering project context for instruction augmentation. If exceeded, the agent runs with unaugmented instructions."
-        },
-        "copilotOrchestrator.instructionEnrichment.projectWorktreeContext": {
-          "type": "boolean",
-          "default": true,
-          "description": "Include project worktree context (file structure, git info) when augmenting agent instructions. Disable to reduce augmentation overhead for large repositories."
+          "description": "When enabled, the setup phase projects a context skill file into each worktree that includes the node's task, dependencies, and worktree path information for the Copilot CLI agent."
         }
       }
     }

@@ -676,9 +676,7 @@ export class NodeDetailPanel {
     
     if (!node || node.type !== 'job') {return;}
     
-    // Extract originalInstructions from AgentSpec if augmented
     const normalizedWork = node.work ? normalizeWorkSpec(node.work) : undefined;
-    const originalInstructions = normalizedWork?.type === 'agent' ? normalizedWork.originalInstructions : undefined;
     
     // Pre-render spec HTML server-side so the webview gets formatted HTML
     this._panel.webview.postMessage({
@@ -692,7 +690,6 @@ export class NodeDetailPanel {
         postchecksType: node.postchecks ? getSpecTypeInfo(node.postchecks) : undefined,
         task: node.task,
         currentPhase: getCurrentExecutionPhase(state),
-        originalInstructions,
       }
     });
   }

@@ -79,7 +79,7 @@ const SERVER_INFO = {
  *
  * @example
  * ```ts
- * const handler = new McpHandler(planRunner, '/workspace');
+ * const handler = new McpHandler(planRunner, '/workspace', git, configProvider);
  * const response = await handler.handleRequest({
  *   jsonrpc: '2.0',
  *   id: 1,
@@ -94,17 +94,22 @@ export class McpHandler implements IMcpRequestRouter {
   /**
    * Create a new MCP handler.
    *
-   * @param PlanRunner    - Singleton {@link PlanRunner} that manages plan lifecycle.
-   * @param workspacePath - Absolute path to the workspace root (git repository).
-   * @param git          - Git operations interface.
-   * @param copilotRunner - Optional Copilot CLI runner for instruction augmentation.
+   * @param PlanRunner      - Singleton {@link PlanRunner} that manages plan lifecycle.
+   * @param workspacePath   - Absolute path to the workspace root (git repository).
+   * @param git             - Git operations interface.
+   * @param configProvider  - Optional configuration provider for reading VS Code settings.
    */
-  constructor(PlanRunner: PlanRunner, workspacePath: string, git: import('../interfaces/IGitOperations').IGitOperations, copilotRunner?: import('../interfaces/ICopilotRunner').ICopilotRunner) {
+  constructor(
+    PlanRunner: PlanRunner,
+    workspacePath: string,
+    git: import('../interfaces/IGitOperations').IGitOperations,
+    configProvider?: import('../interfaces/IConfigProvider').IConfigProvider,
+  ) {
     this.context = { 
       PlanRunner, 
       workspacePath,
       git,
-      copilotRunner,
+      configProvider,
       // Legacy fields - kept for type compatibility
       runner: null as any,
       plans: null as any,

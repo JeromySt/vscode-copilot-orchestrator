@@ -34,8 +34,6 @@ export interface WorkSpec {
   allowedFolders?: string[];
   /** URLs or URL patterns the agent is allowed to access */
   allowedUrls?: string[];
-  /** Whether to augment agent instructions with project context */
-  augmentInstructions?: boolean;
 }
 
 /**
@@ -107,8 +105,7 @@ const workSpecObjectSchema = {
       items: { type: 'string', maxLength: 500 },
       maxItems: 50,
       description: 'URLs or URL patterns the agent is allowed to access. Default: none (no network access).'
-    },
-    augmentInstructions: { type: 'boolean' }
+    }
   },
   additionalProperties: false
 } as const;

@@ -253,20 +253,7 @@ description: Write comprehensive unit tests with high coverage
 
 Skills can also be invoked explicitly via `/skill-name` slash commands in agent instructions.
 
-**Instruction Augmentation** (`augmentInstructions`):
-When creating or updating plans, the orchestrator can automatically augment agent instructions to better trigger matching skills. This is controlled per-node via the `augmentInstructions` field on agent work specs (defaults to `true`):
-
-```json
-{
-  "work": {
-    "type": "agent",
-    "instructions": "Add input validation to the form",
-    "augmentInstructions": true
-  }
-}
-```
-
-When enabled, a single Copilot CLI call at plan creation reviews all opted-in agent instructions and rephrases them to naturally trigger relevant skills — without adding new work scope. The original instructions are preserved in `originalInstructions` for comparison in the UI.
+The MCP tool schema for `create_copilot_plan` and `update_copilot_plan` includes guidance about repository skills, directing the AI agent to consult the `.github/skills/*/SKILL.md` documents and incorporate relevant skills when generating plan node instructions. This guidance helps agents creating plans via MCP discover and reference applicable skills without manual intervention.
 
 ### 🛡️ Default Branch Protection
 

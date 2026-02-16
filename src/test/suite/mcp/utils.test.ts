@@ -172,8 +172,6 @@ suite('MCP Handler Utils', () => {
 
   suite('resolveTargetBranch', () => {
     test('generates feature branch when no request', async () => {
-      const vscode = require('vscode');
-      sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
       sinon.stub(git.branches, 'exists').resolves(false);
       sinon.stub(git.branches, 'create').resolves();
       const result = await resolveTargetBranch('main', '/repo', git as any);
@@ -181,8 +179,6 @@ suite('MCP Handler Utils', () => {
     });
 
     test('creates new branch when needsCreation is true', async () => {
-      const vscode = require('vscode');
-      sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
       sinon.stub(git.branches, 'exists').resolves(false);
       const createStub = sinon.stub(git.branches, 'create').resolves();
       const result = await resolveTargetBranch('main', '/repo', git as any);
@@ -207,8 +203,6 @@ suite('MCP Handler Utils', () => {
     });
 
     test('generates feature branch when requested is default', async () => {
-      const vscode = require('vscode');
-      sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
       sinon.stub(git.branches, 'isDefaultBranch').resolves(true);
       sinon.stub(git.branches, 'exists').resolves(false);
       sinon.stub(git.branches, 'create').resolves();
@@ -217,8 +211,6 @@ suite('MCP Handler Utils', () => {
     });
 
     test('falls back to feature branch on error', async () => {
-      const vscode = require('vscode');
-      sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
       sinon.stub(git.branches, 'isDefaultBranch').rejects(new Error('git fail'));
       sinon.stub(git.branches, 'exists').resolves(false);
       sinon.stub(git.branches, 'create').resolves();
@@ -227,12 +219,34 @@ suite('MCP Handler Utils', () => {
     });
 
     test('uses planName for branch suffix', async () => {
-      const vscode = require('vscode');
-      sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
       sinon.stub(git.branches, 'exists').resolves(false);
       sinon.stub(git.branches, 'create').resolves();
       const result = await resolveTargetBranch('main', '/repo', git as any, undefined, 'My Plan');
       assert.ok(result.includes('copilot_plan'));
+    });
+
+    test('strips trailing slashes from branchPrefix to avoid double-slash', async () => {
+      const mockConfig = {
+        getConfig: (section: string, key: string, def: any) =>
+          section === 'git' && key === 'branchPrefix' ? 'users/jstatia/' : def
+      };
+      sinon.stub(git.branches, 'exists').resolves(false);
+      sinon.stub(git.branches, 'create').resolves();
+      const result = await resolveTargetBranch('main', '/repo', git as any, undefined, 'My Plan', mockConfig);
+      assert.ok(!result.includes('//'), `Branch should not contain double-slash: ${result}`);
+      assert.ok(result.startsWith('users/jstatia/'), `Branch should start with stripped prefix: ${result}`);
+    });
+
+    test('strips multiple trailing slashes via configProvider', async () => {
+      const mockConfig = {
+        getConfig: (section: string, key: string, def: any) =>
+          section === 'git' && key === 'branchPrefix' ? 'users/jstatia///' : def
+      };
+      sinon.stub(git.branches, 'exists').resolves(false);
+      sinon.stub(git.branches, 'create').resolves();
+      const result = await resolveTargetBranch('main', '/repo', git as any, undefined, 'My Plan', mockConfig);
+      assert.ok(!result.includes('//'), `Branch should not contain double-slash even with multiple trailing slashes: ${result}`);
+      assert.ok(result.startsWith('users/jstatia/'), `Branch should start with normalized prefix: ${result}`);
     });
   });
 });

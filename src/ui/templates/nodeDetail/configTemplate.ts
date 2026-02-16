@@ -36,8 +36,6 @@ export interface ConfigData {
   instructions?: string;
   /** Current execution phase */
   currentPhase?: string;
-  /** Original instructions before augmentation (when augmented) */
-  originalInstructions?: string;
 }
 
 /**
@@ -231,28 +229,10 @@ export function configSectionHtml(data: ConfigData): string {
 
   // Instructions (if provided)
   if (data.instructions) {
-    const augmentedBadge = data.originalInstructions
-      ? ' <span class="phase-type-badge agent" style="margin-left: 6px;">✨ Augmented</span>'
-      : '';
     configContent += `
       <div class="config-item">
-        <div class="config-label">Instructions${augmentedBadge}</div>
+        <div class="config-label">Instructions</div>
         <div class="config-value">${escapeHtml(data.instructions)}</div>
-      </div>
-    `;
-  }
-
-  // Original instructions (collapsible, shown when augmentation occurred)
-  if (data.originalInstructions) {
-    configContent += `
-      <div class="config-phase">
-        <div class="config-phase-header collapsed config-collapsible-toggle" data-phase="original-instructions">
-          <span class="chevron">▶</span>
-          <span class="phase-label">View Original</span>
-        </div>
-        <div class="config-phase-body" style="display:none">
-          <div class="config-value">${escapeHtml(data.originalInstructions)}</div>
-        </div>
       </div>
     `;
   }

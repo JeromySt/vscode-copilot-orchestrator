@@ -137,6 +137,7 @@ WORK OPTIONS (work/prechecks/postchecks accept):
 
 IMPORTANT: For agent work, specify 'model' INSIDE the work object (not at job level).
 Agent instructions MUST be in Markdown format for proper rendering.
+If the project has .github/skills/ directories, incorporate relevant skill conventions into agent instructions for best results.
 
 SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
       inputSchema: {
@@ -195,15 +196,16 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
 1. STRING: Shell command like "npm run build" or "@agent Do something" for AI
 2. PROCESS OBJECT: { "type": "process", "executable": "node", "args": ["script.js"] }
 3. SHELL OBJECT: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "claude-sonnet-4.5", "augmentInstructions": true }
+4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "claude-sonnet-4.5" }
 
 For process type, args is an array - no shell quoting needed.
 For shell type, shell can be: cmd, powershell, pwsh, bash, sh
 For agent type, model goes INSIDE the work object. Available models: ${modelEnum.join(', ')}
 Fast models (haiku/mini) for simple tasks, premium models (opus) for complex reasoning.
-augmentInstructions (optional, boolean) enriches agent instructions with project context before execution.
 
-Agent instructions MUST be in Markdown format with headers, numbered lists, bullet lists.`,
+Agent instructions MUST be in Markdown format with headers, numbered lists, bullet lists.
+
+SKILL-AWARE INSTRUCTIONS: If the project has .github/skills/ directories, read the relevant SKILL.md files and incorporate their conventions, patterns, and rules directly into each agent's instructions. Match skills by task type — e.g., test-writer for testing tasks, di-refactor for DI/interface work, security-hardener for security reviews, documentation-writer for docs updates. This gives each agent the project-specific context it needs to produce correct, convention-following code.`,
                 },
                 dependencies: {
                   type: 'array',
