@@ -5,14 +5,29 @@
  * This implements the "reverse integration" pattern where completed work
  * from a worktree is merged back to the main target branch.
  * 
+ * ## Safety guarantees
+ * 
+ * - **Never touches the user's working directory.** All merges happen
+ *   either via `git merge-tree --write-tree` (in-memory) or inside an
+ *   ephemeral detached worktree that is removed after the merge.
+ * - **Never stashes user changes.** The stash/pop pattern is inherently
+ *   dangerous because it mixes user state with orchestrator state.
+ * - **Validates the merged tree.** After every RI merge, the file count
+ *   of the result is compared to the source. If the result has
+ *   significantly fewer files, the merge is aborted.
+ * 
  * @module plan/phases/mergeRiPhase
  */
 
+import * as path from 'path';
 import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces/IPhaseExecutor';
 import type { CopilotUsageMetrics } from '../types';
 import { resolveMergeConflictWithCopilot } from './mergeHelper';
 import type { IGitOperations } from '../../interfaces/IGitOperations';
 import type { ICopilotRunner } from '../../interfaces/ICopilotRunner';
+
+/** Minimum ratio of (result files / richer parent files) below which we abort. */
+const TREE_VALIDATION_MIN_RATIO = 0.8;
 
 /**
  * Executor for the reverse integration merge phase.
@@ -48,8 +63,6 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       return { success: false, error: 'targetBranch is required for reverse integration merge' };
     }
     if (!completedCommit) {
-      // No completed commit — nothing to merge back.
-      // This happens for expects_no_changes nodes or validation-only nodes.
       context.logInfo('========== REVERSE INTEGRATION MERGE START ==========');
       context.logInfo('No completed commit — skipping RI merge (expects_no_changes or validation-only node)');
       context.logInfo('========== REVERSE INTEGRATION MERGE END ==========');
@@ -61,7 +74,6 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
     
     context.logInfo('========== REVERSE INTEGRATION MERGE START ==========');
     
-    // Check if there are any changes to merge
     const mergeSource = completedCommit;
     const diffBase = baseCommitAtStart;
     try {
@@ -87,13 +99,12 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       if (mergeTreeResult.success && mergeTreeResult.treeSha) {
         context.logInfo('✓ No conflicts detected');
         
-        // Create the merge commit from the tree
         const targetSha = await this.git.repository.resolveRef(targetBranch, repoPath);
         const commitMessage = `Plan ${node.name}: merge ${node.name} (commit ${mergeSource.slice(0, 8)})`;
         
         const newCommit = await this.git.merge.commitTree(
           mergeTreeResult.treeSha,
-          [targetSha],  // Single parent for squash-style merge
+          [targetSha],
           commitMessage,
           repoPath,
           s => context.logInfo(s)
@@ -101,59 +112,57 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
         
         context.logInfo(`Created merge commit: ${newCommit.slice(0, 8)}`);
         
+        // Validate the merged tree before updating the branch
+        const validationError = await this.validateMergedTree(
+          context, repoPath, newCommit, mergeSource, targetSha
+        );
+        if (validationError) {
+          context.logError(validationError);
+          context.logInfo('========== REVERSE INTEGRATION MERGE END ==========');
+          return { success: false, error: validationError };
+        }
+        
         // Update the target branch to point to the new commit
         const branchUpdated = await this.updateBranchRef(context, repoPath, targetBranch, newCommit);
         if (branchUpdated) {
           context.logInfo(`Updated ${targetBranch} to ${newCommit.slice(0, 8)}`);
         } else {
-          // Stash/reset failed but merge commit exists - partial success
-          context.logInfo(`⚠ Merge commit ${newCommit.slice(0, 8)} created but branch not auto-updated (stash failed)`);
+          context.logInfo(`⚠ Merge commit ${newCommit.slice(0, 8)} created but branch not auto-updated`);
           context.logInfo(`  Run 'git reset --hard ${newCommit.slice(0, 8)}' to update your local ${targetBranch}`);
         }
         
         // Push if configured
-        const pushOnSuccess = this.configManager?.getConfig('copilotOrchestrator.merge', 'pushOnSuccess', false) ?? false;
-        
-        if (pushOnSuccess) {
-          try {
-            context.logInfo(`Pushing ${targetBranch} to origin...`);
-            await this.git.repository.push(repoPath, { branch: targetBranch, log: s => context.logInfo(s) });
-            context.logInfo('✓ Pushed to origin');
-          } catch (pushError: any) {
-            context.logError(`Push failed: ${pushError.message}`);
-            // Push failure doesn't mean merge failed - the commit is local
-          }
-        }
+        await this.pushIfConfigured(context, repoPath, targetBranch);
         
         context.logInfo('========== REVERSE INTEGRATION MERGE END ==========');
         return { success: true };
       }
       
       // =========================================================================
-      // CONFLICT: Use Copilot CLI to resolve via main repo merge
+      // CONFLICT: Resolve in an ephemeral worktree (never touch user's checkout)
       // =========================================================================
       if (mergeTreeResult.hasConflicts) {
         context.logInfo('⚠ Merge has conflicts');
         context.logInfo(`  Conflicts: ${mergeTreeResult.conflictFiles?.join(', ')}`);
-        context.logInfo('  Invoking Copilot CLI to resolve...');
+        context.logInfo('  Resolving in ephemeral worktree (user checkout untouched)...');
         
-        // Fall back to main repo merge with Copilot CLI resolution
-        const resolved = await this.mergeWithConflictResolution(
+        const resolved = await this.mergeInEphemeralWorktree(
           context,
           repoPath,
           mergeSource,
           targetBranch,
-          `Plan ${node.name}: merge ${node.name} (commit ${mergeSource.slice(0, 8)})`
+          `Plan ${node.name}: merge ${node.name} (commit ${mergeSource.slice(0, 8)})`,
+          mergeTreeResult.conflictFiles || []
         );
         
         if (resolved.success) {
-          context.logInfo('✓ Conflict resolved by Copilot CLI');
+          context.logInfo('✓ Conflict resolved in ephemeral worktree');
           context.logInfo('========== REVERSE INTEGRATION MERGE END ==========');
           return { success: true, metrics: resolved.metrics };
         } else {
-          context.logError('✗ Copilot CLI failed to resolve conflict');
+          context.logError(`✗ Conflict resolution failed: ${resolved.error}`);
           context.logInfo('========== REVERSE INTEGRATION MERGE END ==========');
-          return { success: false, error: 'Failed to resolve merge conflicts', metrics: resolved.metrics };
+          return { success: false, error: resolved.error || 'Failed to resolve merge conflicts', metrics: resolved.metrics };
         }
       }
       
@@ -170,7 +179,6 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
   
   /**
    * Update branch reference to point to new commit.
-   * Handles cases where the branch is checked out elsewhere.
    */
   private async updateBranchRef(
     context: PhaseContext,
@@ -179,194 +187,209 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
     newCommit: string
   ): Promise<boolean> {
     try {
-      // Try to update the branch reference — args: (cwd, refName, commit)
       await this.git.repository.updateRef(repoPath, `refs/heads/${targetBranch}`, newCommit);
       return true;
     } catch (error: any) {
       context.logError(`Failed to update branch ${targetBranch}: ${error.message}`);
-      // Note: Even if branch update fails, the merge commit exists and the operation
-      // should be considered successful from a data integrity perspective
       return false;
     }
   }
   
   /**
-   * Merge with conflict resolution using main repo merge and Copilot CLI.
+   * Resolve merge conflicts in an ephemeral worktree.
    * 
-   * This is used when merge-tree detects conflicts. It:
-   * 1. Stashes user's uncommitted changes
-   * 2. Checks out target branch
-   * 3. Performs merge (conflicts occur)
-   * 4. Uses Copilot CLI to resolve conflicts
-   * 5. Restores user's original branch and stash
+   * This approach NEVER touches the user's main working directory:
+   * 1. Create a temporary detached worktree at the target branch commit
+   * 2. Run `git merge <source> --no-commit` inside the worktree
+   * 3. Use Copilot CLI to resolve conflicts inside the worktree
+   * 4. Read the resulting commit SHA
+   * 5. Validate the merged tree
+   * 6. Update the target branch ref in the main repo
+   * 7. Remove the ephemeral worktree
    */
-  private async mergeWithConflictResolution(
+  private async mergeInEphemeralWorktree(
     context: PhaseContext,
     repoPath: string,
     sourceCommit: string,
     targetBranch: string,
-    commitMessage: string
-  ): Promise<{ success: boolean; metrics?: CopilotUsageMetrics }> {
-    // Capture user's current state
-    const originalBranch = await this.git.branches.currentOrNull(repoPath);
-    const isOnTargetBranch = originalBranch === targetBranch;
-    const isDirty = await this.git.repository.hasUncommittedChanges(repoPath);
+    commitMessage: string,
+    conflictFiles: string[]
+  ): Promise<{ success: boolean; error?: string; metrics?: CopilotUsageMetrics }> {
+    const targetSha = await this.git.repository.resolveRef(targetBranch, repoPath);
+    const worktreeName = `ri-merge-${Date.now()}`;
+    // Place the ephemeral worktree inside the plan's worktree root (already gitignored)
+    const worktreePath = path.join(repoPath, '.worktrees', worktreeName);
     
-    let didStash = false;
-    let didCheckout = false;
+    context.logInfo(`Creating ephemeral worktree at ${worktreePath}`);
     
     try {
-      // Step 1: Stash uncommitted changes if needed
-      if (isDirty) {
-        const stashMsg = `orchestrator-merge-${Date.now()}`;
-        didStash = await this.git.repository.stashPush(repoPath, stashMsg, s => context.logInfo(s));
-        context.logInfo('Stashed user\'s uncommitted changes');
-      }
+      // Step 1: Create detached worktree at target branch commit
+      await this.git.worktrees.createDetachedWithTiming(
+        repoPath, worktreePath, targetSha,
+        s => context.logInfo(s)
+      );
       
-      // Step 2: Checkout targetBranch if needed
-      if (!isOnTargetBranch) {
-        await this.git.branches.checkout(repoPath, targetBranch, s => context.logInfo(s));
-        didCheckout = true;
-        context.logInfo(`Checked out ${targetBranch} for merge`);
-      }
-      
-      // Step 3: Perform the merge (will have conflicts)
+      // Step 2: Perform merge in the worktree (will have conflicts)
+      context.logInfo(`Merging ${sourceCommit.slice(0, 8)} in ephemeral worktree...`);
       await this.git.merge.merge({
         source: sourceCommit,
-        target: targetBranch,
-        cwd: repoPath,
+        target: 'HEAD',
+        cwd: worktreePath,
         noCommit: true,
         log: s => context.logInfo(s)
       }).catch(() => {
         // Expected to fail due to conflicts
       });
-
-      // List conflicted files for the instructions
-      const conflictedFiles = await this.git.merge.listConflicts(repoPath).catch(() => []);
       
-      // Step 4: Use Copilot CLI to resolve conflicts
+      // List conflicts in the worktree
+      const worktreeConflicts = await this.git.merge.listConflicts(worktreePath).catch(() => conflictFiles);
+      
+      // Step 3: Use Copilot CLI to resolve conflicts in the worktree
+      context.logInfo(`Invoking Copilot CLI to resolve ${worktreeConflicts.length} conflict(s)...`);
       const cliResult = await resolveMergeConflictWithCopilot(
         context,
-        repoPath,
+        worktreePath,
         sourceCommit,
         targetBranch,
         commitMessage,
         this.copilotRunner,
-        conflictedFiles,
+        worktreeConflicts,
         this.configManager
       );
       
       if (!cliResult.success) {
-        throw new Error('Copilot CLI failed to resolve conflicts');
+        return { success: false, error: 'Copilot CLI failed to resolve conflicts', metrics: cliResult.metrics };
       }
       
-      context.logInfo('Merge conflict resolved by Copilot CLI');
+      context.logInfo('Copilot CLI resolved conflicts');
+      
+      // Step 4: Get the resulting commit from the worktree
+      const resultCommit = await this.git.worktrees.getHeadCommit(worktreePath);
+      if (!resultCommit) {
+        return { success: false, error: 'No commit found in worktree after conflict resolution' };
+      }
+      
+      context.logInfo(`Worktree merge commit: ${resultCommit.slice(0, 8)}`);
+      
+      // Step 5: Validate the merged tree
+      const validationError = await this.validateMergedTree(
+        context, repoPath, resultCommit, sourceCommit, targetSha
+      );
+      if (validationError) {
+        return { success: false, error: validationError };
+      }
+      
+      // Step 6: Update the target branch ref
+      const branchUpdated = await this.updateBranchRef(context, repoPath, targetBranch, resultCommit);
+      if (branchUpdated) {
+        context.logInfo(`Updated ${targetBranch} to ${resultCommit.slice(0, 8)}`);
+      } else {
+        context.logInfo(`⚠ Merge commit exists but branch not updated — run 'git reset --hard ${resultCommit.slice(0, 8)}'`);
+      }
       
       // Push if configured
-      const pushOnSuccess = this.configManager?.getConfig('copilotOrchestrator.merge', 'pushOnSuccess', false) ?? false;
-      
-      if (pushOnSuccess) {
-        try {
-          await this.git.repository.push(repoPath, { branch: targetBranch, log: s => context.logInfo(s) });
-          context.logInfo(`Pushed ${targetBranch} to origin`);
-        } catch (pushError: any) {
-          context.logInfo(`Push failed: ${pushError.message}`);
-        }
-      }
-      
-      // Step 5: Restore user to original branch (if they weren't on target)
-      if (didCheckout && originalBranch) {
-        await this.git.branches.checkout(repoPath, originalBranch, (s: string) => context.logInfo(s));
-        context.logInfo(`Restored user to ${originalBranch}`);
-      }
-      
-      // Step 6: Restore stashed changes
-      if (didStash) {
-        try {
-          await this.git.repository.stashPop(repoPath, (s: string) => context.logInfo(s));
-          context.logInfo('Restored user\'s stashed changes');
-        } catch (stashError: any) {
-          context.logInfo(`Stash pop failed: ${stashError.message}`);
-          context.logInfo('Attempting AI-assisted resolution of stash conflicts...');
-          
-          // Stash pop leaves conflict markers in the working tree.
-          // Use AI to resolve them, then stage + drop the stash.
-          try {
-            const conflictFiles = await this.git.merge.listConflicts(repoPath).catch(() => []);
-            if (conflictFiles.length > 0) {
-              const stashResult = await resolveMergeConflictWithCopilot(
-                context,
-                repoPath,
-                'stash@{0}',
-                'HEAD',
-                'Resolve stash pop conflicts (restore user\'s local changes after RI merge)',
-                this.copilotRunner,
-                conflictFiles,
-                this.configManager
-              );
-              
-              if (stashResult.success) {
-                // Stage resolved files and drop the stash
-                await this.git.repository.stageAll(repoPath);
-                await this.git.repository.stashDrop(repoPath);
-                context.logInfo('AI resolved stash conflicts successfully');
-              } else {
-                context.logInfo('AI could not resolve stash conflicts. Run `git stash pop` manually.');
-              }
-            } else {
-              // No conflicts but pop still failed — check if it's orchestrator-only
-              const isOrchestratorOnly = await this.isStashOrchestratorOnly(repoPath);
-              if (isOrchestratorOnly) {
-                await this.git.repository.stashDrop(repoPath);
-                context.logInfo('Dropped stash (orchestrator-only changes already in merge)');
-              } else {
-                context.logInfo('Run `git stash list` and `git stash pop` manually if needed');
-              }
-            }
-          } catch (resolveErr: any) {
-            context.logInfo(`Stash resolution failed: ${resolveErr.message}`);
-            context.logInfo('Run `git stash list` and `git stash pop` manually if needed');
-          }
-        }
-      }
+      await this.pushIfConfigured(context, repoPath, targetBranch);
       
       return { success: true, metrics: cliResult.metrics };
       
     } catch (error: any) {
-      context.logError(`Merge with conflict resolution failed: ${error.message}`);
+      context.logError(`Ephemeral worktree merge failed: ${error.message}`);
       
-      // Best effort cleanup
+      // Abort any ongoing merge in the worktree
       try {
-        // Abort any ongoing merge
-        await this.git.merge.abort(repoPath, s => context.logInfo(s));
-        
-        // Restore original branch if we changed it
-        if (didCheckout && originalBranch) {
-          await this.git.branches.checkout(repoPath, originalBranch, s => context.logInfo(s));
-        }
-        
-        // Restore stash if we created one
-        if (didStash) {
-          await this.git.repository.stashPop(repoPath, s => context.logInfo(s));
-        }
-      } catch {
-        // Ignore cleanup errors
-      }
+        await this.git.merge.abort(worktreePath, s => context.logInfo(s));
+      } catch { /* ignore */ }
       
-      return { success: false };
+      return { success: false, error: `Merge in ephemeral worktree failed: ${error.message}` };
+    } finally {
+      // Always clean up the ephemeral worktree
+      try {
+        await this.git.worktrees.removeSafe(repoPath, worktreePath, {
+          force: true,
+          log: s => context.logInfo(s)
+        });
+        context.logInfo('Cleaned up ephemeral worktree');
+      } catch (cleanupErr: any) {
+        context.logInfo(`Warning: failed to remove ephemeral worktree: ${cleanupErr.message}`);
+      }
     }
   }
   
-  /** Check if stash contains only orchestrator-managed changes (safe to drop). */
-  private async isStashOrchestratorOnly(repoPath: string): Promise<boolean> {
+  /**
+   * Validate the merged tree hasn't lost a significant number of files.
+   * 
+   * Compares the file count of the merge result against the richer parent
+   * (source or target). If the result has < 80% of the richer parent's
+   * files, it's flagged as suspicious — likely a bad merge (e.g., stash-pop
+   * deletion was treated as intentional).
+   * 
+   * @returns Error message if validation fails, undefined if OK.
+   */
+  private async validateMergedTree(
+    context: PhaseContext,
+    repoPath: string,
+    resultCommit: string,
+    sourceCommit: string,
+    targetCommit: string,
+  ): Promise<string | undefined> {
     try {
-      const files = await this.git.repository.stashShowFiles(repoPath);
-      if (files.length !== 1 || files[0] !== '.gitignore') {return false;}
-      const diff = await this.git.repository.stashShowPatch(repoPath);
-      if (!diff) {return false;}
-      return this.git.gitignore.isDiffOnlyOrchestratorChanges(diff);
+      const [resultCount, sourceCount, targetCount] = await Promise.all([
+        this.countTreeFiles(repoPath, resultCommit),
+        this.countTreeFiles(repoPath, sourceCommit),
+        this.countTreeFiles(repoPath, targetCommit),
+      ]);
+      
+      const richerCount = Math.max(sourceCount, targetCount);
+      const ratio = richerCount > 0 ? resultCount / richerCount : 1;
+      
+      context.logInfo(`Tree validation: result=${resultCount} files, source=${sourceCount}, target=${targetCount}, ratio=${ratio.toFixed(2)}`);
+      
+      if (ratio < TREE_VALIDATION_MIN_RATIO && richerCount > 10) {
+        return `ABORTED: Merged tree has ${resultCount} files but richer parent has ${richerCount} files ` +
+          `(ratio ${ratio.toFixed(2)} < ${TREE_VALIDATION_MIN_RATIO}). This likely indicates a destructive merge. ` +
+          `The merge commit was NOT applied to the target branch.`;
+      }
+    } catch (err: any) {
+      context.logInfo(`Tree validation skipped (non-fatal): ${err.message}`);
+    }
+    return undefined;
+  }
+  
+  /**
+   * Count the number of files (blobs) in a commit's tree.
+   */
+  private async countTreeFiles(repoPath: string, commitish: string): Promise<number> {
+    try {
+      const { execAsync } = await import('../../git/core/executor');
+      const lsResult = await execAsync(
+        ['ls-tree', '-r', '--name-only', commitish],
+        { cwd: repoPath }
+      );
+      if (!lsResult.success) { return 0; }
+      const lines = lsResult.stdout.trim().split('\n').filter(Boolean);
+      return lines.length;
     } catch {
-      return false;
+      return 0;
+    }
+  }
+  
+  /**
+   * Push the target branch if the pushOnSuccess setting is enabled.
+   */
+  private async pushIfConfigured(
+    context: PhaseContext,
+    repoPath: string,
+    targetBranch: string
+  ): Promise<void> {
+    const pushOnSuccess = this.configManager?.getConfig('copilotOrchestrator.merge', 'pushOnSuccess', false) ?? false;
+    if (pushOnSuccess) {
+      try {
+        context.logInfo(`Pushing ${targetBranch} to origin...`);
+        await this.git.repository.push(repoPath, { branch: targetBranch, log: s => context.logInfo(s) });
+        context.logInfo('✓ Pushed to origin');
+      } catch (pushError: any) {
+        context.logError(`Push failed: ${pushError.message}`);
+      }
     }
   }
 }

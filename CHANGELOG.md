@@ -5,6 +5,18 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.21] - 2026-02-17
+
+### Fixed
+- **CRITICAL: RI merge no longer touches user's working directory**: Conflict resolution now runs in an ephemeral detached worktree instead of stashing/checking out on the user's main repo. This eliminates the stash/pop pattern that caused catastrophic file deletion (190 files lost in production) when stash pop conflicts were resolved by favoring the pre-plan state.
+- **Removed all stash operations from RI merge**: The `mergeWithConflictResolution` method was replaced by `mergeInEphemeralWorktree` which creates a temporary worktree, performs the merge, uses Copilot CLI for conflict resolution, then updates the branch ref — all without touching the user's checkout.
+- **Post-merge tree validation**: After every RI merge (both conflict-free and conflict-resolved), the file count of the merged tree is validated against both parent commits. If the result has <80% of the richer parent's files, the merge is aborted and flagged as destructive.
+
+### Removed
+- `mergeWithConflictResolution` method (stash/checkout/merge/pop pattern)
+- `isStashOrchestratorOnly` helper
+- All `stashPush`/`stashPop`/`stashDrop` usage in RI merge path
+
 ## [0.11.16] - 2026-02-16
 
 ### Fixed
