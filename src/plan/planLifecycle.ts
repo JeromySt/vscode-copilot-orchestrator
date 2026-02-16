@@ -351,15 +351,6 @@ export class PlanLifecycleManager {
       this.log.warn(`Git fetch failed before resume (continuing anyway): ${e.message}`);
     }
 
-    // Ensure target branch exists (deferred from plan creation) and commit .gitignore
-    if (plan.spec.targetBranch && plan.spec.baseBranch) {
-      try {
-        await this.ensureTargetBranchAndGitignore(plan);
-      } catch (e: any) {
-        this.log.warn(`Failed to ensure target branch/gitignore (continuing): ${e.message}`);
-      }
-    }
-
     if (plan.isPaused) {
       plan.isPaused = false;
       this.state.events.emitPlanUpdated(planId);
@@ -373,10 +364,12 @@ export class PlanLifecycleManager {
   }
 
   /**
-   * Ensure the target branch exists and .gitignore has orchestrator entries committed.
-   * Called on first resume — the branch is NOT created at plan creation time.
+   * Ensure the target branch ref exists locally.
+   * Called by the pump's ensureBranchReady callback before any nodes execute.
+   * Subsequent calls are no-ops if the branch already exists.
+   * Throws on failure — the plan must not proceed without a valid target ref.
    */
-  private async ensureTargetBranchAndGitignore(plan: PlanInstance): Promise<void> {
+  async ensureTargetBranch(plan: PlanInstance): Promise<void> {
     const { repoPath } = plan;
     const targetBranch = plan.spec.targetBranch!;
     const baseBranch = plan.spec.baseBranch!;
@@ -386,8 +379,18 @@ export class PlanLifecycleManager {
       await this.git.branches.create(targetBranch, baseBranch, repoPath);
       this.log.info(`Created target branch '${targetBranch}' from '${baseBranch}'`);
     }
+  }
 
-    // Checkout target branch, ensure .gitignore entries, and commit if modified
+  /**
+   * Checkout the target branch and commit orchestrator .gitignore entries
+   * if they are missing. If the repository was on a different named branch
+   * before this call (i.e., currentBranch is non-null and not the target),
+   * that original branch is restored afterward.
+   */
+  async commitGitignoreEntries(plan: PlanInstance): Promise<void> {
+    const { repoPath } = plan;
+    const targetBranch = plan.spec.targetBranch!;
+
     const currentBranch = await this.git.branches.currentOrNull(repoPath);
     try {
       await this.git.branches.checkout(repoPath, targetBranch);

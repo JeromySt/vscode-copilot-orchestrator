@@ -456,6 +456,9 @@ export interface PlanInstance {
   
   /** Whether the plan is paused (no new work scheduled, worktrees preserved) */
   isPaused?: boolean;
+
+  /** Whether the target branch has been created and .gitignore committed */
+  branchReady?: boolean;
   
   /** Aggregated work summary */
   workSummary?: WorkSummary;

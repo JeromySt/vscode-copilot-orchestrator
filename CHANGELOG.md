@@ -5,6 +5,12 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.16] - 2026-02-16
+
+### Fixed
+- **Centralized target branch setup in execution pump**: Branch creation and `.gitignore` commit now happen in the pump before any nodes execute, ensuring the same codepath runs for both paused-then-resumed and immediately-started (`startPaused: false`) plans. Previously, branch setup only ran in `resume()`, so non-paused plans would proceed to RI merge with a missing local ref.
+- **`branchReady` flag**: Plans now track whether target branch setup is complete. The pump skips plans whose branch hasn't been created yet, and persists the flag across restarts so setup isn't repeated.
+
 ## [0.11.15] - 2026-02-16
 
 ### Fixed
