@@ -356,6 +356,7 @@ export class NodeDetailPanel {
   private _currentPhase: string | null = null;
   private _lastStatus: string | null = null;
   private _lastWorktreeCleanedUp: boolean | undefined = undefined;
+  private _lastAttemptCount = 0;
   private _controller: NodeDetailController;
   
   /**
@@ -421,6 +422,7 @@ export class NodeDetailPanel {
       const state = plan?.nodeStates.get(this._nodeId);
       this._lastStatus = state?.status || null;
       this._lastWorktreeCleanedUp = state?.worktreeCleanedUp;
+      this._lastAttemptCount = state?.attemptHistory?.length || 0;
       this._update();
     });
     
@@ -442,6 +444,12 @@ export class NodeDetailPanel {
           phaseStatus,
           currentPhase,
         });
+
+        // Push incremental attempt history when new attempts are recorded
+        if (state.attemptHistory && state.attemptHistory.length > this._lastAttemptCount) {
+          this._lastAttemptCount = state.attemptHistory.length;
+          this._sendAttemptUpdate(state);
+        }
       }
 
       if (state?.status === 'running' || state?.status === 'scheduled') {
@@ -766,6 +774,9 @@ export class NodeDetailPanel {
     }
     
     this._panel.webview.html = this._getHtml(plan, node, state);
+    
+    // Sync attempt count so incremental updates don't duplicate pre-rendered cards
+    this._lastAttemptCount = state.attemptHistory?.length || 0;
     
     // Send config update after rendering
     this._sendConfigUpdate();
