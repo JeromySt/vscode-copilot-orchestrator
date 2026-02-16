@@ -59,6 +59,7 @@ export class planDetailPanel {
   private _lastStructureHash: string = '';
   private _isFirstRender: boolean = true;
   private readonly _controller: PlanDetailController;
+  private _disposed = false;
   
   /**
    * @param panel - The VS Code webview panel instance.
@@ -80,7 +81,11 @@ export class planDetailPanel {
     // Build the delegate that bridges controller → VS Code APIs
     const delegate: PlanDetailDelegate = {
       executeCommand: (cmd, ...args) => vscode.commands.executeCommand(cmd, ...args) as Promise<void>,
-      postMessage: (msg) => this._panel.webview.postMessage(msg),
+      postMessage: (msg) => {
+        if (!this._disposed) {
+          try { this._panel.webview.postMessage(msg); } catch { /* panel disposed */ }
+        }
+      },
       forceFullRefresh: () => this._forceFullRefresh(),
       showWorkSummaryDocument: () => this._showWorkSummaryDocument(),
       sendAllProcessStats: () => this._sendAllProcessStats(),
@@ -127,7 +132,9 @@ export class planDetailPanel {
     // Duration counters (plan header + node labels) update purely client-side
     // using data-started timestamps. No server data needed on every tick.
     this._pulseSubscription = this._pulse.onPulse(() => {
-      this._panel.webview.postMessage({ type: 'pulse' });
+      if (!this._disposed) {
+        try { this._panel.webview.postMessage({ type: 'pulse' }); } catch { /* panel disposed */ }
+      }
     });
     
     // Handle panel disposal
@@ -219,6 +226,7 @@ export class planDetailPanel {
   
   /** Dispose the panel, clear timers, and remove it from the static panel map. */
   public dispose() {
+    this._disposed = true;
     planDetailPanel.panels.delete(this._planId);
     
     if (this._pulseSubscription) {
@@ -237,8 +245,10 @@ export class planDetailPanel {
    * Query all process stats for this Plan and send them to the webview.
    */
   private async _sendAllProcessStats() {
+    if (this._disposed) { return; }
     try {
       const stats = await this._planRunner.getAllProcessStats(this._planId);
+      if (this._disposed) { return; }
       this._panel.webview.postMessage({
         type: 'allProcessStats',
         flat: (stats as any).flat || [],
@@ -246,13 +256,16 @@ export class planDetailPanel {
         rootJobs: (stats as any).rootJobs || []
       });
     } catch (err) {
+      if (this._disposed) { return; }
       // Send empty stats on error to clear the loading state
-      this._panel.webview.postMessage({
-        type: 'allProcessStats',
-        flat: [],
-        hierarchy: [],
-        rootJobs: []
-      });
+      try {
+        this._panel.webview.postMessage({
+          type: 'allProcessStats',
+          flat: [],
+          hierarchy: [],
+          rootJobs: []
+        });
+      } catch { /* panel disposed */ }
     }
   }
   
@@ -379,6 +392,7 @@ export class planDetailPanel {
    * Used when the webview requests a refresh (e.g., after an error).
    */
   private async _forceFullRefresh() {
+    if (this._disposed) { return; }
     const plan = this._planRunner.get(this._planId);
     if (!plan) {
       this._panel.webview.html = this._getErrorHtml('Plan not found');
@@ -406,6 +420,7 @@ export class planDetailPanel {
    * Uses a JSON state hash to skip redundant re-renders.
    */
   private async _update() {
+    if (this._disposed) { return; }
     const plan = this._planRunner.get(this._planId);
     if (!plan) {
       this._panel.webview.html = this._getErrorHtml('Plan not found');
@@ -512,6 +527,7 @@ export class planDetailPanel {
    * startedAt/endedAt data on every pulse tick.
    */
   private async _sendIncrementalUpdate() {
+    if (this._disposed) { return; }
     const plan = this._planRunner.get(this._planId);
     if (!plan) {return;}
     

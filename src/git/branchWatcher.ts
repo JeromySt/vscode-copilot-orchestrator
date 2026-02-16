@@ -93,6 +93,11 @@ export class BranchChangeWatcher implements vscode.Disposable {
     });
     
     // Watch for state changes (includes branch changes, commits, etc.)
+    // Guard: some VS Code Git API versions may not expose onDidChangeState
+    if (typeof repo.onDidChangeState !== 'function') {
+      this.logger.warn('Repository does not support onDidChangeState — skipping watch', { path: workspaceRoot });
+      return;
+    }
     const disposable = repo.onDidChangeState(async (state) => {
       const currentBranch = state.HEAD?.name;
       const lastBranch = this.repositoryBranches.get(repoKey);
