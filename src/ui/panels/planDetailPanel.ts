@@ -653,6 +653,18 @@ export class planDetailPanel {
       padding: 0;
       color: var(--vscode-foreground);
       background: var(--vscode-editor-background);
+      overflow-x: auto;
+      overflow-y: auto;
+    }
+    .plan-content-wrapper {
+      display: inline-flex;
+      flex-direction: column;
+      min-width: 100%;
+      box-sizing: border-box;
+    }
+    .plan-content-wrapper > * {
+      min-width: fit-content;
+      box-sizing: border-box;
     }
     /* Sticky header */
     .sticky-header {
@@ -666,7 +678,7 @@ export class planDetailPanel {
     .sticky-header + * {
       padding-top: 8px;
     }
-    body > *:not(.sticky-header) {
+    .plan-content-wrapper > * {
       padding-left: 16px;
       padding-right: 16px;
     }
@@ -1326,11 +1338,13 @@ export class planDetailPanel {
     globalCapacityStats,
   })}
   </div>
+  <div class="plan-content-wrapper">
   ${renderPlanControls({ status })}
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}
   ${renderPlanDag({ mermaidDef, status })}
   ${workSummaryHtml}
+  </div>
   ${renderPlanScripts({ nodeData, nodeTooltips, mermaidDef, edgeData, globalCapacityStats: globalCapacityStats || null })}
 </body>
 </html>`;
