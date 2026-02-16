@@ -461,9 +461,9 @@ export function webviewScripts(config: ScriptsConfig): string {
 
         for (var i = 0; i < data.attempts.length; i++) {
           var attempt = data.attempts[i];
-          var num = attempt.attemptNumber;
-          if (this._knownAttempts[num]) continue;
-          this._knownAttempts[num] = true;
+          var key = attempt.attemptNumber + ':' + (attempt.triggerType || 'initial');
+          if (this._knownAttempts[key]) continue;
+          this._knownAttempts[key] = true;
           var cardDiv = document.createElement('div');
           cardDiv.innerHTML = this._renderAttemptCard(attempt);
           if (cardDiv.firstChild) container.appendChild(cardDiv.firstChild);
@@ -479,7 +479,9 @@ export function webviewScripts(config: ScriptsConfig): string {
           : attempt.triggerType === 'retry'
             ? '<span class="trigger-badge retry">🔄 Retry</span>' : '';
         var errorHtml = attempt.error
-          ? '<div class="attempt-error"><strong>Error:</strong> <span class="error-message">' + escapeHtml(attempt.error) + '</span></div>' : '';
+          ? '<div class="attempt-error"><strong>Error:</strong> <span class="error-message">' + escapeHtml(attempt.error) + '</span>'
+            + (attempt.failedPhase ? '<div style="margin-top: 4px;">Failed in phase: <strong>' + escapeHtml(attempt.failedPhase) + '</strong></div>' : '')
+            + '</div>' : '';
         return '<div class="attempt-card" data-attempt="' + attempt.attemptNumber + '">'
           + '<div class="attempt-header" data-expanded="false">'
           + '<div class="attempt-header-left">'
