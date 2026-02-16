@@ -646,7 +646,7 @@ export class JobExecutionEngine {
 
             // The heal spec is minimal — the real instructions are in the .md file
             // Add the .orchestrator/logs dir as an allowed folder so the agent can read log files
-            const logsDir = plan.repoPath ? path.join(plan.repoPath, '.orchestrator', 'logs') : undefined;
+            const logsDir = plan.repoPath ? path.resolve(plan.repoPath, '.orchestrator', 'logs') : undefined;
             const healAllowedFolders = [
               ...(originalAgentSpec?.allowedFolders || []),
               ...(logsDir ? [logsDir] : []),
