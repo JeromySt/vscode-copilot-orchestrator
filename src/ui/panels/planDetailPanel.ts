@@ -98,38 +98,6 @@ export class planDetailPanel {
           vscode.window.showTextDocument(fileUri, { preview: true }).then(undefined, () => { /* file may not exist */ });
         }
       },
-      completeFinalMerge: () => {
-        this._planRunner.completeFinalMerge(this._planId).then(result => {
-          if (result.success) {
-            vscode.window.showInformationMessage('Final merge completed successfully!');
-          } else {
-            vscode.window.showErrorMessage(`Final merge failed: ${result.error}`);
-          }
-          this._forceFullRefresh();
-        });
-      },
-      showSnapshotDetail: (node: string) => {
-        const plan = this._planRunner.get(this._planId);
-        if (!plan) {return;}
-        const snap = plan.snapshot;
-        const totalLeaves = plan.leaves.length;
-        let mergedLeaves = 0;
-        for (const leafId of plan.leaves) {
-          const st = plan.nodeStates.get(leafId);
-          if (st?.status === 'succeeded' || st?.mergedToTarget === true) {mergedLeaves++;}
-        }
-        if (node === 'SNAPSHOT') {
-          const msg = snap
-            ? `📦 Snapshot Branch: ${snap.branch}\nBase Commit: ${snap.baseCommit.slice(0, 8)}\nWorktree: ${snap.worktreePath}\nLeaf Progress: ${mergedLeaves}/${totalLeaves} merged`
-            : `📦 Snapshot: Awaiting creation\nLeaf Progress: ${mergedLeaves}/${totalLeaves}`;
-          vscode.window.showInformationMessage(msg, { modal: false });
-        } else {
-          const status = plan.awaitingFinalMerge ? '❌ Awaiting manual merge'
-            : plan.endedAt ? '✅ Merged to target' : '⏳ Pending';
-          const msg = `⬆ Final Merge\nTarget: ${plan.targetBranch || 'unknown'}\nStatus: ${status}\nLeaves: ${mergedLeaves}/${totalLeaves} merged into snapshot`;
-          vscode.window.showInformationMessage(msg, { modal: false });
-        }
-      },
     };
     this._controller = new PlanDetailController(planId, dialogService, delegate);
     
@@ -705,24 +673,6 @@ export class planDetailPanel {
     // Build work summary from node states
     const workSummaryHtml = this._buildWorkSummaryHtml(plan);
     const metricsBarHtml = this._buildMetricsBarHtml(plan);
-
-    // Compute snapshot data for the info card (show whenever targetBranch exists)
-    let snapshotData: { branch: string; baseCommit: string; mergedLeaves: number; totalLeaves: number; awaitingFinalMerge: boolean; planStatus: string } | undefined;
-    if (plan.targetBranch) {
-      let mergedLeaves = 0;
-      for (const leafId of plan.leaves) {
-        const st = plan.nodeStates.get(leafId);
-        if (st?.status === 'succeeded' || st?.mergedToTarget === true) {mergedLeaves++;}
-      }
-      snapshotData = {
-        branch: plan.snapshot?.branch || `orchestrator/snapshot/${plan.id.slice(0, 8)}`,
-        baseCommit: plan.snapshot?.baseCommit || 'pending',
-        mergedLeaves,
-        totalLeaves: plan.leaves.length,
-        awaitingFinalMerge: !!plan.awaitingFinalMerge,
-        planStatus: status,
-      };
-    }
     
     return `<!DOCTYPE html>
 <html>
@@ -1415,11 +1365,11 @@ export class planDetailPanel {
     globalCapacityStats,
   })}
   </div>
-  ${renderPlanControls({ status, awaitingFinalMerge: plan.awaitingFinalMerge })}
+  ${renderPlanControls({ status })}
   </div>
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}
-  ${renderPlanDag({ mermaidDef, status, snapshot: snapshotData })}
+  ${renderPlanDag({ mermaidDef, status })}
   ${workSummaryHtml}
   </div>
   ${renderPlanScripts({ nodeData, nodeTooltips, mermaidDef, edgeData, globalCapacityStats: globalCapacityStats || null })}
@@ -1917,96 +1867,27 @@ export class planDetailPanel {
       lines.push(`  TARGET_DEST["🎯 ${this._escapeForMermaid(truncBranch(targetBranchName, MAX_NODE_LABEL_CHARS))}"]`);
       lines.push('  class TARGET_DEST branchNode');
       if (targetBranchName.length > MAX_NODE_LABEL_CHARS) {nodeTooltips['TARGET_DEST'] = targetBranchName;}
-      
-      const hasSnapshot = !!plan.snapshot;
 
-      // Always show "Final Merge Validation" subgraph when targetBranch is set
-      // (RI merge will happen). Before the snapshot worktree is created, the
-      // nodes simply show as "pending".
-      // Compute snapshot status: how many leaves have merged into it
-      const totalLeaves = mainResult.leaves.length;
-      let mergedLeaves = 0;
-      for (const leafId of mainResult.leaves) {
-        const leafState = leafnodeStates.get(leafId);
-        if (leafState?.mergedToTarget === true || leafState?.status === 'succeeded') {
-          mergedLeaves++;
-        }
-      }
-
-      // Determine snapshot node status
-      let snapshotStatus: string;
-      if (!hasSnapshot) {snapshotStatus = 'pending';}
-      else if (mergedLeaves === totalLeaves) {snapshotStatus = 'succeeded';}
-      else if (mergedLeaves > 0) {snapshotStatus = 'running';}
-      else {snapshotStatus = 'pending';}
-
-      // Determine final merge node status
-      let finalMergeStatus: string;
-      if (plan.awaitingFinalMerge) {finalMergeStatus = 'failed';}
-      else if (plan.endedAt && snapshotStatus === 'succeeded') {finalMergeStatus = 'succeeded';}
-      else if (snapshotStatus === 'succeeded') {finalMergeStatus = 'running';}
-      else {finalMergeStatus = 'pending';}
-
-      const snapshotIcon = this._getStatusIcon(snapshotStatus);
-      const finalMergeIcon = this._getStatusIcon(finalMergeStatus);
-      const snapshotLabel = hasSnapshot
-        ? `${mergedLeaves}/${totalLeaves} leaves merged`
-        : 'Awaiting snapshot';
-      
-      // "Final Merge Validation" subgraph containing both nodes
-      const fmGroupColors: Record<string, { fill: string; stroke: string }> = {
-        pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
-        running: { fill: '#1a2a4e', stroke: '#3794ff' },
-        succeeded: { fill: '#1a3a2e', stroke: '#4ec9b0' },
-        failed: { fill: '#3a1a1e', stroke: '#f48771' },
-      };
-      const overallFmStatus = finalMergeStatus === 'failed' ? 'failed' :
-        finalMergeStatus === 'succeeded' ? 'succeeded' :
-        snapshotStatus === 'running' || finalMergeStatus === 'running' ? 'running' : 'pending';
-      const fmColors = fmGroupColors[overallFmStatus] || fmGroupColors.pending;
-
-      lines.push('');
-      lines.push(`  subgraph FINAL_MERGE_GROUP["Final Merge Validation"]`);
-      lines.push(`    SNAPSHOT["${snapshotIcon} 📦 Snapshot: ${snapshotLabel}"]`);
-      lines.push(`    class SNAPSHOT ${snapshotStatus}`);
-      lines.push(`    FINAL_MERGE["${finalMergeIcon} ⬆ Final Merge"]`);
-      lines.push(`    class FINAL_MERGE ${finalMergeStatus}`);
-      lines.push(`    SNAPSHOT --> FINAL_MERGE`);
-      edgeData.push({ index: edgeIndex, from: 'SNAPSHOT', to: 'FINAL_MERGE' });
-      if (snapshotStatus === 'succeeded') {successEdges.push(edgeIndex);}
-      edgeIndex++;
-      lines.push(`  end`);
-      lines.push(`  style FINAL_MERGE_GROUP fill:${fmColors.fill},stroke:${fmColors.stroke},stroke-width:2px,stroke-dasharray:5`);
-      
-      // Leaf nodes → SNAPSHOT
-      for (const leafId of mainResult.leaves) {
-        const mapping = nodeEntryExitMap.get(leafId);
-        const exitIds = mapping ? mapping.exitIds : [leafId];
+      // The snapshot-validation JobNode is a real node in the plan and renders
+      // naturally through the standard node loop above. Connect its exit to
+      // TARGET_DEST so the diagram shows the merge-ri → targetBranch flow.
+      const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
+      if (svNodeId) {
+        const mapping = nodeEntryExitMap.get(svNodeId);
+        const exitIds = mapping ? mapping.exitIds : [svNodeId];
+        const svState = leafnodeStates.get(svNodeId);
+        const svSucceeded = svState?.status === 'succeeded';
         for (const exitId of exitIds) {
-          const leafState = leafnodeStates.get(exitId);
-          const isMerged = leafState?.mergedToTarget === true
-            || leafState?.status === 'succeeded';
-          
-          if (isMerged) {
-            lines.push(`  ${exitId} --> SNAPSHOT`);
+          if (svSucceeded) {
+            lines.push(`  ${exitId} --> TARGET_DEST`);
             successEdges.push(edgeIndex);
           } else {
-            lines.push(`  ${exitId} -.-> SNAPSHOT`);
+            lines.push(`  ${exitId} -.-> TARGET_DEST`);
           }
-          edgeData.push({ index: edgeIndex, from: exitId, to: 'SNAPSHOT', isLeafToTarget: true });
+          edgeData.push({ index: edgeIndex, from: exitId, to: 'TARGET_DEST' });
           edgeIndex++;
         }
       }
-      
-      // FINAL_MERGE → TARGET_DEST
-      if (finalMergeStatus === 'succeeded') {
-        lines.push(`  FINAL_MERGE --> TARGET_DEST`);
-        successEdges.push(edgeIndex);
-      } else {
-        lines.push(`  FINAL_MERGE -.-> TARGET_DEST`);
-      }
-      edgeData.push({ index: edgeIndex, from: 'FINAL_MERGE', to: 'TARGET_DEST' });
-      edgeIndex++;
     }
     
     // Add linkStyle for colored edges

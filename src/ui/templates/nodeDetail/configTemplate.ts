@@ -32,7 +32,7 @@ export interface ConfigData {
   prechecks?: WorkSpec;
   /** Postchecks spec */
   postchecks?: WorkSpec;
-  /** Verify-RI spec (plan-level, shown on leaf nodes) */
+  /** Verify-RI spec (plan-level — kept for backward compat of persisted data) */
   verifyRi?: WorkSpec;
   /** Job instructions text */
   instructions?: string;
@@ -225,11 +225,6 @@ export function configSectionHtml(data: ConfigData): string {
   // Postchecks phase (collapsible, collapsed by default)
   if (data.postchecks !== undefined && data.postchecks !== null) {
     configContent += renderPhase('postchecks', 'Postchecks', data.postchecks, true);
-  }
-
-  // Verify-RI phase (collapsible, collapsed by default — plan-level spec)
-  if (data.verifyRi !== undefined && data.verifyRi !== null) {
-    configContent += renderPhase('verify-ri', 'Verify RI', data.verifyRi, true);
   }
 
   configContent += '</div>';

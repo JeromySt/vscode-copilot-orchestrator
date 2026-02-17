@@ -98,9 +98,8 @@ export function metricsSummaryHtml(metrics: MetricsData, phaseMetrics?: PhaseMet
       'commit': '📝 Commit Review',
       'postchecks': '✅ Postchecks',
       'merge-ri': '↗↙ Merge RI',
-      'verify-ri': '🔍 Verify RI',
     };
-    const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri', 'verify-ri'];
+    const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
 
     const phaseRows = phaseOrder
       .filter(phase => phaseMetrics[phase])
@@ -188,9 +187,8 @@ export function attemptMetricsHtml(metrics: MetricsData, phaseMetrics?: PhaseMet
       'commit': '📝 Commit Review',
       'postchecks': '✅ Postchecks',
       'merge-ri': '↗↙ Merge RI',
-      'verify-ri': '🔍 Verify RI',
     };
-    const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri', 'verify-ri'];
+    const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
 
     const phaseRows = phaseOrder
       .filter(phase => phaseMetrics[phase])

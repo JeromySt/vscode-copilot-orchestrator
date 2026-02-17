@@ -15,15 +15,6 @@ export interface PlanDagData {
   mermaidDef: string;
   /** Computed plan status */
   status: string;
-  /** Snapshot info (when snapshot-based RI merge is active) */
-  snapshot?: {
-    branch: string;
-    baseCommit: string;
-    mergedLeaves: number;
-    totalLeaves: number;
-    awaitingFinalMerge: boolean;
-    planStatus: string;
-  };
 }
 
 /**
@@ -79,51 +70,6 @@ ${mermaidDef}
     </div>
   </div>
   `;
-
-  // Snapshot Status card (between diagram and processes)
-  if (data.snapshot) {
-    const s = data.snapshot;
-    const allMerged = s.mergedLeaves === s.totalLeaves;
-    const progressPct = s.totalLeaves > 0 ? Math.round((s.mergedLeaves / s.totalLeaves) * 100) : 0;
-
-    let statusIcon: string;
-    let statusText: string;
-    let statusColor: string;
-    if (s.awaitingFinalMerge) {
-      statusIcon = '✗'; statusText = 'Awaiting Manual Merge'; statusColor = '#f48771';
-    } else if (s.planStatus === 'succeeded') {
-      statusIcon = '✓'; statusText = 'Merged to Target'; statusColor = '#4ec9b0';
-    } else if (allMerged) {
-      statusIcon = '▶'; statusText = 'Final Merge In Progress'; statusColor = '#3794ff';
-    } else if (s.mergedLeaves > 0) {
-      statusIcon = '▶'; statusText = 'Accumulating Leaf Merges'; statusColor = '#3794ff';
-    } else {
-      statusIcon = '○'; statusText = 'Waiting for Leaves'; statusColor = '#858585';
-    }
-
-    html += `
-  <div class="snapshot-status-card" style="margin:12px 0;padding:12px 16px;border:1px solid ${statusColor};border-radius:6px;background:var(--vscode-editor-background)">
-    <h3 style="margin:0 0 8px 0;font-size:13px;color:${statusColor}">📦 Snapshot RI Merge</h3>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:12px">
-      <div style="color:var(--vscode-descriptionForeground)">Status</div>
-      <div><span style="color:${statusColor}">${statusIcon}</span> ${statusText}</div>
-      <div style="color:var(--vscode-descriptionForeground)">Branch</div>
-      <div style="font-family:var(--vscode-editor-font-family);font-size:11px">${s.branch}</div>
-      <div style="color:var(--vscode-descriptionForeground)">Base Commit</div>
-      <div style="font-family:var(--vscode-editor-font-family);font-size:11px">${s.baseCommit.slice(0, 8)}</div>
-      <div style="color:var(--vscode-descriptionForeground)">Leaf Progress</div>
-      <div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="flex:1;height:6px;background:var(--vscode-progressBar-background, #3c3c3c);border-radius:3px;overflow:hidden">
-            <div style="width:${progressPct}%;height:100%;background:${statusColor};border-radius:3px;transition:width 0.3s"></div>
-          </div>
-          <span>${s.mergedLeaves}/${s.totalLeaves}</span>
-        </div>
-      </div>
-    </div>
-  </div>
-    `;
-  }
 
   if (status === 'running') {
     html += `

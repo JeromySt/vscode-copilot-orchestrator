@@ -344,14 +344,9 @@ export function renderPlanScripts(data: PlanScriptsData): string {
             const match = nodeGroup.id.match(/flowchart-([^-]+)-/);
             if (match) {
               const sanitizedId = match[1];
-              // Synthetic snapshot nodes — show snapshot detail
-              if (sanitizedId === 'SNAPSHOT' || sanitizedId === 'FINAL_MERGE') {
-                vscode.postMessage({ type: 'showSnapshotDetail', node: sanitizedId });
-              } else {
-                const data = nodeData[sanitizedId];
-                if (data) {
-                  vscode.postMessage({ type: 'openNode', nodeId: data.nodeId, planId: data.planId });
-                }
+              const data = nodeData[sanitizedId];
+              if (data) {
+                vscode.postMessage({ type: 'openNode', nodeId: data.nodeId, planId: data.planId });
               }
             }
           }
@@ -393,10 +388,6 @@ export function renderPlanScripts(data: PlanScriptsData): string {
     
     function showWorkSummary() {
       vscode.postMessage({ type: 'showWorkSummary' });
-    }
-
-    function completeFinalMerge() {
-      vscode.postMessage({ type: 'completeFinalMerge' });
     }
     
     // Zoom functionality

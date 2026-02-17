@@ -190,7 +190,20 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
             description: 'Optional (but HIGHLY recommended) verification command run as the work phase of the auto-injected Snapshot Validation node. Executes after all leaf nodes complete, validating the accumulated snapshot before merging to targetBranch. Auto-healable: on failure, Copilot CLI attempts to fix the issue. String command or object with type: process/shell/agent. Example: "dotnet build --no-restore" or "npm run build"',
             oneOf: [
               { type: 'string', maxLength: 4000 },
-              { type: 'object' }
+              {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', enum: ['process', 'shell', 'agent'] },
+                  command: { type: 'string' },
+                  executable: { type: 'string' },
+                  args: { type: 'array', items: { type: 'string' } },
+                  shell: { type: 'string', enum: ['cmd', 'powershell', 'pwsh', 'bash', 'sh'] },
+                  instructions: { type: 'string' },
+                  model: { type: 'string' },
+                  maxTurns: { type: 'number' },
+                  on_failure: { type: 'object' }
+                }
+              }
             ]
           },
           jobs: {

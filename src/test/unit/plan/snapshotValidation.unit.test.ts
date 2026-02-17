@@ -4,7 +4,7 @@
  */
 import * as assert from 'assert';
 import { suite, test } from 'mocha';
-import { buildPlan, buildSingleJobPlan } from '../../../plan/builder';
+import { buildPlan } from '../../../plan/builder';
 import type { PlanSpec, OnFailureConfig, JobNode, JobExecutionResult, WorkSpec, PlanNode } from '../../../plan/types';
 import { normalizeWorkSpec } from '../../../plan/types';
 

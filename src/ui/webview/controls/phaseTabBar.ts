@@ -34,7 +34,6 @@ const DEFAULT_PHASES: PhaseInfo[] = [
   { id: 'commit', name: 'Commit', icon: '💾' },
   { id: 'postchecks', name: 'Postchecks', icon: '✓' },
   { id: 'merge-ri', name: 'Merge RI', icon: '↑' },
-  { id: 'verify-ri', name: 'Verify RI', icon: '🔍' },
 ];
 
 /** Map phase status to CSS icon character. */
