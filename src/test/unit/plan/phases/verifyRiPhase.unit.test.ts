@@ -4,19 +4,9 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import { VerifyRiPhaseExecutor } from '../../../../plan/phases/verifyRiPhase';
 import type { PhaseContext } from '../../../../interfaces/IPhaseExecutor';
 import type { IGitOperations } from '../../../../interfaces/IGitOperations';
-
-let tmpDirs: string[] = [];
-function makeTmpDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verifyri-test-'));
-  tmpDirs.push(dir);
-  return dir;
-}
 
 function mockGitOperations(): IGitOperations {
   return {
@@ -138,10 +128,6 @@ suite('VerifyRiPhaseExecutor', () => {
   setup(() => { sandbox = sinon.createSandbox(); });
   teardown(() => {
     sandbox.restore();
-    for (const dir of tmpDirs) {
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
-    }
-    tmpDirs = [];
   });
 
   test('constructor creates instance', () => {

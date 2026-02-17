@@ -153,7 +153,6 @@ export class CopilotCliRunner {
     // Auto-derive configDir from cwd for session isolation.
     // Every CLI invocation gets its own config dir so sessions don't leak
     // into the VS Code Sessions UI or collide between concurrent nodes.
-    const configDir = path.join(cwd, '.orchestrator', '.copilot-cli');
     const copilotCmd = this.buildCommand({
       task: skipInstructionsFile ? task : `Complete the task described in the instructions file at ${instructionsFile}.`,
       sessionId,

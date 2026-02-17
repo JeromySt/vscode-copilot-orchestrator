@@ -60,6 +60,8 @@ export class planDetailPanel {
   private _isFirstRender: boolean = true;
   private readonly _controller: PlanDetailController;
   private _disposed = false;
+  private _cachedCapacity: { data: any; fetchedAt: number } | null = null;
+  private static readonly CAPACITY_CACHE_TTL_MS = 5000;
   
   /**
    * @param panel - The VS Code webview panel instance.
@@ -541,8 +543,15 @@ export class planDetailPanel {
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
     
-    // Get global capacity stats (same source as sidebar for consistency)
-    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
+    // Get global capacity stats with caching to avoid async overhead on every pulse tick
+    let globalCapacityStats: any = null;
+    const now = Date.now();
+    if (this._cachedCapacity && (now - this._cachedCapacity.fetchedAt) < planDetailPanel.CAPACITY_CACHE_TTL_MS) {
+      globalCapacityStats = this._cachedCapacity.data;
+    } else {
+      globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
+      this._cachedCapacity = { data: globalCapacityStats, fetchedAt: now };
+    }
     
     // Build node statuses
     const nodeStatuses: Record<string, any> = {};

@@ -42,7 +42,7 @@ export function recomputeRootsAndLeaves(plan: PlanInstance): void {
 
 /**
  * Returns true if adding an edge `fromId → toId` would create a cycle.
- * Uses BFS from `toId` following dependents to see if we can reach `fromId`.
+ * Uses BFS from `toId` following dependencies to see if we can reach `fromId`.
  */
 export function hasCycle(plan: PlanInstance, fromId: string, toId: string): boolean {
   // An edge fromId → toId means "fromId depends on toId".
@@ -336,8 +336,8 @@ function isReachableViaUpstream(
 
 /**
  * Insert a new node as a dependency of an existing pending node.
- * The new node inherits the existing node's current dependencies,
- * and the existing node is rewired to depend only on the new node.
+ * The new node's dependencies come from `spec.dependencies`.
+ * The existing node is rewired to depend only on the new node.
  */
 export function addNodeBefore(
   plan: PlanInstance,
@@ -457,6 +457,18 @@ export function addNodeAfter(
     }
     if (!resolvedSpecDeps.includes(depNodeId)) {
       resolvedSpecDeps.push(depNodeId);
+    }
+  }
+
+  // Cycle check: the new node will inherit existingNode's dependents.
+  // If any spec dependency is itself a dependent of existingNode, wiring
+  // would create a cycle (dependent → newNode → specDep → ... → dependent).
+  for (const depId of resolvedSpecDeps) {
+    if (depId === existingNodeId) { continue; }
+    for (const existingDepId of existingNode.dependents) {
+      if (depId === existingDepId || hasCycle(plan, depId, existingDepId)) {
+        return { success: false, error: `Adding dependency '${depId}' would create a cycle via dependent '${existingDepId}'` };
+      }
     }
   }
 
