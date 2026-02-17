@@ -541,6 +541,18 @@ export class PlanLifecycleManager {
       }
     }
 
+    // Defensive: delete the orchestrator/snapshot/<planId> branch even if
+    // plan.snapshot was never set (race: cancel during snapshot creation).
+    if (!plan.snapshot) {
+      const orphanBranch = `orchestrator/snapshot/${plan.id}`;
+      try {
+        await this.git.branches.deleteLocal(repoPath, orphanBranch, { force: true });
+        this.log.debug(`Cleaned up orphan snapshot branch: ${orphanBranch}`);
+      } catch {
+        // Branch didn't exist — expected in the common case.
+      }
+    }
+
     if (this.state.executor) {
       try {
         const storagePath = (this.state.executor as any).storagePath;

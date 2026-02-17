@@ -330,36 +330,77 @@ export function buildPlan(
   // → work (verify-ri) → postchecks (re-check target) → merge-ri (to target).
   const svNodeId = uuidv4();
   const svProducerId = '__snapshot-validation__';
-  const svGroupPath = 'Final Merge Validation';
+  const svTargetBranch = spec.targetBranch || spec.baseBranch || 'main';
   
-  // Create or reuse the "Final Merge Validation" group
-  let svGroupId = groupPathToId.get(svGroupPath);
-  if (!svGroupId) {
-    svGroupId = uuidv4();
-    groupPathToId.set(svGroupPath, svGroupId);
-    const svGroup: GroupInstance = {
-      id: svGroupId,
-      name: 'Final Merge Validation',
-      path: svGroupPath,
-      nodeIds: [svNodeId],
-      allNodeIds: [svNodeId],
-      totalNodes: 1,
-      childGroupIds: [],
-    };
-    groups.set(svGroupId, svGroup);
-    groupStates.set(svGroupId, {
-      status: 'pending',
-      version: 0,
-      runningCount: 0,
-      succeededCount: 0,
-      failedCount: 0,
-      blockedCount: 0,
-      canceledCount: 0,
-    });
-  } else {
-    const existingGroup = groups.get(svGroupId);
-    if (existingGroup) {
-      existingGroup.nodeIds.push(svNodeId);
+  // Prechecks: verify targetBranch is clean and rebase snapshot if target advanced.
+  // Runs in repoPath (main repo), NOT the snapshot worktree.
+  // On failure: force-fail with user message — no auto-heal (user must fix their branch).
+  const svPrechecks: import('./types/specs').ShellSpec = {
+    type: 'shell',
+    command: [
+      `echo "🔍 Checking target branch '${svTargetBranch}' health..."`,
+      `git diff --quiet "${svTargetBranch}" || (echo "❌ Target branch '${svTargetBranch}' has uncommitted changes." && exit 1)`,
+      `echo "✅ Target branch '${svTargetBranch}' is clean."`,
+    ].join(' && '),
+    onFailure: {
+      noAutoHeal: true,
+      message: `Target branch '${svTargetBranch}' has uncommitted changes or is in a dirty state. Please clean up the target branch before retrying the merge.`,
+      resumeFromPhase: 'prechecks',
+    },
+  };
+
+  // Postchecks: re-verify targetBranch is still clean before merge-ri proceeds.
+  // If target advanced since prechecks, auto-retry from prechecks to pull in latest.
+  const svPostchecks: import('./types/specs').ShellSpec = {
+    type: 'shell',
+    command: [
+      `echo "🔍 Re-checking target branch '${svTargetBranch}' before merge..."`,
+      `git diff --quiet "${svTargetBranch}" || (echo "❌ Target branch '${svTargetBranch}' became dirty during validation." && exit 1)`,
+      `echo "✅ Target branch '${svTargetBranch}' is still clean. Proceeding with merge."`,
+    ].join(' && '),
+    onFailure: {
+      noAutoHeal: true,
+      message: `Target branch '${svTargetBranch}' changed state during validation. Please ensure the branch is clean and retry.`,
+      resumeFromPhase: 'prechecks',
+    },
+  };
+  
+  // Only wrap the SV node in a group if the plan already uses groups.
+  // For simple ungrouped plans, the bare node is sufficient.
+  const planHasGroups = groups.size > 0;
+  let svGroupId: string | undefined;
+  const svGroupPath = planHasGroups ? 'Final Merge Validation' : undefined;
+
+  if (planHasGroups) {
+    // Create or reuse the "Final Merge Validation" group
+    svGroupId = groupPathToId.get(svGroupPath!);
+    if (!svGroupId) {
+      svGroupId = uuidv4();
+      groupPathToId.set(svGroupPath!, svGroupId);
+      const svGroup: GroupInstance = {
+        id: svGroupId,
+        name: 'Final Merge Validation',
+        path: svGroupPath!,
+        nodeIds: [svNodeId],
+        allNodeIds: [svNodeId],
+        totalNodes: 1,
+        childGroupIds: [],
+      };
+      groups.set(svGroupId, svGroup);
+      groupStates.set(svGroupId, {
+        status: 'pending',
+        version: 0,
+        runningCount: 0,
+        succeededCount: 0,
+        failedCount: 0,
+        blockedCount: 0,
+        canceledCount: 0,
+      });
+    } else {
+      const existingGroup = groups.get(svGroupId);
+      if (existingGroup) {
+        existingGroup.nodeIds.push(svNodeId);
+      }
     }
   }
   
@@ -368,8 +409,11 @@ export function buildPlan(
     producerId: svProducerId,
     name: 'Snapshot Validation',
     type: 'job',
-    task: 'Validate accumulated snapshot and merge to target branch',
+    task: `Validate snapshot and merge to '${svTargetBranch}'`,
+    prechecks: svPrechecks,
     work: spec.verifyRiSpec,
+    postchecks: svPostchecks,
+    expectsNoChanges: true,
     group: svGroupPath,
     groupId: svGroupId,
     dependencies: [...leaves],

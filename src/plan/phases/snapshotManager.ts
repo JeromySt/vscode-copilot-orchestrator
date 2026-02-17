@@ -67,7 +67,7 @@ export class SnapshotManager {
     additionalSymlinkDirs?: string[],
   ): Promise<SnapshotInfo> {
     const branch = `orchestrator/snapshot/${planId}`;
-    const worktreePath = path.join(worktreeRoot, '_snapshot');
+    const worktreePath = path.join(worktreeRoot, `_snapshot-${planId.slice(0, 8)}`);
 
     // Resolve the current HEAD of targetBranch — this is our "base".
     const baseCommit = await this.git.repository.resolveRef(targetBranch, repoPath);

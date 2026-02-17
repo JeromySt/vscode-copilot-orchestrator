@@ -81,6 +81,20 @@ suite('Snapshot Validation Node', () => {
       const svNode = plan.nodes.get(svNodeId!)!;
       assert.strictEqual(svNode.type, 'job');
       assert.strictEqual(svNode.name, 'Snapshot Validation');
+      assert.strictEqual(svNode.group, undefined, 'SV node should not have a group when plan has no groups');
+    });
+
+    test('snapshot-validation node gets group when plan has groups', () => {
+      const spec: PlanSpec = {
+        name: 'Test',
+        baseBranch: 'main',
+        jobs: [{ producerId: 'a', task: 'Build', dependencies: [], group: 'Backend' }],
+      };
+      const plan = buildPlan(spec);
+
+      const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
+      assert.ok(svNodeId);
+      const svNode = plan.nodes.get(svNodeId!)!;
       assert.strictEqual(svNode.group, 'Final Merge Validation');
     });
 
@@ -156,11 +170,11 @@ suite('Snapshot Validation Node', () => {
       assert.strictEqual(plan.targetBranch, 'release/v1');
     });
 
-    test('creates Final Merge Validation group', () => {
+    test('creates Final Merge Validation group when plan has groups', () => {
       const spec: PlanSpec = {
         name: 'P',
         baseBranch: 'main',
-        jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+        jobs: [{ producerId: 'a', task: 'X', dependencies: [], group: 'Build' }],
       };
       const plan = buildPlan(spec);
       assert.ok(plan.groupPathToId.has('Final Merge Validation'));
@@ -169,6 +183,20 @@ suite('Snapshot Validation Node', () => {
       assert.strictEqual(group.name, 'Final Merge Validation');
       assert.strictEqual(group.nodeIds.length, 1);
       assert.strictEqual(group.totalNodes, 1);
+    });
+
+    test('does not create group when plan has no groups', () => {
+      const spec: PlanSpec = {
+        name: 'P',
+        baseBranch: 'main',
+        jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+      };
+      const plan = buildPlan(spec);
+      assert.ok(!plan.groupPathToId.has('Final Merge Validation'));
+      const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
+      const svNode = plan.nodes.get(svNodeId)!;
+      assert.strictEqual(svNode.group, undefined);
+      assert.strictEqual(svNode.groupId, undefined);
     });
 
     test('original leaves have snapshot-validation as dependent', () => {
@@ -256,7 +284,7 @@ suite('Snapshot Validation Node', () => {
       const loadedSvNode = loaded!.nodes.get(svNodeId)!;
       assert.strictEqual(loadedSvNode.name, 'Snapshot Validation');
       assert.strictEqual(loadedSvNode.assignedWorktreePath, '/tmp/snapshot-worktree');
-      assert.strictEqual(loadedSvNode.group, 'Final Merge Validation');
+      assert.strictEqual(loadedSvNode.group, undefined, 'SV node should not have group in ungrouped plan');
 
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });

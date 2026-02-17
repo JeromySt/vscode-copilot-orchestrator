@@ -32,6 +32,20 @@ import { NodeDetailController, NodeDetailCommands } from './nodeDetailController
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
 
 /**
+ * Extract onFailure config from a WorkSpec (if present).
+ */
+function extractOnFailure(spec: WorkSpec | undefined): { noAutoHeal?: boolean; message?: string; resumeFromPhase?: string } | undefined {
+  if (!spec || typeof spec === 'string') {return undefined;}
+  const onFailure = (spec as any).onFailure;
+  if (!onFailure) {return undefined;}
+  return {
+    noAutoHeal: onFailure.noAutoHeal,
+    message: onFailure.message,
+    resumeFromPhase: onFailure.resumeFromPhase,
+  };
+}
+
+/**
  * Format a {@link WorkSpec} as a plain-text summary string.
  *
  * @param spec - The work specification to format.
@@ -694,12 +708,17 @@ export class NodeDetailPanel {
       data: {
         work: node.work ? renderSpecContent(node.work) : undefined,
         workType: node.work ? getSpecTypeInfo(node.work) : undefined,
+        workSkipped: !node.work,
+        workOnFailure: extractOnFailure(node.work),
         prechecks: node.prechecks ? renderSpecContent(node.prechecks) : undefined,
         prechecksType: node.prechecks ? getSpecTypeInfo(node.prechecks) : undefined,
+        prechecksOnFailure: extractOnFailure(node.prechecks),
         postchecks: node.postchecks ? renderSpecContent(node.postchecks) : undefined,
         postchecksType: node.postchecks ? getSpecTypeInfo(node.postchecks) : undefined,
+        postchecksOnFailure: extractOnFailure(node.postchecks),
         task: node.task,
         currentPhase: getCurrentExecutionPhase(state),
+        expectsNoChanges: node.expectsNoChanges,
       }
     });
   }
@@ -1406,7 +1425,55 @@ export class NodeDetailPanel {
     .phase-type-badge.shell { background: rgba(72, 187, 120, 0.2); color: #48bb78; }
     .phase-type-badge.process { background: rgba(237, 137, 54, 0.2); color: #ed8936; }
     .phase-type-badge.agent { background: rgba(99, 179, 237, 0.2); color: #63b3ed; }
+    .phase-type-badge.skipped { background: rgba(128, 128, 128, 0.15); color: var(--vscode-disabledForeground); font-style: italic; }
     .config-phase-body { padding: 8px 12px; }
+
+    /* On-failure config display */
+    .on-failure-config {
+      margin-top: 8px;
+      padding: 6px 10px;
+      border: 1px solid rgba(237, 137, 54, 0.3);
+      border-radius: 5px;
+      background: rgba(237, 137, 54, 0.06);
+      font-size: 11px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .failure-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 10px;
+    }
+    .failure-badge.no-heal { background: rgba(220, 38, 38, 0.15); color: #ef4444; }
+    .failure-badge.resume { background: rgba(99, 179, 237, 0.15); color: #63b3ed; }
+    .failure-badge-inline {
+      font-size: 12px;
+      margin-left: 2px;
+      opacity: 0.8;
+    }
+    .failure-message {
+      width: 100%;
+      color: var(--vscode-descriptionForeground);
+      font-style: italic;
+      line-height: 1.4;
+    }
+    .config-hint {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      font-style: italic;
+    }
+    .spec-empty {
+      color: var(--vscode-disabledForeground);
+      font-style: italic;
+      font-size: 12px;
+      padding: 4px 0;
+    }
     
     /* Work Display Formatting */
     .work-item .config-value {

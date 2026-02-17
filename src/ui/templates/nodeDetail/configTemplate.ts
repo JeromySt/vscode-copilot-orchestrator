@@ -38,6 +38,8 @@ export interface ConfigData {
   instructions?: string;
   /** Current execution phase */
   currentPhase?: string;
+  /** Whether the node expects no file changes (commit phase skipped) */
+  expectsNoChanges?: boolean;
 }
 
 /**
@@ -148,11 +150,35 @@ function renderShellSpec(spec: any): string {
 }
 
 /**
+ * Render on_failure config as a subtle info banner within a phase section.
+ */
+function renderFailureConfig(spec: WorkSpec | undefined): string {
+  if (!spec || typeof spec === 'string') {return '';}
+  const onFailure = (spec as any).onFailure;
+  if (!onFailure) {return '';}
+
+  const parts: string[] = [];
+  if (onFailure.noAutoHeal) {
+    parts.push('<span class="failure-badge no-heal" title="Auto-heal disabled">🛑 No Auto-Heal</span>');
+  }
+  if (onFailure.resumeFromPhase) {
+    parts.push(`<span class="failure-badge resume" title="On retry, resume from this phase">🔄 Resume → ${escapeHtml(onFailure.resumeFromPhase)}</span>`);
+  }
+  if (onFailure.message) {
+    parts.push(`<div class="failure-message" title="Message shown on failure">💬 ${escapeHtml(onFailure.message)}</div>`);
+  }
+  if (parts.length === 0) {return '';}
+
+  return `<div class="on-failure-config">${parts.join('')}</div>`;
+}
+
+/**
  * Render a phase section (prechecks, work, or postchecks)
  */
 function renderPhase(phaseKey: string, phaseLabel: string, spec: WorkSpec | undefined, collapsible: boolean): string {
   const typeInfo = getSpecTypeInfo(spec);
   const specHtml = renderSpecContent(spec);
+  const failureHtml = renderFailureConfig(spec);
   
   if (collapsible) {
     return `
@@ -164,6 +190,7 @@ function renderPhase(phaseKey: string, phaseLabel: string, spec: WorkSpec | unde
         </div>
         <div class="config-phase-body" style="display:none">
           ${specHtml}
+          ${failureHtml}
         </div>
       </div>
     `;
@@ -176,6 +203,7 @@ function renderPhase(phaseKey: string, phaseLabel: string, spec: WorkSpec | unde
         </div>
         <div class="config-phase-body">
           ${specHtml}
+          ${failureHtml}
         </div>
       </div>
     `;
@@ -220,6 +248,19 @@ export function configSectionHtml(data: ConfigData): string {
         </div>
       </div>
     `;
+  } else {
+    // Work phase not configured — show "skipped" indicator
+    configContent += `
+      <div class="config-phase">
+        <div class="config-phase-header non-collapsible">
+          <span class="phase-label">Work</span>
+          <span class="phase-type-badge skipped">⊘ Skipped</span>
+        </div>
+        <div class="config-phase-body">
+          <div class="spec-empty">Not configured — this phase will be skipped during execution.</div>
+        </div>
+      </div>
+    `;
   }
 
   // Postchecks phase (collapsible, collapsed by default)
@@ -228,6 +269,17 @@ export function configSectionHtml(data: ConfigData): string {
   }
 
   configContent += '</div>';
+
+  // expectsNoChanges indicator
+  if (data.expectsNoChanges) {
+    configContent += `
+      <div class="config-item">
+        <div class="config-label">Commit Behavior</div>
+        <div class="config-value"><span class="phase-type-badge skipped">📋 Expects No Changes</span>
+        <span class="config-hint">Commit phase will be skipped automatically</span></div>
+      </div>
+    `;
+  }
 
   // Instructions (if provided)
   if (data.instructions) {

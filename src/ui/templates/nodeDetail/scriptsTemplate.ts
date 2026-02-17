@@ -631,10 +631,10 @@ export function webviewScripts(config: ScriptsConfig): string {
           var preExpanded = this._userOverrides.prechecks !== undefined
             ? this._userOverrides.prechecks
             : (cfg.currentPhase === 'prechecks');
-          phasesHtml += this._renderCollapsiblePhase('prechecks', 'Prechecks', preType, cfg.prechecks, preExpanded);
+          phasesHtml += this._renderCollapsiblePhase('prechecks', 'Prechecks', preType, cfg.prechecks, preExpanded, cfg.prechecksOnFailure);
         }
 
-        // Work (always expanded, not collapsible)
+        // Work phase
         if (cfg.work) {
           var workType = cfg.workType || { type: 'agent', label: 'Agent' };
           phasesHtml += '<div class="config-phase">'
@@ -642,7 +642,15 @@ export function webviewScripts(config: ScriptsConfig): string {
             + '<span class="phase-label">Work</span>'
             + '<span class="phase-type-badge ' + (workType.type || '').toLowerCase() + '">' + escapeHtml(workType.label) + '</span>'
             + '</div>'
-            + '<div class="config-phase-body">' + cfg.work + '</div>'
+            + '<div class="config-phase-body">' + cfg.work + this._renderOnFailure(cfg.workOnFailure) + '</div>'
+            + '</div>';
+        } else if (cfg.workSkipped) {
+          phasesHtml += '<div class="config-phase">'
+            + '<div class="config-phase-header non-collapsible">'
+            + '<span class="phase-label">Work</span>'
+            + '<span class="phase-type-badge skipped">⊘ Skipped</span>'
+            + '</div>'
+            + '<div class="config-phase-body"><div class="spec-empty">Not configured — this phase will be skipped during execution.</div></div>'
             + '</div>';
         }
 
@@ -652,22 +660,29 @@ export function webviewScripts(config: ScriptsConfig): string {
           var postExpanded = this._userOverrides.postchecks !== undefined
             ? this._userOverrides.postchecks
             : (cfg.currentPhase === 'postchecks');
-          phasesHtml += this._renderCollapsiblePhase('postchecks', 'Postchecks', postType, cfg.postchecks, postExpanded);
+          phasesHtml += this._renderCollapsiblePhase('postchecks', 'Postchecks', postType, cfg.postchecks, postExpanded, cfg.postchecksOnFailure);
         }
 
         // Wrap in matching server-side section structure
         var html = '<div class="section"><h3>Job Configuration</h3>'
           + '<div class="config-item"><div class="config-label">Task</div>'
-          + '<div class="config-value">' + escapeHtml(cfg.task || '') + '</div></div>'
-          + '<div class="config-phases">' + phasesHtml + '</div>';
+          + '<div class="config-value">' + escapeHtml(cfg.task || '') + '</div></div>';
 
+        // Show expectsNoChanges indicator
+        if (cfg.expectsNoChanges) {
+          html += '<div class="config-item"><div class="config-label">Commit Behavior</div>'
+            + '<div class="config-value"><span class="phase-type-badge skipped">📋 Expects No Changes</span> '
+            + '<span class="config-hint">Commit phase will be skipped automatically</span></div></div>';
+        }
+
+        html += '<div class="config-phases">' + phasesHtml + '</div>';
         html += '</div>';
 
         el.innerHTML = html;
         this._bindCollapsibleHandlers(el);
         this.publishUpdate(data);
       };
-      CDC.prototype._renderCollapsiblePhase = function(phaseId, label, typeInfo, content, expanded) {
+      CDC.prototype._renderCollapsiblePhase = function(phaseId, label, typeInfo, content, expanded, onFailure) {
         var chevron = expanded ? '▼' : '▶';
         var display = expanded ? 'block' : 'none';
         var expandedClass = expanded ? '' : ' collapsed';
@@ -676,9 +691,26 @@ export function webviewScripts(config: ScriptsConfig): string {
           + '<span class="chevron">' + chevron + '</span>'
           + '<span class="phase-label">' + escapeHtml(label) + '</span>'
           + '<span class="phase-type-badge ' + (typeInfo.type || '').toLowerCase() + '">' + escapeHtml(typeInfo.label || label) + '</span>'
+          + (onFailure && onFailure.noAutoHeal ? '<span class="failure-badge-inline no-heal" title="Auto-heal disabled on failure">🛑</span>' : '')
+          + (onFailure && onFailure.resumeFromPhase ? '<span class="failure-badge-inline resume" title="On retry → ' + escapeHtml(onFailure.resumeFromPhase) + '">🔄</span>' : '')
           + '</div>'
-          + '<div class="config-phase-body" style="display: ' + display + ';">' + content + '</div>'
+          + '<div class="config-phase-body" style="display: ' + display + ';">' + content + this._renderOnFailure(onFailure) + '</div>'
           + '</div>';
+      };
+      CDC.prototype._renderOnFailure = function(onFailure) {
+        if (!onFailure) return '';
+        var parts = '';
+        if (onFailure.noAutoHeal) {
+          parts += '<span class="failure-badge no-heal" title="Auto-heal disabled">🛑 No Auto-Heal</span>';
+        }
+        if (onFailure.resumeFromPhase) {
+          parts += '<span class="failure-badge resume" title="On retry, resume from this phase">🔄 Resume → ' + escapeHtml(onFailure.resumeFromPhase) + '</span>';
+        }
+        if (onFailure.message) {
+          parts += '<div class="failure-message" title="Message shown on failure">💬 ' + escapeHtml(onFailure.message) + '</div>';
+        }
+        if (!parts) return '';
+        return '<div class="on-failure-config">' + parts + '</div>';
       };
       CDC.prototype._bindCollapsibleHandlers = function(el) {
         var self = this;
