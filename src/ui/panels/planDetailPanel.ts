@@ -683,6 +683,24 @@ export class planDetailPanel {
     // Build work summary from node states
     const workSummaryHtml = this._buildWorkSummaryHtml(plan);
     const metricsBarHtml = this._buildMetricsBarHtml(plan);
+
+    // Compute snapshot data for the info card
+    let snapshotData: { branch: string; baseCommit: string; mergedLeaves: number; totalLeaves: number; awaitingFinalMerge: boolean; planStatus: string } | undefined;
+    if (plan.snapshot) {
+      let mergedLeaves = 0;
+      for (const leafId of plan.leaves) {
+        const st = plan.nodeStates.get(leafId);
+        if (st?.status === 'succeeded' || st?.mergedToTarget === true) {mergedLeaves++;}
+      }
+      snapshotData = {
+        branch: plan.snapshot.branch,
+        baseCommit: plan.snapshot.baseCommit,
+        mergedLeaves,
+        totalLeaves: plan.leaves.length,
+        awaitingFinalMerge: !!plan.awaitingFinalMerge,
+        planStatus: status,
+      };
+    }
     
     return `<!DOCTYPE html>
 <html>
@@ -1379,7 +1397,7 @@ export class planDetailPanel {
   </div>
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}
-  ${renderPlanDag({ mermaidDef, status })}
+  ${renderPlanDag({ mermaidDef, status, snapshot: snapshotData })}
   ${workSummaryHtml}
   </div>
   ${renderPlanScripts({ nodeData, nodeTooltips, mermaidDef, edgeData, globalCapacityStats: globalCapacityStats || null })}
@@ -1878,28 +1896,110 @@ export class planDetailPanel {
       lines.push('  class TARGET_DEST branchNode');
       if (targetBranchName.length > MAX_NODE_LABEL_CHARS) {nodeTooltips['TARGET_DEST'] = targetBranchName;}
       
-      for (const leafId of mainResult.leaves) {
-        const mapping = nodeEntryExitMap.get(leafId);
-        const exitIds = mapping ? mapping.exitIds : [leafId];
-        for (const exitId of exitIds) {
-          // Check if this leaf has been successfully merged to target
-          // Use either mergedToTarget flag or succeeded status as proxy, since
-          // the Mermaid diagram is rendered once and edge types can't be updated
-          // incrementally.  A succeeded leaf will have its RI merge completed.
-          const leafState = leafnodeStates.get(exitId);
-          const isMerged = leafState?.mergedToTarget === true
-            || leafState?.status === 'succeeded';
-          
-          if (isMerged) {
-            // Use solid line and mark as success edge
-            lines.push(`  ${exitId} --> TARGET_DEST`);
-            successEdges.push(edgeIndex);
-          } else {
-            // Use dotted line for pending merge
-            lines.push(`  ${exitId} -.-> TARGET_DEST`);
+      const hasSnapshot = !!plan.snapshot;
+      
+      if (hasSnapshot) {
+        // Compute snapshot status: how many leaves have merged into it
+        const totalLeaves = mainResult.leaves.length;
+        let mergedLeaves = 0;
+        for (const leafId of mainResult.leaves) {
+          const leafState = leafnodeStates.get(leafId);
+          if (leafState?.mergedToTarget === true || leafState?.status === 'succeeded') {
+            mergedLeaves++;
           }
-          edgeData.push({ index: edgeIndex, from: exitId, to: 'TARGET_DEST', isLeafToTarget: true });
-          edgeIndex++;
+        }
+
+        // Determine snapshot node status
+        let snapshotStatus: string;
+        if (mergedLeaves === totalLeaves) {snapshotStatus = 'succeeded';}
+        else if (mergedLeaves > 0) {snapshotStatus = 'running';}
+        else {snapshotStatus = 'pending';}
+
+        // Determine final merge node status
+        let finalMergeStatus: string;
+        if (plan.awaitingFinalMerge) {finalMergeStatus = 'failed';}
+        else if (plan.endedAt && snapshotStatus === 'succeeded') {finalMergeStatus = 'succeeded';}
+        else if (snapshotStatus === 'succeeded') {finalMergeStatus = 'running';}
+        else {finalMergeStatus = 'pending';}
+
+        const snapshotIcon = this._getStatusIcon(snapshotStatus);
+        const finalMergeIcon = this._getStatusIcon(finalMergeStatus);
+        const snapshotLabel = `${mergedLeaves}/${totalLeaves} leaves merged`;
+        
+        // "Final Merge Validation" subgraph containing both nodes
+        const fmGroupColors: Record<string, { fill: string; stroke: string }> = {
+          pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
+          running: { fill: '#1a2a4e', stroke: '#3794ff' },
+          succeeded: { fill: '#1a3a2e', stroke: '#4ec9b0' },
+          failed: { fill: '#3a1a1e', stroke: '#f48771' },
+        };
+        const overallFmStatus = finalMergeStatus === 'failed' ? 'failed' :
+          finalMergeStatus === 'succeeded' ? 'succeeded' :
+          snapshotStatus === 'running' || finalMergeStatus === 'running' ? 'running' : 'pending';
+        const fmColors = fmGroupColors[overallFmStatus] || fmGroupColors.pending;
+
+        lines.push('');
+        lines.push(`  subgraph FINAL_MERGE_GROUP["Final Merge Validation"]`);
+        lines.push(`    SNAPSHOT["${snapshotIcon} 📦 Snapshot: ${snapshotLabel}"]`);
+        lines.push(`    class SNAPSHOT ${snapshotStatus}`);
+        lines.push(`    FINAL_MERGE["${finalMergeIcon} ⬆ Final Merge"]`);
+        lines.push(`    class FINAL_MERGE ${finalMergeStatus}`);
+        lines.push(`    SNAPSHOT --> FINAL_MERGE`);
+        edgeData.push({ index: edgeIndex, from: 'SNAPSHOT', to: 'FINAL_MERGE' });
+        if (snapshotStatus === 'succeeded') {successEdges.push(edgeIndex);}
+        edgeIndex++;
+        lines.push(`  end`);
+        lines.push(`  style FINAL_MERGE_GROUP fill:${fmColors.fill},stroke:${fmColors.stroke},stroke-width:2px,stroke-dasharray:5`);
+        
+        // Leaf nodes → SNAPSHOT
+        for (const leafId of mainResult.leaves) {
+          const mapping = nodeEntryExitMap.get(leafId);
+          const exitIds = mapping ? mapping.exitIds : [leafId];
+          for (const exitId of exitIds) {
+            const leafState = leafnodeStates.get(exitId);
+            const isMerged = leafState?.mergedToTarget === true
+              || leafState?.status === 'succeeded';
+            
+            if (isMerged) {
+              lines.push(`  ${exitId} --> SNAPSHOT`);
+              successEdges.push(edgeIndex);
+            } else {
+              lines.push(`  ${exitId} -.-> SNAPSHOT`);
+            }
+            edgeData.push({ index: edgeIndex, from: exitId, to: 'SNAPSHOT', isLeafToTarget: true });
+            edgeIndex++;
+          }
+        }
+        
+        // FINAL_MERGE → TARGET_DEST
+        if (finalMergeStatus === 'succeeded') {
+          lines.push(`  FINAL_MERGE --> TARGET_DEST`);
+          successEdges.push(edgeIndex);
+        } else {
+          lines.push(`  FINAL_MERGE -.-> TARGET_DEST`);
+        }
+        edgeData.push({ index: edgeIndex, from: 'FINAL_MERGE', to: 'TARGET_DEST' });
+        edgeIndex++;
+        
+      } else {
+        // No snapshot — leaves connect directly to TARGET_DEST (original behavior)
+        for (const leafId of mainResult.leaves) {
+          const mapping = nodeEntryExitMap.get(leafId);
+          const exitIds = mapping ? mapping.exitIds : [leafId];
+          for (const exitId of exitIds) {
+            const leafState = leafnodeStates.get(exitId);
+            const isMerged = leafState?.mergedToTarget === true
+              || leafState?.status === 'succeeded';
+            
+            if (isMerged) {
+              lines.push(`  ${exitId} --> TARGET_DEST`);
+              successEdges.push(edgeIndex);
+            } else {
+              lines.push(`  ${exitId} -.-> TARGET_DEST`);
+            }
+            edgeData.push({ index: edgeIndex, from: exitId, to: 'TARGET_DEST', isLeafToTarget: true });
+            edgeIndex++;
+          }
         }
       }
     }
