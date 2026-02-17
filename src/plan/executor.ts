@@ -239,7 +239,8 @@ export class DefaultJobExecutor implements JobExecutor {
         this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION START ==========');
         const ctx = makeCtx('merge-ri'); 
         ctx.repoPath = context.repoPath;
-        ctx.targetBranch = context.targetBranch;
+        // If a snapshot branch exists, merge into it instead of targetBranch.
+        ctx.targetBranch = context.snapshotBranch || context.targetBranch;
         ctx.baseCommitAtStart = context.baseCommitAtStart;
         ctx.completedCommit = cr.commit;
         ctx.baseCommit = context.baseCommit;
@@ -258,7 +259,12 @@ export class DefaultJobExecutor implements JobExecutor {
         const ctx = makeCtx('verify-ri');
         ctx.workSpec = plan.spec.verifyRiSpec;
         ctx.repoPath = context.repoPath;
-        ctx.targetBranch = context.targetBranch;
+        // Verify-ri targets snapshot branch if available.
+        ctx.targetBranch = context.snapshotBranch || context.targetBranch;
+        // If snapshot worktree exists, pass it so verify-ri reuses it instead of creating a temp one.
+        if (context.snapshotWorktreePath) {
+          ctx.worktreePath = context.snapshotWorktreePath;
+        }
         const r = await new VerifyRiPhaseExecutor(phaseDeps()).execute(ctx);
         if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['verify-ri'] = r.metrics; }

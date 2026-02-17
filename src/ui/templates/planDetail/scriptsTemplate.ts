@@ -389,6 +389,10 @@ export function renderPlanScripts(data: PlanScriptsData): string {
     function showWorkSummary() {
       vscode.postMessage({ type: 'showWorkSummary' });
     }
+
+    function completeFinalMerge() {
+      vscode.postMessage({ type: 'completeFinalMerge' });
+    }
     
     // Zoom functionality
     let currentZoom = 1;

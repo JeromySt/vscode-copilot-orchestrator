@@ -182,12 +182,13 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
   }
   
   /**
-   * Update branch reference to point to new commit, then sync the
-   * user's working tree if they have this branch checked out.
+   * Update branch reference to point to new commit.
    * 
-   * Without the sync step the user would see a confusing `git status`
-   * (all RI-merged files appearing as uncommitted changes) because
-   * their index/worktree still reflects the old HEAD.
+   * If the user has `targetBranch` checked out AND their working tree
+   * was clean *before* the ref move, we do `git reset --hard HEAD` to
+   * keep the checkout in sync — this is safe because there is nothing
+   * to lose.  If the tree was dirty (user has pending work), we leave
+   * it alone and log a hint so nothing is silently destroyed.
    */
   private async updateBranchRef(
     context: PhaseContext,
@@ -195,6 +196,18 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
     targetBranch: string,
     newCommit: string
   ): Promise<boolean> {
+    // Snapshot dirtiness BEFORE we move the ref — after the move the
+    // index will always look dirty relative to the new HEAD.
+    let branchCheckedOut = false;
+    let wasDirtyBeforeRefUpdate = true; // conservative default
+    try {
+      const currentBranch = await this.git.branches.currentOrNull(repoPath);
+      branchCheckedOut = currentBranch === targetBranch;
+      if (branchCheckedOut) {
+        wasDirtyBeforeRefUpdate = await this.git.repository.hasUncommittedChanges(repoPath);
+      }
+    } catch { /* non-fatal — assume dirty to be safe */ }
+
     try {
       await this.git.repository.updateRef(repoPath, `refs/heads/${targetBranch}`, newCommit);
     } catch (error: any) {
@@ -202,66 +215,24 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       return false;
     }
 
-    // Sync the working tree to prevent desync.
-    // If the user's main checkout has this branch checked out, the index
-    // and working directory still reflect the OLD commit.  Without a
-    // reset the user sees a confusing diff with every RI-merged file
-    // showing up as a local modification.
-    await this.syncWorkingTreeIfNeeded(context, repoPath, targetBranch, newCommit);
-    return true;
-  }
-
-  /**
-   * If the user's checkout is on `targetBranch`, bring the working tree
-   * and index in line with the newly-updated HEAD so `git status` is clean.
-   *
-   * - Clean checkout → `git reset --hard HEAD` (instant, safe).
-   * - Dirty checkout → stash user changes, reset, then restore the stash
-   *   so nothing the user had pending is lost.
-   */
-  private async syncWorkingTreeIfNeeded(
-    context: PhaseContext,
-    repoPath: string,
-    targetBranch: string,
-    newCommit: string
-  ): Promise<void> {
-    try {
-      const currentBranch = await this.git.branches.currentOrNull(repoPath);
-      if (currentBranch !== targetBranch) {
-        // Branch isn't checked out in the main worktree — nothing to sync.
-        return;
-      }
-
-      const isDirty = await this.git.repository.hasUncommittedChanges(repoPath);
-      if (!isDirty) {
-        // Clean checkout — fast-path reset.
-        await this.git.repository.resetHard(repoPath, 'HEAD', s => context.logInfo(s));
-        context.logInfo(`Synced working tree to ${newCommit.slice(0, 8)}`);
-        return;
-      }
-
-      // Dirty checkout — preserve user changes across the sync.
-      context.logInfo('Stashing uncommitted changes before syncing working tree...');
-      const stashed = await this.git.repository.stashPush(
-        repoPath, 'orchestrator: preserve user changes during RI sync',
-        s => context.logInfo(s)
-      );
-
-      await this.git.repository.resetHard(repoPath, 'HEAD', s => context.logInfo(s));
-      context.logInfo(`Synced working tree to ${newCommit.slice(0, 8)}`);
-
-      if (stashed) {
-        const popped = await this.git.repository.stashPop(repoPath, s => context.logInfo(s));
-        if (popped) {
-          context.logInfo('Restored uncommitted changes');
-        } else {
-          context.logInfo('⚠ Stash pop had conflicts — your changes are in `git stash list`');
+    if (branchCheckedOut) {
+      if (!wasDirtyBeforeRefUpdate) {
+        // Working tree was clean before the ref move — safe to reset.
+        try {
+          await this.git.repository.resetHard(repoPath, 'HEAD', s => context.logInfo(s));
+          context.logInfo(`Synced working tree to ${newCommit.slice(0, 8)}`);
+        } catch (err: any) {
+          context.logInfo(`⚠ Could not sync working tree: ${err.message}`);
         }
+      } else {
+        context.logInfo(
+          `ℹ Your checkout on ${targetBranch} has uncommitted changes. ` +
+          `Run 'git reset --hard HEAD' after saving your work to sync with the merge.`
+        );
       }
-    } catch (err: any) {
-      // Non-fatal — the merge commit and ref update already succeeded.
-      context.logInfo(`⚠ Could not sync working tree: ${err.message}`);
     }
+
+    return true;
   }
   
   /**

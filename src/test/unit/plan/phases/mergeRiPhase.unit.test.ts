@@ -563,49 +563,276 @@ suite('MergeRiPhaseExecutor', () => {
     assert.ok(result.error?.includes('Copilot CLI failed'));
   });
 
-  test('syncWorkingTreeIfNeeded resets when branch is checked out and clean', async () => {
+  test('updateBranchRef resets working tree when branch checked out and clean', async () => {
     const git = mockGitOperations();
     (git.branches.currentOrNull as sinon.SinonStub).resolves('main');
     (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
 
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
     const context = createMockContext();
-    const method = (executor as any).syncWorkingTreeIfNeeded;
-    await method.call(executor, context, '/repo', 'main', 'abc123');
+    const method = (executor as any).updateBranchRef;
+    const result = await method.call(executor, context, '/repo', 'main', 'abc123');
 
+    assert.strictEqual(result, true);
+    assert.ok((git.repository.updateRef as sinon.SinonStub).calledOnce);
+    // Clean before ref move → safe to reset
     assert.ok((git.repository.resetHard as sinon.SinonStub).calledOnce);
+    // Must NOT stash — no stash/pop cycle
+    assert.ok(!(git.repository.stashPush as sinon.SinonStub).called);
     assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/Synced working tree/)));
   });
 
-  test('syncWorkingTreeIfNeeded stashes dirty changes, resets, then pops', async () => {
+  test('updateBranchRef logs hint when branch checked out but dirty', async () => {
     const git = mockGitOperations();
     (git.branches.currentOrNull as sinon.SinonStub).resolves('main');
     (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(true);
-    (git.repository.stashPush as sinon.SinonStub).resolves(true);
-    (git.repository.stashPop as sinon.SinonStub).resolves(true);
 
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
     const context = createMockContext();
-    const method = (executor as any).syncWorkingTreeIfNeeded;
-    await method.call(executor, context, '/repo', 'main', 'abc123');
+    const method = (executor as any).updateBranchRef;
+    const result = await method.call(executor, context, '/repo', 'main', 'abc123');
 
-    // Must stash first, then reset, then pop
-    assert.ok((git.repository.stashPush as sinon.SinonStub).calledOnce);
-    assert.ok((git.repository.resetHard as sinon.SinonStub).calledOnce);
-    assert.ok((git.repository.stashPop as sinon.SinonStub).calledOnce);
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith('Restored uncommitted changes'));
+    assert.strictEqual(result, true);
+    // Dirty before ref move → do NOT touch working tree
+    assert.ok(!(git.repository.resetHard as sinon.SinonStub).called);
+    assert.ok(!(git.repository.stashPush as sinon.SinonStub).called);
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/uncommitted changes/)));
   });
 
-  test('syncWorkingTreeIfNeeded skips when different branch is checked out', async () => {
+  test('updateBranchRef does not reset when different branch checked out', async () => {
     const git = mockGitOperations();
     (git.branches.currentOrNull as sinon.SinonStub).resolves('feature-branch');
 
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
     const context = createMockContext();
-    const method = (executor as any).syncWorkingTreeIfNeeded;
+    const method = (executor as any).updateBranchRef;
+    const result = await method.call(executor, context, '/repo', 'main', 'abc123');
+
+    assert.strictEqual(result, true);
+    assert.ok(!(git.repository.resetHard as sinon.SinonStub).called);
+  });
+
+  test('updateBranchRef never uses stash/pop cycle', async () => {
+    const git = mockGitOperations();
+    (git.branches.currentOrNull as sinon.SinonStub).resolves('main');
+    (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).updateBranchRef;
     await method.call(executor, context, '/repo', 'main', 'abc123');
 
-    // Nothing should happen
+    assert.ok(!(git.repository.stashPush as sinon.SinonStub).called);
+    assert.ok(!(git.repository.stashPop as sinon.SinonStub).called);
+  });
+
+  test('updateBranchRef tolerates currentOrNull failure gracefully', async () => {
+    const git = mockGitOperations();
+    (git.branches.currentOrNull as sinon.SinonStub).rejects(new Error('git error'));
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).updateBranchRef;
+    const result = await method.call(executor, context, '/repo', 'main', 'abc123');
+
+    // Still succeeds — dirty check failure is non-fatal (defaults to dirty=true, no reset)
+    assert.strictEqual(result, true);
+    assert.ok(!(git.repository.resetHard as sinon.SinonStub).called);
+  });
+
+  test('resolveConflictFilesWithCopilot runs copilot and returns metrics', async () => {
+    const git = mockGitOperations();
+    const runStub = sinon.stub().resolves({ success: true, metrics: { requestCount: 1, inputTokens: 100, outputTokens: 50, costUsd: 0.01, durationMs: 1000 } });
+    const copilotRunner: ICopilotRunner = { ...mockCopilotRunner, run: runStub };
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).resolveConflictFilesWithCopilot;
+    const result = await method.call(executor, context, '/tmp/dir', '/repo', 'src123', 'main', 'merge msg', ['a.ts', 'b.ts']);
+
+    assert.strictEqual(result.success, true);
+    assert.ok(result.metrics);
+    assert.ok(runStub.calledOnce);
+    const taskArg = runStub.firstCall.args[0].task;
+    assert.ok(taskArg.includes('a.ts'));
+    assert.ok(taskArg.includes('b.ts'));
+  });
+
+  test('resolveConflictFilesWithCopilot returns failure on copilot error', async () => {
+    const git = mockGitOperations();
+    const runStub = sinon.stub().rejects(new Error('copilot crashed'));
+    const copilotRunner: ICopilotRunner = { ...mockCopilotRunner, run: runStub };
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).resolveConflictFilesWithCopilot;
+    const result = await method.call(executor, context, '/tmp/dir', '/repo', 'src123', 'main', 'merge msg', ['a.ts']);
+
+    assert.strictEqual(result.success, false);
+  });
+
+  test('validateMergedTree passes when file counts are comparable', async () => {
+    const git = mockGitOperations();
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).validateMergedTree;
+
+    // Stub countTreeFiles to return comparable counts
+    (executor as any).countTreeFiles = sinon.stub()
+      .onFirstCall().resolves(100)  // result
+      .onSecondCall().resolves(100)  // source
+      .onThirdCall().resolves(95);   // target
+
+    const result = await method.call(executor, context, '/repo', 'result123', 'source123', 'target123');
+    assert.strictEqual(result, undefined);
+  });
+
+  test('validateMergedTree catches errors and returns undefined', async () => {
+    const git = mockGitOperations();
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).validateMergedTree;
+
+    // Force countTreeFiles to throw
+    (executor as any).countTreeFiles = sinon.stub().rejects(new Error('ls-tree failed'));
+
+    const result = await method.call(executor, context, '/repo', 'result123', 'source123', 'target123');
+    assert.strictEqual(result, undefined);
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/validation skipped/)));
+  });
+
+  test('countTreeFiles returns count from ls-tree output', async () => {
+    const git = mockGitOperations();
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const method = (executor as any).countTreeFiles;
+
+    // We can't easily stub execAsync import, but we can test via the public flow
+    // The method returns 0 on failure which is the safe fallback
+    const count = await method.call(executor, '/nonexistent', 'abc123');
+    assert.strictEqual(typeof count, 'number');
+  });
+
+  test('pushIfConfigured skips when no configManager', async () => {
+    const git = mockGitOperations();
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).pushIfConfigured;
+    // Should not throw when configManager is undefined
+    await method.call(executor, context, '/repo', 'main');
+    assert.ok(!(git.repository.push as sinon.SinonStub).called);
+  });
+
+  test('updateBranchRef returns false on error', async () => {
+    const git = mockGitOperations();
+    (git.repository.updateRef as sinon.SinonStub).rejects(new Error('ref update failed'));
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).updateBranchRef;
+    const result = await method.call(executor, context, '/repo', 'main', 'newcommit123');
+
+    assert.strictEqual(result, false);
+  });
+
+  test('execute handles merge-tree failure gracefully', async () => {
+    const git = mockGitOperations();
+    (git.repository.hasChangesBetween as sinon.SinonStub).resolves(true);
+    (git.merge.mergeWithoutCheckout as sinon.SinonStub).resolves({
+      success: false, hasConflicts: false, treeSha: null, conflictFiles: [],
+      error: 'merge-tree internal error'
+    });
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const result = await executor.execute(context);
+
+    assert.strictEqual(result.success, false);
+    assert.ok(result.error?.includes('Merge-tree failed'));
+  });
+
+  test('execute handles conflict path success', async () => {
+    const git = mockGitOperations();
+    (git.repository.hasChangesBetween as sinon.SinonStub).resolves(true);
+    (git.merge.mergeWithoutCheckout as sinon.SinonStub).resolves({
+      success: false, hasConflicts: true, treeSha: 'conflicttree123',
+      conflictFiles: ['file1.ts']
+    });
+    (git.merge.catFileFromTree as sinon.SinonStub).resolves('<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> source');
+    (git.merge.hashObjectFromFile as sinon.SinonStub).resolves('resolvedblob123');
+    (git.merge.replaceTreeBlobs as sinon.SinonStub).resolves('resolvedtree123');
+    (git.merge.commitTree as sinon.SinonStub).resolves('mergecommit123');
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+
+    // Stub validateMergedTree and pushIfConfigured to avoid external calls
+    (executor as any).validateMergedTree = sinon.stub().resolves(undefined);
+    (executor as any).pushIfConfigured = sinon.stub().resolves();
+
+    const result = await executor.execute(context);
+    assert.strictEqual(result.success, true);
+  });
+
+  test('execute handles conflict resolution failure', async () => {
+    const git = mockGitOperations();
+    (git.repository.hasChangesBetween as sinon.SinonStub).resolves(true);
+    (git.merge.mergeWithoutCheckout as sinon.SinonStub).resolves({
+      success: false, hasConflicts: true, treeSha: 'conflicttree123',
+      conflictFiles: ['file1.ts']
+    });
+    (git.merge.catFileFromTree as sinon.SinonStub).resolves('conflict content');
+
+    const failRunner: ICopilotRunner = {
+      ...mockCopilotRunner,
+      run: async () => ({ success: false, error: 'Copilot failed' })
+    };
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: failRunner });
+    const context = createMockContext();
+    const result = await executor.execute(context);
+
+    assert.strictEqual(result.success, false);
+    assert.ok(result.error?.includes('resolve merge conflicts') || result.error?.includes('Copilot CLI failed'));
+  });
+
+  test('execute catches exceptions in try block', async () => {
+    const git = mockGitOperations();
+    (git.repository.hasChangesBetween as sinon.SinonStub).rejects(new Error('git crashed'));
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const result = await executor.execute(context);
+
+    assert.strictEqual(result.success, false);
+    assert.ok(result.error?.includes('git crashed'));
+  });
+
+  test('updateBranchRef resets cleanly and never stashes', async () => {
+    const git = mockGitOperations();
+    (git.branches.currentOrNull as sinon.SinonStub).resolves('main');
+    (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).updateBranchRef;
+    const result = await method.call(executor, context, '/repo', 'main', 'newcommit123');
+
+    assert.strictEqual(result, true);
+    assert.ok((git.repository.updateRef as sinon.SinonStub).calledOnce);
+    assert.ok((git.repository.resetHard as sinon.SinonStub).calledOnce);
+    assert.ok(!(git.repository.stashPush as sinon.SinonStub).called);
+  });
+
+  test('updateBranchRef skips reset when different branch is checked out', async () => {
+    const git = mockGitOperations();
+    (git.branches.currentOrNull as sinon.SinonStub).resolves('feature-branch');
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).updateBranchRef;
+    const result = await method.call(executor, context, '/repo', 'main', 'newcommit123');
+
+    assert.strictEqual(result, true);
     assert.ok(!(git.repository.resetHard as sinon.SinonStub).called);
     assert.ok(!(git.repository.stashPush as sinon.SinonStub).called);
   });

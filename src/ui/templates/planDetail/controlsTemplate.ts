@@ -13,6 +13,8 @@
 export interface PlanControlsData {
   /** Computed plan status */
   status: string;
+  /** True when the plan is waiting for user to trigger final merge */
+  awaitingFinalMerge?: boolean;
 }
 
 /**
@@ -48,6 +50,10 @@ export function renderPlanControls(data: PlanControlsData): string {
     ? '<button id="workSummaryBtn" class="action-btn primary" onclick="showWorkSummary()">View Work Summary</button>'
     : '<button id="workSummaryBtn" class="action-btn primary" onclick="showWorkSummary()" style="display:none">View Work Summary</button>';
 
+  const finalMergeBtn = data.awaitingFinalMerge
+    ? '<button id="finalMergeBtn" class="action-btn primary" onclick="completeFinalMerge()" style="background:var(--vscode-testing-iconPassed, #388A34);color:#fff">⬆ Complete RI Merge</button>'
+    : '<button id="finalMergeBtn" class="action-btn primary" onclick="completeFinalMerge()" style="display:none">⬆ Complete RI Merge</button>';
+
   return `
   <div class="plan-toolbar">
     <div class="actions">
@@ -56,6 +62,7 @@ export function renderPlanControls(data: PlanControlsData): string {
       ${cancelBtn}
       <button class="action-btn secondary" onclick="refresh()">Refresh</button>
       ${workSummaryBtn}
+      ${finalMergeBtn}
       <button class="action-btn danger" onclick="deletePlan()">Delete</button>
     </div>
   </div>

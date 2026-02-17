@@ -27,6 +27,8 @@ export interface PlanDetailDelegate {
   sendAllProcessStats(): void;
   /** Open a file in the editor by relative path. */
   openFile(relativePath: string): void;
+  /** Trigger the final merge (snapshot → targetBranch). */
+  completeFinalMerge(): void;
 }
 
 /**
@@ -94,6 +96,9 @@ export class PlanDetailController {
         if (message.path) {
           this._delegate.openFile(message.path);
         }
+        break;
+      case 'completeFinalMerge':
+        this._delegate.completeFinalMerge();
         break;
     }
   }

@@ -50,7 +50,7 @@ function mockGitOperations(): IGitOperations {
       createOrReuseDetached: sinon.stub().resolves({ durationMs: 100, baseCommit: 'abc123', reused: false }),
       remove: sinon.stub().resolves(),
       removeSafe: sinon.stub().resolves(true),
-      isValid: sinon.stub().resolves(true),
+      isValid: sinon.stub().resolves(false),
       getBranch: sinon.stub().resolves('main'),
       list: sinon.stub().resolves([]),
       prune: sinon.stub().resolves(),

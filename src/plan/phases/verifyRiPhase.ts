@@ -58,21 +58,33 @@ export class VerifyRiPhaseExecutor implements IPhaseExecutor {
       return { success: true }; // No target branch → nothing to verify
     }
 
-    const targetSha = await this.git.repository.resolveRef(targetBranch, repoPath);
-    const worktreeName = `verify-ri-${Date.now()}`;
-    const worktreePath = path.join(repoPath, '.worktrees', worktreeName);
+    // If the caller provided a worktreePath that already exists (e.g. a
+    // snapshot worktree), reuse it instead of creating a throwaway one.
+    const reuseWorktree = context.worktreePath
+      ? await this.git.worktrees.isValid(context.worktreePath).catch(() => false)
+      : false;
 
-    context.logInfo(`Creating verification worktree at ${targetBranch} (${targetSha.slice(0, 8)})...`);
+    const worktreePath = reuseWorktree
+      ? context.worktreePath!
+      : path.join(repoPath, '.worktrees', `verify-ri-${Date.now()}`);
 
     try {
-      // Step 1: Create detached worktree at the just-merged target branch
-      await this.git.worktrees.createDetachedWithTiming(
-        repoPath, worktreePath, targetSha,
-        s => context.logInfo(s)
-      );
+      if (reuseWorktree) {
+        context.logInfo(`Reusing snapshot worktree for verification at ${worktreePath}`);
+        // Ensure the worktree is at the latest target branch commit.
+        try {
+          await this.git.repository.resetHard(worktreePath, targetBranch, s => context.logInfo(s));
+        } catch { /* best-effort — the worktree may already be up-to-date */ }
+      } else {
+        const targetSha = await this.git.repository.resolveRef(targetBranch, repoPath);
+        context.logInfo(`Creating verification worktree at ${targetBranch} (${targetSha.slice(0, 8)})...`);
+        await this.git.worktrees.createDetachedWithTiming(
+          repoPath, worktreePath, targetSha,
+          s => context.logInfo(s)
+        );
+      }
 
-      // Step 2: Run the verification WorkSpec in the worktree
-      // Override the context worktreePath so the work runs in the verify worktree
+      // Run the verification WorkSpec in the worktree
       const verifyContext: PhaseContext = {
         ...context,
         worktreePath,
@@ -95,7 +107,7 @@ export class VerifyRiPhaseExecutor implements IPhaseExecutor {
           result = { success: false, error: `Unknown work type: ${(normalized as any).type}` };
       }
 
-      // Step 3: If the verification (or auto-heal) produced changes, commit them
+      // If the verification (or auto-heal) produced changes, commit them
       if (result.success) {
         await this.commitVerifyFixIfNeeded(context, repoPath, worktreePath, targetBranch);
       }
@@ -106,15 +118,17 @@ export class VerifyRiPhaseExecutor implements IPhaseExecutor {
       context.logError(`Verify-RI failed: ${error.message}`);
       return { success: false, error: `Verification failed: ${error.message}` };
     } finally {
-      // Always clean up the ephemeral worktree
-      try {
-        await this.git.worktrees.removeSafe(repoPath, worktreePath, {
-          force: true,
-          log: s => context.logInfo(s)
-        });
-        context.logInfo('Cleaned up verification worktree');
-      } catch (cleanupErr: any) {
-        context.logInfo(`Warning: failed to remove verification worktree: ${cleanupErr.message}`);
+      // Only clean up worktrees we created — never delete the snapshot worktree.
+      if (!reuseWorktree) {
+        try {
+          await this.git.worktrees.removeSafe(repoPath, worktreePath, {
+            force: true,
+            log: s => context.logInfo(s)
+          });
+          context.logInfo('Cleaned up verification worktree');
+        } catch (cleanupErr: any) {
+          context.logInfo(`Warning: failed to remove verification worktree: ${cleanupErr.message}`);
+        }
       }
     }
   }

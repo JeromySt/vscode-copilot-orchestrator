@@ -53,6 +53,12 @@ interface SerializedPlan {
   workSummary?: WorkSummary;
   isPaused?: boolean;
   branchReady?: boolean;
+  snapshot?: {
+    branch: string;
+    worktreePath: string;
+    baseCommit: string;
+  };
+  awaitingFinalMerge?: boolean;
 }
 
 interface SerializedNode {
@@ -348,6 +354,8 @@ export class PlanPersistence {
       workSummary: plan.workSummary,
       isPaused: plan.isPaused,
       branchReady: plan.branchReady,
+      snapshot: plan.snapshot,
+      awaitingFinalMerge: plan.awaitingFinalMerge,
     };
   }
   
@@ -444,6 +452,8 @@ export class PlanPersistence {
       workSummary: data.workSummary,
       isPaused: data.isPaused,
       branchReady: data.branchReady,
+      snapshot: data.snapshot,
+      awaitingFinalMerge: data.awaitingFinalMerge,
     };
   }
   

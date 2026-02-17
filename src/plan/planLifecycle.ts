@@ -23,6 +23,7 @@ import { OrchestratorFileWatcher } from '../core';
 import { computeProgress } from './helpers';
 import type { IGitOperations } from '../interfaces/IGitOperations';
 import type { JobExecutor, PlanRunnerConfig } from './runner';
+import { FinalMergeExecutor } from './phases/finalMergePhase';
 import type { GlobalCapacityManager, GlobalCapacityStats } from '../core/globalCapacity';
 import type { PowerManager } from '../core/powerManager';
 
@@ -440,11 +441,42 @@ export class PlanLifecycleManager {
       this.state.events.emitNodeTransition(event);
     });
 
-    sm.on('planComplete', (event: PlanCompletionEvent) => {
+    sm.on('planComplete', async (event: PlanCompletionEvent) => {
       const plan = this.state.plans.get(event.planId);
-      if (plan) {
-        this.state.events.emitPlanCompleted(plan, event.status);
+      if (!plan) { return; }
+
+      // If the plan succeeded and has a snapshot, run the final merge
+      // before declaring completion.
+      if (event.status === 'succeeded' && plan.snapshot && plan.targetBranch) {
+        this.log.info(`All nodes succeeded — running final merge: snapshot → ${plan.targetBranch}`);
+        const finalMerge = new FinalMergeExecutor({
+          git: this.git,
+          log: s => this.log.info(s),
+        });
+
+        const result = await finalMerge.execute(plan);
+        if (result.success) {
+          this.log.info(`Final merge succeeded (${result.attempts} attempt(s))`);
+          // Cleanup snapshot now that the merge is complete
+          try {
+            const { SnapshotManager } = await import('./phases/snapshotManager');
+            const snapshotMgr = new SnapshotManager(this.git);
+            await snapshotMgr.cleanupSnapshot(plan.snapshot, plan.repoPath, s => this.log.debug(s));
+            plan.snapshot = undefined;
+            this.state.persistence.save(plan);
+          } catch (e: any) {
+            this.log.warn(`Snapshot cleanup failed: ${e.message}`);
+          }
+        } else {
+          this.log.warn(`Final merge failed: ${result.error}`);
+          plan.awaitingFinalMerge = true;
+          this.state.persistence.save(plan);
+          // Don't emit planCompleted yet — plan is waiting for user action.
+          return;
+        }
       }
+
+      this.state.events.emitPlanCompleted(plan, event.status);
     });
   }
 
@@ -484,6 +516,18 @@ export class PlanLifecycleManager {
     }
 
     this.log.info(`Cleaning up Plan resources`, { planId: plan.id, worktrees: worktreePaths.length });
+
+    // Clean up the snapshot worktree + branch first (if present).
+    if (plan.snapshot) {
+      try {
+        const { SnapshotManager } = await import('./phases/snapshotManager');
+        const snapshotMgr = new SnapshotManager(this.git);
+        await snapshotMgr.cleanupSnapshot(plan.snapshot, repoPath, s => this.log.debug(s));
+        plan.snapshot = undefined;
+      } catch (error: any) {
+        cleanupErrors.push(`snapshot: ${error.message}`);
+      }
+    }
 
     for (const worktreePath of worktreePaths) {
       try {

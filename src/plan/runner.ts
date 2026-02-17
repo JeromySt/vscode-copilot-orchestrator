@@ -41,6 +41,8 @@ import { NodeManager } from './nodeManager';
 import { ExecutionPump } from './executionPump';
 import { JobExecutionEngine } from './executionEngine';
 import { PlanEventEmitter } from './planEvents';
+import { SnapshotManager } from './phases/snapshotManager';
+import { FinalMergeExecutor } from './phases/finalMergePhase';
 import type { PlanConfigManager } from './configManager';
 
 const log = Logger.for('plan-runner');
@@ -97,6 +99,7 @@ export class PlanRunner extends EventEmitter {
   private readonly _pump: ExecutionPump;
   private readonly _engine: JobExecutionEngine;
   private readonly _events: PlanEventEmitter;
+  private readonly _git: import('../interfaces/IGitOperations').IGitOperations;
 
   constructor(config: PlanRunnerConfig, deps: {
     configManager: PlanConfigManager;
@@ -124,6 +127,7 @@ export class PlanRunner extends EventEmitter {
 
     this._state = state;
     this._events = events;
+    this._git = deps.git;
     this._lifecycle = new PlanLifecycleManager(state, log, deps.git);
     this._nodeManager = new NodeManager(state, log, deps.git);
     this._engine = new JobExecutionEngine(state, this._nodeManager, log, deps.git);
@@ -135,6 +139,27 @@ export class PlanRunner extends EventEmitter {
         await this._lifecycle.commitGitignoreEntries(plan);
       } catch (e: any) {
         log.warn(`Failed to commit .gitignore entries (continuing): ${e.message}`);
+      }
+      // Create the snapshot worktree for RI merges (if targetBranch is set
+      // and we haven't already created one).
+      if (plan.targetBranch && !plan.snapshot) {
+        try {
+          const snapshotMgr = new SnapshotManager(deps.git);
+          const snapshot = await snapshotMgr.createSnapshot(
+            plan.id,
+            plan.targetBranch,
+            plan.repoPath,
+            plan.worktreeRoot,
+            s => log.info(s),
+            plan.spec.additionalSymlinkDirs,
+          );
+          plan.snapshot = snapshot;
+          state.persistence.save(plan);
+          log.info(`Snapshot created: ${snapshot.branch} at ${snapshot.worktreePath}`);
+        } catch (e: any) {
+          log.error(`Failed to create snapshot worktree: ${e.message}`);
+          // Non-fatal for now — fall back to direct merge if snapshot fails
+        }
       }
     });
 
@@ -282,6 +307,42 @@ export class PlanRunner extends EventEmitter {
 
   async forceFailNode(planId: string, nodeId: string): Promise<void> {
     return this._nodeManager.forceFailNode(planId, nodeId);
+  }
+
+  /**
+   * Manually trigger the final merge (snapshot → targetBranch).
+   * Called from the "Complete RI Merge" UI button when the plan is in
+   * `awaitingFinalMerge` state.
+   */
+  async completeFinalMerge(planId: string): Promise<{ success: boolean; error?: string }> {
+    const plan = this._state.plans.get(planId);
+    if (!plan) { return { success: false, error: 'Plan not found' }; }
+    if (!plan.awaitingFinalMerge) { return { success: false, error: 'Plan is not awaiting final merge' }; }
+    if (!plan.snapshot || !plan.targetBranch) { return { success: false, error: 'No snapshot or target branch' }; }
+
+    const finalMerge = new FinalMergeExecutor({
+      git: this._git,
+      log: s => log.info(s),
+    });
+
+    const result = await finalMerge.execute(plan);
+    if (result.success) {
+      plan.awaitingFinalMerge = undefined;
+      // Cleanup snapshot
+      try {
+        const snapshotMgr = new SnapshotManager(this._git);
+        await snapshotMgr.cleanupSnapshot(plan.snapshot, plan.repoPath, s => log.debug(s));
+        plan.snapshot = undefined;
+      } catch (e: any) {
+        log.warn(`Snapshot cleanup failed: ${e.message}`);
+      }
+      this._state.persistence.save(plan);
+      this._state.events.emitPlanCompleted(plan, 'succeeded');
+      return { success: true };
+    }
+
+    this._state.persistence.save(plan);
+    return { success: false, error: result.error };
   }
 }
 

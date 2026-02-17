@@ -98,6 +98,16 @@ export class planDetailPanel {
           vscode.window.showTextDocument(fileUri, { preview: true }).then(undefined, () => { /* file may not exist */ });
         }
       },
+      completeFinalMerge: () => {
+        this._planRunner.completeFinalMerge(this._planId).then(result => {
+          if (result.success) {
+            vscode.window.showInformationMessage('Final merge completed successfully!');
+          } else {
+            vscode.window.showErrorMessage(`Final merge failed: ${result.error}`);
+          }
+          this._forceFullRefresh();
+        });
+      },
     };
     this._controller = new PlanDetailController(planId, dialogService, delegate);
     
@@ -1365,7 +1375,7 @@ export class planDetailPanel {
     globalCapacityStats,
   })}
   </div>
-  ${renderPlanControls({ status })}
+  ${renderPlanControls({ status, awaitingFinalMerge: plan.awaitingFinalMerge })}
   </div>
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}

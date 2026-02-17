@@ -471,6 +471,20 @@ export interface PlanInstance {
   /** Whether the target branch has been created and .gitignore committed */
   branchReady?: boolean;
   
+  /** Snapshot branch info for accumulated RI merges (set after plan start) */
+  snapshot?: {
+    /** Snapshot branch name, e.g. `orchestrator/snapshot/<planId>` */
+    branch: string;
+    /** Absolute path to the snapshot worktree on disk */
+    worktreePath: string;
+    /** Commit SHA the snapshot was originally branched from */
+    baseCommit: string;
+  };
+
+  /** True when all nodes succeeded but the final merge (snapshot → targetBranch) failed.
+   *  The "Complete RI Merge" button is shown in this state. */
+  awaitingFinalMerge?: boolean;
+
   /** Aggregated work summary */
   workSummary?: WorkSummary;
 }
@@ -634,6 +648,11 @@ export interface ExecutionContext {
   targetBranch?: string;
   /** Base commit at the start of plan execution */
   baseCommitAtStart?: string;
+  
+  /** Snapshot branch for RI merges (leaf merges go here, not targetBranch) */
+  snapshotBranch?: string;
+  /** Snapshot worktree path (real worktree on disk for the snapshot branch) */
+  snapshotWorktreePath?: string;
 }
 
 // ============================================================================

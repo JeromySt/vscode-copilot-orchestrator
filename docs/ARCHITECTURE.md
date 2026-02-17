@@ -377,8 +377,8 @@ merge-fi → setup → prechecks → work → commit → postchecks → merge-ri
 - **Prechecks/Postchecks** — Optional validation commands (auto-healable)
 - **Work** — Routed by `WorkSpec` type (see [Work Specification Types](#work-specification-types))
 - **Commit** — Validates work evidence, stages and commits changes in the worktree
-- **Merge RI** — Reverse integration to target branch using fully in-memory `git merge-tree --write-tree`. Conflicts resolved by extracting files to temp dir → Copilot CLI → hash objects back. Never touches any checkout.
-- **Verify RI** — Post-merge verification: runs the plan-level `verifyRiSpec` in a temporary worktree at the target branch HEAD. Auto-healable — on failure, Copilot CLI fixes the issue and commits to target branch.
+- **Merge RI** — Reverse integration merge. In v0.12.0+, leaf merges go into a **snapshot branch** (not targetBranch directly). Uses in-memory `git merge-tree --write-tree`; conflicts resolved by extracting files to temp dir → Copilot CLI → hash objects back. A final merge from the snapshot into targetBranch happens after all leaves complete.
+- **Verify RI** — Post-merge verification: runs the plan-level `verifyRiSpec` in the snapshot worktree (or a temporary worktree). Auto-healable — on failure, Copilot CLI fixes the issue. Runs after each leaf merge into the snapshot and after the final merge into targetBranch.
 
 Each phase captures **AI usage metrics** independently (tokens, session time, code changes). The executor aggregates phase-level metrics into a total and returns a `phaseMetrics` record so the UI can display a per-phase breakdown.
 

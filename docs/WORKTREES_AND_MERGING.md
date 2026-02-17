@@ -182,15 +182,48 @@ When `merge-tree` reports conflicts (exit code 1), the first line of stdout is s
 
 #### Working Tree Sync
 
-After the ref update, if the user has `targetBranch` checked out, their working tree is synced:
+After updating the `targetBranch` ref, the orchestrator checks whether the user has that branch checked out and whether their working tree was clean **before** the ref move:
 
-| User State | Sync Behavior |
-|------------|---------------|
-| On target branch, clean | `git reset --hard` (instant) |
-| On target branch, dirty | `git stash push` → `git reset --hard` → `git stash pop` |
-| On different branch | No-op (ref was already updated via `git branch -f`) |
+| User State (before ref update) | Sync Behavior |
+|-------------------------------|---------------|
+| On target branch, clean | `git reset --hard HEAD` (safe — nothing to lose) |
+| On target branch, dirty | No-op — logs hint to `git reset --hard HEAD` after saving work |
+| On different branch | No-op (ref was already updated) |
 
-Working tree sync is **non-fatal** — if it fails, the merge commit and ref update have already succeeded. The user can manually `git pull` or `git reset --hard` to sync.
+**Critical safety rule:** The orchestrator never uses `git stash` / `git stash pop` during RI merges. Dirtiness is checked **before** the ref move; after the ref update, the working tree always appears dirty relative to the new HEAD. Only a pre-move clean state allows automatic sync.
+
+Working tree sync is **non-fatal** — if it fails, the merge commit and ref update have already succeeded.
+
+### Snapshot-Based RI Merge (v0.12.0+)
+
+Instead of merging each leaf directly into `targetBranch` during execution, leaf merges are accumulated in an isolated **snapshot branch + worktree**:
+
+```
+Plan Start
+  └─ Create snapshot branch: orchestrator/snapshot/<planId> off targetBranch HEAD
+  └─ Create real git worktree for snapshot branch
+
+Leaf Node Completes (work + commit)
+  └─ merge-ri: merge leaf's commit into snapshot branch (in the worktree)
+  └─ verify-ri: run verifyRiSpec in the snapshot worktree
+
+All Leaves Complete
+  └─ Rebase snapshot onto current targetBranch HEAD (if target moved forward)
+  └─ Run verify-ri in snapshot worktree (post-rebase validation)
+  └─ Final merge: snapshot → targetBranch (in-memory merge-tree)
+  └─ Run verify-ri against targetBranch (post-final-merge)
+  └─ If auto-resolve fails (max 2 attempts): show "Complete RI Merge" button
+
+Plan Complete
+  └─ Clean up snapshot worktree + branch
+```
+
+**Key benefits:**
+- **targetBranch untouched** during execution — no working tree desync
+- **Single final merge** at the end — validated before applying
+- **Rebase handles forward movement** — if targetBranch advanced during execution
+- **User button fallback** — manual retry if automatic merge fails
+- **verify-ri at multiple checkpoints** — after all leaf merges, after rebase, and after final merge
 
 #### Post-Merge Tree Validation
 
@@ -200,16 +233,17 @@ After every RI merge, file counts are compared between the result tree and both 
 
 After a successful RI merge, the optional `verify-ri` phase validates the merged state:
 
-1. Creates a temporary worktree at `targetBranch` HEAD
-2. Runs the plan-level `verifyRiSpec` (e.g., `npm run build && npm test`)
-3. If the verification produces fixes, commits them to `targetBranch`
-4. Cleans up the temporary worktree
+1. If a snapshot worktree exists (v0.12.0+), reuses it — no new worktree created
+2. Otherwise, creates a temporary worktree at `targetBranch` HEAD
+3. Runs the plan-level `verifyRiSpec` (e.g., `npm run build && npm test`)
+4. If the verification produces fixes, commits them to the target branch
+5. Cleans up the temporary worktree (only if it created one — never deletes the snapshot worktree)
 
 **Key properties:**
 - **Plan-level, not per-node** — One `verifyRiSpec: WorkSpec` on `PlanSpec` applies to all leaf merges
 - **Optional but highly recommended** — MCP schema marks it optional; examples always include it
-- **Auto-healable** — On failure, Copilot CLI attempts to fix the issue in the temp worktree and re-runs verification
-- **Isolated** — Runs in a temporary worktree, never in the user's main checkout
+- **Auto-healable** — On failure, Copilot CLI attempts to fix the issue and re-runs verification
+- **Snapshot-aware** — Reuses the snapshot worktree when available instead of creating throwaway worktrees
 - **Only for leaf nodes** — Non-leaf nodes don't do RI merges, so verify-ri is skipped
 
 ## Merge Strategies
