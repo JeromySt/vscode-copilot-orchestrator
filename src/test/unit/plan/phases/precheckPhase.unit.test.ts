@@ -42,14 +42,14 @@ function makeCtx(overrides: Partial<PhaseContext> = {}): PhaseContext {
 
 suite('PrecheckPhaseExecutor', () => {
   test('returns success when no workSpec', async () => {
-    const executor = new PrecheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
+    const executor = new PrecheckPhaseExecutor({ spawner: stubSpawner });
     const result = await executor.execute(makeCtx({ workSpec: undefined }));
     assert.strictEqual(result.success, true);
   });
 
   test('returns success for shell spec with agent delegator on agent type', async () => {
     const delegator = { delegate: sinon.stub().resolves({ success: true, sessionId: 'sess1', metrics: { durationMs: 100 } }) };
-    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
+    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'check things' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);
@@ -57,7 +57,7 @@ suite('PrecheckPhaseExecutor', () => {
   });
 
   test('returns error for unknown work type', async () => {
-    const executor = new PrecheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
+    const executor = new PrecheckPhaseExecutor({ spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'unknown' as any } as any });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -65,7 +65,7 @@ suite('PrecheckPhaseExecutor', () => {
   });
 
   test('agent fails without delegator', async () => {
-    const executor = new PrecheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
+    const executor = new PrecheckPhaseExecutor({ spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'do' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -76,7 +76,7 @@ suite('PrecheckPhaseExecutor', () => {
     const delegator = {
       delegate: sinon.stub().resolves({ success: false, error: 'bad', exitCode: 1, metrics: { durationMs: 50 } }),
     };
-    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
+    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'check' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -86,7 +86,7 @@ suite('PrecheckPhaseExecutor', () => {
 
   test('agent exception returns error', async () => {
     const delegator = { delegate: sinon.stub().rejects(new Error('boom')) };
-    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
+    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'check' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -95,7 +95,7 @@ suite('PrecheckPhaseExecutor', () => {
 
   test('normalises string workSpec to shell', async () => {
     // A string workSpec gets normalised to shell — this will fail to spawn but exercises the path
-    const executor = new PrecheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
+    const executor = new PrecheckPhaseExecutor({ spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: 'echo hello' });
     // The shell spawn will fail (no real shell), but we exercise the normalisation
     const result = await executor.execute(ctx);
@@ -105,7 +105,7 @@ suite('PrecheckPhaseExecutor', () => {
 
   test('normalises @agent string to agent spec', async () => {
     const delegator = { delegate: sinon.stub().resolves({ success: true }) };
-    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
+    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: '@agent do the thing' });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);
@@ -113,7 +113,7 @@ suite('PrecheckPhaseExecutor', () => {
   });
 
   test('logs work type', async () => {
-    const executor = new PrecheckPhaseExecutor({ getCopilotConfigDir: () => '/tmp', spawner: stubSpawner });
+    const executor = new PrecheckPhaseExecutor({ spawner: stubSpawner });
     const logInfo = sinon.stub();
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'x' }, logInfo });
     await executor.execute(ctx);

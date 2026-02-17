@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @fileoverview Unit tests for CommitPhaseExecutor.
  */
 
@@ -132,7 +132,7 @@ suite('CommitPhaseExecutor', () => {
     (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(true);
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('def456');
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), git });
     const result = await executor.execute(makeCtx());
     assert.strictEqual(result.success, true);
     assert.strictEqual(result.commit, 'def456');
@@ -144,7 +144,7 @@ suite('CommitPhaseExecutor', () => {
     (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('newcommit');
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), git });
     const result = await executor.execute(makeCtx({ baseCommit: 'oldcommit' }));
     assert.strictEqual(result.success, true);
     assert.strictEqual(result.commit, 'newcommit');
@@ -159,7 +159,7 @@ suite('CommitPhaseExecutor', () => {
     headStub.onSecondCall().resolves('evidcommit');
 
     const ev = mockEvidenceValidator(true);
-    const executor = new CommitPhaseExecutor({ evidenceValidator: ev, getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: ev, git });
 
     const result = await executor.execute(makeCtx({ baseCommit: 'abc123' }));
     assert.strictEqual(result.success, true);
@@ -171,7 +171,7 @@ suite('CommitPhaseExecutor', () => {
     (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('abc123');
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), git });
     const result = await executor.execute(makeCtx({
       baseCommit: 'abc123',
       node: makeNode({ expectsNoChanges: true }),
@@ -186,7 +186,7 @@ suite('CommitPhaseExecutor', () => {
     (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('abc123');
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), git });
     const result = await executor.execute(makeCtx({ baseCommit: 'abc123' }));
     assert.strictEqual(result.success, false);
     assert.ok(result.error?.includes('No work evidence'));
@@ -209,7 +209,7 @@ suite('CommitPhaseExecutor', () => {
       logs.push({ timestamp: Date.now(), phase: 'commit', type: 'info', message: msg });
     });
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
     const result = await executor.execute(makeCtx({
       baseCommit: 'abc123', logInfo,
       getExecutionLogs: () => logs,
@@ -235,7 +235,7 @@ suite('CommitPhaseExecutor', () => {
       logs.push({ timestamp: Date.now(), phase: 'commit', type: 'info', message: msg });
     });
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
     const result = await executor.execute(makeCtx({
       baseCommit: 'abc123', logInfo, logError: sinon.stub(),
       getExecutionLogs: () => logs,
@@ -251,7 +251,7 @@ suite('CommitPhaseExecutor', () => {
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('abc123');
 
     const delegator = { delegate: sinon.stub().resolves({ success: false, error: 'timeout' }) };
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
     const result = await executor.execute(makeCtx({ baseCommit: 'abc123' }));
     assert.strictEqual(result.success, false);
   });
@@ -263,7 +263,7 @@ suite('CommitPhaseExecutor', () => {
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('abc123');
 
     const delegator = { delegate: sinon.stub().rejects(new Error('network error')) };
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
     const result = await executor.execute(makeCtx({ baseCommit: 'abc123' }));
     assert.strictEqual(result.success, false);
   });
@@ -273,7 +273,7 @@ suite('CommitPhaseExecutor', () => {
     (git.repository.getDirtyFiles as sinon.SinonStub).resolves([]);
     (git.repository.hasUncommittedChanges as sinon.SinonStub).rejects(new Error('git broke'));
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), git });
     const result = await executor.execute(makeCtx());
     assert.strictEqual(result.success, false);
     assert.ok(result.error?.includes('git broke'));
@@ -286,7 +286,7 @@ suite('CommitPhaseExecutor', () => {
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('abc123');
 
     const logInfo = sinon.stub();
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), git });
     const result = await executor.execute(makeCtx({ baseCommit: 'abc123', logInfo }));
     // Note: ignored files functionality is currently disabled (returns empty array)
     // so this test just verifies the code path runs without error
@@ -300,7 +300,7 @@ suite('CommitPhaseExecutor', () => {
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('abc123');
 
     const logInfo = sinon.stub();
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), git });
     await executor.execute(makeCtx({ baseCommit: 'abc123', logInfo }));
     // Note: ignored files functionality is currently disabled (returns empty array)
     // so this test just verifies the code path runs without error
@@ -314,7 +314,7 @@ suite('CommitPhaseExecutor', () => {
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('newcommit');
 
     const logInfo = sinon.stub();
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), git });
     const result = await executor.execute(makeCtx({ logInfo }));
     
     assert.strictEqual(result.success, true);
@@ -328,7 +328,7 @@ suite('CommitPhaseExecutor', () => {
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('newcommit');
 
     const logInfo = sinon.stub();
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), git });
     const result = await executor.execute(makeCtx({ logInfo }));
     
     assert.strictEqual(result.success, true);
@@ -356,7 +356,7 @@ suite('CommitPhaseExecutor', () => {
       }),
     };
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
     
     // We need to track the logs that include the AI review output
     const reviewLogs: any[] = [...manyLogs];
@@ -395,7 +395,7 @@ suite('CommitPhaseExecutor', () => {
         return { success: true };
       }),
     };
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
     await executor.execute(makeCtx({ baseCommit: 'abc123', node: makeNode({ work: processWork }) }));
 
     // Test agent work type
@@ -407,7 +407,7 @@ suite('CommitPhaseExecutor', () => {
         return { success: true };
       }),
     };
-    const executor2 = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', git });
+    const executor2 = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
     await executor2.execute(makeCtx({ baseCommit: 'abc123', node: makeNode({ work: agentWork }) }));
 
     // Test no work
@@ -418,7 +418,7 @@ suite('CommitPhaseExecutor', () => {
         return { success: true };
       }),
     };
-    const executor3 = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, getCopilotConfigDir: () => '/tmp', git });
+    const executor3 = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
     await executor3.execute(makeCtx({ baseCommit: 'abc123', node: makeNode({ work: undefined }) }));
   });
 });

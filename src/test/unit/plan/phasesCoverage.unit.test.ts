@@ -27,7 +27,6 @@ suite('workPhase edge cases', () => {
     const workPhase = await import('../../../plan/phases/workPhase');
     const executor = new workPhase.WorkPhaseExecutor({
       agentDelegator: undefined,
-      getCopilotConfigDir: () => '/tmp/.copilot-cli',
       spawner: { spawn: () => ({} as any) },
     });
     assert.ok(executor);

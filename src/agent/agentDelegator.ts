@@ -99,10 +99,7 @@ export interface DelegateOptions {
    * - **Job Isolation**: Each delegated task has its own isolated session state
    * - **Clean Shutdown**: When the worktree is cleaned up, all session files are automatically
    *   removed with it
-   * 
-   * Typical value: `{worktreePath}/.orchestrator/.copilot`
    */
-  configDir?: string;
 }
 
 /**
@@ -321,15 +318,6 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       return new CopilotCliRunner(cliLogger); // eslint-disable-line no-restricted-syntax -- legacy fallback before DI
     })();
 
-    // Store Copilot config/sessions in worktree's .orchestrator directory
-    // This ensures session state is cleaned up when worktree is removed
-    const copilotConfigDir = path.join(worktreePath, '.orchestrator', '.copilot');
-    
-    // Ensure directory exists
-    if (!fs.existsSync(copilotConfigDir)) {
-      fs.mkdirSync(copilotConfigDir, { recursive: true });
-    }
-
     // Create job-specific directories for Copilot logs and session tracking
     const copilotJobDir = path.join(worktreePath, '.copilot-orchestrator');
     const copilotLogDir = path.join(copilotJobDir, 'logs');
@@ -371,7 +359,6 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       model,
       logDir: copilotLogDir,
       sharePath: sessionSharePath,
-      configDir: copilotConfigDir,
       jobId,
       allowedFolders: finalAllowedFolders,  // Pass through allowed folders with worktree included
       allowedUrls,     // NEW: pass through to CLI runner

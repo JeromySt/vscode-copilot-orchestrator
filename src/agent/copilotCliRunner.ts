@@ -43,8 +43,6 @@ export interface CopilotRunOptions {
   skipInstructionsFile?: boolean;
   /** Unique job/node ID to disambiguate instructions files across concurrent jobs */
   jobId?: string;
-  /** Custom config directory for Copilot CLI session isolation. */
-  configDir?: string;
   /** Additional folders the agent is allowed to access (beyond cwd/worktree). Must be absolute paths. */
   allowedFolders?: string[];
   /** URLs or URL patterns the agent is allowed to access. Secure by default (none allowed). */
@@ -152,13 +150,16 @@ export class CopilotCliRunner {
     }
     
     // Build the command
+    // Auto-derive configDir from cwd for session isolation.
+    // Every CLI invocation gets its own config dir so sessions don't leak
+    // into the VS Code Sessions UI or collide between concurrent nodes.
+    const configDir = path.join(cwd, '.orchestrator', '.copilot-cli');
     const copilotCmd = this.buildCommand({
       task: skipInstructionsFile ? task : `Complete the task described in the instructions file at ${instructionsFile}.`,
       sessionId,
       model,
       logDir,
       sharePath,
-      configDir: options.configDir,
       cwd,
       allowedFolders: options.allowedFolders,
       allowedUrls: options.allowedUrls,
@@ -499,7 +500,6 @@ export interface BuildCommandOptions {
   model?: string;
   logDir?: string;
   sharePath?: string;
-  configDir?: string;
   cwd?: string;
   allowedFolders?: string[];
   allowedUrls?: string[];
@@ -524,7 +524,7 @@ export function buildCommand(
 ): string {
   const log = deps?.logger ?? noopLogger;
   const exists = deps?.existsSync ?? fs.existsSync;
-  const { task, sessionId, model, logDir, sharePath, configDir, cwd, allowedFolders, allowedUrls, maxTurns } = options;
+  const { task, sessionId, model, logDir, sharePath, cwd, allowedFolders, allowedUrls, maxTurns } = options;
 
   const allowedPaths: string[] = [];
   if (cwd) {
@@ -597,7 +597,8 @@ export function buildCommand(
 
   let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-tools`;
   if (urlsArg) { cmd += ` ${urlsArg}`; }
-  if (configDir) { cmd += ` --config-dir ${JSON.stringify(configDir)}`; }
+  // Always derive configDir from cwd for session isolation
+  if (cwd) { cmd += ` --config-dir ${JSON.stringify(path.join(cwd, '.orchestrator', '.copilot-cli'))}`; }
   if (model) { cmd += ` --model ${model}`; }
   if (logDir) { cmd += ` --log-dir ${JSON.stringify(logDir)} --log-level debug`; }
   if (sharePath) { cmd += ` --share ${JSON.stringify(sharePath)}`; }

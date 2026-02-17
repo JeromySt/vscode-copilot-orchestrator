@@ -37,18 +37,15 @@ export interface CommitPhaseContext extends PhaseContext {
 export class CommitPhaseExecutor implements IPhaseExecutor {
   private evidenceValidator: IEvidenceValidator;
   private agentDelegator?: any;
-  private getCopilotConfigDir: (worktreePath: string) => string;
   private git: IGitOperations;
 
   constructor(deps: {
     evidenceValidator: IEvidenceValidator;
     agentDelegator?: any;
-    getCopilotConfigDir: (worktreePath: string) => string;
     git: IGitOperations;
   }) {
     this.evidenceValidator = deps.evidenceValidator;
     this.agentDelegator = deps.agentDelegator;
-    this.getCopilotConfigDir = deps.getCopilotConfigDir;
     this.git = deps.git;
   }
 
@@ -218,8 +215,6 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
 
       ctx.logInfo('========== AI REVIEW: NO-CHANGE ASSESSMENT ==========');
 
-      const configDir = this.getCopilotConfigDir(worktreePath);
-
       const aiInstructions = `# AI Review: No-Change Assessment
 
 ## Task
@@ -265,7 +260,6 @@ OR
         worktreePath,
         model: 'claude-haiku-4.5',
         jobId: node.id,
-        configDir,
         logOutput: (line: string) => ctx.logInfo(`[ai-review] ${line}`),
         onProcess: () => {},
       });

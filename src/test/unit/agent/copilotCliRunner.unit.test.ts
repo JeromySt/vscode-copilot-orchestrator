@@ -14,36 +14,38 @@ suite('CopilotCliRunner', () => {
   
   suite('buildCommand - Config Directory', () => {
     
-    test('includes --config-dir when provided', () => {
+    test('includes --config-dir when cwd is provided', () => {
       const runner = new CopilotCliRunner();
       const cmd = runner.buildCommand({
         task: 'test task',
-        configDir: '/path/to/worktree/.orchestrator/.copilot'
+        cwd: '/path/to/worktree'
       });
       
       assert.ok(cmd.includes('--config-dir'), 'Command should include --config-dir flag');
-      assert.ok(cmd.includes('/path/to/worktree/.orchestrator/.copilot'), 'Command should include the config directory path');
+      assert.ok(cmd.includes('.orchestrator'), 'Config dir should be derived from cwd');
+      assert.ok(cmd.includes('.copilot-cli'), 'Config dir should use .copilot-cli suffix');
     });
     
-    test('omits --config-dir when not provided', () => {
+    test('omits --config-dir when cwd not provided', () => {
       const runner = new CopilotCliRunner();
       const cmd = runner.buildCommand({
         task: 'test task'
       });
       
-      assert.ok(!cmd.includes('--config-dir'), 'Command should not include --config-dir when not provided');
+      assert.ok(!cmd.includes('--config-dir'), 'Command should not include --config-dir when cwd not provided');
     });
     
     test('config dir path with spaces is properly quoted', () => {
       const runner = new CopilotCliRunner();
       const cmd = runner.buildCommand({
         task: 'test task',
-        configDir: '/path/with spaces/.orchestrator/.copilot'
+        cwd: '/path/with spaces/worktree'
       });
       
       assert.ok(cmd.includes('--config-dir'), 'Command should include --config-dir flag');
-      // The path should be JSON-quoted in the command
-      assert.ok(cmd.includes('"/path/with spaces/.orchestrator/.copilot"'), 'Config dir path with spaces should be JSON-quoted');
+      // The path should be JSON-quoted in the command and contain the worktree path
+      assert.ok(cmd.includes('with spaces'), 'Config dir should preserve spaces from cwd');
+      assert.ok(cmd.includes('.copilot-cli"'), 'Config dir path should be quoted');
     });
     
     test('includes task parameter', () => {
@@ -114,8 +116,8 @@ suite('CopilotCliRunner', () => {
       const runner = new CopilotCliRunner();
       const cmd = runner.buildCommand({
         task: 'test task',
-        configDir: '/config',
-        model: 'gpt-5',
+        cwd: '/worktree',
+          model: 'gpt-5',
         logDir: '/logs',
         sharePath: '/share.json',
         sessionId: 'session-123'

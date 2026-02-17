@@ -116,7 +116,7 @@ export function runShell(spec: ShellSpec, ctx: PhaseContext, spawner: IProcessSp
 /** Run agent work. */
 export async function runAgent(
   spec: AgentSpec, ctx: PhaseContext,
-  agentDelegator: any | undefined, getCopilotConfigDir: (worktreePath: string) => string,
+  agentDelegator: any | undefined,
 ): Promise<PhaseResult> {
   if (!agentDelegator) {return { success: false, error: 'Agent work requires an agent delegator to be configured' };}
   ctx.setIsAgentWork(true);
@@ -131,13 +131,12 @@ export async function runAgent(
   if (spec.allowedFolders?.length) {ctx.logInfo(`Agent allowed folders: ${spec.allowedFolders.join(', ')}`);}
   if (spec.allowedUrls?.length) {ctx.logInfo(`Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);}
   try {
-    const configDir = getCopilotConfigDir(ctx.worktreePath);
     const result = await agentDelegator.delegate({
       task: spec.instructions,
       instructions: ctx.node.instructions || spec.context,
       worktreePath: ctx.worktreePath, model: spec.model,
       contextFiles: spec.contextFiles, maxTurns: spec.maxTurns,
-      sessionId: ctx.sessionId, jobId: ctx.node.id, configDir,
+      sessionId: ctx.sessionId, jobId: ctx.node.id,
       allowedFolders: spec.allowedFolders, allowedUrls: spec.allowedUrls,
       logOutput: (line: string) => ctx.logInfo(line),
       onProcess: (proc: any) => { ctx.setProcess(proc); ctx.setIsAgentWork(true); },
@@ -162,16 +161,13 @@ export async function runAgent(
 /** Executes the main work phase of a job node. */
 export class WorkPhaseExecutor implements IPhaseExecutor {
   private agentDelegator?: any;
-  private getCopilotConfigDir: (worktreePath: string) => string;
   private spawner: IProcessSpawner;
   
   constructor(deps: { 
     agentDelegator?: any; 
-    getCopilotConfigDir: (worktreePath: string) => string;
     spawner: IProcessSpawner;
   }) {
     this.agentDelegator = deps.agentDelegator;
-    this.getCopilotConfigDir = deps.getCopilotConfigDir;
     this.spawner = deps.spawner;
   }
   
@@ -182,7 +178,7 @@ export class WorkPhaseExecutor implements IPhaseExecutor {
     switch (normalized.type) {
       case 'process': return runProcess(normalized as ProcessSpec, context, this.spawner);
       case 'shell': return runShell(normalized as ShellSpec, context, this.spawner);
-      case 'agent': return runAgent(normalized as AgentSpec, context, this.agentDelegator, this.getCopilotConfigDir);
+      case 'agent': return runAgent(normalized as AgentSpec, context, this.agentDelegator);
       default: return { success: false, error: `Unknown work type: ${(normalized as any).type}` };
     }
   }

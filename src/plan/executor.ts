@@ -80,14 +80,6 @@ export class DefaultJobExecutor implements JobExecutor {
   setAgentDelegator(delegator: any): void { this.agentDelegator = delegator; }
   setEvidenceValidator(validator: IEvidenceValidator): void { this.evidenceValidator = validator; }
 
-  private getCopilotConfigDir(worktreePath: string): string {
-    // Store Copilot CLI config inside the worktree so session state is
-    // isolated per node and cleaned up when the worktree is removed.
-    const configDir = path.join(worktreePath, '.orchestrator', '.copilot-cli');
-    if (!fs.existsSync(configDir)) {fs.mkdirSync(configDir, { recursive: true });}
-    return configDir;
-  }
-
   // ===========================================================================
   // EXECUTE — Phase pipeline
   // ===========================================================================
@@ -112,7 +104,6 @@ export class DefaultJobExecutor implements JobExecutor {
     const skip = (p: typeof phaseOrder[number]) => phaseOrder.indexOf(p) < resumeIndex;
     const phaseDeps = () => ({ 
       agentDelegator: this.agentDelegator, 
-      getCopilotConfigDir: (wtp: string) => this.getCopilotConfigDir(wtp),
       spawner: this.spawner,
       git: this.git,
       copilotRunner: this.copilotRunner,
