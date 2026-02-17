@@ -216,19 +216,29 @@ export function removeNode(plan: PlanInstance, nodeId: string): MutationResult {
     }
   }
 
-  // Remove from dependents lists of upstream nodes
+  // Remove from dependents lists of upstream nodes, adding downstream nodes to bridge the gap
   for (const depId of node.dependencies) {
     const depNode = plan.nodes.get(depId);
     if (depNode) {
       depNode.dependents = depNode.dependents.filter(id => id !== nodeId);
+      for (const downId of node.dependents) {
+        if (!depNode.dependents.includes(downId)) {
+          depNode.dependents.push(downId);
+        }
+      }
     }
   }
 
-  // Remove from dependencies lists of downstream nodes
+  // Remove from dependencies lists of downstream nodes, inheriting upstream deps to bridge
   for (const depId of node.dependents) {
     const depNode = plan.nodes.get(depId);
     if (depNode) {
       depNode.dependencies = depNode.dependencies.filter(id => id !== nodeId);
+      for (const upId of node.dependencies) {
+        if (!depNode.dependencies.includes(upId)) {
+          depNode.dependencies.push(upId);
+        }
+      }
       recomputeNodeStatus(plan, depId);
     }
   }
@@ -351,7 +361,8 @@ function isReachableViaUpstream(
 /**
  * Insert a new node as a dependency of an existing pending node.
  * The new node's dependencies come from `spec.dependencies`.
- * The existing node is rewired to depend only on the new node.
+ * The existing node is rewired to depend only on the new node;
+ * its previous upstream edges are removed.
  */
 export function addNodeBefore(
   plan: PlanInstance,
@@ -389,6 +400,20 @@ export function addNodeBefore(
     resolvedSpecDeps.push(depNodeId);
   }
 
+  // Cycle check: existingNode will depend on newNode, and newNode on specDeps.
+  // If existingNode is reachable from any specDep (excluding existingNode's
+  // current deps which will be severed), wiring creates a cycle.
+  // Temporarily sever existingNode's deps so the walk doesn't follow the old edges.
+  const savedDeps = existingNode.dependencies;
+  existingNode.dependencies = [];
+  for (const depId of resolvedSpecDeps) {
+    if (depId === existingNodeId || hasCycle(plan, depId, existingNodeId)) {
+      existingNode.dependencies = savedDeps;
+      return { success: false, error: `Adding dependency '${depId}' would create a cycle through '${existingNodeId}'` };
+    }
+  }
+  existingNode.dependencies = savedDeps;
+
   const nodeId = uuidv4();
   const newNode = buildNodeFromSpec(spec, nodeId, resolvedSpecDeps);
 
@@ -408,13 +433,11 @@ export function addNodeBefore(
     }
   }
 
-  // Remove existingNode from its old upstream nodes' dependents (we'll re-add only newNode)
+  // Remove existingNode from ALL old upstream nodes' dependents (it now depends only on newNode)
   for (const oldDepId of existingNode.dependencies) {
-    if (!resolvedSpecDeps.includes(oldDepId)) {
-      const oldDepNode = plan.nodes.get(oldDepId);
-      if (oldDepNode) {
-        oldDepNode.dependents = oldDepNode.dependents.filter(id => id !== existingNodeId);
-      }
+    const oldDepNode = plan.nodes.get(oldDepId);
+    if (oldDepNode) {
+      oldDepNode.dependents = oldDepNode.dependents.filter(id => id !== existingNodeId);
     }
   }
 

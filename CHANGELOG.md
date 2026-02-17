@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Post-merge verification phase (`verify-ri`)**: New optional (but highly recommended) plan-level `verifyRiSpec` that runs after every successful RI merge. Validates the merged target branch in a temporary worktree (e.g. compile, test). Auto-healable — on failure, Copilot CLI attempts to fix the issue. Catches merge conflict resolution mistakes before the next leaf merges.
 - **8-phase execution pipeline**: Added `verify-ri` as the 8th phase after `merge-ri`. Phase order: merge-fi → setup → prechecks → work → commit → postchecks → merge-ri → verify-ri.
 - **Fully in-memory RI merge conflict resolution**: Conflicts are now resolved by extracting files from the merge tree to a temp directory, running Copilot CLI there, then hashing resolved files back into git objects and rebuilding the tree — no worktree or checkout needed.
-- **Working tree sync after RI merge**: After updating the target branch ref, the orchestrator syncs the user's working tree if they have that branch checked out. Dirty changes are preserved via stash/pop.
+- **Working tree sync after RI merge**: After updating the target branch ref, the orchestrator syncs the user's working tree if they have that branch checked out. Clean trees get `reset --hard`; dirty trees are left untouched with a user notification.
 - **Post-merge tree validation**: After every RI merge, file counts are compared between the result and both parents. If the result has <80% of the richer parent's files, the merge is aborted as destructive.
 - **New git helpers**: `catFileFromTree`, `hashObjectFromFile`, `replaceTreeBlobs` for in-memory tree manipulation. `execAsync` now supports `env` option for `GIT_INDEX_FILE`.
 

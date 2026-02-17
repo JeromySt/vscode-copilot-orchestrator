@@ -481,7 +481,6 @@ export function buildPlan(
     prechecks: svPrechecks,
     work: spec.verifyRiSpec,
     postchecks: svPostchecks,
-    expectsNoChanges: true,
     group: svGroupPath,
     groupId: svGroupId,
     dependencies: [...leaves],

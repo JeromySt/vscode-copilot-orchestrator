@@ -258,8 +258,10 @@ export class JobExecutionEngine {
           // Non-leaf nodes' commits are forward-integrated into children instead.
           targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
           baseCommitAtStart: plan.baseCommitAtStart,
-          // Snapshot branch for leaf RI merges (merges go here instead of targetBranch)
-          snapshotBranch: plan.snapshot?.branch,
+          // Snapshot branch for leaf RI merges (merges go here instead of targetBranch).
+          // The SV node itself merges FROM snapshot INTO targetBranch, so it doesn't
+          // redirect — its merge-ri targets plan.targetBranch directly.
+          snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
           snapshotWorktreePath: plan.snapshot?.worktreePath,
           onProgress: (step) => {
             this.log.debug(`Job progress: ${node.name} - ${step}`);
@@ -483,7 +485,7 @@ export class JobExecutionEngine {
                 repoPath: plan.repoPath,
                 targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
                 baseCommitAtStart: plan.baseCommitAtStart,
-                snapshotBranch: plan.snapshot?.branch,
+                snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
                 snapshotWorktreePath: plan.snapshot?.worktreePath,
                 onProgress: (step) => {
                   this.log.debug(`Auto-retry progress: ${node.name} - ${step}`);
@@ -721,7 +723,7 @@ export class JobExecutionEngine {
               repoPath: plan.repoPath,
               targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
               baseCommitAtStart: plan.baseCommitAtStart,
-              snapshotBranch: plan.snapshot?.branch,
+              snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
               snapshotWorktreePath: plan.snapshot?.worktreePath,
               onProgress: (step) => {
                 this.log.debug(`Auto-heal progress: ${node.name} - ${step}`);

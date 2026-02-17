@@ -262,6 +262,7 @@ export function webviewScripts(config: ScriptsConfig): string {
           if (!el.hasAttribute('data-frozen')) {
             el.textContent = formatDuration(Date.now() - startedAt);
             el.setAttribute('data-frozen', '1');
+            this.publishUpdate();
           }
           return;
         } else {

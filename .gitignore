@@ -13,6 +13,7 @@ node_modules/
 .vscode-test/
 coverage/
 .nyc_output/
+test-artifacts/
 
 # IDE/Editor
 .idea/
