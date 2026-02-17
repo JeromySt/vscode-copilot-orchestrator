@@ -365,24 +365,38 @@ stateDiagram-v2
 
 ### JobExecutor — Work Execution
 
-`DefaultJobExecutor` (`src/plan/executor.ts`) runs each node through an eight-phase pipeline:
+`DefaultJobExecutor` (`src/plan/executor.ts`) runs each node through a seven-phase pipeline:
 
 ```
-merge-fi → setup → prechecks → work → commit → postchecks → merge-ri → verify-ri
+merge-fi → setup → prechecks → work → commit → postchecks → merge-ri
 ```
 
 **Phase details:**
 - **Merge FI** — Forward integration of dependency commits into the worktree
 - **Setup** — Worktree environment preparation (symlinks, instructions)
-- **Prechecks/Postchecks** — Optional validation commands (auto-healable)
+- **Prechecks/Postchecks** — Optional validation commands (auto-healable unless `onFailure.noAutoHeal` is set)
 - **Work** — Routed by `WorkSpec` type (see [Work Specification Types](#work-specification-types))
 - **Commit** — Validates work evidence, stages and commits changes in the worktree
-- **Merge RI** — Reverse integration merge. In v0.12.0+, leaf merges go into a **snapshot branch** (not targetBranch directly). Uses in-memory `git merge-tree --write-tree`; conflicts resolved by extracting files to temp dir → Copilot CLI → hash objects back. A final merge from the snapshot into targetBranch happens after all leaves complete.
-- **Verify RI** — Post-merge verification: runs the plan-level `verifyRiSpec` in the snapshot worktree (or a temporary worktree). Auto-healable — on failure, Copilot CLI fixes the issue. Runs after each leaf merge into the snapshot and after the final merge into targetBranch.
+- **Merge RI** — Reverse integration merge. In v0.12.0+, leaf merges go into a **snapshot branch** (not targetBranch directly). Uses in-memory `git merge-tree --write-tree`; conflicts resolved by extracting files to temp dir → Copilot CLI → hash objects back.
+
+**Failure control:** Each phase checks the work spec's `onFailure` config. When `noAutoHeal` is true, the phase returns a force-fail result that skips auto-heal. The `overrideResumeFromPhase` field controls which phase a retry starts from.
 
 Each phase captures **AI usage metrics** independently (tokens, session time, code changes). The executor aggregates phase-level metrics into a total and returns a `phaseMetrics` record so the UI can display a per-phase breakdown.
 
 On retry, the executor can **skip completed phases** using `resumeFromPhase` and resume the Copilot session via captured session IDs.
+
+#### Snapshot Validation Node
+
+The builder auto-injects a **Snapshot Validation** node into every plan. This is a regular `JobNode` (not a separate type) identified by `producerId: '__snapshot-validation__'`:
+
+- **Group:** `Final Merge Validation`
+- **Dependencies:** All original leaf nodes
+- **Work:** `spec.verifyRiSpec` (plan-level verification command)
+- **`assignedWorktreePath`:** Set at runtime to the snapshot worktree path (not at build time)
+
+The snapshot-validation node runs through the standard executor pipeline. Its prechecks/postchecks handle targetBranch health checks (dirty/ahead detection, rebase), and its merge-ri goes directly to `targetBranch`. This replaces the previous `FinalMergeExecutor` and the separate verify-ri phase.
+
+**Root node pinning:** When a snapshot exists, root nodes (no dependencies) use `plan.snapshot.baseCommit` instead of resolving `plan.baseBranch` at execution time. This ensures all root nodes start from the same commit even if `targetBranch` advances during execution.
 
 ### Work Specification Types
 
@@ -394,6 +408,8 @@ Defined in `src/plan/types/specs.ts`:
 | `ShellSpec` | Shell command with configurable shell | `{ type: 'shell', command: 'npm test', shell: 'bash' }` |
 | `AgentSpec` | AI agent delegation with Markdown instructions | `{ type: 'agent', instructions: '## Task\n...', model: 'gpt-4' }` |
 | `string` | Legacy format — shell command or `@agent ...` | `"npm run lint"` |
+
+All structured specs support an optional `onFailure: OnFailureConfig` field (snake_case `on_failure` accepted from MCP) to control auto-heal behavior, user-facing failure messages, and retry resume points.
 
 ### PlanPersistence — State Durability
 
@@ -628,7 +644,8 @@ Each node maintains an `NodeExecutionState` record (`src/plan/types/plan.ts`):
 | `attempts` | Array of `AttemptRecord` for retry history |
 | `lastAttempt` | Most recent attempt with phase statuses |
 | `metrics` | Aggregate AI usage metrics for the node |
-| `phaseMetrics` | Per-phase AI usage breakdown (`merge-fi`, `prechecks`, `work`, `commit`, `postchecks`, `merge-ri`, `verify-ri`) |
+| `phaseMetrics` | Per-phase AI usage breakdown (`merge-fi`, `prechecks`, `work`, `commit`, `postchecks`, `merge-ri`) |
+| `forceFailMessage` | User-facing message when node was force-failed via `OnFailureConfig` |
 
 **Work Summary Behavior:** When a plan has a `targetBranch` configured, the plan detail panel filters the work summary to show only commits from leaf nodes that have successfully merged to the target branch (`mergedToTarget === true`). This ensures the displayed work summary reflects actual integrated work rather than all work performed across the plan. The summary updates dynamically as nodes complete their merge operations.
 

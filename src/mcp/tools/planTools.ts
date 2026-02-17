@@ -140,13 +140,13 @@ ON_FAILURE CONFIG (optional on any work/prechecks/postchecks object):
 Add "on_failure" to any work spec object to control retry behavior on failure:
 - no_auto_heal: true — prevents automatic AI-assisted retry, requires manual intervention
 - message: "User-facing explanation" — shown in the node detail panel on failure
-- resume_from_phase: "prechecks" — which phase to restart from on retry (prechecks/work/postchecks/commit/merge-ri)
+- resume_from_phase: "prechecks" — which phase to restart from on retry (merge-fi/prechecks/work/postchecks/commit/merge-ri)
 Example: { type: "shell", command: "npm test", on_failure: { no_auto_heal: true, message: "Tests must pass before merge" } }
 
-VERIFY_RI (POST-MERGE VERIFICATION — HIGHLY RECOMMENDED):
-When targetBranch is set, always include verify_ri to validate the merged state after each RI merge.
-This catches compilation errors, test regressions, and merge conflict resolution mistakes before the
-next leaf merges. Auto-healable: if verification fails, Copilot CLI attempts to fix the issue.
+VERIFY_RI (SNAPSHOT VALIDATION — HIGHLY RECOMMENDED):
+The verify_ri command runs as the work phase of an auto-injected "Snapshot Validation" node that executes
+after all leaf nodes complete. It validates the accumulated snapshot branch before merging to targetBranch.
+Auto-healable: if verification fails, the AI agent attempts to fix the issue and re-runs.
 Example: "dotnet build --no-restore", "npm run build && npm test", or "@agent Verify compilation and fix any issues"
 
 IMPORTANT: For agent work, specify 'model' INSIDE the work object (not at job level).
@@ -187,7 +187,7 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
             description: 'Create the plan in paused state for review before execution (default: true). Set to false to start immediately.'
           },
           verify_ri: {
-            description: 'Optional (but HIGHLY recommended) verification command to run after each successful RI merge. Runs in a temporary worktree at the target branch HEAD to validate the merged state (e.g. compile, test). Auto-healable: on failure, Copilot CLI attempts to fix the issue. String command or object with type: process/shell/agent. Example: "dotnet build --no-restore" or "npm run build"',
+            description: 'Optional (but HIGHLY recommended) verification command run as the work phase of the auto-injected Snapshot Validation node. Executes after all leaf nodes complete, validating the accumulated snapshot before merging to targetBranch. Auto-healable: on failure, Copilot CLI attempts to fix the issue. String command or object with type: process/shell/agent. Example: "dotnet build --no-restore" or "npm run build"',
             oneOf: [
               { type: 'string', maxLength: 4000 },
               { type: 'object' }

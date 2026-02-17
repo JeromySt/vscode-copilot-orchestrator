@@ -95,25 +95,37 @@ An 8-stage release pipeline — checkout → compile → unit-tests → package 
 
 ## Features
 
-### 🎯 Automated 8-Phase Job Lifecycle
+### 🎯 Automated 7-Phase Job Lifecycle
 
 Every node follows a complete automated pipeline:
 
 ```
-🔀 MERGE FI → ✅ PRECHECKS → 🤖 AI WORK → 💾 COMMIT → ✅ POSTCHECKS → 🔀 MERGE RI → 🔍 VERIFY RI → 🧹 CLEANUP
-Forward Int.    Validate       Agent work    Stage &      Verify          Reverse Int.   Post-merge     Remove
-from target     pre-state      in worktree   commit       changes         to target      verification   worktree
+🔀 MERGE FI → ✅ PRECHECKS → 🤖 AI WORK → 💾 COMMIT → ✅ POSTCHECKS → 🔀 MERGE RI → 🧹 CLEANUP
+Forward Int.    Validate       Agent work    Stage &      Verify          Reverse Int.   Remove
+from deps       pre-state      in worktree   commit       changes         to snapshot    worktree
 ```
 
 **Why this matters:**
-- **Merge FI** (Forward Integration) brings the latest target branch changes into the worktree before work begins
+- **Merge FI** (Forward Integration) brings the latest dependency commits into the worktree before work begins
 - **Prechecks** ensure you start from a working state
 - **AI Work** runs in complete isolation — can't break your main branch
 - **Commit** stages and commits only the agent's changes
 - **Postchecks** validate the AI's work before merging back
-- **Merge RI** (Reverse Integration) merges results back to the target branch using fully in-memory `git merge-tree --write-tree` — never touches the user's working directory
-- **Verify RI** runs a plan-level verification command (e.g. compile, test) against the merged target branch in a temporary worktree. Auto-healable: if verification fails, Copilot CLI fixes the issue
+- **Merge RI** (Reverse Integration) merges results into the snapshot branch using fully in-memory `git merge-tree --write-tree` — never touches the user's working directory
 - **Cleanup** removes the worktree and temporary branch
+
+### 🔍 Snapshot Validation Node (v0.12.0+)
+
+Every plan automatically includes a **Snapshot Validation** node — a regular `JobNode` auto-injected by the builder that runs plan-level verification (e.g. compile, test) against the accumulated snapshot branch before merging to `targetBranch`.
+
+- **Depends on all leaf nodes** — only runs after all work is merged into the snapshot
+- **Uses the snapshot worktree** via `assignedWorktreePath` — no new worktree created
+- **Runs `verifyRiSpec`** as its work phase — the plan-level verification command
+- **Handles targetBranch drift** — prechecks rebase the snapshot if targetBranch moved forward
+- **Per-phase failure control** via `OnFailureConfig` — force-fails (no auto-heal) when targetBranch is dirty, auto-retries when targetBranch advanced
+- **Merge RI** goes directly to `targetBranch` — no separate final merge step needed
+
+**Root node consistency:** All root nodes (no dependencies) use the snapshot's pinned commit (`snapshot.baseCommit`) as their starting point, ensuring every root begins from the same codebase even if `targetBranch` advances during execution.
 
 ### 🤖 Flexible Work Specifications
 
@@ -221,6 +233,32 @@ When a **prechecks**, **work**, or **postchecks** phase fails due to a process o
 **Per-phase replacement strategy:** Auto-heal replaces only the failed phase's work spec — other completed phases are preserved. This means a node that passed prechecks but failed during work won't re-run prechecks during auto-heal.
 
 Auto-heal attempts are tracked in the node's **attempt history** with `triggerType: 'auto-heal'`, visible in the node detail panel.
+
+#### Per-Phase Failure Control (`OnFailureConfig`)
+
+Work specs can include an `onFailure` (or snake_case `on_failure`) configuration to control failure behavior per phase:
+
+```json
+{
+  "work": {
+    "type": "shell",
+    "command": "npm test",
+    "on_failure": {
+      "no_auto_heal": true,
+      "message": "Tests must pass before merge — fix manually and retry",
+      "resume_from_phase": "prechecks"
+    }
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `no_auto_heal` | `true` to skip auto-heal and immediately fail the node |
+| `message` | User-facing message displayed when the node force-fails |
+| `resume_from_phase` | Phase to resume from on retry (`prechecks`, `work`, `postchecks`, `merge-fi`) |
+
+This is used internally by the snapshot-validation node to force-fail (rather than auto-heal) when `targetBranch` is in an unrecoverable state, and to control retry reset points for different failure modes.
 
 ### 📝 Repository Instructions & Agent Skills
 

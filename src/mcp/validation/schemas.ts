@@ -4,6 +4,23 @@
  * These schemas are used by Ajv to validate all MCP input before processing.
  * All input is treated as potentially malicious and strictly validated.
  * 
+ * ⚠️ MAINTENANCE: When adding new properties to WorkSpec types (ProcessSpec,
+ * ShellSpec, AgentSpec) in src/plan/types/specs.ts, you MUST also:
+ *   1. Add the property to `workSpecObjectSchema` below
+ *   2. Add the property to the `WorkSpec` interface below
+ *   3. Update the comprehensive schema test in
+ *      src/test/unit/mcp/schemaCompleteness.unit.test.ts
+ * 
+ * When adding new plan-level fields to PlanSpec (src/plan/types/plan.ts),
+ * you MUST also:
+ *   1. Add the field to `createPlanSchema`
+ *   2. Add the field to the `CreatePlanInput` interface
+ *   3. Update the comprehensive schema test
+ * 
+ * The schemaCompleteness test validates a "kitchen sink" plan that uses
+ * every supported property — if the schema rejects a valid property,
+ * the test fails.
+ * 
  * @module mcp/validation/schemas
  */
 
@@ -29,11 +46,19 @@ export interface WorkSpec {
   args?: string[];
   shell?: 'cmd' | 'powershell' | 'pwsh' | 'bash' | 'sh';
   instructions?: string;
+  model?: string;
   maxTurns?: number;
+  resumeSession?: boolean;
   /** Additional folder paths the agent is allowed to access beyond the worktree */
   allowedFolders?: string[];
   /** URLs or URL patterns the agent is allowed to access */
   allowedUrls?: string[];
+  /** Per-phase failure behavior (snake_case from MCP, converted to camelCase internally) */
+  on_failure?: {
+    no_auto_heal?: boolean;
+    message?: string;
+    resume_from_phase?: string;
+  };
 }
 
 /**
@@ -74,6 +99,8 @@ export interface CreatePlanInput {
   additionalSymlinkDirs?: string[];
   jobs: JobInput[];
   groups?: GroupInput[];
+  startPaused?: boolean;
+  verify_ri?: string | WorkSpec;
 }
 
 // ============================================================================
@@ -105,6 +132,19 @@ const workSpecObjectSchema = {
       items: { type: 'string', maxLength: 500 },
       maxItems: 50,
       description: 'URLs or URL patterns the agent is allowed to access. Default: none (no network access).'
+    },
+    on_failure: {
+      type: 'object',
+      properties: {
+        no_auto_heal: { type: 'boolean', description: 'When true, skip auto-heal on failure — require manual retry.' },
+        message: { type: 'string', maxLength: 1000, description: 'User-facing message displayed on failure.' },
+        resume_from_phase: { 
+          type: 'string', 
+          enum: ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'],
+          description: 'Phase to resume from when the node is retried after this failure.'
+        }
+      },
+      additionalProperties: false
     }
   },
   additionalProperties: false
@@ -207,7 +247,13 @@ export const createPlanSchema = {
       items: { $ref: '#/$defs/group' },
       maxItems: 50
     },
-    startPaused: { type: 'boolean' }
+    startPaused: { type: 'boolean' },
+    verify_ri: {
+      oneOf: [
+        { type: 'string', maxLength: 50000 },
+        workSpecObjectSchema
+      ]
+    }
   },
   required: ['name', 'jobs'],
   additionalProperties: false,

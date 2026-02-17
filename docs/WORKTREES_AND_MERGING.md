@@ -74,10 +74,10 @@ Target Branch ──→ Job A → SHA1 ──┤
 
 ## Merge Phases
 
-Each node in a plan progresses through well-defined phases. Merging occurs in two distinct phases, with an optional verification after RI:
+Each node in a plan progresses through well-defined phases. Merging occurs in two distinct phases:
 
 ```
-merge-fi → prechecks → work → commit → postchecks → merge-ri → verify-ri
+merge-fi → prechecks → work → commit → postchecks → merge-ri
 ```
 
 | Phase | Description |
@@ -87,8 +87,7 @@ merge-fi → prechecks → work → commit → postchecks → merge-ri → verif
 | **`work`** | Copilot agent executes the task |
 | **`commit`** | Changes are committed in the worktree |
 | **`postchecks`** | Post-execution validation (e.g., tests) |
-| **`merge-ri`** | Reverse Integration — in-memory merge of leaf node's commit to target branch |
-| **`verify-ri`** | Post-merge verification — runs plan-level `verifyRiSpec` in temp worktree at target HEAD |
+| **`merge-ri`** | Reverse Integration — in-memory merge of leaf node's commit to snapshot/target branch |
 
 If any phase fails, the `failedPhase` field is set on the node state, enabling targeted retries that skip already-completed phases.
 
@@ -202,17 +201,19 @@ Instead of merging each leaf directly into `targetBranch` during execution, leaf
 Plan Start
   └─ Create snapshot branch: orchestrator/snapshot/<planId> off targetBranch HEAD
   └─ Create real git worktree for snapshot branch
+  └─ Pin snapshot.baseCommit — all root nodes use this SHA (not the branch ref)
 
 Leaf Node Completes (work + commit)
-  └─ merge-ri: merge leaf's commit into snapshot branch (in the worktree)
-  └─ verify-ri: run verifyRiSpec in the snapshot worktree
+  └─ merge-ri: merge leaf's commit into snapshot branch (in-memory merge-tree)
 
-All Leaves Complete
-  └─ Rebase snapshot onto current targetBranch HEAD (if target moved forward)
-  └─ Run verify-ri in snapshot worktree (post-rebase validation)
-  └─ Final merge: snapshot → targetBranch (in-memory merge-tree)
-  └─ Run verify-ri against targetBranch (post-final-merge)
-  └─ If auto-resolve fails (max 2 attempts): show "Complete RI Merge" button
+All Leaves Complete → Snapshot Validation Node Executes
+  └─ assignedWorktreePath = snapshot worktree (no new worktree created)
+  └─ prechecks: check targetBranch health (dirty/ahead detection, rebase if needed)
+  └─ work: run verifyRiSpec (plan-level verification, e.g. build + test)
+  └─ postchecks: re-check targetBranch before merge
+  └─ merge-ri: merge snapshot → targetBranch
+  └─ On failure with dirty targetBranch: force-fail (no auto-heal) with user message
+  └─ On failure with advanced targetBranch: auto-retry from prechecks (rebase + re-verify)
 
 Plan Complete
   └─ Clean up snapshot worktree + branch
@@ -220,31 +221,34 @@ Plan Complete
 
 **Key benefits:**
 - **targetBranch untouched** during execution — no working tree desync
+- **Root node consistency** — all root nodes start from `snapshot.baseCommit` (pinned SHA), not the live branch ref, so they all begin from the same codebase even if `targetBranch` advances
 - **Single final merge** at the end — validated before applying
-- **Rebase handles forward movement** — if targetBranch advanced during execution
-- **User button fallback** — manual retry if automatic merge fails
-- **verify-ri at multiple checkpoints** — after all leaf merges, after rebase, and after final merge
+- **Snapshot validation is a regular JobNode** — identified by `producerId: '__snapshot-validation__'`, uses `assignedWorktreePath` to reuse the snapshot worktree, no separate execution path needed
+- **Per-phase failure control** — `OnFailureConfig` on each phase controls auto-heal vs force-fail and retry reset points
+- **Rebase handles forward movement** — if targetBranch advanced during execution, prechecks rebase the snapshot
 
 #### Post-Merge Tree Validation
 
 After every RI merge, file counts are compared between the result tree and both parent trees. If the result has <80% of the richer parent's file count, the merge is aborted as potentially destructive.
 
-### Verify RI (Post-Merge Verification)
+### Verify RI — Snapshot Validation Node (v0.12.0+)
 
-After a successful RI merge, the optional `verify-ri` phase validates the merged state:
+Post-merge verification is now handled by the **Snapshot Validation** node — a regular `JobNode` auto-injected into every plan by the builder. This replaces the previous per-node `verify-ri` phase.
 
-1. If a snapshot worktree exists (v0.12.0+), reuses it — no new worktree created
-2. Otherwise, creates a temporary worktree at `targetBranch` HEAD
-3. Runs the plan-level `verifyRiSpec` (e.g., `npm run build && npm test`)
-4. If the verification produces fixes, commits them to the target branch
-5. Cleans up the temporary worktree (only if it created one — never deletes the snapshot worktree)
+**How it works:**
+1. The builder creates a `JobNode` with `producerId: '__snapshot-validation__'` that depends on all leaf nodes
+2. When the snapshot is created, the pump sets `assignedWorktreePath` to the snapshot worktree path
+3. The node's work phase runs the plan-level `verifyRiSpec` (e.g., `npm run build && npm test`)
+4. Prechecks/postchecks handle targetBranch health: dirty detection → force-fail, ahead detection → rebase + retry
+5. Merge RI goes directly to `targetBranch`
+6. On success, the snapshot worktree is cleaned up when the plan completes
 
 **Key properties:**
-- **Plan-level, not per-node** — One `verifyRiSpec: WorkSpec` on `PlanSpec` applies to all leaf merges
-- **Optional but highly recommended** — MCP schema marks it optional; examples always include it
-- **Auto-healable** — On failure, Copilot CLI attempts to fix the issue and re-runs verification
-- **Snapshot-aware** — Reuses the snapshot worktree when available instead of creating throwaway worktrees
-- **Only for leaf nodes** — Non-leaf nodes don't do RI merges, so verify-ri is skipped
+- **Regular JobNode** — No special execution path; uses the standard 7-phase executor pipeline
+- **Plan-level, not per-node** — One `verifyRiSpec: WorkSpec` on `PlanSpec` applies to this node's work phase
+- **Optional but highly recommended** — MCP schema marks `verify_ri` optional; examples always include it
+- **Per-phase failure control** — `OnFailureConfig` on prechecks/postchecks controls force-fail (dirty target) vs auto-retry (target advanced)
+- **Only one per plan** — Always the sole leaf node in the final plan DAG
 
 ## Merge Strategies
 
