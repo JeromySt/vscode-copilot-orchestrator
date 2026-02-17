@@ -14,7 +14,6 @@ import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces
 import type { IEvidenceValidator } from '../../interfaces/IEvidenceValidator';
 import type {
   JobNode,
-  PlanNode,
   LogEntry,
   CopilotUsageMetrics,
 } from '../types';
@@ -98,7 +97,7 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
         }
 
         // Check expectsNoChanges flag
-        if (node.type === 'job' && node.expectsNoChanges) {
+        if (node.expectsNoChanges) {
           ctx.logInfo('Node declares expectsNoChanges — succeeding without commit');
           return { success: true, commit: undefined };
         }
@@ -189,7 +188,7 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
   }
 
   private async aiReviewNoChanges(
-    node: PlanNode,
+    node: JobNode,
     worktreePath: string,
     ctx: CommitPhaseContext,
   ): Promise<{ legitimate: boolean; reason: string; metrics?: CopilotUsageMetrics }> {
@@ -204,7 +203,7 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
         : logText;
 
       const workDesc = (() => {
-        const spec = normalizeWorkSpec(node.type === 'job' ? node.work : undefined);
+        const spec = normalizeWorkSpec(node.work);
         if (!spec) {return 'No work specified';}
         if (spec.type === 'shell') {return `Shell: ${spec.command}`;}
         if (spec.type === 'process') {return `Process: ${spec.executable} ${(spec.args || []).join(' ')}`;}
@@ -212,7 +211,7 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
         return 'Unknown work type';
       })();
 
-      const taskDescription = `Node: ${node.name}\nTask: ${node.type === 'job' ? node.task : node.type === 'snapshot-validation' ? node.task : 'N/A'}\nWork: ${workDesc}`;
+      const taskDescription = `Node: ${node.name}\nTask: ${node.task}\nWork: ${workDesc}`;
 
       ctx.logInfo('========== AI REVIEW: NO-CHANGE ASSESSMENT ==========');
 

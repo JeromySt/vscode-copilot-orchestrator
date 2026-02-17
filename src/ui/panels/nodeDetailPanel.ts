@@ -15,7 +15,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PlanRunner, PlanInstance, JobNode, PlanNode, NodeExecutionState, JobWorkSummary, WorkSpec, normalizeWorkSpec } from '../../plan';
+import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec, normalizeWorkSpec } from '../../plan';
 import { escapeHtml, formatDuration, errorPageHtml, loadingPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 import { getNodeMetrics } from '../../plan/metricsAggregator';
 import {
@@ -820,7 +820,7 @@ export class NodeDetailPanel {
    */
   private _getHtml(
     plan: PlanInstance,
-    node: PlanNode,
+    node: JobNode,
     state: NodeExecutionState
   ): string {
     

@@ -33,7 +33,6 @@ export {
   GroupSpec,
   NodeType,
   JobNode,
-  SnapshotValidationNode,
   PlanNode,
   nodePerformsWork,
   NodeSpec,

@@ -177,12 +177,9 @@ export interface GroupSpec {
 
 /**
  * Type discriminator for nodes.
- * - `job`: Standard job node with work phases
- * - `snapshot-validation`: Auto-injected node that validates and merges accumulated
- *   snapshot work into targetBranch. Has custom prechecks/postchecks for targetBranch
- *   health checking and uses verifyRiSpec as its work phase.
+ * All nodes are jobs - groups are visual hierarchy only.
  */
-export type NodeType = 'job' | 'snapshot-validation';
+export type NodeType = 'job';
 
 /**
  * Base node properties (shared by all node types)
@@ -258,35 +255,20 @@ export interface JobNode extends BaseNode {
   * Used to push state updates from jobs to their parent group.
   */
  groupId?: string;
+
+  /**
+   * Pre-assigned worktree path. Internal-only field set by the orchestrator
+   * (e.g., for the snapshot-validation node that reuses the snapshot worktree).
+   * When set, the engine uses this worktree instead of creating a new one.
+   */
+  assignedWorktreePath?: string;
 }
 
 /**
- * Snapshot-validation node (auto-injected, internal representation).
- *
- * Validates accumulated leaf work in a snapshot worktree and merges to targetBranch.
- * Has built-in prechecks/postchecks for targetBranch health and uses the plan's
- * verifyRiSpec as its work phase.
- *
- * Phases: merge-fi → prechecks → work (verify-ri) → postchecks → merge-ri (to target)
+ * All nodes are jobs - PlanNode is an alias.
+ * Groups are visual hierarchy only, not a separate node type.
  */
-export interface SnapshotValidationNode extends BaseNode {
-  type: 'snapshot-validation';
-
-  /** Task description (auto-generated) */
-  task: string;
-
-  /** Always in the "Final Merge Validation" group */
-  group: string;
-
-  /** Resolved group ID */
-  groupId?: string;
-}
-
-/**
- * Plan node union. Jobs are standard work nodes; snapshot-validation is
- * auto-injected to handle final merge to targetBranch.
- */
-export type PlanNode = JobNode | SnapshotValidationNode;
+export type PlanNode = JobNode;
 /**
  * Check if a node performs work (has a work specification).
  *
@@ -296,7 +278,6 @@ export type PlanNode = JobNode | SnapshotValidationNode;
  * @returns `true` if the node has a `work` property defined.
  */
 export function nodePerformsWork(node: PlanNode): boolean {
-  if (node.type === 'snapshot-validation') {return true;}
   return node.work !== undefined;
 }
 

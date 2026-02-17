@@ -19,7 +19,6 @@ import {
   PlanInstance,
   PlanNode,
   JobNode,
-  SnapshotValidationNode,
   JobNodeSpec,
   NodeExecutionState,
   GroupSpec,
@@ -364,16 +363,18 @@ export function buildPlan(
     }
   }
   
-  const svNode: SnapshotValidationNode = {
+  const svNode: JobNode = {
     id: svNodeId,
     producerId: svProducerId,
     name: 'Snapshot Validation',
-    type: 'snapshot-validation',
+    type: 'job',
     task: 'Validate accumulated snapshot and merge to target branch',
+    work: spec.verifyRiSpec,
     group: svGroupPath,
     groupId: svGroupId,
     dependencies: [...leaves],
     dependents: [],
+    // assignedWorktreePath is set later by the pump when the snapshot is created
   };
   
   // Wire current leaves to point to the snapshot-validation node

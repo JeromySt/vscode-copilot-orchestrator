@@ -1,10 +1,11 @@
 /**
- * @fileoverview Tests for snapshot-validation node type, OnFailureConfig, and builder injection
+ * @fileoverview Tests for snapshot-validation node, OnFailureConfig, and builder injection.
+ * The snapshot-validation node is a regular JobNode identified by producerId '__snapshot-validation__'.
  */
 import * as assert from 'assert';
 import { suite, test } from 'mocha';
 import { buildPlan, buildSingleJobPlan } from '../../../plan/builder';
-import type { PlanSpec, OnFailureConfig, JobNode, SnapshotValidationNode, JobExecutionResult, WorkSpec, PlanNode } from '../../../plan/types';
+import type { PlanSpec, OnFailureConfig, JobNode, JobExecutionResult, WorkSpec, PlanNode } from '../../../plan/types';
 import { normalizeWorkSpec } from '../../../plan/types';
 
 suite('Snapshot Validation Node', () => {
@@ -75,18 +76,12 @@ suite('Snapshot Validation Node', () => {
       };
       const plan = buildPlan(spec);
 
-      // Find the snapshot-validation node
-      let svNode: PlanNode | undefined;
-      for (const node of plan.nodes.values()) {
-        if (node.type === 'snapshot-validation') {
-          svNode = node;
-        }
-      }
-
-      assert.ok(svNode, 'Snapshot-validation node must exist');
-      assert.strictEqual(svNode!.type, 'snapshot-validation');
-      assert.strictEqual(svNode!.name, 'Snapshot Validation');
-      assert.strictEqual((svNode as SnapshotValidationNode).group, 'Final Merge Validation');
+      const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
+      assert.ok(svNodeId, 'Snapshot-validation node must exist');
+      const svNode = plan.nodes.get(svNodeId!)!;
+      assert.strictEqual(svNode.type, 'job');
+      assert.strictEqual(svNode.name, 'Snapshot Validation');
+      assert.strictEqual(svNode.group, 'Final Merge Validation');
     });
 
     test('snapshot-validation node depends on all original leaves', () => {
@@ -101,21 +96,14 @@ suite('Snapshot Validation Node', () => {
       };
       const plan = buildPlan(spec);
 
-      // Original leaves are 'b' and 'c'
       const bId = plan.producerIdToNodeId.get('b')!;
       const cId = plan.producerIdToNodeId.get('c')!;
+      const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
+      const svNode = plan.nodes.get(svNodeId)!;
 
-      let svNode: SnapshotValidationNode | undefined;
-      for (const node of plan.nodes.values()) {
-        if (node.type === 'snapshot-validation') {
-          svNode = node as SnapshotValidationNode;
-        }
-      }
-
-      assert.ok(svNode);
-      assert.ok(svNode!.dependencies.includes(bId), 'Should depend on leaf b');
-      assert.ok(svNode!.dependencies.includes(cId), 'Should depend on leaf c');
-      assert.strictEqual(svNode!.dependencies.length, 2);
+      assert.ok(svNode.dependencies.includes(bId), 'Should depend on leaf b');
+      assert.ok(svNode.dependencies.includes(cId), 'Should depend on leaf c');
+      assert.strictEqual(svNode.dependencies.length, 2);
     });
 
     test('snapshot-validation node is the sole leaf', () => {
@@ -131,7 +119,20 @@ suite('Snapshot Validation Node', () => {
       assert.strictEqual(plan.leaves.length, 1);
 
       const leafNode = plan.nodes.get(plan.leaves[0])!;
-      assert.strictEqual(leafNode.type, 'snapshot-validation');
+      assert.strictEqual(leafNode.producerId, '__snapshot-validation__');
+    });
+
+    test('snapshot-validation node gets verifyRiSpec as work', () => {
+      const spec: PlanSpec = {
+        name: 'P',
+        baseBranch: 'main',
+        verifyRiSpec: 'npm test',
+        jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+      };
+      const plan = buildPlan(spec);
+      const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
+      const svNode = plan.nodes.get(svNodeId)!;
+      assert.strictEqual(svNode.work, 'npm test');
     });
 
     test('targetBranch defaults to baseBranch when not specified', () => {
@@ -179,13 +180,20 @@ suite('Snapshot Validation Node', () => {
       const plan = buildPlan(spec);
       const aId = plan.producerIdToNodeId.get('a')!;
       const aNode = plan.nodes.get(aId)!;
+      const svId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
+      assert.ok(aNode.dependents.includes(svId));
+    });
 
-      let svId: string | undefined;
-      for (const node of plan.nodes.values()) {
-        if (node.type === 'snapshot-validation') {svId = node.id;}
-      }
-      assert.ok(svId);
-      assert.ok(aNode.dependents.includes(svId!));
+    test('assignedWorktreePath is initially undefined', () => {
+      const spec: PlanSpec = {
+        name: 'P',
+        baseBranch: 'main',
+        jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+      };
+      const plan = buildPlan(spec);
+      const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
+      const svNode = plan.nodes.get(svNodeId)!;
+      assert.strictEqual(svNode.assignedWorktreePath, undefined);
     });
   });
 
@@ -218,25 +226,8 @@ suite('Snapshot Validation Node', () => {
     });
   });
 
-  suite('nodePerformsWork', () => {
-    test('returns true for snapshot-validation nodes', () => {
-      const { nodePerformsWork } = require('../../../plan/types');
-      const svNode: SnapshotValidationNode = {
-        id: 'sv-1',
-        producerId: '__snapshot-validation__',
-        name: 'Snapshot Validation',
-        type: 'snapshot-validation',
-        task: 'Validate',
-        group: 'Final Merge Validation',
-        dependencies: [],
-        dependents: [],
-      };
-      assert.strictEqual(nodePerformsWork(svNode), true);
-    });
-  });
-
   suite('Persistence round-trip', () => {
-    test('snapshot-validation node survives serialize/deserialize', () => {
+    test('snapshot-validation node with assignedWorktreePath survives serialize/deserialize', () => {
       const { PlanPersistence } = require('../../../plan/persistence');
       const fs = require('fs');
       const path = require('path');
@@ -252,23 +243,21 @@ suite('Snapshot Validation Node', () => {
       };
       const plan = buildPlan(spec);
 
-      // Save
+      // Simulate snapshot creation setting assignedWorktreePath
+      const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
+      const svNode = plan.nodes.get(svNodeId)!;
+      svNode.assignedWorktreePath = '/tmp/snapshot-worktree';
+
       persistence.save(plan);
 
-      // Load
       const loaded = persistence.load(plan.id);
       assert.ok(loaded);
 
-      // Find snapshot-validation node
-      let svNode: PlanNode | undefined;
-      for (const node of loaded!.nodes.values()) {
-        if (node.type === 'snapshot-validation') {svNode = node;}
-      }
-      assert.ok(svNode, 'Loaded plan must have snapshot-validation node');
-      assert.strictEqual(svNode!.name, 'Snapshot Validation');
-      assert.strictEqual((svNode as SnapshotValidationNode).group, 'Final Merge Validation');
+      const loadedSvNode = loaded!.nodes.get(svNodeId)!;
+      assert.strictEqual(loadedSvNode.name, 'Snapshot Validation');
+      assert.strictEqual(loadedSvNode.assignedWorktreePath, '/tmp/snapshot-worktree');
+      assert.strictEqual(loadedSvNode.group, 'Final Merge Validation');
 
-      // Cleanup
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
   });

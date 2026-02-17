@@ -11,7 +11,6 @@
 
 import type {
   JobNode,
-  PlanNode,
   ExecutionPhase,
   CopilotUsageMetrics,
   WorkSpec,
@@ -23,7 +22,7 @@ import type { ChildProcess } from 'child_process';
  */
 export interface PhaseContext {
   /** The job node being executed */
-  node: PlanNode;
+  node: JobNode;
   /** Resolved worktree path */
   worktreePath: string;
   /** Unique execution key for logging */

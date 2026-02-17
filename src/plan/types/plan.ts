@@ -627,7 +627,7 @@ export interface ExecutionContext {
   plan: PlanInstance;
   
   /** Node being executed */
-  node: PlanNode;
+  node: JobNode;
   
   /** Base commit SHA the worktree was created from */
   baseCommit: string;

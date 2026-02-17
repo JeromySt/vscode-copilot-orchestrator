@@ -11,7 +11,7 @@ import type { ILogger } from '../interfaces/ILogger';
 import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
 import type {
   PlanInstance,
-  PlanNode,
+  JobNode,
   NodeStatus,
 } from './types';
 import { nodePerformsWork } from './types';
@@ -45,7 +45,7 @@ export interface ExecutionPumpState {
 export type ExecuteNodeCallback = (
   plan: PlanInstance,
   sm: PlanStateMachine,
-  node: PlanNode
+  node: JobNode
 ) => void;
 
 /**
@@ -285,7 +285,7 @@ export class ExecutionPump {
         const node = plan.nodes.get(nodeId);
         if (!node) {continue;}
         sm.transition(nodeId, 'scheduled');
-        this.executeNode(plan, sm, node);
+        this.executeNode(plan, sm, node as JobNode);
       }
 
       if (nodesToSchedule.length > 0) {

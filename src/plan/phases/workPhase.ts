@@ -133,7 +133,7 @@ export async function runAgent(
   try {
     const result = await agentDelegator.delegate({
       task: spec.instructions,
-      instructions: (ctx.node.type === 'job' ? ctx.node.instructions : undefined) || spec.context,
+      instructions: ctx.node.instructions || spec.context,
       worktreePath: ctx.worktreePath, model: spec.model,
       contextFiles: spec.contextFiles, maxTurns: spec.maxTurns,
       sessionId: ctx.sessionId, jobId: ctx.node.id,

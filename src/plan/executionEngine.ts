@@ -18,7 +18,6 @@ import type {
   PlanInstance,
   PlanNode,
   JobNode,
-  SnapshotValidationNode,
   NodeExecutionState,
   ExecutionContext,
   JobExecutionResult,
@@ -136,7 +135,11 @@ export class JobExecutionEngine {
       // Determine base commits from dependencies (RI/FI model)
       // First commit is the base, additional commits are merged in
       const baseCommits = sm.getBaseCommitsForNode(node.id);
-      const baseCommitish = baseCommits.length > 0 ? baseCommits[0] : plan.baseBranch;
+      // Root nodes (no deps) use the snapshot's pinned commit so every root
+      // starts from the same codebase even if targetBranch moves during execution.
+      const baseCommitish = baseCommits.length > 0
+        ? baseCommits[0]
+        : (plan.snapshot?.baseCommit ?? plan.baseBranch);
       const additionalSources = baseCommits.slice(1);
       
       // Build dependency info map for enhanced logging
@@ -154,9 +157,9 @@ export class JobExecutionEngine {
         }
       }
       
-      // Create worktree path using first 8 chars of node UUID (flat structure)
-      // All worktrees are directly under .worktrees/<shortId> for simplicity
-      const worktreePath = path.join(plan.worktreeRoot, node.id.slice(0, 8));
+      // Use pre-assigned worktree if set (e.g., snapshot worktree), otherwise
+      // create a worktree path using first 8 chars of node UUID (flat structure)
+      const worktreePath = node.assignedWorktreePath || path.join(plan.worktreeRoot, node.id.slice(0, 8));
       
       // Store in state (no branchName since we use detached HEAD)
       nodeState.worktreePath = worktreePath;
@@ -1019,162 +1022,6 @@ export class JobExecutionEngine {
     }
     
     // Persist after execution
-    this.state.persistence.save(plan);
-  }
-
-  // ============================================================================
-  // SNAPSHOT-VALIDATION NODE EXECUTION
-  // ============================================================================
-
-  /**
-   * Execute a snapshot-validation node.
-   *
-   * This node runs in the snapshot worktree and uses custom prechecks/postchecks
-   * that check targetBranch health. The work phase runs verifyRiSpec.
-   * merge-ri targets the real targetBranch (not the snapshot branch).
-   *
-   * For the initial implementation, this delegates to the standard executor
-   * pipeline with snapshot-appropriate context. The custom prechecks/postchecks
-   * phase executors will be wired in a follow-up.
-   */
-  async executeSnapshotValidationNode(
-    plan: PlanInstance,
-    sm: PlanStateMachine,
-    node: SnapshotValidationNode,
-  ): Promise<void> {
-    const nodeState = plan.nodeStates.get(node.id);
-    if (!nodeState) {return;}
-
-    this.log.info(`Executing snapshot-validation node: ${node.name}`, {
-      planId: plan.id,
-      nodeId: node.id,
-    });
-
-    // Snapshot-validation runs in the snapshot worktree
-    if (!plan.snapshot) {
-      this.log.error('No snapshot worktree available for snapshot-validation node', {
-        planId: plan.id,
-        nodeId: node.id,
-      });
-      sm.transition(node.id, 'failed');
-      nodeState.error = 'No snapshot worktree available. This is an internal error.';
-      nodeState.failureReason = 'execution-error';
-      this.state.persistence.save(plan);
-      return;
-    }
-
-    // Transition to running
-    try {
-      sm.transition(node.id, 'running');
-    } catch {
-      return;
-    }
-
-    nodeState.attempts = (nodeState.attempts || 0) + 1;
-    if (!nodeState.startedAt) {nodeState.startedAt = Date.now();}
-    nodeState.worktreePath = plan.snapshot.worktreePath;
-    nodeState.baseCommit = plan.snapshot.baseCommit;
-
-    // Build dependency commits (from all leaf nodes that merged into snapshot)
-    const dependencyCommits: Array<{ nodeId: string; nodeName: string; commit: string }> = [];
-    for (const depId of node.dependencies) {
-      const depState = plan.nodeStates.get(depId);
-      const depNode = plan.nodes.get(depId);
-      if (depState?.completedCommit) {
-        dependencyCommits.push({
-          nodeId: depId,
-          nodeName: depNode?.name || depId,
-          commit: depState.completedCommit,
-        });
-      }
-    }
-
-    // Build execution context — merge-ri targets real targetBranch
-    const context: ExecutionContext = {
-      plan,
-      node,
-      baseCommit: plan.snapshot.baseCommit,
-      worktreePath: plan.snapshot.worktreePath,
-      attemptNumber: nodeState.attempts,
-      resumeFromPhase: nodeState.resumeFromPhase,
-      previousStepStatuses: nodeState.stepStatuses,
-      dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
-      repoPath: plan.repoPath,
-      // Snapshot-validation's merge-ri targets the REAL targetBranch
-      targetBranch: plan.targetBranch,
-      baseCommitAtStart: plan.baseCommitAtStart,
-      // No snapshotBranch — this node IS the snapshot node, it merges to targetBranch directly
-      onProgress: (step) => {
-        this.log.info(`[snapshot-validation] ${step}`, { planId: plan.id, nodeId: node.id });
-      },
-      onStepStatusChange: (phase, status) => {
-        if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};}
-        (nodeState.stepStatuses as any)[phase] = status;
-      },
-    };
-
-    // Execute using the standard executor — the snapshot-validation node
-    // runs through merge-fi (accumulate leaves), prechecks (TODO: custom),
-    // work (verifyRiSpec), postchecks (TODO: custom), merge-ri (to targetBranch)
-    try {
-      const result = await this.state.executor!.execute(context);
-
-      if (result.success) {
-        nodeState.completedCommit = result.completedCommit;
-        nodeState.mergedToTarget = true;
-        nodeState.copilotSessionId = result.copilotSessionId;
-        nodeState.stepStatuses = result.stepStatuses;
-        nodeState.endedAt = Date.now();
-        sm.transition(node.id, 'succeeded');
-        this.log.info('Snapshot-validation node succeeded', { planId: plan.id, nodeId: node.id });
-
-        // Clean up the snapshot worktree and branch now that merge-ri is done
-        if (plan.snapshot) {
-          try {
-            const { SnapshotManager } = await import('./phases/snapshotManager');
-            const snapshotMgr = new SnapshotManager(this.git);
-            await snapshotMgr.cleanupSnapshot(plan.snapshot, plan.repoPath, s => this.log.debug(s));
-            this.log.info('Snapshot worktree cleaned up after successful merge-ri', { planId: plan.id });
-            plan.snapshot = undefined;
-          } catch (e: any) {
-            this.log.warn(`Snapshot cleanup failed (non-fatal): ${e.message}`, { planId: plan.id });
-          }
-        }
-      } else {
-        nodeState.error = result.error;
-        nodeState.failureReason = 'execution-error';
-        nodeState.copilotSessionId = result.copilotSessionId;
-        nodeState.stepStatuses = result.stepStatuses;
-        nodeState.endedAt = Date.now();
-
-        // Handle failure control signals
-        if (result.failureMessage) {
-          nodeState.forceFailMessage = result.failureMessage;
-        }
-        if (result.overrideResumeFromPhase) {
-          nodeState.resumeFromPhase = result.overrideResumeFromPhase;
-        }
-        if (result.noAutoHeal) {
-          // Force-fail — no auto-heal
-          sm.transition(node.id, 'failed');
-          this.log.info('Snapshot-validation node force-failed (noAutoHeal)', {
-            planId: plan.id,
-            nodeId: node.id,
-            message: result.failureMessage,
-          });
-        } else {
-          sm.transition(node.id, 'failed');
-          this.log.info('Snapshot-validation node failed', { planId: plan.id, nodeId: node.id });
-        }
-      }
-    } catch (err: any) {
-      nodeState.error = err.message;
-      nodeState.failureReason = err.message;
-      nodeState.endedAt = Date.now();
-      sm.transition(node.id, 'failed');
-      this.log.error(`Snapshot-validation node error: ${err.message}`, { planId: plan.id, nodeId: node.id });
-    }
-
     this.state.persistence.save(plan);
   }
 

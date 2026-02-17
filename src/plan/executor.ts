@@ -103,8 +103,7 @@ export class DefaultJobExecutor implements JobExecutor {
   }
 
   async execute(context: ExecutionContext): Promise<JobExecutionResult> {
-    const { plan, worktreePath, attemptNumber } = context;
-    const node = context.node as JobNode;
+    const { plan, node, worktreePath, attemptNumber } = context;
     const executionKey = `${plan.id}:${node.id}:${attemptNumber}`;
     const nodeKey = `${plan.id}:${node.id}`;
 

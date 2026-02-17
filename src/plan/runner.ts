@@ -132,11 +132,7 @@ export class PlanRunner extends EventEmitter {
     this._nodeManager = new NodeManager(state, log, deps.git);
     this._engine = new JobExecutionEngine(state, this._nodeManager, log, deps.git);
     this._pump = new ExecutionPump(state, log, (plan, sm, node) => {
-      if (node.type === 'snapshot-validation') {
-        this._engine.executeSnapshotValidationNode(plan, sm, node);
-      } else {
-        this._engine.executeJobNode(plan, sm, node as JobNode);
-      }
+      this._engine.executeJobNode(plan, sm, node);
     }, async (plan) => {
       await this._lifecycle.ensureTargetBranch(plan);
       try {
@@ -158,6 +154,16 @@ export class PlanRunner extends EventEmitter {
             plan.spec.additionalSymlinkDirs,
           );
           plan.snapshot = snapshot;
+          
+          // Wire the snapshot worktree to the snapshot-validation node
+          const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
+          if (svNodeId) {
+            const svNode = plan.nodes.get(svNodeId);
+            if (svNode) {
+              svNode.assignedWorktreePath = snapshot.worktreePath;
+            }
+          }
+          
           state.persistence.save(plan);
           log.info(`Snapshot created: ${snapshot.branch} at ${snapshot.worktreePath}`);
         } catch (e: any) {
