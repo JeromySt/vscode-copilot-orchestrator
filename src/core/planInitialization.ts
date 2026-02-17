@@ -100,7 +100,6 @@ function createAgentDelegatorAdapter(runner: ICopilotRunner, log: any) {
       jobId?: string;
       logOutput?: (line: string) => void;
       onProcess?: (proc: any) => void;
-      configDir?: string;
       allowedFolders?: string[];
       allowedUrls?: string[];
     }): Promise<{
@@ -110,7 +109,7 @@ function createAgentDelegatorAdapter(runner: ICopilotRunner, log: any) {
       exitCode?: number;
       metrics?: CopilotUsageMetrics;
     }> {
-      const { task, instructions, worktreePath, sessionId, logOutput, onProcess, model, jobId, configDir, allowedFolders, allowedUrls } = options;
+      const { task, instructions, worktreePath, sessionId, logOutput, onProcess, model, jobId, allowedFolders, allowedUrls } = options;
       
       const statsParser = new CopilotStatsParser();
       
@@ -122,7 +121,6 @@ function createAgentDelegatorAdapter(runner: ICopilotRunner, log: any) {
         sessionId,
         model,
         jobId,
-        configDir,
         allowedFolders,
         allowedUrls,
         timeout: 0, // No timeout — agent work can run for a long time
