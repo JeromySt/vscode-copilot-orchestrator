@@ -736,6 +736,7 @@ export class NodeDetailPanel {
       premiumRequests: metrics.premiumRequests,
       apiTimeSeconds: metrics.apiTimeSeconds,
       sessionTimeSeconds: metrics.sessionTimeSeconds,
+      codeChanges: metrics.codeChanges,
       modelBreakdown: metrics.modelBreakdown,
     });
   }
