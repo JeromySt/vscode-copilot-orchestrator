@@ -520,9 +520,11 @@ suite('MergeRiPhaseExecutor', () => {
     sandbox.stub(executor as any, 'updateBranchRef').resolves(true);
 
     const context = createMockContext();
+    const tmpRepo = makeTmpDir();
+    fs.mkdirSync(path.join(tmpRepo, '.git'), { recursive: true });
     const method = (executor as any).resolveConflictsInMemory;
     const result = await method.call(
-      executor, context, '/repo', 'source123', 'main',
+      executor, context, tmpRepo, 'source123', 'main',
       'Test merge', 'conflictedtree000', ['file1.txt']
     );
 
@@ -553,9 +555,11 @@ suite('MergeRiPhaseExecutor', () => {
 
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: failRunner });
     const context = createMockContext();
+    const tmpRepo = makeTmpDir();
+    fs.mkdirSync(path.join(tmpRepo, '.git'), { recursive: true });
     const method = (executor as any).resolveConflictsInMemory;
     const result = await method.call(
-      executor, context, '/repo', 'source123', 'main',
+      executor, context, tmpRepo, 'source123', 'main',
       'Test merge', 'conflictedtree000', ['file1.txt']
     );
 
