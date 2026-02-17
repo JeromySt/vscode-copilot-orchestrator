@@ -643,7 +643,7 @@ OPERATIONS (executed sequentially):
 - add_node: Add a new node with spec (producer_id, task, work, dependencies)
 - remove_node: Remove a pending/ready node by nodeId or producer_id
 - update_deps: Replace a node's dependency list (nodeId + dependencies array)
-- add_before: Insert a new node before an existing node (inherits its dependencies)
+- add_before: Insert a new node before an existing node (new node uses spec.dependencies; existing node is rewired to depend on the new node)
 - add_after: Insert a new node after an existing node (takes over its dependents)
 
 EXAMPLE:

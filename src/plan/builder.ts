@@ -397,25 +397,35 @@ export function buildPlan(
   // Postchecks: re-verify targetBranch hasn't moved since prechecks before merge-ri.
   // Reads .orchestrator-snapshot-base (updated by prechecks) and compares to current
   // targetBranch HEAD. If target advanced during work, fail and resume from prechecks
-  // so the snapshot gets rebased again. If target is dirty, fail for user action.
-  const svPostchecks: import('./types/specs').ShellSpec = {
-    type: 'shell',
-    command: [
-      `echo "🔍 Post-check: verifying target branch '${svTargetBranch}' before merge-ri..."`,
-      `SNAPSHOT_BASE=$(cat .orchestrator-snapshot-base)`,
-      `TARGET_HEAD=$(git rev-parse "refs/heads/${svTargetBranch}")`,
-      `if [ "$TARGET_HEAD" != "$SNAPSHOT_BASE" ]; then`,
-      `  git diff --quiet "refs/heads/${svTargetBranch}" 2>/dev/null`,
-      `  if [ $? -ne 0 ]; then`,
-      `    echo "❌ Target branch '${svTargetBranch}' has uncommitted changes. Please clean up before retrying."`,
-      `    exit 1`,
-      `  fi`,
-      `  echo "❌ Target branch '${svTargetBranch}' advanced during validation ($SNAPSHOT_BASE -> $TARGET_HEAD). Needs rebase."`,
-      `  exit 1`,
-      `fi`,
-      `echo "✅ Target branch '${svTargetBranch}' unchanged since prechecks. Safe to merge."`,
-    ].join('\n'),
-    shell: process.platform === 'win32' ? 'bash' : undefined,
+  // so the snapshot gets rebased again. Uses node.js for cross-platform compatibility
+  // (bash not guaranteed on Windows, PowerShell can't handle bash syntax).
+  const postcheckScript = [
+    `const fs = require('fs');`,
+    `const { execSync } = require('child_process');`,
+    `try {`,
+    `  const base = fs.readFileSync('.orchestrator-snapshot-base', 'utf8').trim();`,
+    `  const head = execSync('git rev-parse "refs/heads/${svTargetBranch}"', { encoding: 'utf8' }).trim();`,
+    `  if (head === base) {`,
+    `    console.log('✅ Target branch ${svTargetBranch} unchanged since prechecks. Safe to merge.');`,
+    `    process.exit(0);`,
+    `  }`,
+    `  try { execSync('git diff --quiet "refs/heads/${svTargetBranch}"'); } catch {`,
+    `    console.error('❌ Target branch ${svTargetBranch} has uncommitted changes. Please clean up before retrying.');`,
+    `    process.exit(1);`,
+    `  }`,
+    `  console.error('❌ Target branch ${svTargetBranch} advanced during validation (' + base.slice(0,8) + ' -> ' + head.slice(0,8) + '). Needs rebase.');`,
+    `  process.exit(1);`,
+    `} catch (e) {`,
+    `  console.error('❌ Post-check failed: ' + e.message);`,
+    `  process.exit(1);`,
+    `}`,
+  ].join('\n');
+
+  const svPostchecks: import('./types/specs').ProcessSpec = {
+    type: 'process',
+    executable: process.execPath,
+    args: ['-e', postcheckScript],
+    env: { ELECTRON_RUN_AS_NODE: '1' },
     onFailure: {
       noAutoHeal: false,
       message: `Target branch '${svTargetBranch}' changed during validation. The plan will automatically retry from prechecks to rebase the snapshot.`,

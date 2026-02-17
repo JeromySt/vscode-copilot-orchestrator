@@ -776,10 +776,13 @@ export function renderPlanScripts(data: PlanScriptsData): string {
         if (cancelBtn) cancelBtn.style.display = canControl ? '' : 'none';
         if (workSummaryBtn) workSummaryBtn.style.display = planStatus === 'succeeded' ? '' : 'none';
       }
-      // Show/hide processes section based on plan status
+      // Show/hide processes section based on plan status.
+      // Keep visible while paused if nodes are still finishing execution.
       var procSection = document.getElementById('processesSection');
       if (procSection) {
-        procSection.style.display = (planStatus === 'running' || planStatus === 'pending') ? '' : 'none';
+        var hasRunningNodes = msg.counts && ((msg.counts.running || 0) + (msg.counts.scheduled || 0)) > 0;
+        var showProc = (planStatus === 'running' || planStatus === 'pending') || (planStatus === 'paused' && hasRunningNodes);
+        procSection.style.display = showProc ? '' : 'none';
       }
       this.publishUpdate(msg);
     };
@@ -897,8 +900,8 @@ export function renderPlanScripts(data: PlanScriptsData): string {
                 updatedText = updatedText.substring(0, pipeIdx);
               }
             }
-            var nodeGroupId = nodeGroup.getAttribute('id') || '';
-            var maxLen = parseInt(nodeEl.getAttribute('data-max-text-len') || '') || nodeTextLengths[nodeGroupId];
+            var nodeElId = nodeEl.getAttribute('id') || '';
+            var maxLen = parseInt(nodeEl.getAttribute('data-max-text-len') || '') || nodeTextLengths[nodeElId];
             textSpan.textContent = maxLen ? clampText(updatedText, maxLen) : updatedText;
           }
         }

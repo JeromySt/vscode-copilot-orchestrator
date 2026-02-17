@@ -124,9 +124,22 @@ function makeInitialState(resolvedDeps: string[], plan: PlanInstance): NodeExecu
   };
 }
 
-// ---------------------------------------------------------------------------
-// addNode
-// ---------------------------------------------------------------------------
+/**
+ * Recompute a node's execution state status after its dependencies change.
+ * If all deps are succeeded (or there are none), set to 'ready'; otherwise 'pending'.
+ * Only applies to nodes in modifiable (non-terminal) states.
+ */
+function recomputeNodeStatus(plan: PlanInstance, nodeId: string): void {
+  const state = plan.nodeStates.get(nodeId);
+  if (!state || !MODIFIABLE_STATES.has(state.status)) {return;}
+  const node = plan.nodes.get(nodeId);
+  if (!node) {return;}
+  const allDepsSatisfied = node.dependencies.length === 0 || node.dependencies.every(depId => {
+    const s = plan.nodeStates.get(depId);
+    return s?.status === 'succeeded';
+  });
+  state.status = allDepsSatisfied ? 'ready' : 'pending';
+}
 
 /**
  * Add a new node to a running/paused plan.
@@ -216,6 +229,7 @@ export function removeNode(plan: PlanInstance, nodeId: string): MutationResult {
     const depNode = plan.nodes.get(depId);
     if (depNode) {
       depNode.dependencies = depNode.dependencies.filter(id => id !== nodeId);
+      recomputeNodeStatus(plan, depId);
     }
   }
 
@@ -406,6 +420,7 @@ export function addNodeBefore(
 
   // Rewire existing node to depend on the new node only
   existingNode.dependencies = [nodeId];
+  recomputeNodeStatus(plan, existingNodeId);
 
   recomputeRootsAndLeaves(plan);
   plan.stateVersion++;
@@ -490,6 +505,7 @@ export function addNodeAfter(
         // Replace existingNodeId with nodeId in the dependent's dependencies
         depNode.dependencies = depNode.dependencies.map(d => d === existingNodeId ? nodeId : d);
         transferredDependents.push(depId);
+        recomputeNodeStatus(plan, depId);
       }
     }
   }
