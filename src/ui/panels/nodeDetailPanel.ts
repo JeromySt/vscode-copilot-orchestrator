@@ -689,6 +689,7 @@ export class NodeDetailPanel {
     const normalizedWork = node.work ? normalizeWorkSpec(node.work) : undefined;
     
     // Pre-render spec HTML server-side so the webview gets formatted HTML
+    const verifyRiSpec = plan?.spec?.verifyRiSpec;
     this._panel.webview.postMessage({
       type: 'configUpdate',
       data: {
@@ -698,6 +699,8 @@ export class NodeDetailPanel {
         prechecksType: node.prechecks ? getSpecTypeInfo(node.prechecks) : undefined,
         postchecks: node.postchecks ? renderSpecContent(node.postchecks) : undefined,
         postchecksType: node.postchecks ? getSpecTypeInfo(node.postchecks) : undefined,
+        verifyRi: verifyRiSpec ? renderSpecContent(verifyRiSpec) : undefined,
+        verifyRiType: verifyRiSpec ? getSpecTypeInfo(verifyRiSpec) : undefined,
         task: node.task,
         currentPhase: getCurrentExecutionPhase(state),
       }

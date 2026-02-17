@@ -651,6 +651,15 @@ export function webviewScripts(config: ScriptsConfig): string {
           phasesHtml += this._renderCollapsiblePhase('postchecks', 'Postchecks', postType, cfg.postchecks, postExpanded);
         }
 
+        // Verify-RI (collapsible, collapsed by default — plan-level spec)
+        if (cfg.verifyRi) {
+          var vrType = cfg.verifyRiType || { type: 'shell', label: 'Shell' };
+          var vrExpanded = this._userOverrides['verify-ri'] !== undefined
+            ? this._userOverrides['verify-ri']
+            : (cfg.currentPhase === 'verify-ri');
+          phasesHtml += this._renderCollapsiblePhase('verify-ri', 'Verify RI', vrType, cfg.verifyRi, vrExpanded);
+        }
+
         // Wrap in matching server-side section structure
         var html = '<div class="section"><h3>Job Configuration</h3>'
           + '<div class="config-item"><div class="config-label">Task</div>'
