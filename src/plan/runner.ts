@@ -132,7 +132,11 @@ export class PlanRunner extends EventEmitter {
     this._nodeManager = new NodeManager(state, log, deps.git);
     this._engine = new JobExecutionEngine(state, this._nodeManager, log, deps.git);
     this._pump = new ExecutionPump(state, log, (plan, sm, node) => {
-      this._engine.executeJobNode(plan, sm, node);
+      if (node.type === 'snapshot-validation') {
+        this._engine.executeSnapshotValidationNode(plan, sm, node);
+      } else {
+        this._engine.executeJobNode(plan, sm, node as JobNode);
+      }
     }, async (plan) => {
       await this._lifecycle.ensureTargetBranch(plan);
       try {

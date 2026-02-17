@@ -344,9 +344,14 @@ export function renderPlanScripts(data: PlanScriptsData): string {
             const match = nodeGroup.id.match(/flowchart-([^-]+)-/);
             if (match) {
               const sanitizedId = match[1];
-              const data = nodeData[sanitizedId];
-              if (data) {
-                vscode.postMessage({ type: 'openNode', nodeId: data.nodeId, planId: data.planId });
+              // Synthetic snapshot nodes — show snapshot detail
+              if (sanitizedId === 'SNAPSHOT' || sanitizedId === 'FINAL_MERGE') {
+                vscode.postMessage({ type: 'showSnapshotDetail', node: sanitizedId });
+              } else {
+                const data = nodeData[sanitizedId];
+                if (data) {
+                  vscode.postMessage({ type: 'openNode', nodeId: data.nodeId, planId: data.planId });
+                }
               }
             }
           }

@@ -19,6 +19,7 @@ import {
   PlanInstance,
   PlanNode,
   JobNode,
+  SnapshotValidationNode,
   JobNodeSpec,
   NodeExecutionState,
   GroupSpec,
@@ -312,7 +313,7 @@ export function buildPlan(
   
   // Identify roots (no dependencies) and leaves (no dependents)
   const roots: string[] = [];
-  const leaves: string[] = [];
+  let leaves: string[] = [];
   
   for (const node of nodes.values()) {
     if (node.dependencies.length === 0) {
@@ -322,6 +323,72 @@ export function buildPlan(
       leaves.push(node.id);
     }
   }
+
+  // ── Inject snapshot-validation node ──────────────────────────────────────
+  // Every plan has a targetBranch (defaults to baseBranch). The snapshot-
+  // validation node depends on all current leaves and becomes the new sole
+  // leaf. It handles: merge-fi (accumulate leaves) → prechecks (target health)
+  // → work (verify-ri) → postchecks (re-check target) → merge-ri (to target).
+  const svNodeId = uuidv4();
+  const svProducerId = '__snapshot-validation__';
+  const svGroupPath = 'Final Merge Validation';
+  
+  // Create or reuse the "Final Merge Validation" group
+  let svGroupId = groupPathToId.get(svGroupPath);
+  if (!svGroupId) {
+    svGroupId = uuidv4();
+    groupPathToId.set(svGroupPath, svGroupId);
+    const svGroup: GroupInstance = {
+      id: svGroupId,
+      name: 'Final Merge Validation',
+      path: svGroupPath,
+      nodeIds: [svNodeId],
+      allNodeIds: [svNodeId],
+      totalNodes: 1,
+      childGroupIds: [],
+    };
+    groups.set(svGroupId, svGroup);
+    groupStates.set(svGroupId, {
+      status: 'pending',
+      version: 0,
+      runningCount: 0,
+      succeededCount: 0,
+      failedCount: 0,
+      blockedCount: 0,
+      canceledCount: 0,
+    });
+  } else {
+    const existingGroup = groups.get(svGroupId);
+    if (existingGroup) {
+      existingGroup.nodeIds.push(svNodeId);
+    }
+  }
+  
+  const svNode: SnapshotValidationNode = {
+    id: svNodeId,
+    producerId: svProducerId,
+    name: 'Snapshot Validation',
+    type: 'snapshot-validation',
+    task: 'Validate accumulated snapshot and merge to target branch',
+    group: svGroupPath,
+    groupId: svGroupId,
+    dependencies: [...leaves],
+    dependents: [],
+  };
+  
+  // Wire current leaves to point to the snapshot-validation node
+  for (const leafId of leaves) {
+    const leafNode = nodes.get(leafId);
+    if (leafNode) {
+      leafNode.dependents.push(svNodeId);
+    }
+  }
+  
+  nodes.set(svNodeId, svNode);
+  producerIdToNodeId.set(svProducerId, svNodeId);
+  
+  // Snapshot-validation node is now the sole leaf
+  leaves = [svNodeId];
   
   // Validate: Check for cycles
   const cycleError = detectCycles(nodes);
@@ -374,7 +441,7 @@ export function buildPlan(
     parentNodeId: options.parentNodeId,
     repoPath,
     baseBranch: spec.baseBranch || 'main',
-    targetBranch: spec.targetBranch,
+    targetBranch: spec.targetBranch || spec.baseBranch || 'main',
     worktreeRoot,
     createdAt: Date.now(),
     stateVersion: 0,

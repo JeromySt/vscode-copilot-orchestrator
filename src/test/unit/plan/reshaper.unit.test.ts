@@ -10,13 +10,13 @@ import {
   hasCycle,
   recomputeRootsAndLeaves,
 } from '../../../plan/reshaper';
-import type { PlanInstance, PlanNode, NodeExecutionState, JobNodeSpec } from '../../../plan/types';
+import type { PlanInstance, PlanNode, JobNode, NodeExecutionState, JobNodeSpec } from '../../../plan/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeNode(id: string, opts: Partial<PlanNode> = {}): PlanNode {
+function makeNode(id: string, opts: Partial<JobNode> = {}): PlanNode {
   return {
     id,
     producerId: opts.producerId ?? id,

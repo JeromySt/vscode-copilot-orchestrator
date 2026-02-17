@@ -15,9 +15,9 @@ suite('Plan Builder (extended coverage)', () => {
       };
       const plan = buildPlan(spec);
       assert.ok(plan.id);
-      assert.strictEqual(plan.nodes.size, 1);
+      assert.strictEqual(plan.nodes.size, 2); // 1 job + snapshot-validation
       assert.strictEqual(plan.roots.length, 1);
-      assert.strictEqual(plan.leaves.length, 1);
+      assert.strictEqual(plan.leaves.length, 1); // snapshot-validation is the sole leaf
       assert.strictEqual(plan.baseBranch, 'main');
     });
 
@@ -32,9 +32,9 @@ suite('Plan Builder (extended coverage)', () => {
         ],
       };
       const plan = buildPlan(spec);
-      assert.strictEqual(plan.nodes.size, 3);
+      assert.strictEqual(plan.nodes.size, 4); // 3 jobs + snapshot-validation
       assert.strictEqual(plan.roots.length, 1);
-      assert.strictEqual(plan.leaves.length, 1);
+      assert.strictEqual(plan.leaves.length, 1); // snapshot-validation is the sole leaf
     });
 
     test('root nodes start as ready', () => {
@@ -253,20 +253,20 @@ suite('Plan Builder (extended coverage)', () => {
       };
       const plan = buildPlan(spec);
       assert.strictEqual(plan.roots.length, 2);
-      assert.strictEqual(plan.leaves.length, 2); // b and c
+      assert.strictEqual(plan.leaves.length, 1); // snapshot-validation is the sole leaf
     });
   });
 
   suite('buildSingleJobPlan', () => {
     test('creates a plan with one node', () => {
       const plan = buildSingleJobPlan({ name: 'My Job', task: 'do stuff' });
-      assert.strictEqual(plan.nodes.size, 1);
+      assert.strictEqual(plan.nodes.size, 2); // 1 job + snapshot-validation
       assert.strictEqual(plan.roots.length, 1);
     });
 
     test('generates producerId from name', () => {
       const plan = buildSingleJobPlan({ name: 'Build & Test!', task: 'go' });
-      assert.strictEqual(plan.producerIdToNodeId.size, 1);
+      assert.strictEqual(plan.producerIdToNodeId.size, 2); // 1 job + snapshot-validation
       const [producerId] = plan.producerIdToNodeId.keys();
       assert.ok(!producerId.includes('!'));
       assert.ok(!producerId.includes('&'));

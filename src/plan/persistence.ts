@@ -13,6 +13,7 @@ import {
   PlanInstance,
   PlanNode,
   JobNode,
+  SnapshotValidationNode,
   NodeExecutionState,
   WorkSummary,
   WorkSpec,
@@ -65,7 +66,7 @@ interface SerializedNode {
   id: string;
   producerId: string;
   name: string;
-  type: 'job';
+  type: 'job' | 'snapshot-validation';
   dependencies: string[];
   dependents: string[];
   // Job-specific
@@ -293,6 +294,11 @@ export class PlanPersistence {
         serializedNode.autoHeal = jobNode.autoHeal;
         serializedNode.group = jobNode.group;
         serializedNode.groupId = jobNode.groupId;
+      } else if (node.type === 'snapshot-validation') {
+        const svNode = node as SnapshotValidationNode;
+        serializedNode.task = svNode.task;
+        serializedNode.group = svNode.group;
+        serializedNode.groupId = svNode.groupId;
       }
       
       nodes.push(serializedNode);
@@ -382,6 +388,19 @@ export class PlanPersistence {
           expectsNoChanges: serializedNode.expectsNoChanges,
           autoHeal: serializedNode.autoHeal,
           group: serializedNode.group,
+          groupId: serializedNode.groupId,
+          dependencies: serializedNode.dependencies,
+          dependents: serializedNode.dependents,
+        };
+        nodes.set(node.id, node);
+      } else if (serializedNode.type === 'snapshot-validation') {
+        const node: SnapshotValidationNode = {
+          id: serializedNode.id,
+          producerId: serializedNode.producerId,
+          name: serializedNode.name,
+          type: 'snapshot-validation',
+          task: serializedNode.task || 'Snapshot validation and final merge',
+          group: serializedNode.group || 'Final Merge Validation',
           groupId: serializedNode.groupId,
           dependencies: serializedNode.dependencies,
           dependents: serializedNode.dependents,

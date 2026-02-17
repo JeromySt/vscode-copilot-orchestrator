@@ -177,9 +177,12 @@ export interface GroupSpec {
 
 /**
  * Type discriminator for nodes.
- * All nodes are jobs - groups are visual hierarchy only.
+ * - `job`: Standard job node with work phases
+ * - `snapshot-validation`: Auto-injected node that validates and merges accumulated
+ *   snapshot work into targetBranch. Has custom prechecks/postchecks for targetBranch
+ *   health checking and uses verifyRiSpec as its work phase.
  */
-export type NodeType = 'job';
+export type NodeType = 'job' | 'snapshot-validation';
 
 /**
  * Base node properties (shared by all node types)
@@ -258,10 +261,32 @@ export interface JobNode extends BaseNode {
 }
 
 /**
- * All nodes are jobs - PlanNode is an alias.
- * Groups are visual hierarchy only, not a separate node type.
+ * Snapshot-validation node (auto-injected, internal representation).
+ *
+ * Validates accumulated leaf work in a snapshot worktree and merges to targetBranch.
+ * Has built-in prechecks/postchecks for targetBranch health and uses the plan's
+ * verifyRiSpec as its work phase.
+ *
+ * Phases: merge-fi → prechecks → work (verify-ri) → postchecks → merge-ri (to target)
  */
-export type PlanNode = JobNode;
+export interface SnapshotValidationNode extends BaseNode {
+  type: 'snapshot-validation';
+
+  /** Task description (auto-generated) */
+  task: string;
+
+  /** Always in the "Final Merge Validation" group */
+  group: string;
+
+  /** Resolved group ID */
+  groupId?: string;
+}
+
+/**
+ * Plan node union. Jobs are standard work nodes; snapshot-validation is
+ * auto-injected to handle final merge to targetBranch.
+ */
+export type PlanNode = JobNode | SnapshotValidationNode;
 /**
  * Check if a node performs work (has a work specification).
  *
@@ -271,6 +296,7 @@ export type PlanNode = JobNode;
  * @returns `true` if the node has a `work` property defined.
  */
 export function nodePerformsWork(node: PlanNode): boolean {
+  if (node.type === 'snapshot-validation') {return true;}
   return node.work !== undefined;
 }
 

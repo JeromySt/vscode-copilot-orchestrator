@@ -65,6 +65,14 @@ suite('PlanRunner delegation coverage', () => {
     runner.setGlobalCapacityManager({} as any);
   });
 
+  test('setCopilotRunner stores the runner', () => {
+    const dir = makeTmpDir();
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    const mockRunner = { run: async () => {} } as any;
+    runner.setCopilotRunner(mockRunner);
+    assert.strictEqual((runner as any)._state.copilotRunner, mockRunner);
+  });
+
   test('query methods return defaults for unknown plans', () => {
     const dir = makeTmpDir();
     const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
@@ -130,7 +138,7 @@ suite('PlanRunner delegation coverage', () => {
     const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
     const plan = runner.enqueueJob({ name: 'Job', task: 'x' });
     assert.ok(plan.id);
-    assert.strictEqual(plan.nodes.size, 1);
+    assert.strictEqual(plan.nodes.size, 2); // 1 job + snapshot-validation
   });
 
   test('initialize, persistSync, shutdown lifecycle', async () => {

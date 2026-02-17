@@ -11,6 +11,7 @@
 
 import type {
   JobNode,
+  PlanNode,
   ExecutionPhase,
   CopilotUsageMetrics,
   WorkSpec,
@@ -22,7 +23,7 @@ import type { ChildProcess } from 'child_process';
  */
 export interface PhaseContext {
   /** The job node being executed */
-  node: JobNode;
+  node: PlanNode;
   /** Resolved worktree path */
   worktreePath: string;
   /** Unique execution key for logging */
@@ -85,6 +86,24 @@ export interface PhaseResult {
   commit?: string;
   /** AI review metrics (commit phase only) */
   reviewMetrics?: CopilotUsageMetrics;
+
+  /**
+   * When true, auto-heal should NOT be attempted for this failure.
+   * Phase executors set this to signal non-auto-healable conditions.
+   */
+  noAutoHeal?: boolean;
+
+  /**
+   * User-facing failure message.
+   * Phase executors set this to provide actionable guidance to the user.
+   */
+  failureMessage?: string;
+
+  /**
+   * Override the phase to resume from on retry.
+   * Phase executors set this to control retry behavior.
+   */
+  overrideResumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
 }
 
 /**

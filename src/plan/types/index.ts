@@ -19,6 +19,7 @@ export {
   ModelUsageBreakdown,
   CodeChangeStats,
   CopilotUsageMetrics,
+  OnFailureConfig,
 } from './specs';
 
 // Node types, status, and specifications
@@ -32,6 +33,7 @@ export {
   GroupSpec,
   NodeType,
   JobNode,
+  SnapshotValidationNode,
   PlanNode,
   nodePerformsWork,
   NodeSpec,

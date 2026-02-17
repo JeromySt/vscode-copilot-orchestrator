@@ -182,13 +182,20 @@ export interface NodeExecutionState {
    * Used by UI to show different styling/messaging for user-initiated failures.
    */
   forceFailed?: boolean;
+
+  /**
+   * User-facing failure message set by a phase executor's onFailure config.
+   * Displayed prominently in NodeDetailPanel. Indicates a non-auto-healable
+   * failure that requires user action (e.g., "targetBranch has uncommitted changes").
+   */
+  forceFailMessage?: string;
   
   /**
    * Phase to resume from on retry.
    * Set when a node fails and is retried - allows skipping already-completed phases.
    * Cleared when new work is provided or worktree is reset.
    */
-  resumeFromPhase?: 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri';
+  resumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri';
 
   /**
    * Tracks which phases have had an auto-heal attempt.
@@ -591,6 +598,25 @@ export interface JobExecutionResult {
   phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'verify-ri' | 'setup', CopilotUsageMetrics>>;
   /** Process ID of the main running process (for crash detection) */
   pid?: number;
+
+  /**
+   * When true, auto-heal should NOT be attempted for this failure.
+   * Set by phase executors or from WorkSpec.onFailure.noAutoHeal.
+   */
+  noAutoHeal?: boolean;
+
+  /**
+   * User-facing failure message (shown in NodeDetailPanel).
+   * Set by phase executors or from WorkSpec.onFailure.message.
+   */
+  failureMessage?: string;
+
+  /**
+   * Override the phase to resume from on retry.
+   * Set by phase executors or from WorkSpec.onFailure.resumeFromPhase.
+   * Takes precedence over the default (resume from failedPhase).
+   */
+  overrideResumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
 }
 
 /**
@@ -601,7 +627,7 @@ export interface ExecutionContext {
   plan: PlanInstance;
   
   /** Node being executed */
-  node: JobNode;
+  node: PlanNode;
   
   /** Base commit SHA the worktree was created from */
   baseCommit: string;
@@ -625,7 +651,7 @@ export interface ExecutionContext {
   copilotSessionId?: string;
   
   /** Phase to resume from on retry (skip phases before this) */
-  resumeFromPhase?: 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri';
+  resumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri';
   
   /** Previous step statuses to preserve (from failed attempt) */
   previousStepStatuses?: {

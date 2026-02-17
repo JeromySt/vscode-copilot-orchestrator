@@ -29,6 +29,8 @@ export interface PlanDetailDelegate {
   openFile(relativePath: string): void;
   /** Trigger the final merge (snapshot → targetBranch). */
   completeFinalMerge(): void;
+  /** Show snapshot detail info for synthetic snapshot/merge nodes. */
+  showSnapshotDetail(node: string): void;
 }
 
 /**
@@ -99,6 +101,9 @@ export class PlanDetailController {
         break;
       case 'completeFinalMerge':
         this._delegate.completeFinalMerge();
+        break;
+      case 'showSnapshotDetail':
+        this._delegate.showSnapshotDetail(message.node);
         break;
     }
   }

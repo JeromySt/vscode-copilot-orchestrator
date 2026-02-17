@@ -1,0 +1,275 @@
+/**
+ * @fileoverview Tests for snapshot-validation node type, OnFailureConfig, and builder injection
+ */
+import * as assert from 'assert';
+import { suite, test } from 'mocha';
+import { buildPlan, buildSingleJobPlan } from '../../../plan/builder';
+import type { PlanSpec, OnFailureConfig, JobNode, SnapshotValidationNode, JobExecutionResult, WorkSpec, PlanNode } from '../../../plan/types';
+import { normalizeWorkSpec } from '../../../plan/types';
+
+suite('Snapshot Validation Node', () => {
+  suite('OnFailureConfig type and normalizeWorkSpec', () => {
+    test('OnFailureConfig fields are optional', () => {
+      const config: OnFailureConfig = {};
+      assert.strictEqual(config.noAutoHeal, undefined);
+      assert.strictEqual(config.message, undefined);
+      assert.strictEqual(config.resumeFromPhase, undefined);
+    });
+
+    test('OnFailureConfig accepts all fields', () => {
+      const config: OnFailureConfig = {
+        noAutoHeal: true,
+        message: 'Target branch dirty',
+        resumeFromPhase: 'prechecks',
+      };
+      assert.strictEqual(config.noAutoHeal, true);
+      assert.strictEqual(config.message, 'Target branch dirty');
+      assert.strictEqual(config.resumeFromPhase, 'prechecks');
+    });
+
+    test('normalizeWorkSpec converts on_failure to onFailure (snake_case)', () => {
+      const spec: any = {
+        type: 'shell',
+        command: 'npm test',
+        on_failure: {
+          no_auto_heal: true,
+          message: 'Must pass tests',
+          resume_from_phase: 'work',
+        },
+      };
+      const result = normalizeWorkSpec(spec);
+      assert.ok(result);
+      assert.deepStrictEqual(result!.onFailure, {
+        noAutoHeal: true,
+        message: 'Must pass tests',
+        resumeFromPhase: 'work',
+      });
+    });
+
+    test('normalizeWorkSpec preserves existing onFailure (camelCase)', () => {
+      const spec: any = {
+        type: 'shell',
+        command: 'npm test',
+        onFailure: { noAutoHeal: true, message: 'test' },
+      };
+      const result = normalizeWorkSpec(spec);
+      assert.ok(result);
+      assert.strictEqual(result!.onFailure!.noAutoHeal, true);
+      assert.strictEqual(result!.onFailure!.message, 'test');
+    });
+
+    test('normalizeWorkSpec handles string specs (no onFailure)', () => {
+      const result = normalizeWorkSpec('npm test');
+      assert.ok(result);
+      assert.strictEqual(result!.type, 'shell');
+      assert.strictEqual(result!.onFailure, undefined);
+    });
+  });
+
+  suite('Builder injection', () => {
+    test('buildPlan always injects snapshot-validation node', () => {
+      const spec: PlanSpec = {
+        name: 'Test',
+        baseBranch: 'main',
+        jobs: [{ producerId: 'a', task: 'Build', dependencies: [] }],
+      };
+      const plan = buildPlan(spec);
+
+      // Find the snapshot-validation node
+      let svNode: PlanNode | undefined;
+      for (const node of plan.nodes.values()) {
+        if (node.type === 'snapshot-validation') {
+          svNode = node;
+        }
+      }
+
+      assert.ok(svNode, 'Snapshot-validation node must exist');
+      assert.strictEqual(svNode!.type, 'snapshot-validation');
+      assert.strictEqual(svNode!.name, 'Snapshot Validation');
+      assert.strictEqual((svNode as SnapshotValidationNode).group, 'Final Merge Validation');
+    });
+
+    test('snapshot-validation node depends on all original leaves', () => {
+      const spec: PlanSpec = {
+        name: 'Multi',
+        baseBranch: 'main',
+        jobs: [
+          { producerId: 'a', task: 'A', dependencies: [] },
+          { producerId: 'b', task: 'B', dependencies: [] },
+          { producerId: 'c', task: 'C', dependencies: ['a'] },
+        ],
+      };
+      const plan = buildPlan(spec);
+
+      // Original leaves are 'b' and 'c'
+      const bId = plan.producerIdToNodeId.get('b')!;
+      const cId = plan.producerIdToNodeId.get('c')!;
+
+      let svNode: SnapshotValidationNode | undefined;
+      for (const node of plan.nodes.values()) {
+        if (node.type === 'snapshot-validation') {
+          svNode = node as SnapshotValidationNode;
+        }
+      }
+
+      assert.ok(svNode);
+      assert.ok(svNode!.dependencies.includes(bId), 'Should depend on leaf b');
+      assert.ok(svNode!.dependencies.includes(cId), 'Should depend on leaf c');
+      assert.strictEqual(svNode!.dependencies.length, 2);
+    });
+
+    test('snapshot-validation node is the sole leaf', () => {
+      const spec: PlanSpec = {
+        name: 'P',
+        baseBranch: 'main',
+        jobs: [
+          { producerId: 'a', task: 'X', dependencies: [] },
+          { producerId: 'b', task: 'Y', dependencies: [] },
+        ],
+      };
+      const plan = buildPlan(spec);
+      assert.strictEqual(plan.leaves.length, 1);
+
+      const leafNode = plan.nodes.get(plan.leaves[0])!;
+      assert.strictEqual(leafNode.type, 'snapshot-validation');
+    });
+
+    test('targetBranch defaults to baseBranch when not specified', () => {
+      const spec: PlanSpec = {
+        name: 'P',
+        baseBranch: 'develop',
+        jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+      };
+      const plan = buildPlan(spec);
+      assert.strictEqual(plan.targetBranch, 'develop');
+    });
+
+    test('targetBranch uses spec value when specified', () => {
+      const spec: PlanSpec = {
+        name: 'P',
+        baseBranch: 'main',
+        targetBranch: 'release/v1',
+        jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+      };
+      const plan = buildPlan(spec);
+      assert.strictEqual(plan.targetBranch, 'release/v1');
+    });
+
+    test('creates Final Merge Validation group', () => {
+      const spec: PlanSpec = {
+        name: 'P',
+        baseBranch: 'main',
+        jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+      };
+      const plan = buildPlan(spec);
+      assert.ok(plan.groupPathToId.has('Final Merge Validation'));
+      const groupId = plan.groupPathToId.get('Final Merge Validation')!;
+      const group = plan.groups.get(groupId)!;
+      assert.strictEqual(group.name, 'Final Merge Validation');
+      assert.strictEqual(group.nodeIds.length, 1);
+      assert.strictEqual(group.totalNodes, 1);
+    });
+
+    test('original leaves have snapshot-validation as dependent', () => {
+      const spec: PlanSpec = {
+        name: 'P',
+        baseBranch: 'main',
+        jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+      };
+      const plan = buildPlan(spec);
+      const aId = plan.producerIdToNodeId.get('a')!;
+      const aNode = plan.nodes.get(aId)!;
+
+      let svId: string | undefined;
+      for (const node of plan.nodes.values()) {
+        if (node.type === 'snapshot-validation') {svId = node.id;}
+      }
+      assert.ok(svId);
+      assert.ok(aNode.dependents.includes(svId!));
+    });
+  });
+
+  suite('JobExecutionResult failure control fields', () => {
+    test('result can carry noAutoHeal', () => {
+      const result: JobExecutionResult = {
+        success: false,
+        error: 'test',
+        noAutoHeal: true,
+      };
+      assert.strictEqual(result.noAutoHeal, true);
+    });
+
+    test('result can carry failureMessage', () => {
+      const result: JobExecutionResult = {
+        success: false,
+        error: 'test',
+        failureMessage: 'User must fix target branch',
+      };
+      assert.strictEqual(result.failureMessage, 'User must fix target branch');
+    });
+
+    test('result can carry overrideResumeFromPhase', () => {
+      const result: JobExecutionResult = {
+        success: false,
+        error: 'test',
+        overrideResumeFromPhase: 'prechecks',
+      };
+      assert.strictEqual(result.overrideResumeFromPhase, 'prechecks');
+    });
+  });
+
+  suite('nodePerformsWork', () => {
+    test('returns true for snapshot-validation nodes', () => {
+      const { nodePerformsWork } = require('../../../plan/types');
+      const svNode: SnapshotValidationNode = {
+        id: 'sv-1',
+        producerId: '__snapshot-validation__',
+        name: 'Snapshot Validation',
+        type: 'snapshot-validation',
+        task: 'Validate',
+        group: 'Final Merge Validation',
+        dependencies: [],
+        dependents: [],
+      };
+      assert.strictEqual(nodePerformsWork(svNode), true);
+    });
+  });
+
+  suite('Persistence round-trip', () => {
+    test('snapshot-validation node survives serialize/deserialize', () => {
+      const { PlanPersistence } = require('../../../plan/persistence');
+      const fs = require('fs');
+      const path = require('path');
+      const os = require('os');
+
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sv-persist-'));
+      const persistence = new PlanPersistence(tmpDir);
+
+      const spec: PlanSpec = {
+        name: 'Persist Test',
+        baseBranch: 'main',
+        jobs: [{ producerId: 'a', task: 'Build', dependencies: [] }],
+      };
+      const plan = buildPlan(spec);
+
+      // Save
+      persistence.save(plan);
+
+      // Load
+      const loaded = persistence.load(plan.id);
+      assert.ok(loaded);
+
+      // Find snapshot-validation node
+      let svNode: PlanNode | undefined;
+      for (const node of loaded!.nodes.values()) {
+        if (node.type === 'snapshot-validation') {svNode = node;}
+      }
+      assert.ok(svNode, 'Loaded plan must have snapshot-validation node');
+      assert.strictEqual(svNode!.name, 'Snapshot Validation');
+      assert.strictEqual((svNode as SnapshotValidationNode).group, 'Final Merge Validation');
+
+      // Cleanup
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+  });
+});

@@ -136,6 +136,13 @@ WORK OPTIONS (work/prechecks/postchecks/verify_ri accept):
 3. Shell spec: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
 4. Agent spec: { type: "agent", instructions: "# Task\\n\\n1. Step one", model: "claude-sonnet-4.5" }
 
+ON_FAILURE CONFIG (optional on any work/prechecks/postchecks object):
+Add "on_failure" to any work spec object to control retry behavior on failure:
+- no_auto_heal: true — prevents automatic AI-assisted retry, requires manual intervention
+- message: "User-facing explanation" — shown in the node detail panel on failure
+- resume_from_phase: "prechecks" — which phase to restart from on retry (prechecks/work/postchecks/commit/merge-ri)
+Example: { type: "shell", command: "npm test", on_failure: { no_auto_heal: true, message: "Tests must pass before merge" } }
+
 VERIFY_RI (POST-MERGE VERIFICATION — HIGHLY RECOMMENDED):
 When targetBranch is set, always include verify_ri to validate the merged state after each RI merge.
 This catches compilation errors, test regressions, and merge conflict resolution mistakes before the

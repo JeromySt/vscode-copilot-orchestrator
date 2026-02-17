@@ -227,4 +227,35 @@ suite('PlanLifecycleManager', () => {
     // Snapshot should be cleaned up (set to undefined) even if worktree removal had issues
     assert.strictEqual(plan.snapshot, undefined);
   });
+
+  test('cleanupPlanResources handles log file unlink error gracefully', async () => {
+    const dir = makeTmpDir();
+    const log = createMockLogger();
+
+    const logsDir = path.join(dir, 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+    // Create a subdirectory that matches the naming pattern — unlinkSync will fail on directories
+    fs.mkdirSync(path.join(logsDir, 'plan-x_node-1.log'));
+
+    const state = makeState(dir, { executor: { storagePath: dir } });
+    const mockGit = {
+      worktrees: { removeSafe: sinon.stub().resolves() },
+    };
+    const lifecycle = new PlanLifecycleManager(state as any, log, mockGit as any);
+
+    const plan: PlanInstance = {
+      id: 'plan-x', spec: { name: 'Test', jobs: [], baseBranch: 'main' },
+      nodes: new Map(), producerIdToNodeId: new Map(),
+      roots: [], leaves: [],
+      nodeStates: new Map(),
+      groups: new Map(), groupStates: new Map(), groupPathToId: new Map(),
+      repoPath: '/repo', baseBranch: 'main',
+      worktreeRoot: '/worktrees', createdAt: Date.now(), stateVersion: 0,
+      cleanUpSuccessfulWork: false, maxParallel: 4,
+    };
+
+    await lifecycle.cleanupPlanResources(plan);
+    // The warn should fire because unlinkSync fails on a directory
+    assert.ok((log.warn as sinon.SinonStub).calledWithMatch(sinon.match(/cleanup.*failed|failed/i)));
+  });
 });
