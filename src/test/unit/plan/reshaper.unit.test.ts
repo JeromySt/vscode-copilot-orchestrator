@@ -681,6 +681,37 @@ suite('reshaper', () => {
       assert.strictEqual(result.success, false);
       assert.ok(result.error!.includes("'a' already exists"));
     });
+
+    test('fails when spec dependency is not available', () => {
+      const a = makeNode('a-id', { producerId: 'a', dependents: ['b-id'] });
+      const b = makeNode('b-id', { producerId: 'b', dependencies: ['a-id'], dependents: [] });
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('failed', { worktreeCleanedUp: true }));
+      states.set('b-id', makeState('pending'));
+      const plan = makePlan([a, b], states);
+
+      const result = addNodeBefore(plan, 'b-id', makeSpec('new', ['a']));
+
+      assert.strictEqual(result.success, false);
+      assert.ok(result.error!.includes('no available worktree'));
+    });
+
+    test('fails when wiring would create a cycle', () => {
+      // a → b → c, try to insert new-before c with dep on c (direct self-cycle)
+      const a = makeNode('a-id', { producerId: 'a', dependents: ['b-id'] });
+      const b = makeNode('b-id', { producerId: 'b', dependencies: ['a-id'], dependents: ['c-id'] });
+      const c = makeNode('c-id', { producerId: 'c', dependencies: ['b-id'], dependents: [] });
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('succeeded', { completedCommit: 'abc' }));
+      states.set('b-id', makeState('succeeded', { completedCommit: 'def' }));
+      states.set('c-id', makeState('pending'));
+      const plan = makePlan([a, b, c], states);
+
+      const result = addNodeBefore(plan, 'c-id', makeSpec('new', ['c']));
+
+      assert.strictEqual(result.success, false);
+      assert.ok(result.error!.includes('cycle'));
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -775,11 +806,52 @@ suite('reshaper', () => {
       assert.strictEqual(result.success, false);
       assert.ok(result.error!.includes("'a' already exists"));
     });
-  });
 
-  // -----------------------------------------------------------------------
-  // Multiple sequential operations
-  // -----------------------------------------------------------------------
+    test('fails when spec dependency not found', () => {
+      const a = makeNode('a-id', { producerId: 'a', dependents: [] });
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('succeeded', { completedCommit: 'abc' }));
+      const plan = makePlan([a], states);
+
+      const result = addNodeAfter(plan, 'a-id', makeSpec('new', ['nonexistent']));
+
+      assert.strictEqual(result.success, false);
+      assert.ok(result.error!.includes("'nonexistent' not found"));
+    });
+
+    test('fails when spec dependency is not available', () => {
+      const a = makeNode('a-id', { producerId: 'a', dependents: [] });
+      const b = makeNode('b-id', { producerId: 'b', dependents: [] });
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('succeeded', { completedCommit: 'abc' }));
+      states.set('b-id', makeState('failed', { worktreeCleanedUp: true }));
+      const plan = makePlan([a, b], states);
+
+      const result = addNodeAfter(plan, 'a-id', makeSpec('new', ['b']));
+
+      assert.strictEqual(result.success, false);
+      assert.ok(result.error!.includes('no available worktree'));
+    });
+
+    test('adds upstream dep from spec.dependencies', () => {
+      const a = makeNode('a-id', { producerId: 'a', dependents: [] });
+      const b = makeNode('b-id', { producerId: 'b', dependents: [] });
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('succeeded', { completedCommit: 'abc' }));
+      states.set('b-id', makeState('succeeded', { completedCommit: 'def' }));
+      const plan = makePlan([a, b], states);
+
+      const result = addNodeAfter(plan, 'a-id', makeSpec('new', ['b']));
+
+      assert.strictEqual(result.success, true);
+      const newNode = plan.nodes.get(result.nodeId!)!;
+      // New node depends on both a (existingNode) and b (spec dep)
+      assert.ok(newNode.dependencies.includes('a-id'));
+      assert.ok(newNode.dependencies.includes('b-id'));
+      // b should list new node in its dependents
+      assert.ok(b.dependents.includes(result.nodeId!));
+    });
+  });
   suite('multiple sequential operations', () => {
     test('add then remove', () => {
       const plan = makePlan([], new Map());
