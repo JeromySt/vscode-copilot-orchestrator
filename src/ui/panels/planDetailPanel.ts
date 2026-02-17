@@ -1892,6 +1892,26 @@ export class planDetailPanel {
           edgeData.push({ index: edgeIndex, from: exitId, to: 'TARGET_DEST' });
           edgeIndex++;
         }
+      } else {
+        // Legacy plans without snapshot-validation: connect leaf nodes directly
+        // to TARGET_DEST based on their merge-ri / succeeded status.
+        for (const leafId of mainResult.leaves) {
+          const mapping = nodeEntryExitMap.get(leafId);
+          const exitIds = mapping ? mapping.exitIds : [leafId];
+          for (const exitId of exitIds) {
+            const leafState = leafnodeStates.get(exitId);
+            const isMerged = leafState?.mergedToTarget === true
+              || leafState?.status === 'succeeded';
+            if (isMerged) {
+              lines.push(`  ${exitId} --> TARGET_DEST`);
+              successEdges.push(edgeIndex);
+            } else {
+              lines.push(`  ${exitId} -.-> TARGET_DEST`);
+            }
+            edgeData.push({ index: edgeIndex, from: exitId, to: 'TARGET_DEST' });
+            edgeIndex++;
+          }
+        }
       }
     }
     
