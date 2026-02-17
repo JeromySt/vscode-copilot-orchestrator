@@ -300,4 +300,47 @@ suite('PlanRunner delegation coverage', () => {
     assert.strictEqual(r.success, true);
     assert.strictEqual(plan.awaitingFinalMerge, undefined);
   });
+
+  test('setPowerManager stores the power manager', () => {
+    const dir = makeTmpDir();
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    const mockPm = { shutdown: async () => {} } as any;
+    runner.setPowerManager(mockPm);
+    assert.strictEqual((runner as any)._state.powerManager, mockPm);
+  });
+
+  test('completeFinalMerge returns failure when merge fails', async () => {
+    const dir = makeTmpDir();
+    const deps = createRunnerDeps(path.join(dir, 'plans'));
+    const resolvedRef = 'abc1234def5678901234567890abcdef12345678';
+    deps.git.repository = {
+      ...deps.git.repository,
+      resolveRef: async () => resolvedRef,
+      updateRef: async () => {},
+      hasUncommittedChanges: async () => false,
+      resetHard: async () => {},
+    };
+    deps.git.branches = {
+      ...deps.git.branches,
+      currentOrNull: async () => null,
+    };
+    deps.git.merge = {
+      mergeWithoutCheckout: async () => ({ success: false, conflicts: ['file.txt'] }),
+    };
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, deps);
+    const plan = runner.enqueue({
+      name: 'P', baseBranch: 'main', targetBranch: 'main',
+      jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+    });
+    (plan as any).awaitingFinalMerge = true;
+    (plan as any).snapshot = {
+      branch: 'orchestrator/snapshot/test',
+      worktreePath: '/tmp/snap',
+      baseCommit: resolvedRef,
+    };
+    (plan as any).repoPath = dir;
+    const r = await runner.completeFinalMerge(plan.id);
+    assert.strictEqual(r.success, false);
+    assert.ok(r.error);
+  });
 });
