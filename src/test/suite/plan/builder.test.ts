@@ -25,7 +25,8 @@ suite('Plan Builder', () => {
   suite('buildPlan()', () => {
     test('creates plan with single node', () => {
       const plan = buildPlan({ name: 'Test', jobs: [makeJob('a')] });
-      assert.strictEqual(plan.nodes.size, 1);
+      // +1 for auto-injected snapshot-validation node
+      assert.strictEqual(plan.nodes.size, 2);
       assert.strictEqual(plan.roots.length, 1);
       assert.strictEqual(plan.leaves.length, 1);
     });
@@ -35,7 +36,7 @@ suite('Plan Builder', () => {
         name: 'Test',
         jobs: [makeJob('a'), makeJob('b', ['a'])],
       });
-      assert.strictEqual(plan.nodes.size, 2);
+      assert.strictEqual(plan.nodes.size, 3);
       assert.strictEqual(plan.roots.length, 1);
       assert.strictEqual(plan.leaves.length, 1);
     });
@@ -45,7 +46,7 @@ suite('Plan Builder', () => {
         name: 'Test',
         jobs: [makeJob('a'), makeJob('b', ['a']), makeJob('c', ['a']), makeJob('d', ['b', 'c'])],
       });
-      assert.strictEqual(plan.nodes.size, 4);
+      assert.strictEqual(plan.nodes.size, 5);
       assert.strictEqual(plan.roots.length, 1);
       assert.strictEqual(plan.leaves.length, 1);
     });
@@ -211,7 +212,8 @@ suite('buildSingleJobPlan', () => {
 
   test('creates a plan with exactly one node', () => {
     const plan = buildSingleJobPlan({ name: 'Build', task: 'Build project' });
-    assert.strictEqual(plan.nodes.size, 1);
+    // +1 for auto-injected snapshot-validation node
+    assert.strictEqual(plan.nodes.size, 2);
   });
 
   test('generates producerId from name', () => {
@@ -241,11 +243,15 @@ suite('buildSingleJobPlan', () => {
     assert.ok(node.work || node.task);
   });
 
-  test('single node is both root and leaf', () => {
+  test('single node is root, snapshot-validation is leaf', () => {
     const plan = buildSingleJobPlan({ name: 'Build', task: 'build' });
     assert.strictEqual(plan.roots.length, 1);
     assert.strictEqual(plan.leaves.length, 1);
-    assert.strictEqual(plan.roots[0], plan.leaves[0]);
+    // With snapshot-validation injection, root !== leaf
+    assert.notStrictEqual(plan.roots[0], plan.leaves[0]);
+    // The leaf should be the snapshot-validation node
+    const leafNode = plan.nodes.get(plan.leaves[0])!;
+    assert.strictEqual(leafNode.producerId, '__snapshot-validation__');
   });
 
   test('accepts repoPath and worktreeRoot options', () => {
@@ -319,9 +325,11 @@ suite('buildPlan with groups', () => {
       ],
       groups,
     });
-    assert.strictEqual(plan.groups.size, 2);
+    // +1 for auto-injected "Final Merge Validation" group
+    assert.strictEqual(plan.groups.size, 3);
     assert.ok(plan.groupPathToId.has('backend'));
     assert.ok(plan.groupPathToId.has('frontend'));
+    assert.ok(plan.groupPathToId.has('Final Merge Validation'));
   });
 
   test('auto-creates group hierarchy from job group paths', () => {
@@ -415,8 +423,8 @@ suite('buildPlan with groups', () => {
       }]
     });
     
-    // Plan should still be created successfully
-    assert.strictEqual(plan.nodes.size, 1);
+    // Plan should still be created successfully (+1 for SV node)
+    assert.strictEqual(plan.nodes.size, 2);
     assert.ok(plan.groupPathToId.has('child'));
   });
 });
@@ -546,7 +554,8 @@ suite('Complex dependency scenarios', () => {
         makeJob('leaf', ['left', 'right'])
       ]
     });
-    assert.strictEqual(plan.nodes.size, 4);
+    // +1 for auto-injected snapshot-validation node
+    assert.strictEqual(plan.nodes.size, 5);
     assert.strictEqual(plan.roots.length, 1);
     assert.strictEqual(plan.leaves.length, 1);
   });
@@ -562,7 +571,7 @@ suite('Complex dependency scenarios', () => {
         makeJob('e', ['d'])
       ]
     });
-    assert.strictEqual(plan.nodes.size, 5);
+    assert.strictEqual(plan.nodes.size, 6);
     assert.strictEqual(plan.roots.length, 1);
     assert.strictEqual(plan.leaves.length, 1);
     
@@ -584,9 +593,10 @@ suite('Complex dependency scenarios', () => {
         makeJob('leaf2', ['middle2'])
       ]
     });
-    assert.strictEqual(plan.nodes.size, 6);
+    // +1 for SV node; both original leaves now feed into it
+    assert.strictEqual(plan.nodes.size, 7);
     assert.strictEqual(plan.roots.length, 2);
-    assert.strictEqual(plan.leaves.length, 2);
+    assert.strictEqual(plan.leaves.length, 1);
   });
 
   test('node with multiple dependencies becomes ready only when all deps are done', () => {

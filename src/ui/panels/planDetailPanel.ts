@@ -1774,11 +1774,15 @@ export class planDetailPanel {
         
         // Truncate group names based on the widest descendant node's rendered
         // label width, so the group title never overflows its content box.
+        // However, ensure group names are never truncated below their natural
+        // length — mermaid subgraphs expand to fit their title.
         const displayName = treeNode.name;
         const escapedName = this._escapeForMermaid(displayName);
         const maxWidth = groupMaxWidths.get(groupPath) || 0;
-        const truncatedGroupName = maxWidth > 0
-          ? this._truncateLabel(escapedName, GROUP_DURATION_TEMPLATE, maxWidth)
+        const groupNameTotal = 3 + escapedName.length + GROUP_DURATION_TEMPLATE.length; // ICON_WIDTH + name + duration
+        const effectiveMaxWidth = Math.max(maxWidth, groupNameTotal);
+        const truncatedGroupName = effectiveMaxWidth > 0
+          ? this._truncateLabel(escapedName, GROUP_DURATION_TEMPLATE, effectiveMaxWidth)
           : escapedName;
         // Show full path in tooltip for nested groups or when truncated
         if (truncatedGroupName !== escapedName || groupPath.includes('/')) {
@@ -1873,9 +1877,10 @@ export class planDetailPanel {
       // TARGET_DEST so the diagram shows the merge-ri → targetBranch flow.
       const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
       if (svNodeId) {
-        const mapping = nodeEntryExitMap.get(svNodeId);
-        const exitIds = mapping ? mapping.exitIds : [svNodeId];
-        const svState = leafnodeStates.get(svNodeId);
+        const svSanitizedId = this._sanitizeId(svNodeId);
+        const mapping = nodeEntryExitMap.get(svSanitizedId);
+        const exitIds = mapping ? mapping.exitIds : [svSanitizedId];
+        const svState = leafnodeStates.get(svSanitizedId);
         const svSucceeded = svState?.status === 'succeeded';
         for (const exitId of exitIds) {
           if (svSucceeded) {

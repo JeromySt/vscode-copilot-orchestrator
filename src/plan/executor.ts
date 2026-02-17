@@ -301,9 +301,14 @@ export class DefaultJobExecutor implements JobExecutor {
     }
   }
 
-  getLogs(planId: string, nodeId: string): LogEntry[] { return this.executionLogs.get(`${planId}:${nodeId}`) || []; }
+  getLogs(planId: string, nodeId: string): LogEntry[] {
+    // Look up via activeExecutionsByNode to find the current attempt's log key
+    const nodeKey = `${planId}:${nodeId}`;
+    const executionKey = this.activeExecutionsByNode.get(nodeKey) || nodeKey;
+    return this.executionLogs.get(executionKey) || [];
+  }
   getLogsForPhase(planId: string, nodeId: string, phase: ExecutionPhase): LogEntry[] { return this.getLogs(planId, nodeId).filter(e => e.phase === phase); }
-  getLogFileSize(planId: string, nodeId: string): number { const f = getLogFilePathByKey(`${planId}:${nodeId}`, this.storagePath, this.logFiles); if (!f || !fs.existsSync(f)) {return 0;} try { return fs.statSync(f).size; } catch { return 0; } }
+  getLogFileSize(planId: string, nodeId: string): number { const nodeKey = `${planId}:${nodeId}`; const ek = this.activeExecutionsByNode.get(nodeKey) || nodeKey; const f = getLogFilePathByKey(ek, this.storagePath, this.logFiles); if (!f || !fs.existsSync(f)) {return 0;} try { return fs.statSync(f).size; } catch { return 0; } }
   isActive(planId: string, nodeId: string): boolean { return this.activeExecutionsByNode.has(`${planId}:${nodeId}`); }
 
   log(planId: string, nodeId: string, phase: ExecutionPhase, type: 'info' | 'error' | 'stdout' | 'stderr', message: string, attemptNumber?: number): void {
