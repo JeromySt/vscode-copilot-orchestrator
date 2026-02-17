@@ -524,6 +524,9 @@ export function webviewScripts(config: ScriptsConfig): string {
         if (data.sessionTimeSeconds !== undefined) {
           parts.push('<span class="metric-item">🕐 Session: ' + formatDurationSeconds(data.sessionTimeSeconds) + '</span>');
         }
+        if (data.codeChanges) {
+          parts.push('<span class="metric-item">📝 Code: +' + data.codeChanges.linesAdded + ' -' + data.codeChanges.linesRemoved + '</span>');
+        }
 
         var modelHtml = '';
         if (data.modelBreakdown && data.modelBreakdown.length > 0) {
