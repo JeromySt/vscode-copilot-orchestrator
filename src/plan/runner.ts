@@ -163,6 +163,12 @@ export class PlanRunner extends EventEmitter {
               svNode.assignedWorktreePath = snapshot.worktreePath;
             }
           }
+
+          // Write the original base commit to a marker file in the snapshot worktree
+          // so the SV precheck agent can compare against current targetBranch HEAD.
+          const fs = require('fs');
+          const markerPath = require('path').join(snapshot.worktreePath, '.orchestrator-snapshot-base');
+          fs.writeFileSync(markerPath, snapshot.baseCommit, 'utf8');
           
           state.persistence.save(plan);
           log.info(`Snapshot created: ${snapshot.branch} at ${snapshot.worktreePath}`);

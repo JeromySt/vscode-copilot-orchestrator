@@ -332,35 +332,93 @@ export function buildPlan(
   const svProducerId = '__snapshot-validation__';
   const svTargetBranch = spec.targetBranch || spec.baseBranch || 'main';
   
-  // Prechecks: verify targetBranch is clean and rebase snapshot if target advanced.
-  // Runs in repoPath (main repo), NOT the snapshot worktree.
-  // On failure: force-fail with user message — no auto-heal (user must fix their branch).
-  const svPrechecks: import('./types/specs').ShellSpec = {
-    type: 'shell',
-    command: [
-      `echo "🔍 Checking target branch '${svTargetBranch}' health..."`,
-      `git diff --quiet "${svTargetBranch}" || (echo "❌ Target branch '${svTargetBranch}' has uncommitted changes." && exit 1)`,
-      `echo "✅ Target branch '${svTargetBranch}' is clean."`,
-    ].join(' && '),
+  // Prechecks: three-case logic for targetBranch health + snapshot rebase.
+  // Runs in the snapshot worktree (HEAD = snapshot branch, shares refs with main repo).
+  // The original base commit (targetBranch HEAD when snapshot was created) is written
+  // to .orchestrator-snapshot-base by the runner at snapshot creation time.
+  //
+  // Case 1: targetBranch HEAD == snapshot base commit → success (no changes)
+  // Case 2: targetBranch HEAD != snapshot base && target is clean → rebase snapshot
+  //         onto new target HEAD, resolve any conflicts, complete success
+  // Case 3: targetBranch HEAD != snapshot base && target is dirty → fail with
+  //         user message explaining what to fix before retry
+  const svPrechecks: import('./types/specs').AgentSpec = {
+    type: 'agent',
+    instructions: [
+      `You are running in the snapshot worktree. Your job is to verify the target branch '${svTargetBranch}' is healthy and rebase the snapshot if the target has advanced.`,
+      ``,
+      `Step 1: Read the original snapshot base commit and the current target HEAD.`,
+      `  SNAPSHOT_BASE = read the file .orchestrator-snapshot-base in the current directory`,
+      `  TARGET_HEAD = run: git rev-parse "refs/heads/${svTargetBranch}"`,
+      ``,
+      `Step 2: Compare them.`,
+      ``,
+      `  Case A — TARGET_HEAD equals SNAPSHOT_BASE:`,
+      `    The target branch has not changed since the snapshot was created.`,
+      `    Print "✅ Target branch '${svTargetBranch}' unchanged since snapshot creation. No rebase needed."`,
+      `    Exit successfully with no further action.`,
+      ``,
+      `  Case B — TARGET_HEAD does NOT equal SNAPSHOT_BASE:`,
+      `    The target branch has advanced. Check if the target ref is clean:`,
+      `    Run: git diff --quiet "refs/heads/${svTargetBranch}"`,
+      ``,
+      `    If the diff command FAILS (non-zero exit = dirty):`,
+      `      Print "❌ Target branch '${svTargetBranch}' has uncommitted changes in the working tree."`,
+      `      Print "Please commit or stash your changes on '${svTargetBranch}' before retrying."`,
+      `      Exit with failure.`,
+      ``,
+      `    If the diff command SUCCEEDS (clean):`,
+      `      The target advanced but is clean. Rebase the snapshot onto the new target HEAD:`,
+      `      Run: git rebase --onto $TARGET_HEAD $SNAPSHOT_BASE HEAD`,
+      ``,
+      `      If the rebase succeeds cleanly:`,
+      `        Update .orchestrator-snapshot-base to contain $TARGET_HEAD (the new base).`,
+      `        Print "✅ Snapshot rebased onto updated '${svTargetBranch}' ($TARGET_HEAD)."`,
+      `        Exit successfully.`,
+      ``,
+      `      If the rebase has conflicts:`,
+      `        Resolve each conflict by examining both sides and producing a correct merge.`,
+      `        For each conflicted file, choose the resolution that preserves both sets of changes.`,
+      `        After resolving, run: git add <file> && git rebase --continue`,
+      `        Repeat until rebase completes.`,
+      `        Update .orchestrator-snapshot-base to contain $TARGET_HEAD (the new base).`,
+      `        Print "✅ Snapshot rebased with conflict resolution onto '${svTargetBranch}'."`,
+      `        Exit successfully.`,
+      ``,
+      `IMPORTANT: Do not modify any files except to resolve rebase conflicts and update .orchestrator-snapshot-base. Do not create commits beyond what git rebase produces.`,
+    ].join('\n'),
     onFailure: {
       noAutoHeal: true,
-      message: `Target branch '${svTargetBranch}' has uncommitted changes or is in a dirty state. Please clean up the target branch before retrying the merge.`,
+      message: `Target branch '${svTargetBranch}' has uncommitted changes or is in a dirty state. Please clean up the target branch before retrying.`,
       resumeFromPhase: 'prechecks',
     },
   };
 
-  // Postchecks: re-verify targetBranch is still clean before merge-ri proceeds.
-  // If target advanced since prechecks, auto-retry from prechecks to pull in latest.
+  // Postchecks: re-verify targetBranch hasn't moved since prechecks before merge-ri.
+  // Reads .orchestrator-snapshot-base (updated by prechecks) and compares to current
+  // targetBranch HEAD. If target advanced during work, fail and resume from prechecks
+  // so the snapshot gets rebased again. If target is dirty, fail for user action.
   const svPostchecks: import('./types/specs').ShellSpec = {
     type: 'shell',
     command: [
-      `echo "🔍 Re-checking target branch '${svTargetBranch}' before merge..."`,
-      `git diff --quiet "${svTargetBranch}" || (echo "❌ Target branch '${svTargetBranch}' became dirty during validation." && exit 1)`,
-      `echo "✅ Target branch '${svTargetBranch}' is still clean. Proceeding with merge."`,
-    ].join(' && '),
+      `echo "🔍 Post-check: verifying target branch '${svTargetBranch}' before merge-ri..."`,
+      `SNAPSHOT_BASE=$(cat .orchestrator-snapshot-base)`,
+      `TARGET_HEAD=$(git rev-parse "refs/heads/${svTargetBranch}")`,
+      `if [ "$TARGET_HEAD" != "$SNAPSHOT_BASE" ]; then`,
+      `  git diff --quiet "refs/heads/${svTargetBranch}" 2>/dev/null`,
+      `  if [ $? -ne 0 ]; then`,
+      `    echo "❌ Target branch '${svTargetBranch}' has uncommitted changes. Please clean up before retrying."`,
+      `    exit 1`,
+      `  fi`,
+      `  echo "❌ Target branch '${svTargetBranch}' advanced during validation ($SNAPSHOT_BASE -> $TARGET_HEAD). Needs rebase."`,
+      `  exit 1`,
+      `fi`,
+      `echo "✅ Target branch '${svTargetBranch}' unchanged since prechecks. Safe to merge."`,
+    ].join('\n'),
+    shell: process.platform === 'win32' ? 'bash' : undefined,
     onFailure: {
-      noAutoHeal: true,
-      message: `Target branch '${svTargetBranch}' changed state during validation. Please ensure the branch is clean and retry.`,
+      noAutoHeal: false,
+      message: `Target branch '${svTargetBranch}' changed during validation. The plan will automatically retry from prechecks to rebase the snapshot.`,
       resumeFromPhase: 'prechecks',
     },
   };
