@@ -62,6 +62,7 @@ export async function getPlanToolDefinitions(): Promise<McpTool[]> {
     {
       name: 'create_copilot_plan',
       description: `Create a Plan (Directed Acyclic Graph) of work units. Everything is a Plan - even a single job.
+After creation, use reshape_copilot_plan to add/remove/reorder nodes in a running or paused plan.
 
 PRODUCER_ID IS REQUIRED:
 - Every job MUST have a 'producer_id' field
@@ -595,6 +596,104 @@ Agent instructions MUST be in Markdown format.`
           }
         },
         required: ['planId', 'nodeId']
+      }
+    },
+
+    // =========================================================================
+    // RESHAPE (TOPOLOGY CHANGES)
+    // =========================================================================
+    {
+      name: 'reshape_copilot_plan',
+      description: `Reshape a running or paused plan's DAG topology. Supports adding, removing, and reordering nodes.
+
+OPERATIONS (executed sequentially):
+- add_node: Add a new node with spec (producer_id, task, work, dependencies)
+- remove_node: Remove a pending/ready node by nodeId or producer_id
+- update_deps: Replace a node's dependency list (nodeId + dependencies array)
+- add_before: Insert a new node before an existing node (inherits its dependencies)
+- add_after: Insert a new node after an existing node (takes over its dependents)
+
+EXAMPLE:
+{
+  "planId": "<uuid>",
+  "operations": [
+    {
+      "type": "add_node",
+      "spec": { "producer_id": "lint-fix", "task": "Fix lint errors", "dependencies": ["build"] }
+    },
+    {
+      "type": "remove_node",
+      "producer_id": "obsolete-step"
+    },
+    {
+      "type": "add_before",
+      "existingNodeId": "<node-uuid>",
+      "spec": { "producer_id": "setup-db", "task": "Initialize test DB", "dependencies": [] }
+    }
+  ]
+}
+
+NOTES:
+- Plan must be running or paused
+- Only pending/ready nodes can be removed or have dependencies updated
+- Cycle detection prevents invalid dependency additions
+- Returns per-operation results and updated topology`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: {
+            type: 'string',
+            description: 'Plan ID (UUID) to reshape'
+          },
+          operations: {
+            type: 'array',
+            description: 'Array of reshape operations to execute sequentially',
+            items: {
+              type: 'object',
+              properties: {
+                type: {
+                  type: 'string',
+                  enum: ['add_node', 'remove_node', 'update_deps', 'add_before', 'add_after'],
+                  description: 'Operation type'
+                },
+                spec: {
+                  type: 'object',
+                  description: 'Node spec for add_node, add_before, add_after. Must include producer_id, task, dependencies.',
+                  properties: {
+                    producer_id: { type: 'string', pattern: '^[a-z0-9-]{3,64}$' },
+                    name: { type: 'string' },
+                    task: { type: 'string' },
+                    work: { description: 'Work spec (string or object)' },
+                    dependencies: { type: 'array', items: { type: 'string' } },
+                    prechecks: { description: 'Prechecks spec' },
+                    postchecks: { description: 'Postchecks spec' },
+                    instructions: { type: 'string' },
+                    expects_no_changes: { type: 'boolean' }
+                  }
+                },
+                nodeId: {
+                  type: 'string',
+                  description: 'Node ID (UUID) or producer_id for remove_node / update_deps'
+                },
+                producer_id: {
+                  type: 'string',
+                  description: 'Producer ID for remove_node (alternative to nodeId)'
+                },
+                existingNodeId: {
+                  type: 'string',
+                  description: 'Existing node ID for add_before / add_after'
+                },
+                dependencies: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'New dependency list for update_deps (node IDs or producer_ids)'
+                }
+              },
+              required: ['type']
+            }
+          }
+        },
+        required: ['planId', 'operations']
       }
     },
   ];

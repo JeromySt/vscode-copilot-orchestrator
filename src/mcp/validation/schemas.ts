@@ -420,6 +420,77 @@ export const addNodeSchema = {
   additionalProperties: false
 } as const;
 
+/**
+ * Schema for reshape_copilot_plan input
+ */
+export const reshapePlanSchema = {
+  $id: 'reshape_copilot_plan',
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    operations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['add_node', 'remove_node', 'update_deps', 'add_before', 'add_after']
+          },
+          spec: {
+            type: 'object',
+            properties: {
+              producer_id: { type: 'string', pattern: PRODUCER_ID_PATTERN, minLength: 3, maxLength: 64 },
+              name: { type: 'string', maxLength: 200 },
+              task: { type: 'string', minLength: 1, maxLength: 5000 },
+              work: {
+                oneOf: [
+                  { type: 'string', maxLength: 50000 },
+                  workSpecObjectSchema
+                ]
+              },
+              dependencies: {
+                type: 'array',
+                items: { type: 'string', maxLength: 200 },
+                maxItems: 100
+              },
+              prechecks: {
+                oneOf: [
+                  { type: 'string', maxLength: 10000 },
+                  workSpecObjectSchema
+                ]
+              },
+              postchecks: {
+                oneOf: [
+                  { type: 'string', maxLength: 10000 },
+                  workSpecObjectSchema
+                ]
+              },
+              instructions: { type: 'string', maxLength: 100000 },
+              expects_no_changes: { type: 'boolean' }
+            },
+            additionalProperties: false
+          },
+          nodeId: { type: 'string', maxLength: 100 },
+          producer_id: { type: 'string', maxLength: 100 },
+          existingNodeId: { type: 'string', maxLength: 100 },
+          dependencies: {
+            type: 'array',
+            items: { type: 'string', maxLength: 200 },
+            maxItems: 100
+          }
+        },
+        required: ['type'],
+        additionalProperties: false
+      },
+      minItems: 1,
+      maxItems: 100
+    }
+  },
+  required: ['planId', 'operations'],
+  additionalProperties: false
+} as const;
+
 // ============================================================================
 // NODE-CENTRIC TOOL SCHEMAS
 // ============================================================================
@@ -568,6 +639,7 @@ export const schemas: Record<string, object> = {
   retry_copilot_plan_node: retryNodeSchema,
   get_copilot_plan_node_failure_context: getFailureContextSchema,
   add_copilot_node: addNodeSchema,
+  reshape_copilot_plan: reshapePlanSchema,
   
   // Node-centric tools (NEW)
   get_copilot_node: getNodeSchema,
