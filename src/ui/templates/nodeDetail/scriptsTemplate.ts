@@ -228,21 +228,41 @@ export function webviewScripts(config: ScriptsConfig): string {
     })();
 
     // ── DurationCounterControl ──────────────────────────────────────────
+    var TERMINAL_STATUSES = { succeeded:1, failed:1, canceled:1, blocked:1 };
     var DurationCounterControl = (function() {
       function DCC(bus, controlId, elementId) {
         SubscribableControl.call(this, bus, controlId);
         this._elementId = elementId;
         var self = this;
         this.subscribe(T.PULSE, function() { self._tick(); });
+        this.subscribe(T.NODE_STATE, function(data) { self._onStateChange(data); });
       }
       DCC.prototype = Object.create(SubscribableControl.prototype);
       DCC.prototype.constructor = DCC;
+      DCC.prototype._onStateChange = function(data) {
+        if (!data) return;
+        var el = this.getElement(this._elementId);
+        if (!el) return;
+        if (data.status) el.setAttribute('data-status', data.status);
+        if (data.startedAt) el.setAttribute('data-started-at', String(data.startedAt));
+        if (data.endedAt) el.setAttribute('data-ended-at', String(data.endedAt));
+        this._tick();
+      };
       DCC.prototype._tick = function() {
         var el = this.getElement(this._elementId);
         if (!el || !el.hasAttribute('data-started-at')) return;
         var startedAt = parseInt(el.getAttribute('data-started-at'), 10);
         if (!startedAt) { el.textContent = '--'; return; }
-        el.textContent = formatDuration(Date.now() - startedAt);
+        var endedAt = el.hasAttribute('data-ended-at') ? parseInt(el.getAttribute('data-ended-at'), 10) : 0;
+        var status = el.getAttribute('data-status') || '';
+        if (endedAt) {
+          el.textContent = formatDuration(endedAt - startedAt);
+        } else if (status in TERMINAL_STATUSES) {
+          // Terminal but no endedAt yet — freeze at current value
+          return;
+        } else {
+          el.textContent = formatDuration(Date.now() - startedAt);
+        }
         this.publishUpdate();
       };
       DCC.prototype.update = function(data) { this._tick(); };
