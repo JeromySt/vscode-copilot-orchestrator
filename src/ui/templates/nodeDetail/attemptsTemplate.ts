@@ -137,7 +137,7 @@ export function attemptPhaseTabsHtml(attempt: AttemptCardData): string {
 
   const tabs = phases.map(phase => {
     const status = getPhaseStatus(phase);
-    const statusIcon = status === 'success' ? '✓' : status === 'failed' ? '✗' : status === 'skipped' ? '○' : '';
+    const statusIcon = status === 'success' ? '✓' : status === 'failed' ? '✗' : status === 'skipped' ? '⊘' : '';
     return `<button class="attempt-phase-tab ${phase === 'all' ? 'active' : ''} ${status}" 
                     data-phase="${phase}" data-attempt="${attempt.attemptNumber}">
               ${statusIcon} ${phaseLabels[phase]}

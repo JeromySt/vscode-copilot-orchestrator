@@ -1001,10 +1001,13 @@ export class NodeDetailPanel {
         : undefined);
     
     if (ss) {
+      result['merge-fi'] = ss['merge-fi'] || 'pending';
       result.prechecks = ss.prechecks || 'pending';
       result.work = ss.work || 'pending';
       result.commit = ss.commit || 'pending';
       result.postchecks = ss.postchecks || 'pending';
+      result['merge-ri'] = ss['merge-ri'] || 'pending';
+      result['verify-ri'] = ss['verify-ri'] || 'pending';
     }
     
     const status = state.status;
@@ -1012,33 +1015,36 @@ export class NodeDetailPanel {
     const failedPhase = state.lastAttempt?.phase;
     
     if (status === 'succeeded') {
-      result['merge-fi'] = 'success';
+      // When stepStatuses exist, they already have the correct values (including 'skipped').
+      // Only set merge-fi/merge-ri/verify-ri to 'success' as fallback when no stepStatuses.
       if (!ss) {
+        result['merge-fi'] = 'success';
         result.prechecks = 'success';
         result.work = 'success';
         result.commit = 'success';
         result.postchecks = 'success';
+        result['merge-ri'] = 'success';
+        result['verify-ri'] = 'success';
       }
-      result['merge-ri'] = 'success';
-      result['verify-ri'] = 'success';
     } else if (status === 'failed') {
+      // When stepStatuses exist, merge-fi/merge-ri/verify-ri are already populated.
+      // Only override specific phases for the failure indicator and fallback heuristics.
       // Check for verify-ri failure
       if (failedPhase === 'verify-ri' || error.includes('Post-merge verification')) {
-        result['merge-fi'] = 'success';
         if (!ss) {
+          result['merge-fi'] = 'success';
           result.prechecks = 'success';
           result.work = 'success';
           result.commit = 'success';
           result.postchecks = 'success';
+          result['merge-ri'] = 'success';
         }
-        result['merge-ri'] = 'success';
         result['verify-ri'] = 'failed';
       }
       // Check for merge-ri failure (via lastAttempt.phase or error message)
       else if (failedPhase === 'merge-ri' || error.includes('Reverse integration merge')) {
-        // All executor phases succeeded, RI merge failed
-        result['merge-fi'] = 'success';
         if (!ss) {
+          result['merge-fi'] = 'success';
           result.prechecks = 'success';
           result.work = 'success';
           result.commit = 'success';
@@ -1073,13 +1079,10 @@ export class NodeDetailPanel {
           result.prechecks = 'success';
           result.work = 'failed';
         }
-      } else {
-        // stepStatuses present, non-merge failure — merge-fi presumably succeeded
-        result['merge-fi'] = 'success';
       }
     } else if (status === 'running') {
-      result['merge-fi'] = 'success';
       if (!ss) {
+        result['merge-fi'] = 'success';
         result.prechecks = 'success';
         result.work = 'running';
       }

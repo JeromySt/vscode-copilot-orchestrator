@@ -226,4 +226,152 @@ suite('VerifyRiPhaseExecutor', () => {
     assert.ok(!(git.repository.stageAll as sinon.SinonStub).called);
     assert.ok(!(git.repository.commit as sinon.SinonStub).called);
   });
+
+  test('full execute: shell workSpec success with worktree lifecycle', async () => {
+    const git = mockGitOperations();
+    (git.repository.resolveRef as sinon.SinonStub).resolves('target789abc');
+
+    const { EventEmitter } = require('events');
+    const mockProc = new EventEmitter();
+    mockProc.stdout = new EventEmitter();
+    mockProc.stderr = new EventEmitter();
+    mockProc.stdout.setEncoding = sinon.stub();
+    mockProc.stderr.setEncoding = sinon.stub();
+    mockProc.pid = 12345;
+    mockProc.killed = false;
+    mockProc.kill = sinon.stub();
+
+    const spawner = {
+      spawn: sinon.stub().returns(mockProc),
+    };
+
+    const executor = new VerifyRiPhaseExecutor({ spawner: spawner as any, git });
+    const context = createMockContext({ workSpec: 'npm test' });
+
+    const resultPromise = executor.execute(context);
+
+    // Let the process emit close with code 0 — must be after spawn listeners attach
+    setTimeout(() => {
+      mockProc.emit('close', 0);
+    }, 20);
+
+    const result = await resultPromise;
+    assert.strictEqual(result.success, true);
+
+    // Verify worktree was created and cleaned up
+    assert.ok((git.worktrees.createDetachedWithTiming as sinon.SinonStub).calledOnce);
+    assert.ok((git.worktrees.removeSafe as sinon.SinonStub).calledOnce);
+  });
+
+  test('full execute: shell workSpec failure returns error', async () => {
+    const git = mockGitOperations();
+    (git.repository.resolveRef as sinon.SinonStub).resolves('target789abc');
+
+    const { EventEmitter } = require('events');
+    const mockProc = new EventEmitter();
+    mockProc.stdout = new EventEmitter();
+    mockProc.stderr = new EventEmitter();
+    mockProc.stdout.setEncoding = sinon.stub();
+    mockProc.stderr.setEncoding = sinon.stub();
+    mockProc.pid = 12345;
+    mockProc.killed = false;
+    mockProc.kill = sinon.stub();
+
+    const spawner = {
+      spawn: sinon.stub().returns(mockProc),
+    };
+
+    const executor = new VerifyRiPhaseExecutor({ spawner: spawner as any, git });
+    const context = createMockContext({ workSpec: 'npm test' });
+
+    const resultPromise = executor.execute(context);
+
+    // Process exits with failure
+    setTimeout(() => {
+      mockProc.emit('close', 1);
+    }, 20);
+
+    const result = await resultPromise;
+    assert.strictEqual(result.success, false);
+
+    // Worktree should still be cleaned up on failure
+    assert.ok((git.worktrees.removeSafe as sinon.SinonStub).calledOnce);
+  });
+
+  test('execute catches errors and cleans up worktree', async () => {
+    const git = mockGitOperations();
+    (git.repository.resolveRef as sinon.SinonStub).resolves('target789abc');
+    (git.worktrees.createDetachedWithTiming as sinon.SinonStub).rejects(new Error('worktree creation failed'));
+
+    const executor = new VerifyRiPhaseExecutor({ spawner: mockSpawner as any, git });
+    const context = createMockContext({ workSpec: 'npm test' });
+
+    const result = await executor.execute(context);
+    assert.strictEqual(result.success, false);
+    assert.ok(result.error?.includes('worktree creation failed'));
+
+    // removeSafe should still be called in finally block
+    assert.ok((git.worktrees.removeSafe as sinon.SinonStub).calledOnce);
+  });
+
+  test('execute with process workSpec type', async () => {
+    const git = mockGitOperations();
+    (git.repository.resolveRef as sinon.SinonStub).resolves('target789abc');
+
+    const { EventEmitter } = require('events');
+    const mockProc = new EventEmitter();
+    mockProc.stdout = new EventEmitter();
+    mockProc.stderr = new EventEmitter();
+    mockProc.stdout.setEncoding = sinon.stub();
+    mockProc.stderr.setEncoding = sinon.stub();
+    mockProc.pid = 12345;
+    mockProc.killed = false;
+    mockProc.kill = sinon.stub();
+
+    const spawner = {
+      spawn: sinon.stub().returns(mockProc),
+    };
+
+    const executor = new VerifyRiPhaseExecutor({ spawner: spawner as any, git });
+    const processSpec = { type: 'process', command: 'npm', args: ['test'] };
+    const context = createMockContext({ workSpec: processSpec as any });
+
+    const resultPromise = executor.execute(context);
+    setTimeout(() => { mockProc.emit('close', 0); }, 20);
+
+    const result = await resultPromise;
+    assert.strictEqual(result.success, true);
+  });
+
+  test('execute with agent workSpec type returns error without delegator', async () => {
+    const git = mockGitOperations();
+    (git.repository.resolveRef as sinon.SinonStub).resolves('target789abc');
+
+    const { EventEmitter } = require('events');
+    const executor = new VerifyRiPhaseExecutor({ spawner: mockSpawner as any, git });
+    const agentSpec = { type: 'agent', instructions: 'Fix issues' };
+    const context = createMockContext({ workSpec: agentSpec as any });
+
+    const result = await executor.execute(context);
+    assert.strictEqual(result.success, false);
+    assert.ok(result.error?.includes('agent delegator'));
+  });
+
+  test('commitVerifyFixIfNeeded handles commit failure gracefully', async () => {
+    const git = mockGitOperations();
+    (git.repository.hasChanges as sinon.SinonStub).resolves(true);
+    (git.repository.commit as sinon.SinonStub).resolves(false); // commit returns false
+
+    const executor = new VerifyRiPhaseExecutor({ spawner: mockSpawner as any, git });
+    const context = createMockContext({ workSpec: 'npm test' });
+
+    const method = (executor as any).commitVerifyFixIfNeeded;
+    await method.call(executor, context, '/repo', '/worktree', 'main');
+
+    // stageAll was called, commit was called but returned false
+    assert.ok((git.repository.stageAll as sinon.SinonStub).calledOnce);
+    assert.ok((git.repository.commit as sinon.SinonStub).calledOnce);
+    // updateRef should NOT be called since commit failed
+    assert.ok(!(git.repository.updateRef as sinon.SinonStub).called);
+  });
 });
