@@ -511,8 +511,11 @@ export class PlanLifecycleManager {
     const cleanupErrors: string[] = [];
     const worktreePaths: string[] = [];
 
+    const snapshotWorktreePath = plan.snapshot?.worktreePath;
     for (const [, state] of plan.nodeStates) {
-      if (state.worktreePath) {worktreePaths.push(state.worktreePath);}
+      if (state.worktreePath && state.worktreePath !== snapshotWorktreePath) {
+        worktreePaths.push(state.worktreePath);
+      }
     }
 
     this.log.info(`Cleaning up Plan resources`, { planId: plan.id, worktrees: worktreePaths.length });
