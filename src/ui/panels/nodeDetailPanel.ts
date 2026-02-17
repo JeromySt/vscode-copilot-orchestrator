@@ -443,6 +443,8 @@ export class NodeDetailPanel {
           status: state.status,
           phaseStatus,
           currentPhase,
+          startedAt: state.startedAt,
+          endedAt: state.endedAt,
         });
 
         // Push incremental attempt history when new attempts are recorded
