@@ -5,6 +5,33 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-02-17
+
+### Added
+- **Live plan reshaping**: Add, remove, or reorder nodes in a running plan with dependency validation and DAG integrity checks.
+- **Post-merge tree validation**: After every RI merge, file counts are compared between the result and both parents. If the result has <80% of the richer parent's files, the merge is aborted as destructive.
+
+### Fixed
+- **CRITICAL: RI merge no longer touches user's working directory**: Conflict resolution now runs in an ephemeral detached worktree instead of stashing/checking out on the user's main repo. Eliminates the stash/pop pattern that caused catastrophic file deletion (190 files lost in production).
+- **Auto-derive configDir from cwd**: Removed explicit `configDir` plumbing from `DelegateOptions`, `CopilotRunOptions`, `BuildCommandOptions`, and `ICopilotRunner`. Config dir is now auto-derived as `path.join(cwd, '.orchestrator', '.copilot-cli')` inside `buildCommand()`.
+- **Plan detail panel overflow**: Fixed layout overflow in plan detail panel.
+- **Node detail auto-heal attempts**: Fixed auto-heal attempt history display in the Attempts section.
+- **AI stats display**: Fixed AI stats rendering in node detail panel.
+- **Runtime JS errors**: Fixed runtime JavaScript errors in webview panels.
+- **Sticky buttons and capacity**: Fixed sticky button positioning and global capacity stats display.
+- **Force fail button restyle**: Restyled Force Fail button and moved to sticky header.
+- **Node duration timer**: Fixed live duration timer for running nodes.
+- **Job count listener**: Added `planStarted` listener to plan detail panel.
+- **Mermaid text clamp**: Clamped Mermaid node text to rendered box width.
+- **Mermaid sizing template**: Updated duration template to hours format.
+- **Duration display logic**: Updated duration display for running nodes with data-attribute-driven rendering.
+
+### Removed
+- `mergeWithConflictResolution` method (stash/checkout/merge/pop pattern)
+- `isStashOrchestratorOnly` helper
+- All `stashPush`/`stashPop`/`stashDrop` usage in RI merge path
+- `configDir` parameter from all interfaces and phase executors
+
 ## [0.11.21] - 2026-02-17
 
 ### Fixed
