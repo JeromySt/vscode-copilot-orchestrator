@@ -354,6 +354,25 @@ suite('MergeRiPhaseExecutor', () => {
     assert.ok(result.error?.includes('Could not resolve conflicts'));
   });
 
+  test('merge conflict with no treeSha returns failure', async () => {
+    const git = mockGitOperations();
+    (git.repository.hasChangesBetween as sinon.SinonStub).resolves(true);
+    (git.merge.mergeWithoutCheckout as sinon.SinonStub).resolves({
+      success: false,
+      hasConflicts: true,
+      treeSha: undefined,
+      conflictFiles: ['broken.txt']
+    });
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+
+    const result = await executor.execute(context);
+
+    assert.strictEqual(result.success, false);
+    assert.ok(result.error?.includes('no tree SHA'));
+  });
+
   test('validation-only root node - no commit to merge', async () => {
     const executor = new MergeRiPhaseExecutor({ git: mockGitOperations(), copilotRunner: mockCopilotRunner });
     const context = createMockContext({
