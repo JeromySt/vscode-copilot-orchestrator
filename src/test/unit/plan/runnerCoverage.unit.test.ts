@@ -214,4 +214,90 @@ suite('PlanRunner delegation coverage', () => {
     const result = await runner.getAllProcessStats('unknown-plan');
     assert.ok(result === null || result === undefined || Array.isArray(result) || typeof result === 'object');
   });
+
+  test('savePlan returns false for unknown', () => {
+    const dir = makeTmpDir();
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    assert.strictEqual(runner.savePlan('unknown'), false);
+  });
+
+  test('savePlan returns true for known plan', () => {
+    const dir = makeTmpDir();
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    const plan = runner.enqueue({
+      name: 'P', baseBranch: 'main',
+      jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+    });
+    assert.strictEqual(runner.savePlan(plan.id), true);
+  });
+
+  test('completeFinalMerge returns error for unknown plan', async () => {
+    const dir = makeTmpDir();
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    const r = await runner.completeFinalMerge('unknown');
+    assert.strictEqual(r.success, false);
+    assert.ok(r.error?.includes('not found'));
+  });
+
+  test('completeFinalMerge returns error when not awaiting', async () => {
+    const dir = makeTmpDir();
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    const plan = runner.enqueue({
+      name: 'P', baseBranch: 'main',
+      jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+    });
+    const r = await runner.completeFinalMerge(plan.id);
+    assert.strictEqual(r.success, false);
+    assert.ok(r.error?.includes('not awaiting'));
+  });
+
+  test('completeFinalMerge returns error when no snapshot', async () => {
+    const dir = makeTmpDir();
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    const plan = runner.enqueue({
+      name: 'P', baseBranch: 'main',
+      jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+    });
+    (plan as any).awaitingFinalMerge = true;
+    const r = await runner.completeFinalMerge(plan.id);
+    assert.strictEqual(r.success, false);
+    assert.ok(r.error?.includes('snapshot'));
+  });
+
+  test('completeFinalMerge succeeds with valid snapshot', async () => {
+    const dir = makeTmpDir();
+    const deps = createRunnerDeps(path.join(dir, 'plans'));
+    const resolvedRef = 'abc1234def5678901234567890abcdef12345678';
+    // Add merge and repository stubs needed by FinalMergeExecutor
+    deps.git.repository = {
+      ...deps.git.repository,
+      resolveRef: async () => resolvedRef,
+      updateRef: async () => {},
+      hasUncommittedChanges: async () => false,
+      resetHard: async () => {},
+    };
+    deps.git.branches = {
+      ...deps.git.branches,
+      currentOrNull: async () => null,
+    };
+    deps.git.merge = {
+      mergeWithoutCheckout: async () => ({ success: true, treeSha: 'tree123' }),
+      commitTree: async () => 'commit12345678901234567890abcdef1234567890',
+    };
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, deps);
+    const plan = runner.enqueue({
+      name: 'P', baseBranch: 'main', targetBranch: 'main',
+      jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+    });
+    (plan as any).awaitingFinalMerge = true;
+    (plan as any).snapshot = {
+      branch: 'orchestrator/snapshot/test',
+      worktreePath: '/tmp/snap',
+      baseCommit: resolvedRef, // same as resolveRef returns → rebase is a no-op
+    };
+    (plan as any).repoPath = dir;
+    const r = await runner.completeFinalMerge(plan.id);
+    assert.strictEqual(r.success, true);
+    assert.strictEqual(plan.awaitingFinalMerge, undefined);
+  });
 });
