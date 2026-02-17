@@ -778,6 +778,9 @@ export class NodeDetailPanel {
     // Sync attempt count so incremental updates don't duplicate pre-rendered cards
     this._lastAttemptCount = state.attemptHistory?.length || 0;
     
+    // Sync attempt count so incremental updates don't duplicate pre-rendered cards
+    this._lastAttemptCount = state.attemptHistory?.length || 0;
+    
     // Send config update after rendering
     this._sendConfigUpdate();
   }

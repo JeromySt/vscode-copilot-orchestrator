@@ -7,7 +7,7 @@
  * @module test/unit/ui/plansViewNameTruncation
  */
 
-import { suite, test, setup, teardown } from 'mocha';
+import { suite, test } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 
@@ -18,8 +18,7 @@ suite('PlansView Plan Name Truncation', () => {
   let sandbox: sinon.SinonSandbox;
   let html: string;
 
-  setup(function () {
-    this.timeout(10000);
+  setup(() => {
     sandbox = sinon.createSandbox();
 
     // Minimal mock PlanRunner – plansViewProvider constructor subscribes to events
