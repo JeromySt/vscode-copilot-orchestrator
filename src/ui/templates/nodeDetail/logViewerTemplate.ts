@@ -78,6 +78,7 @@ export function phaseTabsHtml(phaseStatus: Record<string, string>, isRunning: bo
     { id: 'commit', name: 'Commit', icon: getPhaseIcon(phaseStatus.commit) },
     { id: 'postchecks', name: 'Postchecks', icon: getPhaseIcon(phaseStatus.postchecks) },
     { id: 'merge-ri', name: 'Merge RI', icon: getMergeIcon(phaseStatus['merge-ri'], '↑') },
+    { id: 'verify-ri', name: 'Verify RI', icon: getPhaseIcon(phaseStatus['verify-ri']) },
   ];
 
   return phases.map(p => `

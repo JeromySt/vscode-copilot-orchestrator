@@ -8,8 +8,10 @@
  * ## Safety guarantees
  * 
  * - **Never touches the user's working directory.** All merges happen
- *   either via `git merge-tree --write-tree` (in-memory) or inside an
- *   ephemeral detached worktree that is removed after the merge.
+ *   via `git merge-tree --write-tree` (in-memory). Conflict resolution
+ *   extracts conflicted files to a temp directory, resolves them with
+ *   Copilot CLI, then hashes the resolved files back into git objects
+ *   and rebuilds the tree — all without modifying any checkout.
  * - **Never stashes user changes.** The stash/pop pattern is inherently
  *   dangerous because it mixes user state with orchestrator state.
  * - **Validates the merged tree.** After every RI merge, the file count
@@ -19,10 +21,10 @@
  * @module plan/phases/mergeRiPhase
  */
 
+import * as fs from 'fs';
 import * as path from 'path';
 import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces/IPhaseExecutor';
 import type { CopilotUsageMetrics } from '../types';
-import { resolveMergeConflictWithCopilot } from './mergeHelper';
 import type { IGitOperations } from '../../interfaces/IGitOperations';
 import type { ICopilotRunner } from '../../interfaces/ICopilotRunner';
 
@@ -139,24 +141,26 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       }
       
       // =========================================================================
-      // CONFLICT: Resolve in an ephemeral worktree (never touch user's checkout)
+      // CONFLICT: Resolve in-memory via merge-tree + Copilot + hash-object
+      // Never creates a worktree or touches the user's checkout.
       // =========================================================================
       if (mergeTreeResult.hasConflicts) {
         context.logInfo('⚠ Merge has conflicts');
         context.logInfo(`  Conflicts: ${mergeTreeResult.conflictFiles?.join(', ')}`);
-        context.logInfo('  Resolving in ephemeral worktree (user checkout untouched)...');
+        context.logInfo('  Resolving in-memory (user checkout untouched)...');
         
-        const resolved = await this.mergeInEphemeralWorktree(
+        const resolved = await this.resolveConflictsInMemory(
           context,
           repoPath,
           mergeSource,
           targetBranch,
           `Plan ${node.name}: merge ${node.name} (commit ${mergeSource.slice(0, 8)})`,
+          mergeTreeResult.treeSha!,
           mergeTreeResult.conflictFiles || []
         );
         
         if (resolved.success) {
-          context.logInfo('✓ Conflict resolved in ephemeral worktree');
+          context.logInfo('✓ Conflicts resolved in-memory');
           context.logInfo('========== REVERSE INTEGRATION MERGE END ==========');
           return { success: true, metrics: resolved.metrics };
         } else {
@@ -178,7 +182,12 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
   }
   
   /**
-   * Update branch reference to point to new commit.
+   * Update branch reference to point to new commit, then sync the
+   * user's working tree if they have this branch checked out.
+   * 
+   * Without the sync step the user would see a confusing `git status`
+   * (all RI-merged files appearing as uncommitted changes) because
+   * their index/worktree still reflects the old HEAD.
    */
   private async updateBranchRef(
     context: PhaseContext,
@@ -188,73 +197,122 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
   ): Promise<boolean> {
     try {
       await this.git.repository.updateRef(repoPath, `refs/heads/${targetBranch}`, newCommit);
-      return true;
     } catch (error: any) {
       context.logError(`Failed to update branch ${targetBranch}: ${error.message}`);
       return false;
     }
+
+    // Sync the working tree to prevent desync.
+    // If the user's main checkout has this branch checked out, the index
+    // and working directory still reflect the OLD commit.  Without a
+    // reset the user sees a confusing diff with every RI-merged file
+    // showing up as a local modification.
+    await this.syncWorkingTreeIfNeeded(context, repoPath, targetBranch, newCommit);
+    return true;
+  }
+
+  /**
+   * If the user's checkout is on `targetBranch`, bring the working tree
+   * and index in line with the newly-updated HEAD so `git status` is clean.
+   *
+   * - Clean checkout → `git reset --hard HEAD` (instant, safe).
+   * - Dirty checkout → stash user changes, reset, then restore the stash
+   *   so nothing the user had pending is lost.
+   */
+  private async syncWorkingTreeIfNeeded(
+    context: PhaseContext,
+    repoPath: string,
+    targetBranch: string,
+    newCommit: string
+  ): Promise<void> {
+    try {
+      const currentBranch = await this.git.branches.currentOrNull(repoPath);
+      if (currentBranch !== targetBranch) {
+        // Branch isn't checked out in the main worktree — nothing to sync.
+        return;
+      }
+
+      const isDirty = await this.git.repository.hasUncommittedChanges(repoPath);
+      if (!isDirty) {
+        // Clean checkout — fast-path reset.
+        await this.git.repository.resetHard(repoPath, 'HEAD', s => context.logInfo(s));
+        context.logInfo(`Synced working tree to ${newCommit.slice(0, 8)}`);
+        return;
+      }
+
+      // Dirty checkout — preserve user changes across the sync.
+      context.logInfo('Stashing uncommitted changes before syncing working tree...');
+      const stashed = await this.git.repository.stashPush(
+        repoPath, 'orchestrator: preserve user changes during RI sync',
+        s => context.logInfo(s)
+      );
+
+      await this.git.repository.resetHard(repoPath, 'HEAD', s => context.logInfo(s));
+      context.logInfo(`Synced working tree to ${newCommit.slice(0, 8)}`);
+
+      if (stashed) {
+        const popped = await this.git.repository.stashPop(repoPath, s => context.logInfo(s));
+        if (popped) {
+          context.logInfo('Restored uncommitted changes');
+        } else {
+          context.logInfo('⚠ Stash pop had conflicts — your changes are in `git stash list`');
+        }
+      }
+    } catch (err: any) {
+      // Non-fatal — the merge commit and ref update already succeeded.
+      context.logInfo(`⚠ Could not sync working tree: ${err.message}`);
+    }
   }
   
   /**
-   * Resolve merge conflicts in an ephemeral worktree.
+   * Resolve merge conflicts entirely in-memory using merge-tree + Copilot CLI.
    * 
-   * This approach NEVER touches the user's main working directory:
-   * 1. Create a temporary detached worktree at the target branch commit
-   * 2. Run `git merge <source> --no-commit` inside the worktree
-   * 3. Use Copilot CLI to resolve conflicts inside the worktree
-   * 4. Read the resulting commit SHA
-   * 5. Validate the merged tree
-   * 6. Update the target branch ref in the main repo
-   * 7. Remove the ephemeral worktree
+   * This approach NEVER touches ANY working directory:
+   * 1. merge-tree --write-tree already gave us a tree SHA with conflict markers
+   * 2. Extract each conflicted file from the tree to a temp directory
+   * 3. Run Copilot CLI in the temp directory to resolve conflict markers
+   * 4. hash-object the resolved files back into git's object store
+   * 5. replaceTreeBlobs to build a new clean tree
+   * 6. commitTree + updateRef to land the merge
    */
-  private async mergeInEphemeralWorktree(
+  private async resolveConflictsInMemory(
     context: PhaseContext,
     repoPath: string,
     sourceCommit: string,
     targetBranch: string,
     commitMessage: string,
+    conflictedTreeSha: string,
     conflictFiles: string[]
   ): Promise<{ success: boolean; error?: string; metrics?: CopilotUsageMetrics }> {
     const targetSha = await this.git.repository.resolveRef(targetBranch, repoPath);
-    const worktreeName = `ri-merge-${Date.now()}`;
-    // Place the ephemeral worktree inside the plan's worktree root (already gitignored)
-    const worktreePath = path.join(repoPath, '.worktrees', worktreeName);
-    
-    context.logInfo(`Creating ephemeral worktree at ${worktreePath}`);
+    const tmpDir = path.join(repoPath, '.git', `ri-conflict-${Date.now()}`);
     
     try {
-      // Step 1: Create detached worktree at target branch commit
-      await this.git.worktrees.createDetachedWithTiming(
-        repoPath, worktreePath, targetSha,
-        s => context.logInfo(s)
-      );
+      // Step 1: Extract conflicted files from the tree to a temp directory
+      fs.mkdirSync(tmpDir, { recursive: true });
+      context.logInfo(`Extracting ${conflictFiles.length} conflicted file(s) to temp dir...`);
       
-      // Step 2: Perform merge in the worktree (will have conflicts)
-      context.logInfo(`Merging ${sourceCommit.slice(0, 8)} in ephemeral worktree...`);
-      await this.git.merge.merge({
-        source: sourceCommit,
-        target: 'HEAD',
-        cwd: worktreePath,
-        noCommit: true,
-        log: s => context.logInfo(s)
-      }).catch(() => {
-        // Expected to fail due to conflicts
-      });
+      for (const filePath of conflictFiles) {
+        const content = await this.git.merge.catFileFromTree(repoPath, conflictedTreeSha, filePath);
+        if (content === null) {
+          context.logInfo(`  Skipping ${filePath} — could not read from tree (likely deleted-by-us)`);
+          continue;
+        }
+        const destPath = path.join(tmpDir, filePath);
+        fs.mkdirSync(path.dirname(destPath), { recursive: true });
+        fs.writeFileSync(destPath, content);
+      }
       
-      // List conflicts in the worktree
-      const worktreeConflicts = await this.git.merge.listConflicts(worktreePath).catch(() => conflictFiles);
-      
-      // Step 3: Use Copilot CLI to resolve conflicts in the worktree
-      context.logInfo(`Invoking Copilot CLI to resolve ${worktreeConflicts.length} conflict(s)...`);
-      const cliResult = await resolveMergeConflictWithCopilot(
+      // Step 2: Run Copilot CLI to resolve conflict markers in the temp dir
+      context.logInfo(`Invoking Copilot CLI to resolve ${conflictFiles.length} conflict(s) in-memory...`);
+      const cliResult = await this.resolveConflictFilesWithCopilot(
         context,
-        worktreePath,
+        tmpDir,
+        repoPath,
         sourceCommit,
         targetBranch,
         commitMessage,
-        this.copilotRunner,
-        worktreeConflicts,
-        this.configManager
+        conflictFiles
       );
       
       if (!cliResult.success) {
@@ -263,28 +321,57 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       
       context.logInfo('Copilot CLI resolved conflicts');
       
-      // Step 4: Get the resulting commit from the worktree
-      const resultCommit = await this.git.worktrees.getHeadCommit(worktreePath);
-      if (!resultCommit) {
-        return { success: false, error: 'No commit found in worktree after conflict resolution' };
+      // Step 3: Hash resolved files back into git object store
+      const replacements = new Map<string, string>();
+      for (const filePath of conflictFiles) {
+        const resolvedPath = path.join(tmpDir, filePath);
+        if (!fs.existsSync(resolvedPath)) {
+          continue;
+        }
+        // Verify conflict markers are gone
+        const resolvedContent = fs.readFileSync(resolvedPath, 'utf-8');
+        if (resolvedContent.includes('<<<<<<<') || resolvedContent.includes('>>>>>>>')) {
+          context.logInfo(`  Warning: ${filePath} still contains conflict markers`);
+        }
+        const blobSha = await this.git.merge.hashObjectFromFile(repoPath, resolvedPath);
+        replacements.set(filePath, blobSha);
+        context.logInfo(`  Hashed ${filePath} → ${blobSha.slice(0, 8)}`);
       }
       
-      context.logInfo(`Worktree merge commit: ${resultCommit.slice(0, 8)}`);
+      // Step 4: Build new tree with resolved blobs
+      context.logInfo(`Building resolved tree (${replacements.size} replacement(s))...`);
+      const resolvedTreeSha = await this.git.merge.replaceTreeBlobs(
+        repoPath,
+        conflictedTreeSha,
+        replacements,
+        s => context.logInfo(s)
+      );
+      context.logInfo(`Resolved tree: ${resolvedTreeSha.slice(0, 8)}`);
       
-      // Step 5: Validate the merged tree
+      // Step 5: Create merge commit from the resolved tree
+      const mergeCommit = await this.git.merge.commitTree(
+        resolvedTreeSha,
+        [targetSha, sourceCommit],
+        commitMessage,
+        repoPath,
+        s => context.logInfo(s)
+      );
+      context.logInfo(`Merge commit: ${mergeCommit.slice(0, 8)}`);
+      
+      // Step 6: Validate the merged tree
       const validationError = await this.validateMergedTree(
-        context, repoPath, resultCommit, sourceCommit, targetSha
+        context, repoPath, mergeCommit, sourceCommit, targetSha
       );
       if (validationError) {
         return { success: false, error: validationError };
       }
       
-      // Step 6: Update the target branch ref
-      const branchUpdated = await this.updateBranchRef(context, repoPath, targetBranch, resultCommit);
+      // Step 7: Update the target branch ref
+      const branchUpdated = await this.updateBranchRef(context, repoPath, targetBranch, mergeCommit);
       if (branchUpdated) {
-        context.logInfo(`Updated ${targetBranch} to ${resultCommit.slice(0, 8)}`);
+        context.logInfo(`Updated ${targetBranch} to ${mergeCommit.slice(0, 8)}`);
       } else {
-        context.logInfo(`⚠ Merge commit exists but branch not updated — run 'git reset --hard ${resultCommit.slice(0, 8)}'`);
+        context.logInfo(`⚠ Merge commit exists but branch not updated — run 'git reset --hard ${mergeCommit.slice(0, 8)}'`);
       }
       
       // Push if configured
@@ -293,25 +380,57 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       return { success: true, metrics: cliResult.metrics };
       
     } catch (error: any) {
-      context.logError(`Ephemeral worktree merge failed: ${error.message}`);
-      
-      // Abort any ongoing merge in the worktree
-      try {
-        await this.git.merge.abort(worktreePath, s => context.logInfo(s));
-      } catch { /* ignore */ }
-      
-      return { success: false, error: `Merge in ephemeral worktree failed: ${error.message}` };
+      context.logError(`In-memory conflict resolution failed: ${error.message}`);
+      return { success: false, error: `In-memory merge failed: ${error.message}` };
     } finally {
-      // Always clean up the ephemeral worktree
+      // Clean up temp directory
       try {
-        await this.git.worktrees.removeSafe(repoPath, worktreePath, {
-          force: true,
-          log: s => context.logInfo(s)
-        });
-        context.logInfo('Cleaned up ephemeral worktree');
-      } catch (cleanupErr: any) {
-        context.logInfo(`Warning: failed to remove ephemeral worktree: ${cleanupErr.message}`);
-      }
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        context.logInfo('Cleaned up temp conflict dir');
+      } catch { /* ignore */ }
+    }
+  }
+  
+  /**
+   * Run Copilot CLI to resolve conflict markers in extracted files.
+   * 
+   * The files live in a plain temp directory (not a git repo). Copilot CLI
+   * is instructed to edit the files in-place, removing conflict markers.
+   */
+  private async resolveConflictFilesWithCopilot(
+    context: PhaseContext,
+    tmpDir: string,
+    _repoPath: string,
+    sourceCommit: string,
+    targetBranch: string,
+    commitMessage: string,
+    conflictFiles: string[]
+  ): Promise<{ success: boolean; metrics?: CopilotUsageMetrics }> {
+    const task = [
+      'You are resolving git merge conflicts.',
+      `Source commit: ${sourceCommit.slice(0, 8)}`,
+      `Target branch: ${targetBranch}`,
+      `Merge message: ${commitMessage}`,
+      '',
+      'The following files have conflict markers (<<<<<<< / ======= / >>>>>>>).',
+      'Edit each file to resolve the conflicts by choosing the correct content.',
+      'Remove all conflict markers when done.',
+      '',
+      'Conflicted files:',
+      ...conflictFiles.map(f => `  - ${f}`)
+    ].join('\n');
+    
+    try {
+      const result = await this.copilotRunner.run({
+        task,
+        cwd: tmpDir,
+        label: 'ri-conflict-resolution',
+        onOutput: (line: string) => context.logInfo(line)
+      });
+      return { success: result.success, metrics: result.metrics };
+    } catch (error: any) {
+      context.logError(`Copilot CLI conflict resolution error: ${error.message}`);
+      return { success: false };
     }
   }
   

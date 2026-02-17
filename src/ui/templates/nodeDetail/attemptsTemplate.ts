@@ -19,6 +19,7 @@ export interface StepStatuses {
   commit?: string;
   postchecks?: string;
   'merge-ri'?: string;
+  'verify-ri'?: string;
 }
 
 /**
@@ -112,7 +113,7 @@ export function attemptPhaseTabsHtml(attempt: AttemptCardData): string {
   if (!attempt.logs) {return '';}
 
   const logs = attempt.logs;
-  const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
+  const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri', 'verify-ri'] as const;
 
   const phaseLabels: Record<string, string> = {
     'all': '📄 Full Log',
@@ -122,6 +123,7 @@ export function attemptPhaseTabsHtml(attempt: AttemptCardData): string {
     'commit': '💾 Commit',
     'postchecks': '✓ Postchecks',
     'merge-ri': '↗↙ Merge RI',
+    'verify-ri': '🔍 Verify RI',
   };
 
   const getPhaseStatus = (phase: string): string => {
@@ -152,6 +154,7 @@ export function attemptPhaseTabsHtml(attempt: AttemptCardData): string {
       'commit': 'COMMIT',
       'postchecks': 'POSTCHECKS',
       'merge-ri': 'REVERSE INTEGRATION',
+      'verify-ri': 'VERIFY-RI',
     };
 
     const marker = phaseMarkers[phase];
@@ -208,6 +211,7 @@ export function attemptCardHtml(attempt: AttemptCardData): string {
         ${stepIconHtml(attempt.stepStatuses?.commit)}
         ${stepIconHtml(attempt.stepStatuses?.postchecks)}
         ${stepIconHtml(attempt.stepStatuses?.['merge-ri'])}
+        ${stepIconHtml(attempt.stepStatuses?.['verify-ri'])}
       `;
 
   const sessionHtml = attempt.copilotSessionId

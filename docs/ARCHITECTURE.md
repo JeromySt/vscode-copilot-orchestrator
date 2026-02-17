@@ -365,16 +365,20 @@ stateDiagram-v2
 
 ### JobExecutor — Work Execution
 
-`DefaultJobExecutor` (`src/plan/executor.ts`) runs each node through a four-phase pipeline:
+`DefaultJobExecutor` (`src/plan/executor.ts`) runs each node through an eight-phase pipeline:
 
 ```
-prechecks → work → postchecks → commit
+merge-fi → setup → prechecks → work → commit → postchecks → merge-ri → verify-ri
 ```
 
 **Phase details:**
-- **Prechecks/Postchecks** — Optional validation commands
+- **Merge FI** — Forward integration of dependency commits into the worktree
+- **Setup** — Worktree environment preparation (symlinks, instructions)
+- **Prechecks/Postchecks** — Optional validation commands (auto-healable)
 - **Work** — Routed by `WorkSpec` type (see [Work Specification Types](#work-specification-types))
 - **Commit** — Validates work evidence, stages and commits changes in the worktree
+- **Merge RI** — Reverse integration to target branch using fully in-memory `git merge-tree --write-tree`. Conflicts resolved by extracting files to temp dir → Copilot CLI → hash objects back. Never touches any checkout.
+- **Verify RI** — Post-merge verification: runs the plan-level `verifyRiSpec` in a temporary worktree at the target branch HEAD. Auto-healable — on failure, Copilot CLI fixes the issue and commits to target branch.
 
 Each phase captures **AI usage metrics** independently (tokens, session time, code changes). The executor aggregates phase-level metrics into a total and returns a `phaseMetrics` record so the UI can display a per-phase breakdown.
 
@@ -624,7 +628,7 @@ Each node maintains an `NodeExecutionState` record (`src/plan/types/plan.ts`):
 | `attempts` | Array of `AttemptRecord` for retry history |
 | `lastAttempt` | Most recent attempt with phase statuses |
 | `metrics` | Aggregate AI usage metrics for the node |
-| `phaseMetrics` | Per-phase AI usage breakdown (`merge-fi`, `prechecks`, `work`, `commit`, `postchecks`, `merge-ri`) |
+| `phaseMetrics` | Per-phase AI usage breakdown (`merge-fi`, `prechecks`, `work`, `commit`, `postchecks`, `merge-ri`, `verify-ri`) |
 
 **Work Summary Behavior:** When a plan has a `targetBranch` configured, the plan detail panel filters the work summary to show only commits from leaf nodes that have successfully merged to the target branch (`mergedToTarget === true`). This ensures the displayed work summary reflects actual integrated work rather than all work performed across the plan. The summary updates dynamically as nodes complete their merge operations.
 
@@ -702,7 +706,7 @@ The orchestrator discovers available LLM models at runtime by parsing `copilot -
 
 ### Token Usage Tracking
 
-After each agent job completes, the orchestrator extracts token usage from Copilot CLI output using `CopilotStatsParser`. Metrics are captured per-phase (prechecks, work, postchecks, merge-fi, merge-ri) and aggregated for the node total.
+After each agent job completes, the orchestrator extracts token usage from Copilot CLI output using `CopilotStatsParser`. Metrics are captured per-phase (prechecks, work, postchecks, merge-fi, merge-ri, verify-ri) and aggregated for the node total.
 
 **Extracted Metrics:**
 - Premium requests consumed

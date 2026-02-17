@@ -130,11 +130,17 @@ EXECUTION CONTEXT:
 - Each job gets its own git worktree for isolated work
 - Dependencies chain commits - dependent jobs start from their parent's commit
 
-WORK OPTIONS (work/prechecks/postchecks accept):
+WORK OPTIONS (work/prechecks/postchecks/verify_ri accept):
 1. String: "npm run build" (runs in default shell) or "@agent Implement feature" 
 2. Process spec: { type: "process", executable: "dotnet", args: ["build", "-c", "Release"] }
 3. Shell spec: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
 4. Agent spec: { type: "agent", instructions: "# Task\\n\\n1. Step one", model: "claude-sonnet-4.5" }
+
+VERIFY_RI (POST-MERGE VERIFICATION — HIGHLY RECOMMENDED):
+When targetBranch is set, always include verify_ri to validate the merged state after each RI merge.
+This catches compilation errors, test regressions, and merge conflict resolution mistakes before the
+next leaf merges. Auto-healable: if verification fails, Copilot CLI attempts to fix the issue.
+Example: "dotnet build --no-restore", "npm run build && npm test", or "@agent Verify compilation and fix any issues"
 
 IMPORTANT: For agent work, specify 'model' INSIDE the work object (not at job level).
 Agent instructions MUST be in Markdown format for proper rendering.
@@ -172,6 +178,9 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
           startPaused: {
             type: 'boolean',
             description: 'Create the plan in paused state for review before execution (default: true). Set to false to start immediately.'
+          },
+          verify_ri: {
+            description: 'Optional (but HIGHLY recommended) verification command to run after each successful RI merge. Runs in a temporary worktree at the target branch HEAD to validate the merged state (e.g. compile, test). Auto-healable: on failure, Copilot CLI attempts to fix the issue. String command or object with type: process/shell/agent. Example: "dotnet build --no-restore" or "npm run build"'
           },
           jobs: {
             type: 'array',
@@ -517,7 +526,7 @@ Agent instructions MUST be in Markdown format.`
 
 Returns:
 - Execution logs from the failed attempt
-- Which phase failed (prechecks, work, commit, postchecks, merge-fi, merge-ri)
+- Which phase failed (prechecks, work, commit, postchecks, merge-fi, merge-ri, verify-ri)
 - Error message
 - Copilot session ID (if agent work was involved)
 - Worktree path (for manual inspection)

@@ -34,7 +34,7 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | 🚀 **Parallel AI Agents** | Run 4, 8, or more Copilot agents simultaneously on different tasks |
 | 🔀 **Git Worktree Isolation** | Each agent works in its own worktree branch — zero conflicts, clean history |
 | 📊 **Interactive DAG Visualization** | See your entire plan as a live, zoomable Mermaid dependency graph |
-| ⚡ **Automated 7-Phase Pipeline** | Merge FI → Prechecks → AI Work → Commit → Postchecks → Merge RI → Cleanup |
+| ⚡ **Automated 8-Phase Pipeline** | Merge FI → Prechecks → AI Work → Commit → Postchecks → Merge RI → Verify RI → Cleanup |
 | 🔧 **Auto-Heal** | Failed phases automatically retried by a fresh AI agent with failure context |
 | 🤖 **20 Native MCP Tools** | Create and manage plans directly from GitHub Copilot Chat |
 | ⏸️ **Pause / Resume / Retry** | Pause running plans, resume later, or retry failed nodes with AI failure context |
@@ -95,14 +95,14 @@ An 8-stage release pipeline — checkout → compile → unit-tests → package 
 
 ## Features
 
-### 🎯 Automated 7-Phase Job Lifecycle
+### 🎯 Automated 8-Phase Job Lifecycle
 
 Every node follows a complete automated pipeline:
 
 ```
-🔀 MERGE FI → ✅ PRECHECKS → 🤖 AI WORK → 💾 COMMIT → ✅ POSTCHECKS → 🔀 MERGE RI → 🧹 CLEANUP
-Forward Int.    Validate       Agent work    Stage &      Verify          Reverse Int.   Remove
-from target     pre-state      in worktree   commit       changes         to target      worktree
+🔀 MERGE FI → ✅ PRECHECKS → 🤖 AI WORK → 💾 COMMIT → ✅ POSTCHECKS → 🔀 MERGE RI → 🔍 VERIFY RI → 🧹 CLEANUP
+Forward Int.    Validate       Agent work    Stage &      Verify          Reverse Int.   Post-merge     Remove
+from target     pre-state      in worktree   commit       changes         to target      verification   worktree
 ```
 
 **Why this matters:**
@@ -111,7 +111,8 @@ from target     pre-state      in worktree   commit       changes         to tar
 - **AI Work** runs in complete isolation — can't break your main branch
 - **Commit** stages and commits only the agent's changes
 - **Postchecks** validate the AI's work before merging back
-- **Merge RI** (Reverse Integration) squash-merges results back to the target branch
+- **Merge RI** (Reverse Integration) merges results back to the target branch using fully in-memory `git merge-tree --write-tree` — never touches the user's working directory
+- **Verify RI** runs a plan-level verification command (e.g. compile, test) against the merged target branch in a temporary worktree. Auto-healable: if verification fails, Copilot CLI fixes the issue
 - **Cleanup** removes the worktree and temporary branch
 
 ### 🤖 Flexible Work Specifications
@@ -459,7 +460,7 @@ The orchestrator parses Copilot CLI output to extract AI usage metrics for each 
 - **API time** and **total session time**
 - **Code changes** — lines added / removed
 - **Per-model token breakdown** — input tokens, output tokens, cached tokens
-- **Per-phase breakdown** — metrics for each phase (prechecks, work, postchecks, merge-fi, merge-ri) captured independently and displayed in the phase breakdown section of the AI Usage card
+- **Per-phase breakdown** — metrics for each phase (prechecks, work, postchecks, merge-fi, merge-ri, verify-ri) captured independently and displayed in the phase breakdown section of the AI Usage card
 
 **Example CLI output parsed:**
 ```

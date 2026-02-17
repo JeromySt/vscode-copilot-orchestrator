@@ -102,7 +102,7 @@ src/
 ├── plan/                   # Plan execution engine
 │   ├── executionEngine.ts  # Node-centric job execution engine
 │   ├── executionPump.ts    # Async execution pump for scheduling
-│   ├── executor.ts         # 7-phase executor pipeline
+│   ├── executor.ts         # 8-phase executor pipeline
 │   ├── nodeManager.ts      # Centralized node state management
 │   ├── planEvents.ts       # Event pub/sub for plan lifecycle
 │   ├── planLifecycle.ts    # Plan CRUD operations

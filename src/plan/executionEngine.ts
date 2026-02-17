@@ -385,9 +385,10 @@ export class JobExecutionEngine {
           // and resuming from that phase. Earlier phases that passed are
           // skipped; later phases (including commit) run normally.
           const failedPhase = result.failedPhase || 'work';
-          const isHealablePhase = ['prechecks', 'work', 'postchecks'].includes(failedPhase);
+          const isHealablePhase = ['prechecks', 'work', 'postchecks', 'verify-ri'].includes(failedPhase);
           const failedWorkSpec = failedPhase === 'prechecks' ? node.prechecks
             : failedPhase === 'postchecks' ? node.postchecks
+            : failedPhase === 'verify-ri' ? plan.spec.verifyRiSpec
             : node.work;
           const normalizedFailedSpec = normalizeWorkSpec(failedWorkSpec);
           const isAgentWork = normalizedFailedSpec?.type === 'agent';
@@ -404,7 +405,7 @@ export class JobExecutionEngine {
             error: result.error,
           });
           
-          const phaseAlreadyHealed = nodeState.autoHealAttempted?.[failedPhase as 'prechecks' | 'work' | 'postchecks'];
+          const phaseAlreadyHealed = nodeState.autoHealAttempted?.[failedPhase as 'prechecks' | 'work' | 'postchecks' | 'verify-ri'];
           
           // Auto-retry is allowed if:
           // 1. Non-agent work (existing behavior - swap to agent)
@@ -422,7 +423,7 @@ export class JobExecutionEngine {
           
           if (shouldAttemptAutoRetry) {
             if (!nodeState.autoHealAttempted) {nodeState.autoHealAttempted = {};}
-            nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = true;
+            nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks' | 'verify-ri'] = true;
             
             if (isAgentWork && wasExternallyKilled) {
               // Agent was interrupted - retry with same spec (don't swap to different agent spec)

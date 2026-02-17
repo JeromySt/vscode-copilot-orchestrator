@@ -42,6 +42,8 @@ export interface ExecuteOptions {
   errorPrefix?: string;
   /** Timeout in milliseconds (default: 60000 = 1 minute) */
   timeoutMs?: number;
+  /** Additional environment variables (merged with process.env) */
+  env?: Record<string, string>;
 }
 
 /**
@@ -166,12 +168,13 @@ export function execOrNull(args: string[], cwd: string): string | null {
  * @returns Promise resolving to command result
  */
 export async function execAsync(args: string[], options: ExecuteOptions): Promise<CommandResult> {
-  const { cwd, log, throwOnError = false, errorPrefix = 'Git command failed', timeoutMs = 60000 } = options;
+  const { cwd, log, throwOnError = false, errorPrefix = 'Git command failed', timeoutMs = 60000, env } = options;
   
   return new Promise((resolve, reject) => {
     const proc = spawn('git', args, {
       cwd,
-      stdio: 'pipe'
+      stdio: 'pipe',
+      env: env ? { ...process.env, ...env } : undefined
     });
     
     let stdout = '';

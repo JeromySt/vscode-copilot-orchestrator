@@ -174,6 +174,18 @@ class DefaultGitMerge implements IGitMerge {
   async isInProgress(cwd: string): Promise<boolean> {
     return merge.isInProgress(cwd);
   }
+
+  async catFileFromTree(repoPath: string, treeSha: string, filePath: string): Promise<string | null> {
+    return merge.catFileFromTree(repoPath, treeSha, filePath);
+  }
+
+  async hashObjectFromFile(repoPath: string, absFilePath: string): Promise<string> {
+    return merge.hashObjectFromFile(repoPath, absFilePath);
+  }
+
+  async replaceTreeBlobs(repoPath: string, baseTreeSha: string, replacements: Map<string, string>, log?: GitLogger): Promise<string> {
+    return merge.replaceTreeBlobs(repoPath, baseTreeSha, replacements, log);
+  }
 }
 
 /**

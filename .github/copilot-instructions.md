@@ -7,7 +7,7 @@ This VS Code extension orchestrates parallel GitHub Copilot agents via DAG-based
 ```
 Extension.ts → createContainer() → DI Container (ServiceContainer)
   ├─ PlanRunner (orchestrator, delegates to sub-modules)
-  │   ├─ JobExecutionEngine (7-phase node lifecycle)
+  │   ├─ JobExecutionEngine (8-phase node lifecycle)
   │   ├─ ExecutionPump (scheduling loop, concurrency)
   │   ├─ PlanEventEmitter (typed pub/sub for UI)
   │   └─ PlanPersistence (state save/load)

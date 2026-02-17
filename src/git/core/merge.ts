@@ -129,12 +129,17 @@ export async function mergeWithoutCheckout(options: MergeTreeOptions): Promise<M
   
   // Step 3: Handle merge conflicts (exit code 1 with CONFLICT output)
   // Git merge-tree outputs conflict information to stdout in human-readable format
-  // Example output lines:
-  //   "CONFLICT (content): Merge conflict in src/file.js"
-  //   "CONFLICT (modify/delete): src/deleted.js deleted in HEAD and modified in branch"
+  // IMPORTANT: merge-tree still outputs a tree SHA even with conflicts.
+  // The tree contains conflict markers in the conflicted files.
   if (result.stdout.includes('CONFLICT') || result.stderr.includes('CONFLICT')) {
     const conflictFiles: string[] = [];
     const lines = result.stdout.split('\n');
+    
+    // The first line of stdout is the tree SHA (even with conflicts)
+    let conflictTreeSha: string | undefined;
+    if (lines.length > 0 && /^[0-9a-f]{40,64}$/.test(lines[0].trim())) {
+      conflictTreeSha = lines[0].trim();
+    }
     
     // Parse each line looking for conflict descriptions
     for (const line of lines) {
@@ -152,9 +157,10 @@ export async function mergeWithoutCheckout(options: MergeTreeOptions): Promise<M
       }
     }
     
-    log?.(`[merge-tree] ⚠ Merge has conflicts in ${conflictFiles.length} file(s)`);
+    log?.(`[merge-tree] ⚠ Merge has conflicts in ${conflictFiles.length} file(s)${conflictTreeSha ? `, tree: ${conflictTreeSha.slice(0, 8)}` : ''}`);
     return {
       success: false,
+      treeSha: conflictTreeSha,
       hasConflicts: true,
       conflictFiles,
       error: `Merge conflicts in: ${conflictFiles.join(', ')}`
@@ -372,4 +378,94 @@ export async function continueAfterResolve(cwd: string, message: string, log?: G
   
   log?.(`[merge] ✗ Failed to commit: ${result.stderr}`);
   return false;
+}
+
+// =============================================================================
+// In-memory conflict resolution helpers
+// =============================================================================
+
+/**
+ * Extract a file's content from a git tree object.
+ * Uses `git cat-file` to read the blob directly from the object store.
+ */
+export async function catFileFromTree(
+  repoPath: string, treeSha: string, filePath: string
+): Promise<string | null> {
+  const result = await execAsync(
+    ['cat-file', '-p', `${treeSha}:${filePath}`],
+    { cwd: repoPath }
+  );
+  return result.success ? result.stdout : null;
+}
+
+/**
+ * Write a file's content into git's object store and return the blob SHA.
+ * @param repoPath - Repository path
+ * @param absFilePath - Absolute path to the file to hash
+ */
+export async function hashObjectFromFile(repoPath: string, absFilePath: string): Promise<string> {
+  const result = await execAsync(
+    ['hash-object', '-w', '--', absFilePath],
+    { cwd: repoPath }
+  );
+  if (!result.success) {
+    throw new Error(`hash-object failed: ${result.stderr}`);
+  }
+  return result.stdout.trim();
+}
+
+/**
+ * Replace specific blobs in a tree and return a new tree SHA.
+ * 
+ * Uses a temporary GIT_INDEX_FILE to avoid touching the real index:
+ * 1. `git read-tree` loads the base tree into a temp index
+ * 2. `git update-index --cacheinfo` replaces specific blob entries
+ * 3. `git write-tree` writes the modified index as a new tree object
+ * 
+ * This is entirely in-memory from the working directory's perspective.
+ */
+export async function replaceTreeBlobs(
+  repoPath: string,
+  baseTreeSha: string,
+  replacements: Map<string, string>,
+  log?: GitLogger
+): Promise<string> {
+  const tmpIndex = path.join(repoPath, '.git', `tmp-index-${Date.now()}`);
+  const env = { GIT_INDEX_FILE: tmpIndex };
+  
+  try {
+    // Step 1: Load base tree into temporary index
+    const readResult = await execAsync(
+      ['read-tree', baseTreeSha],
+      { cwd: repoPath, env }
+    );
+    if (!readResult.success) {
+      throw new Error(`read-tree failed: ${readResult.stderr}`);
+    }
+    
+    // Step 2: Replace each conflicted file's blob in the index
+    for (const [filePath, blobSha] of replacements) {
+      log?.(`[merge] Replacing ${filePath} with resolved blob ${blobSha.slice(0, 8)}`);
+      const updateResult = await execAsync(
+        ['update-index', '--cacheinfo', `100644,${blobSha},${filePath}`],
+        { cwd: repoPath, env }
+      );
+      if (!updateResult.success) {
+        throw new Error(`update-index failed for ${filePath}: ${updateResult.stderr}`);
+      }
+    }
+    
+    // Step 3: Write the modified index as a new tree object
+    const writeResult = await execAsync(
+      ['write-tree'],
+      { cwd: repoPath, env }
+    );
+    if (!writeResult.success) {
+      throw new Error(`write-tree failed: ${writeResult.stderr}`);
+    }
+    
+    return writeResult.stdout.trim();
+  } finally {
+    try { fs.unlinkSync(tmpIndex); } catch { /* ignore */ }
+  }
 }

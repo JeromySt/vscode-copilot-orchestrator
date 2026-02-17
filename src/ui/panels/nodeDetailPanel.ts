@@ -309,7 +309,7 @@ function getCurrentExecutionPhase(state: NodeExecutionState | undefined): string
   }
   
   // If nothing is currently running, return the first incomplete phase
-  const phaseOrder = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+  const phaseOrder = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri', 'verify-ri'];
   for (const phase of phaseOrder) {
     const status = state.stepStatuses[phase as keyof typeof state.stepStatuses];
     if (!status || status === 'pending') {
@@ -983,8 +983,8 @@ export class NodeDetailPanel {
    *   to status strings (`'pending'`, `'running'`, `'success'`, `'failed'`, `'skipped'`).
    */
   private _getPhaseStatus(state: NodeExecutionState): Record<string, string> {
-    // Always produce all 6 phases: merge-fi, prechecks, work, commit, postchecks, merge-ri.
-    // stepStatuses (from executor) covers prechecks/work/commit/postchecks.
+    // Always produce all phases: merge-fi, prechecks, work, commit, postchecks, merge-ri, verify-ri.
+    // stepStatuses (from executor) covers prechecks/work/commit/postchecks/merge-ri/verify-ri.
     // Merge phases are derived from lastAttempt.phase and error messages.
     
     const result: Record<string, string> = {
@@ -994,6 +994,7 @@ export class NodeDetailPanel {
       commit: 'pending',
       postchecks: 'pending',
       'merge-ri': 'pending',
+      'verify-ri': 'pending',
     };
     
     // Resolve executor stepStatuses: current state or last attempt for retried nodes
@@ -1022,9 +1023,22 @@ export class NodeDetailPanel {
         result.postchecks = 'success';
       }
       result['merge-ri'] = 'success';
+      result['verify-ri'] = 'success';
     } else if (status === 'failed') {
+      // Check for verify-ri failure
+      if (failedPhase === 'verify-ri' || error.includes('Post-merge verification')) {
+        result['merge-fi'] = 'success';
+        if (!ss) {
+          result.prechecks = 'success';
+          result.work = 'success';
+          result.commit = 'success';
+          result.postchecks = 'success';
+        }
+        result['merge-ri'] = 'success';
+        result['verify-ri'] = 'failed';
+      }
       // Check for merge-ri failure (via lastAttempt.phase or error message)
-      if (failedPhase === 'merge-ri' || error.includes('Reverse integration merge')) {
+      else if (failedPhase === 'merge-ri' || error.includes('Reverse integration merge')) {
         // All executor phases succeeded, RI merge failed
         result['merge-fi'] = 'success';
         if (!ss) {
@@ -1090,7 +1104,7 @@ export class NodeDetailPanel {
   private _getInitialPhase(phaseStatus: Record<string, string>, nodeStatus: string): string {
     // If node is running, show the currently running phase
     if (nodeStatus === 'running') {
-      const phases = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+      const phases = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri', 'verify-ri'];
       for (const phase of phases) {
         if (phaseStatus[phase] === 'running') {
           return phase;
@@ -1102,7 +1116,7 @@ export class NodeDetailPanel {
     
     // If node failed, show the failed phase
     if (nodeStatus === 'failed') {
-      const phases = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+      const phases = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri', 'verify-ri'];
       for (const phase of phases) {
         if (phaseStatus[phase] === 'failed') {
           return phase;

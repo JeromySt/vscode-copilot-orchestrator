@@ -42,7 +42,7 @@ description: Updating documentation for this VS Code extension. Use when asked t
 
 - Include Mermaid diagrams for component relationships
 - Document the DI token → interface → implementation mapping
-- Show the 7-phase execution pipeline with data flow
+- Show the 8-phase execution pipeline with data flow
 - Keep diagrams in sync with code (`src/composition.ts` is source of truth)
 
 ## Style

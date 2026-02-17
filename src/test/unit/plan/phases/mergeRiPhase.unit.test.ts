@@ -132,6 +132,9 @@ function mockGitOperations(): IGitOperations {
       abort: sinon.stub().resolves(),
       listConflicts: sinon.stub().resolves([]),
       isInProgress: sinon.stub().resolves(false),
+      catFileFromTree: sinon.stub().resolves('file content'),
+      hashObjectFromFile: sinon.stub().resolves('blob123'),
+      replaceTreeBlobs: sinon.stub().resolves('newtree123'),
     },
     gitignore: {
       ensureGitignoreEntries: sinon.stub().resolves(true),
@@ -284,18 +287,18 @@ suite('MergeRiPhaseExecutor', () => {
     assert.ok((git.repository.push as sinon.SinonStub).calledOnce);
   });
 
-  test('merge conflict with resolution - conflict resolved in ephemeral worktree', async () => {
+  test('merge conflict with resolution - conflict resolved in-memory', async () => {
     const git = mockGitOperations();
     (git.repository.hasChangesBetween as sinon.SinonStub).resolves(true);
     (git.merge.mergeWithoutCheckout as sinon.SinonStub).resolves({
       success: false,
       hasConflicts: true,
+      treeSha: 'conflictedtree123',
       conflictFiles: ['conflict1.txt', 'conflict2.txt']
     });
 
-    // Mock mergeInEphemeralWorktree to succeed
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
-    const mergeInWorktreeStub = sandbox.stub(executor as any, 'mergeInEphemeralWorktree').resolves({
+    const resolveStub = sandbox.stub(executor as any, 'resolveConflictsInMemory').resolves({
       success: true,
       metrics: {
         durationMs: 7500,
@@ -317,12 +320,12 @@ suite('MergeRiPhaseExecutor', () => {
     assert.strictEqual(result.success, true);
     assert.ok((context.logInfo as sinon.SinonStub).calledWith('⚠ Merge has conflicts'));
     assert.ok((context.logInfo as sinon.SinonStub).calledWith('  Conflicts: conflict1.txt, conflict2.txt'));
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/Resolving in ephemeral worktree/)));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/Resolving in-memory/)));
     
-    // Check that mergeInEphemeralWorktree was called
-    assert.ok(mergeInWorktreeStub.calledOnce);
+    assert.ok(resolveStub.calledOnce);
+    // treeSha must be passed through
+    assert.strictEqual(resolveStub.firstCall.args[5], 'conflictedtree123');
     
-    // Check that metrics are returned
     assert.ok(result.metrics);
     assert.strictEqual(result.metrics!.tokenUsage?.totalTokens, 225);
   });
@@ -333,12 +336,12 @@ suite('MergeRiPhaseExecutor', () => {
     (git.merge.mergeWithoutCheckout as sinon.SinonStub).resolves({
       success: false,
       hasConflicts: true,
+      treeSha: 'conflictedtree123',
       conflictFiles: ['failed.txt']
     });
 
-    // Mock mergeInEphemeralWorktree to fail
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
-    sandbox.stub(executor as any, 'mergeInEphemeralWorktree').resolves({
+    sandbox.stub(executor as any, 'resolveConflictsInMemory').resolves({
       success: false,
       error: 'Could not resolve conflicts'
     });
@@ -503,91 +506,108 @@ suite('MergeRiPhaseExecutor', () => {
     assert.ok((context.logError as sinon.SinonStub).calledWith('Push failed: Push failed'));
   });
 
-  test('mergeInEphemeralWorktree creates worktree, merges, resolves, validates, and cleans up', async () => {
+  test('resolveConflictsInMemory extracts files, calls Copilot, hashes back, commits', async () => {
     const git = mockGitOperations();
     (git.repository.resolveRef as sinon.SinonStub).resolves('target789abc');
-    (git.worktrees.createDetachedWithTiming as sinon.SinonStub).resolves({ durationMs: 100, baseCommit: 'target789abc' });
-    (git.merge.merge as sinon.SinonStub).rejects(new Error('Conflicts'));
-    (git.merge.listConflicts as sinon.SinonStub).resolves(['file1.txt']);
-    (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('resolvedcommit123');
-    (git.worktrees.removeSafe as sinon.SinonStub).resolves(true);
-
-    // Mock resolveMergeConflictWithCopilot
-    const mergeHelperModule = await import('../../../../plan/phases/mergeHelper');
-    sandbox.stub(mergeHelperModule, 'resolveMergeConflictWithCopilot').resolves({
-      success: true,
-      metrics: { durationMs: 5000 }
-    });
+    // catFileFromTree returns content with conflict markers
+    (git.merge.catFileFromTree as sinon.SinonStub).resolves('<<<<<<< ours\nfoo\n=======\nbar\n>>>>>>> theirs\n');
+    (git.merge.hashObjectFromFile as sinon.SinonStub).resolves('resolvedblob123');
+    (git.merge.replaceTreeBlobs as sinon.SinonStub).resolves('resolvedtree456');
+    (git.merge.commitTree as sinon.SinonStub).resolves('mergecommit789');
 
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
     sandbox.stub(executor as any, 'validateMergedTree').resolves(undefined);
     sandbox.stub(executor as any, 'updateBranchRef').resolves(true);
 
     const context = createMockContext();
-    const method = (executor as any).mergeInEphemeralWorktree;
-    const result = await method.call(executor, context, '/repo', 'source123', 'main', 'Test merge', ['file1.txt']);
+    const method = (executor as any).resolveConflictsInMemory;
+    const result = await method.call(
+      executor, context, '/repo', 'source123', 'main',
+      'Test merge', 'conflictedtree000', ['file1.txt']
+    );
 
     assert.strictEqual(result.success, true);
-    // Verify worktree was created
-    assert.ok((git.worktrees.createDetachedWithTiming as sinon.SinonStub).calledOnce);
-    // Verify merge was attempted in the worktree
-    assert.ok((git.merge.merge as sinon.SinonStub).calledOnce);
-    // Verify worktree was cleaned up
-    assert.ok((git.worktrees.removeSafe as sinon.SinonStub).calledOnce);
-    // Verify user's main checkout was NEVER touched (no stash, no checkout)
-    assert.ok(!(git.repository.stashPush as sinon.SinonStub).called);
+    // catFileFromTree must be called for each conflict file
+    assert.ok((git.merge.catFileFromTree as sinon.SinonStub).calledOnce);
+    // replaceTreeBlobs must be called with the conflicted tree
+    assert.ok((git.merge.replaceTreeBlobs as sinon.SinonStub).calledOnce);
+    assert.strictEqual((git.merge.replaceTreeBlobs as sinon.SinonStub).firstCall.args[1], 'conflictedtree000');
+    // commitTree gets the resolved tree
+    assert.ok((git.merge.commitTree as sinon.SinonStub).calledOnce);
+    assert.strictEqual((git.merge.commitTree as sinon.SinonStub).firstCall.args[0], 'resolvedtree456');
+    // No worktree created, no checkout, no stash
+    assert.ok(!(git.worktrees.createDetachedWithTiming as sinon.SinonStub).called);
     assert.ok(!(git.branches.checkout as sinon.SinonStub).called);
   });
 
-  test('mergeInEphemeralWorktree cleans up worktree on failure', async () => {
+  test('resolveConflictsInMemory returns failure when Copilot cannot resolve', async () => {
     const git = mockGitOperations();
     (git.repository.resolveRef as sinon.SinonStub).resolves('target789abc');
-    (git.worktrees.createDetachedWithTiming as sinon.SinonStub).resolves({ durationMs: 100, baseCommit: 'target789abc' });
-    (git.merge.merge as sinon.SinonStub).rejects(new Error('Conflicts'));
-    (git.merge.listConflicts as sinon.SinonStub).resolves(['file1.txt']);
-    (git.worktrees.removeSafe as sinon.SinonStub).resolves(true);
+    (git.merge.catFileFromTree as sinon.SinonStub).resolves('content');
 
-    // Mock resolveMergeConflictWithCopilot to fail
-    const mergeHelperModule = await import('../../../../plan/phases/mergeHelper');
-    sandbox.stub(mergeHelperModule, 'resolveMergeConflictWithCopilot').resolves({
-      success: false
-    });
+    // Copilot runner fails
+    const failRunner: ICopilotRunner = {
+      ...mockCopilotRunner,
+      run: async () => ({ success: false, error: 'Copilot failed' })
+    };
 
-    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: failRunner });
     const context = createMockContext();
-    const method = (executor as any).mergeInEphemeralWorktree;
-    const result = await method.call(executor, context, '/repo', 'source123', 'main', 'Test merge', ['file1.txt']);
+    const method = (executor as any).resolveConflictsInMemory;
+    const result = await method.call(
+      executor, context, '/repo', 'source123', 'main',
+      'Test merge', 'conflictedtree000', ['file1.txt']
+    );
 
     assert.strictEqual(result.success, false);
     assert.ok(result.error?.includes('Copilot CLI failed'));
-    // Worktree must be cleaned up even on failure
-    assert.ok((git.worktrees.removeSafe as sinon.SinonStub).calledOnce);
   });
 
-  test('mergeInEphemeralWorktree never touches user stash', async () => {
+  test('syncWorkingTreeIfNeeded resets when branch is checked out and clean', async () => {
     const git = mockGitOperations();
-    (git.repository.resolveRef as sinon.SinonStub).resolves('target789abc');
-    (git.worktrees.createDetachedWithTiming as sinon.SinonStub).resolves({ durationMs: 100, baseCommit: 'target789abc' });
-    (git.merge.merge as sinon.SinonStub).rejects(new Error('Conflicts'));
-    (git.merge.listConflicts as sinon.SinonStub).resolves(['file1.txt']);
-    (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('resolvedcommit123');
-    (git.worktrees.removeSafe as sinon.SinonStub).resolves(true);
-
-    const mergeHelperModule = await import('../../../../plan/phases/mergeHelper');
-    sandbox.stub(mergeHelperModule, 'resolveMergeConflictWithCopilot').resolves({ success: true });
+    (git.branches.currentOrNull as sinon.SinonStub).resolves('main');
+    (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
 
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
-    sandbox.stub(executor as any, 'validateMergedTree').resolves(undefined);
-    sandbox.stub(executor as any, 'updateBranchRef').resolves(true);
-
     const context = createMockContext();
-    const method = (executor as any).mergeInEphemeralWorktree;
-    await method.call(executor, context, '/repo', 'source123', 'main', 'Test merge', ['file1.txt']);
+    const method = (executor as any).syncWorkingTreeIfNeeded;
+    await method.call(executor, context, '/repo', 'main', 'abc123');
 
-    // CRITICAL: stash operations must NEVER be called
-    assert.ok(!(git.repository.stashPush as sinon.SinonStub).called, 'stashPush must not be called');
-    assert.ok(!(git.repository.stashPop as sinon.SinonStub).called, 'stashPop must not be called');
-    assert.ok(!(git.repository.stashDrop as sinon.SinonStub).called, 'stashDrop must not be called');
+    assert.ok((git.repository.resetHard as sinon.SinonStub).calledOnce);
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/Synced working tree/)));
+  });
+
+  test('syncWorkingTreeIfNeeded stashes dirty changes, resets, then pops', async () => {
+    const git = mockGitOperations();
+    (git.branches.currentOrNull as sinon.SinonStub).resolves('main');
+    (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(true);
+    (git.repository.stashPush as sinon.SinonStub).resolves(true);
+    (git.repository.stashPop as sinon.SinonStub).resolves(true);
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).syncWorkingTreeIfNeeded;
+    await method.call(executor, context, '/repo', 'main', 'abc123');
+
+    // Must stash first, then reset, then pop
+    assert.ok((git.repository.stashPush as sinon.SinonStub).calledOnce);
+    assert.ok((git.repository.resetHard as sinon.SinonStub).calledOnce);
+    assert.ok((git.repository.stashPop as sinon.SinonStub).calledOnce);
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('Restored uncommitted changes'));
+  });
+
+  test('syncWorkingTreeIfNeeded skips when different branch is checked out', async () => {
+    const git = mockGitOperations();
+    (git.branches.currentOrNull as sinon.SinonStub).resolves('feature-branch');
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).syncWorkingTreeIfNeeded;
+    await method.call(executor, context, '/repo', 'main', 'abc123');
+
+    // Nothing should happen
+    assert.ok(!(git.repository.resetHard as sinon.SinonStub).called);
+    assert.ok(!(git.repository.stashPush as sinon.SinonStub).called);
   });
 
   test('validateMergedTree passes when file ratio is above threshold', async () => {

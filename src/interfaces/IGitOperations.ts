@@ -75,6 +75,9 @@ export interface IGitMerge {
   abort(cwd: string, log?: GitLogger): Promise<void>;
   listConflicts(cwd: string): Promise<string[]>;
   isInProgress(cwd: string): Promise<boolean>;
+  catFileFromTree(repoPath: string, treeSha: string, filePath: string): Promise<string | null>;
+  hashObjectFromFile(repoPath: string, absFilePath: string): Promise<string>;
+  replaceTreeBlobs(repoPath: string, baseTreeSha: string, replacements: Map<string, string>, log?: GitLogger): Promise<string>;
 }
 
 /**

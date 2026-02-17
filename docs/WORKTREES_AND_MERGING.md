@@ -4,12 +4,13 @@ This document explains how the Copilot Orchestrator uses git worktrees and mergi
 
 ## Overview
 
-The orchestrator runs multiple jobs in parallel, each in its own isolated git worktree. When jobs complete, their work is merged back to the target branch using squash merges. This approach:
+The orchestrator runs multiple jobs in parallel, each in its own isolated git worktree. When jobs complete, their work is merged back to the target branch using fully in-memory `git merge-tree --write-tree` merges. This approach:
 
 - **Isolates job execution** - Each job has its own working directory
-- **Preserves user's workspace** - Main repo is never modified during job execution
+- **Preserves user's workspace** - RI merges never touch any checkout; conflicts are resolved entirely in git objects
 - **Creates clean history** - Squash merges produce single commits per job
-- **Handles conflicts** - Copilot CLI resolves merge conflicts automatically
+- **Handles conflicts** - Copilot CLI resolves merge conflicts via temp dir extraction (no worktree needed)
+- **Validates merges** - Optional `verify-ri` phase runs post-merge verification in a temporary worktree
 
 ## Worktree Types
 
@@ -29,15 +30,15 @@ git worktree add --detach <path> <commit>
 
 **Location:** `<repoPath>/.worktrees/<jobId>/`
 
-### 2. Merge Operations (Main Repo)
+### 2. Merge Operations (In-Memory)
 
-Unlike job worktrees, **merges happen in the main repository** with full state preservation.
-This allows:
-- Conflicts to appear in the user's editor (where Copilot can resolve them)
-- User to see and review merge results
-- Full git conflict resolution tooling
+Unlike job worktrees, **RI merges happen entirely in the git object store** using `git merge-tree --write-tree`. No worktree or checkout is needed for the merge itself:
+- Merge tree is computed as a git tree object
+- Conflicts are resolved by extracting files to a temp directory, running Copilot CLI, then hashing resolved files back
+- Target branch ref is updated via `git branch -f`
+- User's working tree is synced only if they have the target branch checked out
 
-The merge system automatically handles the user's workspace state (stashing, branch switching, etc.)
+After the merge, an optional **verify-ri** phase creates a temporary worktree to validate the merged result.
 
 ## Commit Flow
 
@@ -73,10 +74,10 @@ Target Branch ──→ Job A → SHA1 ──┤
 
 ## Merge Phases
 
-Each node in a plan progresses through well-defined phases. Merging occurs in two distinct phases:
+Each node in a plan progresses through well-defined phases. Merging occurs in two distinct phases, with an optional verification after RI:
 
 ```
-merge-fi → prechecks → work → commit → postchecks → merge-ri
+merge-fi → prechecks → work → commit → postchecks → merge-ri → verify-ri
 ```
 
 | Phase | Description |
@@ -86,7 +87,8 @@ merge-fi → prechecks → work → commit → postchecks → merge-ri
 | **`work`** | Copilot agent executes the task |
 | **`commit`** | Changes are committed in the worktree |
 | **`postchecks`** | Post-execution validation (e.g., tests) |
-| **`merge-ri`** | Reverse Integration — merge leaf node's commit to the target branch |
+| **`merge-ri`** | Reverse Integration — in-memory merge of leaf node's commit to target branch |
+| **`verify-ri`** | Post-merge verification — runs plan-level `verifyRiSpec` in temp worktree at target HEAD |
 
 If any phase fails, the `failedPhase` field is set on the node state, enabling targeted retries that skip already-completed phases.
 
@@ -129,7 +131,7 @@ would break: Code Change B's FI would miss Code Change A's work because the Type
 
 ### Reverse Integration (RI)
 
-When a leaf node completes and the plan has a `targetBranch`, the node's completed commit is merged to the target branch.
+When a leaf node completes and the plan has a `targetBranch`, the node's completed commit is merged to the target branch using a fully in-memory approach.
 
 #### Aggregated Work for RI Merge
 
@@ -141,126 +143,109 @@ When a leaf node merges to targetBranch (RI phase), the work being merged includ
 
 This is captured in `nodeState.aggregatedWorkSummary` and displayed in the Plan work summary view.
 
-**Fast path (`git merge-tree`):**
+#### In-Memory Merge Process
+
+The RI merge operates entirely on git objects — no checkout or worktree is needed:
+
 ```bash
-# Compute merge result as a tree object (no checkout needed)
+# 1. Compute merge result as a tree object
 git merge-tree --write-tree <target-branch> <completed-commit>
+# Returns: tree SHA on stdout (even on conflicts, exit code 1 = conflicts)
 
-# Create squash commit from tree (single parent = target branch)
+# 2. If conflict-free (exit 0): create squash commit
 git commit-tree <tree-sha> -p <target-sha> -m "message"
-
-# Update branch ref
 git branch -f <target> <new-commit>
+
+# 3. If conflicts (exit 1): resolve in-memory (see below)
 ```
 
-**Conflict path:** If `merge-tree` detects conflicts, falls back to main repo merge with Copilot CLI conflict resolution (see below).
+#### In-Memory Conflict Resolution
+
+When `merge-tree` reports conflicts (exit code 1), the first line of stdout is still a valid tree SHA containing conflict markers. Resolution proceeds without any checkout:
+
+```
+1. Extract conflicted files from the merge tree to a temp directory:
+   git cat-file -p <tree-sha>:<path> → .git/ri-conflict-<timestamp>/<path>
+
+2. Run Copilot CLI to resolve conflicts in the temp directory
+
+3. Hash resolved files back into git objects:
+   git hash-object -w <resolved-file> → new blob SHA
+
+4. Rebuild the tree with resolved blobs (using temp GIT_INDEX_FILE):
+   git read-tree <original-tree>           # load base tree
+   git update-index --cacheinfo <blob>,<path>  # replace conflicted blobs
+   git write-tree                           # emit new tree
+
+5. Create commit and update ref as in the fast path
+```
+
+#### Working Tree Sync
+
+After the ref update, if the user has `targetBranch` checked out, their working tree is synced:
+
+| User State | Sync Behavior |
+|------------|---------------|
+| On target branch, clean | `git reset --hard` (instant) |
+| On target branch, dirty | `git stash push` → `git reset --hard` → `git stash pop` |
+| On different branch | No-op (ref was already updated via `git branch -f`) |
+
+Working tree sync is **non-fatal** — if it fails, the merge commit and ref update have already succeeded. The user can manually `git pull` or `git reset --hard` to sync.
+
+#### Post-Merge Tree Validation
+
+After every RI merge, file counts are compared between the result tree and both parent trees. If the result has <80% of the richer parent's file count, the merge is aborted as potentially destructive.
+
+### Verify RI (Post-Merge Verification)
+
+After a successful RI merge, the optional `verify-ri` phase validates the merged state:
+
+1. Creates a temporary worktree at `targetBranch` HEAD
+2. Runs the plan-level `verifyRiSpec` (e.g., `npm run build && npm test`)
+3. If the verification produces fixes, commits them to `targetBranch`
+4. Cleans up the temporary worktree
+
+**Key properties:**
+- **Plan-level, not per-node** — One `verifyRiSpec: WorkSpec` on `PlanSpec` applies to all leaf merges
+- **Optional but highly recommended** — MCP schema marks it optional; examples always include it
+- **Auto-healable** — On failure, Copilot CLI attempts to fix the issue in the temp worktree and re-runs verification
+- **Isolated** — Runs in a temporary worktree, never in the user's main checkout
+- **Only for leaf nodes** — Non-leaf nodes don't do RI merges, so verify-ri is skipped
 
 ## Merge Strategies
 
-### 1. Fast Path: `git merge-tree` (Git 2.38+)
+### In-Memory Merge via `git merge-tree` (Git 2.38+)
 
-For conflict-free merges, we use git's plumbing commands to merge **entirely in the object store** without any worktree:
+All RI merges use git's plumbing commands to merge **entirely in the object store**. Both conflict-free and conflict paths operate on git objects — no checkout or worktree is involved in the merge itself.
 
 ```bash
 # Compute merge result as a tree object
 git merge-tree --write-tree <target> <source>
-# Returns: <tree-sha>
+# Exit 0 = clean merge, exit 1 = conflicts (tree still valid, contains markers)
+# First line of stdout = tree SHA
 
 # Create commit from tree (squash - single parent)
 git commit-tree <tree-sha> -p <target-sha> -m "message"
 # Returns: <new-commit-sha>
 
-# Update branch/working directory (see below)
+# Update branch ref
+git branch -f <target> <new-commit>
 ```
 
-**Updating the Target Branch:**
+**Updating the User's Working Tree (if applicable):**
 
-The approach depends on whether the user has the target branch checked out:
-
-| User State | Fast Path Behavior |
-|------------|-------------------|
+| User State | Sync Behavior |
+|------------|---------------|
 | On target branch, clean | `git reset --hard <new-commit>` |
-| On target branch, dirty | Stash → reset → unstash |
-| On different branch | `git branch -f <target> <new-commit>` |
+| On target branch, dirty | Stash → reset --hard → stash pop |
+| On different branch | No-op (ref already updated) |
 
 **Benefits:**
-- No worktree creation overhead  
-- No disk I/O for working directory files (except when target is checked out)
-- Fastest possible merge path
-- **Safe** - always preserves user's uncommitted work via stash
-
-### 2. Main Repo Merge (Conflicts or Fast Path Failure)
-
-When conflicts occur or `git merge-tree` can't be used, the merge happens in the **main repository** 
-with full state preservation:
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  SAFETY GUARANTEE: User's work is NEVER lost                 │
-│  - Uncommitted changes are stashed before any operation      │
-│  - Original branch is restored after merge                   │
-│  - Stash is popped even if merge fails                       │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**State Preservation Flow:**
-
-```
-User State Before Merge          →    During Merge         →    After Merge
-────────────────────────────────────────────────────────────────────────────
-On target branch, clean          →    Merge directly       →    Stay on target
-On target branch, dirty          →    Stash → Merge        →    Stash pop
-On different branch, clean       →    Checkout → Merge     →    Checkout back
-On different branch, dirty       →    Stash → Checkout     →    Checkout → Pop
-                                      → Merge
-```
-
-**Full Process:**
-
-```bash
-# 1. Capture user's current state
-ORIGINAL_BRANCH=$(git branch --show-current)
-IS_DIRTY=$(git status --porcelain | head -1)
-
-# 2. Stash uncommitted changes (if any)
-if [ -n "$IS_DIRTY" ]; then
-  git stash push -m "orchestrator-autostash-<timestamp>"
-fi
-
-# 3. Checkout target branch (if needed)
-if [ "$ORIGINAL_BRANCH" != "<target>" ]; then
-  git checkout <target>
-fi
-
-# 4. Perform squash merge
-git merge --squash <source-commit>
-
-# 5. If conflicts, Copilot CLI resolves them
-if [ $? -ne 0 ]; then
-  copilot -p "Resolve the merge conflict..." --allow-all-paths --allow-all-tools
-fi
-
-# 6. Commit the merge
-git commit -m "message"
-
-# 7. Restore user to original branch
-if [ "$ORIGINAL_BRANCH" != "<target>" ]; then
-  git checkout "$ORIGINAL_BRANCH"
-fi
-
-# 8. Restore user's uncommitted changes
-if [ -n "$DID_STASH" ]; then
-  git stash pop
-fi
-```
-
-**Error Recovery:**
-
-If the merge fails at any point, the system:
-1. Aborts any in-progress merge (`git merge --abort`)
-2. Restores the user to their original branch (if changed)
-3. Pops the stash (if stashed)
-4. Reports the error without losing any user work
+- No worktree creation overhead for the merge itself
+- No disk I/O for working directory files (except optional sync)
+- Never loses user's uncommitted work
+- Conflict resolution isolated to temp directory
+- **Safe** — the user's checkout is only touched after the merge commit succeeds
 
 ## Squash vs Regular Merge
 
@@ -335,7 +320,7 @@ try {
 }
 ```
 
-> **Note:** This mutex serializes only git worktree operations, not merge operations. Merges use `git merge-tree` (which operates on the object store) or `git merge --squash` (which operates in the main repo), neither of which conflicts with worktree add/remove.
+> **Note:** This mutex serializes only git worktree operations, not merge operations. RI merges use `git merge-tree` (which operates entirely on the object store) and never need worktree operations. Verify-RI creates a temporary worktree but acquires the mutex internally.
 
 ### Race Condition Prevention Strategy
 
@@ -373,14 +358,25 @@ Fetch failures are logged as warnings but **never block** the resume or retry op
 
 ## Conflict Resolution
 
-When merge conflicts occur, Copilot CLI is invoked:
+When `git merge-tree` reports conflicts (exit code 1), the orchestrator resolves them without any checkout:
+
+1. **Extract** conflicted files from the merge tree to `.git/ri-conflict-<timestamp>/`
+2. **Resolve** — Copilot CLI runs in the temp directory with the task: "Resolve merge conflicts, preferring theirs"
+3. **Hash** resolved files back into git blob objects via `git hash-object -w`
+4. **Rebuild** the tree: load the base tree into a temp index, replace conflicted blobs, write new tree
+5. **Commit** the resolved tree and update the target branch ref
 
 ```bash
-copilot -p "@agent Resolve the current git merge conflict. \
-  We are squash merging '<source>' into '<target>'. \
-  Prefer 'theirs' changes when there are conflicts. \
-  Resolve all conflicts, stage with 'git add', and commit." \
-  --allow-all-paths --allow-all-tools
+# Extract conflicted file from merge tree
+git cat-file -p <tree-sha>:<conflicted-path> > /tmp/ri-conflict/<path>
+
+# After Copilot CLI resolves...
+git hash-object -w /tmp/ri-conflict/<path>  # → new blob SHA
+
+# Rebuild tree with temp index
+GIT_INDEX_FILE=/tmp/ri-index git read-tree <original-tree>
+GIT_INDEX_FILE=/tmp/ri-index git update-index --cacheinfo 100644,<blob-sha>,<path>
+GIT_INDEX_FILE=/tmp/ri-index git write-tree  # → resolved tree SHA
 ```
 
 The `prefer` setting (`ours` or `theirs`) is configurable in VS Code settings:
@@ -496,7 +492,8 @@ This error should not occur with the detached HEAD approach. If it does:
 
 1. **Submodules**: Worktrees use symlinks to main repo's submodules (fast)
 2. **Large repos**: Worktree creation shares objects with main repo (no clone)
-3. **Conflict-free merges**: RI uses `git merge-tree` fast path (no disk I/O for working dir)
+3. **Conflict-free merges**: RI uses `git merge-tree` fast path (no disk I/O at all)
+4. **Conflict merges**: Resolved in-memory — only conflicted files touch disk (temp dir), not the full working tree
 4. **Parallel jobs**: Each job has isolated worktree; only worktree add/remove is serialized per-repo
 5. **Mutex overhead**: The per-repo mutex adds minimal latency — only `git worktree add/remove` commands are serialized, not the actual job work
 6. **Eager cleanup**: Non-leaf worktrees are removed as soon as all dependents consume them, reducing peak disk usage

@@ -69,7 +69,7 @@ eventBus.on('plan:refresh', () => updateView());
 
 Node lifecycle follows strict phase ordering:
 ```
-merge-fi → prechecks → work → commit → postchecks → merge-ri → cleanup
+merge-fi → prechecks → work → commit → postchecks → merge-ri → verify-ri → cleanup
 ```
 
 Each phase is a separate file in `src/plan/phases/`. When adding a new phase:

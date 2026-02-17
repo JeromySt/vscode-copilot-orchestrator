@@ -26,6 +26,7 @@ import {
   PrecheckPhaseExecutor, WorkPhaseExecutor,
   PostcheckPhaseExecutor, CommitPhaseExecutor,
   MergeFiPhaseExecutor, MergeRiPhaseExecutor,
+  VerifyRiPhaseExecutor,
 } from './phases';
 import type { CommitPhaseContext } from './phases';
 import {
@@ -99,7 +100,7 @@ export class DefaultJobExecutor implements JobExecutor {
     let capturedMetrics: CopilotUsageMetrics | undefined;
     const phaseMetrics: Record<string, CopilotUsageMetrics> = {};
 
-    const phaseOrder = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
+    const phaseOrder = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri', 'verify-ri'] as const;
     const resumeIndex = context.resumeFromPhase ? phaseOrder.indexOf(context.resumeFromPhase as any) : 0;
     const skip = (p: typeof phaseOrder[number]) => phaseOrder.indexOf(p) < resumeIndex;
     const phaseDeps = () => ({ 
@@ -248,6 +249,23 @@ export class DefaultJobExecutor implements JobExecutor {
         if (!r.success) { stepStatuses['merge-ri'] = 'failed'; context.onStepStatusChange?.('merge-ri', 'failed'); return { success: false, error: `Reverse integration merge failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'merge-ri', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
         stepStatuses['merge-ri'] = 'success'; context.onStepStatusChange?.('merge-ri', 'success');
       } else { stepStatuses['merge-ri'] = 'skipped'; context.onStepStatusChange?.('merge-ri', 'skipped'); }
+
+      // ---- VERIFY-RI ----
+      if (skip('verify-ri')) { this.logEntry(executionKey, 'verify-ri', 'info', '========== VERIFY-RI SECTION (SKIPPED - RESUMING) =========='); }
+      else if (context.targetBranch && context.repoPath && plan.spec.verifyRiSpec && stepStatuses['merge-ri'] === 'success') {
+        context.onProgress?.('Post-merge verification'); context.onStepStatusChange?.('verify-ri', 'running');
+        this.logEntry(executionKey, 'verify-ri', 'info', '========== VERIFY-RI SECTION START ==========');
+        const ctx = makeCtx('verify-ri');
+        ctx.workSpec = plan.spec.verifyRiSpec;
+        ctx.repoPath = context.repoPath;
+        ctx.targetBranch = context.targetBranch;
+        const r = await new VerifyRiPhaseExecutor(phaseDeps()).execute(ctx);
+        if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
+        if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['verify-ri'] = r.metrics; }
+        this.logEntry(executionKey, 'verify-ri', 'info', '========== VERIFY-RI SECTION END ==========');
+        if (!r.success) { stepStatuses['verify-ri'] = 'failed'; context.onStepStatusChange?.('verify-ri', 'failed'); return { success: false, error: `Post-merge verification failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'verify-ri', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
+        stepStatuses['verify-ri'] = 'success'; context.onStepStatusChange?.('verify-ri', 'success');
+      } else { stepStatuses['verify-ri'] = 'skipped'; context.onStepStatusChange?.('verify-ri', 'skipped'); }
 
       const ws = await computeWorkSummary(node, worktreePath, context.baseCommit, this.git);
       return { success: true, completedCommit: cr.commit, workSummary: ws, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid };

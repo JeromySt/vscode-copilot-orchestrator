@@ -9,10 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Live plan reshaping**: Add, remove, or reorder nodes in a running plan with dependency validation and DAG integrity checks.
+- **Post-merge verification phase (`verify-ri`)**: New optional (but highly recommended) plan-level `verifyRiSpec` that runs after every successful RI merge. Validates the merged target branch in a temporary worktree (e.g. compile, test). Auto-healable — on failure, Copilot CLI attempts to fix the issue. Catches merge conflict resolution mistakes before the next leaf merges.
+- **8-phase execution pipeline**: Added `verify-ri` as the 8th phase after `merge-ri`. Phase order: merge-fi → setup → prechecks → work → commit → postchecks → merge-ri → verify-ri.
+- **Fully in-memory RI merge conflict resolution**: Conflicts are now resolved by extracting files from the merge tree to a temp directory, running Copilot CLI there, then hashing resolved files back into git objects and rebuilding the tree — no worktree or checkout needed.
+- **Working tree sync after RI merge**: After updating the target branch ref, the orchestrator syncs the user's working tree if they have that branch checked out. Dirty changes are preserved via stash/pop.
 - **Post-merge tree validation**: After every RI merge, file counts are compared between the result and both parents. If the result has <80% of the richer parent's files, the merge is aborted as destructive.
+- **New git helpers**: `catFileFromTree`, `hashObjectFromFile`, `replaceTreeBlobs` for in-memory tree manipulation. `execAsync` now supports `env` option for `GIT_INDEX_FILE`.
 
 ### Fixed
-- **CRITICAL: RI merge no longer touches user's working directory**: Conflict resolution now runs in an ephemeral detached worktree instead of stashing/checking out on the user's main repo. Eliminates the stash/pop pattern that caused catastrophic file deletion (190 files lost in production).
+- **CRITICAL: RI merge now fully in-memory via `git merge-tree --write-tree`**: Both conflict-free and conflict paths operate entirely on git objects — no checkout, no worktree, no stash. Eliminates the stash/pop pattern that caused catastrophic file deletion (190 files lost in production).
 - **Auto-derive configDir from cwd**: Removed explicit `configDir` plumbing from `DelegateOptions`, `CopilotRunOptions`, `BuildCommandOptions`, and `ICopilotRunner`. Config dir is now auto-derived as `path.join(cwd, '.orchestrator', '.copilot-cli')` inside `buildCommand()`.
 - **Plan detail panel overflow**: Fixed layout overflow in plan detail panel.
 - **Node detail auto-heal attempts**: Fixed auto-heal attempt history display in the Attempts section.
@@ -28,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 - `mergeWithConflictResolution` method (stash/checkout/merge/pop pattern)
+- `mergeInEphemeralWorktree` method (replaced by fully in-memory approach)
 - `isStashOrchestratorOnly` helper
 - All `stashPush`/`stashPop`/`stashDrop` usage in RI merge path
 - `configDir` parameter from all interfaces and phase executors

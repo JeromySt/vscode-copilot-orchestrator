@@ -245,6 +245,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
     cleanUpSuccessfulWork: args.cleanUpSuccessfulWork,
     additionalSymlinkDirs: args.additionalSymlinkDirs,
     startPaused: args.startPaused,
+    verifyRiSpec: args.verify_ri,
     jobs: [...rootJobs, ...groupJobs],
     // Note: groups are flattened into jobs, not stored separately
   };
