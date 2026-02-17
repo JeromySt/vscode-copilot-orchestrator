@@ -180,7 +180,11 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
             description: 'Create the plan in paused state for review before execution (default: true). Set to false to start immediately.'
           },
           verify_ri: {
-            description: 'Optional (but HIGHLY recommended) verification command to run after each successful RI merge. Runs in a temporary worktree at the target branch HEAD to validate the merged state (e.g. compile, test). Auto-healable: on failure, Copilot CLI attempts to fix the issue. String command or object with type: process/shell/agent. Example: "dotnet build --no-restore" or "npm run build"'
+            description: 'Optional (but HIGHLY recommended) verification command to run after each successful RI merge. Runs in a temporary worktree at the target branch HEAD to validate the merged state (e.g. compile, test). Auto-healable: on failure, Copilot CLI attempts to fix the issue. String command or object with type: process/shell/agent. Example: "dotnet build --no-restore" or "npm run build"',
+            oneOf: [
+              { type: 'string', maxLength: 4000 },
+              { type: 'object' }
+            ]
           },
           jobs: {
             type: 'array',

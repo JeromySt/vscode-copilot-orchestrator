@@ -16,6 +16,7 @@
  * @module git/core/merge
  */
 
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execAsync, execAsyncOrNull, execAsyncOrThrow, GitLogger } from './executor';
@@ -430,7 +431,7 @@ export async function replaceTreeBlobs(
   replacements: Map<string, string>,
   log?: GitLogger
 ): Promise<string> {
-  const tmpIndex = path.join(repoPath, '.git', `tmp-index-${Date.now()}`);
+  const tmpIndex = path.join(repoPath, '.git', `tmp-index-${crypto.randomUUID()}`);
   const env = { GIT_INDEX_FILE: tmpIndex };
   
   try {
@@ -443,11 +444,25 @@ export async function replaceTreeBlobs(
       throw new Error(`read-tree failed: ${readResult.stderr}`);
     }
     
-    // Step 2: Replace each conflicted file's blob in the index
+    // Step 2: Replace each conflicted file's blob in the index,
+    // preserving the original file mode (e.g. 100755 for executables).
     for (const [filePath, blobSha] of replacements) {
-      log?.(`[merge] Replacing ${filePath} with resolved blob ${blobSha.slice(0, 8)}`);
+      // Read the original mode from the base tree
+      let mode = '100644';
+      const lsResult = await execAsync(
+        ['ls-tree', baseTreeSha, '--', filePath],
+        { cwd: repoPath }
+      );
+      if (lsResult.success && lsResult.stdout.trim()) {
+        const firstSpace = lsResult.stdout.indexOf(' ');
+        if (firstSpace > 0) {
+          mode = lsResult.stdout.slice(0, firstSpace);
+        }
+      }
+
+      log?.(`[merge] Replacing ${filePath} with resolved blob ${blobSha.slice(0, 8)} (mode ${mode})`);
       const updateResult = await execAsync(
-        ['update-index', '--cacheinfo', `100644,${blobSha},${filePath}`],
+        ['update-index', '--cacheinfo', `${mode},${blobSha},${filePath}`],
         { cwd: repoPath, env }
       );
       if (!updateResult.success) {

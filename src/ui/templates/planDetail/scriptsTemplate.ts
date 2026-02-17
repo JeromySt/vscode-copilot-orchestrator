@@ -901,7 +901,8 @@ export function renderPlanScripts(data: PlanScriptsData): string {
                 updatedText = updatedText.substring(0, pipeIdx);
               }
             }
-            var maxLen = parseInt(nodeEl.getAttribute('data-max-text-len') || '') || nodeTextLengths[sanitizedId];
+            var nodeGroupId = nodeGroup.getAttribute('id') || '';
+            var maxLen = parseInt(nodeEl.getAttribute('data-max-text-len') || '') || nodeTextLengths[nodeGroupId];
             textSpan.textContent = maxLen ? clampText(updatedText, maxLen) : updatedText;
           }
         }

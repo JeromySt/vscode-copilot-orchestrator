@@ -22,6 +22,7 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces/IPhaseExecutor';
 import type { CopilotUsageMetrics } from '../types';
@@ -147,6 +148,12 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
       if (mergeTreeResult.hasConflicts) {
         context.logInfo('⚠ Merge has conflicts');
         context.logInfo(`  Conflicts: ${mergeTreeResult.conflictFiles?.join(', ')}`);
+
+        if (!mergeTreeResult.treeSha) {
+          context.logError('Merge has conflicts but no tree SHA was produced — cannot resolve');
+          return { success: false, error: 'Merge-tree produced conflicts but no tree SHA' };
+        }
+
         context.logInfo('  Resolving in-memory (user checkout untouched)...');
         
         const resolved = await this.resolveConflictsInMemory(
@@ -155,7 +162,7 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
           mergeSource,
           targetBranch,
           `Plan ${node.name}: merge ${node.name} (commit ${mergeSource.slice(0, 8)})`,
-          mergeTreeResult.treeSha!,
+          mergeTreeResult.treeSha,
           mergeTreeResult.conflictFiles || []
         );
         
@@ -256,11 +263,10 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
     conflictFiles: string[]
   ): Promise<{ success: boolean; error?: string; metrics?: CopilotUsageMetrics }> {
     const targetSha = await this.git.repository.resolveRef(targetBranch, repoPath);
-    const tmpDir = path.join(repoPath, '.git', `ri-conflict-${Date.now()}`);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ri-conflict-'));
     
     try {
       // Step 1: Extract conflicted files from the tree to a temp directory
-      fs.mkdirSync(tmpDir, { recursive: true });
       context.logInfo(`Extracting ${conflictFiles.length} conflicted file(s) to temp dir...`);
       
       for (const filePath of conflictFiles) {

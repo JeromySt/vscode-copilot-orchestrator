@@ -258,7 +258,11 @@ export function webviewScripts(config: ScriptsConfig): string {
         if (endedAt) {
           el.textContent = formatDuration(endedAt - startedAt);
         } else if (status in TERMINAL_STATUSES) {
-          // Terminal but no endedAt yet — freeze at current value
+          // Terminal but no endedAt yet — show current duration once, then freeze
+          if (!el.hasAttribute('data-frozen')) {
+            el.textContent = formatDuration(Date.now() - startedAt);
+            el.setAttribute('data-frozen', '1');
+          }
           return;
         } else {
           el.textContent = formatDuration(Date.now() - startedAt);

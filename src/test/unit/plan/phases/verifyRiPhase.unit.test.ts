@@ -347,7 +347,6 @@ suite('VerifyRiPhaseExecutor', () => {
     const git = mockGitOperations();
     (git.repository.resolveRef as sinon.SinonStub).resolves('target789abc');
 
-    const { EventEmitter } = require('events');
     const executor = new VerifyRiPhaseExecutor({ spawner: mockSpawner as any, git });
     const agentSpec = { type: 'agent', instructions: 'Fix issues' };
     const context = createMockContext({ workSpec: agentSpec as any });
