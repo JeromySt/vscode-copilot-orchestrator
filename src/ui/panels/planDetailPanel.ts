@@ -1574,10 +1574,10 @@ export class planDetailPanel {
       const icon = this._getStatusIcon(status);
       
       // Calculate duration for completed or running nodes.
-      // ALL nodes get rendered with ' | 00m 00s' sizing template so Mermaid
+      // ALL nodes get rendered with ' | 00h 00s ' sizing template so Mermaid
       // allocates consistent rect widths. Client-side strips the suffix from
       // non-started nodes after render.
-      const DURATION_TEMPLATE = ' | 00m 00s'; // fixed-width sizing template
+      const DURATION_TEMPLATE = ' | 00h 00s '; // fixed-width sizing template (hours format with trailing space)
       let durationLabel = DURATION_TEMPLATE;
       if (state?.startedAt) {
         const endTime = state.endedAt || Date.now();
@@ -1725,7 +1725,8 @@ export class planDetailPanel {
         
         // Calculate duration for groups
         // Always include a duration placeholder to maintain consistent sizing
-        let groupDurationLabel = ' | --';
+        const GROUP_DURATION_TEMPLATE = ' | 00h 00s ';
+        let groupDurationLabel = GROUP_DURATION_TEMPLATE;
         if (groupState?.startedAt) {
           const endTime = groupState.endedAt || Date.now();
           const duration = endTime - groupState.startedAt;
@@ -1750,7 +1751,7 @@ export class planDetailPanel {
         const escapedName = this._escapeForMermaid(displayName);
         const maxWidth = groupMaxWidths.get(groupPath) || 0;
         const truncatedGroupName = maxWidth > 0
-          ? this._truncateLabel(escapedName, groupDurationLabel, maxWidth)
+          ? this._truncateLabel(escapedName, GROUP_DURATION_TEMPLATE, maxWidth)
           : escapedName;
         // Show full path in tooltip for nested groups or when truncated
         if (truncatedGroupName !== escapedName || groupPath.includes('/')) {
