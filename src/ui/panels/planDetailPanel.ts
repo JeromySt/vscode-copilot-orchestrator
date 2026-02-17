@@ -525,6 +525,9 @@ export class planDetailPanel {
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
     
+    // Get global capacity stats (same source as sidebar for consistency)
+    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
+    
     // Build node statuses
     const nodeStatuses: Record<string, any> = {};
     for (const [nodeId, state] of plan.nodeStates) {
@@ -553,6 +556,11 @@ export class planDetailPanel {
       counts, progress, total, completed,
       startedAt: plan.startedAt,
       endedAt: effectiveEndedAt,
+      globalCapacity: globalCapacityStats ? {
+        activeInstances: globalCapacityStats.activeInstances,
+        totalGlobalJobs: globalCapacityStats.totalGlobalJobs,
+        globalMaxParallel: globalCapacityStats.globalMaxParallel
+      } : null
     });
   }
 
@@ -1246,13 +1254,7 @@ export class planDetailPanel {
     }
     
     .plan-toolbar {
-      position: sticky;
-      top: 0;
-      z-index: 20;
-      background: var(--vscode-editor-background);
-      padding: 8px 0 8px 0;
-      margin-bottom: 12px;
-      border-bottom: 1px solid var(--vscode-widget-border);
+      padding: 4px 0 0 0;
     }
     .actions {
       display: flex;
@@ -1325,8 +1327,8 @@ export class planDetailPanel {
     showBranchFlow: !!showBranchFlow,
     globalCapacityStats,
   })}
-  </div>
   ${renderPlanControls({ status })}
+  </div>
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}
   ${renderPlanDag({ mermaidDef, status })}
