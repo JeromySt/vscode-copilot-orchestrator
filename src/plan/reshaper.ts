@@ -38,6 +38,80 @@ export function recomputeRootsAndLeaves(plan: PlanInstance): void {
   }
   plan.roots = roots;
   plan.leaves = leaves;
+
+  // Keep the SV node's dependencies in sync with the current leaf set.
+  syncSnapshotValidationDeps(plan);
+}
+
+/**
+ * Sync the auto-injected snapshot-validation node's dependencies to match
+ * the current set of leaf nodes (excluding itself).  Called automatically
+ * by `recomputeRootsAndLeaves` after every topology mutation so the SV
+ * node always waits for all real work nodes to finish.
+ */
+function syncSnapshotValidationDeps(plan: PlanInstance): void {
+  const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
+  if (!svNodeId) { return; } // no SV node in this plan
+
+  const svNode = plan.nodes.get(svNodeId);
+  if (!svNode) { return; }
+
+  // Desired deps = every node with no dependents, except the SV node itself.
+  const desiredDeps = new Set<string>();
+  for (const node of plan.nodes.values()) {
+    if (node.id !== svNodeId && node.dependents.length === 0) {
+      desiredDeps.add(node.id);
+    }
+  }
+
+  // But wait — nodes whose only dependent is the SV node are the real leaves.
+  // After this function wires them, they'll have svNodeId in dependents.
+  // So we need: every node whose dependents are empty OR contain only svNodeId.
+  desiredDeps.clear();
+  for (const node of plan.nodes.values()) {
+    if (node.id === svNodeId) { continue; }
+    const nonSvDependents = node.dependents.filter(d => d !== svNodeId);
+    if (nonSvDependents.length === 0) {
+      desiredDeps.add(node.id);
+    }
+  }
+
+  const currentDeps = new Set(svNode.dependencies);
+  if (setsEqual(currentDeps, desiredDeps)) { return; } // no change needed
+
+  // Remove SV from old deps' dependents
+  for (const oldDep of svNode.dependencies) {
+    if (!desiredDeps.has(oldDep)) {
+      const depNode = plan.nodes.get(oldDep);
+      if (depNode) {
+        depNode.dependents = depNode.dependents.filter(d => d !== svNodeId);
+      }
+    }
+  }
+
+  // Add SV to new deps' dependents
+  for (const newDep of desiredDeps) {
+    if (!currentDeps.has(newDep)) {
+      const depNode = plan.nodes.get(newDep);
+      if (depNode && !depNode.dependents.includes(svNodeId)) {
+        depNode.dependents.push(svNodeId);
+      }
+    }
+  }
+
+  svNode.dependencies = [...desiredDeps];
+
+  // Recompute SV node's execution state
+  recomputeNodeStatus(plan, svNodeId);
+
+  // Update plan.leaves — SV should be the sole leaf
+  plan.leaves = [svNodeId];
+}
+
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) { return false; }
+  for (const v of a) { if (!b.has(v)) { return false; } }
+  return true;
 }
 
 /**

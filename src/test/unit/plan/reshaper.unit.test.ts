@@ -956,4 +956,89 @@ suite('reshaper', () => {
       assert.strictEqual(result.success, true);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Snapshot-validation dependency sync
+  // ─────────────────────────────────────────────────────────────────────────
+
+  suite('SV node dependency sync', () => {
+    function makeSvNode(deps: string[]): PlanNode {
+      return makeNode('sv-id', {
+        producerId: '__snapshot-validation__',
+        name: 'Snapshot Validation',
+        dependencies: deps,
+        dependents: [],
+      });
+    }
+
+    test('addNode wires new leaf into SV dependencies', () => {
+      // A, B are leaves → SV depends on [A, B]
+      const a = makeNode('a-id', { producerId: 'a', dependents: ['sv-id'] });
+      const b = makeNode('b-id', { producerId: 'b', dependents: ['sv-id'] });
+      const sv = makeSvNode(['a-id', 'b-id']);
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('succeeded', { completedCommit: 'c1' }));
+      states.set('b-id', makeState('succeeded', { completedCommit: 'c2' }));
+      states.set('sv-id', makeState('pending'));
+      const plan = makePlan([a, b, sv], states);
+
+      // Add a new independent leaf node C
+      const result = addNode(plan, makeSpec('c'));
+      assert.strictEqual(result.success, true);
+
+      // SV should now depend on A, B, and C
+      assert.ok(sv.dependencies.includes(result.nodeId!), 'SV should depend on new node');
+      assert.ok(sv.dependencies.includes('a-id'));
+      assert.ok(sv.dependencies.includes('b-id'));
+      assert.strictEqual(sv.dependencies.length, 3);
+    });
+
+    test('addNodeAfter updates SV when new node becomes leaf', () => {
+      // A is the sole leaf → SV depends on [A]
+      const a = makeNode('a-id', { producerId: 'a', dependents: ['sv-id'] });
+      const sv = makeSvNode(['a-id']);
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('succeeded', { completedCommit: 'c1' }));
+      states.set('sv-id', makeState('pending'));
+      const plan = makePlan([a, sv], states);
+
+      // Add node after A — new node becomes the leaf, A no longer is
+      const result = addNodeAfter(plan, 'a-id', makeSpec('after-a'));
+      assert.strictEqual(result.success, true);
+
+      // SV should now depend on the new node, not A
+      assert.ok(sv.dependencies.includes(result.nodeId!), 'SV should depend on new leaf');
+      assert.ok(!sv.dependencies.includes('a-id'), 'SV should not depend on old non-leaf');
+    });
+
+    test('removeNode updates SV when predecessor becomes leaf', () => {
+      // A → B → SV. A and B are in chain; SV depends on B.
+      const a = makeNode('a-id', { producerId: 'a', dependents: ['b-id'] });
+      const b = makeNode('b-id', { producerId: 'b', dependencies: ['a-id'], dependents: ['sv-id'] });
+      const sv = makeSvNode(['b-id']);
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('succeeded', { completedCommit: 'c1' }));
+      states.set('b-id', makeState('pending'));
+      states.set('sv-id', makeState('pending'));
+      const plan = makePlan([a, b, sv], states);
+
+      // Remove B — A should become the leaf, SV should depend on A
+      const result = removeNode(plan, 'b-id');
+      assert.strictEqual(result.success, true);
+
+      assert.ok(sv.dependencies.includes('a-id'), 'SV should now depend on A');
+      assert.ok(!sv.dependencies.includes('b-id'), 'SV should not depend on removed B');
+    });
+
+    test('no SV node — reshaping works without error', () => {
+      // Plan without SV node — sync should be a no-op
+      const a = makeNode('a-id', { producerId: 'a' });
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('pending'));
+      const plan = makePlan([a], states);
+
+      const result = addNode(plan, makeSpec('b'));
+      assert.strictEqual(result.success, true);
+    });
+  });
 });
