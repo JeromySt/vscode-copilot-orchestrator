@@ -549,6 +549,17 @@ suite('MCP Validator', () => {
       assert.ok(result.includes('pre-agent'));
       assert.ok(result.includes('post-agent'));
     });
+
+    test('extracts agents from nodes array', () => {
+      const { extractAgentNames } = require('../../../mcp/validation/validator');
+      const result = extractAgentNames({
+        nodes: [
+          { work: { type: 'agent', instructions: '# N', agent: 'node-agent' } },
+          { work: { type: 'shell', command: 'echo hi' } },
+        ],
+      });
+      assert.deepStrictEqual(result, ['node-agent']);
+    });
   });
 
   suite('validateAgentPlugins', () => {
@@ -619,6 +630,74 @@ suite('MCP Validator', () => {
       );
       assert.strictEqual(result.valid, false);
       assert.ok(result.error?.includes('autoInstallPlugins'));
+    });
+
+    test('auto-installs missing plugin when autoInstall enabled and install succeeds', async () => {
+      const { validateAgentPlugins } = require('../../../mcp/validation/validator');
+      let callCount = 0;
+      const spawner: any = {
+        spawn: sinon.stub().callsFake(() => {
+          callCount++;
+          if (callCount === 1) {
+            // First call: plugin list (no plugins)
+            return {
+              stdout: { on: (evt: string, cb: any) => { if (evt === 'data') { cb('No plugins installed.\n'); } } },
+              stderr: { on: () => {} },
+              on: (evt: string, cb: any) => { if (evt === 'close') { cb(0); } },
+              kill: sinon.stub(),
+            };
+          }
+          // Second call: install (success)
+          return {
+            stdout: { on: (evt: string, cb: any) => { if (evt === 'data') { cb('Installed!\n'); } } },
+            stderr: { on: () => {} },
+            on: (evt: string, cb: any) => { if (evt === 'close') { cb(0); } },
+            kill: sinon.stub(),
+          };
+        }),
+      };
+      const env: any = { env: {}, platform: 'linux' };
+      const config: any = { getConfig: sinon.stub().returns(true) };
+      const result = await validateAgentPlugins(
+        { work: { type: 'agent', instructions: '# T', agent: 'new-plugin' } },
+        spawner, env, config
+      );
+      assert.strictEqual(result.valid, true);
+    });
+
+    test('returns error when autoInstall enabled but install fails', async () => {
+      const { validateAgentPlugins } = require('../../../mcp/validation/validator');
+      let callCount = 0;
+      const spawner: any = {
+        spawn: sinon.stub().callsFake(() => {
+          callCount++;
+          if (callCount === 1) {
+            // First call: plugin list (no plugins)
+            return {
+              stdout: { on: (evt: string, cb: any) => { if (evt === 'data') { cb('No plugins installed.\n'); } } },
+              stderr: { on: () => {} },
+              on: (evt: string, cb: any) => { if (evt === 'close') { cb(0); } },
+              kill: sinon.stub(),
+            };
+          }
+          // Second call: install (failure)
+          return {
+            stdout: { on: () => {} },
+            stderr: { on: (evt: string, cb: any) => { if (evt === 'data') { cb('Plugin not found\n'); } } },
+            on: (evt: string, cb: any) => { if (evt === 'close') { cb(1); } },
+            kill: sinon.stub(),
+          };
+        }),
+      };
+      const env: any = { env: {}, platform: 'linux' };
+      const config: any = { getConfig: sinon.stub().returns(true) };
+      const result = await validateAgentPlugins(
+        { work: { type: 'agent', instructions: '# T', agent: 'bad-plugin' } },
+        spawner, env, config
+      );
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes('auto-install failed'));
+      assert.ok(result.error?.includes('bad-plugin'));
     });
   });
 
