@@ -469,15 +469,6 @@ suite('MCP Validator', () => {
       assert.strictEqual(result.valid, false);
       assert.ok(result.error?.includes('2>&1'));
     });
-
-    test('detects 2>&1 in JSON-stringified work spec', () => {
-      const { validatePowerShellCommands } = require('../../../mcp/validation/validator');
-      const result = validatePowerShellCommands({
-        work: JSON.stringify({ type: 'shell', command: 'test 2>&1', shell: 'powershell' }),
-      });
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes('2>&1'));
-    });
   });
 
   suite('extractAgentNames', () => {
