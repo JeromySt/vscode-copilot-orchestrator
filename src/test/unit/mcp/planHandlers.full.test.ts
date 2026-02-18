@@ -32,6 +32,7 @@ function makeMockPlanRunner(overrides?: Record<string, any>): any {
     getEffectiveEndedAt: sinon.stub().returns(undefined),
     forceFailNode: sinon.stub().resolves(),
     savePlan: sinon.stub(),
+    emit: sinon.stub(),
     ...overrides,
   };
 }

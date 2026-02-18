@@ -337,6 +337,44 @@ suite('reshapePlanHandler', () => {
     });
   });
 
+  suite('update_deps edge cases', () => {
+    test('update_deps rejects SV node', async () => {
+      const svNode = makeNode('sv-id', { producerId: '__snapshot-validation__', name: 'Snapshot Validation' });
+      const plan = makePlan([svNode], new Map([['sv-id', makeState('completed')]]));
+      const ctx = makeCtx(plan);
+      const result = await handleReshapePlan({
+        planId: 'plan-1',
+        operations: [{ type: 'update_deps', nodeId: 'sv-id', dependencies: [] }],
+      }, ctx);
+      assert.strictEqual(result.success, false);
+      assert.ok(result.results[0].error?.includes('auto-managed'));
+    });
+
+    test('update_deps with missing node returns error', async () => {
+      const node = makeNode('n1');
+      const plan = makePlan([node], new Map([['n1', makeState('completed')]]));
+      const ctx = makeCtx(plan);
+      const result = await handleReshapePlan({
+        planId: 'plan-1',
+        operations: [{ type: 'update_deps', nodeId: 'nonexistent', dependencies: [] }],
+      }, ctx);
+      assert.ok(result.results[0].error?.includes('not found'));
+    });
+  });
+
+  suite('add_after edge cases', () => {
+    test('add_after with missing node returns error', async () => {
+      const node = makeNode('n1');
+      const plan = makePlan([node], new Map([['n1', makeState('completed')]]));
+      const ctx = makeCtx(plan);
+      const result = await handleReshapePlan({
+        planId: 'plan-1',
+        operations: [{ type: 'add_after', existingNodeId: 'nonexistent', spec: { name: 'test', task: 'do stuff' } }],
+      }, ctx);
+      assert.ok(result.results[0].error?.includes('not found'));
+    });
+  });
+
   suite('add_after', () => {
     test('adds node after existing', async () => {
       const a = makeNode('a-id', { producerId: 'a' });
