@@ -35,7 +35,7 @@ function makeTmpDir(): string {
 
 const mockGitOps = {
   branches: { currentOrNull: async () => 'main', isDefaultBranch: async () => false, exists: async () => false, create: async () => {}, current: async () => 'main' },
-  worktrees: {}, merge: {}, repository: {}, orchestrator: {}, gitignore: { ensureGitignoreEntries: async () => {} },
+  worktrees: {}, merge: {}, repository: {}, orchestrator: {}, gitignore: { ensureGitignoreEntries: async () => {} }, command: {} as any,
 };
 
 const HELP_OUTPUT = `Usage: copilot [options]

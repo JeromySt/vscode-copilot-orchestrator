@@ -42,6 +42,7 @@ function mockGitOperations(): IGitOperations {
       commitTree: sinon.stub().resolves('finalcommit123'),
     },
     gitignore: {},
+    command: {},
   } as any;
 }
 

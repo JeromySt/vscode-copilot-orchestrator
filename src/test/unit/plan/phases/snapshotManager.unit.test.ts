@@ -38,6 +38,11 @@ function mockGitOperations(): IGitOperations {
     },
     merge: {},
     gitignore: {},
+    command: {
+      execAsync: sinon.stub().resolves({ success: true, stdout: '', stderr: '', exitCode: 0 }),
+      execAsyncOrThrow: sinon.stub().resolves(''),
+      execAsyncOrNull: sinon.stub().resolves(null),
+    },
   } as any;
 }
 

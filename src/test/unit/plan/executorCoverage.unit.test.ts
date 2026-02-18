@@ -50,6 +50,7 @@ function createMockGitOps() {
     gitignore: {
       ensureGitignoreEntries: sinon.stub().resolves(),
     },
+    command: {} as any,
   } as any;
 }
 

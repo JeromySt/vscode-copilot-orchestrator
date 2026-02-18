@@ -50,6 +50,7 @@ suite('PlanRunner External Deletion Handling', () => {
         gitignore: {
           ensureGitignoreEntries: async () => {},
         },
+        command: {} as any,
         worktrees: {},
         merge: {},
         repository: {},

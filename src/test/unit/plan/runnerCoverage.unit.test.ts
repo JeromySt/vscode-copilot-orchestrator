@@ -28,6 +28,7 @@ function createRunnerDeps(storagePath: string) {
     git: {
       worktrees: { removeSafe: async () => {}, list: async () => [], prune: async () => {} },
       gitignore: { ensureGitignoreEntries: async () => true, ensureOrchestratorGitIgnore: async () => true },
+      command: {} as any,
       branches: { current: async () => 'main', exists: async () => true },
       repository: { hasChanges: async () => false },
       merge: {},

@@ -177,4 +177,5 @@ export interface IGitOperations {
   readonly merge: IGitMerge;
   readonly repository: IGitRepository;
   readonly gitignore: IGitGitignore;
+  readonly command: IGitExecutor;
 }

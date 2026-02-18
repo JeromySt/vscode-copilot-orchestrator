@@ -90,6 +90,7 @@ function mockGitOperations(): IGitOperations {
       ensureOrchestratorGitIgnore: sinon.stub().resolves(true),
       isDiffOnlyOrchestratorChanges: sinon.stub().returns(true),
     },
+    command: {} as any,
   } as any;
 }
 

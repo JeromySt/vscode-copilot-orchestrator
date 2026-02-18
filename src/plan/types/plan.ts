@@ -615,7 +615,7 @@ export interface JobExecutionResult {
    * Set by phase executors or from WorkSpec.onFailure.resumeFromPhase.
    * Takes precedence over the default (resume from failedPhase).
    */
-  overrideResumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
+  overrideResumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri';
 }
 
 /**

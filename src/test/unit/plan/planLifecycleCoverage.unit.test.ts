@@ -87,6 +87,7 @@ suite('PlanLifecycleManager', () => {
     const mockGit = {
       worktrees: { removeSafe: sinon.stub().resolves() },
       gitignore: { ensureGitignoreEntries: sinon.stub().resolves(true) },
+      command: {} as any,
     };
     const lifecycle = new PlanLifecycleManager(state as any, log, mockGit as any);
 

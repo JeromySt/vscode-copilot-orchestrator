@@ -34,7 +34,6 @@
 
 import * as path from 'path';
 import type { IGitOperations } from '../../interfaces/IGitOperations';
-import { execAsync } from '../../git/core/executor';
 
 /** Metadata stored in the plan for the active snapshot. */
 export interface SnapshotInfo {
@@ -89,7 +88,7 @@ export class SnapshotManager {
     );
 
     // Attach the worktree to the snapshot branch so commits advance it.
-    await execAsync(['checkout', branch], { cwd: worktreePath });
+    await this.git.command.execAsync(['checkout', branch], { cwd: worktreePath });
 
     log?.(`Snapshot worktree ready at ${worktreePath}`);
 
@@ -120,15 +119,15 @@ export class SnapshotManager {
 
     log?.(`Rebasing snapshot onto ${targetBranch} (${currentTarget.slice(0, 8)})...`);
 
-    const result = await execAsync(
+    const result = await this.git.command.execAsync(
       ['rebase', '--onto', currentTarget, snapshot.baseCommit, snapshot.branch],
-      { cwd: repoPath },
+      { cwd: snapshot.worktreePath },
     );
 
     if (!result.success) {
       log?.(`Rebase failed: ${result.stderr}`);
       // Abort the failed rebase to leave the repo in a clean state.
-      await execAsync(['rebase', '--abort'], { cwd: repoPath }).catch(() => {});
+      await this.git.command.execAsync(['rebase', '--abort'], { cwd: snapshot.worktreePath }).catch(() => {});
       return false;
     }
 

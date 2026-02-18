@@ -102,6 +102,7 @@ function createMockGitOperations(): any {
     gitignore: {
       ensureGitignoreEntries: sinon.stub().resolves(false),
     },
+    command: {} as any,
     repository: {
       updateRef: sinon.stub().resolves(),
       resolveRef: sinon.stub().resolves('target-sha-123'),
@@ -126,6 +127,7 @@ function createPassthroughGitOperations(): any {
   return {
     worktrees: git.worktrees,
     gitignore: git.gitignore,
+    command: {} as any,
     repository: git.repository,
     merge: git.merge,
     branches: git.branches,

@@ -38,7 +38,7 @@ export interface OnFailureConfig {
   message?: string;
 
   /** Phase to resume from when the node is retried after this failure. */
-  resumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
+  resumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri';
 }
 
 /**

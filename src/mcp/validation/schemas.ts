@@ -141,7 +141,7 @@ const workSpecObjectSchema = {
         message: { type: 'string', maxLength: 1000, description: 'User-facing message displayed on failure.' },
         resume_from_phase: { 
           type: 'string', 
-          enum: ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'],
+          enum: ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri', 'verify-ri'],
           description: 'Phase to resume from when the node is retried after this failure.'
         }
       },

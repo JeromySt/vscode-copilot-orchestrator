@@ -178,6 +178,7 @@ function createMockGitOps(): any {
       isOrchestratorGitIgnoreConfigured: sinon.stub().resolves(true),
       ensureOrchestratorGitIgnore: sinon.stub().resolves(true),
     },
+    command: {} as any,
   } as any;
 }
 
