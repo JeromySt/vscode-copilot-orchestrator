@@ -118,6 +118,7 @@ const workSpecObjectSchema = {
     executable: { type: 'string' },
     args: { type: 'array', items: { type: 'string' } },
     shell: { type: 'string', enum: ['cmd', 'powershell', 'pwsh', 'bash', 'sh'] },
+    error_action: { type: 'string', enum: ['Continue', 'Stop', 'SilentlyContinue'], description: 'PowerShell $ErrorActionPreference. Default: Continue. Only applies to powershell/pwsh shells.' },
     instructions: { type: 'string' },
     model: { type: 'string', maxLength: 100 },
     model_tier: { type: 'string', enum: ['fast', 'standard', 'premium'], description: 'Model tier preference. When set and model is not specified, auto-selects a model matching this tier.' },

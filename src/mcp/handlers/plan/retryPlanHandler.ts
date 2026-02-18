@@ -6,7 +6,7 @@
  * @module mcp/handlers/plan/retryPlanHandler
  */
 
-import { validateAllowedFolders, validateAllowedUrls } from '../../validation';
+import { validateAllowedFolders, validateAllowedUrls, validatePowerShellCommands } from '../../validation';
 import {
   PlanHandlerContext,
   errorResult,
@@ -61,6 +61,11 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
     const modelValidation = await validateAgentModels(args, 'retry_copilot_plan');
     if (!modelValidation.valid) {
       return { success: false, error: modelValidation.error };
+    }
+    // Reject PowerShell commands containing 2>&1 (causes false failures)
+    const psValidation = validatePowerShellCommands(args);
+    if (!psValidation.valid) {
+      return { success: false, error: psValidation.error };
     }
   }
   

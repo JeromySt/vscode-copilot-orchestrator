@@ -147,6 +147,10 @@ export class DefaultJobExecutor implements JobExecutor {
       else if (context.dependencyCommits && context.dependencyCommits.length > 0) {
         context.onProgress?.('Forward integration merge'); context.onStepStatusChange?.('merge-fi', 'running');
         this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION START ==========');
+        this.logEntry(executionKey, 'merge-fi', 'info', `Merging ${context.dependencyCommits.length} dependency commit(s) into worktree at ${worktreePath}`);
+        for (const dc of context.dependencyCommits) {
+          this.logEntry(executionKey, 'merge-fi', 'info', `  ← ${dc.commit.slice(0, 8)} from ${dc.nodeName} (${dc.nodeId.slice(0, 8)})`);
+        }
         const ctx = makeCtx('merge-fi'); 
         ctx.dependencyCommits = context.dependencyCommits;
         const r = await new MergeFiPhaseExecutor(phaseDeps()).execute(ctx);
@@ -154,7 +158,10 @@ export class DefaultJobExecutor implements JobExecutor {
         this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION END ==========');
         if (!r.success) { stepStatuses['merge-fi'] = 'failed'; context.onStepStatusChange?.('merge-fi', 'failed'); return { success: false, error: `Forward integration merge failed: ${r.error}`, stepStatuses, failedPhase: 'merge-fi', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid }; }
         stepStatuses['merge-fi'] = 'success'; context.onStepStatusChange?.('merge-fi', 'success');
-      } else { stepStatuses['merge-fi'] = 'skipped'; context.onStepStatusChange?.('merge-fi', 'skipped'); }
+      } else {
+        this.logEntry(executionKey, 'merge-fi', 'info', `Merge-FI skipped: no dependency commits (worktree created from ${context.baseCommit?.slice(0, 8) ?? 'baseBranch'})`);
+        stepStatuses['merge-fi'] = 'skipped'; context.onStepStatusChange?.('merge-fi', 'skipped');
+      }
       if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid };}
 
       // ---- SETUP ----

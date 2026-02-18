@@ -121,13 +121,20 @@ export class planDetailPanel {
         this._update();
       }
     };
+    const onPlanUpdated = (planId: string) => {
+      if (planId === this._planId) {
+        this._update();
+      }
+    };
     this._planRunner.on('nodeTransition', onNodeTransition);
     this._planRunner.on('planStarted', onPlanStarted);
     this._planRunner.on('planCompleted', onPlanCompleted);
+    this._planRunner.on('planUpdated', onPlanUpdated);
     this._disposables.push({ dispose: () => {
       this._planRunner.removeListener('nodeTransition', onNodeTransition);
       this._planRunner.removeListener('planStarted', onPlanStarted);
       this._planRunner.removeListener('planCompleted', onPlanCompleted);
+      this._planRunner.removeListener('planUpdated', onPlanUpdated);
     }});
     
     // Subscribe to pulse — forward to webview for client-side duration ticking.
@@ -773,6 +780,8 @@ export class planDetailPanel {
       background: var(--vscode-sideBar-background);
       border-radius: 6px;
       font-size: 12px;
+      overflow: hidden;
+      max-width: 100%;
     }
     .branch-name {
       padding: 3px 8px;
@@ -780,13 +789,20 @@ export class planDetailPanel {
       color: var(--vscode-badge-foreground);
       border-radius: 4px;
       font-family: monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+      max-width: 40%;
     }
     .branch-arrow {
       color: var(--vscode-descriptionForeground);
+      flex-shrink: 0;
     }
     .branch-label {
       color: var(--vscode-descriptionForeground);
       font-size: 11px;
+      flex-shrink: 0;
     }
     
     .capacity-info.capacity-badge {

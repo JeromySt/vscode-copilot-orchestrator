@@ -88,6 +88,16 @@ export interface ShellSpec {
    */
   shell?: 'cmd' | 'powershell' | 'pwsh' | 'bash' | 'sh';
   
+  /**
+   * PowerShell $ErrorActionPreference value.
+   * Controls how PowerShell handles non-terminating errors (e.g. stderr from native commands).
+   * - 'Continue' (default) - Log errors but continue execution. Recommended for native commands.
+   * - 'Stop' - Treat non-terminating errors as terminating. Use when stderr truly indicates failure.
+   * - 'SilentlyContinue' - Suppress error output entirely.
+   * Only applies when shell is 'powershell', 'pwsh', or default on Windows.
+   */
+  errorAction?: 'Continue' | 'Stop' | 'SilentlyContinue';
+  
   /** Additional environment variables */
   env?: Record<string, string>;
   
@@ -373,6 +383,10 @@ export function normalizeWorkSpec(spec: WorkSpec | undefined): ProcessSpec | She
   if (raw.model_tier && !raw.modelTier) {
     raw.modelTier = raw.model_tier;
     delete raw.model_tier;
+  }
+  if (raw.error_action && !raw.errorAction) {
+    raw.errorAction = raw.error_action;
+    delete raw.error_action;
   }
   
   return spec;

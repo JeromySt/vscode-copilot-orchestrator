@@ -15,14 +15,14 @@ import type { ProcessSpec, ShellSpec, AgentSpec, CopilotUsageMetrics } from '../
 import { killProcessTree } from '../../process/processHelpers';
 
 /** Adapt a shell command for Windows PowerShell 5.x compatibility. */
-export function adaptCommandForPowerShell(command: string): string {
+export function adaptCommandForPowerShell(command: string, errorAction: string = 'Continue'): string {
   // Adapt && chaining to PowerShell's error-checking equivalent
   const adapted = command.replace(/\s*&&\s*/g, '; if (!$?) { exit 1 }; ').replace(/\bls\s+-la\b/g, 'Get-ChildItem');
-  // Wrap in $ErrorActionPreference = 'Continue' to prevent stderr from native
-  // commands being treated as terminating errors. PowerShell by default wraps
-  // stderr output as NativeCommandError which can cause unexpected failures.
-  // We rely solely on exit code (not stderr content) to determine success.
-  return `$ErrorActionPreference = 'Continue'; ${adapted}; exit $LASTEXITCODE`;
+  // Set $ErrorActionPreference to control how PowerShell handles non-terminating
+  // errors (e.g. stderr from native commands). Default 'Continue' prevents
+  // NativeCommandError from causing unexpected failures. Callers can override
+  // to 'Stop' when stderr truly indicates failure.
+  return `$ErrorActionPreference = '${errorAction}'; ${adapted}; exit $LASTEXITCODE`;
 }
 
 // Shared helper: spawn a process/shell and track it in the PhaseContext
@@ -97,18 +97,21 @@ export function runProcess(spec: ProcessSpec, ctx: PhaseContext, spawner: IProce
 export function runShell(spec: ShellSpec, ctx: PhaseContext, spawner: IProcessSpawner): Promise<PhaseResult> {
   const cwd = spec.cwd ? path.resolve(ctx.worktreePath, spec.cwd) : ctx.worktreePath;
   const isWindows = process.platform === 'win32';
+  const ea = spec.errorAction || 'Continue';
   let shell: string, shellArgs: string[];
   switch (spec.shell) {
     case 'cmd': shell = 'cmd.exe'; shellArgs = ['/c', spec.command]; break;
-    case 'powershell': shell = 'powershell.exe'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', spec.command]; break;
-    case 'pwsh': shell = 'pwsh'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', spec.command]; break;
+    case 'powershell': shell = 'powershell.exe'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', adaptCommandForPowerShell(spec.command, ea)]; break;
+    case 'pwsh': shell = 'pwsh'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', adaptCommandForPowerShell(spec.command, ea)]; break;
     case 'bash': shell = 'bash'; shellArgs = ['-c', spec.command]; break;
     case 'sh': shell = '/bin/sh'; shellArgs = ['-c', spec.command]; break;
     default:
-      if (isWindows) { shell = 'powershell.exe'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', adaptCommandForPowerShell(spec.command)]; }
+      if (isWindows) { shell = 'powershell.exe'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', adaptCommandForPowerShell(spec.command, ea)]; }
       else { shell = '/bin/sh'; shellArgs = ['-c', spec.command]; }
   }
   ctx.logInfo(`Command: ${spec.command}`);
+  if (spec.shell) {ctx.logInfo(`Shell: ${shell}`);}
+  if (spec.errorAction) {ctx.logInfo(`ErrorActionPreference: ${spec.errorAction}`);}
   if (spec.env) {ctx.logInfo(`Environment overrides: ${JSON.stringify(spec.env)}`);}
   return spawnAndTrack(spawner, shell, shellArgs, cwd, { ...process.env, ...spec.env }, spec.timeout || 0, ctx, 'Shell');
 }

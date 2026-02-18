@@ -153,6 +153,7 @@ export class JobExecutionEngine {
         additionalSources = baseCommits; // ALL deps go through merge-fi
         baseCommitish = plan.snapshot!.baseCommit; // worktree was created from snapshot base
       }
+
       
       // Build dependency info map for enhanced logging
       const dependencyInfoMap = new Map<string, DependencyInfo>();

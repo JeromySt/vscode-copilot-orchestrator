@@ -8,7 +8,7 @@
  * @module mcp/handlers/nodeHandlers
  */
 
-import { validateAllowedFolders, validateAllowedUrls, validateAgentModels } from '../validation';
+import { validateAllowedFolders, validateAllowedUrls, validateAgentModels, validatePowerShellCommands } from '../validation';
 import {
   PlanHandlerContext,
   errorResult,
@@ -357,6 +357,12 @@ export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promi
   const urlValidation = await validateAllowedUrls(args, 'retry_copilot_node');
   if (!urlValidation.valid) {
     return { success: false, error: urlValidation.error };
+  }
+
+  // Reject PowerShell commands containing 2>&1 (causes false failures)
+  const psValidation = validatePowerShellCommands(args);
+  if (!psValidation.valid) {
+    return { success: false, error: psValidation.error };
   }
 
   const retryOptions = {

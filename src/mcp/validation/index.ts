@@ -7,5 +7,5 @@
  * @module mcp/validation
  */
 
-export { validateInput, hasSchema, getRegisteredTools, ValidationResult, validateAgentModels, validateAllowedUrls, validateAllowedFolders, validatePostchecksPresence } from './validator';
+export { validateInput, hasSchema, getRegisteredTools, ValidationResult, validateAgentModels, validateAllowedUrls, validateAllowedFolders, validatePostchecksPresence, validatePowerShellCommands } from './validator';
 export { schemas } from './schemas';

@@ -158,7 +158,7 @@ suite('planDetail headerTemplate', () => {
         targetBranch: undefined,
       }));
       // The target display should be baseBranch
-      const branchNames = html.match(/class="branch-name">([^<]+)/g);
+      const branchNames = html.match(/class="branch-name"[^>]*>([^<]+)/g);
       assert.ok(branchNames, 'Should have branch-name elements');
       assert.ok(branchNames!.length >= 2, 'Should have at least 2 branch names');
     });

@@ -7,7 +7,7 @@
  */
 
 import { JobNode, normalizeWorkSpec } from '../../../plan/types';
-import { validateAllowedFolders, validateAllowedUrls } from '../../validation';
+import { validateAllowedFolders, validateAllowedUrls, validatePowerShellCommands } from '../../validation';
 import {
   PlanHandlerContext,
   errorResult,
@@ -60,6 +60,12 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
     return { success: false, error: modelValidation.error };
   }
   
+  // Reject PowerShell commands containing 2>&1 (causes false failures)
+  const psValidation = validatePowerShellCommands(args);
+  if (!psValidation.valid) {
+    return { success: false, error: psValidation.error };
+  }
+  
   const planResult = lookupPlan(ctx, args.planId, 'getPlan');
   if (isError(planResult)) {return planResult;}
   const plan = planResult;
@@ -72,6 +78,11 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
     return errorResult(`Node "${args.nodeId}" is not a job node and cannot be updated`);
   }
   const jobNode = node as JobNode;
+  
+  // Snapshot Validation node is auto-managed — reject updates
+  if (jobNode.producerId === '__snapshot-validation__') {
+    return errorResult('The Snapshot Validation node is auto-managed and cannot be updated. Its prechecks, work, and postchecks are configured automatically by the orchestrator.');
+  }
   
   // Check if node is currently running or scheduled - cannot update while executing
   const nodeState = plan.nodeStates.get(args.nodeId);
@@ -114,8 +125,9 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
     nodeState.resumeFromPhase = resetTo as typeof nodeState.resumeFromPhase;
   }
   
-  // Persist the updated plan, then resume execution if not paused.
+  // Persist the updated plan, notify UI, then resume execution if not paused.
   ctx.PlanRunner.savePlan(args.planId);
+  ctx.PlanRunner.emit('planUpdated', args.planId);
   if (plan.isPaused !== true) {
     await ctx.PlanRunner.resume(args.planId);
   }

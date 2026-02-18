@@ -107,6 +107,17 @@ function resolveNodeId(
   return undefined;
 }
 
+const SV_PRODUCER_ID = '__snapshot-validation__';
+
+/** Returns true if the resolved node is the auto-managed Snapshot Validation node. */
+function isSnapshotValidationNode(
+  plan: import('../../../plan/types').PlanInstance,
+  nodeId: string,
+): boolean {
+  const node = plan.nodes.get(nodeId);
+  return node?.producerId === SV_PRODUCER_ID;
+}
+
 // ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
@@ -154,6 +165,10 @@ export async function handleReshapePlan(args: any, ctx: PlanHandlerContext): Pro
           results.push({ operation: 'remove_node', success: false, error: `Node not found: ${op.nodeId ?? op.producer_id}` });
           break;
         }
+        if (isSnapshotValidationNode(plan, id)) {
+          results.push({ operation: 'remove_node', success: false, error: 'The Snapshot Validation node is auto-managed and cannot be removed. It updates automatically when plan topology changes.' });
+          break;
+        }
         const res = removeNode(plan, id);
         results.push({ operation: 'remove_node', success: res.success, error: res.error });
         break;
@@ -167,6 +182,10 @@ export async function handleReshapePlan(args: any, ctx: PlanHandlerContext): Pro
         const id = resolveNodeId(plan, op.nodeId);
         if (!id) {
           results.push({ operation: 'update_deps', success: false, error: `Node not found: ${op.nodeId}` });
+          break;
+        }
+        if (isSnapshotValidationNode(plan, id)) {
+          results.push({ operation: 'update_deps', success: false, error: 'The Snapshot Validation node\'s dependencies are auto-managed and cannot be updated directly. They sync automatically when plan topology changes.' });
           break;
         }
         // Resolve dependency producer_ids to node IDs
@@ -221,8 +240,9 @@ export async function handleReshapePlan(args: any, ctx: PlanHandlerContext): Pro
     }
   }
 
-  // Persist changes
+  // Persist changes and notify UI
   ctx.PlanRunner.savePlan(args.planId);
+  ctx.PlanRunner.emit('planUpdated', args.planId);
 
   // Build topology summary
   const nodes: Array<{ id: string; producerId?: string; name: string; dependencies: string[]; dependents: string[] }> = [];

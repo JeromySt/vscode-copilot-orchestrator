@@ -153,6 +153,7 @@ For topology changes (add/remove nodes, change dependencies), use reshape_copilo
 RESTRICTIONS:
 - Cannot update a node that is currently running (wait for completion or force-fail first)
 - Cannot update dependencies/consumesFrom (use a new plan for structural changes)
+- The "Snapshot Validation" node (producer_id: __snapshot-validation__) is auto-managed and cannot be updated
 
 WORKFLOW:
 1. Provide planId and nodeId to identify the node

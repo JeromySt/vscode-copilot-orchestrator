@@ -69,6 +69,7 @@ function makeCtx(plan: PlanInstance | undefined, overrides: Record<string, any> 
       getPlan: sinon.stub().returns(plan),
       get: sinon.stub().returns(plan),
       savePlan: sinon.stub(),
+      emit: sinon.stub(),
       ...overrides,
     },
     workspacePath: '/test',

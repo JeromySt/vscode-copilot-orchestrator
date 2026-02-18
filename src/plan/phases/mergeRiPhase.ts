@@ -107,7 +107,7 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
         
         const newCommit = await this.git.merge.commitTree(
           mergeTreeResult.treeSha,
-          [targetSha],
+          [targetSha, mergeSource],
           commitMessage,
           repoPath,
           s => context.logInfo(s)

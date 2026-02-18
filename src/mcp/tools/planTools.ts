@@ -153,7 +153,9 @@ IMPORTANT: For agent work, specify 'model' INSIDE the work object (not at job le
 Agent instructions MUST be in Markdown format for proper rendering.
 If the project has .github/skills/ directories, incorporate relevant skill conventions into agent instructions for best results.
 
-SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
+SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"
+POWERSHELL NOTE: On Windows, PowerShell is the default shell. The orchestrator automatically wraps commands with $ErrorActionPreference='Continue' and 'exit $LASTEXITCODE' to prevent stderr from native commands causing false failures. Do NOT use '2>&1' in PowerShell commands — it causes NativeCommandError when commands write warnings to stderr, leading to false exit code 1 even when the command succeeds. The orchestrator captures stdout and stderr separately, so 2>&1 is never needed.
+To override $ErrorActionPreference, set "error_action" on the shell spec: "Continue" (default), "Stop", or "SilentlyContinue".`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -233,7 +235,7 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
 4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "claude-sonnet-4.5" }
 
 For process type, args is an array - no shell quoting needed.
-For shell type, shell can be: cmd, powershell, pwsh, bash, sh
+For shell type, shell can be: cmd, powershell, pwsh, bash, sh. Do NOT use '2>&1' in PowerShell — the orchestrator captures stderr separately.
 For agent type, model goes INSIDE the work object. Available models: ${modelEnum.join(', ')}
 Fast models (haiku/mini) for simple tasks, premium models (opus) for complex reasoning.
 
@@ -670,6 +672,7 @@ NOTES:
 - Plan must be running or paused
 - Only pending/ready nodes can be removed or have dependencies updated
 - Cycle detection prevents invalid dependency additions
+- The "Snapshot Validation" node (producer_id: __snapshot-validation__) is auto-managed — it cannot be removed, updated, or have its dependencies changed. Its dependencies sync automatically when the plan topology changes.
 - Returns per-operation results and updated topology`,
       inputSchema: {
         type: 'object',
