@@ -245,7 +245,12 @@ export function webviewScripts(config: ScriptsConfig): string {
         if (!el) return;
         if (data.status) el.setAttribute('data-status', data.status);
         if (data.startedAt) el.setAttribute('data-started-at', String(data.startedAt));
-        if (data.endedAt) el.setAttribute('data-ended-at', String(data.endedAt));
+        if (data.endedAt) {
+          el.setAttribute('data-ended-at', String(data.endedAt));
+        } else {
+          el.removeAttribute('data-ended-at');
+          el.removeAttribute('data-frozen');
+        }
         this._tick();
       };
       DCC.prototype._tick = function() {

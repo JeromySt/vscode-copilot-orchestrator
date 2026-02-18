@@ -45,11 +45,11 @@ export interface PlanSpec {
   additionalSymlinkDirs?: string[];
   
   /**
-   * Optional verification command to run after every successful RI merge.
-   * Executes in a temporary worktree checked out at the targetBranch HEAD
-   * to validate the merged result (e.g. compilation, tests).
+   * Optional verification spec used as the work phase of the auto-injected
+   * snapshot-validation node. Executes in the snapshot worktree after all
+   * dependency commits are forward-integrated, validating the combined result
+   * (e.g. compilation, tests) before the final merge to targetBranch.
    * Auto-healable: on failure, Copilot CLI attempts to fix the issue.
-   * Highly recommended when targetBranch is set.
    */
   verifyRiSpec?: WorkSpec;
   

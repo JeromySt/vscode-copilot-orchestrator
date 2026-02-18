@@ -240,7 +240,7 @@ export class McpHandler implements IMcpRequestRouter {
       case 'create_copilot_plan': {
         const postchecksWarnings = validatePostchecksPresence(args || {});
         result = await handleCreatePlan(args || {}, this.context);
-        if (postchecksWarnings.length > 0 && result && typeof result === 'object') {
+        if (postchecksWarnings.length > 0 && result && typeof result === 'object' && (result as any).success === true) {
           result.warnings = postchecksWarnings;
         }
         break;
