@@ -10,6 +10,10 @@
  * @module agent/pluginDiscovery
  */
 
+// Direct fs usage is intentional: this module is a standalone utility for plugin/agent
+// discovery that runs outside the VS Code extension host (e.g. during MCP validation).
+// Similar to src/git/core/executor.ts using child_process directly.
+// Future refactoring opportunity: wrap behind IFileSystem if this moves into DI scope.
 import * as fs from 'fs';
 import * as path from 'path';
 import type { IProcessSpawner } from '../interfaces/IProcessSpawner';
@@ -86,19 +90,25 @@ export async function listInstalledPlugins(
     const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
       const proc = spawner.spawn('copilot', ['plugin', 'list'], { stdio: 'pipe' });
+
+      const finish = (exitCode: number) => {
+        if (settled) { return; }
+        settled = true;
+        if (timeout) { clearTimeout(timeout); }
+        resolve({ stdout, stderr, exitCode });
+      };
 
       proc.stdout?.on('data', (data: Buffer | string) => { stdout += data.toString(); });
       proc.stderr?.on('data', (data: Buffer | string) => { stderr += data.toString(); });
-      proc.on('close', (code: number | null) => {
-        resolve({ stdout, stderr, exitCode: code ?? 1 });
-      });
-      proc.on('error', () => {
-        resolve({ stdout, stderr, exitCode: 1 });
-      });
+      proc.on('close', (code: number | null) => { finish(code ?? 1); });
+      proc.on('error', () => { finish(1); });
 
-      // Timeout after 15 seconds
-      setTimeout(() => {
+      timeout = setTimeout(() => {
+        if (settled) { return; }
+        settled = true;
         try { proc.kill?.(); } catch { /* ignore */ }
         resolve({ stdout, stderr, exitCode: 1 });
       }, 15_000);
@@ -205,8 +215,10 @@ export async function isAgentAvailable(
 ): Promise<AgentAvailabilityResult> {
   // Check installed plugins first
   const plugins = await listInstalledPlugins(spawner);
+  const normalizedName = agentName.toLowerCase();
   const pluginMatch = plugins.find(p =>
-    p.name === agentName || p.name.toLowerCase() === agentName.toLowerCase()
+    p.name.toLowerCase() === normalizedName ||
+    p.source?.toLowerCase() === normalizedName
   );
   if (pluginMatch) {
     return { available: true, source: 'plugin', installSource: pluginMatch.source };
@@ -237,19 +249,29 @@ export async function installPlugin(
     const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
       const proc = spawner.spawn('copilot', ['plugin', 'install', source], { stdio: 'pipe' });
+
+      const finish = (r: { stdout: string; stderr: string; exitCode: number }) => {
+        if (settled) { return; }
+        settled = true;
+        if (timeout) { clearTimeout(timeout); }
+        resolve(r);
+      };
 
       proc.stdout?.on('data', (data: Buffer | string) => { stdout += data.toString(); });
       proc.stderr?.on('data', (data: Buffer | string) => { stderr += data.toString(); });
       proc.on('close', (code: number | null) => {
-        resolve({ stdout, stderr, exitCode: code ?? 1 });
+        finish({ stdout, stderr, exitCode: code ?? 1 });
       });
       proc.on('error', (err: Error) => {
-        resolve({ stdout, stderr: err.message, exitCode: 1 });
+        finish({ stdout, stderr: err.message, exitCode: 1 });
       });
 
-      // Timeout after 60 seconds for install
-      setTimeout(() => {
+      timeout = setTimeout(() => {
+        if (settled) { return; }
+        settled = true;
         try { proc.kill?.(); } catch { /* ignore */ }
         resolve({ stdout, stderr: 'Plugin install timed out after 60 seconds', exitCode: 1 });
       }, 60_000);

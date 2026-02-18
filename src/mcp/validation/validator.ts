@@ -10,7 +10,7 @@
 import Ajv, { ErrorObject, ValidateFunction } from 'ajv';
 import { schemas } from './schemas';
 import { getCachedModels } from '../../agent/modelDiscovery';
-import { isAgentAvailable, installPlugin } from '../../agent/pluginDiscovery';
+import { listInstalledPlugins, discoverCustomAgents, installPlugin } from '../../agent/pluginDiscovery';
 import type { IProcessSpawner } from '../../interfaces/IProcessSpawner';
 import type { IEnvironment } from '../../interfaces/IEnvironment';
 import type { IConfigProvider } from '../../interfaces/IConfigProvider';
@@ -713,8 +713,9 @@ export function extractAgentNames(input: unknown): string[] {
   const agents = new Set<string>();
 
   function checkSpec(value: unknown): void {
-    if (!value || typeof value !== 'object') { return; }
-    const spec = value as Record<string, unknown>;
+    const parsed = tryParseWorkSpec(value);
+    const spec = (parsed && typeof parsed === 'object') ? parsed as Record<string, unknown> : null;
+    if (!spec) { return; }
     if (spec.type === 'agent' && typeof spec.agent === 'string' && spec.agent.trim()) {
       agents.add(spec.agent.trim());
     }
@@ -724,7 +725,7 @@ export function extractAgentNames(input: unknown): string[] {
     if (!obj || typeof obj !== 'object') { return; }
     const record = obj as Record<string, unknown>;
 
-    for (const field of ['work', 'prechecks', 'postchecks', 'verify_ri']) {
+    for (const field of ['work', 'prechecks', 'postchecks', 'verify_ri', 'newWork', 'newPrechecks', 'newPostchecks']) {
       if (record[field] !== undefined) { checkSpec(record[field]); }
     }
 
@@ -782,12 +783,29 @@ export async function validateAgentPlugins(
   const errors: string[] = [];
   const installed: string[] = [];
 
-  for (const agentName of agentNames) {
-    const result = await isAgentAvailable(agentName, spawner, env, repoCwd);
-    if (result.available) { continue; }
+  // List plugins and discover agents once
+  const plugins = await listInstalledPlugins(spawner);
+  const customAgents = discoverCustomAgents(env, repoCwd);
 
-    // Agent not available — try to install or report error
-    if (autoInstall) {
+  for (const agentName of agentNames) {
+    const normalizedName = agentName.toLowerCase();
+
+    // Check plugins (name or source match)
+    const pluginMatch = plugins.find(p =>
+      p.name.toLowerCase() === normalizedName ||
+      p.source?.toLowerCase() === normalizedName
+    );
+    if (pluginMatch) { continue; }
+
+    // Check custom agents
+    const agentMatch = customAgents.find(a =>
+      a.name.toLowerCase() === normalizedName
+    );
+    if (agentMatch) { continue; }
+
+    // Agent not available
+    const isPluginRef = agentName.includes('@') || agentName.includes('/');
+    if (autoInstall && isPluginRef) {
       const installResult = await installPlugin(agentName, spawner);
       if (installResult.success) {
         installed.push(agentName);

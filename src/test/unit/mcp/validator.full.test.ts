@@ -668,7 +668,7 @@ suite('MCP Validator', () => {
       const env: any = { env: {}, platform: 'linux' };
       const config: any = { getConfig: sinon.stub().returns(true) };
       const result = await validateAgentPlugins(
-        { work: { type: 'agent', instructions: '# T', agent: 'new-plugin' } },
+        { work: { type: 'agent', instructions: '# T', agent: 'new-plugin@marketplace' } },
         spawner, env, config
       );
       assert.strictEqual(result.valid, true);
@@ -701,12 +701,12 @@ suite('MCP Validator', () => {
       const env: any = { env: {}, platform: 'linux' };
       const config: any = { getConfig: sinon.stub().returns(true) };
       const result = await validateAgentPlugins(
-        { work: { type: 'agent', instructions: '# T', agent: 'bad-plugin' } },
+        { work: { type: 'agent', instructions: '# T', agent: 'org/bad-plugin' } },
         spawner, env, config
       );
       assert.strictEqual(result.valid, false);
       assert.ok(result.error?.includes('auto-install failed'));
-      assert.ok(result.error?.includes('bad-plugin'));
+      assert.ok(result.error?.includes('org/bad-plugin'));
     });
   });
 
