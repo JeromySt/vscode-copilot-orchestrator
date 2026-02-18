@@ -167,7 +167,9 @@ export class PlanRunner extends EventEmitter {
           // Write the original base commit to a marker file in the snapshot worktree
           // so the SV precheck agent can compare against current targetBranch HEAD.
           const fs = require('fs');
-          const markerPath = require('path').join(snapshot.worktreePath, '.orchestrator-snapshot-base');
+          const markerDir = require('path').join(snapshot.worktreePath, '.orchestrator');
+          fs.mkdirSync(markerDir, { recursive: true });
+          const markerPath = require('path').join(markerDir, 'snapshot-base');
           fs.writeFileSync(markerPath, snapshot.baseCommit, 'utf8');
           
           state.persistence.save(plan);

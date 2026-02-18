@@ -137,10 +137,22 @@ export class JobExecutionEngine {
       const baseCommits = sm.getBaseCommitsForNode(node.id);
       // Root nodes (no deps) use the snapshot's pinned commit so every root
       // starts from the same codebase even if targetBranch moves during execution.
-      const baseCommitish = baseCommits.length > 0
+      let baseCommitish = baseCommits.length > 0
         ? baseCommits[0]
         : (plan.snapshot?.baseCommit ?? plan.baseBranch);
-      const additionalSources = baseCommits.slice(1);
+      let additionalSources = baseCommits.slice(1);
+      
+      // SV node uses a pre-assigned snapshot worktree. Its deps' commits
+      // must ALL be forward-integrated (merge-fi) into that worktree — none
+      // of them served as the worktree's creation base. Treat every dep
+      // commit as an additional source so merge-fi brings them all in.
+      const isSvNode = node.assignedWorktreePath
+        && plan.snapshot
+        && node.assignedWorktreePath === plan.snapshot.worktreePath;
+      if (isSvNode && baseCommits.length > 0) {
+        additionalSources = baseCommits; // ALL deps go through merge-fi
+        baseCommitish = plan.snapshot!.baseCommit; // worktree was created from snapshot base
+      }
       
       // Build dependency info map for enhanced logging
       const dependencyInfoMap = new Map<string, DependencyInfo>();

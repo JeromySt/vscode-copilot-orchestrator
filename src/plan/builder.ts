@@ -335,7 +335,7 @@ export function buildPlan(
   // Prechecks: three-case logic for targetBranch health + snapshot rebase.
   // Runs in the snapshot worktree (HEAD = snapshot branch, shares refs with main repo).
   // The original base commit (targetBranch HEAD when snapshot was created) is written
-  // to .orchestrator-snapshot-base by the runner at snapshot creation time.
+  // to .orchestrator/snapshot-base by the runner at snapshot creation time.
   //
   // Case 1: targetBranch HEAD == snapshot base commit → success (no changes)
   // Case 2: targetBranch HEAD != snapshot base && target is clean → rebase snapshot
@@ -349,7 +349,7 @@ export function buildPlan(
       `You are running in the snapshot worktree. Your job is to verify the target branch '${svTargetBranch}' is healthy and rebase the snapshot if the target has advanced.`,
       ``,
       `Step 1: Read the original snapshot base commit and the current target HEAD.`,
-      `  SNAPSHOT_BASE = read the file .orchestrator-snapshot-base in the current directory`,
+      `  SNAPSHOT_BASE = read the file .orchestrator/snapshot-base in the current directory`,
       `  TARGET_HEAD = run: git rev-parse "refs/heads/${svTargetBranch}"`,
       ``,
       `Step 2: Compare them.`,
@@ -373,7 +373,7 @@ export function buildPlan(
       `      Run: git rebase --onto $TARGET_HEAD $SNAPSHOT_BASE HEAD`,
       ``,
       `      If the rebase succeeds cleanly:`,
-      `        Update .orchestrator-snapshot-base to contain $TARGET_HEAD (the new base).`,
+      `        Update .orchestrator/snapshot-base to contain $TARGET_HEAD (the new base).`,
       `        Print "✅ Snapshot rebased onto updated '${svTargetBranch}' ($TARGET_HEAD)."`,
       `        Exit successfully.`,
       ``,
@@ -382,11 +382,11 @@ export function buildPlan(
       `        For each conflicted file, choose the resolution that preserves both sets of changes.`,
       `        After resolving, run: git add <file> && git rebase --continue`,
       `        Repeat until rebase completes.`,
-      `        Update .orchestrator-snapshot-base to contain $TARGET_HEAD (the new base).`,
+      `        Update .orchestrator/snapshot-base to contain $TARGET_HEAD (the new base).`,
       `        Print "✅ Snapshot rebased with conflict resolution onto '${svTargetBranch}'."`,
       `        Exit successfully.`,
       ``,
-      `IMPORTANT: Do not modify any files except to resolve rebase conflicts and update .orchestrator-snapshot-base. Do not create commits beyond what git rebase produces.`,
+      `IMPORTANT: Do not modify any files except to resolve rebase conflicts and update .orchestrator/snapshot-base. Do not create commits beyond what git rebase produces.`,
     ].join('\n'),
     onFailure: {
       noAutoHeal: true,
@@ -396,7 +396,7 @@ export function buildPlan(
   };
 
   // Postchecks: re-verify targetBranch hasn't moved since prechecks before merge-ri.
-  // Reads .orchestrator-snapshot-base (updated by prechecks) and compares to current
+  // Reads .orchestrator/snapshot-base (updated by prechecks) and compares to current
   // targetBranch HEAD. If target advanced during work, fail and resume from prechecks
   // so the snapshot gets rebased again. Uses node.js for cross-platform compatibility
   // (bash not guaranteed on Windows, PowerShell can't handle bash syntax).
@@ -404,7 +404,7 @@ export function buildPlan(
     `const fs = require('fs');`,
     `const { execSync } = require('child_process');`,
     `try {`,
-    `  const base = fs.readFileSync('.orchestrator-snapshot-base', 'utf8').trim();`,
+    `  const base = fs.readFileSync('.orchestrator/snapshot-base', 'utf8').trim();`,
     `  const head = execSync('git rev-parse "refs/heads/${svTargetBranch}"', { encoding: 'utf8' }).trim();`,
     `  if (head === base) {`,
     `    console.log('✅ Target branch ${svTargetBranch} unchanged since prechecks. Safe to merge.');`,
