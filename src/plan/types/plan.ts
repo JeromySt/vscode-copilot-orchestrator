@@ -161,7 +161,6 @@ export interface NodeExecutionState {
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
     'merge-ri'?: PhaseStatus;
-    'verify-ri'?: PhaseStatus;
   };
   
   /**
@@ -195,21 +194,21 @@ export interface NodeExecutionState {
    * Set when a node fails and is retried - allows skipping already-completed phases.
    * Cleared when new work is provided or worktree is reset.
    */
-  resumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri';
+  resumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
 
   /**
    * Tracks auto-heal attempts per phase.
    * Each value is the number of heal attempts for that phase.
    * Backwards-compatible: `true` is treated as 1 when reading.
    */
-  autoHealAttempted?: Partial<Record<'prechecks' | 'work' | 'postchecks' | 'verify-ri', boolean | number>>;
+  autoHealAttempted?: Partial<Record<'prechecks' | 'work' | 'postchecks', boolean | number>>;
   
   /**
    * Details about the last execution attempt (for retry context).
    */
   lastAttempt?: {
     /** Which phase failed or was running */
-    phase: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'verify-ri' | 'setup';
+    phase: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup';
     /** When the attempt started */
     startTime: number;
     /** When the attempt ended */
@@ -235,9 +234,9 @@ export interface NodeExecutionState {
   /**
    * Per-phase AI usage metrics breakdown.
    * Keys are phase names for which metrics are available:
-   * 'prechecks', 'work', 'commit', 'postchecks', 'merge-fi', 'merge-ri', 'verify-ri', 'setup'.
+   * 'prechecks', 'work', 'commit', 'postchecks', 'merge-fi', 'merge-ri', 'setup'.
    */
-  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'verify-ri' | 'setup', CopilotUsageMetrics>>;
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup', CopilotUsageMetrics>>;
 }
 
 /**
@@ -260,7 +259,7 @@ export interface AttemptRecord {
   endedAt: number;
   
   /** Which phase failed (if failed) */
-  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'verify-ri' | 'setup';
+  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup';
   
   /** Error message (if failed) */
   error?: string;
@@ -280,7 +279,6 @@ export interface AttemptRecord {
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
     'merge-ri'?: PhaseStatus;
-    'verify-ri'?: PhaseStatus;
   };
   
   /** Worktree path used in this attempt */
@@ -305,11 +303,11 @@ export interface AttemptRecord {
   metrics?: CopilotUsageMetrics;
 
   /** Per-phase AI usage metrics breakdown */
-  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'verify-ri' | 'setup', CopilotUsageMetrics>>;
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup', CopilotUsageMetrics>>;
 }
 
 // ============================================================================
-// GROUP INSTANCE (Visual Hierarchy with State)
+// GROUP INSTANCE(Visual Hierarchy with State)
 // ============================================================================
 
 /**
@@ -583,18 +581,17 @@ export interface JobExecutionResult {
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
     'merge-ri'?: PhaseStatus;
-    'verify-ri'?: PhaseStatus;
   };
   /** Copilot session ID captured during agent work (for session resumption) */
   copilotSessionId?: string;
   /** Which phase failed (for retry context) */
-  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'verify-ri' | 'setup';
+  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup';
   /** Exit code from failed process */
   exitCode?: number;
   /** Agent execution metrics (token usage, duration, turns, tool calls) */
   metrics?: CopilotUsageMetrics;
   /** Per-phase metrics breakdown */
-  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'verify-ri' | 'setup', CopilotUsageMetrics>>;
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup', CopilotUsageMetrics>>;
   /** Process ID of the main running process (for crash detection) */
   pid?: number;
 
@@ -615,7 +612,7 @@ export interface JobExecutionResult {
    * Set by phase executors or from WorkSpec.onFailure.resumeFromPhase.
    * Takes precedence over the default (resume from failedPhase).
    */
-  overrideResumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri';
+  overrideResumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
 }
 
 /**
@@ -650,7 +647,7 @@ export interface ExecutionContext {
   copilotSessionId?: string;
   
   /** Phase to resume from on retry (skip phases before this) */
-  resumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri';
+  resumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
   
   /** Previous step statuses to preserve (from failed attempt) */
   previousStepStatuses?: {
@@ -661,7 +658,6 @@ export interface ExecutionContext {
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
     'merge-ri'?: PhaseStatus;
-    'verify-ri'?: PhaseStatus;
   };
   
   // --- Merge phase specific fields ---
@@ -741,7 +737,7 @@ export interface EvidenceValidationResult {
 /**
  * Execution phase for logging
  */
-export type ExecutionPhase = 'setup' | 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri' | 'cleanup';
+export type ExecutionPhase = 'setup' | 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'cleanup';
 
 /**
  * Log entry for job execution

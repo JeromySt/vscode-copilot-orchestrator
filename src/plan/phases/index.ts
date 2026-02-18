@@ -13,5 +13,4 @@ export { CommitPhaseExecutor } from './commitPhase';
 export type { CommitPhaseContext } from './commitPhase';
 export { MergeFiPhaseExecutor } from './mergeFiPhase';
 export { MergeRiPhaseExecutor } from './mergeRiPhase';
-export { VerifyRiPhaseExecutor } from './verifyRiPhase';
 export { resolveMergeConflictWithCopilot } from './mergeHelper';

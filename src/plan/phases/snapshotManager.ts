@@ -23,7 +23,7 @@
  *
  * ```
  * createSnapshot()          → branch + worktree created off targetBranch HEAD
- * [leaf RI merges happen]   → merge into snapshot branch, verify-ri in worktree
+ * [leaf RI merges happen]   → merge into snapshot branch, verification in worktree
  * rebaseOnTarget()          → rebase snapshot onto current targetBranch HEAD
  * [final merge]             → merge-tree snapshot → targetBranch
  * cleanupSnapshot()         → remove worktree + delete branch

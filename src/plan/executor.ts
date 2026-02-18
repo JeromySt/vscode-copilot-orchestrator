@@ -27,7 +27,6 @@ import {
   PrecheckPhaseExecutor, WorkPhaseExecutor,
   PostcheckPhaseExecutor, CommitPhaseExecutor,
   MergeFiPhaseExecutor, MergeRiPhaseExecutor,
-  VerifyRiPhaseExecutor,
 } from './phases';
 import type { CommitPhaseContext } from './phases';
 import {

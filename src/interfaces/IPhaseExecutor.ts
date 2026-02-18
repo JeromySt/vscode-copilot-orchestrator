@@ -102,7 +102,7 @@ export interface PhaseResult {
    * Override the phase to resume from on retry.
    * Phase executors set this to control retry behavior.
    */
-  overrideResumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri';
+  overrideResumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
 }
 
 /**

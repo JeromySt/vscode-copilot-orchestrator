@@ -1,7 +1,7 @@
 /**
  * @fileoverview Final Merge Phase
  *
- * Triggered after ALL leaf nodes have completed their merge-ri + verify-ri
+ * Triggered after ALL leaf nodes have completed their merge-ri + verification
  * into the snapshot branch.  Performs a single validated merge from the
  * snapshot branch into `targetBranch`.
  *
@@ -9,9 +9,9 @@
  *
  * 1. Rebase the snapshot branch onto the current `targetBranch` HEAD (in
  *    case the target moved forward during execution).
- * 2. Run verify-ri on the rebased snapshot (validates accumulated changes).
+ * 2. Run verification on the rebased snapshot (validates accumulated changes).
  * 3. In-memory merge-tree: snapshot → targetBranch.
- * 4. Run verify-ri on the final merged targetBranch.
+ * 4. Run verification on the final merged targetBranch.
  * 5. On failure — retry once (re-snapshot, rebase, verify, merge).
  *    After 2 failures, the plan is left in `awaiting-final-merge` state
  *    for the user to trigger manually via UI button.
@@ -33,7 +33,7 @@ export interface FinalMergeResult {
 export interface FinalMergeDeps {
   git: IGitOperations;
   log: (s: string) => void;
-  /** Optional callback to run verify-ri on a given branch. */
+  /** Optional callback to run verification on a given branch. */
   runVerifyRi?: (targetBranch: string, worktreePath?: string) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -103,14 +103,14 @@ export class FinalMergeExecutor {
       return { success: false, error: 'Rebase of snapshot onto target branch failed' };
     }
 
-    // Step 2: Run verify-ri on the rebased snapshot (if configured)
+    // Step 2: Run verification on the rebased snapshot (if configured)
     if (this.runVerifyRi) {
-      this.log('Running verify-ri on rebased snapshot...');
+      this.log('Running verification on rebased snapshot...');
       const vr = await this.runVerifyRi(snapshot.branch, snapshot.worktreePath);
       if (!vr.success) {
-        return { success: false, error: `Pre-merge verify-ri failed: ${vr.error}` };
+        return { success: false, error: `Pre-merge verification failed: ${vr.error}` };
       }
-      this.log('✓ Pre-merge verify-ri passed');
+      this.log('✓ Pre-merge verification passed');
     }
 
     // Step 3: In-memory merge-tree: snapshot → targetBranch
@@ -173,14 +173,14 @@ export class FinalMergeExecutor {
       this.log(`ℹ Your checkout on ${targetBranch} has uncommitted changes. Run 'git reset --hard ${newCommit.slice(0, 8)}' after saving your work.`);
     }
 
-    // Step 5: Run verify-ri on the final merged targetBranch (if configured)
+    // Step 5: Run verification on the final merged targetBranch (if configured)
     if (this.runVerifyRi) {
-      this.log('Running verify-ri on merged target branch...');
+      this.log('Running verification on merged target branch...');
       const vr = await this.runVerifyRi(targetBranch);
       if (!vr.success) {
-        return { success: false, error: `Post-merge verify-ri failed: ${vr.error}` };
+        return { success: false, error: `Post-merge verification failed: ${vr.error}` };
       }
-      this.log('✓ Post-merge verify-ri passed');
+      this.log('✓ Post-merge verification passed');
     }
 
     return { success: true };

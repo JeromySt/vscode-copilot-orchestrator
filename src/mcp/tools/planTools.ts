@@ -550,7 +550,7 @@ Agent instructions MUST be in Markdown format.`
 
 Returns:
 - Execution logs from the failed attempt
-- Which phase failed (prechecks, work, commit, postchecks, merge-fi, merge-ri, verify-ri)
+- Which phase failed (prechecks, work, commit, postchecks, merge-fi, merge-ri)
 - Error message
 - Copilot session ID (if agent work was involved)
 - Worktree path (for manual inspection)

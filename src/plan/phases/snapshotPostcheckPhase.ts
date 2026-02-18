@@ -2,7 +2,7 @@
  * @fileoverview Snapshot Postchecks Phase Executor
  *
  * Custom postchecks for the snapshot-validation node. Re-checks targetBranch
- * health after verify-ri work completes, before merge-ri to targetBranch:
+ * health after verification work completes, before merge-ri to targetBranch:
  *
  * - Clean, same commit as rebased-to → proceed to merge-ri
  * - Clean, new commit (target moved during verify) → auto-retry from prechecks
@@ -61,7 +61,7 @@ export class SnapshotPostcheckPhaseExecutor {
         return { success: true };
       }
 
-      // Target moved during verify-ri — need to re-rebase and re-verify
+      // Target moved during verification — need to re-rebase and re-verify
       ctx.logInfo(`Target branch '${targetBranch}' advanced during verification (${snapshot.baseCommit.slice(0, 8)} → ${currentHead.slice(0, 8)}). Will retry from prechecks.`);
       return {
         success: false,

@@ -2,7 +2,7 @@
  * @fileoverview Snapshot Prechecks Phase Executor
  *
  * Custom prechecks for the snapshot-validation node. Checks targetBranch
- * health before running verify-ri:
+ * health before running verification:
  *
  * - Clean, same commit as snapshot base → proceed
  * - Clean, ahead → rebase snapshot worktree onto new targetBranch HEAD

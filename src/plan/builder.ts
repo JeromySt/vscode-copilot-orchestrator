@@ -327,7 +327,7 @@ export function buildPlan(
   // Every plan has a targetBranch (defaults to baseBranch). The snapshot-
   // validation node depends on all current leaves and becomes the new sole
   // leaf. It handles: merge-fi (accumulate leaves) → prechecks (target health)
-  // → work (verify-ri) → postchecks (re-check target) → merge-ri (to target).
+  // → work (verification) → postchecks (re-check target) → merge-ri (to target).
   const svNodeId = uuidv4();
   const svProducerId = '__snapshot-validation__';
   const svTargetBranch = spec.targetBranch || spec.baseBranch || 'main';

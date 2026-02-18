@@ -151,7 +151,7 @@ suite('FinalMergeExecutor', () => {
     assert.strictEqual(result.success, false);
   });
 
-  test('verify-ri failure blocks merge', async () => {
+  test('verification failure blocks merge', async () => {
     const git = mockGitOperations();
     (git.repository.resolveRef as sinon.SinonStub).resolves('base123');
 
@@ -161,7 +161,7 @@ suite('FinalMergeExecutor', () => {
 
     const result = await executor.execute(plan);
     assert.strictEqual(result.success, false);
-    // verify-ri is called before merge
+    // verification is called before merge
     assert.ok(verifyRi.called);
   });
 
