@@ -178,6 +178,7 @@ function createMockGitOps(): any {
       isOrchestratorGitIgnoreConfigured: sinon.stub().resolves(true),
       ensureOrchestratorGitIgnore: sinon.stub().resolves(true),
     },
+    command: {} as any,
   } as any;
 }
 
@@ -463,7 +464,7 @@ suite('JobExecutionEngine - Coverage', () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
       const ns = plan.nodeStates.get('node-1')!;
-      ns.autoHealAttempted = { work: true };
+      ns.autoHealAttempted = { work: 2 }; // budget exhausted (MAX_AUTO_HEAL_PER_PHASE = 2)
       const node = plan.nodes.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'npm test' };
       node.autoHeal = true;

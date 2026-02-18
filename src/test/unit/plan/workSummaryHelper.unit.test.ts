@@ -33,6 +33,7 @@ function makeMockGit() {
       getFileChangesBetween: sinon.stub(),
     } as any,
     gitignore: {} as any,
+    command: {} as any,
   };
 }
 

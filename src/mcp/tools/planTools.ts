@@ -62,6 +62,7 @@ export async function getPlanToolDefinitions(): Promise<McpTool[]> {
     {
       name: 'create_copilot_plan',
       description: `Create a Plan (Directed Acyclic Graph) of work units. Everything is a Plan - even a single job.
+After creation, use reshape_copilot_plan to add/remove/reorder nodes in a running or paused plan.
 
 PRODUCER_ID IS REQUIRED:
 - Every job MUST have a 'producer_id' field
@@ -129,17 +130,32 @@ EXECUTION CONTEXT:
 - Each job gets its own git worktree for isolated work
 - Dependencies chain commits - dependent jobs start from their parent's commit
 
-WORK OPTIONS (work/prechecks/postchecks accept):
+WORK OPTIONS (work/prechecks/postchecks/verify_ri accept):
 1. String: "npm run build" (runs in default shell) or "@agent Implement feature" 
 2. Process spec: { type: "process", executable: "dotnet", args: ["build", "-c", "Release"] }
 3. Shell spec: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
 4. Agent spec: { type: "agent", instructions: "# Task\\n\\n1. Step one", model: "claude-sonnet-4.5" }
 
+ON_FAILURE CONFIG (optional on any work/prechecks/postchecks object):
+Add "on_failure" to any work spec object to control retry behavior on failure:
+- no_auto_heal: true — prevents automatic AI-assisted retry, requires manual intervention
+- message: "User-facing explanation" — shown in the node detail panel on failure
+- resume_from_phase: "prechecks" — which phase to restart from on retry (merge-fi/prechecks/work/postchecks/commit/merge-ri)
+Example: { type: "shell", command: "npm test", on_failure: { no_auto_heal: true, message: "Tests must pass before merge" } }
+
+VERIFY_RI (SNAPSHOT VALIDATION — HIGHLY RECOMMENDED):
+The verify_ri command runs as the work phase of an auto-injected "Snapshot Validation" node that executes
+after all leaf nodes complete. It validates the accumulated snapshot branch before merging to targetBranch.
+Auto-healable: if verification fails, the AI agent attempts to fix the issue and re-runs.
+Example: "dotnet build --no-restore", "npm run build && npm test", or "@agent Verify compilation and fix any issues"
+
 IMPORTANT: For agent work, specify 'model' INSIDE the work object (not at job level).
 Agent instructions MUST be in Markdown format for proper rendering.
 If the project has .github/skills/ directories, incorporate relevant skill conventions into agent instructions for best results.
 
-SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
+SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"
+POWERSHELL NOTE: On Windows, PowerShell is the default shell. The orchestrator automatically wraps commands with $ErrorActionPreference='Continue' and 'exit $LASTEXITCODE' to prevent stderr from native commands causing false failures. Do NOT use '2>&1' in PowerShell commands — it causes NativeCommandError when commands write warnings to stderr, leading to false exit code 1 even when the command succeeds. The orchestrator captures stdout and stderr separately, so 2>&1 is never needed.
+To override $ErrorActionPreference, set "error_action" on the shell spec: "Continue" (default), "Stop", or "SilentlyContinue".`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -172,6 +188,26 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
             type: 'boolean',
             description: 'Create the plan in paused state for review before execution (default: true). Set to false to start immediately.'
           },
+          verify_ri: {
+            description: 'Optional (but HIGHLY recommended) verification command run as the work phase of the auto-injected Snapshot Validation node. Executes after all leaf nodes complete, validating the accumulated snapshot before merging to targetBranch. Auto-healable: on failure, Copilot CLI attempts to fix the issue. String command or object with type: process/shell/agent. Example: "dotnet build --no-restore" or "npm run build"',
+            oneOf: [
+              { type: 'string', maxLength: 4000 },
+              {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', enum: ['process', 'shell', 'agent'] },
+                  command: { type: 'string' },
+                  executable: { type: 'string' },
+                  args: { type: 'array', items: { type: 'string' } },
+                  shell: { type: 'string', enum: ['cmd', 'powershell', 'pwsh', 'bash', 'sh'] },
+                  instructions: { type: 'string' },
+                  model: { type: 'string' },
+                  maxTurns: { type: 'number' },
+                  on_failure: { type: 'object' }
+                }
+              }
+            ]
+          },
           jobs: {
             type: 'array',
             description: 'Array of job specifications',
@@ -199,7 +235,7 @@ SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"`,
 4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "claude-sonnet-4.5" }
 
 For process type, args is an array - no shell quoting needed.
-For shell type, shell can be: cmd, powershell, pwsh, bash, sh
+For shell type, shell can be: cmd, powershell, pwsh, bash, sh. Do NOT use '2>&1' in PowerShell — the orchestrator captures stderr separately.
 For agent type, model goes INSIDE the work object. Available models: ${modelEnum.join(', ')}
 Fast models (haiku/mini) for simple tasks, premium models (opus) for complex reasoning.
 
@@ -595,6 +631,105 @@ Agent instructions MUST be in Markdown format.`
           }
         },
         required: ['planId', 'nodeId']
+      }
+    },
+
+    // =========================================================================
+    // RESHAPE (TOPOLOGY CHANGES)
+    // =========================================================================
+    {
+      name: 'reshape_copilot_plan',
+      description: `Reshape a running or paused plan's DAG topology. Supports adding, removing, and reordering nodes.
+
+OPERATIONS (executed sequentially):
+- add_node: Add a new node with spec (producer_id, task, work, dependencies)
+- remove_node: Remove a pending/ready node by nodeId or producer_id
+- update_deps: Replace a node's dependency list (nodeId + dependencies array)
+- add_before: Insert a new node before an existing node (new node uses spec.dependencies; existing node is rewired to depend on the new node)
+- add_after: Insert a new node after an existing node (takes over its dependents)
+
+EXAMPLE:
+{
+  "planId": "<uuid>",
+  "operations": [
+    {
+      "type": "add_node",
+      "spec": { "producer_id": "lint-fix", "task": "Fix lint errors", "dependencies": ["build"] }
+    },
+    {
+      "type": "remove_node",
+      "producer_id": "obsolete-step"
+    },
+    {
+      "type": "add_before",
+      "existingNodeId": "<node-uuid>",
+      "spec": { "producer_id": "setup-db", "task": "Initialize test DB", "dependencies": [] }
+    }
+  ]
+}
+
+NOTES:
+- Plan must be running or paused
+- Only pending/ready nodes can be removed or have dependencies updated
+- Cycle detection prevents invalid dependency additions
+- The "Snapshot Validation" node (producer_id: __snapshot-validation__) is auto-managed — it cannot be removed, updated, or have its dependencies changed. Its dependencies sync automatically when the plan topology changes.
+- Returns per-operation results and updated topology`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: {
+            type: 'string',
+            description: 'Plan ID (UUID) to reshape'
+          },
+          operations: {
+            type: 'array',
+            description: 'Array of reshape operations to execute sequentially',
+            items: {
+              type: 'object',
+              properties: {
+                type: {
+                  type: 'string',
+                  enum: ['add_node', 'remove_node', 'update_deps', 'add_before', 'add_after'],
+                  description: 'Operation type'
+                },
+                spec: {
+                  type: 'object',
+                  description: 'Node spec for add_node, add_before, add_after. Must include producer_id, task, dependencies.',
+                  properties: {
+                    producer_id: { type: 'string', pattern: '^[a-z0-9-]{3,64}$' },
+                    name: { type: 'string' },
+                    task: { type: 'string' },
+                    work: { description: 'Work spec (string or object)' },
+                    dependencies: { type: 'array', items: { type: 'string' } },
+                    prechecks: { description: 'Prechecks spec' },
+                    postchecks: { description: 'Postchecks spec' },
+                    instructions: { type: 'string' },
+                    expects_no_changes: { type: 'boolean' }
+                  }
+                },
+                nodeId: {
+                  type: 'string',
+                  description: 'Node ID (UUID) or producer_id for remove_node / update_deps'
+                },
+                producer_id: {
+                  type: 'string',
+                  description: 'Producer ID for remove_node (alternative to nodeId)'
+                },
+                existingNodeId: {
+                  type: 'string',
+                  description: 'Existing node ID for add_before / add_after'
+                },
+                dependencies: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'New dependency list for update_deps (node IDs or producer_ids)'
+                }
+              },
+              required: ['type']
+            }
+          }
+        },
+        required: ['planId', 'operations']
       }
     },
   ];

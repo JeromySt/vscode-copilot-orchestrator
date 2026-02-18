@@ -255,6 +255,13 @@ export interface JobNode extends BaseNode {
   * Used to push state updates from jobs to their parent group.
   */
  groupId?: string;
+
+  /**
+   * Pre-assigned worktree path. Internal-only field set by the orchestrator
+   * (e.g., for the snapshot-validation node that reuses the snapshot worktree).
+   * When set, the engine uses this worktree instead of creating a new one.
+   */
+  assignedWorktreePath?: string;
 }
 
 /**

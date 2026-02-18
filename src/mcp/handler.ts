@@ -17,7 +17,7 @@ import { JsonRpcRequest, JsonRpcResponse } from './types';
 import { IMcpRequestRouter } from '../interfaces/IMcpManager';
 import { getPlanToolDefinitions } from './tools/planTools';
 import { getNodeToolDefinitions } from './tools/nodeTools';
-import { validateInput, hasSchema } from './validation';
+import { validateInput, hasSchema, validatePostchecksPresence } from './validation';
 import {
   PlanHandlerContext,
   handleCreatePlan,
@@ -39,6 +39,7 @@ import {
   handleRetryNode,
   handleForceFailNode,
   handleNodeFailureContext,
+  handleReshapePlan,
 } from './handlers';
 
 /** MCP component logger */
@@ -236,9 +237,14 @@ export class McpHandler implements IMcpRequestRouter {
     
     // Route to appropriate handler
     switch (name) {
-      case 'create_copilot_plan':
+      case 'create_copilot_plan': {
+        const postchecksWarnings = validatePostchecksPresence(args || {});
         result = await handleCreatePlan(args || {}, this.context);
+        if (postchecksWarnings.length > 0 && result && typeof result === 'object' && (result as any).success === true) {
+          result.warnings = postchecksWarnings;
+        }
         break;
+      }
         
       case 'get_copilot_plan_status':
         result = await handleGetPlanStatus(args || {}, this.context);
@@ -290,6 +296,10 @@ export class McpHandler implements IMcpRequestRouter {
         
       case 'update_copilot_plan_node':
         result = await handleUpdatePlanNode(args || {}, this.context);
+        break;
+        
+      case 'reshape_copilot_plan':
+        result = await handleReshapePlan(args || {}, this.context);
         break;
         
       // --- New node-centric tools ---

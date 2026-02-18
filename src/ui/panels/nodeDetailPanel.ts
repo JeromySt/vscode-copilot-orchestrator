@@ -32,6 +32,20 @@ import { NodeDetailController, NodeDetailCommands } from './nodeDetailController
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
 
 /**
+ * Extract onFailure config from a WorkSpec (if present).
+ */
+function extractOnFailure(spec: WorkSpec | undefined): { noAutoHeal?: boolean; message?: string; resumeFromPhase?: string } | undefined {
+  if (!spec || typeof spec === 'string') {return undefined;}
+  const onFailure = (spec as any).onFailure;
+  if (!onFailure) {return undefined;}
+  return {
+    noAutoHeal: onFailure.noAutoHeal,
+    message: onFailure.message,
+    resumeFromPhase: onFailure.resumeFromPhase,
+  };
+}
+
+/**
  * Format a {@link WorkSpec} as a plain-text summary string.
  *
  * @param spec - The work specification to format.
@@ -443,6 +457,8 @@ export class NodeDetailPanel {
           status: state.status,
           phaseStatus,
           currentPhase,
+          startedAt: state.startedAt,
+          endedAt: state.endedAt,
         });
 
         // Push incremental attempt history when new attempts are recorded
@@ -692,12 +708,17 @@ export class NodeDetailPanel {
       data: {
         work: node.work ? renderSpecContent(node.work) : undefined,
         workType: node.work ? getSpecTypeInfo(node.work) : undefined,
+        workSkipped: !node.work,
+        workOnFailure: extractOnFailure(node.work),
         prechecks: node.prechecks ? renderSpecContent(node.prechecks) : undefined,
         prechecksType: node.prechecks ? getSpecTypeInfo(node.prechecks) : undefined,
+        prechecksOnFailure: extractOnFailure(node.prechecks),
         postchecks: node.postchecks ? renderSpecContent(node.postchecks) : undefined,
         postchecksType: node.postchecks ? getSpecTypeInfo(node.postchecks) : undefined,
+        postchecksOnFailure: extractOnFailure(node.postchecks),
         task: node.task,
         currentPhase: getCurrentExecutionPhase(state),
+        expectsNoChanges: node.expectsNoChanges,
       }
     });
   }
@@ -736,6 +757,7 @@ export class NodeDetailPanel {
       premiumRequests: metrics.premiumRequests,
       apiTimeSeconds: metrics.apiTimeSeconds,
       sessionTimeSeconds: metrics.sessionTimeSeconds,
+      codeChanges: metrics.codeChanges,
       modelBreakdown: metrics.modelBreakdown,
     });
   }
@@ -977,8 +999,8 @@ export class NodeDetailPanel {
    *   to status strings (`'pending'`, `'running'`, `'success'`, `'failed'`, `'skipped'`).
    */
   private _getPhaseStatus(state: NodeExecutionState): Record<string, string> {
-    // Always produce all 6 phases: merge-fi, prechecks, work, commit, postchecks, merge-ri.
-    // stepStatuses (from executor) covers prechecks/work/commit/postchecks.
+    // Always produce all phases: merge-fi, prechecks, work, commit, postchecks, merge-ri.
+    // stepStatuses (from executor) covers prechecks/work/commit/postchecks/merge-ri.
     // Merge phases are derived from lastAttempt.phase and error messages.
     
     const result: Record<string, string> = {
@@ -997,10 +1019,12 @@ export class NodeDetailPanel {
         : undefined);
     
     if (ss) {
+      result['merge-fi'] = ss['merge-fi'] || 'pending';
       result.prechecks = ss.prechecks || 'pending';
       result.work = ss.work || 'pending';
       result.commit = ss.commit || 'pending';
       result.postchecks = ss.postchecks || 'pending';
+      result['merge-ri'] = ss['merge-ri'] || 'pending';
     }
     
     const status = state.status;
@@ -1008,20 +1032,23 @@ export class NodeDetailPanel {
     const failedPhase = state.lastAttempt?.phase;
     
     if (status === 'succeeded') {
-      result['merge-fi'] = 'success';
+      // When stepStatuses exist, they already have the correct values (including 'skipped').
+      // Only set merge-fi/merge-ri to 'success' as fallback when no stepStatuses.
       if (!ss) {
+        result['merge-fi'] = 'success';
         result.prechecks = 'success';
         result.work = 'success';
         result.commit = 'success';
         result.postchecks = 'success';
+        result['merge-ri'] = 'success';
       }
-      result['merge-ri'] = 'success';
     } else if (status === 'failed') {
+      // When stepStatuses exist, merge-fi/merge-ri are already populated.
+      // Only override specific phases for the failure indicator and fallback heuristics.
       // Check for merge-ri failure (via lastAttempt.phase or error message)
       if (failedPhase === 'merge-ri' || error.includes('Reverse integration merge')) {
-        // All executor phases succeeded, RI merge failed
-        result['merge-fi'] = 'success';
         if (!ss) {
+          result['merge-fi'] = 'success';
           result.prechecks = 'success';
           result.work = 'success';
           result.commit = 'success';
@@ -1056,13 +1083,10 @@ export class NodeDetailPanel {
           result.prechecks = 'success';
           result.work = 'failed';
         }
-      } else {
-        // stepStatuses present, non-merge failure — merge-fi presumably succeeded
-        result['merge-fi'] = 'success';
       }
     } else if (status === 'running') {
-      result['merge-fi'] = 'success';
       if (!ss) {
+        result['merge-fi'] = 'success';
         result.prechecks = 'success';
         result.work = 'running';
       }
@@ -1401,7 +1425,55 @@ export class NodeDetailPanel {
     .phase-type-badge.shell { background: rgba(72, 187, 120, 0.2); color: #48bb78; }
     .phase-type-badge.process { background: rgba(237, 137, 54, 0.2); color: #ed8936; }
     .phase-type-badge.agent { background: rgba(99, 179, 237, 0.2); color: #63b3ed; }
+    .phase-type-badge.skipped { background: rgba(128, 128, 128, 0.15); color: var(--vscode-disabledForeground); font-style: italic; }
     .config-phase-body { padding: 8px 12px; }
+
+    /* On-failure config display */
+    .on-failure-config {
+      margin-top: 8px;
+      padding: 6px 10px;
+      border: 1px solid rgba(237, 137, 54, 0.3);
+      border-radius: 5px;
+      background: rgba(237, 137, 54, 0.06);
+      font-size: 11px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .failure-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 10px;
+    }
+    .failure-badge.no-heal { background: rgba(220, 38, 38, 0.15); color: #ef4444; }
+    .failure-badge.resume { background: rgba(99, 179, 237, 0.15); color: #63b3ed; }
+    .failure-badge-inline {
+      font-size: 12px;
+      margin-left: 2px;
+      opacity: 0.8;
+    }
+    .failure-message {
+      width: 100%;
+      color: var(--vscode-descriptionForeground);
+      font-style: italic;
+      line-height: 1.4;
+    }
+    .config-hint {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      font-style: italic;
+    }
+    .spec-empty {
+      color: var(--vscode-disabledForeground);
+      font-style: italic;
+      font-size: 12px;
+      padding: 4px 0;
+    }
     
     /* Work Display Formatting */
     .work-item .config-value {

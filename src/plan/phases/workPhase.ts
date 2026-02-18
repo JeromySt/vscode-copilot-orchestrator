@@ -15,14 +15,14 @@ import type { ProcessSpec, ShellSpec, AgentSpec, CopilotUsageMetrics } from '../
 import { killProcessTree } from '../../process/processHelpers';
 
 /** Adapt a shell command for Windows PowerShell 5.x compatibility. */
-export function adaptCommandForPowerShell(command: string): string {
+export function adaptCommandForPowerShell(command: string, errorAction: string = 'Continue'): string {
   // Adapt && chaining to PowerShell's error-checking equivalent
   const adapted = command.replace(/\s*&&\s*/g, '; if (!$?) { exit 1 }; ').replace(/\bls\s+-la\b/g, 'Get-ChildItem');
-  // Wrap in $ErrorActionPreference = 'Continue' to prevent stderr from native
-  // commands being treated as terminating errors. PowerShell by default wraps
-  // stderr output as NativeCommandError which can cause unexpected failures.
-  // We rely solely on exit code (not stderr content) to determine success.
-  return `$ErrorActionPreference = 'Continue'; ${adapted}; exit $LASTEXITCODE`;
+  // Set $ErrorActionPreference to control how PowerShell handles non-terminating
+  // errors (e.g. stderr from native commands). Default 'Continue' prevents
+  // NativeCommandError from causing unexpected failures. Callers can override
+  // to 'Stop' when stderr truly indicates failure.
+  return `$ErrorActionPreference = '${errorAction}'; ${adapted}; exit $LASTEXITCODE`;
 }
 
 // Shared helper: spawn a process/shell and track it in the PhaseContext
@@ -97,18 +97,21 @@ export function runProcess(spec: ProcessSpec, ctx: PhaseContext, spawner: IProce
 export function runShell(spec: ShellSpec, ctx: PhaseContext, spawner: IProcessSpawner): Promise<PhaseResult> {
   const cwd = spec.cwd ? path.resolve(ctx.worktreePath, spec.cwd) : ctx.worktreePath;
   const isWindows = process.platform === 'win32';
+  const ea = spec.errorAction || 'Continue';
   let shell: string, shellArgs: string[];
   switch (spec.shell) {
     case 'cmd': shell = 'cmd.exe'; shellArgs = ['/c', spec.command]; break;
-    case 'powershell': shell = 'powershell.exe'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', spec.command]; break;
-    case 'pwsh': shell = 'pwsh'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', spec.command]; break;
+    case 'powershell': shell = 'powershell.exe'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', adaptCommandForPowerShell(spec.command, ea)]; break;
+    case 'pwsh': shell = 'pwsh'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', adaptCommandForPowerShell(spec.command, ea)]; break;
     case 'bash': shell = 'bash'; shellArgs = ['-c', spec.command]; break;
     case 'sh': shell = '/bin/sh'; shellArgs = ['-c', spec.command]; break;
     default:
-      if (isWindows) { shell = 'powershell.exe'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', adaptCommandForPowerShell(spec.command)]; }
+      if (isWindows) { shell = 'powershell.exe'; shellArgs = ['-NoProfile', '-NonInteractive', '-Command', adaptCommandForPowerShell(spec.command, ea)]; }
       else { shell = '/bin/sh'; shellArgs = ['-c', spec.command]; }
   }
   ctx.logInfo(`Command: ${spec.command}`);
+  if (spec.shell) {ctx.logInfo(`Shell: ${shell}`);}
+  if (spec.errorAction) {ctx.logInfo(`ErrorActionPreference: ${spec.errorAction}`);}
   if (spec.env) {ctx.logInfo(`Environment overrides: ${JSON.stringify(spec.env)}`);}
   return spawnAndTrack(spawner, shell, shellArgs, cwd, { ...process.env, ...spec.env }, spec.timeout || 0, ctx, 'Shell');
 }
@@ -116,14 +119,28 @@ export function runShell(spec: ShellSpec, ctx: PhaseContext, spawner: IProcessSp
 /** Run agent work. */
 export async function runAgent(
   spec: AgentSpec, ctx: PhaseContext,
-  agentDelegator: any | undefined, getCopilotConfigDir: (worktreePath: string) => string,
+  agentDelegator: any | undefined,
 ): Promise<PhaseResult> {
   if (!agentDelegator) {return { success: false, error: 'Agent work requires an agent delegator to be configured' };}
   ctx.setIsAgentWork(true);
   const startTime = Date.now();
   ctx.setStartTime(startTime);
   ctx.logInfo(`Agent instructions: ${spec.instructions}`);
-  if (spec.model) {ctx.logInfo(`Using model: ${spec.model}`);}
+
+  // Resolve model from modelTier if model isn't explicitly set
+  let resolvedModel = spec.model;
+  if (!resolvedModel && spec.modelTier) {
+    try {
+      const { suggestModel } = await import('../../agent/modelDiscovery');
+      const suggested = await suggestModel(spec.modelTier);
+      if (suggested) {
+        resolvedModel = suggested.id;
+        ctx.logInfo(`Resolved modelTier '${spec.modelTier}' → '${resolvedModel}'`);
+      }
+    } catch { /* fallback to default */ }
+  }
+
+  if (resolvedModel) {ctx.logInfo(`Using model: ${resolvedModel}`);}
   if (spec.contextFiles?.length) {ctx.logInfo(`Agent context files: ${spec.contextFiles.join(', ')}`);}
   if (spec.maxTurns) {ctx.logInfo(`Agent max turns: ${spec.maxTurns}`);}
   if (spec.context) {ctx.logInfo(`Agent context: ${spec.context}`);}
@@ -131,13 +148,12 @@ export async function runAgent(
   if (spec.allowedFolders?.length) {ctx.logInfo(`Agent allowed folders: ${spec.allowedFolders.join(', ')}`);}
   if (spec.allowedUrls?.length) {ctx.logInfo(`Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);}
   try {
-    const configDir = getCopilotConfigDir(ctx.worktreePath);
     const result = await agentDelegator.delegate({
       task: spec.instructions,
       instructions: ctx.node.instructions || spec.context,
-      worktreePath: ctx.worktreePath, model: spec.model,
+      worktreePath: ctx.worktreePath, model: resolvedModel,
       contextFiles: spec.contextFiles, maxTurns: spec.maxTurns,
-      sessionId: ctx.sessionId, jobId: ctx.node.id, configDir,
+      sessionId: ctx.sessionId, jobId: ctx.node.id,
       allowedFolders: spec.allowedFolders, allowedUrls: spec.allowedUrls,
       logOutput: (line: string) => ctx.logInfo(line),
       onProcess: (proc: any) => { ctx.setProcess(proc); ctx.setIsAgentWork(true); },
@@ -162,16 +178,13 @@ export async function runAgent(
 /** Executes the main work phase of a job node. */
 export class WorkPhaseExecutor implements IPhaseExecutor {
   private agentDelegator?: any;
-  private getCopilotConfigDir: (worktreePath: string) => string;
   private spawner: IProcessSpawner;
   
   constructor(deps: { 
     agentDelegator?: any; 
-    getCopilotConfigDir: (worktreePath: string) => string;
     spawner: IProcessSpawner;
   }) {
     this.agentDelegator = deps.agentDelegator;
-    this.getCopilotConfigDir = deps.getCopilotConfigDir;
     this.spawner = deps.spawner;
   }
   
@@ -182,7 +195,7 @@ export class WorkPhaseExecutor implements IPhaseExecutor {
     switch (normalized.type) {
       case 'process': return runProcess(normalized as ProcessSpec, context, this.spawner);
       case 'shell': return runShell(normalized as ShellSpec, context, this.spawner);
-      case 'agent': return runAgent(normalized as AgentSpec, context, this.agentDelegator, this.getCopilotConfigDir);
+      case 'agent': return runAgent(normalized as AgentSpec, context, this.agentDelegator);
       default: return { success: false, error: `Unknown work type: ${(normalized as any).type}` };
     }
   }

@@ -55,7 +55,6 @@ export interface ICopilotRunner {
     model?: string;
     logDir?: string;
     sharePath?: string;
-    configDir?: string;
     cwd?: string;
     allowedFolders?: string[];
     allowedUrls?: string[];

@@ -135,8 +135,25 @@ export class JobExecutionEngine {
       // Determine base commits from dependencies (RI/FI model)
       // First commit is the base, additional commits are merged in
       const baseCommits = sm.getBaseCommitsForNode(node.id);
-      const baseCommitish = baseCommits.length > 0 ? baseCommits[0] : plan.baseBranch;
-      const additionalSources = baseCommits.slice(1);
+      // Root nodes (no deps) use the snapshot's pinned commit so every root
+      // starts from the same codebase even if targetBranch moves during execution.
+      let baseCommitish = baseCommits.length > 0
+        ? baseCommits[0]
+        : (plan.snapshot?.baseCommit ?? plan.baseBranch);
+      let additionalSources = baseCommits.slice(1);
+      
+      // SV node uses a pre-assigned snapshot worktree. Its deps' commits
+      // must ALL be forward-integrated (merge-fi) into that worktree — none
+      // of them served as the worktree's creation base. Treat every dep
+      // commit as an additional source so merge-fi brings them all in.
+      const isSvNode = node.assignedWorktreePath
+        && plan.snapshot
+        && node.assignedWorktreePath === plan.snapshot.worktreePath;
+      if (isSvNode && baseCommits.length > 0) {
+        additionalSources = baseCommits; // ALL deps go through merge-fi
+        baseCommitish = plan.snapshot!.baseCommit; // worktree was created from snapshot base
+      }
+
       
       // Build dependency info map for enhanced logging
       const dependencyInfoMap = new Map<string, DependencyInfo>();
@@ -153,9 +170,9 @@ export class JobExecutionEngine {
         }
       }
       
-      // Create worktree path using first 8 chars of node UUID (flat structure)
-      // All worktrees are directly under .worktrees/<shortId> for simplicity
-      const worktreePath = path.join(plan.worktreeRoot, node.id.slice(0, 8));
+      // Use pre-assigned worktree if set (e.g., snapshot worktree), otherwise
+      // create a worktree path using first 8 chars of node UUID (flat structure)
+      const worktreePath = node.assignedWorktreePath || path.join(plan.worktreeRoot, node.id.slice(0, 8));
       
       // Store in state (no branchName since we use detached HEAD)
       nodeState.worktreePath = worktreePath;
@@ -254,6 +271,11 @@ export class JobExecutionEngine {
           // Non-leaf nodes' commits are forward-integrated into children instead.
           targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
           baseCommitAtStart: plan.baseCommitAtStart,
+          // Snapshot branch for leaf RI merges (merges go here instead of targetBranch).
+          // The SV node itself merges FROM snapshot INTO targetBranch, so it doesn't
+          // redirect — its merge-ri targets plan.targetBranch directly.
+          snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
+          snapshotWorktreePath: plan.snapshot?.worktreePath,
           onProgress: (step) => {
             this.log.debug(`Job progress: ${node.name} - ${step}`);
           },
@@ -394,25 +416,46 @@ export class JobExecutionEngine {
           const isNonAgentWork = normalizedFailedSpec && normalizedFailedSpec.type !== 'agent';
           const autoHealEnabled = node.autoHeal !== false; // default true
           
+          // Phase-level noAutoHeal overrides node-level autoHeal
+          const phaseNoAutoHeal = result.noAutoHeal === true;
+          
           // Detect external interruption (SIGTERM, SIGKILL, etc.)
           const wasExternallyKilled = result.error?.includes('killed by signal');
           
           // INFO logging for auto-retry decision (visible in logs)
-          this.log.info(`Auto-retry decision for ${node.name}: phase=${failedPhase}, isHealable=${isHealablePhase}, isAgentWork=${isAgentWork}, wasExternallyKilled=${wasExternallyKilled}, autoHealEnabled=${autoHealEnabled}`, {
+          this.log.info(`Auto-retry decision for ${node.name}: phase=${failedPhase}, isHealable=${isHealablePhase}, isAgentWork=${isAgentWork}, wasExternallyKilled=${wasExternallyKilled}, autoHealEnabled=${autoHealEnabled}, phaseNoAutoHeal=${phaseNoAutoHeal}`, {
             planId: plan.id,
             nodeId: node.id,
             error: result.error,
           });
           
-          const phaseAlreadyHealed = nodeState.autoHealAttempted?.[failedPhase as 'prechecks' | 'work' | 'postchecks'];
+          // Store failure message on node state for UI display
+          if (result.failureMessage) {
+            nodeState.forceFailMessage = result.failureMessage;
+          }
+          
+          // Override resumeFromPhase if specified by the phase executor
+          if (result.overrideResumeFromPhase) {
+            nodeState.resumeFromPhase = result.overrideResumeFromPhase;
+          }
+          
+          const healCount = (() => {
+            const v = nodeState.autoHealAttempted?.[failedPhase as 'prechecks' | 'work' | 'postchecks'];
+            if (v === true) {return 1;} // backward compat
+            return typeof v === 'number' ? v : 0;
+          })();
+          const MAX_AUTO_HEAL_PER_PHASE = 2;
+          const phaseAlreadyHealed = healCount >= MAX_AUTO_HEAL_PER_PHASE;
           
           // Auto-retry is allowed if:
           // 1. Non-agent work (existing behavior - swap to agent)
           // 2. Agent work that was externally killed (retry same agent)
-          const shouldAttemptAutoRetry = isHealablePhase && autoHealEnabled && !phaseAlreadyHealed &&
+          // 3. NOT blocked by phase-level noAutoHeal
+          // 4. Under per-phase heal budget
+          const shouldAttemptAutoRetry = isHealablePhase && autoHealEnabled && !phaseAlreadyHealed && !phaseNoAutoHeal &&
             (isNonAgentWork || (isAgentWork && wasExternallyKilled));
           
-          this.log.info(`Auto-retry shouldAttempt=${shouldAttemptAutoRetry}: isHealablePhase=${isHealablePhase}, autoHealEnabled=${autoHealEnabled}, phaseAlreadyHealed=${phaseAlreadyHealed}, isNonAgentWork=${isNonAgentWork}, isAgentWork=${isAgentWork}`, {
+          this.log.info(`Auto-retry shouldAttempt=${shouldAttemptAutoRetry}: isHealablePhase=${isHealablePhase}, autoHealEnabled=${autoHealEnabled}, phaseAlreadyHealed=${phaseAlreadyHealed}, phaseNoAutoHeal=${phaseNoAutoHeal}, isNonAgentWork=${isNonAgentWork}, isAgentWork=${isAgentWork}`, {
             planId: plan.id,
             nodeId: node.id,
           });
@@ -422,7 +465,7 @@ export class JobExecutionEngine {
           
           if (shouldAttemptAutoRetry) {
             if (!nodeState.autoHealAttempted) {nodeState.autoHealAttempted = {};}
-            nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = true;
+            nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = healCount + 1;
             
             if (isAgentWork && wasExternallyKilled) {
               // Agent was interrupted - retry with same spec (don't swap to different agent spec)
@@ -461,6 +504,8 @@ export class JobExecutionEngine {
                 repoPath: plan.repoPath,
                 targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
                 baseCommitAtStart: plan.baseCommitAtStart,
+                snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
+                snapshotWorktreePath: plan.snapshot?.worktreePath,
                 onProgress: (step) => {
                   this.log.debug(`Auto-retry progress: ${node.name} - ${step}`);
                 },
@@ -697,6 +742,8 @@ export class JobExecutionEngine {
               repoPath: plan.repoPath,
               targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
               baseCommitAtStart: plan.baseCommitAtStart,
+              snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
+              snapshotWorktreePath: plan.snapshot?.worktreePath,
               onProgress: (step) => {
                 this.log.debug(`Auto-heal progress: ${node.name} - ${step}`);
               },
@@ -749,6 +796,164 @@ export class JobExecutionEngine {
               }
               if (healResult.phaseMetrics) {
                 nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...healResult.phaseMetrics };
+              }
+              
+              // ---- POSTCHECKS RE-VALIDATION LOOP ----
+              // When auto-heal healed the postchecks phase, the agent replaced the
+              // original postchecks spec.  Re-run the caller's original postchecks
+              // as a new attempt so the caller's exit-criteria gate is honoured.
+              // For other failed phases (work, prechecks) the heal execution already
+              // ran the original postchecks in its pipeline, so no extra pass needed.
+              // Loops within MAX_AUTO_HEAL_PER_PHASE budget: heal → reval → heal → reval → fail.
+              if (failedPhase === 'postchecks' && originalPostchecks) {
+                let revalPassed = false;
+                
+                for (let revalCycle = 0; ; revalCycle++) {
+                  const cycleLogMemory = this.state.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
+                  const cycleLogFile = this.state.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
+                  
+                  if (revalCycle > 0) {
+                    // Budget check for re-heal
+                    const curCount = (() => {
+                      const v = nodeState.autoHealAttempted?.['postchecks'];
+                      return v === true ? 1 : (typeof v === 'number' ? v : 0);
+                    })();
+                    if (curCount >= MAX_AUTO_HEAL_PER_PHASE) {
+                      this.log.warn(`Auto-heal budget exhausted for postchecks on ${node.name} (${curCount}/${MAX_AUTO_HEAL_PER_PHASE})`, { planId: plan.id, nodeId: node.id });
+                      break;
+                    }
+                    if (!nodeState.autoHealAttempted) {nodeState.autoHealAttempted = {};}
+                    nodeState.autoHealAttempted['postchecks'] = curCount + 1;
+                    
+                    // Re-heal the postchecks phase
+                    nodeState.attempts++;
+                    nodeState.startedAt = Date.now();
+                    this.execLog(plan.id, node.id, 'postchecks', 'info', '', nodeState.attempts);
+                    this.execLog(plan.id, node.id, 'postchecks', 'info', `========== AUTO-HEAL: RE-HEALING POSTCHECKS (cycle ${revalCycle + 1}) ==========`, nodeState.attempts);
+                    
+                    node.postchecks = healSpec;
+                    const rhCtx: ExecutionContext = {
+                      plan, node, baseCommit: nodeState.baseCommit!, worktreePath,
+                      attemptNumber: nodeState.attempts, copilotSessionId: nodeState.copilotSessionId,
+                      resumeFromPhase: 'postchecks', previousStepStatuses: nodeState.stepStatuses,
+                      dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
+                      repoPath: plan.repoPath,
+                      targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
+                      baseCommitAtStart: plan.baseCommitAtStart,
+                      snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
+                      snapshotWorktreePath: plan.snapshot?.worktreePath,
+                      onProgress: (s) => { this.log.debug(`Re-heal progress: ${node.name} - ${s}`); },
+                      onStepStatusChange: (p, s) => { if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};} (nodeState.stepStatuses as any)[p] = s; },
+                    };
+                    const rhResult = await this.state.executor!.execute(rhCtx);
+                    node.postchecks = originalPostchecks;
+                    
+                    if (rhResult.stepStatuses) { nodeState.stepStatuses = rhResult.stepStatuses; }
+                    if (rhResult.copilotSessionId) { nodeState.copilotSessionId = rhResult.copilotSessionId; }
+                    
+                    if (!rhResult.success) {
+                      this.execLog(plan.id, node.id, 'postchecks', 'info', '========== AUTO-HEAL: FAILED ==========', nodeState.attempts);
+                      const rhRec: AttemptRecord = {
+                        attemptNumber: nodeState.attempts, triggerType: 'auto-heal', status: 'failed',
+                        startedAt: nodeState.startedAt || Date.now(), endedAt: Date.now(),
+                        failedPhase: 'postchecks', error: rhResult.error, exitCode: rhResult.exitCode,
+                        copilotSessionId: nodeState.copilotSessionId,
+                        stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
+                        worktreePath: nodeState.worktreePath, baseCommit: nodeState.baseCommit,
+                        logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, cycleLogMemory, cycleLogFile, nodeState.attempts),
+                        logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
+                        workUsed: healSpec, metrics: rhResult.metrics,
+                        phaseMetrics: rhResult.phaseMetrics ? { ...rhResult.phaseMetrics } : undefined,
+                      };
+                      nodeState.attemptHistory = [...(nodeState.attemptHistory || []), rhRec];
+                      nodeState.error = `Auto-heal failed (cycle ${revalCycle + 1}): ${rhResult.error}`;
+                      break;
+                    }
+                    this.execLog(plan.id, node.id, 'postchecks', 'info', '========== AUTO-HEAL: SUCCESS ==========', nodeState.attempts);
+                    if (rhResult.completedCommit) { nodeState.completedCommit = rhResult.completedCommit; }
+                    if (rhResult.metrics) { nodeState.metrics = rhResult.metrics; }
+                    if (rhResult.phaseMetrics) { nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...rhResult.phaseMetrics }; }
+                  }
+                  
+                  // Record the heal attempt as succeeded
+                  const hlm = revalCycle === 0 ? healLogMemoryOffset : cycleLogMemory;
+                  const hlf = revalCycle === 0 ? healLogFileOffset : cycleLogFile;
+                  const healRec: AttemptRecord = {
+                    attemptNumber: nodeState.attempts, triggerType: 'auto-heal', status: 'succeeded',
+                    startedAt: nodeState.startedAt || Date.now(), endedAt: Date.now(),
+                    copilotSessionId: nodeState.copilotSessionId,
+                    stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
+                    worktreePath: nodeState.worktreePath, baseCommit: nodeState.baseCommit,
+                    completedCommit: nodeState.completedCommit,
+                    logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, hlm, hlf, nodeState.attempts),
+                    logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
+                    workUsed: healSpec, metrics: nodeState.metrics,
+                    phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
+                  };
+                  nodeState.attemptHistory = [...(nodeState.attemptHistory || []), healRec];
+                  
+                  // New attempt: postchecks re-validation with original spec
+                  nodeState.attempts++;
+                  nodeState.startedAt = Date.now();
+                  this.execLog(plan.id, node.id, 'postchecks', 'info', '', nodeState.attempts);
+                  this.execLog(plan.id, node.id, 'postchecks', 'info', '========== POSTCHECKS RE-VALIDATION: RUNNING ORIGINAL POSTCHECKS ==========', nodeState.attempts);
+                  
+                  const rvlm = this.state.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
+                  const rvlf = this.state.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
+                  
+                  const rvCtx: ExecutionContext = {
+                    plan, node, baseCommit: nodeState.baseCommit!, worktreePath,
+                    attemptNumber: nodeState.attempts, copilotSessionId: nodeState.copilotSessionId,
+                    resumeFromPhase: 'postchecks', previousStepStatuses: nodeState.stepStatuses,
+                    dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
+                    repoPath: plan.repoPath,
+                    targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
+                    baseCommitAtStart: plan.baseCommitAtStart,
+                    snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
+                    snapshotWorktreePath: plan.snapshot?.worktreePath,
+                    onProgress: (s) => { this.log.debug(`Postchecks re-validation: ${node.name} - ${s}`); },
+                    onStepStatusChange: (p, s) => { if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};} (nodeState.stepStatuses as any)[p] = s; },
+                  };
+                  const rvResult = await this.state.executor!.execute(rvCtx);
+                  if (rvResult.stepStatuses) { nodeState.stepStatuses = rvResult.stepStatuses; }
+                  if (rvResult.copilotSessionId) { nodeState.copilotSessionId = rvResult.copilotSessionId; }
+                  
+                  if (rvResult.success) {
+                    this.log.info(`Postchecks re-validation passed for ${node.name}`, { planId: plan.id, nodeId: node.id });
+                    this.execLog(plan.id, node.id, 'postchecks', 'info', '========== POSTCHECKS RE-VALIDATION: PASSED ==========', nodeState.attempts);
+                    if (rvResult.completedCommit) { nodeState.completedCommit = rvResult.completedCommit; }
+                    if (rvResult.metrics) { nodeState.metrics = rvResult.metrics; }
+                    if (rvResult.phaseMetrics) { nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...rvResult.phaseMetrics }; }
+                    revalPassed = true;
+                    break;
+                  }
+                  
+                  // Re-validation failed — record and loop
+                  this.log.warn(`Postchecks re-validation failed (cycle ${revalCycle + 1}) for ${node.name}`, { planId: plan.id, nodeId: node.id, error: rvResult.error });
+                  this.execLog(plan.id, node.id, 'postchecks', 'info', '========== POSTCHECKS RE-VALIDATION: FAILED ==========', nodeState.attempts);
+                  this.execLog(plan.id, node.id, 'postchecks', 'error', `Original postchecks still failing after auto-heal: ${rvResult.error}`, nodeState.attempts);
+                  const rvRec: AttemptRecord = {
+                    attemptNumber: nodeState.attempts, triggerType: 'postchecks-revalidation', status: 'failed',
+                    startedAt: nodeState.startedAt || Date.now(), endedAt: Date.now(),
+                    failedPhase: 'postchecks', error: rvResult.error, exitCode: rvResult.exitCode,
+                    copilotSessionId: nodeState.copilotSessionId,
+                    stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
+                    worktreePath: nodeState.worktreePath, baseCommit: nodeState.baseCommit,
+                    logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, rvlm, rvlf, nodeState.attempts),
+                    logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
+                    metrics: rvResult.metrics, phaseMetrics: rvResult.phaseMetrics ? { ...rvResult.phaseMetrics } : undefined,
+                  };
+                  nodeState.attemptHistory = [...(nodeState.attemptHistory || []), rvRec];
+                }
+                
+                if (!revalPassed) {
+                  nodeState.error = nodeState.error || 'Postchecks re-validation exhausted auto-heal budget';
+                  nodeState.pid = undefined;
+                  sm.transition(node.id, 'failed');
+                  this.state.events.emit('nodeCompleted', plan.id, node.id, false);
+                  this.state.persistence.save(plan);
+                  return;
+                }
               }
               // Fall through to RI merge handling below
             } else {

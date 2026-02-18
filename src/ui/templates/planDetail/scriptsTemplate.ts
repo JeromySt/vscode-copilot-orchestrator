@@ -231,7 +231,10 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           var textEl = ng.querySelector('.nodeLabel') || ng.querySelector('span');
           if (textEl && textEl.textContent) {
             var gId = ng.getAttribute('id') || '';
-            nodeTextLengths[gId] = textEl.textContent.length;
+            var len = textEl.textContent.length;
+            nodeTextLengths[gId] = len;
+            // Store as HTML attribute for client-side update code
+            ng.setAttribute('data-max-text-len', String(len));
           }
         });
         // Capture rendered text lengths for cluster/subgraph labels
@@ -239,24 +242,31 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           var textEl = cg.querySelector('.cluster-label .nodeLabel') || cg.querySelector('.cluster-label span') || cg.querySelector('.cluster-label text');
           if (textEl && textEl.textContent) {
             var gId = cg.getAttribute('id') || '';
-            nodeTextLengths[gId] = textEl.textContent.length;
+            var len = textEl.textContent.length;
+            nodeTextLengths[gId] = len;
+            // Store as HTML attribute for client-side update code
+            cg.setAttribute('data-max-text-len', String(len));
           }
         });
 
-        // Strip duration from non-started nodes (they were sized with a template)
+        // Strip duration from ALL nodes — initial render shows only "<icon> <title>"
         element.querySelectorAll('.node').forEach(function(ng) {
-          // Find which nodeData entry this is
-          var gId = ng.getAttribute('id') || '';
-          var matchedId = null;
-          for (var sid in nodeData) {
-            if (gId.includes(sid)) { matchedId = sid; break; }
-          }
-          if (!matchedId) return;
-          var nd = nodeData[matchedId];
-          // Only strip from nodes that haven't started
-          if (nd && nd.startedAt) return;
-          // Find the text element and strip ' | 00m 00s'
           var textEls = ng.querySelectorAll('foreignObject *, text, tspan, .nodeLabel, .label');
+          for (var i = 0; i < textEls.length; i++) {
+            var el = textEls[i];
+            if (!el.childNodes.length || el.children.length > 0) continue;
+            var t = el.textContent || '';
+            var pipeIdx = t.lastIndexOf(' | ');
+            if (pipeIdx > 0) {
+              el.textContent = t.substring(0, pipeIdx);
+            }
+            break;
+          }
+        });
+
+        // Strip duration from ALL cluster/subgraph labels — initial render shows only "<icon> <title>"
+        element.querySelectorAll('.cluster').forEach(function(cg) {
+          var textEls = cg.querySelectorAll('.cluster-label .nodeLabel, .cluster-label text, .cluster-label span');
           for (var i = 0; i < textEls.length; i++) {
             var el = textEls[i];
             if (!el.childNodes.length || el.children.length > 0) continue;
@@ -601,7 +611,7 @@ export function renderPlanScripts(data: PlanScriptsData): string {
         if (!targetGroup || !textEls) continue;
         
         var gId = targetGroup.getAttribute('id') || '';
-        var maxLen = nodeTextLengths[gId];
+        var maxLen = parseInt(targetGroup.getAttribute('data-max-text-len')) || nodeTextLengths[gId];
         for (const textEl of textEls) {
           if (!textEl.childNodes.length || textEl.children.length > 0) continue;
           
@@ -766,10 +776,13 @@ export function renderPlanScripts(data: PlanScriptsData): string {
         if (cancelBtn) cancelBtn.style.display = canControl ? '' : 'none';
         if (workSummaryBtn) workSummaryBtn.style.display = planStatus === 'succeeded' ? '' : 'none';
       }
-      // Show/hide processes section based on plan status
+      // Show/hide processes section based on plan status.
+      // Keep visible while paused if nodes are still finishing execution.
       var procSection = document.getElementById('processesSection');
       if (procSection) {
-        procSection.style.display = (planStatus === 'running' || planStatus === 'pending') ? '' : 'none';
+        var hasRunningNodes = msg.counts && ((msg.counts.running || 0) + (msg.counts.scheduled || 0)) > 0;
+        var showProc = (planStatus === 'running' || planStatus === 'pending') || (planStatus === 'paused' && hasRunningNodes);
+        procSection.style.display = showProc ? '' : 'none';
       }
       this.publishUpdate(msg);
     };
@@ -879,8 +892,16 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           var currentText = textSpan.textContent || '';
           if (currentText.length > 0 && ['✓', '✗', '▶', '⊘', '○'].includes(currentText[0])) {
             var updatedText = newIcon + currentText.substring(1);
+            // For non-running nodes, strip the duration suffix
+            var isRunning = data.status === 'running' || data.status === 'scheduled';
+            if (!isRunning) {
+              var pipeIdx = updatedText.lastIndexOf(' | ');
+              if (pipeIdx > 0) {
+                updatedText = updatedText.substring(0, pipeIdx);
+              }
+            }
             var nodeElId = nodeEl.getAttribute('id') || '';
-            var maxLen = nodeTextLengths[nodeElId];
+            var maxLen = parseInt(nodeEl.getAttribute('data-max-text-len') || '') || nodeTextLengths[nodeElId];
             textSpan.textContent = maxLen ? clampText(updatedText, maxLen) : updatedText;
           }
         }
@@ -967,8 +988,16 @@ export function renderPlanScripts(data: PlanScriptsData): string {
             var firstChar = currentText[0];
             if (['✓', '✗', '▶', '⊘', '○', '📦'].includes(firstChar)) {
               var updatedText = newIcon + currentText.substring(1);
+              // For non-running groups, strip the duration suffix
+              var isRunning = data.status === 'running' || data.status === 'scheduled';
+              if (!isRunning) {
+                var pipeIdx = updatedText.lastIndexOf(' | ');
+                if (pipeIdx > 0) {
+                  updatedText = updatedText.substring(0, pipeIdx);
+                }
+              }
               var clusterGId = cluster.getAttribute('id') || '';
-              var maxLen = nodeTextLengths[clusterGId];
+              var maxLen = parseInt(cluster.getAttribute('data-max-text-len') || '') || nodeTextLengths[clusterGId];
               labelText.textContent = maxLen ? clampText(updatedText, maxLen) : updatedText;
             }
           }
@@ -1072,6 +1101,75 @@ export function renderPlanScripts(data: PlanScriptsData): string {
             label.style.overflow = 'visible';
             label.style.width = 'auto';
           });
+          // Re-capture and store node text lengths as data attributes (same as initial render)
+          element.querySelectorAll('.node').forEach(function(ng) {
+            var textEl = ng.querySelector('foreignObject span, foreignObject div, text tspan, text');
+            if (textEl && textEl.textContent) {
+              var gId = ng.getAttribute('id') || '';
+              var len = textEl.textContent.length;
+              nodeTextLengths[gId] = len;
+              // Store as HTML attribute for client-side update code
+              ng.setAttribute('data-max-text-len', String(len));
+            }
+          });
+          // Re-capture cluster text lengths
+          element.querySelectorAll('g.cluster').forEach(function(cg) {
+            var textEl = cg.querySelector('.cluster-label .nodeLabel, .cluster-label span, .cluster-label div, text tspan, text');
+            if (textEl && textEl.textContent) {
+              var gId = cg.getAttribute('id') || '';
+              var len = textEl.textContent.length;
+              nodeTextLengths[gId] = len;
+              // Store as HTML attribute for client-side update code
+              cg.setAttribute('data-max-text-len', String(len));
+            }
+          });
+          // Strip duration from all non-running nodes after re-render
+          for (var sid in nodeData) {
+            var data = nodeData[sid];
+            var isRunning = data.status === 'running' || data.status === 'scheduled';
+            if (isRunning) continue; // Running nodes will get duration re-added by pulse timer
+            
+            if (data.type === 'group') {
+              // Handle clusters
+              var cluster = element.querySelector('g.cluster[id*="' + sid + '"], g[id*="' + sid + '"].cluster');
+              if (!cluster) {
+                var allClusters = element.querySelectorAll('g.cluster');
+                for (var ci = 0; ci < allClusters.length; ci++) {
+                  var clusterId = allClusters[ci].getAttribute('id') || '';
+                  if (clusterId.includes(sid)) { cluster = allClusters[ci]; break; }
+                }
+              }
+              if (cluster) {
+                var labelText = cluster.querySelector('.cluster-label .nodeLabel, .cluster-label text, .nodeLabel, text');
+                if (labelText) {
+                  var currentText = labelText.textContent || '';
+                  var pipeIdx = currentText.lastIndexOf(' | ');
+                  if (pipeIdx > 0) {
+                    var strippedText = currentText.substring(0, pipeIdx);
+                    var maxLen = parseInt(cluster.getAttribute('data-max-text-len') || '') || nodeTextLengths[cluster.getAttribute('id') || ''];
+                    labelText.textContent = maxLen ? clampText(strippedText, maxLen) : strippedText;
+                  }
+                }
+              }
+            } else {
+              // Handle regular nodes
+              var nodeGroup = element.querySelector('g[id^="flowchart-' + sid + '-"]');
+              if (nodeGroup) {
+                var nodeEl = nodeGroup.querySelector('.node') || nodeGroup;
+                var foreignObject = nodeEl.querySelector('foreignObject');
+                var textSpan = foreignObject ? foreignObject.querySelector('span') : nodeEl.querySelector('text tspan, text');
+                if (textSpan) {
+                  var currentText = textSpan.textContent || '';
+                  var pipeIdx = currentText.lastIndexOf(' | ');
+                  if (pipeIdx > 0) {
+                    var strippedText = currentText.substring(0, pipeIdx);
+                    var maxLen = parseInt(nodeEl.getAttribute('data-max-text-len') || '') || nodeTextLengths[nodeEl.getAttribute('id') || ''];
+                    textSpan.textContent = maxLen ? clampText(strippedText, maxLen) : strippedText;
+                  }
+                }
+              }
+            }
+          }
           // Restore viewport state
           currentZoom = savedZoom;
           updateZoom();

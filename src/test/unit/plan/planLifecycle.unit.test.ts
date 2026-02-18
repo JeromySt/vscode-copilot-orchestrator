@@ -330,6 +330,7 @@ suite('PlanLifecycleManager', () => {
         gitignore: {
           ensureGitignoreEntries: sinon.stub().resolves(false),
         },
+        command: {} as any,
       };
     }
 

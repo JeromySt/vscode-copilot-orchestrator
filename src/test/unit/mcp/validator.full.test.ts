@@ -417,6 +417,51 @@ suite('MCP Validator', () => {
     });
   });
 
+  suite('validatePowerShellCommands', () => {
+    test('rejects 2>&1 in PowerShell shell command', () => {
+      const { validatePowerShellCommands } = require('../../../mcp/validation/validator');
+      const result = validatePowerShellCommands({
+        work: { type: 'shell', command: 'cargo test 2>&1', shell: 'powershell' },
+      });
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes('2>&1'));
+    });
+
+    test('allows 2>&1 in non-PowerShell shell', () => {
+      const { validatePowerShellCommands } = require('../../../mcp/validation/validator');
+      const result = validatePowerShellCommands({
+        work: { type: 'shell', command: 'cargo test 2>&1', shell: 'bash' },
+      });
+      assert.strictEqual(result.valid, true);
+    });
+
+    test('accepts clean commands', () => {
+      const { validatePowerShellCommands } = require('../../../mcp/validation/validator');
+      const result = validatePowerShellCommands({
+        work: { type: 'shell', command: 'npm test', shell: 'powershell' },
+      });
+      assert.strictEqual(result.valid, true);
+    });
+
+    test('traverses nodes array', () => {
+      const { validatePowerShellCommands } = require('../../../mcp/validation/validator');
+      const result = validatePowerShellCommands({
+        nodes: [{ work: { type: 'shell', command: 'test 2>&1', shell: 'pwsh' } }],
+      });
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes('2>&1'));
+    });
+
+    test('traverses reshape operations', () => {
+      const { validatePowerShellCommands } = require('../../../mcp/validation/validator');
+      const result = validatePowerShellCommands({
+        operations: [{ spec: { work: { type: 'shell', command: 'test 2>&1', shell: 'powershell' } } }],
+      });
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes('2>&1'));
+    });
+  });
+
   suite('schemas', () => {
     test('should export all schemas', () => {
       const { schemas } = require('../../../mcp/validation/schemas');

@@ -15,9 +15,11 @@ import type {
   IGitMerge,
   IGitRepository,
   IGitGitignore,
+  IGitExecutor,
 } from '../interfaces/IGitOperations';
 import type {
   GitLogger,
+  CommandResult,
   MergeResult,
   MergeOptions,
   MergeTreeResult,
@@ -32,6 +34,7 @@ import * as worktrees from './core/worktrees';
 import * as merge from './core/merge';
 import * as repository from './core/repository';
 import * as gitignore from './core/gitignore';
+import * as executor from './core/executor';
 
 /**
  * Default implementation of IGitBranches that delegates to branches module.
@@ -173,6 +176,18 @@ class DefaultGitMerge implements IGitMerge {
 
   async isInProgress(cwd: string): Promise<boolean> {
     return merge.isInProgress(cwd);
+  }
+
+  async catFileFromTree(repoPath: string, treeSha: string, filePath: string): Promise<string | null> {
+    return merge.catFileFromTree(repoPath, treeSha, filePath);
+  }
+
+  async hashObjectFromFile(repoPath: string, absFilePath: string): Promise<string> {
+    return merge.hashObjectFromFile(repoPath, absFilePath);
+  }
+
+  async replaceTreeBlobs(repoPath: string, baseTreeSha: string, replacements: Map<string, string>, log?: GitLogger): Promise<string> {
+    return merge.replaceTreeBlobs(repoPath, baseTreeSha, replacements, log);
   }
 }
 
@@ -327,6 +342,21 @@ class DefaultGitGitignore implements IGitGitignore {
 }
 
 /**
+ * Default implementation of IGitExecutor that delegates to executor module.
+ */
+class DefaultGitExecutor implements IGitExecutor {
+  async execAsync(args: string[], options: { cwd: string }): Promise<CommandResult> {
+    return executor.execAsync(args, options);
+  }
+  async execAsyncOrThrow(args: string[], cwd: string): Promise<string> {
+    return executor.execAsyncOrThrow(args, cwd);
+  }
+  async execAsyncOrNull(args: string[], cwd: string): Promise<string | null> {
+    return executor.execAsyncOrNull(args, cwd);
+  }
+}
+
+/**
  * Default implementation of IGitOperations.
  * 
  * Provides concrete implementations for all git operations by delegating
@@ -339,4 +369,5 @@ export class DefaultGitOperations implements IGitOperations {
   public readonly merge = new DefaultGitMerge();
   public readonly repository = new DefaultGitRepository();
   public readonly gitignore = new DefaultGitGitignore();
+  public readonly command = new DefaultGitExecutor();
 }

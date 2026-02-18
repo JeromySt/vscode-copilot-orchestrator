@@ -8,6 +8,40 @@
  */
 
 /**
+ * Per-phase failure behavior configuration.
+ *
+ * Controls what happens when a phase fails: whether auto-heal is attempted,
+ * which phase to resume from on retry, and an optional user-facing message.
+ *
+ * Can be set on any WorkSpec (prechecks, work, postchecks) to customize
+ * failure handling for that specific phase.
+ *
+ * @example
+ * ```typescript
+ * // Force-fail with message (no auto-heal)
+ * const prechecks: ShellSpec = {
+ *   type: 'shell',
+ *   command: 'npm test',
+ *   onFailure: {
+ *     noAutoHeal: true,
+ *     message: 'Target branch has uncommitted changes. Clean up before retrying.',
+ *     resumeFromPhase: 'prechecks',
+ *   },
+ * };
+ * ```
+ */
+export interface OnFailureConfig {
+  /** When true, skip auto-heal on failure — require manual retry. */
+  noAutoHeal?: boolean;
+
+  /** User-facing message displayed in NodeDetailPanel on failure. */
+  message?: string;
+
+  /** Phase to resume from when the node is retried after this failure. */
+  resumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
+}
+
+/**
  * Direct process spawn (no shell interpretation).
  * Arguments are passed directly - no quoting issues.
  */
@@ -28,6 +62,9 @@ export interface ProcessSpec {
   
   /** Process timeout in milliseconds */
   timeout?: number;
+
+  /** Failure behavior for this phase */
+  onFailure?: OnFailureConfig;
 }
 
 /**
@@ -51,6 +88,16 @@ export interface ShellSpec {
    */
   shell?: 'cmd' | 'powershell' | 'pwsh' | 'bash' | 'sh';
   
+  /**
+   * PowerShell $ErrorActionPreference value.
+   * Controls how PowerShell handles non-terminating errors (e.g. stderr from native commands).
+   * - 'Continue' (default) - Log errors but continue execution. Recommended for native commands.
+   * - 'Stop' - Treat non-terminating errors as terminating. Use when stderr truly indicates failure.
+   * - 'SilentlyContinue' - Suppress error output entirely.
+   * Only applies when shell is 'powershell', 'pwsh', or default on Windows.
+   */
+  errorAction?: 'Continue' | 'Stop' | 'SilentlyContinue';
+  
   /** Additional environment variables */
   env?: Record<string, string>;
   
@@ -59,6 +106,9 @@ export interface ShellSpec {
   
   /** Process timeout in milliseconds */
   timeout?: number;
+
+  /** Failure behavior for this phase */
+  onFailure?: OnFailureConfig;
 }
 
 /**
@@ -118,6 +168,13 @@ export interface AgentSpec {
   
   /** Optional model preference */
   model?: string;
+  
+  /**
+   * Model tier preference. When set and `model` is not specified,
+   * the system will discover available models and select one matching
+   * this tier. Values: 'fast' (cheap/quick), 'standard', 'premium'.
+   */
+  modelTier?: 'fast' | 'standard' | 'premium';
   
   /** Files to include in agent context (relative to worktree) */
   contextFiles?: string[];
@@ -181,6 +238,9 @@ export interface AgentSpec {
    * ```
    */
   allowedUrls?: string[];
+
+  /** Failure behavior for this phase */
+  onFailure?: OnFailureConfig;
 }
 
 /**
@@ -307,6 +367,26 @@ export function normalizeWorkSpec(spec: WorkSpec | undefined): ProcessSpec | She
       type: 'shell',
       command: spec,
     };
+  }
+  
+  // Handle snake_case → camelCase conversion from MCP input
+  const raw = spec as any;
+  if (raw.on_failure && !raw.onFailure) {
+    const cfg = raw.on_failure;
+    raw.onFailure = {
+      noAutoHeal: cfg.no_auto_heal,
+      message: cfg.message,
+      resumeFromPhase: cfg.resume_from_phase,
+    };
+    delete raw.on_failure;
+  }
+  if (raw.model_tier && !raw.modelTier) {
+    raw.modelTier = raw.model_tier;
+    delete raw.model_tier;
+  }
+  if (raw.error_action && !raw.errorAction) {
+    raw.errorAction = raw.error_action;
+    delete raw.error_action;
   }
   
   return spec;

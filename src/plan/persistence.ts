@@ -53,6 +53,12 @@ interface SerializedPlan {
   workSummary?: WorkSummary;
   isPaused?: boolean;
   branchReady?: boolean;
+  snapshot?: {
+    branch: string;
+    worktreePath: string;
+    baseCommit: string;
+  };
+  awaitingFinalMerge?: boolean;
 }
 
 interface SerializedNode {
@@ -73,6 +79,7 @@ interface SerializedNode {
   autoHeal?: boolean;
   group?: string;
   groupId?: string;
+  assignedWorktreePath?: string;
 }
 
 /**
@@ -287,6 +294,7 @@ export class PlanPersistence {
         serializedNode.autoHeal = jobNode.autoHeal;
         serializedNode.group = jobNode.group;
         serializedNode.groupId = jobNode.groupId;
+        serializedNode.assignedWorktreePath = jobNode.assignedWorktreePath;
       }
       
       nodes.push(serializedNode);
@@ -348,6 +356,8 @@ export class PlanPersistence {
       workSummary: plan.workSummary,
       isPaused: plan.isPaused,
       branchReady: plan.branchReady,
+      snapshot: plan.snapshot,
+      awaitingFinalMerge: plan.awaitingFinalMerge,
     };
   }
   
@@ -375,6 +385,7 @@ export class PlanPersistence {
           autoHeal: serializedNode.autoHeal,
           group: serializedNode.group,
           groupId: serializedNode.groupId,
+          assignedWorktreePath: serializedNode.assignedWorktreePath,
           dependencies: serializedNode.dependencies,
           dependents: serializedNode.dependents,
         };
@@ -444,6 +455,8 @@ export class PlanPersistence {
       workSummary: data.workSummary,
       isPaused: data.isPaused,
       branchReady: data.branchReady,
+      snapshot: data.snapshot,
+      awaitingFinalMerge: data.awaitingFinalMerge,
     };
   }
   

@@ -127,6 +127,9 @@ function mockGitOperations(): IGitOperations {
       abort: sinon.stub().resolves(),
       listConflicts: sinon.stub().resolves([]),
       isInProgress: sinon.stub().resolves(false),
+      catFileFromTree: sinon.stub().resolves('file content'),
+      hashObjectFromFile: sinon.stub().resolves('blob123'),
+      replaceTreeBlobs: sinon.stub().resolves('newtree123'),
     },
     gitignore: {
       ensureGitignoreEntries: sinon.stub().resolves(true),
@@ -135,6 +138,7 @@ function mockGitOperations(): IGitOperations {
       ensureOrchestratorGitIgnore: sinon.stub().resolves(true),
     isDiffOnlyOrchestratorChanges: sinon.stub().returns(true),
     },
+    command: {} as any,
   };
 }
 

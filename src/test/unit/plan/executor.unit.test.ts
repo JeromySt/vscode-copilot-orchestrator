@@ -46,6 +46,7 @@ function createMockGitOps() {
     gitignore: {
       ensureGitignoreEntries: sinon.stub().resolves(),
     },
+    command: {} as any,
   } as any;
 }
 
@@ -157,9 +158,9 @@ suite('DefaultJobExecutor', () => {
       fs.mkdirSync(path.join(storagePath, 'logs'), { recursive: true });
       const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
       executor.setStoragePath(storagePath);
-      // getLogFileSize now creates a log file with header on first access
+      // getLogFileSize should NOT create a log file; only writing does
       const size = executor.getLogFileSize('plan-1', 'node-1');
-      assert.ok(size > 0, 'Log file should have header content');
+      assert.strictEqual(size, 0, 'No log file should exist before any writes');
     });
   });
 

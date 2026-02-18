@@ -228,21 +228,51 @@ export function webviewScripts(config: ScriptsConfig): string {
     })();
 
     // ── DurationCounterControl ──────────────────────────────────────────
+    var TERMINAL_STATUSES = { succeeded:1, failed:1, canceled:1, blocked:1 };
     var DurationCounterControl = (function() {
       function DCC(bus, controlId, elementId) {
         SubscribableControl.call(this, bus, controlId);
         this._elementId = elementId;
         var self = this;
         this.subscribe(T.PULSE, function() { self._tick(); });
+        this.subscribe(T.NODE_STATE, function(data) { self._onStateChange(data); });
       }
       DCC.prototype = Object.create(SubscribableControl.prototype);
       DCC.prototype.constructor = DCC;
+      DCC.prototype._onStateChange = function(data) {
+        if (!data) return;
+        var el = this.getElement(this._elementId);
+        if (!el) return;
+        if (data.status) el.setAttribute('data-status', data.status);
+        if (data.startedAt) el.setAttribute('data-started-at', String(data.startedAt));
+        if (data.endedAt) {
+          el.setAttribute('data-ended-at', String(data.endedAt));
+        } else {
+          el.removeAttribute('data-ended-at');
+          el.removeAttribute('data-frozen');
+        }
+        this._tick();
+      };
       DCC.prototype._tick = function() {
         var el = this.getElement(this._elementId);
         if (!el || !el.hasAttribute('data-started-at')) return;
         var startedAt = parseInt(el.getAttribute('data-started-at'), 10);
         if (!startedAt) { el.textContent = '--'; return; }
-        el.textContent = formatDuration(Date.now() - startedAt);
+        var endedAt = el.hasAttribute('data-ended-at') ? parseInt(el.getAttribute('data-ended-at'), 10) : 0;
+        var status = el.getAttribute('data-status') || '';
+        if (endedAt) {
+          el.textContent = formatDuration(endedAt - startedAt);
+        } else if (status in TERMINAL_STATUSES) {
+          // Terminal but no endedAt yet — show current duration once, then freeze
+          if (!el.hasAttribute('data-frozen')) {
+            el.textContent = formatDuration(Date.now() - startedAt);
+            el.setAttribute('data-frozen', '1');
+            this.publishUpdate();
+          }
+          return;
+        } else {
+          el.textContent = formatDuration(Date.now() - startedAt);
+        }
         this.publishUpdate();
       };
       DCC.prototype.update = function(data) { this._tick(); };
@@ -477,7 +507,9 @@ export function webviewScripts(config: ScriptsConfig): string {
         var triggerBadge = attempt.triggerType === 'auto-heal'
           ? '<span class="trigger-badge auto-heal">🔧 Auto-Heal</span>'
           : attempt.triggerType === 'retry'
-            ? '<span class="trigger-badge retry">🔄 Retry</span>' : '';
+            ? '<span class="trigger-badge retry">🔄 Retry</span>'
+            : attempt.triggerType === 'postchecks-revalidation'
+              ? '<span class="trigger-badge retry">🔍 Postchecks Re-validation</span>' : '';
         var errorHtml = attempt.error
           ? '<div class="attempt-error"><strong>Error:</strong> <span class="error-message">' + escapeHtml(attempt.error) + '</span>'
             + (attempt.failedPhase ? '<div style="margin-top: 4px;">Failed in phase: <strong>' + escapeHtml(attempt.failedPhase) + '</strong></div>' : '')
@@ -523,6 +555,9 @@ export function webviewScripts(config: ScriptsConfig): string {
         }
         if (data.sessionTimeSeconds !== undefined) {
           parts.push('<span class="metric-item">🕐 Session: ' + formatDurationSeconds(data.sessionTimeSeconds) + '</span>');
+        }
+        if (data.codeChanges) {
+          parts.push('<span class="metric-item">📝 Code: +' + data.codeChanges.linesAdded + ' -' + data.codeChanges.linesRemoved + '</span>');
         }
 
         var modelHtml = '';
@@ -604,10 +639,10 @@ export function webviewScripts(config: ScriptsConfig): string {
           var preExpanded = this._userOverrides.prechecks !== undefined
             ? this._userOverrides.prechecks
             : (cfg.currentPhase === 'prechecks');
-          phasesHtml += this._renderCollapsiblePhase('prechecks', 'Prechecks', preType, cfg.prechecks, preExpanded);
+          phasesHtml += this._renderCollapsiblePhase('prechecks', 'Prechecks', preType, cfg.prechecks, preExpanded, cfg.prechecksOnFailure);
         }
 
-        // Work (always expanded, not collapsible)
+        // Work phase
         if (cfg.work) {
           var workType = cfg.workType || { type: 'agent', label: 'Agent' };
           phasesHtml += '<div class="config-phase">'
@@ -615,7 +650,15 @@ export function webviewScripts(config: ScriptsConfig): string {
             + '<span class="phase-label">Work</span>'
             + '<span class="phase-type-badge ' + (workType.type || '').toLowerCase() + '">' + escapeHtml(workType.label) + '</span>'
             + '</div>'
-            + '<div class="config-phase-body">' + cfg.work + '</div>'
+            + '<div class="config-phase-body">' + cfg.work + this._renderOnFailure(cfg.workOnFailure) + '</div>'
+            + '</div>';
+        } else if (cfg.workSkipped) {
+          phasesHtml += '<div class="config-phase">'
+            + '<div class="config-phase-header non-collapsible">'
+            + '<span class="phase-label">Work</span>'
+            + '<span class="phase-type-badge skipped">⊘ Skipped</span>'
+            + '</div>'
+            + '<div class="config-phase-body"><div class="spec-empty">Not configured — this phase will be skipped during execution.</div></div>'
             + '</div>';
         }
 
@@ -625,22 +668,29 @@ export function webviewScripts(config: ScriptsConfig): string {
           var postExpanded = this._userOverrides.postchecks !== undefined
             ? this._userOverrides.postchecks
             : (cfg.currentPhase === 'postchecks');
-          phasesHtml += this._renderCollapsiblePhase('postchecks', 'Postchecks', postType, cfg.postchecks, postExpanded);
+          phasesHtml += this._renderCollapsiblePhase('postchecks', 'Postchecks', postType, cfg.postchecks, postExpanded, cfg.postchecksOnFailure);
         }
 
         // Wrap in matching server-side section structure
         var html = '<div class="section"><h3>Job Configuration</h3>'
           + '<div class="config-item"><div class="config-label">Task</div>'
-          + '<div class="config-value">' + escapeHtml(cfg.task || '') + '</div></div>'
-          + '<div class="config-phases">' + phasesHtml + '</div>';
+          + '<div class="config-value">' + escapeHtml(cfg.task || '') + '</div></div>';
 
+        // Show expectsNoChanges indicator
+        if (cfg.expectsNoChanges) {
+          html += '<div class="config-item"><div class="config-label">Commit Behavior</div>'
+            + '<div class="config-value"><span class="phase-type-badge skipped">📋 Expects No Changes</span> '
+            + '<span class="config-hint">Commit phase will be skipped automatically</span></div></div>';
+        }
+
+        html += '<div class="config-phases">' + phasesHtml + '</div>';
         html += '</div>';
 
         el.innerHTML = html;
         this._bindCollapsibleHandlers(el);
         this.publishUpdate(data);
       };
-      CDC.prototype._renderCollapsiblePhase = function(phaseId, label, typeInfo, content, expanded) {
+      CDC.prototype._renderCollapsiblePhase = function(phaseId, label, typeInfo, content, expanded, onFailure) {
         var chevron = expanded ? '▼' : '▶';
         var display = expanded ? 'block' : 'none';
         var expandedClass = expanded ? '' : ' collapsed';
@@ -649,9 +699,26 @@ export function webviewScripts(config: ScriptsConfig): string {
           + '<span class="chevron">' + chevron + '</span>'
           + '<span class="phase-label">' + escapeHtml(label) + '</span>'
           + '<span class="phase-type-badge ' + (typeInfo.type || '').toLowerCase() + '">' + escapeHtml(typeInfo.label || label) + '</span>'
+          + (onFailure && onFailure.noAutoHeal ? '<span class="failure-badge-inline no-heal" title="Auto-heal disabled on failure">🛑</span>' : '')
+          + (onFailure && onFailure.resumeFromPhase ? '<span class="failure-badge-inline resume" title="On retry → ' + escapeHtml(onFailure.resumeFromPhase) + '">🔄</span>' : '')
           + '</div>'
-          + '<div class="config-phase-body" style="display: ' + display + ';">' + content + '</div>'
+          + '<div class="config-phase-body" style="display: ' + display + ';">' + content + this._renderOnFailure(onFailure) + '</div>'
           + '</div>';
+      };
+      CDC.prototype._renderOnFailure = function(onFailure) {
+        if (!onFailure) return '';
+        var parts = '';
+        if (onFailure.noAutoHeal) {
+          parts += '<span class="failure-badge no-heal" title="Auto-heal disabled">🛑 No Auto-Heal</span>';
+        }
+        if (onFailure.resumeFromPhase) {
+          parts += '<span class="failure-badge resume" title="On retry, resume from this phase">🔄 Resume → ' + escapeHtml(onFailure.resumeFromPhase) + '</span>';
+        }
+        if (onFailure.message) {
+          parts += '<div class="failure-message" title="Message shown on failure">💬 ' + escapeHtml(onFailure.message) + '</div>';
+        }
+        if (!parts) return '';
+        return '<div class="on-failure-config">' + parts + '</div>';
       };
       CDC.prototype._bindCollapsibleHandlers = function(el) {
         var self = this;

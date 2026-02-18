@@ -62,6 +62,8 @@ export interface ValidationResult {
   error?: string;
   /** Raw Ajv errors for debugging */
   errors?: ErrorObject[];
+  /** Non-fatal warnings (e.g., missing recommended fields) */
+  warnings?: string[];
 }
 
 // ============================================================================
@@ -570,5 +572,126 @@ export async function validateAllowedFolders(
     };
   }
   
+  return { valid: true };
+}
+
+/**
+ * Check for jobs/nodes that have work specified but no postchecks.
+ * Returns warnings (not errors) so the caller can include them in the response.
+ */
+export function validatePostchecksPresence(input: unknown): string[] {
+  const warnings: string[] = [];
+
+  function hasWork(obj: Record<string, unknown>): boolean {
+    return obj.work !== undefined && obj.work !== null && obj.work !== '';
+  }
+
+  function check(obj: unknown, jsonPath: string): void {
+    if (!obj || typeof obj !== 'object') {return;}
+    const record = obj as Record<string, unknown>;
+
+    if (hasWork(record) && !record.postchecks) {
+      const name = record.name || record.task || jsonPath;
+      warnings.push(`${name}: has work but no postchecks. Postchecks act as exit-criteria gates — without them, auto-heal cannot verify fixes meet your requirements.`);
+    }
+
+    if (Array.isArray(record.jobs)) {
+      for (let i = 0; i < record.jobs.length; i++) {check(record.jobs[i], `jobs[${i}]`);}
+    }
+    if (Array.isArray(record.groups)) {
+      for (const g of record.groups as any[]) {
+        if (Array.isArray(g?.jobs)) {
+          for (let i = 0; i < g.jobs.length; i++) {check(g.jobs[i], `${g.name || 'group'}/jobs[${i}]`);}
+        }
+      }
+    }
+    if (Array.isArray(record.nodes)) {
+      for (let i = 0; i < record.nodes.length; i++) {check(record.nodes[i], `nodes[${i}]`);}
+    }
+  }
+
+  check(input, '');
+  return warnings;
+}
+
+/**
+ * Validate that PowerShell shell commands do not contain `2>&1` redirects.
+ *
+ * PowerShell wraps stderr as NativeCommandError when `2>&1` is used, causing
+ * false exit code 1 even when the underlying command succeeds. The orchestrator
+ * captures stdout and stderr separately, so `2>&1` is never needed.
+ *
+ * Also checks bare string commands on Windows (which default to PowerShell).
+ */
+export function validatePowerShellCommands(input: unknown): ValidationResult {
+  const errors: string[] = [];
+  const isWindows = process.platform === 'win32';
+  const REDIRECT_PATTERN = /2>&1/;
+
+  function checkCommand(command: string, shell: string | undefined, jsonPath: string): void {
+    if (!REDIRECT_PATTERN.test(command)) {return;}
+    const isPowerShell = shell === 'powershell' || shell === 'pwsh' || (!shell && isWindows);
+    if (isPowerShell) {
+      errors.push(
+        `${jsonPath}: PowerShell command contains '2>&1' which causes false failures. ` +
+        `PowerShell wraps stderr output as NativeCommandError, producing exit code 1 even when the command succeeds. ` +
+        `Remove '2>&1' — the orchestrator captures stdout and stderr separately.`
+      );
+    }
+  }
+
+  function checkSpec(value: unknown, jsonPath: string): void {
+    if (typeof value === 'string') {
+      // Bare string commands default to PowerShell on Windows
+      checkCommand(value, undefined, jsonPath);
+      return;
+    }
+    const parsed = tryParseWorkSpec(value);
+    if (parsed && typeof parsed === 'object') {
+      const spec = parsed as Record<string, unknown>;
+      if (spec.type === 'shell' && typeof spec.command === 'string') {
+        checkCommand(spec.command, spec.shell as string | undefined, jsonPath);
+      }
+    }
+  }
+
+  function traverse(obj: unknown, jsonPath: string): void {
+    if (!obj || typeof obj !== 'object') {return;}
+    const record = obj as Record<string, unknown>;
+
+    for (const field of ['work', 'prechecks', 'postchecks']) {
+      if (record[field] !== undefined) {
+        checkSpec(record[field], `${jsonPath}${jsonPath ? '/' : ''}${field}`);
+      }
+    }
+
+    if (Array.isArray(record.jobs)) {
+      for (let i = 0; i < record.jobs.length; i++) {traverse(record.jobs[i], `jobs[${i}]`);}
+    }
+    if (Array.isArray(record.groups)) {
+      for (let i = 0; i < (record.groups as any[]).length; i++) {
+        const g = (record.groups as any[])[i];
+        if (Array.isArray(g?.jobs)) {
+          for (let j = 0; j < g.jobs.length; j++) {traverse(g.jobs[j], `${g.name || `groups[${i}]`}/jobs[${j}]`);}
+        }
+      }
+    }
+    if (Array.isArray(record.nodes)) {
+      for (let i = 0; i < record.nodes.length; i++) {traverse(record.nodes[i], `nodes[${i}]`);}
+    }
+    // reshape operations
+    if (Array.isArray(record.operations)) {
+      for (let i = 0; i < record.operations.length; i++) {
+        const op = record.operations[i] as Record<string, unknown>;
+        if (op?.spec) {traverse(op.spec, `operations[${i}]/spec`);}
+      }
+    }
+  }
+
+  traverse(input, '');
+
+  if (errors.length > 0) {
+    return { valid: false, error: errors.join('\n') };
+  }
   return { valid: true };
 }

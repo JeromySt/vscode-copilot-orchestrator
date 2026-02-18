@@ -59,6 +59,9 @@ export class planDetailPanel {
   private _lastStructureHash: string = '';
   private _isFirstRender: boolean = true;
   private readonly _controller: PlanDetailController;
+  private _disposed = false;
+  private _cachedCapacity: { data: any; fetchedAt: number } | null = null;
+  private static readonly CAPACITY_CACHE_TTL_MS = 5000;
   
   /**
    * @param panel - The VS Code webview panel instance.
@@ -80,7 +83,11 @@ export class planDetailPanel {
     // Build the delegate that bridges controller → VS Code APIs
     const delegate: PlanDetailDelegate = {
       executeCommand: (cmd, ...args) => vscode.commands.executeCommand(cmd, ...args) as Promise<void>,
-      postMessage: (msg) => this._panel.webview.postMessage(msg),
+      postMessage: (msg) => {
+        if (!this._disposed) {
+          try { this._panel.webview.postMessage(msg); } catch { /* panel disposed */ }
+        }
+      },
       forceFullRefresh: () => this._forceFullRefresh(),
       showWorkSummaryDocument: () => this._showWorkSummaryDocument(),
       sendAllProcessStats: () => this._sendAllProcessStats(),
@@ -114,20 +121,29 @@ export class planDetailPanel {
         this._update();
       }
     };
+    const onPlanUpdated = (planId: string) => {
+      if (planId === this._planId) {
+        this._update();
+      }
+    };
     this._planRunner.on('nodeTransition', onNodeTransition);
     this._planRunner.on('planStarted', onPlanStarted);
     this._planRunner.on('planCompleted', onPlanCompleted);
+    this._planRunner.on('planUpdated', onPlanUpdated);
     this._disposables.push({ dispose: () => {
       this._planRunner.removeListener('nodeTransition', onNodeTransition);
       this._planRunner.removeListener('planStarted', onPlanStarted);
       this._planRunner.removeListener('planCompleted', onPlanCompleted);
+      this._planRunner.removeListener('planUpdated', onPlanUpdated);
     }});
     
     // Subscribe to pulse — forward to webview for client-side duration ticking.
     // Duration counters (plan header + node labels) update purely client-side
     // using data-started timestamps. No server data needed on every tick.
     this._pulseSubscription = this._pulse.onPulse(() => {
-      this._panel.webview.postMessage({ type: 'pulse' });
+      if (!this._disposed) {
+        try { this._panel.webview.postMessage({ type: 'pulse' }); } catch { /* panel disposed */ }
+      }
     });
     
     // Handle panel disposal
@@ -219,6 +235,7 @@ export class planDetailPanel {
   
   /** Dispose the panel, clear timers, and remove it from the static panel map. */
   public dispose() {
+    this._disposed = true;
     planDetailPanel.panels.delete(this._planId);
     
     if (this._pulseSubscription) {
@@ -237,8 +254,10 @@ export class planDetailPanel {
    * Query all process stats for this Plan and send them to the webview.
    */
   private async _sendAllProcessStats() {
+    if (this._disposed) { return; }
     try {
       const stats = await this._planRunner.getAllProcessStats(this._planId);
+      if (this._disposed) { return; }
       this._panel.webview.postMessage({
         type: 'allProcessStats',
         flat: (stats as any).flat || [],
@@ -246,13 +265,16 @@ export class planDetailPanel {
         rootJobs: (stats as any).rootJobs || []
       });
     } catch (err) {
+      if (this._disposed) { return; }
       // Send empty stats on error to clear the loading state
-      this._panel.webview.postMessage({
-        type: 'allProcessStats',
-        flat: [],
-        hierarchy: [],
-        rootJobs: []
-      });
+      try {
+        this._panel.webview.postMessage({
+          type: 'allProcessStats',
+          flat: [],
+          hierarchy: [],
+          rootJobs: []
+        });
+      } catch { /* panel disposed */ }
     }
   }
   
@@ -379,6 +401,7 @@ export class planDetailPanel {
    * Used when the webview requests a refresh (e.g., after an error).
    */
   private async _forceFullRefresh() {
+    if (this._disposed) { return; }
     const plan = this._planRunner.get(this._planId);
     if (!plan) {
       this._panel.webview.html = this._getErrorHtml('Plan not found');
@@ -406,6 +429,7 @@ export class planDetailPanel {
    * Uses a JSON state hash to skip redundant re-renders.
    */
   private async _update() {
+    if (this._disposed) { return; }
     const plan = this._planRunner.get(this._planId);
     if (!plan) {
       this._panel.webview.html = this._getErrorHtml('Plan not found');
@@ -512,6 +536,7 @@ export class planDetailPanel {
    * startedAt/endedAt data on every pulse tick.
    */
   private async _sendIncrementalUpdate() {
+    if (this._disposed) { return; }
     const plan = this._planRunner.get(this._planId);
     if (!plan) {return;}
     
@@ -524,6 +549,16 @@ export class planDetailPanel {
     const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
+    
+    // Get global capacity stats with caching to avoid async overhead on every pulse tick
+    let globalCapacityStats: any = null;
+    const now = Date.now();
+    if (this._cachedCapacity && (now - this._cachedCapacity.fetchedAt) < planDetailPanel.CAPACITY_CACHE_TTL_MS) {
+      globalCapacityStats = this._cachedCapacity.data;
+    } else {
+      globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
+      this._cachedCapacity = { data: globalCapacityStats, fetchedAt: now };
+    }
     
     // Build node statuses
     const nodeStatuses: Record<string, any> = {};
@@ -553,6 +588,11 @@ export class planDetailPanel {
       counts, progress, total, completed,
       startedAt: plan.startedAt,
       endedAt: effectiveEndedAt,
+      globalCapacity: globalCapacityStats ? {
+        activeInstances: globalCapacityStats.activeInstances,
+        totalGlobalJobs: globalCapacityStats.totalGlobalJobs,
+        globalMaxParallel: globalCapacityStats.globalMaxParallel
+      } : null
     });
   }
 
@@ -653,6 +693,18 @@ export class planDetailPanel {
       padding: 0;
       color: var(--vscode-foreground);
       background: var(--vscode-editor-background);
+      overflow-x: auto;
+      overflow-y: auto;
+    }
+    .plan-content-wrapper {
+      display: inline-flex;
+      flex-direction: column;
+      min-width: 100%;
+      box-sizing: border-box;
+    }
+    .plan-content-wrapper > * {
+      min-width: fit-content;
+      box-sizing: border-box;
     }
     /* Sticky header */
     .sticky-header {
@@ -666,7 +718,7 @@ export class planDetailPanel {
     .sticky-header + * {
       padding-top: 8px;
     }
-    body > *:not(.sticky-header) {
+    .plan-content-wrapper > * {
       padding-left: 16px;
       padding-right: 16px;
     }
@@ -728,6 +780,8 @@ export class planDetailPanel {
       background: var(--vscode-sideBar-background);
       border-radius: 6px;
       font-size: 12px;
+      overflow: hidden;
+      max-width: 100%;
     }
     .branch-name {
       padding: 3px 8px;
@@ -735,13 +789,20 @@ export class planDetailPanel {
       color: var(--vscode-badge-foreground);
       border-radius: 4px;
       font-family: monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+      max-width: 40%;
     }
     .branch-arrow {
       color: var(--vscode-descriptionForeground);
+      flex-shrink: 0;
     }
     .branch-label {
       color: var(--vscode-descriptionForeground);
       font-size: 11px;
+      flex-shrink: 0;
     }
     
     .capacity-info.capacity-badge {
@@ -1246,13 +1307,7 @@ export class planDetailPanel {
     }
     
     .plan-toolbar {
-      position: sticky;
-      top: 0;
-      z-index: 20;
-      background: var(--vscode-editor-background);
-      padding: 8px 0 8px 0;
-      margin-bottom: 12px;
-      border-bottom: 1px solid var(--vscode-widget-border);
+      padding: 4px 0 0 0;
     }
     .actions {
       display: flex;
@@ -1327,10 +1382,12 @@ export class planDetailPanel {
   })}
   </div>
   ${renderPlanControls({ status })}
+  </div>
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}
   ${renderPlanDag({ mermaidDef, status })}
   ${workSummaryHtml}
+  </div>
   ${renderPlanScripts({ nodeData, nodeTooltips, mermaidDef, edgeData, globalCapacityStats: globalCapacityStats || null })}
 </body>
 </html>`;
@@ -1560,10 +1617,10 @@ export class planDetailPanel {
       const icon = this._getStatusIcon(status);
       
       // Calculate duration for completed or running nodes.
-      // ALL nodes get rendered with ' | 00m 00s' sizing template so Mermaid
+      // ALL nodes get rendered with ' | 00h 00s ' sizing template so Mermaid
       // allocates consistent rect widths. Client-side strips the suffix from
       // non-started nodes after render.
-      const DURATION_TEMPLATE = ' | 00m 00s'; // fixed-width sizing template
+      const DURATION_TEMPLATE = ' | 00h 00s '; // fixed-width sizing template (hours format with trailing space)
       let durationLabel = DURATION_TEMPLATE;
       if (state?.startedAt) {
         const endTime = state.endedAt || Date.now();
@@ -1711,7 +1768,8 @@ export class planDetailPanel {
         
         // Calculate duration for groups
         // Always include a duration placeholder to maintain consistent sizing
-        let groupDurationLabel = ' | --';
+        const GROUP_DURATION_TEMPLATE = ' | 00h 00s ';
+        let groupDurationLabel = GROUP_DURATION_TEMPLATE;
         if (groupState?.startedAt) {
           const endTime = groupState.endedAt || Date.now();
           const duration = endTime - groupState.startedAt;
@@ -1732,11 +1790,15 @@ export class planDetailPanel {
         
         // Truncate group names based on the widest descendant node's rendered
         // label width, so the group title never overflows its content box.
+        // However, ensure group names are never truncated below their natural
+        // length — mermaid subgraphs expand to fit their title.
         const displayName = treeNode.name;
         const escapedName = this._escapeForMermaid(displayName);
         const maxWidth = groupMaxWidths.get(groupPath) || 0;
-        const truncatedGroupName = maxWidth > 0
-          ? this._truncateLabel(escapedName, groupDurationLabel, maxWidth)
+        const groupNameTotal = 3 + escapedName.length + GROUP_DURATION_TEMPLATE.length; // ICON_WIDTH + name + duration
+        const effectiveMaxWidth = Math.max(maxWidth, groupNameTotal);
+        const truncatedGroupName = effectiveMaxWidth > 0
+          ? this._truncateLabel(escapedName, GROUP_DURATION_TEMPLATE, effectiveMaxWidth)
           : escapedName;
         // Show full path in tooltip for nested groups or when truncated
         if (truncatedGroupName !== escapedName || groupPath.includes('/')) {
@@ -1825,29 +1887,46 @@ export class planDetailPanel {
       lines.push(`  TARGET_DEST["🎯 ${this._escapeForMermaid(truncBranch(targetBranchName, MAX_NODE_LABEL_CHARS))}"]`);
       lines.push('  class TARGET_DEST branchNode');
       if (targetBranchName.length > MAX_NODE_LABEL_CHARS) {nodeTooltips['TARGET_DEST'] = targetBranchName;}
-      
-      for (const leafId of mainResult.leaves) {
-        const mapping = nodeEntryExitMap.get(leafId);
-        const exitIds = mapping ? mapping.exitIds : [leafId];
+
+      // The snapshot-validation JobNode is a real node in the plan and renders
+      // naturally through the standard node loop above. Connect its exit to
+      // TARGET_DEST so the diagram shows the merge-ri → targetBranch flow.
+      const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
+      if (svNodeId) {
+        const svSanitizedId = this._sanitizeId(svNodeId);
+        const mapping = nodeEntryExitMap.get(svSanitizedId);
+        const exitIds = mapping ? mapping.exitIds : [svSanitizedId];
+        const svState = leafnodeStates.get(svSanitizedId);
+        const svSucceeded = svState?.status === 'succeeded';
         for (const exitId of exitIds) {
-          // Check if this leaf has been successfully merged to target
-          // Use either mergedToTarget flag or succeeded status as proxy, since
-          // the Mermaid diagram is rendered once and edge types can't be updated
-          // incrementally.  A succeeded leaf will have its RI merge completed.
-          const leafState = leafnodeStates.get(exitId);
-          const isMerged = leafState?.mergedToTarget === true
-            || leafState?.status === 'succeeded';
-          
-          if (isMerged) {
-            // Use solid line and mark as success edge
+          if (svSucceeded) {
             lines.push(`  ${exitId} --> TARGET_DEST`);
             successEdges.push(edgeIndex);
           } else {
-            // Use dotted line for pending merge
             lines.push(`  ${exitId} -.-> TARGET_DEST`);
           }
-          edgeData.push({ index: edgeIndex, from: exitId, to: 'TARGET_DEST', isLeafToTarget: true });
+          edgeData.push({ index: edgeIndex, from: exitId, to: 'TARGET_DEST' });
           edgeIndex++;
+        }
+      } else {
+        // Legacy plans without snapshot-validation: connect leaf nodes directly
+        // to TARGET_DEST based on their merge-ri / succeeded status.
+        for (const leafId of mainResult.leaves) {
+          const mapping = nodeEntryExitMap.get(leafId);
+          const exitIds = mapping ? mapping.exitIds : [leafId];
+          for (const exitId of exitIds) {
+            const leafState = leafnodeStates.get(exitId);
+            const isMerged = leafState?.mergedToTarget === true
+              || leafState?.status === 'succeeded';
+            if (isMerged) {
+              lines.push(`  ${exitId} --> TARGET_DEST`);
+              successEdges.push(edgeIndex);
+            } else {
+              lines.push(`  ${exitId} -.-> TARGET_DEST`);
+            }
+            edgeData.push({ index: edgeIndex, from: exitId, to: 'TARGET_DEST' });
+            edgeIndex++;
+          }
         }
       }
     }

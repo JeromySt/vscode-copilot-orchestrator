@@ -10,7 +10,7 @@ Do NOT re-execute the original task. Your only job is to diagnose and fix the er
 ## Diagnosis Process
 
 1. **Read the log file** provided in the instructions — focus on ERROR and ERR lines
-2. **Identify the phase** that failed (merge-fi, prechecks, work, commit, postchecks, merge-ri)
+2. **Identify the phase** that failed (merge-fi, prechecks, work, commit, postchecks, merge-ri, verify-ri)
 3. **Apply the phase-specific fix** below
 
 ## Phase-Specific Strategies
@@ -42,8 +42,13 @@ Do NOT re-execute the original task. Your only job is to diagnose and fix the er
 - **Command**: Usually `npx tsc --noEmit` — run it, read errors, fix them
 
 ### merge-ri (Reverse Integration) Failures
-- **Cause**: Squash-merge back to target branch failed (conflicts)
-- **Fix**: This is rare — usually means target branch diverged. Rebase or resolve.
+- **Cause**: In-memory merge-tree to target branch failed (conflicts unresolvable)
+- **Fix**: This is rare — usually means target branch diverged significantly. Rebase or resolve.
+
+### verify-ri (Post-Merge Verification) Failures
+- **Cause**: Post-merge validation failed (e.g., compilation errors, test failures after RI merge)
+- **Fix**: Read the verification output, fix the issues in the worktree. Changes will be committed to the target branch.
+- **Key**: The verify command is in `plan.spec.verifyRiSpec` — run it to verify your fix
 
 ## Error Patterns
 

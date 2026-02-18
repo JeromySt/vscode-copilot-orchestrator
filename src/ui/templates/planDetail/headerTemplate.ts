@@ -77,12 +77,12 @@ export function renderPlanHeader(data: PlanHeaderData): string {
     html += `
   <div class="branch-flow">
     <span class="branch-label">Base:</span>
-    <span class="branch-name">${escapeHtml(baseBranch)}</span>
+    <span class="branch-name" title="${escapeHtml(baseBranch)}">${escapeHtml(baseBranch)}</span>
     <span class="branch-arrow">→</span>
     <span class="branch-label">Work</span>
     <span class="branch-arrow">→</span>
     <span class="branch-label">Target:</span>
-    <span class="branch-name">${escapeHtml(targetBranchName)}</span>
+    <span class="branch-name" title="${escapeHtml(targetBranchName)}">${escapeHtml(targetBranchName)}</span>
   </div>
   `;
   }

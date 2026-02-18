@@ -185,7 +185,6 @@ suite('CopilotCliRunner Instructions Tests', () => {
         model: undefined,
         logDir: undefined,
         sharePath: undefined,
-        configDir: undefined,
         cwd: undefined,
         allowedFolders: undefined,
         allowedUrls: undefined
@@ -200,8 +199,7 @@ suite('CopilotCliRunner Instructions Tests', () => {
         task: '',
         sessionId: '',
         model: '',
-        configDir: '',
-        cwd: ''
+          cwd: ''
       });
 
       assert.ok(cmd.includes('copilot'));
@@ -211,8 +209,7 @@ suite('CopilotCliRunner Instructions Tests', () => {
       const cmd = runner.buildCommand({
         task: 'test',
         sessionId: null as any,
-        model: null as any,
-        configDir: null as any
+        model: null as any
       });
 
       assert.ok(cmd.includes('test'));
@@ -222,13 +219,14 @@ suite('CopilotCliRunner Instructions Tests', () => {
     test('quotes paths with spaces correctly', () => {
       const cmd = runner.buildCommand({
         task: 'test',
-        configDir: '/path with spaces/config',
-        logDir: '/another path with spaces/logs',
+        cwd: '/path with spaces/worktree',
+          logDir: '/another path with spaces/logs',
         sharePath: '/yet another/path with spaces/share.md'
       });
 
       assert.ok(cmd.includes('"'));
-      assert.ok(cmd.includes('/path with spaces/config'));
+      assert.ok(cmd.includes('path with spaces'));
+      assert.ok(cmd.includes('.copilot-cli'));
     });
 
     test('includes all expected flags', () => {
@@ -238,8 +236,8 @@ suite('CopilotCliRunner Instructions Tests', () => {
         model: 'test-model',
         logDir: '/logs',
         sharePath: '/share.md',
-        configDir: '/config',
-        allowedFolders: ['/folder1', '/folder2'],
+        cwd: '/worktree',
+          allowedFolders: ['/folder1', '/folder2'],
         allowedUrls: ['https://example.com']
       });
 

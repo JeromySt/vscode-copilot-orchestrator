@@ -23,5 +23,8 @@ export * from './retryNodeHandler';
 // Node update handlers
 export * from './updateNodeHandler';
 
+// Plan reshape handlers
+export * from './reshapePlanHandler';
+
 // Node detail handlers
 export * from './nodeDetailsHandler';

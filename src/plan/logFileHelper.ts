@@ -26,17 +26,24 @@ export function getLogFilePathByKey(
     const safeKey = executionKey.replace(/[^a-zA-Z0-9-_]/g, '_');
     logFile = path.join(logsDir, `${safeKey}.log`);
     logFiles.set(executionKey, logFile);
-    
-    // Write log file header with version info on first creation
-    try {
-      if (!fs.existsSync(logsDir)) {
-        fs.mkdirSync(logsDir, { recursive: true });
-      }
-      const header = buildLogFileHeader(executionKey);
-      fs.writeFileSync(logFile, header, 'utf8');
-    } catch { /* ignore header write errors */ }
   }
   return logFile;
+}
+
+/**
+ * Ensure the log file exists on disk with a diagnostic header.
+ * Called only when we are about to *write* a log entry.
+ */
+function ensureLogFile(logFile: string, executionKey: string): void {
+  if (fs.existsSync(logFile)) {return;}
+  try {
+    const logsDir = path.dirname(logFile);
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+    const header = buildLogFileHeader(executionKey);
+    fs.writeFileSync(logFile, header, 'utf8');
+  } catch { /* ignore header write errors */ }
 }
 
 /**
@@ -97,6 +104,7 @@ export function appendToLogFile(
   const logFile = getLogFilePathByKey(executionKey, storagePath, logFiles);
   if (!logFile) {return;}
   try {
+    ensureLogFile(logFile, executionKey);
     if (storagePath) {
       const workspacePath = path.resolve(storagePath, '..');
       const logsDirPath = path.join(workspacePath, '.orchestrator', 'logs');

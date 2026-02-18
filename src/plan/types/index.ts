@@ -19,6 +19,7 @@ export {
   ModelUsageBreakdown,
   CodeChangeStats,
   CopilotUsageMetrics,
+  OnFailureConfig,
 } from './specs';
 
 // Node types, status, and specifications

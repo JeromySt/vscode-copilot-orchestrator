@@ -10,7 +10,7 @@ import {
   PlanSpec, 
   JobNodeSpec, 
 } from '../../../plan/types';
-import { validateAllowedFolders, validateAllowedUrls } from '../../validation';
+import { validateAllowedFolders, validateAllowedUrls, validatePowerShellCommands } from '../../validation';
 import {
   PlanHandlerContext,
   errorResult,
@@ -245,6 +245,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
     cleanUpSuccessfulWork: args.cleanUpSuccessfulWork,
     additionalSymlinkDirs: args.additionalSymlinkDirs,
     startPaused: args.startPaused,
+    verifyRiSpec: args.verify_ri,
     jobs: [...rootJobs, ...groupJobs],
     // Note: groups are flattened into jobs, not stored separately
   };
@@ -306,6 +307,12 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
   const modelValidation = await validateAgentModels(args, 'create_copilot_plan');
   if (!modelValidation.valid) {
     return { success: false, error: modelValidation.error };
+  }
+  
+  // Reject PowerShell commands containing 2>&1 (causes false failures)
+  const psValidation = validatePowerShellCommands(args);
+  if (!psValidation.valid) {
+    return { success: false, error: psValidation.error };
   }
   
   // Validate additionalSymlinkDirs: must exist in workspace and be gitignored

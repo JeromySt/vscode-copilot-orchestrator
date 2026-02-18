@@ -134,11 +134,13 @@ suite('CopilotCliRunner DI', () => {
       assert.ok(cmd.includes('--allow-all-tools'));
     });
 
-    test('includes --config-dir when provided', () => {
-      const cmd = buildCommand({ task: 'test', configDir: '/path/to/config' }, {
+    test('includes --config-dir when cwd is provided', () => {
+      const cmd = buildCommand({ task: 'test', cwd: '/path/to/worktree' }, {
         existsSync: () => true,
       });
-      assert.ok(cmd.includes('--config-dir "/path/to/config"'));
+      assert.ok(cmd.includes('--config-dir'));
+      assert.ok(cmd.includes('.orchestrator'));
+      assert.ok(cmd.includes('.copilot-cli'));
     });
 
     test('includes --model when provided', () => {
