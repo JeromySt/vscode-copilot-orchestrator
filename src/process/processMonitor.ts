@@ -270,6 +270,7 @@ export class ProcessMonitor implements IProcessMonitor {
   /**
    * Terminate a process tree on Windows.
    */
+  /* c8 ignore next 8 -- Windows-only method, untestable on Linux CI */
   private async terminateWindows(pid: number, force: boolean): Promise<void> {
     try {
       const args = force ? ['/F', '/T', '/PID', String(pid)] : ['/T', '/PID', String(pid)];

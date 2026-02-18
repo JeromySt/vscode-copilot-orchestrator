@@ -86,6 +86,7 @@ export async function killProcessTree(
   timeoutMs = 5000
 ): Promise<void> {
   if (process.platform === 'win32') {
+    /* c8 ignore next 9 -- Windows-only path, untestable on Linux CI */
     const args = force 
       ? ['/F', '/T', '/PID', String(pid)]
       : ['/T', '/PID', String(pid)];
@@ -96,8 +97,6 @@ export async function killProcessTree(
       console.error(`Failed to kill Windows process ${pid}:`, e);
     }
   } else {
-    // On Unix, use process.kill directly for simplicity
-    // The spawner is not needed for this operation
     try {
       const signal = force ? 'SIGKILL' : 'SIGTERM';
       process.kill(pid, signal);
