@@ -58,6 +58,7 @@ export interface ICopilotRunner {
     cwd?: string;
     allowedFolders?: string[];
     allowedUrls?: string[];
+    agent?: string;
   }): string;
 
   /**

@@ -6,7 +6,7 @@
  * @module mcp/handlers/plan/retryNodeHandler
  */
 
-import { validateAllowedFolders, validateAllowedUrls, validatePowerShellCommands } from '../../validation';
+import { validateAllowedFolders, validateAllowedUrls, validatePowerShellCommands, validateAgentPlugins } from '../../validation';
 import {
   PlanHandlerContext,
   errorResult,
@@ -53,6 +53,13 @@ export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): P
     const psValidation = validatePowerShellCommands(args);
     if (!psValidation.valid) {
       return { success: false, error: psValidation.error };
+    }
+    // Validate agent plugins/sub-agents are available
+    if (ctx.spawner && ctx.env && ctx.configProvider) {
+      const pluginValidation = await validateAgentPlugins(args, ctx.spawner, ctx.env, ctx.configProvider, ctx.workspacePath);
+      if (!pluginValidation.valid) {
+        return { success: false, error: pluginValidation.error };
+      }
     }
   }
   

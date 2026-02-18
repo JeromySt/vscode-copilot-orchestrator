@@ -62,6 +62,7 @@ const KITCHEN_SINK_PLAN = {
       work: {
         type: 'agent',
         instructions: '# Build feature',
+        agent: 'k8s-assistant',
         model: 'claude-sonnet-4',
         model_tier: 'standard',
         maxTurns: 15,

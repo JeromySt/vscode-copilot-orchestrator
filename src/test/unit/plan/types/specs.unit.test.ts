@@ -9,4 +9,19 @@ suite('normalizeWorkSpec', () => {
     assert.strictEqual((result as any).errorAction, 'Continue');
     assert.strictEqual((input as any).error_action, undefined);
   });
+
+  test('preserves agent field on AgentSpec', () => {
+    const input: any = { type: 'agent', instructions: '# Task', agent: 'k8s-assistant', model: 'gpt-5' };
+    const result = normalizeWorkSpec(input);
+    assert.strictEqual((result as any).agent, 'k8s-assistant');
+    assert.strictEqual((result as any).type, 'agent');
+    assert.strictEqual((result as any).instructions, '# Task');
+  });
+
+  test('handles agent spec without agent field', () => {
+    const input: any = { type: 'agent', instructions: '# Task' };
+    const result = normalizeWorkSpec(input);
+    assert.strictEqual((result as any).type, 'agent');
+    assert.strictEqual((result as any).agent, undefined);
+  });
 });

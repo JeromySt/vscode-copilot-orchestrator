@@ -46,6 +46,8 @@ export interface WorkSpec {
   args?: string[];
   shell?: 'cmd' | 'powershell' | 'pwsh' | 'bash' | 'sh';
   instructions?: string;
+  /** Copilot CLI sub-agent or plugin name (e.g. "k8s-assistant" or "my-plugin@awesome-copilot") */
+  agent?: string;
   model?: string;
   maxTurns?: number;
   resumeSession?: boolean;
@@ -120,6 +122,7 @@ const workSpecObjectSchema = {
     shell: { type: 'string', enum: ['cmd', 'powershell', 'pwsh', 'bash', 'sh'] },
     error_action: { type: 'string', enum: ['Continue', 'Stop', 'SilentlyContinue'], description: 'PowerShell $ErrorActionPreference. Default: Continue. Only applies to powershell/pwsh shells.' },
     instructions: { type: 'string' },
+    agent: { type: 'string', maxLength: 200, description: 'Copilot CLI sub-agent or plugin name. E.g. "k8s-assistant" or "my-plugin@awesome-copilot". Validated at plan creation — must be installed or available as a custom agent.' },
     model: { type: 'string', maxLength: 100 },
     model_tier: { type: 'string', enum: ['fast', 'standard', 'premium'], description: 'Model tier preference. When set and model is not specified, auto-selects a model matching this tier.' },
     maxTurns: { type: 'number', minimum: 1, maximum: 100 },

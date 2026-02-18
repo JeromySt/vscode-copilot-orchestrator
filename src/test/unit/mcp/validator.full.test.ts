@@ -462,6 +462,166 @@ suite('MCP Validator', () => {
     });
   });
 
+  suite('extractAgentNames', () => {
+    test('returns empty for input without agents', () => {
+      const { extractAgentNames } = require('../../../mcp/validation/validator');
+      const result = extractAgentNames({
+        work: { type: 'shell', command: 'npm test' },
+      });
+      assert.deepStrictEqual(result, []);
+    });
+
+    test('extracts agent name from work spec', () => {
+      const { extractAgentNames } = require('../../../mcp/validation/validator');
+      const result = extractAgentNames({
+        work: { type: 'agent', instructions: '# Task', agent: 'k8s-assistant' },
+      });
+      assert.deepStrictEqual(result, ['k8s-assistant']);
+    });
+
+    test('extracts agents from nested jobs', () => {
+      const { extractAgentNames } = require('../../../mcp/validation/validator');
+      const result = extractAgentNames({
+        jobs: [
+          { work: { type: 'agent', instructions: '# Task', agent: 'agent-a' } },
+          { work: { type: 'agent', instructions: '# Task', agent: 'agent-b' } },
+        ],
+      });
+      assert.strictEqual(result.length, 2);
+      assert.ok(result.includes('agent-a'));
+      assert.ok(result.includes('agent-b'));
+    });
+
+    test('deduplicates agent names', () => {
+      const { extractAgentNames } = require('../../../mcp/validation/validator');
+      const result = extractAgentNames({
+        jobs: [
+          { work: { type: 'agent', instructions: '# A', agent: 'shared-agent' } },
+          { work: { type: 'agent', instructions: '# B', agent: 'shared-agent' } },
+        ],
+      });
+      assert.deepStrictEqual(result, ['shared-agent']);
+    });
+
+    test('extracts agents from groups', () => {
+      const { extractAgentNames } = require('../../../mcp/validation/validator');
+      const result = extractAgentNames({
+        groups: [
+          { jobs: [{ work: { type: 'agent', instructions: '# T', agent: 'group-agent' } }] },
+        ],
+      });
+      assert.deepStrictEqual(result, ['group-agent']);
+    });
+
+    test('extracts agents from reshape operations', () => {
+      const { extractAgentNames } = require('../../../mcp/validation/validator');
+      const result = extractAgentNames({
+        operations: [
+          { spec: { work: { type: 'agent', instructions: '# T', agent: 'op-agent' } } },
+        ],
+      });
+      assert.deepStrictEqual(result, ['op-agent']);
+    });
+
+    test('ignores agent field on non-agent type', () => {
+      const { extractAgentNames } = require('../../../mcp/validation/validator');
+      const result = extractAgentNames({
+        work: { type: 'shell', command: 'test', agent: 'should-ignore' },
+      });
+      assert.deepStrictEqual(result, []);
+    });
+
+    test('ignores empty agent string', () => {
+      const { extractAgentNames } = require('../../../mcp/validation/validator');
+      const result = extractAgentNames({
+        work: { type: 'agent', instructions: '# T', agent: '  ' },
+      });
+      assert.deepStrictEqual(result, []);
+    });
+
+    test('extracts from prechecks and postchecks', () => {
+      const { extractAgentNames } = require('../../../mcp/validation/validator');
+      const result = extractAgentNames({
+        prechecks: { type: 'agent', instructions: '# Pre', agent: 'pre-agent' },
+        postchecks: { type: 'agent', instructions: '# Post', agent: 'post-agent' },
+      });
+      assert.strictEqual(result.length, 2);
+      assert.ok(result.includes('pre-agent'));
+      assert.ok(result.includes('post-agent'));
+    });
+  });
+
+  suite('validateAgentPlugins', () => {
+    test('returns valid when no agents referenced', async () => {
+      const { validateAgentPlugins } = require('../../../mcp/validation/validator');
+      const spawner: any = { spawn: sinon.stub() };
+      const env: any = { env: {}, platform: 'linux' };
+      const config: any = { getConfig: sinon.stub().returns(false) };
+      const result = await validateAgentPlugins({ work: { type: 'shell', command: 'npm test' } }, spawner, env, config);
+      assert.strictEqual(result.valid, true);
+    });
+
+    test('returns error when agent not available and autoInstall disabled', async () => {
+      const { validateAgentPlugins } = require('../../../mcp/validation/validator');
+      const spawner: any = {
+        spawn: sinon.stub().returns({
+          stdout: { on: (evt: string, cb: any) => { if (evt === 'data') { cb('No plugins installed.\n'); } } },
+          stderr: { on: () => {} },
+          on: (evt: string, cb: any) => { if (evt === 'close') { cb(0); } },
+          kill: sinon.stub(),
+        }),
+      };
+      const env: any = { env: {}, platform: 'linux' };
+      const config: any = { getConfig: sinon.stub().returns(false) };
+      const result = await validateAgentPlugins(
+        { work: { type: 'agent', instructions: '# T', agent: 'missing-agent' } },
+        spawner, env, config
+      );
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes('missing-agent'));
+      assert.ok(result.error?.includes('copilot plugin install'));
+    });
+
+    test('returns valid when agent is an installed plugin', async () => {
+      const { validateAgentPlugins } = require('../../../mcp/validation/validator');
+      const spawner: any = {
+        spawn: sinon.stub().returns({
+          stdout: { on: (evt: string, cb: any) => { if (evt === 'data') { cb('my-agent (source: org/repo)\n'); } } },
+          stderr: { on: () => {} },
+          on: (evt: string, cb: any) => { if (evt === 'close') { cb(0); } },
+          kill: sinon.stub(),
+        }),
+      };
+      const env: any = { env: {}, platform: 'linux' };
+      const config: any = { getConfig: sinon.stub().returns(false) };
+      const result = await validateAgentPlugins(
+        { work: { type: 'agent', instructions: '# T', agent: 'my-agent' } },
+        spawner, env, config
+      );
+      assert.strictEqual(result.valid, true);
+    });
+
+    test('error message includes auto-install setting hint', async () => {
+      const { validateAgentPlugins } = require('../../../mcp/validation/validator');
+      const spawner: any = {
+        spawn: sinon.stub().returns({
+          stdout: { on: (evt: string, cb: any) => { if (evt === 'data') { cb('No plugins installed.\n'); } } },
+          stderr: { on: () => {} },
+          on: (evt: string, cb: any) => { if (evt === 'close') { cb(0); } },
+          kill: sinon.stub(),
+        }),
+      };
+      const env: any = { env: {}, platform: 'linux' };
+      const config: any = { getConfig: sinon.stub().returns(false) };
+      const result = await validateAgentPlugins(
+        { work: { type: 'agent', instructions: '# T', agent: 'x' } },
+        spawner, env, config
+      );
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes('autoInstallPlugins'));
+    });
+  });
+
   suite('schemas', () => {
     test('should export all schemas', () => {
       const { schemas } = require('../../../mcp/validation/schemas');

@@ -190,6 +190,11 @@
           "default": true,
           "description": "Fail jobs early if Copilot CLI is missing (with install guidance)"
         },
+        "copilotOrchestrator.copilotCli.autoInstallPlugins": {
+          "type": "boolean",
+          "default": false,
+          "description": "When a plan references a Copilot CLI plugin that is not installed, automatically attempt to install it via 'copilot plugin install'. If disabled, plan creation fails with instructions for manual installation. Custom agent files (.agent.md) cannot be auto-installed — only marketplace plugins."
+        },
         "copilotOrchestrator.merge.mode": {
           "type": "string",
           "enum": [

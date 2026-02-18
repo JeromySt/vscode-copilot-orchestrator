@@ -16,6 +16,7 @@ import {
   addNodeAfter,
 } from '../../../plan/reshaper';
 import type { JobNodeSpec } from '../../../plan/types';
+import { validateAgentPlugins } from '../../validation';
 import {
   PlanHandlerContext,
   errorResult,
@@ -144,6 +145,14 @@ export async function handleReshapePlan(args: any, ctx: PlanHandlerContext): Pro
   const planResult = lookupPlan(ctx, args.planId, 'getPlan');
   if (isError(planResult)) { return planResult; }
   const plan = planResult;
+
+  // Validate agent plugins in any add_node operations
+  if (ctx.spawner && ctx.env && ctx.configProvider) {
+    const pluginValidation = await validateAgentPlugins(args, ctx.spawner, ctx.env, ctx.configProvider, ctx.workspacePath);
+    if (!pluginValidation.valid) {
+      return { success: false, error: pluginValidation.error };
+    }
+  }
 
   const results: Array<{ operation: string; success: boolean; nodeId?: string; error?: string }> = [];
 

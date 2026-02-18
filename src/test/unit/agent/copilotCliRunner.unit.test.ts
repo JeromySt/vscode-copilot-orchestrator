@@ -175,4 +175,32 @@ suite('CopilotCliRunner', () => {
       assert.ok(cmd.includes('--allow-url "https://api.example.com/v1?key=value&other=param"'), 'Command should properly quote URL with query params');
     });
   });
+
+  suite('buildCommand - Agent Flag', () => {
+    test('includes --agent when agent is specified', () => {
+      const runner = new CopilotCliRunner();
+      const cmd = runner.buildCommand({
+        task: 'test task',
+        agent: 'k8s-assistant'
+      });
+      assert.ok(cmd.includes('--agent "k8s-assistant"'), 'Command should include --agent flag');
+    });
+
+    test('omits --agent when not specified', () => {
+      const runner = new CopilotCliRunner();
+      const cmd = runner.buildCommand({
+        task: 'test task'
+      });
+      assert.ok(!cmd.includes('--agent'), 'Command should not include --agent when not specified');
+    });
+
+    test('quotes agent name with special characters', () => {
+      const runner = new CopilotCliRunner();
+      const cmd = runner.buildCommand({
+        task: 'test task',
+        agent: 'my-plugin@awesome-copilot'
+      });
+      assert.ok(cmd.includes('--agent "my-plugin@awesome-copilot"'), 'Command should JSON-quote agent name');
+    });
+  });
 });

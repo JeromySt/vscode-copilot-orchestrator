@@ -134,7 +134,7 @@ WORK OPTIONS (work/prechecks/postchecks/verify_ri accept):
 1. String: "npm run build" (runs in default shell) or "@agent Implement feature" 
 2. Process spec: { type: "process", executable: "dotnet", args: ["build", "-c", "Release"] }
 3. Shell spec: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
-4. Agent spec: { type: "agent", instructions: "# Task\\n\\n1. Step one", model: "claude-sonnet-4.5" }
+4. Agent spec: { type: "agent", instructions: "# Task\\n\\n1. Step one", model: "claude-sonnet-4.5", agent: "my-custom-agent" }
 
 ON_FAILURE CONFIG (optional on any work/prechecks/postchecks object):
 Add "on_failure" to any work spec object to control retry behavior on failure:
@@ -152,6 +152,7 @@ Example: "dotnet build --no-restore", "npm run build && npm test", or "@agent Ve
 IMPORTANT: For agent work, specify 'model' INSIDE the work object (not at job level).
 Agent instructions MUST be in Markdown format for proper rendering.
 If the project has .github/skills/ directories, incorporate relevant skill conventions into agent instructions for best results.
+AGENT PLUGINS: The optional 'agent' field selects a Copilot CLI sub-agent or plugin (e.g. "k8s-assistant" or "my-plugin@awesome-copilot"). Must be installed via 'copilot plugin install' or available as a custom agent file. Validated at plan creation.
 
 SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"
 POWERSHELL NOTE: On Windows, PowerShell is the default shell. The orchestrator automatically wraps commands with $ErrorActionPreference='Continue' and 'exit $LASTEXITCODE' to prevent stderr from native commands causing false failures. Do NOT use '2>&1' in PowerShell commands — it causes NativeCommandError when commands write warnings to stderr, leading to false exit code 1 even when the command succeeds. The orchestrator captures stdout and stderr separately, so 2>&1 is never needed.
@@ -232,12 +233,13 @@ To override $ErrorActionPreference, set "error_action" on the shell spec: "Conti
 1. STRING: Shell command like "npm run build" or "@agent Do something" for AI
 2. PROCESS OBJECT: { "type": "process", "executable": "node", "args": ["script.js"] }
 3. SHELL OBJECT: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "claude-sonnet-4.5" }
+4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "claude-sonnet-4.5", "agent": "my-custom-agent" }
 
 For process type, args is an array - no shell quoting needed.
 For shell type, shell can be: cmd, powershell, pwsh, bash, sh. Do NOT use '2>&1' in PowerShell — the orchestrator captures stderr separately.
 For agent type, model goes INSIDE the work object. Available models: ${modelEnum.join(', ')}
 Fast models (haiku/mini) for simple tasks, premium models (opus) for complex reasoning.
+The optional 'agent' field selects a Copilot CLI sub-agent or installed plugin — validated at plan creation.
 
 Agent instructions MUST be in Markdown format with headers, numbered lists, bullet lists.
 
@@ -498,10 +500,10 @@ NEW WORK OPTIONS:
 - String: Shell command like "npm run build" or "@agent Do something"
 - Process: { type: "process", executable: "node", args: ["script.js"] }
 - Shell: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
-- Agent: { type: "agent", instructions: "# Fix Issue\\n\\n1. Analyze error\\n2. Apply fix", resumeSession: true }
+- Agent: { type: "agent", instructions: "# Fix Issue\\n\\n1. Analyze error\\n2. Apply fix", resumeSession: true, agent: "my-agent" }
 
 For agent work, resumeSession (default: true) controls whether to continue
-the existing Copilot session or start fresh.
+the existing Copilot session or start fresh. The optional 'agent' field selects a sub-agent or plugin.
 
 IMPORTANT: Agent instructions MUST be in Markdown format (# headers, 1. numbered lists, - bullet lists).
 
@@ -526,10 +528,10 @@ Options:
 1. STRING: Shell command like "npm run build" or "@agent Do something"
 2. PROCESS: { "type": "process", "executable": "node", "args": ["script.js"] }
 3. SHELL: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT: { "type": "agent", "instructions": "# Fix X\\n\\n1. Analyze\\n2. Fix", "resumeSession": true }
+4. AGENT: { "type": "agent", "instructions": "# Fix X\\n\\n1. Analyze\\n2. Fix", "resumeSession": true, "agent": "my-agent" }
 
 For agent type, resumeSession (default: true) continues existing Copilot session.
-Agent instructions MUST be in Markdown format.`
+The optional 'agent' field selects a sub-agent or plugin. Agent instructions MUST be in Markdown format.`
           },
           newPrechecks: {
             description: 'Optional replacement prechecks for the retry. Same format as work specs. Use null to remove prechecks.'
@@ -614,10 +616,10 @@ WORKFLOW:
 1. STRING: Shell command like "npm run build" or "@agent Do something"
 2. PROCESS: { "type": "process", "executable": "node", "args": ["script.js"] }
 3. SHELL: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT: { "type": "agent", "instructions": "# Fix X\\n\\n1. Analyze\\n2. Fix", "resumeSession": true }
+4. AGENT: { "type": "agent", "instructions": "# Fix X\\n\\n1. Analyze\\n2. Fix", "resumeSession": true, "agent": "my-agent" }
 
 For agent type, resumeSession (default: true) continues existing Copilot session.
-Agent instructions MUST be in Markdown format.`
+The optional 'agent' field selects a sub-agent or plugin. Agent instructions MUST be in Markdown format.`
           },
           newPrechecks: {
             description: 'Optional replacement prechecks for the retry. Same format as work specs. Use null to remove prechecks.'

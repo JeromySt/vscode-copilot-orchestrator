@@ -167,7 +167,8 @@ Each stage (prechecks/work/postchecks) can be:
 1. String: "npm run test" or "@agent Check implementation"
 2. Process spec: { "type": "process", "executable": "node", "args": ["test.js"] }
 3. Shell spec: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. Agent spec: { "type": "agent", "instructions": "# Task\\n1. Validate code", "model": "${modelEnum[0]}" }`,
+4. Agent spec: { "type": "agent", "instructions": "# Task\\n1. Validate code", "model": "${modelEnum[0]}", "agent": "my-agent" }
+The optional 'agent' field selects a Copilot CLI sub-agent or installed plugin — validated at plan creation.`,
       inputSchema: {
         type: 'object',
         properties: {

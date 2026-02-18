@@ -27,6 +27,10 @@ export interface PlanHandlerContext extends ToolHandlerContext {
   git: IGitOperations;
   /** Configuration provider for reading VS Code settings without direct API coupling. */
   configProvider?: IConfigProvider;
+  /** Process spawner for running CLI commands (used by agent plugin validation). */
+  spawner?: import('../../interfaces/IProcessSpawner').IProcessSpawner;
+  /** Environment abstraction (used by agent plugin discovery). */
+  env?: import('../../interfaces/IEnvironment').IEnvironment;
 }
 
 /**

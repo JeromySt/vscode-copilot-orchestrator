@@ -10,6 +10,10 @@
 import Ajv, { ErrorObject, ValidateFunction } from 'ajv';
 import { schemas } from './schemas';
 import { getCachedModels } from '../../agent/modelDiscovery';
+import { isAgentAvailable, installPlugin } from '../../agent/pluginDiscovery';
+import type { IProcessSpawner } from '../../interfaces/IProcessSpawner';
+import type { IEnvironment } from '../../interfaces/IEnvironment';
+import type { IConfigProvider } from '../../interfaces/IConfigProvider';
 
 // ============================================================================
 // VALIDATOR SINGLETON
@@ -692,6 +696,123 @@ export function validatePowerShellCommands(input: unknown): ValidationResult {
 
   if (errors.length > 0) {
     return { valid: false, error: errors.join('\n') };
+  }
+  return { valid: true };
+}
+
+// ============================================================================
+// AGENT PLUGIN VALIDATION
+// ============================================================================
+
+/**
+ * Extract all unique agent names from a plan/node spec input.
+ *
+ * Traverses work, prechecks, postchecks at all levels (top-level, jobs, groups, nodes, operations).
+ */
+export function extractAgentNames(input: unknown): string[] {
+  const agents = new Set<string>();
+
+  function checkSpec(value: unknown): void {
+    if (!value || typeof value !== 'object') { return; }
+    const spec = value as Record<string, unknown>;
+    if (spec.type === 'agent' && typeof spec.agent === 'string' && spec.agent.trim()) {
+      agents.add(spec.agent.trim());
+    }
+  }
+
+  function traverse(obj: unknown): void {
+    if (!obj || typeof obj !== 'object') { return; }
+    const record = obj as Record<string, unknown>;
+
+    for (const field of ['work', 'prechecks', 'postchecks', 'verify_ri']) {
+      if (record[field] !== undefined) { checkSpec(record[field]); }
+    }
+
+    if (Array.isArray(record.jobs)) {
+      for (const job of record.jobs) { traverse(job); }
+    }
+    if (Array.isArray(record.groups)) {
+      for (const group of (record.groups as any[])) {
+        if (Array.isArray(group?.jobs)) {
+          for (const job of group.jobs) { traverse(job); }
+        }
+      }
+    }
+    if (Array.isArray(record.nodes)) {
+      for (const node of record.nodes) { traverse(node); }
+    }
+    if (Array.isArray(record.operations)) {
+      for (const op of (record.operations as any[])) {
+        if (op?.spec) { traverse(op.spec); }
+      }
+    }
+  }
+
+  traverse(input);
+  return Array.from(agents);
+}
+
+/**
+ * Validate that all referenced Copilot CLI agents/plugins are available.
+ *
+ * For each unique agent name found in the input:
+ * 1. Check if it's an installed plugin or custom agent file
+ * 2. If missing and autoInstall is enabled, attempt to install it
+ * 3. If missing and autoInstall is disabled, return an error with install instructions
+ *
+ * @param input     - The MCP tool input (plan spec, node spec, reshape operations)
+ * @param spawner   - Process spawner for running copilot CLI
+ * @param env       - Environment for home directory resolution
+ * @param config    - Config provider for autoInstallPlugins setting
+ * @param repoCwd   - Repository working directory (for .github/agents/ discovery)
+ */
+export async function validateAgentPlugins(
+  input: unknown,
+  spawner: IProcessSpawner,
+  env: IEnvironment,
+  config: IConfigProvider,
+  repoCwd?: string,
+): Promise<ValidationResult> {
+  const agentNames = extractAgentNames(input);
+  if (agentNames.length === 0) {
+    return { valid: true };
+  }
+
+  const autoInstall = config.getConfig<boolean>('copilotOrchestrator.copilotCli', 'autoInstallPlugins', false);
+  const errors: string[] = [];
+  const installed: string[] = [];
+
+  for (const agentName of agentNames) {
+    const result = await isAgentAvailable(agentName, spawner, env, repoCwd);
+    if (result.available) { continue; }
+
+    // Agent not available — try to install or report error
+    if (autoInstall) {
+      const installResult = await installPlugin(agentName, spawner);
+      if (installResult.success) {
+        installed.push(agentName);
+        continue;
+      }
+      errors.push(
+        `Agent '${agentName}' is not available and auto-install failed: ${installResult.error}. ` +
+        `Install manually with: copilot plugin install ${agentName}`
+      );
+    } else {
+      errors.push(
+        `Agent '${agentName}' is not installed or available as a custom agent. ` +
+        `Install it with: copilot plugin install ${agentName}\n` +
+        `Or create a custom agent file at ~/.copilot/agents/${agentName}.agent.md\n` +
+        `To enable automatic plugin installation, set copilotOrchestrator.copilotCli.autoInstallPlugins to true.`
+      );
+    }
+  }
+
+  if (installed.length > 0 && errors.length === 0) {
+    return { valid: true };
+  }
+
+  if (errors.length > 0) {
+    return { valid: false, error: errors.join('\n\n') };
   }
   return { valid: true };
 }

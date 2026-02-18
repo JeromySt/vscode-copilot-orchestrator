@@ -99,18 +99,24 @@ export class McpHandler implements IMcpRequestRouter {
    * @param workspacePath   - Absolute path to the workspace root (git repository).
    * @param git             - Git operations interface.
    * @param configProvider  - Optional configuration provider for reading VS Code settings.
+   * @param spawner         - Optional process spawner for CLI commands (plugin validation).
+   * @param env             - Optional environment abstraction (plugin discovery).
    */
   constructor(
     PlanRunner: PlanRunner,
     workspacePath: string,
     git: import('../interfaces/IGitOperations').IGitOperations,
     configProvider?: import('../interfaces/IConfigProvider').IConfigProvider,
+    spawner?: import('../interfaces/IProcessSpawner').IProcessSpawner,
+    env?: import('../interfaces/IEnvironment').IEnvironment,
   ) {
     this.context = { 
       PlanRunner, 
       workspacePath,
       git,
       configProvider,
+      spawner,
+      env,
       // Legacy fields - kept for type compatibility
       runner: null as any,
       plans: null as any,

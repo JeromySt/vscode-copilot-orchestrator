@@ -100,6 +100,8 @@ export interface DelegateOptions {
    * - **Clean Shutdown**: When the worktree is cleaned up, all session files are automatically
    *   removed with it
    */
+  /** Copilot CLI sub-agent or plugin name. */
+  agent?: string;
 }
 
 /**
@@ -300,7 +302,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
    * Delegate task via GitHub Copilot CLI.
    */
   private async delegateViaCopilot(options: DelegateOptions): Promise<DelegateResult> {
-    const { jobId, taskDescription, label, worktreePath, sessionId, model, allowedFolders, allowedUrls } = options;
+    const { jobId, taskDescription, label, worktreePath, sessionId, model, allowedFolders, allowedUrls, agent } = options;
 
     // Validate model if provided
     if (model && !await isValidModel(model)) {
@@ -362,6 +364,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       jobId,
       allowedFolders: finalAllowedFolders,  // Pass through allowed folders with worktree included
       allowedUrls,     // NEW: pass through to CLI runner
+      agent,
       timeout: 0, // No timeout — agent work can run for a long time
       onProcess: (proc) => {
         if (proc.pid) {

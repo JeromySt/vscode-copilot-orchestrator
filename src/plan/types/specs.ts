@@ -165,6 +165,19 @@ export interface AgentSpec {
    * ```
    */
   instructions: string;
+
+  /**
+   * Name of a Copilot CLI sub-agent or plugin to use for this task.
+   *
+   * Can be a custom agent name (from `~/.copilot/agents/` or `.github/agents/`)
+   * or a marketplace plugin reference (e.g. `"my-plugin@awesome-copilot"`).
+   *
+   * When specified, the Copilot CLI is invoked with `--agent <name>`.
+   * The orchestrator validates agent availability at plan creation time.
+   *
+   * @example `"k8s-assistant"` or `"security-reviewer@copilot-plugins"`
+   */
+  agent?: string;
   
   /** Optional model preference */
   model?: string;

@@ -49,6 +49,8 @@ export interface CopilotRunOptions {
   allowedUrls?: string[];
   /** Maximum agent turns/iterations (e.g., 1 for single-turn augmentation calls). */
   maxTurns?: number;
+  /** Copilot CLI sub-agent or plugin name. Passed as `--agent <name>` to the CLI. */
+  agent?: string;
 }
 
 /**
@@ -163,6 +165,7 @@ export class CopilotCliRunner {
       allowedFolders: options.allowedFolders,
       allowedUrls: options.allowedUrls,
       maxTurns: options.maxTurns,
+      agent: options.agent,
     });
     
     this.logger.info(`[${label}] Running: ${copilotCmd.substring(0, 100)}...`);
@@ -503,6 +506,8 @@ export interface BuildCommandOptions {
   allowedFolders?: string[];
   allowedUrls?: string[];
   maxTurns?: number;
+  /** Copilot CLI sub-agent or plugin name. */
+  agent?: string;
 }
 
 /**
@@ -603,6 +608,7 @@ export function buildCommand(
   if (sharePath) { cmd += ` --share ${JSON.stringify(sharePath)}`; }
   if (sessionId) { cmd += ` --resume ${sessionId}`; }
   if (maxTurns && maxTurns > 0) { cmd += ` --max-turns ${maxTurns}`; }
+  if (options.agent) { cmd += ` --agent ${JSON.stringify(options.agent)}`; }
   log.info(`[SECURITY] Copilot CLI command: copilot ${cmd}`);
   return cmd;
 }

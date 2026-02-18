@@ -147,6 +147,7 @@ export async function runAgent(
   if (ctx.sessionId) {ctx.logInfo(`Resuming Copilot session: ${ctx.sessionId}`);}
   if (spec.allowedFolders?.length) {ctx.logInfo(`Agent allowed folders: ${spec.allowedFolders.join(', ')}`);}
   if (spec.allowedUrls?.length) {ctx.logInfo(`Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);}
+  if (spec.agent) {ctx.logInfo(`Using Copilot sub-agent: ${spec.agent}`);}
   try {
     const result = await agentDelegator.delegate({
       task: spec.instructions,
@@ -155,6 +156,7 @@ export async function runAgent(
       contextFiles: spec.contextFiles, maxTurns: spec.maxTurns,
       sessionId: ctx.sessionId, jobId: ctx.node.id,
       allowedFolders: spec.allowedFolders, allowedUrls: spec.allowedUrls,
+      agent: spec.agent,
       logOutput: (line: string) => ctx.logInfo(line),
       onProcess: (proc: any) => { ctx.setProcess(proc); ctx.setIsAgentWork(true); },
     });
