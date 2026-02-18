@@ -63,6 +63,7 @@ const KITCHEN_SINK_PLAN = {
         type: 'agent',
         instructions: '# Build feature',
         model: 'claude-sonnet-4',
+        model_tier: 'standard',
         maxTurns: 15,
         resumeSession: true,
         allowedFolders: ['/shared/libs'],
@@ -160,6 +161,7 @@ const KITCHEN_SINK_RETRY_NODE = {
     type: 'agent',
     instructions: '# Fix the issue',
     model: 'claude-sonnet-4',
+    model_tier: 'fast',
     maxTurns: 10,
     resumeSession: false,
     allowedFolders: ['/tmp/shared'],
@@ -267,7 +269,7 @@ const KITCHEN_SINK_RETRY_NODE_CENTRIC = {
 
 suite('MCP Schema Completeness', () => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { validateInput } = require('../../../mcp/validation/validator');
+  const { validateInput, validatePostchecksPresence } = require('../../../mcp/validation/validator');
 
   // -----------------------------------------------------------------------
   // Kitchen-sink acceptance tests
@@ -567,6 +569,20 @@ suite('MCP Schema Completeness', () => {
         assert.strictEqual(r.valid, true, `Shell '${shell}' should be valid: ${r.error}`);
       }
     });
+
+    test('type: agent with model_tier is accepted', () => {
+      const r = validateInput('create_copilot_plan', planWithWork({
+        type: 'agent', instructions: '# Task', model_tier: 'fast',
+      }));
+      assert.strictEqual(r.valid, true, r.error);
+    });
+
+    test('model_tier rejects invalid value', () => {
+      const r = validateInput('create_copilot_plan', planWithWork({
+        type: 'agent', instructions: '# Task', model_tier: 'ultra',
+      }));
+      assert.strictEqual(r.valid, false);
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -715,6 +731,41 @@ suite('MCP Schema Completeness', () => {
         }],
       });
       assert.strictEqual(r.valid, true, r.error);
+    });
+  });
+
+  suite('validatePostchecksPresence', () => {
+    test('returns warning when job has work but no postchecks', () => {
+      const warnings = validatePostchecksPresence({
+        name: 'Test Plan',
+        jobs: [{ producer_id: 'j1', task: 'Do stuff', dependencies: [], work: { type: 'shell', command: 'echo hi' } }],
+      });
+      assert.strictEqual(warnings.length, 1);
+      assert.ok(warnings[0].includes('postchecks'));
+    });
+
+    test('returns no warning when job has both work and postchecks', () => {
+      const warnings = validatePostchecksPresence({
+        name: 'Test Plan',
+        jobs: [{ producer_id: 'j1', task: 'Do stuff', dependencies: [], work: { type: 'shell', command: 'echo hi' }, postchecks: { type: 'shell', command: 'echo check' } }],
+      });
+      assert.strictEqual(warnings.length, 0);
+    });
+
+    test('returns no warning when no work specified', () => {
+      const warnings = validatePostchecksPresence({
+        name: 'Test Plan',
+        jobs: [{ producer_id: 'j1', task: 'Do stuff', dependencies: [] }],
+      });
+      assert.strictEqual(warnings.length, 0);
+    });
+
+    test('checks nested groups', () => {
+      const warnings = validatePostchecksPresence({
+        name: 'Test Plan',
+        groups: [{ name: 'g1', jobs: [{ producer_id: 'j1', task: 'Do stuff', dependencies: [], work: 'echo hi' }] }],
+      });
+      assert.strictEqual(warnings.length, 1);
     });
   });
 });

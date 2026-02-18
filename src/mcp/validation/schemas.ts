@@ -120,6 +120,7 @@ const workSpecObjectSchema = {
     shell: { type: 'string', enum: ['cmd', 'powershell', 'pwsh', 'bash', 'sh'] },
     instructions: { type: 'string' },
     model: { type: 'string', maxLength: 100 },
+    model_tier: { type: 'string', enum: ['fast', 'standard', 'premium'], description: 'Model tier preference. When set and model is not specified, auto-selects a model matching this tier.' },
     maxTurns: { type: 'number', minimum: 1, maximum: 100 },
     resumeSession: { type: 'boolean' },
     allowedFolders: {

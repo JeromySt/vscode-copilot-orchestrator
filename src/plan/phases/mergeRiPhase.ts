@@ -210,13 +210,16 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
     try {
       const currentBranch = await this.git.branches.currentOrNull(repoPath);
       branchCheckedOut = currentBranch === targetBranch;
+      context.logInfo(`Main worktree branch: ${currentBranch || '(detached)'}, target: ${targetBranch}, match: ${branchCheckedOut}`);
       if (branchCheckedOut) {
         wasDirtyBeforeRefUpdate = await this.git.repository.hasUncommittedChanges(repoPath);
+        context.logInfo(`Main worktree dirty before ref update: ${wasDirtyBeforeRefUpdate}`);
       }
     } catch { /* non-fatal — assume dirty to be safe */ }
 
     try {
       await this.git.repository.updateRef(repoPath, `refs/heads/${targetBranch}`, newCommit);
+      context.logInfo(`Ref refs/heads/${targetBranch} → ${newCommit.slice(0, 8)}`);
     } catch (error: any) {
       context.logError(`Failed to update branch ${targetBranch}: ${error.message}`);
       return false;
@@ -224,19 +227,24 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
 
     if (branchCheckedOut) {
       if (!wasDirtyBeforeRefUpdate) {
-        // Working tree was clean before the ref move — safe to reset.
+        // Working tree was clean — safe to reset to the exact commit.
+        // Use the explicit commit SHA (not 'HEAD') to avoid stale
+        // symref resolution when other tools (e.g. VS Code git) are
+        // watching the repo concurrently.
         try {
-          await this.git.repository.resetHard(repoPath, 'HEAD', s => context.logInfo(s));
-          context.logInfo(`Synced working tree to ${newCommit.slice(0, 8)}`);
+          await this.git.repository.resetHard(repoPath, newCommit, s => context.logInfo(s));
+          context.logInfo(`Synced main worktree to ${newCommit.slice(0, 8)}`);
         } catch (err: any) {
-          context.logInfo(`⚠ Could not sync working tree: ${err.message}`);
+          context.logInfo(`⚠ Could not sync main worktree: ${err.message}`);
         }
       } else {
         context.logInfo(
           `ℹ Your checkout on ${targetBranch} has uncommitted changes. ` +
-          `Run 'git reset --hard HEAD' after saving your work to sync with the merge.`
+          `Run 'git reset --hard ${newCommit.slice(0, 8)}' after saving your work to sync with the merge.`
         );
       }
+    } else {
+      context.logInfo(`Main worktree is not on ${targetBranch} — skipping working tree sync`);
     }
 
     return true;

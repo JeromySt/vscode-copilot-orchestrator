@@ -123,7 +123,21 @@ export async function runAgent(
   const startTime = Date.now();
   ctx.setStartTime(startTime);
   ctx.logInfo(`Agent instructions: ${spec.instructions}`);
-  if (spec.model) {ctx.logInfo(`Using model: ${spec.model}`);}
+
+  // Resolve model from modelTier if model isn't explicitly set
+  let resolvedModel = spec.model;
+  if (!resolvedModel && spec.modelTier) {
+    try {
+      const { suggestModel } = await import('../../agent/modelDiscovery');
+      const suggested = await suggestModel(spec.modelTier);
+      if (suggested) {
+        resolvedModel = suggested.id;
+        ctx.logInfo(`Resolved modelTier '${spec.modelTier}' → '${resolvedModel}'`);
+      }
+    } catch { /* fallback to default */ }
+  }
+
+  if (resolvedModel) {ctx.logInfo(`Using model: ${resolvedModel}`);}
   if (spec.contextFiles?.length) {ctx.logInfo(`Agent context files: ${spec.contextFiles.join(', ')}`);}
   if (spec.maxTurns) {ctx.logInfo(`Agent max turns: ${spec.maxTurns}`);}
   if (spec.context) {ctx.logInfo(`Agent context: ${spec.context}`);}
@@ -134,7 +148,7 @@ export async function runAgent(
     const result = await agentDelegator.delegate({
       task: spec.instructions,
       instructions: ctx.node.instructions || spec.context,
-      worktreePath: ctx.worktreePath, model: spec.model,
+      worktreePath: ctx.worktreePath, model: resolvedModel,
       contextFiles: spec.contextFiles, maxTurns: spec.maxTurns,
       sessionId: ctx.sessionId, jobId: ctx.node.id,
       allowedFolders: spec.allowedFolders, allowedUrls: spec.allowedUrls,

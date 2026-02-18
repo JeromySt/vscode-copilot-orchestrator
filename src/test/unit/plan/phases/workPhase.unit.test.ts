@@ -181,4 +181,37 @@ suite('runAgent (standalone)', () => {
     await runAgent({ type: 'agent', instructions: 'x' }, ctx, delegator);
     assert.ok(setProcess.calledWith(fakeProc));
   });
+
+  test('resolves modelTier to concrete model via suggestModel', async () => {
+    const delegator = { delegate: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    // Stub the dynamic import by pre-loading the module and stubbing suggestModel
+    const modelDiscovery = await import('../../../../agent/modelDiscovery');
+    const stub = sinon.stub(modelDiscovery, 'suggestModel').resolves({ id: 'claude-haiku-4.5', vendor: 'anthropic', family: 'haiku', tier: 'fast' } as any);
+    try {
+      await runAgent({ type: 'agent', instructions: 'test', modelTier: 'fast' }, ctx, delegator);
+      const call = delegator.delegate.firstCall.args[0];
+      assert.strictEqual(call.model, 'claude-haiku-4.5');
+    } finally { stub.restore(); }
+  });
+
+  test('falls back to undefined model when suggestModel fails', async () => {
+    const delegator = { delegate: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    const modelDiscovery = await import('../../../../agent/modelDiscovery');
+    const stub = sinon.stub(modelDiscovery, 'suggestModel').rejects(new Error('no models'));
+    try {
+      await runAgent({ type: 'agent', instructions: 'test', modelTier: 'fast' }, ctx, delegator);
+      const call = delegator.delegate.firstCall.args[0];
+      assert.strictEqual(call.model, undefined);
+    } finally { stub.restore(); }
+  });
+
+  test('explicit model takes precedence over modelTier', async () => {
+    const delegator = { delegate: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    await runAgent({ type: 'agent', instructions: 'test', model: 'gpt-5', modelTier: 'fast' }, ctx, delegator);
+    const call = delegator.delegate.firstCall.args[0];
+    assert.strictEqual(call.model, 'gpt-5');
+  });
 });

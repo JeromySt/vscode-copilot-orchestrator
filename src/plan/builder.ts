@@ -344,6 +344,7 @@ export function buildPlan(
   //         user message explaining what to fix before retry
   const svPrechecks: import('./types/specs').AgentSpec = {
     type: 'agent',
+    modelTier: 'fast',
     instructions: [
       `You are running in the snapshot worktree. Your job is to verify the target branch '${svTargetBranch}' is healthy and rebase the snapshot if the target has advanced.`,
       ``,

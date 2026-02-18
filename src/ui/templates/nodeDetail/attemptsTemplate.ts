@@ -35,7 +35,7 @@ export interface WorkSpecData {
 export interface AttemptCardData {
   attemptNumber: number;
   status: 'succeeded' | 'failed' | 'canceled';
-  triggerType?: 'initial' | 'auto-heal' | 'retry';
+  triggerType?: 'initial' | 'auto-heal' | 'retry' | 'postchecks-revalidation';
   startedAt: number;
   endedAt: number;
   failedPhase?: string;
@@ -239,7 +239,9 @@ export function attemptCardHtml(attempt: AttemptCardData): string {
     ? '<span class="trigger-badge auto-heal">🔧 Auto-Heal</span>'
     : attempt.triggerType === 'retry'
       ? '<span class="trigger-badge retry">🔄 Retry</span>'
-      : '';
+      : attempt.triggerType === 'postchecks-revalidation'
+        ? '<span class="trigger-badge retry">🔍 Postchecks Re-validation</span>'
+        : '';
 
   const phaseTabsHtml = attempt.logs ? attemptPhaseTabsHtml(attempt) : '';
 

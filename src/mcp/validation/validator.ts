@@ -62,6 +62,8 @@ export interface ValidationResult {
   error?: string;
   /** Raw Ajv errors for debugging */
   errors?: ErrorObject[];
+  /** Non-fatal warnings (e.g., missing recommended fields) */
+  warnings?: string[];
 }
 
 // ============================================================================
@@ -571,4 +573,43 @@ export async function validateAllowedFolders(
   }
   
   return { valid: true };
+}
+
+/**
+ * Check for jobs/nodes that have work specified but no postchecks.
+ * Returns warnings (not errors) so the caller can include them in the response.
+ */
+export function validatePostchecksPresence(input: unknown): string[] {
+  const warnings: string[] = [];
+
+  function hasWork(obj: Record<string, unknown>): boolean {
+    return obj.work !== undefined && obj.work !== null && obj.work !== '';
+  }
+
+  function check(obj: unknown, jsonPath: string): void {
+    if (!obj || typeof obj !== 'object') {return;}
+    const record = obj as Record<string, unknown>;
+
+    if (hasWork(record) && !record.postchecks) {
+      const name = record.name || record.task || jsonPath;
+      warnings.push(`${name}: has work but no postchecks. Postchecks act as exit-criteria gates — without them, auto-heal cannot verify fixes meet your requirements.`);
+    }
+
+    if (Array.isArray(record.jobs)) {
+      for (let i = 0; i < record.jobs.length; i++) {check(record.jobs[i], `jobs[${i}]`);}
+    }
+    if (Array.isArray(record.groups)) {
+      for (const g of record.groups as any[]) {
+        if (Array.isArray(g?.jobs)) {
+          for (let i = 0; i < g.jobs.length; i++) {check(g.jobs[i], `${g.name || 'group'}/jobs[${i}]`);}
+        }
+      }
+    }
+    if (Array.isArray(record.nodes)) {
+      for (let i = 0; i < record.nodes.length; i++) {check(record.nodes[i], `nodes[${i}]`);}
+    }
+  }
+
+  check(input, '');
+  return warnings;
 }

@@ -59,7 +59,7 @@ suite('logFileHelper', () => {
   });
 
   suite('appendToLogFile', () => {
-    test('creates log file and appends entry', () => {
+    test('creates log file with header on first append', () => {
       const dir = makeTmpDir();
       const orchDir = path.join(dir, '.orchestrator');
       fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
@@ -76,6 +76,8 @@ suite('logFileHelper', () => {
       const content = fs.readFileSync(logFile, 'utf8');
       assert.ok(content.includes('test message'));
       assert.ok(content.includes('[WORK]'));
+      // Header should also be present
+      assert.ok(content.includes('Copilot Orchestrator'));
     });
 
     test('does nothing when storagePath is undefined', () => {
@@ -120,14 +122,14 @@ suite('logFileHelper', () => {
   });
 
   suite('readLogsFromFile', () => {
-    test('returns header content when storagePath is provided (file auto-created)', () => {
+    test('returns "No log file found." when log file does not exist on disk', () => {
       const dir = makeTmpDir();
       const orchDir = path.join(dir, '.orchestrator');
       fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
       const logFiles = new Map<string, string>();
       const result = readLogsFromFile('key1', orchDir, logFiles);
-      // getLogFilePathByKey now auto-creates the log file with a header
-      assert.ok(result.includes('Copilot Orchestrator'));
+      // getLogFilePathByKey no longer auto-creates — read should report not found
+      assert.ok(result.includes('No log file found'));
     });
 
     test('returns "No log file found." when storagePath is undefined', () => {

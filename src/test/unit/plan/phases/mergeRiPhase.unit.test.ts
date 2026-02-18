@@ -598,11 +598,12 @@ suite('MergeRiPhaseExecutor', () => {
 
     assert.strictEqual(result, true);
     assert.ok((git.repository.updateRef as sinon.SinonStub).calledOnce);
-    // Clean before ref move → safe to reset
+    // Clean before ref move → safe to reset with explicit commit SHA
     assert.ok((git.repository.resetHard as sinon.SinonStub).calledOnce);
+    assert.strictEqual((git.repository.resetHard as sinon.SinonStub).firstCall.args[1], 'abc123');
     // Must NOT stash — no stash/pop cycle
     assert.ok(!(git.repository.stashPush as sinon.SinonStub).called);
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/Synced working tree/)));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/Synced main worktree/)));
   });
 
   test('updateBranchRef logs hint when branch checked out but dirty', async () => {

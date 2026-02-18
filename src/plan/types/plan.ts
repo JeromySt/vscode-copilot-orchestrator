@@ -198,12 +198,11 @@ export interface NodeExecutionState {
   resumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri' | 'verify-ri';
 
   /**
-   * Tracks which phases have had an auto-heal attempt.
-   * Each phase gets at most one auto-heal attempt independently, so if
-   * prechecks is healed successfully and postchecks later fails, postchecks
-   * will still get its own auto-heal attempt.
+   * Tracks auto-heal attempts per phase.
+   * Each value is the number of heal attempts for that phase.
+   * Backwards-compatible: `true` is treated as 1 when reading.
    */
-  autoHealAttempted?: Partial<Record<'prechecks' | 'work' | 'postchecks' | 'verify-ri', boolean>>;
+  autoHealAttempted?: Partial<Record<'prechecks' | 'work' | 'postchecks' | 'verify-ri', boolean | number>>;
   
   /**
    * Details about the last execution attempt (for retry context).
@@ -252,7 +251,7 @@ export interface AttemptRecord {
   status: 'succeeded' | 'failed' | 'canceled';
   
   /** What triggered this attempt */
-  triggerType?: 'initial' | 'auto-heal' | 'retry';
+  triggerType?: 'initial' | 'auto-heal' | 'retry' | 'postchecks-revalidation';
   
   /** When the attempt started */
   startedAt: number;

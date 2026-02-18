@@ -159,6 +159,13 @@ export interface AgentSpec {
   /** Optional model preference */
   model?: string;
   
+  /**
+   * Model tier preference. When set and `model` is not specified,
+   * the system will discover available models and select one matching
+   * this tier. Values: 'fast' (cheap/quick), 'standard', 'premium'.
+   */
+  modelTier?: 'fast' | 'standard' | 'premium';
+  
   /** Files to include in agent context (relative to worktree) */
   contextFiles?: string[];
   
@@ -362,6 +369,10 @@ export function normalizeWorkSpec(spec: WorkSpec | undefined): ProcessSpec | She
       resumeFromPhase: cfg.resume_from_phase,
     };
     delete raw.on_failure;
+  }
+  if (raw.model_tier && !raw.modelTier) {
+    raw.modelTier = raw.model_tier;
+    delete raw.model_tier;
   }
   
   return spec;

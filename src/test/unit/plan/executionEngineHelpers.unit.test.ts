@@ -1246,9 +1246,16 @@ suite('JobExecutionEngine - helper methods', () => {
         completedCommit: 'heal-commit-12345678901234567890123',
         stepStatuses: { work: 'success', postchecks: 'success', commit: 'success' },
       };
+      // Third call: postchecks re-validation with original spec
+      const revalResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-commit-12345678901234567890123',
+        stepStatuses: { postchecks: 'success', commit: 'success' },
+      };
       const executeStub = sinon.stub();
       executeStub.onFirstCall().resolves(failResult);
       executeStub.onSecondCall().resolves(healResult);
+      executeStub.onThirdCall().resolves(revalResult);
 
       const { engine, state } = createEngine(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
@@ -1264,6 +1271,138 @@ suite('JobExecutionEngine - helper methods', () => {
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'succeeded');
+    });
+  });
+
+  suite('postchecks-as-gate re-validation', () => {
+    test('postchecks heal triggers re-validation with original spec', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.postchecks = { type: 'shell', command: 'echo gate-check' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub();
+      // 1st: original execution fails at postchecks
+      executeStub.onCall(0).resolves({ success: false, error: 'Gate check failed', failedPhase: 'postchecks', exitCode: 1, stepStatuses: { work: 'success', postchecks: 'failed' } });
+      // 2nd: heal agent succeeds
+      executeStub.onCall(1).resolves({ success: true, completedCommit: 'heal-commit-aaaabbbbccccddddeeeeffff', stepStatuses: { postchecks: 'success', commit: 'success' } });
+      // 3rd: re-validation with original postchecks passes
+      executeStub.onCall(2).resolves({ success: true, completedCommit: 'reval-commit-aaaabbbbccccddddeeee', stepStatuses: { postchecks: 'success', commit: 'success' } });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({ reused: false, baseCommit: 'base', totalMs: 50 } as any);
+      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(executeStub.callCount, 3);
+      // Verify re-validation context resumes from postchecks
+      const revalCall = executeStub.getCall(2).args[0] as ExecutionContext;
+      assert.strictEqual(revalCall.resumeFromPhase, 'postchecks');
+      // Attempt history should include both heal and revalidation
+      assert.ok(ns.attemptHistory);
+      assert.ok(ns.attemptHistory!.some(a => a.triggerType === 'auto-heal'));
+    });
+
+    test('postchecks re-validation failure exhausts budget then fails node', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.postchecks = { type: 'shell', command: 'echo gate-check' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub();
+      // 1st: original execution fails at postchecks
+      executeStub.onCall(0).resolves({ success: false, error: 'Gate check failed', failedPhase: 'postchecks', exitCode: 1, stepStatuses: { postchecks: 'failed' } });
+      // 2nd: heal agent succeeds
+      executeStub.onCall(1).resolves({ success: true, completedCommit: 'heal1-aabbccddee1234567890123', stepStatuses: { postchecks: 'success' } });
+      // 3rd: re-validation fails — gate still doesn't pass
+      executeStub.onCall(2).resolves({ success: false, error: 'Still failing', failedPhase: 'postchecks', exitCode: 1, stepStatuses: { postchecks: 'failed' } });
+      // 4th: second heal attempt succeeds
+      executeStub.onCall(3).resolves({ success: true, completedCommit: 'heal2-aabbccddee1234567890123', stepStatuses: { postchecks: 'success' } });
+      // 5th: second re-validation fails
+      executeStub.onCall(4).resolves({ success: false, error: 'Still failing again', failedPhase: 'postchecks', exitCode: 1, stepStatuses: { postchecks: 'failed' } });
+      // Budget should be exhausted after 2 heal cycles (MAX_AUTO_HEAL_PER_PHASE = 2)
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({ reused: false, baseCommit: 'base', totalMs: 50 } as any);
+      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      // Should have postchecks-revalidation attempts in history
+      assert.ok(ns.attemptHistory);
+      const revalAttempts = ns.attemptHistory!.filter(a => a.triggerType === 'postchecks-revalidation');
+      assert.ok(revalAttempts.length >= 1, 'Should have postchecks-revalidation attempts');
+    });
+
+    test('work-phase heal runs original postchecks naturally (no extra re-validation)', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.postchecks = { type: 'shell', command: 'echo gate-check' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub();
+      // 1st: original fails at work
+      executeStub.onCall(0).resolves({ success: false, error: 'Tests failed', failedPhase: 'work', exitCode: 1, stepStatuses: { work: 'failed' } });
+      // 2nd: heal succeeds (executor runs work → commit → postchecks → merge-ri with original postchecks)
+      executeStub.onCall(1).resolves({ success: true, completedCommit: 'heal-commit-1234567890123456789012', stepStatuses: { work: 'success', postchecks: 'success', commit: 'success' } });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({ reused: false, baseCommit: 'base', totalMs: 50 } as any);
+      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      // Only 2 execute calls — no extra re-validation for work-phase heal
+      assert.strictEqual(executeStub.callCount, 2);
+    });
+
+    test('no postchecks defined skips re-validation entirely', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.postchecks = undefined;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub();
+      executeStub.onCall(0).resolves({ success: false, error: 'Failed', failedPhase: 'work', exitCode: 1, stepStatuses: { work: 'failed' } });
+      executeStub.onCall(1).resolves({ success: true, completedCommit: 'heal-commit-1234567890123456789012', stepStatuses: { work: 'success', commit: 'success' } });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+      sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({ reused: false, baseCommit: 'base', totalMs: 50 } as any);
+      sandbox.stub(git.gitignore, 'ensureGitignoreEntries').resolves(false);
+      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(executeStub.callCount, 2);
     });
   });
 

@@ -161,15 +161,16 @@ export class FinalMergeExecutor {
     this.log(`Updated ${targetBranch} to ${newCommit.slice(0, 8)}`);
 
     // Safe sync: only reset if working tree was clean before ref move.
+    // Use explicit commit SHA (not 'HEAD') to avoid stale symref resolution.
     if (branchCheckedOut && !wasDirtyBefore) {
       try {
-        await this.git.repository.resetHard(repoPath, 'HEAD', this.log);
-        this.log(`Synced working tree to ${newCommit.slice(0, 8)}`);
+        await this.git.repository.resetHard(repoPath, newCommit, this.log);
+        this.log(`Synced main worktree to ${newCommit.slice(0, 8)}`);
       } catch (err: any) {
-        this.log(`⚠ Could not sync working tree: ${err.message}`);
+        this.log(`⚠ Could not sync main worktree: ${err.message}`);
       }
     } else if (branchCheckedOut) {
-      this.log(`ℹ Your checkout on ${targetBranch} has uncommitted changes. Run 'git reset --hard HEAD' after saving your work.`);
+      this.log(`ℹ Your checkout on ${targetBranch} has uncommitted changes. Run 'git reset --hard ${newCommit.slice(0, 8)}' after saving your work.`);
     }
 
     // Step 5: Run verify-ri on the final merged targetBranch (if configured)

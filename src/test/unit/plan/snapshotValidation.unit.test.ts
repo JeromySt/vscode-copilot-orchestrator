@@ -65,6 +65,25 @@ suite('Snapshot Validation Node', () => {
       assert.strictEqual(result!.type, 'shell');
       assert.strictEqual(result!.onFailure, undefined);
     });
+
+    test('normalizeWorkSpec converts model_tier to modelTier', () => {
+      const spec: any = {
+        type: 'agent', instructions: '# Task', model_tier: 'fast',
+      };
+      const result = normalizeWorkSpec(spec) as any;
+      assert.ok(result);
+      assert.strictEqual(result.modelTier, 'fast');
+      assert.strictEqual(result.model_tier, undefined);
+    });
+
+    test('normalizeWorkSpec preserves existing modelTier over model_tier', () => {
+      const spec: any = {
+        type: 'agent', instructions: '# Task', modelTier: 'premium', model_tier: 'fast',
+      };
+      const result = normalizeWorkSpec(spec) as any;
+      assert.ok(result);
+      assert.strictEqual(result.modelTier, 'premium');
+    });
   });
 
   suite('Builder injection', () => {

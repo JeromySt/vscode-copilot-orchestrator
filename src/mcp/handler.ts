@@ -17,7 +17,7 @@ import { JsonRpcRequest, JsonRpcResponse } from './types';
 import { IMcpRequestRouter } from '../interfaces/IMcpManager';
 import { getPlanToolDefinitions } from './tools/planTools';
 import { getNodeToolDefinitions } from './tools/nodeTools';
-import { validateInput, hasSchema } from './validation';
+import { validateInput, hasSchema, validatePostchecksPresence } from './validation';
 import {
   PlanHandlerContext,
   handleCreatePlan,
@@ -237,9 +237,14 @@ export class McpHandler implements IMcpRequestRouter {
     
     // Route to appropriate handler
     switch (name) {
-      case 'create_copilot_plan':
+      case 'create_copilot_plan': {
+        const postchecksWarnings = validatePostchecksPresence(args || {});
         result = await handleCreatePlan(args || {}, this.context);
+        if (postchecksWarnings.length > 0 && result && typeof result === 'object') {
+          result.warnings = postchecksWarnings;
+        }
         break;
+      }
         
       case 'get_copilot_plan_status':
         result = await handleGetPlanStatus(args || {}, this.context);

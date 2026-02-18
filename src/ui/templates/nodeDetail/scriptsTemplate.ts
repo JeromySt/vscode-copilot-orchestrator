@@ -502,7 +502,9 @@ export function webviewScripts(config: ScriptsConfig): string {
         var triggerBadge = attempt.triggerType === 'auto-heal'
           ? '<span class="trigger-badge auto-heal">🔧 Auto-Heal</span>'
           : attempt.triggerType === 'retry'
-            ? '<span class="trigger-badge retry">🔄 Retry</span>' : '';
+            ? '<span class="trigger-badge retry">🔄 Retry</span>'
+            : attempt.triggerType === 'postchecks-revalidation'
+              ? '<span class="trigger-badge retry">🔍 Postchecks Re-validation</span>' : '';
         var errorHtml = attempt.error
           ? '<div class="attempt-error"><strong>Error:</strong> <span class="error-message">' + escapeHtml(attempt.error) + '</span>'
             + (attempt.failedPhase ? '<div style="margin-top: 4px;">Failed in phase: <strong>' + escapeHtml(attempt.failedPhase) + '</strong></div>' : '')
