@@ -336,7 +336,7 @@
   },
   "dependencies": {
     "@types/markdown-it": "^14.1.2",
-    "ajv": "^8.17.1",
+    "ajv": "^8.18.0",
     "markdown-it": "^14.1.1",
     "micromatch": "^4.0.5",
     "uuid": "^11.1.0"
