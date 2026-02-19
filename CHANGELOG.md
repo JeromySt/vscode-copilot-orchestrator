@@ -5,6 +5,15 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-02-18
+
+### Fixed
+- **CRITICAL: baseCommitAtStart not persisted across restarts**: Plan's `baseCommitAtStart` field (capturing the target branch HEAD at plan creation) was missing from the serialization round-trip, causing RI merge parent graphs to break after VS Code restart.
+- **RI-only resume path now executes merge phase**: When resuming a node from `merge-ri` phase (e.g., after RI merge failure), the executor is now called with `resumeFromPhase: 'merge-ri'` instead of bypassing the executor entirely. This ensures the merge phase actually runs on retry.
+- **Model validation resilient to discovery failures**: When model discovery returns no models or throws, validation now warns and skips instead of blocking plan creation. Added `copilotOrchestrator.copilotCli.validateModels` setting (default: true) and reduced failure cache TTL from 5 minutes to 30 seconds.
+- **Copilot CLI auto-update disabled**: Added `--no-auto-update` flag to all Copilot CLI invocations to prevent automatic updates during plan execution that could cause timing inconsistencies.
+- **Git executor test timeout on Windows**: Increased timeout for git core executor tests to handle slower git init operations on Windows.
+
 ## [0.12.0] - 2026-02-17
 
 ### Added

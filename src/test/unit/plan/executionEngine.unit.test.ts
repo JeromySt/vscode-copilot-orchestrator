@@ -444,7 +444,7 @@ suite('JobExecutionEngine', () => {
       assert.strictEqual(executeStub.callCount, 1);
     });
 
-    test('resume from merge-ri phase skips executor', async () => {
+    test('resume from merge-ri phase calls executor with resumeFromPhase', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'feature' });
       const ns = plan.nodeStates.get('node-1')!;
@@ -455,7 +455,12 @@ suite('JobExecutionEngine', () => {
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
 
-      const executeStub = sinon.stub();
+      const executorResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'existing-commit-12345678901234567890',
+        stepStatuses: { 'merge-ri': 'success' },
+      };
+      const executeStub = sinon.stub().resolves(executorResult);
       const state = createEngineState(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
@@ -466,21 +471,14 @@ suite('JobExecutionEngine', () => {
       sandbox.stub(git.worktrees, 'createOrReuseDetached').resolves({
         reused: true, baseCommit: 'base123', totalMs: 10,
       } as any);
-      sandbox.stub(git.merge, 'mergeWithoutCheckout').resolves({
-        success: true, treeSha: 'tree-sha',
-      } as any);
-      sandbox.stub(git.repository, 'resolveRef').resolves('target-sha');
-      sandbox.stub(git.merge, 'commitTree').resolves('new-commit');
-      sandbox.stub(git.branches, 'currentOrNull').resolves('main');
-      sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
-      sandbox.stub(git.repository, 'updateRef').resolves();
-      sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(false);
       sandbox.stub(git.worktrees, 'removeSafe').resolves();
 
       await engine.executeJobNode(plan, sm, node);
 
-      // Executor should not be called - resumed from RI
-      assert.strictEqual(executeStub.callCount, 0);
+      // Executor should be called with resumeFromPhase set
+      assert.strictEqual(executeStub.callCount, 1);
+      const context = executeStub.firstCall.args[0];
+      assert.strictEqual(context.resumeFromPhase, 'merge-ri');
     });
 
     test('expectsNoChanges node carries forward baseCommit', async () => {

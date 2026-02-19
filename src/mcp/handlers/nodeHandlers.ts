@@ -341,7 +341,7 @@ export async function handleRetryNode(args: any, ctx: PlanHandlerContext): Promi
 
   // Validate agent model names if any new specs are provided
   if (args.newWork || args.newPrechecks || args.newPostchecks) {
-    const modelValidation = await validateAgentModels(args, 'retry_copilot_node');
+    const modelValidation = await validateAgentModels(args, 'retry_copilot_node', ctx.configProvider);
     if (!modelValidation.valid) {
       return { success: false, error: modelValidation.error };
     }

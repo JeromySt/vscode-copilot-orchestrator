@@ -304,7 +304,7 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
   }
   
   // Validate agent model names
-  const modelValidation = await validateAgentModels(args, 'create_copilot_plan');
+  const modelValidation = await validateAgentModels(args, 'create_copilot_plan', ctx.configProvider);
   if (!modelValidation.valid) {
     return { success: false, error: modelValidation.error };
   }

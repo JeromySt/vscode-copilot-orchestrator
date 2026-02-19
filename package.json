@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -189,6 +189,11 @@
           "type": "boolean",
           "default": true,
           "description": "Fail jobs early if Copilot CLI is missing (with install guidance)"
+        },
+        "copilotOrchestrator.copilotCli.validateModels": {
+          "type": "boolean",
+          "default": true,
+          "description": "Validate that model names in work specifications are available in the Copilot CLI before creating or updating plans. When disabled, model names are accepted without validation. Disable this if model discovery is unreliable in your environment."
         },
         "copilotOrchestrator.merge.mode": {
           "type": "string",

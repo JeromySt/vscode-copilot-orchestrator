@@ -34,7 +34,7 @@ export interface ModelDiscoveryResult {
 // ============================================================================
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
-const FAILURE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const FAILURE_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 
 // ============================================================================
 // DI OPTIONS
