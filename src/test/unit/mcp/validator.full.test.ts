@@ -222,23 +222,22 @@ suite('MCP Validator', () => {
       assert.strictEqual(result.valid, true);
     });
 
-    test('should handle empty models list', async () => {
+    test('should pass with warning when models list is empty', async () => {
       modelStub.resolves({ models: [], rawChoices: [], discoveredAt: Date.now() });
       const { validateAgentModels } = require('../../../mcp/validation/validator');
       const result = await validateAgentModels({
         work: { type: 'agent', instructions: 'Do it', model: 'gpt-5' },
       }, 'test');
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error!.includes('No models available'));
+      assert.strictEqual(result.valid, true);
     });
 
-    test('should handle discovery error', async () => {
+    test('should pass with warning on discovery error', async () => {
       modelStub.rejects(new Error('Discovery failed'));
       const { validateAgentModels } = require('../../../mcp/validation/validator');
       const result = await validateAgentModels({
         work: { type: 'agent', instructions: 'Do it', model: 'gpt-5' },
       }, 'test');
-      assert.strictEqual(result.valid, false);
+      assert.strictEqual(result.valid, true);
     });
   });
 

@@ -138,7 +138,7 @@ suite('validateAgentModels', () => {
     assert.strictEqual(result.valid, true);
   });
 
-  test('should fail when model discovery returns no models', async () => {
+  test('should pass with warning when model discovery returns no models', async () => {
     // Override the mock to return empty results
     getCachedModelsStub.resolves({
       models: [],
@@ -154,12 +154,10 @@ suite('validateAgentModels', () => {
       }]
     };
     const result = await validateAgentModels(input, 'create_copilot_plan');
-    assert.strictEqual(result.valid, false);
-    assert.ok(result.error);
-    assert.ok(result.error.includes('No models available from GitHub Copilot CLI'));
+    assert.strictEqual(result.valid, true);
   });
 
-  test('should handle exceptions during model discovery', async () => {
+  test('should pass with warning when model discovery throws', async () => {
     // Override the mock to throw an error
     getCachedModelsStub.rejects(new Error('Model discovery failed'));
 
@@ -171,8 +169,42 @@ suite('validateAgentModels', () => {
       }]
     };
     const result = await validateAgentModels(input, 'create_copilot_plan');
+    assert.strictEqual(result.valid, true);
+  });
+
+  test('should skip validation when validateModels setting is disabled', async () => {
+    const mockConfig: any = {
+      getConfig: sinon.stub().returns(false),
+    };
+
+    const input = {
+      jobs: [{
+        producer_id: 'test',
+        task: 'Test',
+        work: { type: 'agent', instructions: 'X', model: 'nonexistent-model' }
+      }]
+    };
+    const result = await validateAgentModels(input, 'create_copilot_plan', mockConfig);
+    assert.strictEqual(result.valid, true);
+    // getCachedModels should not have been called
+    assert.strictEqual(getCachedModelsStub.callCount, 0);
+  });
+
+  test('should still validate when validateModels setting is enabled', async () => {
+    const mockConfig: any = {
+      getConfig: sinon.stub().returns(true),
+    };
+
+    const input = {
+      jobs: [{
+        producer_id: 'test',
+        task: 'Test',
+        work: { type: 'agent', instructions: 'X', model: 'nonexistent-model' }
+      }]
+    };
+    const result = await validateAgentModels(input, 'create_copilot_plan', mockConfig);
     assert.strictEqual(result.valid, false);
     assert.ok(result.error);
-    assert.ok(result.error.includes('Model validation error'));
+    assert.ok(result.error.includes('nonexistent-model'));
   });
 });

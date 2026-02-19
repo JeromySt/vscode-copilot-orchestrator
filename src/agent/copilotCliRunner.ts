@@ -594,7 +594,7 @@ export function buildCommand(
     log.info(`[SECURITY] Copilot CLI allowed URLs: none (network access disabled)`);
   }
 
-  let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-tools`;
+  let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-tools --no-auto-update`;
   if (urlsArg) { cmd += ` ${urlsArg}`; }
   // Always derive configDir from cwd for session isolation
   if (cwd) { cmd += ` --config-dir ${JSON.stringify(path.join(cwd, '.orchestrator', '.copilot-cli'))}`; }

@@ -10,7 +10,8 @@ import * as executor from '../../../git/core/executor';
  * Uses a real temporary git repository to avoid child_process stubbing issues.
  */
 
-suite('Git Core Executor Unit Tests', () => {
+suite('Git Core Executor Unit Tests', function() {
+  this.timeout(10000); // Increase timeout for git operations on Windows
   let tempDir: string;
   let nonGitDir: string;
 

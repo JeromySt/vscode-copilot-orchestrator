@@ -42,6 +42,7 @@ interface SerializedPlan {
   parentNodeId?: string;
   repoPath: string;
   baseBranch: string;
+  baseCommitAtStart?: string;
   targetBranch?: string;
   worktreeRoot: string;
   createdAt: number;
@@ -345,6 +346,7 @@ export class PlanPersistence {
       parentNodeId: plan.parentNodeId,
       repoPath: plan.repoPath,
       baseBranch: plan.baseBranch,
+      baseCommitAtStart: plan.baseCommitAtStart,
       targetBranch: plan.targetBranch,
       worktreeRoot: plan.worktreeRoot,
       createdAt: plan.createdAt,
@@ -444,6 +446,7 @@ export class PlanPersistence {
       parentNodeId: data.parentNodeId,
       repoPath: data.repoPath,
       baseBranch: data.baseBranch,
+      baseCommitAtStart: data.baseCommitAtStart,
       targetBranch: data.targetBranch,
       worktreeRoot: data.worktreeRoot,
       createdAt: data.createdAt,

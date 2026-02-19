@@ -10,6 +10,10 @@
 import Ajv, { ErrorObject, ValidateFunction } from 'ajv';
 import { schemas } from './schemas';
 import { getCachedModels } from '../../agent/modelDiscovery';
+import type { IConfigProvider } from '../../interfaces/IConfigProvider';
+import { Logger } from '../../core/logger';
+
+const log = Logger.for('mcp');
 
 // ============================================================================
 // VALIDATOR SINGLETON
@@ -294,10 +298,19 @@ function extractModelValues(obj: any, path: string = ''): Array<{ value: string;
  * 
  * @param args - The MCP tool arguments to validate
  * @param toolName - The tool name for error formatting
+ * @param configProvider - Optional config provider to check validateModels setting
  * @returns Validation result indicating success or failure with detailed error message
  */
-export async function validateAgentModels(args: any, toolName: string): Promise<ValidationResult> {
+export async function validateAgentModels(args: any, toolName: string, configProvider?: IConfigProvider): Promise<ValidationResult> {
   try {
+    // Check if model validation is disabled via setting
+    if (configProvider) {
+      const enabled = configProvider.getConfig<boolean>('copilotOrchestrator.copilotCli', 'validateModels', true);
+      if (!enabled) {
+        return { valid: true };
+      }
+    }
+
     const modelReferences = extractModelValues(args);
     
     if (modelReferences.length === 0) {
@@ -310,10 +323,9 @@ export async function validateAgentModels(args: any, toolName: string): Promise<
     const validModelIds = modelDiscovery.models.map(m => m.id);
     
     if (validModelIds.length === 0) {
-      return {
-        valid: false,
-        error: `Model validation failed: No models available from GitHub Copilot CLI. Please check your CLI installation and authentication.`,
-      };
+      // Model discovery failed or returned no models — skip validation with warning
+      log.warn(`Model discovery returned no models for '${toolName}'; skipping model validation. Models referenced: ${modelReferences.map(m => m.value).join(', ')}`);
+      return { valid: true };
     }
     
     // Check each model reference
@@ -338,10 +350,9 @@ export async function validateAgentModels(args: any, toolName: string): Promise<
     
     return { valid: true };
   } catch (error: any) {
-    return {
-      valid: false,
-      error: `Model validation error: ${error.message || 'Unknown error during model validation'}`,
-    };
+    // Discovery error — warn but don't block plan creation
+    log.warn(`Model validation error for '${toolName}': ${error.message || 'Unknown error'}`);
+    return { valid: true };
   }
 }
 

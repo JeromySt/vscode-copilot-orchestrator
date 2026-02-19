@@ -234,18 +234,10 @@ export class JobExecutionEngine {
       
       let autoHealSucceeded = false; // Track if success came from auto-heal
       
-      // Check if resuming from merge-ri phase - skip executor entirely
-      if (nodeState.resumeFromPhase === 'merge-ri') {
-        this.log.info(`Resuming from merge-ri phase - skipping executor for ${node.name}`);
-        this.execLog(plan.id, node.id, 'work', 'info', '========== WORK PHASES (SKIPPED - RESUMING FROM RI) ==========', nodeState.attempts);
-        // The completedCommit is already set from the previous successful work phase
-        // Clear resumeFromPhase since we're handling the retry now
-        nodeState.resumeFromPhase = undefined;
-      } else {
-        // Build execution context
-        // Use nodeState.baseCommit which is preserved across retries
-        
-        // Prepare dependency commits for forward integration
+      // Build execution context
+      // Use nodeState.baseCommit which is preserved across retries
+      
+      // Prepare dependency commits for forward integration
         const dependencyCommits = additionalSources.map(commit => {
           const depInfo = dependencyInfoMap.get(commit);
           return {
@@ -1031,7 +1023,6 @@ export class JobExecutionEngine {
             return;
           }
         }
-      }
       
       // At this point, executor succeeded (or was skipped for RI-only retry)
       // Leaf node tracking - merge phases handled by executor pipeline

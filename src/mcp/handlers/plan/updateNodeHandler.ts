@@ -55,7 +55,7 @@ export async function handleUpdatePlanNode(args: any, ctx: PlanHandlerContext): 
   }
   
   // Validate agent model names in any provided stages
-  const modelValidation = await validateAgentModels(args, 'update_copilot_plan_node');
+  const modelValidation = await validateAgentModels(args, 'update_copilot_plan_node', ctx.configProvider);
   if (!modelValidation.valid) {
     return { success: false, error: modelValidation.error };
   }

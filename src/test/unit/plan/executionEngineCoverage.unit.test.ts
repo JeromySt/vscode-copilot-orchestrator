@@ -1156,12 +1156,12 @@ suite('JobExecutionEngine - Coverage', () => {
   });
 
   // ------------------------------------------------------------------
-  // 17. resumeFromPhase = 'merge-ri' path
+  // 17. resumeFromPhase = 'merge-ri' path (updated for new flow through executor)
   // ------------------------------------------------------------------
   suite('resume from merge-ri', () => {
-    test('resumeFromPhase merge-ri skips executor and clears resumeFromPhase', async () => {
+    test('merge-ri resume passes resumeFromPhase through executor', async () => {
       const dir = makeTmpDir();
-      const plan = createTestPlan({ targetBranch: 'feature' });
+      const plan = createTestPlan({ targetBranch: 'feature', leaves: ['node-1'] });
       const ns = plan.nodeStates.get('node-1')!;
       ns.resumeFromPhase = 'merge-ri' as any;
       ns.completedCommit = 'existing-commit-12345678901234567890';
@@ -1169,17 +1169,114 @@ suite('JobExecutionEngine - Coverage', () => {
       const node = plan.nodes.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
-      const executeStub = sinon.stub();
+      let capturedContext: ExecutionContext | undefined;
+      const executeStub = sinon.stub().callsFake(async (context: ExecutionContext) => {
+        capturedContext = context;
+        return {
+          success: true,
+          completedCommit: 'merge-ri-commit-1234567890123456789012345678',
+          stepStatuses: { 'merge-ri': 'success' },
+        };
+      });
+
       const { engine, state } = createEngine(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
       state.stateMachines.set(plan.id, sm);
 
       await engine.executeJobNode(plan, sm, node);
 
-      // Executor should not have been called
-      assert.strictEqual(executeStub.callCount, 0);
-      // resumeFromPhase should be cleared
+      // Executor should have been called (not skipped)
+      assert.strictEqual(executeStub.callCount, 1);
+      // resumeFromPhase should be passed to executor
+      assert.strictEqual(capturedContext?.resumeFromPhase, 'merge-ri');
+    });
+
+    test('merge-ri resume does not clear resumeFromPhase before executor call', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'feature', leaves: ['node-1'] });
+      const ns = plan.nodeStates.get('node-1')!;
+      ns.resumeFromPhase = 'merge-ri' as any;
+      ns.completedCommit = 'existing-commit-12345678901234567890';
+      ns.baseCommit = 'base123';
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      let capturedContext: ExecutionContext | undefined;
+      const executeStub = sinon.stub().callsFake(async (context: ExecutionContext) => {
+        capturedContext = context;
+        return {
+          success: true,
+          completedCommit: 'merge-ri-commit-1234567890123456789012345678',
+          stepStatuses: { 'merge-ri': 'success' },
+        };
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Context passed to executor should have resumeFromPhase = 'merge-ri'
+      assert.strictEqual(capturedContext?.resumeFromPhase, 'merge-ri');
+      // resumeFromPhase should be cleared after execution
       assert.strictEqual(ns.resumeFromPhase, undefined);
+    });
+
+    test('merge-ri resume completes successfully when executor merge-ri succeeds', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'feature', leaves: ['node-1'] });
+      const ns = plan.nodeStates.get('node-1')!;
+      ns.resumeFromPhase = 'merge-ri' as any;
+      ns.completedCommit = 'existing-commit-12345678901234567890';
+      ns.baseCommit = 'base123';
+      const node = plan.nodes.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub().resolves({
+        success: true,
+        completedCommit: 'merge-ri-success-commit-123456789012345678901234567',
+        stepStatuses: { 'merge-ri': 'success' },
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Node should transition to succeeded
+      assert.strictEqual(ns.status, 'succeeded');
+      // mergedToTarget should be set to true for leaf nodes
+      assert.strictEqual(ns.mergedToTarget, true);
+    });
+
+    test('merge-ri resume fails node when executor merge-ri fails', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'feature', leaves: ['node-1'] });
+      const ns = plan.nodeStates.get('node-1')!;
+      ns.resumeFromPhase = 'merge-ri' as any;
+      ns.completedCommit = 'existing-commit-12345678901234567890';
+      ns.baseCommit = 'base123';
+      const node = plan.nodes.get('node-1')! as JobNode;
+      node.autoHeal = false; // Disable auto-heal to ensure immediate failure
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub().resolves({
+        success: false,
+        error: 'merge-ri failed with conflicts',
+        failedPhase: 'merge-ri',
+        stepStatuses: { 'merge-ri': 'failed' },
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Node should transition to failed
+      assert.strictEqual(ns.status, 'failed');
     });
   });
 

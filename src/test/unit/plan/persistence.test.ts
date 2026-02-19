@@ -196,6 +196,53 @@ suite('PlanPersistence', () => {
       assert.strictEqual(loaded.startedAt, 1000);
       assert.strictEqual(loaded.endedAt, 5000);
     });
+
+    test('baseCommitAtStart survives serialization round-trip', () => {
+      const dir = makeTmpDir();
+      const persistence = new PlanPersistence(dir);
+      const plan = makePlan({
+        baseCommitAtStart: 'abc123def456789012345678901234567890abcd',
+      });
+
+      persistence.save(plan);
+      const loaded = persistence.load(plan.id)!;
+
+      assert.ok(loaded);
+      assert.strictEqual(loaded.baseCommitAtStart, 'abc123def456789012345678901234567890abcd');
+    });
+
+    test('plan without baseCommitAtStart loads correctly', () => {
+      const dir = makeTmpDir();
+      const persistence = new PlanPersistence(dir);
+      
+      // Create a serialized plan JSON without baseCommitAtStart field
+      const planWithoutBase = makePlan();
+      delete (planWithoutBase as any).baseCommitAtStart;
+      
+      persistence.save(planWithoutBase);
+      const loaded = persistence.load(planWithoutBase.id)!;
+
+      assert.ok(loaded);
+      assert.strictEqual(loaded.baseCommitAtStart, undefined);
+    });
+
+    test('serialize includes baseCommitAtStart when set', () => {
+      const dir = makeTmpDir();
+      const persistence = new PlanPersistence(dir);
+      const testCommit = 'abc123def456789012345678901234567890abcd';
+      const plan = makePlan({
+        baseCommitAtStart: testCommit,
+      });
+
+      persistence.save(plan);
+
+      // Read the raw JSON file
+      const filePath = path.join(dir, `plan-${plan.id}.json`);
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      
+      assert.strictEqual(parsed.baseCommitAtStart, testCommit);
+    });
   });
 
   // -----------------------------------------------------------------------

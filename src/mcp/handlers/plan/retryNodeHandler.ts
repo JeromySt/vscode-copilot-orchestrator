@@ -45,7 +45,7 @@ export async function handleRetryPlanNode(args: any, ctx: PlanHandlerContext): P
   
   // Validate agent model names if any new specs are provided
   if (args.newWork || args.newPrechecks || args.newPostchecks) {
-    const modelValidation = await validateAgentModels(args, 'retry_copilot_plan_node');
+    const modelValidation = await validateAgentModels(args, 'retry_copilot_plan_node', ctx.configProvider);
     if (!modelValidation.valid) {
       return { success: false, error: modelValidation.error };
     }
