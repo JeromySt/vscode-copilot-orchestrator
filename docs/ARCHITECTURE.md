@@ -115,6 +115,8 @@ src/
 │   └── validation/           # Ajv-based input validation
 ├── plan/                     # DAG execution engine
 │   ├── phases/               # Execution phase handlers (prechecks, work, etc.)
+│   ├── repository/           # Plan repository (DefaultPlanRepository, FilePlanDefinition)
+│   ├── store/                # Plan storage (FileSystemPlanStore)
 │   └── types/                # Type definitions (nodes, plans, specs)
 ├── process/                  # OS process monitoring
 ├── types/                    # Shared types (config, job, process)
@@ -301,6 +303,18 @@ graph LR
 - **Pump loop**: Selects ready nodes → schedules → executes → transitions state → checks completion
 - **Retry**: `retryNode()` resets a failed node to `pending`, unblocks descendants, optionally resumes from the failed phase
 - **Events**: Emits `planCreated`, `planScaffolded`, `scaffoldNodeAdded`, `planFinalized`, `planCompleted`, `nodeTransition`, `planDeleted`
+
+#### Plan Chaining (`resumeAfterPlan`)
+
+Plans can declare a dependency on another plan via the `resumeAfterPlan` field. When set:
+
+1. The dependent plan is created in **paused** state
+2. `PlanLifecycle` listens for the prerequisite plan's completion
+3. On **success** → the dependent plan auto-resumes
+4. On **cancel/delete** → the dependency link is cleared (plan stays paused for manual decision)
+5. On **failure** → the dependent remains paused (does not auto-resume)
+
+The UI shows a chain reason message when paused for dependency and hides the Resume button. Use `update_copilot_plan` to set or modify `resumeAfterPlan` on an existing plan.
 
 ### DAG Builder
 
@@ -505,8 +519,8 @@ The MCP server uses a **child-process architecture** with IPC:
 
 Tools are statically defined with JSON Schemas for LLM discoverability:
 
-- **Plan tools** (`src/mcp/tools/planTools.ts`) — 13 tools: `create_copilot_plan`, `get_copilot_plan_status`, `list_copilot_plans`, `cancel_copilot_plan`, `delete_copilot_plan`, `retry_copilot_plan`, `create_copilot_job`, `get_copilot_node_details`, `get_copilot_node_logs`, `get_copilot_node_attempts`, `get_copilot_group_status`, `list_copilot_groups`, `cancel_copilot_group`
-- **Node tools** (`src/mcp/tools/nodeTools.ts`) — 5 tools: `create_copilot_node`, `get_copilot_node`, `list_copilot_nodes`, `retry_copilot_node`, `get_copilot_node_failure_context`
+- **Plan tools** (`src/mcp/tools/planTools.ts`) — 15 tools: `create_copilot_plan`, `get_copilot_plan_status`, `list_copilot_plans`, `get_copilot_job_logs`, `get_copilot_job_attempts`, `cancel_copilot_plan`, `pause_copilot_plan`, `resume_copilot_plan`, `delete_copilot_plan`, `retry_copilot_plan`, `reshape_copilot_plan`, `update_copilot_plan`, `scaffold_copilot_plan`, `add_copilot_plan_job`, `finalize_copilot_plan`
+- **Job tools** (`src/mcp/tools/jobTools.ts`) — 6 tools: `get_copilot_job`, `list_copilot_jobs`, `retry_copilot_job`, `force_fail_copilot_job`, `get_copilot_job_failure_context`, `update_copilot_plan_job`
 
 ### Request Pipeline
 
@@ -518,7 +532,9 @@ Tool call → Ajv schema validation → Handler dispatch → PlanRunner operatio
 
 **Handlers** (`src/mcp/handlers/`) implement business logic:
 - `planHandlers.ts` — Plan CRUD, status queries, cancel/retry
-- `nodeHandlers.ts` — Node-centric API (create, query, retry)
+- `jobHandlers.ts` — Job-centric API (query, retry, force-fail, update)
+- `plan/scaffoldPlanHandler.ts` — Scaffold, add job, and finalize handlers
+- `plan/updatePlanHandler.ts` — Plan-level settings (env, maxParallel, resumeAfterPlan)
 - `utils.ts` — Shared utilities: `errorResult()`, `lookupPlan()`, `lookupNode()`, `resolveBaseBranch()`
 
 ---

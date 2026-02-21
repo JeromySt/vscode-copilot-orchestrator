@@ -5,11 +5,13 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.13.0] - 2026-02-19
+## [0.13.0] - 2026-02-21
 
 ### Added
 - **IPlanRepository architecture with file-backed lazy plan storage**: New abstraction layer for plan storage supporting lazy loading of large specs from disk. Includes `IPlanRepository`, `IPlanRepositoryStore`, `IPlanDefinition` interfaces and `DefaultPlanRepository`, `FileSystemPlanStore`, `FilePlanDefinition` implementations.
-- **Scaffold MCP tools for incremental plan building**: New tools `scaffold_copilot_plan`, `add_plan_node`, and `finalize_plan` for building plans incrementally instead of all-at-once.
+- **Scaffold MCP tools for incremental plan building**: New tools `scaffold_copilot_plan`, `add_copilot_plan_job`, and `finalize_copilot_plan` for building plans incrementally instead of all-at-once.
+- **Plan chaining via `resumeAfterPlan`**: Plans can declare a dependency on another plan. The dependent plan starts paused and auto-resumes when its dependency succeeds. Canceled/deleted dependencies unblock waiting plans. UI shows chain reason when paused for dependency and hides the Resume button.
+- **Plan-level environment variables**: New `env` field on plans propagated to all jobs. Per-job `env` overrides plan-level values for that job.
 - **Scaffolding plans UI support**: Plans sidebar now shows scaffolding plans with distinct state and controls.
 - **Copilot CLI setup/login command**: New command `copilotOrchestrator.setupCopilotCli` guides users through CLI installation and authentication.
 - **Duration helpers for attempt history**: Helper functions to compute node/plan duration from attempt history for accurate timing across retries.
@@ -21,10 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **EventEmitter listener leak on extension reload**: Process event listeners (exit, SIGINT, SIGTERM) are now properly cleaned up on deactivate.
 - **Eliminated @vscode/test-electron**: Migrated all tests to pure unit test runner with Mocha, removing VS Code host dependency.
 - **CRITICAL: Merge-FI data loss on node resume**: Fixed bug where merge-fi phase was skipped when resuming a node, causing dependency commits to be dropped from the final merge. The executor's `skip()` function now never skips merge-fi, and merge-fi is idempotent (checks if commits are already ancestors before merging).
-- **CRITICAL: updateNodeHandler sets resumeFromPhase for never-executed nodes**: When updating a node via `update_copilot_plan_node` that had never been executed (attempts=0), the handler incorrectly set `resumeFromPhase`, causing the executor to skip merge-fi/setup/prechecks/work phases on first execution. The fix checks if the node has executed before setting resumeFromPhase.
-- **MCP phase enum missing phases**: The `get_copilot_node_logs` tool's phase enum was missing phases. Updated from `['prechecks', 'work', 'postchecks', 'commit', 'all']` to include all phases: `['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri', 'cleanup', 'all']`.
+- **CRITICAL: updateNodeHandler sets resumeFromPhase for never-executed nodes**: When updating a node via `update_copilot_plan_job` that had never been executed (attempts=0), the handler incorrectly set `resumeFromPhase`, causing the executor to skip merge-fi/setup/prechecks/work phases on first execution. The fix checks if the node has executed before setting resumeFromPhase.
+- **MCP phase enum missing phases**: The `get_copilot_job_logs` tool's phase enum was missing phases. Updated from `['prechecks', 'work', 'postchecks', 'commit', 'all']` to include all phases: `['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri', 'cleanup', 'all']`.
+- **Schema: require `type` field on work spec objects**: Work spec objects now require an explicit `type` field for correct routing.
+- **`normalizeWorkSpec` parses JSON string work specs**: Work specs that arrive as JSON-encoded strings are now correctly parsed before validation.
+- **Comprehensive disk fallback for all spec reads on finalized plans**: Auto-heal and execution now load specs from disk when in-memory definition is not available for finalized plans.
+- **Group state reset on retry + duration restart**: Group status now resets correctly when retrying failed jobs, and duration timers restart properly.
+- **Plan chaining: only canceled plans unblock chained dependents**: Failed and partial plans no longer auto-unblock chained dependents — only canceled/deleted plans do.
+- **groupId set on nodes loaded from repository metadata**: Nodes loaded from persisted plan metadata now correctly have their `groupId` populated.
 
 ### Changed
+- **Node → Job terminology in user-visible strings**: All MCP tool names, UI labels, and user-facing messages now use "job" instead of "node" (e.g., `retry_copilot_plan_node` → `retry_copilot_plan_job`, `get_copilot_node_details` → `get_copilot_job`)
+- **MCP tool consolidation (24 → 21 tools)**: Removed 3 redundant tools. Added `planId` to all job-centric tool schemas for consistency.
+- **configDir reverted to worktree-local path**: Copilot CLI config directory is now `.orchestrator/.copilot-cli` within the worktree (not derived from cwd).
 - Test runner simplified to pure Mocha (`npm test` now runs unit tests directly)
 - Updated architecture documentation for new plan repository system
 

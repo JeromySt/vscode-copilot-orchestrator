@@ -36,7 +36,7 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | 📊 **Interactive DAG Visualization** | See your entire plan as a live, zoomable Mermaid dependency graph |
 | ⚡ **Automated 8-Phase Pipeline** | Merge FI → Prechecks → AI Work → Commit → Postchecks → Merge RI → Verify RI → Cleanup |
 | 🔧 **Auto-Heal** | Failed phases automatically retried by a fresh AI agent with failure context |
-| 🤖 **20 Native MCP Tools** | Create and manage plans directly from GitHub Copilot Chat |
+| 🤖 **21 Native MCP Tools** | Create and manage plans directly from GitHub Copilot Chat |
 | ⏸️ **Pause / Resume / Retry** | Pause running plans, resume later, or retry failed nodes with AI failure context |
 | 🔒 **Secure MCP Architecture** | Nonce-authenticated IPC ensures 1:1 pairing between VS Code and MCP stdio process |
 | 🛡️ **Default Branch Protection** | Auto-creates feature branches when targeting main/master — never writes to default |
@@ -259,6 +259,75 @@ Work specs can include an `onFailure` (or snake_case `on_failure`) configuration
 
 This is used internally by the snapshot-validation node to force-fail (rather than auto-heal) when `targetBranch` is in an unrecoverable state, and to control retry reset points for different failure modes.
 
+### 🔗 Plan Chaining (`resumeAfterPlan`)
+
+Chain plans together for sequential execution — a dependent plan auto-resumes when its prerequisite succeeds.
+
+```json
+{
+  "name": "Deploy to Production",
+  "resumeAfterPlan": "<plan-id-of-staging-deploy>",
+  "jobs": [...]
+}
+```
+
+**How it works:**
+1. A plan with `resumeAfterPlan` is created in **paused** state automatically
+2. The UI shows the chain reason ("Waiting for plan: *Staging Deploy*") and hides the Resume button
+3. When the prerequisite plan **succeeds**, the dependent plan auto-resumes
+4. If the prerequisite is **canceled** or **deleted**, the dependent is unblocked (stays paused for manual decision)
+5. If the prerequisite **fails**, the dependent remains paused — it does not auto-resume on failure
+
+Use `update_copilot_plan` to set or change `resumeAfterPlan` on an existing plan.
+
+### 📦 Incremental Plan Building (Scaffold Workflow)
+
+For complex plans with many jobs, build the plan incrementally instead of submitting everything at once:
+
+```
+1. scaffold_copilot_plan  →  Creates empty plan in "scaffolding" state
+2. add_copilot_plan_job   →  Add jobs one at a time (repeat N times)
+3. finalize_copilot_plan  →  Validates DAG, injects snapshot node, starts execution
+```
+
+**Benefits:**
+- Avoids massive single-payload creation for plans with 5+ jobs
+- Plan appears in the UI sidebar during building (with "scaffolding" status)
+- Each job gets immediate feedback — catch errors early
+- Supports iterative DAG construction with dependency resolution at finalize
+
+**Example via Copilot Chat:**
+```
+Scaffold a new plan called "Microservices Migration". Then add jobs for
+each of the 6 services one at a time, with the API gateway depending on
+all service jobs. Finalize when done.
+```
+
+### 🌐 Plan-Level Environment Variables
+
+Set environment variables that apply to all jobs in a plan, with per-job overrides:
+
+```json
+{
+  "name": "CI Pipeline",
+  "env": {
+    "NODE_ENV": "test",
+    "CI": "true"
+  },
+  "jobs": [
+    {
+      "producerId": "build",
+      "task": "Build project",
+      "env": { "NODE_ENV": "production" }
+    }
+  ]
+}
+```
+
+- **Plan-level `env`**: Applied to every job in the plan
+- **Job-level `env`**: Overrides plan-level values for that specific job
+- Use `update_copilot_plan` to modify plan-level env vars on a running/paused plan
+
 ### 📝 Repository Instructions & Agent Skills
 
 Copilot CLI agents launched by the orchestrator **automatically discover and use** repo-level instructions and skills — no extra configuration needed.
@@ -379,7 +448,7 @@ The Copilot Orchestrator integrates with GitHub Copilot Chat via the **Model Con
 │                       ▼                                               │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐    │
 │  │  McpHandler  │→ │  PlanRunner  │→ │  Git / Agent / UI        │    │
-│  │  (20 tools)  │  │  (DAG engine)│  │  (worktrees, Copilot CLI)│    │
+│  │  (21 tools)  │  │  (DAG engine)│  │  (worktrees, Copilot CLI)│    │
 │  └──────────────┘  └──────────────┘  └──────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -411,35 +480,38 @@ The extension implements VS Code's `McpServerDefinitionProvider` API to automati
 - **VS Code manages lifecycle** — No manual process management needed
 - **Workspace-scoped** — Each workspace gets its own MCP server instance
 
-### 18 MCP Tools
+### 21 MCP Tools
 
-**Plan Management (14 tools):**
+**Plan Management (15 tools):**
 
 | Tool | Description |
 |------|-------------|
-| `create_copilot_plan` | Create a multi-node plan with DAG dependencies and groups |
-| `update_copilot_plan` | Update plan configuration or node specs |
-| `update_copilot_plan_node` | Update a specific node's work spec or configuration |
-| `get_copilot_plan_status` | Get plan progress, node states, and group summary |
+| `create_copilot_plan` | Create a complete plan with all jobs and DAG dependencies |
+| `scaffold_copilot_plan` | Create an empty plan scaffold for incremental building |
+| `add_copilot_plan_job` | Add a job to a scaffolding plan |
+| `finalize_copilot_plan` | Validate and start a scaffolded plan |
+| `get_copilot_plan_status` | Get plan progress, job states, and group summary |
 | `list_copilot_plans` | List all plans with optional status filter |
-| `cancel_copilot_plan` | Cancel a plan and all running nodes |
-| `pause_copilot_plan` | Pause a plan — running nodes finish, no new work starts |
+| `update_copilot_plan` | Update plan-level settings (env, maxParallel, resumeAfterPlan) |
+| `reshape_copilot_plan` | Modify running plan topology (add/remove/reorder jobs) |
+| `cancel_copilot_plan` | Cancel a plan and all running jobs |
+| `pause_copilot_plan` | Pause a plan — running jobs finish, no new work starts |
 | `resume_copilot_plan` | Resume a paused plan |
 | `delete_copilot_plan` | Delete a plan and all persisted state |
-| `retry_copilot_plan` | Retry all failed nodes in a plan |
-| `retry_copilot_plan_node` | Retry a specific failed node in a plan |
-| `get_copilot_plan_node_failure_context` | Get AI-friendly failure context for a node |
-| `get_copilot_node_details` | Get detailed node info (config, state, work summary) |
-| `get_copilot_node_logs` | Get execution logs filtered by phase |
+| `retry_copilot_plan` | Retry all failed jobs in a plan |
+| `get_copilot_job_logs` | Get execution logs filtered by phase |
+| `get_copilot_job_attempts` | Get full attempt history with per-attempt logs |
 
-**Node Operations (4 tools):**
+**Job Operations (6 tools):**
 
 | Tool | Description |
 |------|-------------|
-| `get_copilot_node_attempts` | Get full attempt history with per-attempt logs |
-| `retry_copilot_node` | Retry a specific failed node |
-| `force_fail_copilot_node` | Force-fail a stuck node to unblock dependents |
-| `get_copilot_node_failure_context` | Get structured failure details for retry |
+| `get_copilot_job` | Get detailed job info (config, state, work summary) |
+| `list_copilot_jobs` | List jobs in a plan with optional filters (group, status) |
+| `retry_copilot_job` | Retry a specific failed job with optional new instructions |
+| `force_fail_copilot_job` | Force-fail a stuck job to unblock dependents |
+| `get_copilot_job_failure_context` | Get AI-friendly failure context for a job |
+| `update_copilot_plan_job` | Update a job's work spec, prechecks, or postchecks |
 
 **Example — Creating a plan via Copilot Chat:**
 ```
