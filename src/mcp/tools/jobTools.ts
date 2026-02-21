@@ -31,10 +31,14 @@ export async function getJobToolDefinitions(): Promise<McpTool[]> {
     // =========================================================================
     {
       name: 'get_copilot_job',
-      description: 'Get detailed information about a specific job. No group/plan ID required — jobs are looked up globally.',
+      description: 'Get detailed information about a specific job. If planId is provided, looks up directly; otherwise scans all plans.',
       inputSchema: {
         type: 'object',
         properties: {
+          planId: {
+            type: 'string',
+            description: 'Plan ID (optional — speeds up lookup if known)'
+          },
           jobId: {
             type: 'string',
             description: 'Job UUID or producerId'
@@ -46,10 +50,14 @@ export async function getJobToolDefinitions(): Promise<McpTool[]> {
 
     {
       name: 'list_copilot_jobs',
-      description: 'List jobs with optional filters by group or status.',
+      description: 'List jobs with optional filters by plan, group, or status.',
       inputSchema: {
         type: 'object',
         properties: {
+          planId: {
+            type: 'string',
+            description: 'Filter by plan ID (optional)'
+          },
           groupId: {
             type: 'string',
             description: 'Filter by group ID'
@@ -72,7 +80,7 @@ export async function getJobToolDefinitions(): Promise<McpTool[]> {
     // =========================================================================
     {
       name: 'retry_copilot_job',
-      description: `Retry a specific failed job. No group/plan ID required.
+      description: `Retry a specific failed job.
 
 The job must be in 'failed' state to be retried.
 
@@ -83,12 +91,22 @@ WORKFLOW:
       inputSchema: {
         type: 'object',
         properties: {
+          planId: {
+            type: 'string',
+            description: 'Plan ID (optional — speeds up lookup if known)'
+          },
           jobId: {
             type: 'string',
             description: 'Job ID to retry'
           },
           newWork: {
             description: 'Optional replacement work for the retry'
+          },
+          newPrechecks: {
+            description: 'Optional replacement prechecks for the retry (null to remove)'
+          },
+          newPostchecks: {
+            description: 'Optional replacement postchecks for the retry (null to remove)'
           },
           clearWorktree: {
             type: 'boolean',
@@ -110,6 +128,10 @@ Only works on jobs in 'running' or 'scheduled' state.`,
       inputSchema: {
         type: 'object',
         properties: {
+          planId: {
+            type: 'string',
+            description: 'Plan ID (optional — speeds up lookup if known)'
+          },
           jobId: {
             type: 'string',
             description: 'Job ID to force fail'
@@ -125,7 +147,7 @@ Only works on jobs in 'running' or 'scheduled' state.`,
 
     {
       name: 'get_copilot_job_failure_context',
-      description: `Get detailed failure context for a failed job. No group/plan ID required.
+      description: `Get detailed failure context for a failed job.
 
 Returns:
 - Execution logs from the failed attempt
@@ -136,6 +158,10 @@ Returns:
       inputSchema: {
         type: 'object',
         properties: {
+          planId: {
+            type: 'string',
+            description: 'Plan ID (optional — speeds up lookup if known)'
+          },
           jobId: {
             type: 'string',
             description: 'Job ID to get failure context for'

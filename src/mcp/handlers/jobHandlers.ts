@@ -16,6 +16,19 @@ import {
 } from './utils';
 
 // ============================================================================
+// HELPERS
+// ============================================================================
+
+/** Resolve plan list: direct lookup when planId provided, otherwise all plans. */
+function resolvePlans(args: any, ctx: PlanHandlerContext): any[] {
+  if (args.planId) {
+    const plan = ctx.PlanRunner.getPlan(args.planId);
+    return plan ? [plan] : [];
+  }
+  return ctx.PlanRunner.getAll();
+}
+
+// ============================================================================
 // HANDLERS
 // ============================================================================
 
@@ -28,8 +41,8 @@ export async function handleGetJob(args: any, ctx: PlanHandlerContext): Promise<
   const fieldError = validateRequired(args, ['jobId']);
   if (fieldError) {return fieldError;}
 
-  // Search across all plans for the job
-  const plans = ctx.PlanRunner.getAll();
+  const plans = resolvePlans(args, ctx);
+
   for (const plan of plans) {
     let nodeId = args.jobId;
 
@@ -50,11 +63,11 @@ export async function handleGetJob(args: any, ctx: PlanHandlerContext): Promise<
           producerId: node.producerId,
           name: node.name,
           type: node.type,
-          dependencies: node.dependencies.map(depId => {
+          dependencies: node.dependencies.map((depId: string) => {
             const depNode = plan.jobs.get(depId);
             return { id: depId, producerId: depNode?.producerId, name: depNode?.name };
           }),
-          dependents: node.dependents.map(depId => {
+          dependents: node.dependents.map((depId: string) => {
             const depNode = plan.jobs.get(depId);
             return { id: depId, producerId: depNode?.producerId, name: depNode?.name };
           }),
@@ -93,7 +106,7 @@ export async function handleGetJob(args: any, ctx: PlanHandlerContext): Promise<
  * Lists jobs with optional filters by group, status, or group name.
  */
 export async function handleListJobs(args: any, ctx: PlanHandlerContext): Promise<any> {
-  const allPlans = ctx.PlanRunner.getAll();
+  const allPlans = resolvePlans(args, ctx);
   const nodes: any[] = [];
 
   for (const plan of allPlans) {
@@ -370,8 +383,7 @@ export async function handleRetryJob(args: any, ctx: PlanHandlerContext): Promis
     clearWorktree: args.clearWorktree || false,
   };
 
-  // Find the job across all plans
-  const plans = ctx.PlanRunner.getAll();
+  const plans = resolvePlans(args, ctx);
   for (const plan of plans) {
     let nodeId = args.jobId;
     if (!plan.jobs.has(nodeId)) {
@@ -405,8 +417,7 @@ export async function handleForceFailJob(args: any, ctx: PlanHandlerContext): Pr
   const fieldError = validateRequired(args, ['jobId']);
   if (fieldError) {return fieldError;}
 
-  // Find the job across all plans
-  const plans = ctx.PlanRunner.getAll();
+  const plans = resolvePlans(args, ctx);
   for (const plan of plans) {
     let nodeId = args.jobId;
     if (!plan.jobs.has(nodeId)) {
@@ -433,13 +444,13 @@ export async function handleForceFailJob(args: any, ctx: PlanHandlerContext): Pr
 /**
  * Handle the `get_copilot_job_failure_context` MCP tool call.
  *
- * Gets failure context for a job without requiring planId.
+ * Gets failure context for a job. Uses planId for direct lookup if provided.
  */
 export async function handleJobFailureContext(args: any, ctx: PlanHandlerContext): Promise<any> {
   const fieldError = validateRequired(args, ['jobId']);
   if (fieldError) {return fieldError;}
 
-  const plans = ctx.PlanRunner.getAll();
+  const plans = resolvePlans(args, ctx);
   for (const plan of plans) {
     let nodeId = args.jobId;
     if (!plan.jobs.has(nodeId)) {

@@ -264,7 +264,7 @@ SKILL-AWARE INSTRUCTIONS: If the project has .github/skills/ directories, read t
         properties: {
           status: {
             type: 'string',
-            enum: ['pending', 'running', 'succeeded', 'failed', 'partial', 'canceled'],
+            enum: ['all', 'pending', 'scaffolding', 'running', 'succeeded', 'completed', 'failed', 'partial', 'canceled'],
             description: 'Filter by status (optional)'
           }
         }

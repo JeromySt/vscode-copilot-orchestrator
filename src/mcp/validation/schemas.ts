@@ -270,7 +270,7 @@ export const listPlansSchema = {
   properties: {
     status: { 
       type: 'string', 
-      enum: ['all', 'running', 'completed', 'failed', 'pending', 'scaffolding', 'canceled'] 
+      enum: ['all', 'pending', 'scaffolding', 'running', 'succeeded', 'completed', 'failed', 'partial', 'canceled'] 
     }
   },
   additionalProperties: false
@@ -299,6 +299,10 @@ export const getNodeLogsSchema = {
   properties: {
     planId: { type: 'string', minLength: 1, maxLength: 100 },
     jobId: { type: 'string', minLength: 1, maxLength: 100 },
+    phase: {
+      type: 'string',
+      enum: ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri', 'all']
+    },
     tail: { type: 'number', minimum: 1, maximum: 10000 }
   },
   required: ['planId', 'jobId'],
@@ -313,7 +317,9 @@ export const getNodeAttemptsSchema = {
   type: 'object',
   properties: {
     planId: { type: 'string', minLength: 1, maxLength: 100 },
-    jobId: { type: 'string', minLength: 1, maxLength: 100 }
+    jobId: { type: 'string', minLength: 1, maxLength: 100 },
+    attemptNumber: { type: 'number', minimum: 1, maximum: 1000 },
+    includeLogs: { type: 'boolean' }
   },
   required: ['planId', 'jobId'],
   additionalProperties: false
@@ -534,6 +540,7 @@ export const getNodeSchema = {
   $id: 'get_copilot_job',
   type: 'object',
   properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
     jobId: { type: 'string', minLength: 1, maxLength: 100 }
   },
   required: ['jobId'],
@@ -547,6 +554,7 @@ export const listNodesSchema = {
   $id: 'list_copilot_jobs',
   type: 'object',
   properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
     groupId: { type: 'string', maxLength: 100 },
     status: {
       type: 'string',
@@ -564,6 +572,7 @@ export const retryNodeCentricSchema = {
   $id: 'retry_copilot_job',
   type: 'object',
   properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
     jobId: { type: 'string', minLength: 1, maxLength: 100 },
     newWork: {
       oneOf: [
@@ -598,6 +607,7 @@ export const forceFailNodeSchema = {
   $id: 'force_fail_copilot_job',
   type: 'object',
   properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
     jobId: { type: 'string', minLength: 1, maxLength: 100 },
     reason: { type: 'string', maxLength: 1000 }
   },
@@ -612,6 +622,7 @@ export const getNodeFailureContextSchema = {
   $id: 'get_copilot_job_failure_context',
   type: 'object',
   properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
     jobId: { type: 'string', minLength: 1, maxLength: 100 }
   },
   required: ['jobId'],
@@ -648,9 +659,40 @@ export const updateCopilotPlanNodeSchema = {
     resetToStage: {
       type: 'string',
       enum: ['prechecks', 'work', 'postchecks']
+    },
+    env: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      description: 'Environment variables for this job. Overrides plan-level env.'
     }
   },
   required: ['planId', 'jobId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for pause_copilot_plan input
+ */
+export const pausePlanSchema = {
+  $id: 'pause_copilot_plan',
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['planId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for resume_copilot_plan input
+ */
+export const resumePlanSchema = {
+  $id: 'resume_copilot_plan',
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['planId'],
   additionalProperties: false
 } as const;
 
@@ -683,7 +725,7 @@ export const scaffoldPlanSchema = {
     name: { type: 'string', minLength: 1, maxLength: 200 },
     baseBranch: { type: 'string', maxLength: 200 },
     targetBranch: { type: 'string', maxLength: 200 },
-    maxParallel: { type: 'number', minimum: 1, maximum: 64 },
+    maxParallel: { type: 'number', minimum: 0, maximum: 1024 },
     startPaused: { type: 'boolean' },
     cleanUpSuccessfulWork: { type: 'boolean' },
     additionalSymlinkDirs: {
@@ -748,7 +790,12 @@ export const addPlanNodeSchema = {
       ]
     },
     autoHeal: { type: 'boolean' },
-    expectsNoChanges: { type: 'boolean' }
+    expectsNoChanges: { type: 'boolean' },
+    env: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      description: 'Environment variables for this job. Overrides plan-level env for this specific job.'
+    }
   },
   required: ['planId', 'producerId', 'task', 'work'],
   additionalProperties: false
@@ -772,31 +819,34 @@ export const finalizePlanSchema = {
  * All schemas indexed by tool name
  */
 export const schemas: Record<string, object> = {
-  // Existing plan tools
+  // Plan lifecycle tools
   create_copilot_plan: createPlanSchema,
   get_copilot_plan_status: getPlanStatusSchema,
   list_copilot_plans: listPlansSchema,
+  cancel_copilot_plan: cancelPlanSchema,
+  pause_copilot_plan: pausePlanSchema,
+  resume_copilot_plan: resumePlanSchema,
+  delete_copilot_plan: deletePlanSchema,
+  update_copilot_plan: updatePlanSchema,
+  retry_copilot_plan: retryPlanSchema,
+  reshape_copilot_plan: reshapePlanSchema,
+
+  // Plan-qualified job tools
   get_copilot_job_details: getNodeDetailsSchema,
   get_copilot_job_logs: getNodeLogsSchema,
   get_copilot_job_attempts: getNodeAttemptsSchema,
-  cancel_copilot_plan: cancelPlanSchema,
-  delete_copilot_plan: deletePlanSchema,
-  retry_copilot_plan: retryPlanSchema,
   retry_copilot_plan_job: retryNodeSchema,
   get_copilot_plan_job_failure_context: getFailureContextSchema,
-  add_copilot_job: addNodeSchema,
-  reshape_copilot_plan: reshapePlanSchema,
-  
-  // Job-centric tools (NEW)
+  update_copilot_plan_job: updateCopilotPlanNodeSchema,
+
+  // Job-centric tools (planId optional — scans all plans if omitted)
   get_copilot_job: getNodeSchema,
   list_copilot_jobs: listNodesSchema,
   retry_copilot_job: retryNodeCentricSchema,
   force_fail_copilot_job: forceFailNodeSchema,
   get_copilot_job_failure_context: getNodeFailureContextSchema,
-  update_copilot_plan_job: updateCopilotPlanNodeSchema,
-  update_copilot_plan: updatePlanSchema,
-  
-  // Scaffolding tools (NEW)
+
+  // Scaffolding tools
   scaffold_copilot_plan: scaffoldPlanSchema,
   add_copilot_plan_job: addPlanNodeSchema,
   finalize_copilot_plan: finalizePlanSchema,
