@@ -363,6 +363,15 @@ export function normalizeWorkSpec(spec: WorkSpec | undefined): ProcessSpec | She
   }
   
   if (typeof spec === 'string') {
+    // Try parsing JSON object strings (e.g. '{"type":"agent","instructions":"..."}')
+    if (spec.trimStart().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(spec);
+        if (parsed && typeof parsed === 'object' && parsed.type) {
+          return normalizeWorkSpec(parsed);
+        }
+      } catch { /* not valid JSON, treat as shell command */ }
+    }
     // Legacy string format
     if (spec.startsWith('@agent')) {
       const instructions = spec.replace(/^@agent\s*/i, '').trim();
