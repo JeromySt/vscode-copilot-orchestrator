@@ -320,7 +320,7 @@
     "@types/uuid": "^10.0.0",
     "@types/vscode": "^1.109.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
+    "@typescript-eslint/parser": "^8.56.0",
     "@vscode/test-electron": "^2.5.0",
     "@vscode/vsce": "^3.0.0",
     "c8": "^10.1.3",
