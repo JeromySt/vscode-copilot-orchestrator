@@ -630,8 +630,9 @@ export class PlanLifecycleManager {
             });
           }
         }
-      } else if (event.status === 'failed' || event.status === 'partial' || event.status === 'canceled') {
-        // Dependency plan didn't succeed — unblock waiting plans (keep paused)
+      } else if (event.status === 'canceled') {
+        // Only canceled plans unblock dependents — failed/partial plans can be retried,
+        // so dependent plans should keep waiting until the user cancels or retries to success.
         this.notifyDependentPlansOfTermination(event.planId, 'canceled');
       }
     });
