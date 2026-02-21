@@ -31,6 +31,8 @@ export interface CommitPhaseContext extends PhaseContext {
   getExecutionLogs: () => LogEntry[];
   /** Get the log file path for the current execution (for granting AI review access) */
   getLogFilePath?: () => string | undefined;
+  /** Hydrated work spec (loaded from disk for finalized plans) */
+  hydratedWork?: any;
 }
 
 /**
@@ -219,7 +221,7 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
         : logText;
 
       const workDesc = (() => {
-        const spec = normalizeWorkSpec(node.work);
+        const spec = normalizeWorkSpec(ctx.hydratedWork || node.work);
         if (!spec) {return 'No work specified';}
         if (spec.type === 'shell') {return `Shell: ${spec.command}`;}
         if (spec.type === 'process') {return `Process: ${spec.executable} ${(spec.args || []).join(' ')}`;}

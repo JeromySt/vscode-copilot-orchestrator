@@ -67,9 +67,9 @@ export async function handleGetJobDetails(args: any, ctx: PlanHandlerContext): P
       }),
       ...(node.type === 'job' ? {
         task: (node as any).task,
-        work: (node as any).work,
-        prechecks: (node as any).prechecks,
-        postchecks: (node as any).postchecks,
+        work: (node as any).work || await plan.definition?.getWorkSpec(nodeId),
+        prechecks: (node as any).prechecks || await plan.definition?.getPrechecksSpec(nodeId),
+        postchecks: (node as any).postchecks || await plan.definition?.getPostchecksSpec(nodeId),
       } : {}),
     },
     state: {

@@ -361,9 +361,11 @@ export class NodeManager {
     // Auto-generate failure-fixing instructions for agent jobs
     if (!options?.newWork && node.type === 'job') {
       const jobNode = node as JobNode;
-      const isAgentWork = typeof jobNode.work === 'string'
-        ? jobNode.work.startsWith('@agent')
-        : (jobNode.work && 'type' in jobNode.work && jobNode.work.type === 'agent');
+      // Resolve work spec: prefer inline, fall back to disk for finalized plans
+      const resolvedWork = jobNode.work || await plan.definition?.getWorkSpec(nodeId);
+      const isAgentWork = typeof resolvedWork === 'string'
+        ? resolvedWork.startsWith('@agent')
+        : (resolvedWork && typeof resolvedWork === 'object' && 'type' in resolvedWork && resolvedWork.type === 'agent');
 
       if (isAgentWork && nodeState.copilotSessionId) {
         const failureContext = this.getNodeFailureContext(planId, nodeId);

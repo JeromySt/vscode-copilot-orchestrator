@@ -449,7 +449,7 @@ export class JobExecutionEngine {
             baseCommit: nodeState.baseCommit,
             logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
             logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-            workUsed: node.work,
+            workUsed: hydratedWork,
             metrics: nodeState.metrics,
             phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
           };
@@ -664,7 +664,7 @@ export class JobExecutionEngine {
                   baseCommit: nodeState.baseCommit,
                   logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, retryLogMemoryOffset, retryLogFileOffset, nodeState.attempts),
                   logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-                  workUsed: node.work,
+                  workUsed: hydratedWork,
                   metrics: nodeState.metrics,
                   phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
                 };
@@ -1199,7 +1199,7 @@ export class JobExecutionEngine {
                   baseCommit: nodeState.baseCommit,
                   logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, retryLogMemoryOffset, retryLogFileOffset, nodeState.attempts),
                   logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-                  workUsed: node.work,
+                  workUsed: hydratedWork,
                   metrics: retryResult.metrics,
                   phaseMetrics: retryResult.phaseMetrics ? { ...retryResult.phaseMetrics } : undefined,
                 };
@@ -1282,7 +1282,7 @@ export class JobExecutionEngine {
           completedCommit: nodeState.completedCommit, // Work was successful, so we have the commit
           logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
           logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-          workUsed: node.work,
+          workUsed: hydratedWork,
           metrics: nodeState.metrics,
           phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
         };
@@ -1314,7 +1314,7 @@ export class JobExecutionEngine {
           baseCommit: nodeState.baseCommit,
           logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
           logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-          workUsed: node.work,
+          workUsed: hydratedWork,
           metrics: nodeState.metrics,
           phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
         };
@@ -1377,7 +1377,7 @@ export class JobExecutionEngine {
         baseCommit: nodeState.baseCommit,
         logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
         logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-        workUsed: node.work,
+        workUsed: node.work, // Best-effort: may be undefined for finalized plans in error path
         metrics: nodeState.metrics,
         phaseMetrics: nodeState.phaseMetrics,
       };
