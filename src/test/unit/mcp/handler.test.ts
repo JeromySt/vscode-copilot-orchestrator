@@ -227,7 +227,7 @@ suite('McpHandler', () => {
 
       const res = await h.handleRequest(makeRequest('tools/call', {
         name: 'cancel_copilot_plan',
-        arguments: { id: 'plan-1' },
+        arguments: { planId: 'plan-1' },
       }));
 
       const parsed = JSON.parse(res.result.content[0].text);
@@ -240,7 +240,7 @@ suite('McpHandler', () => {
 
       const res = await h.handleRequest(makeRequest('tools/call', {
         name: 'delete_copilot_plan',
-        arguments: { id: 'plan-1' },
+        arguments: { planId: 'plan-1' },
       }));
 
       const parsed = JSON.parse(res.result.content[0].text);
@@ -302,7 +302,7 @@ suite('McpHandler', () => {
     test('returns error when plan not found', async () => {
       const res = await handler.handleRequest(makeRequest('tools/call', {
         name: 'get_copilot_plan_status',
-        arguments: { id: 'nonexistent' },
+        arguments: { planId: 'nonexistent' },
       }));
 
       const parsed = JSON.parse(res.result.content[0].text);
@@ -325,7 +325,7 @@ suite('McpHandler', () => {
 
       const res = await h.handleRequest(makeRequest('tools/call', {
         name: 'get_copilot_plan_status',
-        arguments: { id: 'plan-1' },
+        arguments: { planId: 'plan-1' },
       }));
 
       const parsed = JSON.parse(res.result.content[0].text);
@@ -337,18 +337,18 @@ suite('McpHandler', () => {
   });
 
   // =========================================================================
-  // tools/call - get_copilot_job_details
+  // tools/call - get_copilot_job
   // =========================================================================
-  suite('tools/call - get_copilot_job_details', () => {
+  suite('tools/call - get_copilot_job', () => {
     test('returns error when required fields missing', async () => {
       const res = await handler.handleRequest(makeRequest('tools/call', {
-        name: 'get_copilot_job_details',
+        name: 'get_copilot_job',
         arguments: { planId: 'plan-1' },
       }));
 
       const parsed = JSON.parse(res.result.content[0].text);
       assert.strictEqual(parsed.success, false);
-      assert.ok(parsed.error.includes('nodeId'));
+      assert.ok(parsed.error.includes('jobId'));
     });
 
     test('returns node details when found', async () => {
@@ -378,8 +378,8 @@ suite('McpHandler', () => {
       const h = new McpHandler(mockRunner, '/workspace', {} as any);
 
       const res = await h.handleRequest(makeRequest('tools/call', {
-        name: 'get_copilot_job_details',
-        arguments: { planId: 'plan-1', nodeId: 'node-1' },
+        name: 'get_copilot_job',
+        arguments: { planId: 'plan-1', jobId: 'node-1' },
       }));
 
       const parsed = JSON.parse(res.result.content[0].text);

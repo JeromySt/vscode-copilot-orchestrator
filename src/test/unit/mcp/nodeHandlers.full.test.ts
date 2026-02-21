@@ -127,9 +127,9 @@ suite('Node Handlers', () => {
   suite('handleListNodes', () => {
     test('should return empty list when no plans', async () => {
       const { handleListJobs } = require('../../../mcp/handlers/jobHandlers');
-      const result = await handleListJobs({}, makeCtx());
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.count, 0);
+      const ctx = makeCtx();
+      const result = await handleListJobs({ planId: 'nonexistent' }, ctx);
+      assert.strictEqual(result.success, false);  // Should fail when plan not found
     });
 
     test('should list all nodes', async () => {
@@ -138,8 +138,8 @@ suite('Node Handlers', () => {
       const node = { id: 'n1', producerId: 'build', name: 'Build', type: 'job' };
       plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'running', attempts: 1, startedAt: 100 });
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await handleListJobs({}, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
+      const result = await handleListJobs({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.count, 1);
     });
@@ -152,8 +152,8 @@ suite('Node Handlers', () => {
       const plan2 = makeMockPlan({ id: 'p2' });
       plan2.jobs.set('n2', { id: 'n2', producerId: 'test', name: 'Test', type: 'job' });
       plan2.nodeStates.set('n2', { status: 'pending' });
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan1, plan2]) });
-      const result = await handleListJobs({ group_id: 'p1' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().withArgs('p1').returns(plan1) });
+      const result = await handleListJobs({ planId: 'p1' }, ctx);
       assert.strictEqual(result.count, 1);
     });
 
@@ -164,8 +164,8 @@ suite('Node Handlers', () => {
       plan.nodeStates.set('n1', { status: 'failed' });
       plan.jobs.set('n2', { id: 'n2', producerId: 'test', name: 'Test', type: 'job' });
       plan.nodeStates.set('n2', { status: 'running' });
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await handleListJobs({ status: 'failed' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
+      const result = await handleListJobs({ planId: 'plan-1', status: 'failed' }, ctx);
       assert.strictEqual(result.count, 1);
     });
 
@@ -174,11 +174,11 @@ suite('Node Handlers', () => {
       const plan = makeMockPlan({ spec: { name: 'My Build Plan' } });
       plan.jobs.set('n1', { id: 'n1', producerId: 'build', name: 'Build', type: 'job' });
       plan.nodeStates.set('n1', { status: 'running' });
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await handleListJobs({ group_name: 'build' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
+      const result = await handleListJobs({ planId: 'plan-1', groupName: 'build' }, ctx);
       assert.strictEqual(result.count, 1);
       // Non-matching group_name
-      const result2 = await handleListJobs({ group_name: 'zzzzz' }, ctx);
+      const result2 = await handleListJobs({ planId: 'plan-1', groupName: 'zzzzz' }, ctx);
       assert.strictEqual(result2.count, 0);
     });
   });

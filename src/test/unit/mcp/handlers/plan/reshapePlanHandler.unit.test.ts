@@ -203,7 +203,7 @@ suite('reshapePlanHandler', () => {
 
       const result = await handleReshapePlan({
         planId: 'plan-1',
-        operations: [{ type: 'remove_node', nodeId: 'no-such-node' }],
+        operations: [{ type: 'remove_node', producer_id: 'no-such-node' }],
       }, ctx);
 
       assert.strictEqual(result.results[0].success, false);
@@ -448,7 +448,7 @@ suite('reshapePlanHandler', () => {
           // This should succeed
           { type: 'add_node', spec: { producer_id: 'new-1', task: 'work', dependencies: [] } },
           // This should fail — nonexistent node
-          { type: 'remove_node', nodeId: 'nonexistent' },
+          { type: 'remove_node', producer_id: 'nonexistent' },
           // This should succeed
           { type: 'add_node', spec: { producer_id: 'new-2', task: 'more work', dependencies: [] } },
         ],

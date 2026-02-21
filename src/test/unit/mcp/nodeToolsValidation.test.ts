@@ -146,16 +146,17 @@ suite('Node Tool Schema Validation', () => {
     test('accepts valid status values', () => {
       const validStatuses = ['pending', 'ready', 'scheduled', 'running', 'succeeded', 'failed', 'blocked', 'canceled'];
       for (const status of validStatuses) {
-        const result = validateInput('list_copilot_jobs', { status });
+        const result = validateInput('list_copilot_jobs', { planId: 'test-plan', status });
         assert.ok(result.valid, `Expected valid for status '${status}', got: ${result.error}`);
       }
     });
 
     test('accepts valid filter combinations', () => {
       const result = validateInput('list_copilot_jobs', {
-        group_id: 'test-group',
+        planId: 'test-plan',
+        groupId: 'test-group',
         status: 'running',
-        group_name: 'Test Group'
+        groupName: 'Test Group'
       });
       
       assert.ok(result.valid, `Expected valid with filters, got: ${result.error}`);

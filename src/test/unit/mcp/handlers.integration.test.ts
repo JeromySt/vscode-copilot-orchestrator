@@ -173,15 +173,16 @@ suite('MCP Handlers', () => {
 
     test('returns error when plan not found', async () => {
       const ctx = createContext();
-      const result = await handleGetPlanStatus({ id: 'nonexistent' }, ctx);
+      const result = await handleGetPlanStatus({ planId: 'nonexistent' }, ctx);
       assert.strictEqual(result.success, false);
     });
 
     test('returns plan status when found', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleGetPlanStatus({ id: plan.id }, ctx);
-      assert.ok(result.success !== false || result.id !== undefined);
+      const result = await handleGetPlanStatus({ planId: plan.id }, ctx);
+      assert.strictEqual(result.success, true);
+      assert.ok(result.planId !== undefined);
     });
   });
 
@@ -193,7 +194,8 @@ suite('MCP Handlers', () => {
     test('returns empty list when no plans', async () => {
       const ctx = createContext();
       const result = await handleListPlans({}, ctx);
-      assert.ok(result.success !== false || result.plans !== undefined);
+      assert.strictEqual(result.success, true);
+      assert.ok(Array.isArray(result.plans));
     });
 
     test('returns plans when they exist', async () => {
@@ -224,7 +226,7 @@ suite('MCP Handlers', () => {
     test('returns node details when found', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleGetJobDetails({ planId: plan.id, nodeId: 'node-1' }, ctx);
+      const result = await handleGetJobDetails({ planId: plan.id, jobId: 'node-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.node.id, 'node-1');
       assert.strictEqual(result.node.name, 'Test Job');
@@ -235,7 +237,7 @@ suite('MCP Handlers', () => {
     test('returns node details by producerId', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleGetJobDetails({ planId: plan.id, nodeId: 'job-1' }, ctx);
+      const result = await handleGetJobDetails({ planId: plan.id, jobId: 'job-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.node.producerId, 'job-1');
     });
@@ -243,7 +245,7 @@ suite('MCP Handlers', () => {
     test('returns error for unknown nodeId', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleGetJobDetails({ planId: plan.id, nodeId: 'ghost' }, ctx);
+      const result = await handleGetJobDetails({ planId: plan.id, jobId: 'ghost' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -262,7 +264,7 @@ suite('MCP Handlers', () => {
     test('returns logs when plan and node exist', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleGetJobLogs({ planId: plan.id, nodeId: 'node-1' }, ctx);
+      const result = await handleGetJobLogs({ planId: plan.id, jobId: 'node-1' }, ctx);
       assert.ok(result);
     });
   });
@@ -281,7 +283,7 @@ suite('MCP Handlers', () => {
     test('delegates to PlanRunner.cancelPlan', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleCancelPlan({ id: plan.id }, ctx);
+      const result = await handleCancelPlan({ planId: plan.id }, ctx);
       assert.ok(result);
     });
   });
@@ -299,7 +301,7 @@ suite('MCP Handlers', () => {
 
     test('delegates to PlanRunner.deletePlan', async () => {
       const ctx = createContext();
-      const result = await handleDeletePlan({ id: 'some-plan' }, ctx);
+      const result = await handleDeletePlan({ planId: 'some-plan' }, ctx);
       assert.ok(result);
     });
   });
@@ -317,7 +319,7 @@ suite('MCP Handlers', () => {
 
     test('pauses plan', async () => {
       const ctx = createContext();
-      const result = await handlePausePlan({ id: 'some-plan' }, ctx);
+      const result = await handlePausePlan({ planId: 'some-plan' }, ctx);
       assert.ok(result);
     });
   });
@@ -335,7 +337,7 @@ suite('MCP Handlers', () => {
 
     test('resumes plan', async () => {
       const ctx = createContext();
-      const result = await handleResumePlan({ id: 'some-plan' }, ctx);
+      const result = await handleResumePlan({ planId: 'some-plan' }, ctx);
       assert.ok(result);
     });
   });
@@ -353,7 +355,7 @@ suite('MCP Handlers', () => {
 
     test('returns error when plan not found', async () => {
       const ctx = createContext();
-      const result = await handleRetryPlan({ id: 'nonexistent' }, ctx);
+      const result = await handleRetryPlan({ planId: 'nonexistent' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -489,7 +491,7 @@ suite('MCP Handlers', () => {
       // Set node to failed state
       plan.nodeStates.get('node-1')!.status = 'failed';
       const ctx = createContext([plan]);
-      const result = await handleRetryPlan({ id: plan.id }, ctx);
+      const result = await handleRetryPlan({ planId: plan.id }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.retriedNodes);
       assert.strictEqual(result.retriedNodes.length, 1);
@@ -499,7 +501,7 @@ suite('MCP Handlers', () => {
       const plan = createTestPlan();
       // Node is running, not failed
       const ctx = createContext([plan]);
-      const result = await handleRetryPlan({ id: plan.id }, ctx);
+      const result = await handleRetryPlan({ planId: plan.id }, ctx);
       assert.strictEqual(result.success, false);
     });
 
@@ -507,7 +509,7 @@ suite('MCP Handlers', () => {
       const plan = createTestPlan();
       plan.nodeStates.get('node-1')!.status = 'failed';
       const ctx = createContext([plan]);
-      const result = await handleRetryPlan({ id: plan.id, nodeIds: ['node-1'] }, ctx);
+      const result = await handleRetryPlan({ planId: plan.id, nodeIds: ['node-1'] }, ctx);
       assert.strictEqual(result.success, true);
     });
 
@@ -516,7 +518,7 @@ suite('MCP Handlers', () => {
       plan.nodeStates.get('node-1')!.status = 'failed';
       const ctx = createContext([plan]);
       (ctx.PlanRunner as any).retryNode = sinon.stub().returns({ success: false, error: 'retry failed' });
-      const result = await handleRetryPlan({ id: plan.id }, ctx);
+      const result = await handleRetryPlan({ planId: plan.id }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.errors);
     });
@@ -525,7 +527,7 @@ suite('MCP Handlers', () => {
       const plan = createTestPlan();
       plan.nodeStates.get('node-1')!.status = 'failed';
       const ctx = createContext([plan]);
-      const result = await handleRetryPlan({ id: plan.id, newWork: 'new instructions', clearWorktree: true }, ctx);
+      const result = await handleRetryPlan({ planId: plan.id, newWork: 'new instructions', clearWorktree: true }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -714,7 +716,7 @@ suite('MCP Handlers', () => {
     test('returns full status with node details', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleGetPlanStatus({ id: plan.id }, ctx);
+      const result = await handleGetPlanStatus({ planId: plan.id }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.planId);
       assert.ok(result.nodes);
@@ -726,7 +728,7 @@ suite('MCP Handlers', () => {
       const node = plan.jobs.get('node-1')!;
       (node as any).group = 'backend';
       const ctx = createContext([plan]);
-      const result = await handleGetPlanStatus({ id: plan.id }, ctx);
+      const result = await handleGetPlanStatus({ planId: plan.id }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.groups);
       assert.ok(result.groups['backend']);

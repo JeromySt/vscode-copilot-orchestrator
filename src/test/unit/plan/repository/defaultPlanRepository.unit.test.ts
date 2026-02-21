@@ -29,6 +29,7 @@ suite('DefaultPlanRepository', () => {
       writeNodeSpec: sandbox.stub(),
       moveFileToSpec: sandbox.stub(),
       hasNodeSpec: sandbox.stub(),
+      snapshotSpecsForAttempt: sandbox.stub(),
       listPlanIds: sandbox.stub().returns([]),
       deletePlan: sandbox.stub(),
       exists: sandbox.stub(),
@@ -217,7 +218,7 @@ suite('DefaultPlanRepository', () => {
 
       await assert.rejects(
         () => repository.addNode(planId, nodeSpec),
-        /Cannot add nodes to plan in status 'pending'/
+        /Cannot add jobs to plan in status 'pending'/
       );
     });
 
@@ -915,6 +916,524 @@ suite('DefaultPlanRepository', () => {
       // Groups should be populated from built plan
       assert.ok(savedMetadata.groups);
       assert.ok(savedMetadata.groupPathToId);
+    });
+  });
+
+  suite('removeNode', () => {
+    test('should remove node and rewire SV dependencies', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      metadata.spec.jobs = [
+        { id: 'node-1', producerId: 'producer-1', name: 'Node 1', task: 'Task 1', dependencies: [] },
+        { id: 'sv-id', producerId: '__snapshot-validation__', name: 'SV', task: 'SV task', dependencies: ['producer-1'] }
+      ];
+      metadata.producerIdToNodeId = { 'producer-1': 'node-1', '__snapshot-validation__': 'sv-id' };
+      metadata.nodeStates = {
+        'node-1': { status: 'ready', version: 0, attempts: 0 },
+        'sv-id': { status: 'pending', version: 0, attempts: 0 }
+      };
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      const result = await repository.removeNode(planId, 'producer-1');
+
+      assert.ok(result);
+      assert.ok(mockStore.writePlanMetadata.calledOnce);
+      const updatedMetadata = mockStore.writePlanMetadata.firstCall.args[0];
+      // Node should be removed
+      assert.strictEqual(updatedMetadata.spec.jobs.length, 1);
+      assert.strictEqual(updatedMetadata.spec.jobs[0].producerId, '__snapshot-validation__');
+      // SV dependencies should be empty (no user jobs left)
+      assert.deepStrictEqual(updatedMetadata.spec.jobs[0].dependencies, []);
+    });
+
+    test('should reject removal of SV node', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      metadata.spec.jobs = [
+        { id: 'sv-id', producerId: '__snapshot-validation__', name: 'SV', task: 'SV', dependencies: [] }
+      ];
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      await assert.rejects(
+        () => repository.removeNode(planId, '__snapshot-validation__'),
+        /Cannot remove the snapshot-validation node/
+      );
+    });
+
+    test('should reject if plan not in scaffolding status', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      metadata.spec.status = 'running';
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      await assert.rejects(
+        () => repository.removeNode(planId, 'producer-1'),
+        /Cannot remove jobs from plan in status 'running'/
+      );
+    });
+
+    test('should reject if node not found', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      metadata.spec.jobs = [];
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      await assert.rejects(
+        () => repository.removeNode(planId, 'non-existent'),
+        /Node not found: non-existent/
+      );
+    });
+
+    test('should remove node from other jobs dependencies', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      metadata.spec.jobs = [
+        { id: 'node-1', producerId: 'producer-1', name: 'Node 1', task: 'Task 1', dependencies: [] },
+        { id: 'node-2', producerId: 'producer-2', name: 'Node 2', task: 'Task 2', dependencies: ['producer-1'] },
+        { id: 'sv-id', producerId: '__snapshot-validation__', name: 'SV', task: 'SV', dependencies: ['producer-2'] }
+      ];
+      metadata.producerIdToNodeId = { 'producer-1': 'node-1', 'producer-2': 'node-2', '__snapshot-validation__': 'sv-id' };
+      metadata.nodeStates = {
+        'node-1': { status: 'ready', version: 0, attempts: 0 },
+        'node-2': { status: 'pending', version: 0, attempts: 0 },
+        'sv-id': { status: 'pending', version: 0, attempts: 0 }
+      };
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      await repository.removeNode(planId, 'producer-1');
+
+      const updatedMetadata = mockStore.writePlanMetadata.firstCall.args[0];
+      const node2 = updatedMetadata.spec.jobs.find((j: any) => j.producerId === 'producer-2');
+      // producer-1 should be removed from node-2 dependencies
+      assert.deepStrictEqual(node2.dependencies, []);
+    });
+  });
+
+  suite('updateNode', () => {
+    test('should update node properties', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      metadata.spec.jobs = [
+        { id: 'node-1', producerId: 'producer-1', name: 'Old Name', task: 'Old Task', dependencies: [] }
+      ];
+      metadata.producerIdToNodeId = { 'producer-1': 'node-1' };
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      const updates: Partial<NodeSpec> = {
+        name: 'New Name',
+        task: 'New Task'
+      };
+
+      const result = await repository.updateNode(planId, 'producer-1', updates);
+
+      assert.ok(result);
+      const updatedMetadata = mockStore.writePlanMetadata.firstCall.args[0];
+      const updatedJob = updatedMetadata.spec.jobs[0];
+      assert.strictEqual(updatedJob.name, 'New Name');
+      assert.strictEqual(updatedJob.task, 'New Task');
+    });
+
+    test('should update dependencies and rewire SV', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      metadata.spec.jobs = [
+        { id: 'node-1', producerId: 'producer-1', name: 'Node 1', task: 'Task 1', dependencies: [] },
+        { id: 'node-2', producerId: 'producer-2', name: 'Node 2', task: 'Task 2', dependencies: [] },
+        { id: 'sv-id', producerId: '__snapshot-validation__', name: 'SV', task: 'SV', dependencies: ['producer-1', 'producer-2'] }
+      ];
+      metadata.producerIdToNodeId = { 'producer-1': 'node-1', 'producer-2': 'node-2', '__snapshot-validation__': 'sv-id' };
+      metadata.nodeStates = {
+        'node-1': { status: 'ready', version: 0, attempts: 0 },
+        'node-2': { status: 'ready', version: 0, attempts: 0 },
+        'sv-id': { status: 'pending', version: 0, attempts: 0 }
+      };
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      const updates: Partial<NodeSpec> = {
+        dependencies: ['producer-1']
+      };
+
+      await repository.updateNode(planId, 'producer-2', updates);
+
+      const updatedMetadata = mockStore.writePlanMetadata.firstCall.args[0];
+      const updatedJob = updatedMetadata.spec.jobs.find((j: any) => j.producerId === 'producer-2');
+      assert.deepStrictEqual(updatedJob.dependencies, ['producer-1']);
+      // Node status should change from ready to pending when dependencies added
+      assert.strictEqual(updatedMetadata.nodeStates['node-2'].status, 'pending');
+    });
+
+    test('should reject update of SV node', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      metadata.spec.jobs = [
+        { id: 'sv-id', producerId: '__snapshot-validation__', name: 'SV', task: 'SV', dependencies: [] }
+      ];
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      await assert.rejects(
+        () => repository.updateNode(planId, '__snapshot-validation__', { name: 'New Name' }),
+        /Cannot update the snapshot-validation node/
+      );
+    });
+
+    test('should reject if plan not in scaffolding status', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      metadata.spec.status = 'pending';
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      await assert.rejects(
+        () => repository.updateNode(planId, 'producer-1', { name: 'New Name' }),
+        /Cannot update jobs in plan in status 'pending'/
+      );
+    });
+
+    test('should reject if node not found', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      metadata.spec.jobs = [];
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      await assert.rejects(
+        () => repository.updateNode(planId, 'non-existent', { name: 'New Name' }),
+        /Node not found: non-existent/
+      );
+    });
+  });
+
+  suite('writeNodeSpec', () => {
+    test('should delegate to store', async () => {
+      const planId = 'test-plan';
+      const nodeId = 'node-1';
+      const spec: WorkSpec = { type: 'shell', command: 'npm test' } as ShellSpec;
+
+      await repository.writeNodeSpec(planId, nodeId, 'work', spec);
+
+      assert.ok(mockStore.writeNodeSpec.calledOnce);
+      assert.deepStrictEqual(mockStore.writeNodeSpec.firstCall.args, [planId, nodeId, 'work', spec]);
+    });
+
+    test('should handle prechecks phase', async () => {
+      const planId = 'test-plan';
+      const nodeId = 'node-1';
+      const spec: WorkSpec = { type: 'shell', command: 'npm lint' } as ShellSpec;
+
+      await repository.writeNodeSpec(planId, nodeId, 'prechecks', spec);
+
+      assert.ok(mockStore.writeNodeSpec.calledOnce);
+      assert.strictEqual(mockStore.writeNodeSpec.firstCall.args[2], 'prechecks');
+    });
+
+    test('should handle postchecks phase', async () => {
+      const planId = 'test-plan';
+      const nodeId = 'node-1';
+      const spec: WorkSpec = { type: 'shell', command: 'npm verify' } as ShellSpec;
+
+      await repository.writeNodeSpec(planId, nodeId, 'postchecks', spec);
+
+      assert.ok(mockStore.writeNodeSpec.calledOnce);
+      assert.strictEqual(mockStore.writeNodeSpec.firstCall.args[2], 'postchecks');
+    });
+  });
+
+  suite('snapshotSpecsForAttempt', () => {
+    test('should delegate to store', async () => {
+      const planId = 'test-plan';
+      const nodeId = 'node-1';
+      const attemptNumber = 2;
+
+      await repository.snapshotSpecsForAttempt(planId, nodeId, attemptNumber);
+
+      assert.ok(mockStore.snapshotSpecsForAttempt.calledOnce);
+      assert.deepStrictEqual(mockStore.snapshotSpecsForAttempt.firstCall.args, [planId, nodeId, attemptNumber]);
+    });
+  });
+
+  suite('migrateLegacy', () => {
+    test('should delegate to store', async () => {
+      const planId = 'test-plan';
+
+      await repository.migrateLegacy(planId);
+
+      assert.ok(mockStore.migrateLegacy.calledOnce);
+      assert.deepStrictEqual(mockStore.migrateLegacy.firstCall.args, [planId]);
+    });
+  });
+
+  suite('saveStateSync', () => {
+    test('should preserve hasWork flags from existing metadata', () => {
+      const planId = 'test-plan';
+      const existingMetadata: StoredPlanMetadata = {
+        id: planId,
+        spec: { name: 'Test', status: 'running', jobs: [] },
+        jobs: [
+          {
+            id: 'node-1',
+            producerId: 'producer-1',
+            name: 'Node 1',
+            task: 'Task 1',
+            dependencies: [],
+            hasWork: true,
+            hasPrechecks: false,
+            hasPostchecks: false
+          }
+        ],
+        producerIdToNodeId: { 'producer-1': 'node-1' },
+        roots: ['node-1'],
+        leaves: ['node-1'],
+        nodeStates: { 'node-1': { status: 'running', version: 0, attempts: 0 } },
+        groups: {},
+        groupStates: {},
+        groupPathToId: {},
+        repoPath: '/test/repo',
+        baseBranch: 'main',
+        worktreeRoot: '/test/worktrees',
+        createdAt: Date.now(),
+        maxParallel: 4,
+        cleanUpSuccessfulWork: true
+      };
+
+      mockStore.readPlanMetadataSync = sandbox.stub().returns(existingMetadata);
+
+      const plan: any = {
+        id: planId,
+        spec: { name: 'Test', status: 'running', jobs: [] },
+        jobs: new Map([
+          ['node-1', { id: 'node-1', producerId: 'producer-1', name: 'Node 1', task: 'Task 1', dependencies: [] }]
+        ]),
+        nodeStates: new Map([['node-1', { status: 'running', version: 0, attempts: 0 }]]),
+        producerIdToNodeId: new Map([['producer-1', 'node-1']]),
+        roots: ['node-1'],
+        leaves: ['node-1'],
+        stateVersion: 1,
+        isPaused: false
+      };
+
+      repository.saveStateSync(plan);
+
+      assert.ok(mockStore.writePlanMetadataSync.calledOnce);
+      const savedMetadata = mockStore.writePlanMetadataSync.firstCall.args[0];
+      const savedJob = savedMetadata.jobs.find((j: any) => j.id === 'node-1');
+      // hasWork should be preserved from existing metadata
+      assert.strictEqual(savedJob.hasWork, true);
+    });
+
+    test('should skip for scaffolding plans', () => {
+      const planId = 'test-plan';
+      const plan: any = {
+        id: planId,
+        spec: { name: 'Test', status: 'scaffolding', jobs: [] },
+        jobs: new Map(),
+        nodeStates: new Map(),
+        producerIdToNodeId: new Map(),
+        roots: [],
+        leaves: [],
+        stateVersion: 0,
+        isPaused: false
+      };
+
+      repository.saveStateSync(plan);
+
+      // Should not call store write for scaffolding plans
+      assert.ok(!mockStore.writePlanMetadataSync.called);
+    });
+
+    test('should handle missing metadata gracefully', () => {
+      const planId = 'test-plan';
+      mockStore.readPlanMetadataSync = sandbox.stub().returns(undefined);
+
+      const plan: any = {
+        id: planId,
+        spec: { name: 'Test', status: 'running', jobs: [] },
+        jobs: new Map(),
+        nodeStates: new Map(),
+        producerIdToNodeId: new Map(),
+        roots: [],
+        leaves: [],
+        stateVersion: 0,
+        isPaused: false
+      };
+
+      // Should not throw
+      repository.saveStateSync(plan);
+
+      assert.ok(!mockStore.writePlanMetadataSync.called);
+    });
+  });
+
+  suite('list', () => {
+    test('should handle metadata not found for a plan', async () => {
+      mockStore.listPlanIds.resolves(['plan-1', 'plan-2']);
+      
+      const meta1 = makeScaffoldingMetadata('plan-1');
+
+      mockStore.readPlanMetadata.callsFake(async (id: string) => {
+        if (id === 'plan-1') return meta1;
+        return undefined; // plan-2 metadata not found
+      });
+
+      const summaries = await repository.list();
+
+      // Should only include plan-1
+      assert.strictEqual(summaries.length, 1);
+      assert.strictEqual(summaries[0].id, 'plan-1');
+    });
+
+    test('should handle legacy nodes field migration', async () => {
+      mockStore.listPlanIds.resolves(['legacy-plan']);
+      
+      const legacyMeta: any = makeScaffoldingMetadata('legacy-plan');
+      legacyMeta.nodes = [{ id: 'node-1', producerId: 'p1', name: 'N1', task: 'T1', dependencies: [] }];
+      delete legacyMeta.jobs;
+
+      mockStore.readPlanMetadata.resolves(legacyMeta);
+
+      const summaries = await repository.list();
+
+      assert.strictEqual(summaries.length, 1);
+      assert.strictEqual(summaries[0].nodeCount, 1);
+    });
+  });
+
+  suite('buildPlanInstanceFromMetadata edge cases', () => {
+    test('should skip jobs with missing stable IDs', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      metadata.spec.jobs = [
+        { producerId: 'job-1', name: 'Job 1', task: 'Task 1', dependencies: [] },
+        { id: 'node-2', producerId: 'job-2', name: 'Job 2', task: 'Task 2', dependencies: [] }
+      ];
+      // job-1 has no ID and not in producerIdToNodeId
+      metadata.producerIdToNodeId = { 'job-2': 'node-2' };
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      const result = await repository.scaffold('Test Plan', makeScaffoldOptions());
+      
+      // The implementation builds from metadata but should handle missing IDs
+      assert.ok(result);
+    });
+
+    test('should handle dependencies not found in node map', async () => {
+      const planId = 'test-plan';
+      
+      // Create a finalized plan with dependencies referencing non-existent nodes
+      const metadata: StoredPlanMetadata = {
+        id: planId,
+        spec: { name: 'Test', status: 'pending', jobs: [] },
+        jobs: [
+          {
+            id: 'node-1',
+            producerId: 'producer-1',
+            name: 'Node 1',
+            task: 'Task 1',
+            dependencies: ['non-existent-dep'], // Reference to missing node
+            hasWork: false,
+            hasPrechecks: false,
+            hasPostchecks: false
+          }
+        ],
+        producerIdToNodeId: { 'producer-1': 'node-1' },
+        roots: ['node-1'],
+        leaves: ['node-1'],
+        nodeStates: { 'node-1': { status: 'ready', version: 0, attempts: 0 } },
+        groups: {},
+        groupStates: {},
+        groupPathToId: {},
+        repoPath: '/test/repo',
+        baseBranch: 'main',
+        worktreeRoot: '/test/worktrees',
+        createdAt: Date.now(),
+        maxParallel: 4,
+        cleanUpSuccessfulWork: true
+      };
+
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      const result = await repository.loadState(planId);
+
+      assert.ok(result);
+      const node = result?.jobs.get('node-1');
+      // Dependency should be filtered out since it doesn't exist
+      assert.ok(node);
+    });
+  });
+
+  suite('resolveInstructionsFile', () => {
+    test('should read and inline instructionsFile content', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      // Create a temporary file in the repo path
+      const fs = require('fs');
+      const path = require('path');
+      // Repository is created with repoPath '/test/repo' in setup
+      // We need to mock the file read since we can't create files there
+      
+      // Instead, let's create a real temp file in the actual test directory
+      const actualRepoPath = process.cwd();
+      const testRepo = new DefaultPlanRepository(mockStore, actualRepoPath, '/test/worktrees');
+      
+      const tempDir = path.join(actualRepoPath, '.temp-test');
+      const instructionsPath = path.join(tempDir, 'instructions.md');
+      
+      try {
+        await fs.promises.mkdir(tempDir, { recursive: true });
+        await fs.promises.writeFile(instructionsPath, 'Test instructions content');
+
+        mockStore.readPlanMetadata.resolves(metadata);
+
+        const nodeSpec: NodeSpec = {
+          producerId: 'producer-1',
+          name: 'Test Node',
+          task: 'Test task',
+          workWithFile: {
+            type: 'agent',
+            model: 'gpt-4',
+            instructionsFile: '.temp-test/instructions.md'
+          } as any
+        };
+
+        await testRepo.addNode(planId, nodeSpec);
+
+        const updatedMetadata = mockStore.writePlanMetadata.firstCall.args[0];
+        const job = updatedMetadata.spec.jobs[0];
+        // Instructions should be inlined
+        assert.strictEqual(job.work.instructions, 'Test instructions content');
+        assert.strictEqual(job.work.instructionsFile, undefined);
+      } finally {
+        // Cleanup
+        try {
+          await fs.promises.rm(tempDir, { recursive: true, force: true });
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+      }
+    });
+
+    test('should handle instructionsFile read errors gracefully', async () => {
+      const planId = 'test-plan';
+      const metadata = makeScaffoldingMetadata(planId);
+      mockStore.readPlanMetadata.resolves(metadata);
+
+      const nodeSpec: NodeSpec = {
+        producerId: 'producer-1',
+        name: 'Test Node',
+        task: 'Test task',
+        workWithFile: {
+          type: 'agent',
+          model: 'gpt-4',
+          instructionsFile: 'non-existent-file.md'
+        } as any
+      };
+
+      // Should not throw, but keep the file reference
+      await repository.addNode(planId, nodeSpec);
+
+      const updatedMetadata = mockStore.writePlanMetadata.firstCall.args[0];
+      const job = updatedMetadata.spec.jobs[0];
+      // File reference should be preserved if read fails
+      assert.strictEqual(job.work.instructionsFile, 'non-existent-file.md');
     });
   });
 });

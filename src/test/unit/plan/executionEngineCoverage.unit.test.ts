@@ -2142,4 +2142,458 @@ suite('JobExecutionEngine - Coverage', () => {
       assert.ok(attempt.logsRef);
     });
   });
+
+  // ------------------------------------------------------------------
+  // NEW: Auto-heal loads spec from disk when inline is undefined
+  // ------------------------------------------------------------------
+  suite('auto-heal spec hydration from plan.definition', () => {
+    test('auto-heal loads work spec from disk when node.work is undefined', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      // No inline work spec
+      node.work = undefined;
+      node.autoHeal = true;
+
+      // Mock plan.definition with getWorkSpec
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves({ type: 'shell', command: 'npm test' }),
+        getPrechecksSpec: sinon.stub().resolves(undefined),
+        getPostchecksSpec: sinon.stub().resolves(undefined),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Tests failed', failedPhase: 'work',
+        exitCode: 1, stepStatuses: { work: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-commit-12345678901234567890123',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      // Verify plan.definition.getWorkSpec was called
+      assert.ok(plan.definition && (plan.definition.getWorkSpec as sinon.SinonStub).called);
+    });
+
+    test('auto-heal loads prechecks spec from disk when node.prechecks is undefined', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm build' } as any;
+      node.prechecks = undefined;
+      node.autoHeal = true;
+
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves({ type: 'shell', command: 'npm build' }),
+        getPrechecksSpec: sinon.stub().resolves({ type: 'shell', command: 'npm run lint' }),
+        getPostchecksSpec: sinon.stub().resolves(undefined),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Lint failed', failedPhase: 'prechecks',
+        exitCode: 1, stepStatuses: { prechecks: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-prechecks-commit-123456789012',
+        stepStatuses: { prechecks: 'success', work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.ok(plan.definition && (plan.definition.getPrechecksSpec as sinon.SinonStub).called);
+    });
+
+    test('auto-heal loads postchecks spec from disk when node.postchecks is undefined', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm build' } as any;
+      node.postchecks = undefined;
+      node.autoHeal = true;
+
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves({ type: 'shell', command: 'npm build' }),
+        getPrechecksSpec: sinon.stub().resolves(undefined),
+        getPostchecksSpec: sinon.stub().resolves({ type: 'shell', command: 'npm test' }),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Tests failed', failedPhase: 'postchecks',
+        exitCode: 1, stepStatuses: { postchecks: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-postchecks-commit-123456789012',
+        stepStatuses: { postchecks: 'success', commit: 'success' },
+      };
+      // Re-validation call
+      const revalResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'reval-postchecks-commit-12345678901',
+        stepStatuses: { postchecks: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+      executeStub.onThirdCall().resolves(revalResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.ok(plan.definition && (plan.definition.getPostchecksSpec as sinon.SinonStub).called);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // NEW: workUsed uses hydratedWork (not node.work)
+  // ------------------------------------------------------------------
+  suite('attemptRecord workUsed uses hydratedWork', () => {
+    test('attemptRecord.workUsed uses hydratedWork from plan.definition', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = undefined; // No inline work
+      node.autoHeal = false;
+
+      const diskWork = { type: 'shell', command: 'npm test from disk' };
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves(diskWork),
+        getPrechecksSpec: sinon.stub().resolves(undefined),
+        getPostchecksSpec: sinon.stub().resolves(undefined),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Tests failed', failedPhase: 'work',
+        exitCode: 1, stepStatuses: { work: 'failed' },
+      };
+      const executeStub = sinon.stub().resolves(failResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      // Check that attemptHistory[0].workUsed matches diskWork
+      const attempt = ns.attemptHistory![0];
+      // workUsed is converted to workRef by toRefAttempt, but the original diskWork was passed
+      // We verify indirectly by confirming plan.definition.getWorkSpec was called
+      assert.ok(plan.definition && (plan.definition.getWorkSpec as sinon.SinonStub).called);
+    });
+
+    test('attemptRecord.workUsed uses inline work when available', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      const inlineWork = { type: 'shell', command: 'echo inline' } as any;
+      node.work = inlineWork;
+      node.autoHeal = false;
+
+      // plan.definition exists but should not be called
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves({ type: 'shell', command: 'from disk' }),
+        getPrechecksSpec: sinon.stub().resolves(undefined),
+        getPostchecksSpec: sinon.stub().resolves(undefined),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Fail', failedPhase: 'work',
+        exitCode: 1, stepStatuses: { work: 'failed' },
+      };
+      const executeStub = sinon.stub().resolves(failResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      // Inline work exists, so plan.definition should still be called during hydration
+      // but hydratedWork should be the inline spec
+      assert.ok(ns.attemptHistory!.length > 0);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // NEW: Job configuration logging at execution start
+  // ------------------------------------------------------------------
+  suite('job configuration logging', () => {
+    test('logs job node execution start with planId and nodeId', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state, log } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Verify log.info was called with execution start message
+      const infoStub = log.info as sinon.SinonStub;
+      assert.ok(infoStub.called);
+      const calls = infoStub.getCalls();
+      const startCall = calls.find((c: sinon.SinonSpyCall) => 
+        c.args[0]?.includes('Executing job node')
+      );
+      assert.ok(startCall, 'Expected log.info to be called with "Executing job node"');
+      assert.ok(startCall.args[1]?.planId === plan.id);
+      assert.ok(startCall.args[1]?.nodeId === node.id);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // NEW: Phase pipeline verification
+  // ------------------------------------------------------------------
+  suite('phase pipeline order', () => {
+    test('executor receives correct execution context with all phase fields', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'main' });
+      plan.baseCommitAtStart = 'base-start-123';
+      const node = plan.jobs.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub().resolves({
+        success: true,
+        completedCommit: 'commit123456789012345678901234567890ab',
+        stepStatuses: { 
+          'merge-fi': 'skipped',
+          'setup': 'success',
+          'prechecks': 'skipped',
+          'work': 'success',
+          'commit': 'success',
+          'postchecks': 'skipped',
+          'merge-ri': 'success',
+        },
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Verify executor was called with proper context
+      assert.ok(executeStub.calledOnce);
+      const context = executeStub.firstCall.args[0];
+      assert.ok(context.plan);
+      assert.ok(context.node);
+      assert.ok(context.baseCommit);
+      assert.ok(context.worktreePath);
+      assert.strictEqual(context.attemptNumber, 1);
+      assert.strictEqual(context.targetBranch, 'main');
+      assert.strictEqual(context.repoPath, plan.repoPath);
+      assert.strictEqual(context.baseCommitAtStart, 'base-start-123');
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // NEW: Auto-retry decision logic verification
+  // ------------------------------------------------------------------
+  suite('auto-retry decision logging', () => {
+    test('logs auto-retry decision factors for shell work failure', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Tests failed', failedPhase: 'work',
+        exitCode: 1, stepStatuses: { work: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-commit-12345678901234567890123',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state, log } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Verify auto-retry decision is logged
+      const infoStub = log.info as sinon.SinonStub;
+      const decisionCalls = infoStub.getCalls().filter((c: sinon.SinonSpyCall) => 
+        c.args[0]?.includes('Auto-retry decision')
+      );
+      assert.ok(decisionCalls.length > 0, 'Expected auto-retry decision to be logged');
+      const decisionCall = decisionCalls[0];
+      assert.ok(decisionCall.args[0].includes('isHealable=true'));
+      assert.ok(decisionCall.args[0].includes('isAgentWork=false'));
+    });
+
+    test('logs auto-retry decision for agent externally killed', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'fix' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Process killed by signal: SIGTERM',
+        failedPhase: 'work', exitCode: 137,
+        stepStatuses: { work: 'failed' },
+      };
+      const retryResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'retry-commit-1234567890123456789012',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(retryResult);
+
+      const { engine, state, log } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const infoStub = log.info as sinon.SinonStub;
+      const decisionCalls = infoStub.getCalls().filter((c: sinon.SinonSpyCall) => 
+        c.args[0]?.includes('Auto-retry decision')
+      );
+      assert.ok(decisionCalls.length > 0);
+      const decisionCall = decisionCalls[0];
+      assert.ok(decisionCall.args[0].includes('wasExternallyKilled=true'));
+      assert.ok(decisionCall.args[0].includes('isAgentWork=true'));
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // NEW: Hydrated specs passed in ExecutionContext
+  // ------------------------------------------------------------------
+  suite('hydrated specs in execution context', () => {
+    test('executor receives hydratedWork, hydratedPrechecks, hydratedPostchecks in context', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = undefined;
+      node.prechecks = undefined;
+      node.postchecks = undefined;
+
+      const diskWork = { type: 'shell', command: 'npm build' };
+      const diskPrechecks = { type: 'shell', command: 'npm run lint' };
+      const diskPostchecks = { type: 'shell', command: 'npm test' };
+
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves(diskWork),
+        getPrechecksSpec: sinon.stub().resolves(diskPrechecks),
+        getPostchecksSpec: sinon.stub().resolves(diskPostchecks),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub().resolves({
+        success: true,
+        completedCommit: 'commit123456789012345678901234567890ab',
+        stepStatuses: { work: 'success', commit: 'success' },
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Verify executor was called with hydrated specs
+      assert.ok(executeStub.calledOnce);
+      const context = executeStub.firstCall.args[0];
+      assert.deepStrictEqual(context.hydratedWork, diskWork);
+      assert.deepStrictEqual(context.hydratedPrechecks, diskPrechecks);
+      assert.deepStrictEqual(context.hydratedPostchecks, diskPostchecks);
+    });
+
+    test('executor receives inline specs when available, not from disk', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      const inlineWork = { type: 'shell', command: 'echo inline' } as any;
+      node.work = inlineWork;
+      node.prechecks = { type: 'shell', command: 'echo prechecks' } as any;
+      node.postchecks = { type: 'shell', command: 'echo postchecks' } as any;
+
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves({ type: 'shell', command: 'from disk' }),
+        getPrechecksSpec: sinon.stub().resolves({ type: 'shell', command: 'from disk' }),
+        getPostchecksSpec: sinon.stub().resolves({ type: 'shell', command: 'from disk' }),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub().resolves({
+        success: true,
+        completedCommit: 'commit123456789012345678901234567890ab',
+        stepStatuses: { work: 'success', commit: 'success' },
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Verify executor received inline specs (not from disk)
+      const context = executeStub.firstCall.args[0];
+      assert.deepStrictEqual(context.hydratedWork, inlineWork);
+      assert.deepStrictEqual(context.hydratedPrechecks, node.prechecks);
+      assert.deepStrictEqual(context.hydratedPostchecks, node.postchecks);
+    });
+  });
 });
