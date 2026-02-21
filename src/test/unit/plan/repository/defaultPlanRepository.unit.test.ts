@@ -217,7 +217,7 @@ suite('DefaultPlanRepository', () => {
 
       await assert.rejects(
         () => repository.addNode(planId, nodeSpec),
-        /Cannot add nodes to plan in status 'pending'/
+        /Cannot add jobs to plan in status 'pending'/
       );
     });
 

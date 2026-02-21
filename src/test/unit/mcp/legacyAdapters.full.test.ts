@@ -83,14 +83,14 @@ suite('Legacy Adapters', () => {
           counts: { succeeded: 1 }, progress: 1.0,
         }),
       });
-      const result = await adaptGetPlanStatus({ id: 'plan-1' }, ctx);
+      const result = await adaptGetPlanStatus({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.planId, result.groupId);
     });
 
     test('should return error when plan not found', async () => {
       const { adaptGetPlanStatus } = require('../../../mcp/handlers/legacyAdapters');
-      const result = await adaptGetPlanStatus({ id: 'missing' }, makeCtx());
+      const result = await adaptGetPlanStatus({ planId: 'missing' }, makeCtx());
       assert.strictEqual(result.success, false);
     });
   });
@@ -117,7 +117,7 @@ suite('Legacy Adapters', () => {
       const { adaptCancelPlan } = require('../../../mcp/handlers/legacyAdapters');
       const plan = makeMockPlan();
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
-      const result = await adaptCancelPlan({ id: 'plan-1' }, ctx);
+      const result = await adaptCancelPlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -127,7 +127,7 @@ suite('Legacy Adapters', () => {
       const { adaptDeletePlan } = require('../../../mcp/handlers/legacyAdapters');
       const plan = makeMockPlan();
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan), delete: sinon.stub().resolves(true) });
-      const result = await adaptDeletePlan({ id: 'plan-1' }, ctx);
+      const result = await adaptDeletePlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -143,7 +143,7 @@ suite('Legacy Adapters', () => {
         retryNode: sinon.stub().resolves({ success: true }),
         resume: sinon.stub().resolves(true),
       });
-      const result = await adaptRetryPlan({ id: 'plan-1' }, ctx);
+      const result = await adaptRetryPlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -156,7 +156,7 @@ suite('Legacy Adapters', () => {
       plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'running', attempts: 1 });
       const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await adaptGetJobDetails({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+      const result = await adaptGetJobDetails({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -171,7 +171,7 @@ suite('Legacy Adapters', () => {
         retryNode: sinon.stub().resolves({ success: true }),
         resume: sinon.stub().resolves(true),
       });
-      const result = await adaptRetryPlanJob({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+      const result = await adaptRetryPlanJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -183,7 +183,7 @@ suite('Legacy Adapters', () => {
       plan.jobs.set('n1', { id: 'n1', producerId: 'build', name: 'Build' });
       plan.nodeStates.set('n1', { status: 'failed', error: 'err', lastAttempt: {} });
       const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await adaptGetJobFailureContext({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+      const result = await adaptGetJobFailureContext({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
     });
   });

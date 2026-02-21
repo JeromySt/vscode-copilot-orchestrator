@@ -82,7 +82,7 @@ suite('retryPlanHandler', () => {
     // newWork must be truthy to enter the validation branch;
     // validatePowerShellCommands traverses 'work'/'prechecks'/'postchecks' fields
     const result = await handleRetryPlan({
-      id: 'plan-1',
+      planId: 'plan-1',
       newWork: { type: 'shell', command: 'test 2>&1', shell: 'powershell' },
       work: { type: 'shell', command: 'test 2>&1', shell: 'powershell' },
     }, ctx);
