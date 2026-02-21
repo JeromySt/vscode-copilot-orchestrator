@@ -543,7 +543,7 @@ export const getNodeSchema = {
     planId: { type: 'string', minLength: 1, maxLength: 100 },
     jobId: { type: 'string', minLength: 1, maxLength: 100 }
   },
-  required: ['jobId'],
+  required: ['planId', 'jobId'],
   additionalProperties: false
 } as const;
 
@@ -562,11 +562,12 @@ export const listNodesSchema = {
     },
     groupName: { type: 'string', maxLength: 200 }
   },
+  required: ['planId'],
   additionalProperties: false
 } as const;
 
 /**
- * Schema for retry_copilot_job input (job-centric, no planId)
+ * Schema for retry_copilot_job input
  */
 export const retryNodeCentricSchema = {
   $id: 'retry_copilot_job',
@@ -596,7 +597,7 @@ export const retryNodeCentricSchema = {
     },
     clearWorktree: { type: 'boolean' }
   },
-  required: ['jobId'],
+  required: ['planId', 'jobId'],
   additionalProperties: false
 } as const;
 
@@ -611,12 +612,12 @@ export const forceFailNodeSchema = {
     jobId: { type: 'string', minLength: 1, maxLength: 100 },
     reason: { type: 'string', maxLength: 1000 }
   },
-  required: ['jobId'],
+  required: ['planId', 'jobId'],
   additionalProperties: false
 } as const;
 
 /**
- * Schema for get_copilot_job_failure_context input (job-centric)
+ * Schema for get_copilot_job_failure_context input
  */
 export const getNodeFailureContextSchema = {
   $id: 'get_copilot_job_failure_context',
@@ -625,7 +626,7 @@ export const getNodeFailureContextSchema = {
     planId: { type: 'string', minLength: 1, maxLength: 100 },
     jobId: { type: 'string', minLength: 1, maxLength: 100 }
   },
-  required: ['jobId'],
+  required: ['planId', 'jobId'],
   additionalProperties: false
 } as const;
 
@@ -831,20 +832,15 @@ export const schemas: Record<string, object> = {
   retry_copilot_plan: retryPlanSchema,
   reshape_copilot_plan: reshapePlanSchema,
 
-  // Plan-qualified job tools
-  get_copilot_job_details: getNodeDetailsSchema,
+  // Job tools (all require planId + jobId)
+  get_copilot_job: getNodeSchema,
   get_copilot_job_logs: getNodeLogsSchema,
   get_copilot_job_attempts: getNodeAttemptsSchema,
-  retry_copilot_plan_job: retryNodeSchema,
-  get_copilot_plan_job_failure_context: getFailureContextSchema,
-  update_copilot_plan_job: updateCopilotPlanNodeSchema,
-
-  // Job-centric tools (planId optional — scans all plans if omitted)
-  get_copilot_job: getNodeSchema,
   list_copilot_jobs: listNodesSchema,
   retry_copilot_job: retryNodeCentricSchema,
   force_fail_copilot_job: forceFailNodeSchema,
   get_copilot_job_failure_context: getNodeFailureContextSchema,
+  update_copilot_plan_job: updateCopilotPlanNodeSchema,
 
   // Scaffolding tools
   scaffold_copilot_plan: scaffoldPlanSchema,

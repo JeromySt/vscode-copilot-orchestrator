@@ -36,10 +36,9 @@ export const PRODUCER_ID_PATTERN = /^[a-z0-9-]{3,64}$/;
  * Tools are grouped into three categories:
  * 1. **Creation** – `create_copilot_plan`
  * 2. **Status & Queries** – `get_copilot_plan_status`, `list_copilot_plans`,
- *    `get_copilot_job_details`, `get_copilot_job_logs`, `get_copilot_job_attempts`
+ *    `get_copilot_job_logs`, `get_copilot_job_attempts`
  * 3. **Control** – `cancel_copilot_plan`, `delete_copilot_plan`,
- *    `retry_copilot_plan`, `retry_copilot_plan_job`,
- *    `get_copilot_plan_job_failure_context`
+ *    `retry_copilot_plan`
  *
  * @returns Array of {@link McpTool} definitions registered with the MCP server.
  *
@@ -272,25 +271,6 @@ SKILL-AWARE INSTRUCTIONS: If the project has .github/skills/ directories, read t
     },
     
     {
-      name: 'get_copilot_job_details',
-      description: 'Get detailed information about a specific job in a Plan.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          planId: { 
-            type: 'string', 
-            description: 'Plan ID' 
-          },
-          jobId: { 
-            type: 'string', 
-            description: 'Job ID (UUID) or producerId' 
-          }
-        },
-        required: ['planId', 'jobId']
-      }
-    },
-    
-    {
       name: 'get_copilot_job_logs',
       description: 'Get execution logs for a job.',
       inputSchema: {
@@ -424,7 +404,7 @@ This resets failed jobs back to 'ready' state and resumes execution.
 Use after fixing issues that caused the failures.
 
 RETRY WORKFLOW:
-1. Use get_copilot_plan_job_failure_context to analyze why the job failed
+1. Use get_copilot_job_failure_context to analyze why the job failed
 2. Optionally provide newWork to replace or augment the original work
 3. Call retry_copilot_plan with the job ID
 
@@ -477,94 +457,6 @@ Agent instructions MUST be in Markdown format.`
           }
         },
         required: ['planId']
-      }
-    },
-    
-    {
-      name: 'get_copilot_plan_job_failure_context',
-      description: `Get detailed failure context for a failed job in a Plan.
-
-Returns:
-- Execution logs from the failed attempt
-- Which phase failed (prechecks, work, commit, postchecks, merge-fi, merge-ri)
-- Error message
-- Copilot session ID (if agent work was involved)
-- Worktree path (for manual inspection)
-
-Use this to analyze failures before deciding how to retry.`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          planId: { 
-            type: 'string', 
-            description: 'Plan ID' 
-          },
-          jobId: { 
-            type: 'string', 
-            description: 'Job ID to get failure context for' 
-          }
-        },
-        required: ['planId', 'jobId']
-      }
-    },
-    
-    {
-      name: 'retry_copilot_plan_job',
-      description: `Retry a specific failed job in a Plan.
-
-This is a convenience tool for retrying a single job. For retrying multiple
-jobs at once, use retry_copilot_plan with jobIds array.
-
-The job must be in 'failed' state to be retried.
-
-NEW WORK OPTIONS:
-- String: Shell command like "npm run build" or "@agent Do something"
-- Process: { type: "process", executable: "node", args: ["script.js"] }
-- Shell: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
-- Agent: { type: "agent", instructions: "# Fix Issue\\n\\n1. Analyze\\n2. Fix", resumeSession: true }
-
-For agent work, resumeSession (default: true) controls whether to continue
-the existing Copilot session or start fresh.
-
-IMPORTANT: Agent instructions MUST be in Markdown format.
-
-WORKFLOW:
-1. Use get_copilot_plan_job_failure_context to analyze why the job failed
-2. Call retry_copilot_plan_job with optional newWork
-3. Monitor with get_copilot_plan_status`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          planId: { 
-            type: 'string', 
-            description: 'Plan ID containing the job' 
-          },
-          jobId: { 
-            type: 'string', 
-            description: 'Job ID to retry' 
-          },
-          newWork: {
-            description: `Optional replacement work for the retry. Can be:
-1. STRING: Shell command like "npm run build" or "@agent Do something"
-2. PROCESS: { "type": "process", "executable": "node", "args": ["script.js"] }
-3. SHELL: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT: { "type": "agent", "instructions": "# Fix X\\n\\n1. Analyze\\n2. Fix", "resumeSession": true }
-
-For agent type, resumeSession (default: true) continues existing Copilot session.
-Agent instructions MUST be in Markdown format.`
-          },
-          newPrechecks: {
-            description: 'Optional replacement prechecks for the retry. Same format as work specs. Use null to remove prechecks.'
-          },
-          newPostchecks: {
-            description: 'Optional replacement postchecks for the retry. Same format as work specs. Use null to remove postchecks.'
-          },
-          clearWorktree: {
-            type: 'boolean',
-            description: 'Reset worktree to base commit before retry (default: false)'
-          }
-        },
-        required: ['planId', 'jobId']
       }
     },
 

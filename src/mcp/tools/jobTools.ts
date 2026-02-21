@@ -31,32 +31,32 @@ export async function getJobToolDefinitions(): Promise<McpTool[]> {
     // =========================================================================
     {
       name: 'get_copilot_job',
-      description: 'Get detailed information about a specific job. If planId is provided, looks up directly; otherwise scans all plans.',
+      description: 'Get detailed information about a specific job.',
       inputSchema: {
         type: 'object',
         properties: {
           planId: {
             type: 'string',
-            description: 'Plan ID (optional — speeds up lookup if known)'
+            description: 'Plan ID'
           },
           jobId: {
             type: 'string',
             description: 'Job UUID or producerId'
           }
         },
-        required: ['jobId']
+        required: ['planId', 'jobId']
       }
     },
 
     {
       name: 'list_copilot_jobs',
-      description: 'List jobs with optional filters by plan, group, or status.',
+      description: 'List jobs in a plan with optional filters by group or status.',
       inputSchema: {
         type: 'object',
         properties: {
           planId: {
             type: 'string',
-            description: 'Filter by plan ID (optional)'
+            description: 'Plan ID'
           },
           groupId: {
             type: 'string',
@@ -71,7 +71,8 @@ export async function getJobToolDefinitions(): Promise<McpTool[]> {
             type: 'string',
             description: 'Filter by group name (partial match)'
           }
-        }
+        },
+        required: ['planId']
       }
     },
 
@@ -93,7 +94,7 @@ WORKFLOW:
         properties: {
           planId: {
             type: 'string',
-            description: 'Plan ID (optional — speeds up lookup if known)'
+            description: 'Plan ID'
           },
           jobId: {
             type: 'string',
@@ -113,7 +114,7 @@ WORKFLOW:
             description: 'Reset worktree to base commit before retry (default: false)'
           }
         },
-        required: ['jobId']
+        required: ['planId', 'jobId']
       }
     },
 
@@ -130,7 +131,7 @@ Only works on jobs in 'running' or 'scheduled' state.`,
         properties: {
           planId: {
             type: 'string',
-            description: 'Plan ID (optional — speeds up lookup if known)'
+            description: 'Plan ID'
           },
           jobId: {
             type: 'string',
@@ -141,7 +142,7 @@ Only works on jobs in 'running' or 'scheduled' state.`,
             description: 'Optional reason for the forced failure (for logging)'
           }
         },
-        required: ['jobId']
+        required: ['planId', 'jobId']
       }
     },
 
@@ -160,14 +161,14 @@ Returns:
         properties: {
           planId: {
             type: 'string',
-            description: 'Plan ID (optional — speeds up lookup if known)'
+            description: 'Plan ID'
           },
           jobId: {
             type: 'string',
             description: 'Job ID to get failure context for'
           }
         },
-        required: ['jobId']
+        required: ['planId', 'jobId']
       }
     },
 

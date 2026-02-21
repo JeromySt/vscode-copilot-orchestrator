@@ -19,13 +19,19 @@ import {
 // HELPERS
 // ============================================================================
 
-/** Resolve plan list: direct lookup when planId provided, otherwise all plans. */
-function resolvePlans(args: any, ctx: PlanHandlerContext): any[] {
-  if (args.planId) {
-    const plan = ctx.PlanRunner.getPlan(args.planId);
-    return plan ? [plan] : [];
+/** Resolve plan by planId. Returns the plan or an error result. */
+function resolvePlan(args: any, ctx: PlanHandlerContext): { plan?: any; error?: any } {
+  const plan = ctx.PlanRunner.getPlan(args.planId);
+  if (!plan) {
+    return { error: errorResult(`Plan not found: ${args.planId}`) };
   }
-  return ctx.PlanRunner.getAll();
+  return { plan };
+}
+
+/** Resolve a job within a plan by jobId or producerId. */
+function resolveJob(plan: any, jobId: string): string {
+  if (plan.jobs.has(jobId)) { return jobId; }
+  return plan.producerIdToNodeId.get(jobId) || '';
 }
 
 // ============================================================================
@@ -35,89 +41,85 @@ function resolvePlans(args: any, ctx: PlanHandlerContext): any[] {
 /**
  * Handle the `get_copilot_job` MCP tool call.
  *
- * Looks up a job globally (no planId needed) by UUID or producerId.
+ * Looks up a job by planId + jobId (UUID or producerId).
  */
 export async function handleGetJob(args: any, ctx: PlanHandlerContext): Promise<any> {
-  const fieldError = validateRequired(args, ['jobId']);
+  const fieldError = validateRequired(args, ['planId', 'jobId']);
   if (fieldError) {return fieldError;}
 
-  const plans = resolvePlans(args, ctx);
+  const { plan, error } = resolvePlan(args, ctx);
+  if (error) { return error; }
 
-  for (const plan of plans) {
-    let nodeId = args.jobId;
+  const nodeId = resolveJob(plan, args.jobId);
+  const node = plan.jobs.get(nodeId);
+  const state = plan.nodeStates.get(nodeId);
 
-    // Try direct node ID lookup
-    if (!plan.jobs.has(nodeId)) {
-      // Try producerId lookup
-      nodeId = plan.producerIdToNodeId.get(args.jobId) || '';
-    }
-
-    const node = plan.jobs.get(nodeId);
-    const state = plan.nodeStates.get(nodeId);
-
-    if (node && state) {
-      return {
-        success: true,
-        node: {
-          id: node.id,
-          producerId: node.producerId,
-          name: node.name,
-          type: node.type,
-          dependencies: node.dependencies.map((depId: string) => {
-            const depNode = plan.jobs.get(depId);
-            return { id: depId, producerId: depNode?.producerId, name: depNode?.name };
-          }),
-          dependents: node.dependents.map((depId: string) => {
-            const depNode = plan.jobs.get(depId);
-            return { id: depId, producerId: depNode?.producerId, name: depNode?.name };
-          }),
-          ...(node.type === 'job' ? {
-            task: (node as any).task,
-            work: (node as any).work,
-            prechecks: (node as any).prechecks,
-            postchecks: (node as any).postchecks,
-          } : {}),
-        },
-        state: {
-          status: state.status,
-          attempts: state.attempts,
-          scheduledAt: state.scheduledAt,
-          startedAt: state.startedAt,
-          endedAt: state.endedAt,
-          error: state.error,
-          baseCommit: state.baseCommit,
-          completedCommit: state.completedCommit,
-          worktreePath: state.worktreePath,
-          mergedToTarget: plan.leaves.includes(nodeId) ? state.mergedToTarget : undefined,
-          isLeaf: plan.leaves.includes(nodeId),
-        },
-        groupId: plan.id,
-        groupName: plan.spec.name,
-      };
-    }
+  if (!node || !state) {
+    return errorResult(`Job not found: ${args.jobId}`);
   }
 
-  return errorResult(`Job not found: ${args.jobId}`);
+  return {
+    success: true,
+    node: {
+      id: node.id,
+      producerId: node.producerId,
+      name: node.name,
+      type: node.type,
+      dependencies: node.dependencies.map((depId: string) => {
+        const depNode = plan.jobs.get(depId);
+        return { id: depId, producerId: depNode?.producerId, name: depNode?.name };
+      }),
+      dependents: node.dependents.map((depId: string) => {
+        const depNode = plan.jobs.get(depId);
+        return { id: depId, producerId: depNode?.producerId, name: depNode?.name };
+      }),
+      ...(node.type === 'job' ? {
+        task: (node as any).task,
+        work: (node as any).work,
+        prechecks: (node as any).prechecks,
+        postchecks: (node as any).postchecks,
+      } : {}),
+    },
+    state: {
+      status: state.status,
+      attempts: state.attempts,
+      scheduledAt: state.scheduledAt,
+      startedAt: state.startedAt,
+      endedAt: state.endedAt,
+      error: state.error,
+      baseCommit: state.baseCommit,
+      completedCommit: state.completedCommit,
+      worktreePath: state.worktreePath,
+      mergedToTarget: plan.leaves.includes(nodeId) ? state.mergedToTarget : undefined,
+      isLeaf: plan.leaves.includes(nodeId),
+    },
+    planId: plan.id,
+    groupId: plan.id,
+    groupName: plan.spec.name,
+  };
 }
 
 /**
  * Handle the `list_copilot_jobs` MCP tool call.
  *
- * Lists jobs with optional filters by group, status, or group name.
+ * Lists jobs in a plan with optional filters by status or group name.
  */
 export async function handleListJobs(args: any, ctx: PlanHandlerContext): Promise<any> {
-  const allPlans = resolvePlans(args, ctx);
+  const fieldError = validateRequired(args, ['planId']);
+  if (fieldError) {return fieldError;}
+
+  const { plan, error } = resolvePlan(args, ctx);
+  if (error) { return error; }
+
   const nodes: any[] = [];
 
-  for (const plan of allPlans) {
-    // Filter by groupId
-    if (args.groupId && plan.id !== args.groupId) {continue;}
+  // Filter by groupName
+  if (args.groupName &&
+      !plan.spec.name.toLowerCase().includes(args.groupName.toLowerCase())) {
+    return { success: true, count: 0, nodes: [] };
+  }
 
-    // Filter by groupName
-    if (args.groupName &&
-        !plan.spec.name.toLowerCase().includes(args.groupName.toLowerCase())) {continue;}
-
-    for (const [nodeId, state] of plan.nodeStates) {
+  for (const [nodeId, state] of plan.nodeStates) {
       // Filter by status
       if (args.status && state.status !== args.status) {continue;}
 
@@ -137,7 +139,6 @@ export async function handleListJobs(args: any, ctx: PlanHandlerContext): Promis
         startedAt: state.startedAt,
         endedAt: state.endedAt,
       });
-    }
   }
 
   return {
@@ -346,10 +347,10 @@ export async function handleRetryGroup(args: any, ctx: PlanHandlerContext): Prom
 /**
  * Handle the `retry_copilot_job` MCP tool call.
  *
- * Retries a specific failed job. Finds the job globally (no planId needed).
+ * Retries a specific failed job by planId + jobId.
  */
 export async function handleRetryJob(args: any, ctx: PlanHandlerContext): Promise<any> {
-  const fieldError = validateRequired(args, ['jobId']);
+  const fieldError = validateRequired(args, ['planId', 'jobId']);
   if (fieldError) {return fieldError;}
 
   // Validate agent model names if any new specs are provided
@@ -378,34 +379,35 @@ export async function handleRetryJob(args: any, ctx: PlanHandlerContext): Promis
     return { success: false, error: psValidation.error };
   }
 
+  const { plan, error } = resolvePlan(args, ctx);
+  if (error) { return error; }
+
+  const nodeId = resolveJob(plan, args.jobId);
+  if (!plan.jobs.has(nodeId)) {
+    return errorResult(`Job not found: ${args.jobId}`);
+  }
+
   const retryOptions = {
     newWork: args.newWork,
+    newPrechecks: args.newPrechecks,
+    newPostchecks: args.newPostchecks,
     clearWorktree: args.clearWorktree || false,
   };
 
-  const plans = resolvePlans(args, ctx);
-  for (const plan of plans) {
-    let nodeId = args.jobId;
-    if (!plan.jobs.has(nodeId)) {
-      nodeId = plan.producerIdToNodeId.get(args.jobId) || '';
-    }
-
-    if (plan.jobs.has(nodeId)) {
-      const result = await ctx.PlanRunner.retryNode(plan.id, nodeId, retryOptions);
-      if (result.success) {
-        await ctx.PlanRunner.resume(plan.id);
-        return {
-          success: true,
-          message: `Retry initiated for job '${args.jobId}'.`,
-          groupId: plan.id,
-        };
-      } else {
-        return errorResult(result.error || 'Failed to retry job');
-      }
-    }
+  const node = plan.jobs.get(nodeId);
+  const result = await ctx.PlanRunner.retryNode(plan.id, nodeId, retryOptions);
+  if (result.success) {
+    await ctx.PlanRunner.resume(plan.id);
+    return {
+      success: true,
+      message: `Retry initiated for job '${node?.name || args.jobId}'.`,
+      planId: plan.id,
+      jobId: nodeId,
+      jobName: node?.name || args.jobId,
+    };
+  } else {
+    return errorResult(result.error || 'Failed to retry job');
   }
-
-  return errorResult(`Job not found: ${args.jobId}`);
 }
 
 /**
@@ -414,86 +416,80 @@ export async function handleRetryJob(args: any, ctx: PlanHandlerContext): Promis
  * Forces a stuck running/scheduled job to failed state so it can be retried.
  */
 export async function handleForceFailJob(args: any, ctx: PlanHandlerContext): Promise<any> {
-  const fieldError = validateRequired(args, ['jobId']);
+  const fieldError = validateRequired(args, ['planId', 'jobId']);
   if (fieldError) {return fieldError;}
 
-  const plans = resolvePlans(args, ctx);
-  for (const plan of plans) {
-    let nodeId = args.jobId;
-    if (!plan.jobs.has(nodeId)) {
-      nodeId = plan.producerIdToNodeId.get(args.jobId) || '';
-    }
+  const { plan, error } = resolvePlan(args, ctx);
+  if (error) { return error; }
 
-    if (plan.jobs.has(nodeId)) {
-      try {
-        await ctx.PlanRunner.forceFailNode(plan.id, nodeId);
-        return {
-          success: true,
-          message: `Job '${args.jobId}' has been force failed. It can now be retried.`,
-          groupId: plan.id,
-        };
-      } catch (error) {
-        return errorResult((error as Error)?.message || 'Failed to force fail job');
-      }
-    }
+  const nodeId = resolveJob(plan, args.jobId);
+  if (!plan.jobs.has(nodeId)) {
+    return errorResult(`Job not found: ${args.jobId}`);
   }
 
-  return errorResult(`Job not found: ${args.jobId}`);
+  try {
+    await ctx.PlanRunner.forceFailNode(plan.id, nodeId);
+    return {
+      success: true,
+      message: `Job '${args.jobId}' has been force failed. It can now be retried.`,
+      planId: plan.id,
+      groupId: plan.id,
+    };
+  } catch (err) {
+    return errorResult((err as Error)?.message || 'Failed to force fail job');
+  }
 }
 
 /**
  * Handle the `get_copilot_job_failure_context` MCP tool call.
  *
- * Gets failure context for a job. Uses planId for direct lookup if provided.
+ * Gets failure context for a job by planId + jobId.
  */
 export async function handleJobFailureContext(args: any, ctx: PlanHandlerContext): Promise<any> {
-  const fieldError = validateRequired(args, ['jobId']);
+  const fieldError = validateRequired(args, ['planId', 'jobId']);
   if (fieldError) {return fieldError;}
 
-  const plans = resolvePlans(args, ctx);
-  for (const plan of plans) {
-    let nodeId = args.jobId;
-    if (!plan.jobs.has(nodeId)) {
-      nodeId = plan.producerIdToNodeId.get(args.jobId) || '';
-    }
+  const { plan, error } = resolvePlan(args, ctx);
+  if (error) { return error; }
 
-    const node = plan.jobs.get(nodeId);
-    const state = plan.nodeStates.get(nodeId);
+  const nodeId = resolveJob(plan, args.jobId);
+  const node = plan.jobs.get(nodeId);
+  const state = plan.nodeStates.get(nodeId);
 
-    if (node && state) {
-      if (state.status !== 'failed') {
-        return errorResult(`Job '${args.jobId}' is not in failed state (current: ${state.status})`);
-      }
-
-      // Get logs from executor
-      const executor = (ctx.PlanRunner as any).executor;
-      let logs: any[] = [];
-      if (executor?.getLogs) {
-        logs = executor.getLogs(plan.id, nodeId);
-      }
-
-      return {
-        success: true,
-        nodeId,
-        producerId: node.producerId,
-        name: node.name,
-        groupId: plan.id,
-        groupName: plan.spec.name,
-        failedPhase: state.lastAttempt?.phase,
-        error: state.error,
-        attempts: state.attempts,
-        worktreePath: state.worktreePath,
-        copilotSessionId: state.copilotSessionId,
-        lastAttempt: state.lastAttempt,
-        logs: logs.map((l: any) => ({
-          timestamp: l.timestamp,
-          phase: l.phase,
-          type: l.type,
-          message: l.message,
-        })),
-      };
-    }
+  if (!node || !state) {
+    return errorResult(`Job not found: ${args.jobId}`);
   }
 
-  return errorResult(`Job not found: ${args.jobId}`);
+  if (state.status !== 'failed') {
+    return errorResult(`Job '${args.jobId}' is not in failed state (current: ${state.status})`);
+  }
+
+  // Get logs from executor
+  const executor = (ctx.PlanRunner as any).executor;
+  let logs: any[] = [];
+  if (executor?.getLogs) {
+    logs = executor.getLogs(plan.id, nodeId);
+  }
+
+  return {
+    success: true,
+    nodeId,
+    producerId: node.producerId,
+    name: node.name,
+    planId: plan.id,
+    groupId: plan.id,
+    groupName: plan.spec.name,
+    failedPhase: state.lastAttempt?.phase,
+    error: state.error,
+    attempts: state.attempts,
+    worktreePath: state.worktreePath,
+    copilotSessionId: state.copilotSessionId,
+    lastAttempt: state.lastAttempt,
+    logs: logs.map((l: any) => ({
+      timestamp: l.timestamp,
+      phase: l.phase,
+      type: l.type,
+      message: l.message,
+    })),
+  };
 }

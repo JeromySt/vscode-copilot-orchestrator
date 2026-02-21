@@ -24,7 +24,6 @@ import {
   handleCreatePlan,
   handleGetPlanStatus,
   handleListPlans,
-  handleGetJobDetails,
   handleGetJobLogs,
   handleGetJobAttempts,
   handleCancelPlan,
@@ -33,7 +32,6 @@ import {
   handleDeletePlan,
   handleRetryPlan,
   handleGetJobFailureContext,
-  handleRetryPlanJob,
   handleUpdatePlanJob,
   handleUpdatePlan,
   handleGetJob,
@@ -264,10 +262,6 @@ export class McpHandler implements IMcpRequestRouter {
         result = await handleListPlans(args || {}, this.context);
         break;
         
-      case 'get_copilot_job_details':
-        result = await handleGetJobDetails(args || {}, this.context);
-        break;
-        
       case 'get_copilot_job_logs':
         result = await handleGetJobLogs(args || {}, this.context);
         break;
@@ -294,14 +288,6 @@ export class McpHandler implements IMcpRequestRouter {
         
       case 'retry_copilot_plan':
         result = await handleRetryPlan(args || {}, this.context);
-        break;
-        
-      case 'get_copilot_plan_job_failure_context':
-        result = await handleGetJobFailureContext(args || {}, this.context);
-        break;
-        
-      case 'retry_copilot_plan_job':
-        result = await handleRetryPlanJob(args || {}, this.context);
         break;
         
       case 'update_copilot_plan_job':
