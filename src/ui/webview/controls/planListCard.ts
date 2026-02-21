@@ -67,7 +67,7 @@ export class PlanListCard extends SubscribableControl {
     </div>
     <div class="plan-card-progress"><div class="plan-card-progress-fill" style="width:${pct}%"></div></div>
     <div class="plan-card-counts">
-      <span class="count-total">${data.totalNodes} nodes</span>
+      <span class="count-total">${data.totalNodes} jobs</span>
       <span class="count-succeeded">✓${data.succeededNodes}</span>
       <span class="count-failed">✗${data.failedNodes}</span>
       <span class="count-running">▶${data.runningNodes}</span>

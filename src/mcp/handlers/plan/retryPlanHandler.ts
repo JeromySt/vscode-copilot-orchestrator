@@ -87,7 +87,7 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   
   if (nodeIdsToRetry.length === 0) {
     return { 
-      ...errorResult('No failed nodes to retry'),
+      ...errorResult('No failed jobs to retry'),
       planId: args.planId,
     };
   }
@@ -121,8 +121,8 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   return {
     success: retriedNodes.length > 0,
     message: retriedNodes.length > 0 
-      ? `Retrying ${retriedNodes.length} node(s)` 
-      : 'No nodes were retried',
+      ? `Retrying ${retriedNodes.length} job(s)` 
+      : 'No jobs were retried',
     planId: args.planId,
     retriedNodes,
     errors: errors.length > 0 ? errors : undefined,

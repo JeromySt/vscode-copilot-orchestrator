@@ -34,7 +34,7 @@ export class PlanTreeItem extends vscode.TreeItem {
   
   private getPlanStatusDescription(plan: PlanInstance): string {
     const nodeCount = plan.jobs.size;
-    let description = `(${nodeCount} nodes)`;
+    let description = `(${nodeCount} jobs)`;
     
     // Add duration for running plans
     if (plan.startedAt) {
@@ -117,7 +117,7 @@ export class PlanTreeDataProvider implements vscode.TreeDataProvider<PlanTreeIte
    */
   private getFreshPlanStatusDescription(plan: PlanInstance): string {
     const nodeCount = plan.jobs.size;
-    let description = `(${nodeCount} nodes)`;
+    let description = `(${nodeCount} jobs)`;
     
     // Add duration for running/pending plans - calculate FRESH each time
     if (plan.startedAt) {

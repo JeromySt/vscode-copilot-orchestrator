@@ -811,7 +811,7 @@ export function renderPlanScripts(data: PlanScriptsData): string {
         var value = stat.querySelector('.stat-value');
         if (!label || !value) return;
         var labelText = label.textContent.trim();
-        if (labelText === 'Total Nodes') value.textContent = total;
+        if (labelText === 'Total Jobs') value.textContent = total;
         else if (labelText === 'Succeeded') value.textContent = counts.succeeded || 0;
         else if (labelText === 'Failed') value.textContent = counts.failed || 0;
         else if (labelText === 'Running') value.textContent = (counts.running || 0) + (counts.scheduled || 0);

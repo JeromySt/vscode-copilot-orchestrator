@@ -242,8 +242,8 @@ async function handleScaffoldingOp(
         }
         return undefined;
       })();
-      if (!producerId) { return { operation: 'remove_node', success: false, error: `Node not found: ${op.nodeId ?? op.producerId}` }; }
-      if (producerId === SV_PRODUCER_ID) { return { operation: 'remove_node', success: false, error: 'The Snapshot Validation node is auto-managed and cannot be removed.' }; }
+      if (!producerId) { return { operation: 'remove_node', success: false, error: `Job not found: ${op.nodeId ?? op.producerId}` }; }
+      if (producerId === SV_PRODUCER_ID) { return { operation: 'remove_node', success: false, error: 'The Snapshot Validation job is auto-managed and cannot be removed.' }; }
       const rebuilt = await ctx.PlanRepository.removeNode(planId, producerId);
       replaceInMemoryPlan(plan, rebuilt);
       return { operation: 'remove_node', success: true };
@@ -257,7 +257,7 @@ async function handleScaffoldingOp(
         }
         return undefined;
       })();
-      if (!producerId) { return { operation: 'update_deps', success: false, error: `Node not found: ${op.nodeId}` }; }
+      if (!producerId) { return { operation: 'update_deps', success: false, error: `Job not found: ${op.nodeId}` }; }
       // Find the actual producerId from nodeId
       const node = plan.jobs.get(op.nodeId!);
       const pid = node?.producerId || producerId;
@@ -267,7 +267,7 @@ async function handleScaffoldingOp(
     }
 
     default:
-      return { operation: (op as any).type ?? 'unknown', success: false, error: `Operation '${(op as any).type}' not supported for scaffolding plans. Use add_copilot_plan_node / remove_node / update_deps.` };
+      return { operation: (op as any).type ?? 'unknown', success: false, error: `Operation '${(op as any).type}' not supported for scaffolding plans. Use add_copilot_plan_job / remove_node / update_deps.` };
   }
 }
 
@@ -286,16 +286,16 @@ function handleRunningOp(
     }
     case 'remove_node': {
       const id = resolveNodeId(plan, op.nodeId, op.producerId);
-      if (!id) { return { operation: 'remove_node', success: false, error: `Node not found: ${op.nodeId ?? op.producerId}` }; }
-      if (isSnapshotValidationNode(plan, id)) { return { operation: 'remove_node', success: false, error: 'The Snapshot Validation node is auto-managed and cannot be removed.' }; }
+      if (!id) { return { operation: 'remove_node', success: false, error: `Job not found: ${op.nodeId ?? op.producerId}` }; }
+      if (isSnapshotValidationNode(plan, id)) { return { operation: 'remove_node', success: false, error: 'The Snapshot Validation job is auto-managed and cannot be removed.' }; }
       const res = removeNode(plan, id);
       return { operation: 'remove_node', success: res.success, error: res.error };
     }
     case 'update_deps': {
       if (!op.nodeId || !Array.isArray(op.dependencies)) { return { operation: 'update_deps', success: false, error: 'nodeId and dependencies array are required' }; }
       const id = resolveNodeId(plan, op.nodeId);
-      if (!id) { return { operation: 'update_deps', success: false, error: `Node not found: ${op.nodeId}` }; }
-      if (isSnapshotValidationNode(plan, id)) { return { operation: 'update_deps', success: false, error: 'SV node dependencies are auto-managed.' }; }
+      if (!id) { return { operation: 'update_deps', success: false, error: `Job not found: ${op.nodeId}` }; }
+      if (isSnapshotValidationNode(plan, id)) { return { operation: 'update_deps', success: false, error: 'SV job dependencies are auto-managed.' }; }
       const resolvedDeps: string[] = [];
       for (const dep of op.dependencies) {
         const depId = resolveNodeId(plan, dep);
@@ -308,14 +308,14 @@ function handleRunningOp(
     case 'add_before': {
       if (!op.existingNodeId || !op.spec) { return { operation: 'add_before', success: false, error: 'existingNodeId and spec are required' }; }
       const id = resolveNodeId(plan, op.existingNodeId);
-      if (!id) { return { operation: 'add_before', success: false, error: `Node not found: ${op.existingNodeId}` }; }
+      if (!id) { return { operation: 'add_before', success: false, error: `Job not found: ${op.existingNodeId}` }; }
       const res = addNodeBefore(plan, id, toJobNodeSpec(op.spec));
       return { operation: 'add_before', success: res.success, nodeId: res.nodeId, error: res.error };
     }
     case 'add_after': {
       if (!op.existingNodeId || !op.spec) { return { operation: 'add_after', success: false, error: 'existingNodeId and spec are required' }; }
       const id = resolveNodeId(plan, op.existingNodeId);
-      if (!id) { return { operation: 'add_after', success: false, error: `Node not found: ${op.existingNodeId}` }; }
+      if (!id) { return { operation: 'add_after', success: false, error: `Job not found: ${op.existingNodeId}` }; }
       const res = addNodeAfter(plan, id, toJobNodeSpec(op.spec));
       return { operation: 'add_after', success: res.success, nodeId: res.nodeId, error: res.error };
     }

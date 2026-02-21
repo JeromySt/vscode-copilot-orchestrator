@@ -615,7 +615,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
           '<span class="plan-status ' + data.status + '">' + (data.status === 'scaffolding' ? '🚧 Under Construction' : data.status) + '</span>' +
         '</div>' +
         '<div class="plan-details">' +
-          '<span class="plan-node-count">' + data.nodes + ' nodes</span>' +
+          '<span class="plan-node-count">' + data.nodes + ' jobs</span>' +
           '<span class="plan-succeeded">✓ ' + data.counts.succeeded + '</span>' +
           '<span class="plan-failed">✗ ' + data.counts.failed + '</span>' +
           '<span class="plan-running">⏳ ' + data.counts.running + '</span>' +
@@ -647,7 +647,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         statusEl.textContent = data.status === 'scaffolding' ? '🚧 Under Construction' : data.status; 
       }
       var countEl = this.element.querySelector('.plan-node-count');
-      if (countEl) countEl.textContent = data.nodes + ' nodes';
+      if (countEl) countEl.textContent = data.nodes + ' jobs';
       var sEl = this.element.querySelector('.plan-succeeded');
       if (sEl) sEl.textContent = '✓ ' + data.counts.succeeded;
       var fEl = this.element.querySelector('.plan-failed');

@@ -69,7 +69,7 @@ export async function handleScaffoldPlan(args: any, ctx: PlanHandlerContext): Pr
       success: true,
       planId,
       specsDir: `${worktreeRoot}/${planId}/specs`,
-      message: `Plan scaffold '${name}' created with ID '${planId}'. Use add_copilot_plan_node to add nodes, then finalize_copilot_plan to start.`
+      message: `Plan scaffold '${name}' created with ID '${planId}'. Use add_copilot_plan_job to add jobs, then finalize_copilot_plan to start.`
     };
 
   } catch (error: any) {

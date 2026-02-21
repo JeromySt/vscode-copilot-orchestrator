@@ -552,7 +552,7 @@ export class NodeDetailPanel {
     
     const plan = planRunner.get(planId);
     const node = plan?.jobs.get(nodeId);
-    const title = node ? `Node: ${node.name}` : `Node: ${nodeId.slice(0, 8)}`;
+    const title = node ? `Job: ${node.name}` : `Job: ${nodeId.slice(0, 8)}`;
     
     const panel = vscode.window.createWebviewPanel(
       'nodeDetail',
@@ -629,7 +629,7 @@ export class NodeDetailPanel {
       await this._planRunner.forceFailNode(planId, nodeId);
       // Refresh panel after successful force fail
       this._update();
-      vscode.window.showInformationMessage(`Node force failed. You can now retry.`);
+      vscode.window.showInformationMessage(`Job force failed. You can now retry.`);
     } catch (error) {
       console.debug('forceFailNode failed:', error);
       vscode.window.showErrorMessage(`Failed to force fail: ${error}`);
@@ -654,7 +654,7 @@ export class NodeDetailPanel {
     });
     
     if (result.success) {
-      vscode.window.showInformationMessage(`Node retry initiated${resumeSession ? ' (resuming session)' : ' (fresh session)'}`);
+      vscode.window.showInformationMessage(`Job retry initiated${resumeSession ? ' (resuming session)' : ' (fresh session)'}`);
       this._update();
     } else {
       vscode.window.showErrorMessage(`Retry failed: ${result.error}`);
@@ -686,7 +686,7 @@ export class NodeDetailPanel {
       this._panel.webview.postMessage({
         type: 'logContent',
         phase,
-        content: 'Plan or node not found.',
+        content: 'Plan or job not found.',
         logFilePath: undefined,
       });
       return;
@@ -873,7 +873,7 @@ export class NodeDetailPanel {
     const state = plan.nodeStates.get(this._nodeId);
     
     if (!node || !state) {
-      this._panel.webview.html = this._getErrorHtml('Node not found');
+      this._panel.webview.html = this._getErrorHtml('Job not found');
       return;
     }
     
@@ -912,7 +912,7 @@ export class NodeDetailPanel {
    * @returns Full HTML document string with a loading animation.
    */
   private _getLoadingHtml(): string {
-    return loadingPageHtml('Loading node details...');
+    return loadingPageHtml('Loading job details...');
   }
   
   /**

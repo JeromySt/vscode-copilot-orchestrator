@@ -305,7 +305,7 @@ export async function handleRetryGroup(args: any, ctx: PlanHandlerContext): Prom
 
     if (nodeIdsToRetry.length === 0) {
       return {
-        ...errorResult('No failed nodes to retry'),
+        ...errorResult('No failed jobs to retry'),
         groupId: args.groupId,
       };
     }
@@ -333,8 +333,8 @@ export async function handleRetryGroup(args: any, ctx: PlanHandlerContext): Prom
     return {
       success: retriedNodes.length > 0,
       message: retriedNodes.length > 0
-        ? `Retrying ${retriedNodes.length} node(s) in group '${plan.spec.name}'`
-        : 'No nodes were retried',
+        ? `Retrying ${retriedNodes.length} job(s) in group '${plan.spec.name}'`
+        : 'No jobs were retried',
       groupId: args.groupId,
       retriedNodes,
       errors: errors.length > 0 ? errors : undefined,

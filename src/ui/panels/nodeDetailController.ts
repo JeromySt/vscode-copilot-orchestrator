@@ -98,7 +98,7 @@ export class NodeDetailController {
         break;
       case 'confirmForceFailNode': {
         const choice = await this._dialogService.showWarning(
-          'Force-fail this node? This will mark it as failed and may affect downstream nodes.',
+          'Force-fail this job? This will mark it as failed and may affect downstream jobs.',
           { modal: true },
           'Force Fail'
         );

@@ -129,7 +129,7 @@ export function isError(value: any): value is ErrorResult {
 export function lookupNode(plan: PlanInstance, nodeId: string): { node: any; state: any } | ErrorResult {
   const node = plan.jobs.get(nodeId);
   if (!node) {
-    return errorResult(`Node not found: ${nodeId}`);
+    return errorResult(`Job not found: ${nodeId}`);
   }
   const state = plan.nodeStates.get(nodeId);
   return { node, state };

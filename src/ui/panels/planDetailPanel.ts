@@ -1400,7 +1400,7 @@ export class planDetailPanel {
   })}
   </div>
   ${renderPlanControls({ status })}
-  ${status === 'scaffolding' ? '<div class="scaffolding-message">Plan is being built. Nodes appear as they are added via MCP.</div>' : ''}
+  ${status === 'scaffolding' ? '<div class="scaffolding-message">Plan is being built. Jobs appear as they are added via MCP.</div>' : ''}
   </div>
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}

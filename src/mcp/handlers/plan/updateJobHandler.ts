@@ -77,7 +77,7 @@ export async function handleUpdatePlanJob(args: any, ctx: PlanHandlerContext): P
   const { node } = nodeResult;
   
   if (node.type !== 'job') {
-    return errorResult(`Job "${jobIdValue}" is not a job node and cannot be updated`);
+    return errorResult(`Job "${jobIdValue}" is not a job and cannot be updated`);
   }
   const jobNode = node as JobNode;
   
