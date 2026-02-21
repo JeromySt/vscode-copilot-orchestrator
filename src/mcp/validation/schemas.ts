@@ -78,6 +78,8 @@ export interface JobInput {
   baseBranch?: string;
   expectsNoChanges?: boolean;
   group?: string;
+  /** Environment variables for this job. Overrides plan-level env. */
+  env?: Record<string, string>;
 }
 
 /**
@@ -201,7 +203,12 @@ const jobSchema = {
     instructions: { type: 'string', maxLength: 100000 },
     baseBranch: { type: 'string', maxLength: 200 },
     expectsNoChanges: { type: 'boolean' },
-    group: { type: 'string', maxLength: 200 }
+    group: { type: 'string', maxLength: 200 },
+    env: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      description: 'Environment variables for this job. Overrides plan-level env for this specific job.'
+    }
   },
   required: ['producerId', 'task', 'work', 'dependencies'],
   additionalProperties: false
