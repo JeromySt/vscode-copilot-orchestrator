@@ -155,6 +155,16 @@ export class DefaultJobExecutor implements JobExecutor {
       if (!fs.existsSync(worktreePath))
         {return { success: false, error: `Worktree does not exist: ${worktreePath}`, stepStatuses, failedPhase: 'merge-fi', pid: execution.process?.pid };}
 
+      // ---- Log execution configuration for diagnostics ----
+      this.logEntry(executionKey, 'merge-fi', 'info', `Job: ${node.name} (${node.producerId})`);
+      this.logEntry(executionKey, 'merge-fi', 'info', `autoHeal: ${node.autoHeal !== false}`);
+      this.logEntry(executionKey, 'merge-fi', 'info', `expectsNoChanges: ${!!node.expectsNoChanges}`);
+      this.logEntry(executionKey, 'merge-fi', 'info', `hasWork: ${!!node.work || !!context.hydratedWork}, hasPrechecks: ${!!node.prechecks || !!context.hydratedPrechecks}, hasPostchecks: ${!!node.postchecks || !!context.hydratedPostchecks}`);
+      if (node.work || context.hydratedWork) { const ws = normalizeWorkSpec(context.hydratedWork || node.work); this.logEntry(executionKey, 'merge-fi', 'info', `workType: ${ws?.type || 'unknown'}`); }
+      if (node.postchecks || context.hydratedPostchecks) { const ps = normalizeWorkSpec(context.hydratedPostchecks || node.postchecks); this.logEntry(executionKey, 'merge-fi', 'info', `postchecksType: ${ps?.type || 'unknown'}`); }
+      if (context.resumeFromPhase) { this.logEntry(executionKey, 'merge-fi', 'info', `resumeFromPhase: ${context.resumeFromPhase}`); }
+      if (plan.env && Object.keys(plan.env).length > 0) { this.logEntry(executionKey, 'merge-fi', 'info', `planEnv: ${Object.keys(plan.env).join(', ')}`); }
+
       // ---- MERGE-FI ----
       if (skip('merge-fi')) { this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION (SKIPPED - RESUMING) =========='); }
       else if (context.dependencyCommits && context.dependencyCommits.length > 0) {

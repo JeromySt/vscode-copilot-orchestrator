@@ -464,9 +464,21 @@ export class JobExecutionEngine {
           // skipped; later phases (including commit) run normally.
           const failedPhase = result.failedPhase || 'work';
           const isHealablePhase = ['prechecks', 'work', 'postchecks'].includes(failedPhase);
-          const failedWorkSpec = failedPhase === 'prechecks' ? node.prechecks
+          // Resolve the failed phase's work spec: prefer inline, fall back to disk (finalized plans)
+          const failedWorkSpecInline = failedPhase === 'prechecks' ? node.prechecks
             : failedPhase === 'postchecks' ? node.postchecks
             : node.work;
+          let failedWorkSpec = failedWorkSpecInline;
+          if (!failedWorkSpec && plan.definition) {
+            try {
+              failedWorkSpec = failedPhase === 'prechecks'
+                ? await plan.definition.getPrechecksSpec(node.id)
+                : failedPhase === 'postchecks'
+                  ? await plan.definition.getPostchecksSpec(node.id)
+                  : await plan.definition.getWorkSpec(node.id);
+              this.log.debug(`Loaded ${failedPhase} spec from disk for auto-heal decision`, { planId: plan.id, nodeId: node.id });
+            } catch { /* best-effort */ }
+          }
           const normalizedFailedSpec = normalizeWorkSpec(failedWorkSpec);
           const isAgentWork = normalizedFailedSpec?.type === 'agent';
           const isNonAgentWork = normalizedFailedSpec && normalizedFailedSpec.type !== 'agent';
