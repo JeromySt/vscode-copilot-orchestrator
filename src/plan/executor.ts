@@ -131,7 +131,8 @@ export class DefaultJobExecutor implements JobExecutor {
     const makeCtx = (phase: ExecutionPhase): PhaseContext => ({
       node, worktreePath, executionKey, phase,
       // Copilot CLI config dir: plans/<planId>/.copilot-cli (plan-level isolation)
-      configDir: this.storagePath ? path.join(this.storagePath, 'plans', plan.id, '.copilot-cli') : undefined,
+      // configDir: derived from cwd by buildCommand() — always <worktree>/.orchestrator/.copilot-cli
+      configDir: undefined,
       logInfo: (m) => this.logEntry(executionKey, phase, 'info', m),
       logError: (m) => this.logEntry(executionKey, phase, 'error', m),
       logOutput: (t, m) => this.logEntry(executionKey, phase, t, m),

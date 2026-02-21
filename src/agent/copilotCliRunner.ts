@@ -568,17 +568,10 @@ export function buildCommand(
     log.info(`[SECURITY]   - ${p}`);
   }
 
-  // Resolve configDir early so we can include it in the sandbox allowlist.
-  // Without this, copilot-cli can't write to the config dir and falls back to
-  // creating .copilot-cli/ in the cwd (worktree), which then gets committed.
+  // Config dir is always inside the worktree so copilot-cli can write to it
+  // without needing extra --add-dir entries. Session state is lost when the
+  // worktree is deleted, which is acceptable.
   const resolvedConfigDir = options.configDir || (cwd ? path.join(cwd, '.orchestrator', '.copilot-cli') : undefined);
-  if (resolvedConfigDir) {
-    const resolvedConfigPath = path.resolve(resolvedConfigDir);
-    if (!allowedPaths.includes(resolvedConfigPath)) {
-      allowedPaths.push(resolvedConfigPath);
-      log.info(`[SECURITY] Added config-dir to sandbox: ${resolvedConfigPath}`);
-    }
-  }
 
   let pathsArg: string;
   if (allowedPaths.length === 0) {
