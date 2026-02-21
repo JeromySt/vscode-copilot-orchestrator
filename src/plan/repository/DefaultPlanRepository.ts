@@ -610,6 +610,8 @@ export class DefaultPlanRepository implements IPlanRepository {
         dependencies: node.dependencies || [],
         dependents: [],
         group: node.group,
+        // Resolve groupId (UUID) from group path — needed for state machine group updates
+        groupId: node.group && metadata.groupPathToId ? metadata.groupPathToId[node.group] : undefined,
       });
 
       producerIdToNodeId.set(node.producerId, node.id);
