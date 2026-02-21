@@ -385,6 +385,9 @@ export class PlanLifecycleManager {
 
     this.log.info(`Canceling Plan: ${planId}`);
 
+    // Unblock any plans chained on this one
+    this.notifyDependentPlansOfTermination(planId, 'canceled');
+
     for (const [nodeId, state] of plan.nodeStates) {
       if (state.status === 'running' || state.status === 'scheduled') {
         this.log.info(`Canceling node via executor`, { planId, nodeId, status: state.status });
@@ -416,6 +419,9 @@ export class PlanLifecycleManager {
 
     const plan = this.state.plans.get(planId)!;
     this.log.info(`Deleting Plan: ${planId}`);
+
+    // Unblock any plans chained on this one before removing it
+    this.notifyDependentPlansOfTermination(planId, 'deleted');
 
     this.cancel(planId);
 
@@ -554,6 +560,31 @@ export class PlanLifecycleManager {
     }
   }
 
+  /**
+   * Unblock any plans that were waiting on the given plan via `resumeAfterPlan`.
+   * Called when a plan is canceled or deleted — the dependency can never succeed,
+   * so clear the chain link and keep the waiting plan paused for the user to decide.
+   */
+  private notifyDependentPlansOfTermination(terminatedPlanId: string, reason: 'canceled' | 'deleted'): void {
+    for (const [, waitingPlan] of this.state.plans) {
+      if (waitingPlan.resumeAfterPlan === terminatedPlanId) {
+        const terminatedPlan = this.state.plans.get(terminatedPlanId);
+        const terminatedName = terminatedPlan?.spec.name || terminatedPlanId;
+        this.log.warn(
+          `Dependency plan '${terminatedName}' was ${reason} — unblocking chained plan '${waitingPlan.spec.name}' (remains paused)`,
+          { waitingPlanId: waitingPlan.id, terminatedPlanId }
+        );
+        // Clear the chain link so the UI no longer shows "waiting for..."
+        // and the Resume button becomes available again.
+        waitingPlan.resumeAfterPlan = undefined;
+        // Persist the change
+        if (this.state.planRepository) {
+          try { this.state.planRepository.saveStateSync(waitingPlan); } catch { /* best-effort */ }
+        }
+      }
+    }
+  }
+
   setupStateMachineListeners(sm: PlanStateMachine, startPump?: () => void): void {
     sm.on('transition', (event: NodeTransitionEvent) => {
       this.state.events.emitNodeTransition(event);
@@ -599,6 +630,9 @@ export class PlanLifecycleManager {
             });
           }
         }
+      } else if (event.status === 'failed' || event.status === 'partial' || event.status === 'canceled') {
+        // Dependency plan didn't succeed — unblock waiting plans (keep paused)
+        this.notifyDependentPlansOfTermination(event.planId, 'canceled');
       }
     });
   }
