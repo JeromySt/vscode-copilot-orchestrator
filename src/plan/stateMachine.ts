@@ -296,6 +296,12 @@ export class PlanStateMachine extends EventEmitter {
       if (groupState.endedAt) {
         groupState.endedAt = undefined;
       }
+    } else if (pending > 0 && failed === 0 && blocked === 0) {
+      // Nodes pending with no failures → group reverts to pending/running
+      // This handles the retry case: failed node reset to pending
+      newStatus = minStartedAt ? 'running' : 'pending';
+      if (groupState.endedAt) { groupState.endedAt = undefined; }
+      if (newStatus === 'pending') { groupState.startedAt = undefined; }
     } else if (failed > 0 || blocked > 0) {
       // Any child failed/blocked → group is failed
       newStatus = 'failed';
@@ -540,7 +546,10 @@ export class PlanStateMachine extends EventEmitter {
     
     // Unblock any downstream nodes that were blocked due to this node
     this.unblockDownstream(nodeId);
-    
+
+    // Recompute group state — the node moved from failed→pending/ready
+    this.updateGroupState(nodeId, oldStatus, newStatus);
+
     return true;
   }
   
@@ -565,6 +574,9 @@ export class PlanStateMachine extends EventEmitter {
             planId: this.plan.id,
             nodeName: this.plan.jobs.get(dependentId)?.name,
           });
+
+          // Update group state for the unblocked dependent
+          this.updateGroupState(dependentId, 'blocked', 'pending');
           
           // Recursively unblock further downstream
           this.unblockDownstream(dependentId);
