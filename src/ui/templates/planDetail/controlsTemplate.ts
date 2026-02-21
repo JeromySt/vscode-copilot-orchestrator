@@ -13,6 +13,8 @@
 export interface PlanControlsData {
   /** Computed plan status */
   status: string;
+  /** True if the plan is paused because it's waiting on another plan to finish */
+  isChainedPause?: boolean;
 }
 
 /**
@@ -37,7 +39,7 @@ export function renderPlanControls(data: PlanControlsData): string {
     ? '<button id="pauseBtn" class="action-btn secondary" onclick="pausePlan()">Pause</button>'
     : '<button id="pauseBtn" class="action-btn secondary" onclick="pausePlan()" style="display:none">Pause</button>';
 
-  const resumeBtn = isPaused
+  const resumeBtn = isPaused && !data.isChainedPause
     ? '<button id="resumeBtn" class="action-btn primary" onclick="resumePlan()">Resume</button>'
     : '<button id="resumeBtn" class="action-btn primary" onclick="resumePlan()" style="display:none">Resume</button>';
 

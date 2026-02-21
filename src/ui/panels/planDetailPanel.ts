@@ -1399,8 +1399,13 @@ export class planDetailPanel {
     globalCapacityStats,
   })}
   </div>
-  ${renderPlanControls({ status })}
+  ${renderPlanControls({ status, isChainedPause: !!(plan.resumeAfterPlan && plan.isPaused) })}
   ${status === 'scaffolding' ? '<div class="scaffolding-message">Plan is being built. Jobs appear as they are added via MCP.</div>' : ''}
+  ${status === 'paused' && plan.resumeAfterPlan ? (() => {
+    const depPlan = this._planRunner.getPlan(plan.resumeAfterPlan!);
+    const depName = depPlan ? depPlan.spec.name : plan.resumeAfterPlan;
+    return `<div class="scaffolding-message">⏸ Paused — waiting for plan "${escapeHtml(depName!)}" to succeed before auto-resuming.</div>`;
+  })() : ''}
   </div>
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}
