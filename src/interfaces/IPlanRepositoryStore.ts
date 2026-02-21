@@ -95,6 +95,9 @@ export interface StoredPlanMetadata {
   
   /** Whether target branch is ready */
   branchReady?: boolean;
+
+  /** Plan ID that must succeed before this plan auto-resumes */
+  resumeAfterPlan?: string;
   
   /** Snapshot information */
   snapshot?: {

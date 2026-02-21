@@ -97,9 +97,10 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
     maxParallel: args.maxParallel,
     cleanUpSuccessfulWork: args.cleanUpSuccessfulWork,
     additionalSymlinkDirs: args.additionalSymlinkDirs,
-    startPaused: args.startPaused,
+    startPaused: args.resumeAfterPlan ? true : args.startPaused,
     verifyRiSpec: args.verifyRi,
     env: args.env,
+    resumeAfterPlan: args.resumeAfterPlan,
     jobs,
   };
   
@@ -222,6 +223,7 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
     
     const plan = await ctx.PlanRepository.finalize(planId);
     plan.isPaused = spec.startPaused !== false;
+    if (spec.resumeAfterPlan) { plan.resumeAfterPlan = spec.resumeAfterPlan; }
     
     // Register with PlanRunner so it appears in UI and can be executed
     ctx.PlanRunner.registerPlan(plan);

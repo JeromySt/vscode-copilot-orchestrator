@@ -51,6 +51,29 @@ export async function handleUpdatePlan(args: any, ctx: PlanHandlerContext): Prom
     log.info('Updated plan maxParallel', { planId: args.planId, maxParallel: args.maxParallel });
   }
 
+  // Update resumeAfterPlan (plan chaining)
+  if (args.resumeAfterPlan !== undefined) {
+    if (args.resumeAfterPlan === '') {
+      plan.resumeAfterPlan = undefined;
+      updated.push('resumeAfterPlan (cleared)');
+      log.info('Cleared plan resumeAfterPlan', { planId: args.planId });
+    } else {
+      // Validate the dependency plan exists
+      const depPlan = ctx.PlanRunner.getPlan(args.resumeAfterPlan);
+      if (!depPlan) {
+        return errorResult(`Dependency plan not found: ${args.resumeAfterPlan}`);
+      }
+      plan.resumeAfterPlan = args.resumeAfterPlan;
+      // Auto-pause so it waits for the dependency
+      if (!plan.isPaused) {
+        plan.isPaused = true;
+        updated.push('isPaused (auto-set for chain)');
+      }
+      updated.push('resumeAfterPlan');
+      log.info('Updated plan resumeAfterPlan', { planId: args.planId, resumeAfterPlan: args.resumeAfterPlan });
+    }
+  }
+
   if (updated.length === 0) {
     return { success: true, planId: args.planId, message: 'No changes specified' };
   }

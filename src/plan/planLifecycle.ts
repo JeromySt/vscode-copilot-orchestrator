@@ -554,7 +554,7 @@ export class PlanLifecycleManager {
     }
   }
 
-  setupStateMachineListeners(sm: PlanStateMachine): void {
+  setupStateMachineListeners(sm: PlanStateMachine, startPump?: () => void): void {
     sm.on('transition', (event: NodeTransitionEvent) => {
       this.state.events.emitNodeTransition(event);
     });
@@ -582,6 +582,24 @@ export class PlanLifecycleManager {
       }
 
       this.state.events.emitPlanCompleted(plan, event.status);
+
+      // Plan chaining: auto-resume any plans waiting on this one
+      if (event.status === 'succeeded') {
+        for (const [, waitingPlan] of this.state.plans) {
+          if (waitingPlan.resumeAfterPlan === event.planId && waitingPlan.isPaused) {
+            this.log.info(`Auto-resuming chained plan '${waitingPlan.spec.name}' (was waiting on '${plan.spec.name}')`, {
+              resumedPlanId: waitingPlan.id,
+              completedPlanId: event.planId,
+            });
+            // Clear the dependency now that it's satisfied
+            waitingPlan.resumeAfterPlan = undefined;
+            const pump = startPump || (() => {});
+            this.resume(waitingPlan.id, pump).catch(e => {
+              this.log.error(`Failed to auto-resume chained plan ${waitingPlan.id}: ${e.message}`);
+            });
+          }
+        }
+      }
     });
   }
 

@@ -63,6 +63,13 @@ export interface PlanSpec {
   /** Job nodes at the top level of this Plan */
   jobs: JobNodeSpec[];
   
+  /**
+   * Plan ID that must complete successfully before this plan auto-resumes.
+   * When set, the plan is created paused and automatically resumed when the
+   * dependency plan reaches 'succeeded' status.
+   */
+  resumeAfterPlan?: string;
+  
   /** 
    * Visual groups for organizing jobs.
    * Groups provide namespace isolation for producerIds and visual hierarchy.
@@ -494,6 +501,12 @@ export interface PlanInstance {
   
   /** Whether the plan is paused (no new work scheduled, worktrees preserved) */
   isPaused?: boolean;
+
+  /**
+   * Plan ID that must complete successfully before this plan auto-resumes.
+   * When set, the plan stays paused until the dependency plan succeeds.
+   */
+  resumeAfterPlan?: string;
 
   /** Whether the target branch has been created and .gitignore committed */
   branchReady?: boolean;

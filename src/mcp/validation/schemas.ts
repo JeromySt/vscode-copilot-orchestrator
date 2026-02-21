@@ -107,6 +107,8 @@ export interface CreatePlanInput {
   verifyRi?: string | WorkSpec;
   /** Environment variables applied to all jobs. Individual work specs can override. */
   env?: Record<string, string>;
+  /** Plan ID that must complete successfully before this plan auto-resumes. */
+  resumeAfterPlan?: string;
 }
 
 // ============================================================================
@@ -250,6 +252,12 @@ export const createPlanSchema = {
       type: 'object',
       additionalProperties: { type: 'string' },
       description: 'Environment variables applied to all jobs. Individual work specs can override specific keys.'
+    },
+    resumeAfterPlan: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 100,
+      description: 'Plan ID that must complete successfully before this plan auto-resumes. The plan will be created paused.'
     }
   },
   required: ['name', 'jobs'],
@@ -719,6 +727,11 @@ export const updatePlanSchema = {
       description: 'Replace plan-level environment variables. Pass {} to clear.'
     },
     maxParallel: { type: 'number', minimum: 0, maximum: 1024, description: 'Update max concurrent jobs (0 = unlimited)' },
+    resumeAfterPlan: {
+      type: 'string',
+      maxLength: 100,
+      description: 'Set or change the plan ID that must complete successfully before this plan auto-resumes. Pass empty string to clear.'
+    },
   },
   required: ['planId'],
   additionalProperties: false
@@ -752,6 +765,12 @@ export const scaffoldPlanSchema = {
       type: 'object',
       additionalProperties: { type: 'string' },
       description: 'Environment variables applied to all jobs. Individual work specs can override specific keys.'
+    },
+    resumeAfterPlan: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 100,
+      description: 'Plan ID that must complete successfully before this plan auto-resumes. The plan will be created paused.'
     }
   },
   required: ['name'],

@@ -34,7 +34,7 @@ export async function handleScaffoldPlan(args: any, ctx: PlanHandlerContext): Pr
     return errorResult(validation.error || 'Invalid input');
   }
 
-  const { name, baseBranch, targetBranch, maxParallel, startPaused, cleanUpSuccessfulWork, additionalSymlinkDirs, verifyRi, env } = args;
+  const { name, baseBranch, targetBranch, maxParallel, startPaused, cleanUpSuccessfulWork, additionalSymlinkDirs, verifyRi, env, resumeAfterPlan } = args;
 
   try {
     const repoPath = ctx.workspacePath;
@@ -55,6 +55,7 @@ export async function handleScaffoldPlan(args: any, ctx: PlanHandlerContext): Pr
       repoPath,
       worktreeRoot,
       env,
+      resumeAfterPlan,
       // Add other scaffold options as needed
     };
 

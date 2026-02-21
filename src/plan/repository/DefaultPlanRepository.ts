@@ -130,6 +130,7 @@ export class DefaultPlanRepository implements IPlanRepository {
       maxParallel: options.maxParallel || 0,
       cleanUpSuccessfulWork: true,
       env: options.env,
+      resumeAfterPlan: options.resumeAfterPlan,
     };
 
     await this.store.writePlanMetadata(metadata);
@@ -666,6 +667,7 @@ export class DefaultPlanRepository implements IPlanRepository {
       endedAt: metadata.endedAt,
       baseCommitAtStart: metadata.baseCommitAtStart,
       isPaused: metadata.isPaused,
+      resumeAfterPlan: metadata.resumeAfterPlan,
       branchReady: metadata.branchReady,
       env: metadata.env,
       snapshot: metadata.snapshot,
@@ -707,6 +709,7 @@ export class DefaultPlanRepository implements IPlanRepository {
       if (metadata) {
         metadata.stateVersion = plan.stateVersion;
         metadata.isPaused = plan.isPaused;
+        metadata.resumeAfterPlan = plan.resumeAfterPlan;
         await this.store.writePlanMetadata(metadata);
       }
       log.debug('Scaffolding plan state saved', { planId: plan.id });
@@ -776,6 +779,7 @@ export class DefaultPlanRepository implements IPlanRepository {
     meta.endedAt = plan.endedAt;
     meta.baseCommitAtStart = plan.baseCommitAtStart;
     meta.isPaused = plan.isPaused;
+    meta.resumeAfterPlan = plan.resumeAfterPlan;
     meta.branchReady = plan.branchReady;
     meta.snapshot = plan.snapshot;
     meta.workSummary = plan.workSummary;
@@ -852,6 +856,7 @@ export class DefaultPlanRepository implements IPlanRepository {
       metadata.leaves = plan.leaves;
       metadata.stateVersion = plan.stateVersion;
       metadata.isPaused = plan.isPaused;
+      metadata.resumeAfterPlan = plan.resumeAfterPlan;
       metadata.startedAt = plan.startedAt;
       metadata.endedAt = plan.endedAt;
       metadata.nodeStates = {};
@@ -1263,6 +1268,7 @@ export class DefaultPlanRepository implements IPlanRepository {
       endedAt: metadata.endedAt,
       baseCommitAtStart: metadata.baseCommitAtStart,
       isPaused: metadata.isPaused,
+      resumeAfterPlan: metadata.resumeAfterPlan,
       branchReady: metadata.branchReady,
       env: metadata.env,
       snapshot: metadata.snapshot,

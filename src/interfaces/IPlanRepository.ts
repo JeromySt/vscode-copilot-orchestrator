@@ -66,6 +66,9 @@ export interface ScaffoldOptions {
   
   /** Environment variables applied to all jobs */
   env?: Record<string, string>;
+
+  /** Plan ID that must succeed before this plan auto-resumes */
+  resumeAfterPlan?: string;
 }
 
 /**
