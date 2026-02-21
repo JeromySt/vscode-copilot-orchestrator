@@ -56,7 +56,7 @@ suite('validateAllowedUrls', () => {
     test('should accept https URLs', async () => {
       const input = {
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: {
             type: 'agent',
@@ -72,7 +72,7 @@ suite('validateAllowedUrls', () => {
     test('should accept http URLs', async () => {
       const input = {
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: {
             type: 'agent',
@@ -88,7 +88,7 @@ suite('validateAllowedUrls', () => {
     test('should accept domain-only format', async () => {
       const input = {
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: {
             type: 'agent',
@@ -104,7 +104,7 @@ suite('validateAllowedUrls', () => {
     test('should accept wildcard domains', async () => {
       const input = {
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: {
             type: 'agent',
@@ -122,7 +122,7 @@ suite('validateAllowedUrls', () => {
     test('should reject file:// URLs', async () => {
       const input = {
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: {
             type: 'agent',
@@ -140,7 +140,7 @@ suite('validateAllowedUrls', () => {
     test('should reject javascript: URLs', async () => {
       const input = {
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: {
             type: 'agent',
@@ -157,7 +157,7 @@ suite('validateAllowedUrls', () => {
     test('should reject data: URLs', async () => {
       const input = {
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: {
             type: 'agent',
@@ -174,7 +174,7 @@ suite('validateAllowedUrls', () => {
     test('should reject ftp:// URLs', async () => {
       const input = {
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: {
             type: 'agent',
@@ -194,7 +194,7 @@ suite('validateAllowedUrls', () => {
     test('should reject URLs with invalid format', async () => {
       const input = {
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: {
             type: 'agent',
@@ -211,7 +211,7 @@ suite('validateAllowedUrls', () => {
     test('should reject single-word domains', async () => {
       const input = {
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: {
             type: 'agent',
@@ -233,7 +233,7 @@ suite('validateAllowedUrls', () => {
         groups: [{
           name: 'backend',
           jobs: [{
-            producer_id: 'test',
+            producerId: 'test',
             task: 'Test',
             work: {
               type: 'agent',
@@ -267,7 +267,7 @@ suite('validateAllowedUrls', () => {
   test('should pass when agent has no allowedUrls', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: { type: 'agent', instructions: 'Do something' }
       }]
@@ -279,7 +279,7 @@ suite('validateAllowedUrls', () => {
   test('should skip validation for non-agent work types', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: {
           type: 'shell',

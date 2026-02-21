@@ -1,17 +1,13 @@
 /**
- * @fileoverview Branch change detection for .gitignore maintenance.
+ * @fileoverview Branch change detection.
  * 
- * Monitors VS Code git repositories for branch changes and ensures
- * orchestrator .gitignore entries are present after switching branches.
- * This prevents issues when switching to branches that don't have
- * orchestrator setup or have reverted .gitignore changes.
+ * Monitors VS Code git repositories for branch changes.
  * 
  * @module git/branchWatcher
  */
 
 import * as vscode from 'vscode';
 import type { ILogger } from '../interfaces/ILogger';
-import { ensureOrchestratorGitIgnore } from './core/gitignore';
 
 /**
  * Git extension types from VS Code built-in git extension
@@ -113,47 +109,15 @@ export class BranchChangeWatcher implements vscode.Disposable {
         // Update our tracked branch
         this.repositoryBranches.set(repoKey, currentBranch);
         
-        // Ensure .gitignore has orchestrator entries
-        await this.ensureGitIgnoreOnBranchChange(workspaceRoot);
+        // Note: We intentionally do NOT re-write .gitignore on branch change.
+        // The new branch may not have orchestrator entries, but that's fine —
+        // planInitialization.ts ensures them on activation, and any plan
+        // execution will add them if needed. Eagerly writing .gitignore here
+        // creates uncommitted changes that block git checkout operations.
       }
     });
     
     this.disposables.push(disposable);
-  }
-  
-  /**
-   * Ensure orchestrator .gitignore entries are present after a branch change.
-   */
-  private async ensureGitIgnoreOnBranchChange(workspaceRoot: string): Promise<void> {
-    try {
-      const modified = await ensureOrchestratorGitIgnore(workspaceRoot);
-      
-      if (modified) {
-        this.logger.info('Updated .gitignore with orchestrator entries after branch change', {
-          repository: workspaceRoot
-        });
-        
-        // Show user notification for awareness
-        vscode.window.showInformationMessage(
-          'Copilot Orchestrator: Updated .gitignore for the new branch',
-          { modal: false }
-        );
-      } else {
-        this.logger.debug('No .gitignore update needed - orchestrator entries already present', {
-          repository: workspaceRoot
-        });
-      }
-    } catch (error) {
-      this.logger.error('Failed to update .gitignore on branch change', {
-        repository: workspaceRoot,
-        error: error instanceof Error ? error.message : String(error)
-      });
-      
-      // Show error to user since this affects functionality
-      vscode.window.showWarningMessage(
-        `Copilot Orchestrator: Could not update .gitignore after branch change: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
   }
   
   /**

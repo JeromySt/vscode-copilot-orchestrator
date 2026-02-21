@@ -8,7 +8,7 @@
  */
 
 import * as vscode from 'vscode';
-import { handleRefreshModels } from './utilityCommandLogic';
+import { handleRefreshModels, handleRefreshCopilotCli, handleSetupCopilotCli } from './utilityCommandLogic';
 import { VsCodeDialogService } from '../vscode/adapters';
 
 /**
@@ -22,6 +22,23 @@ export function registerUtilityCommands(context: vscode.ExtensionContext): void 
   context.subscriptions.push(
     vscode.commands.registerCommand('copilotOrchestrator.refreshModels', async () => {
       await handleRefreshModels({ dialog });
+    }),
+    
+    vscode.commands.registerCommand('copilotOrchestrator.refreshCopilotCli', async () => {
+      await handleRefreshCopilotCli({ dialog });
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('copilotOrchestrator.setupCopilotCli', async () => {
+      await handleSetupCopilotCli({
+        dialog,
+        openTerminal: (name: string, command: string) => {
+          const terminal = vscode.window.createTerminal({ name });
+          terminal.show();
+          terminal.sendText(command, true);
+        },
+      });
     })
   );
 }

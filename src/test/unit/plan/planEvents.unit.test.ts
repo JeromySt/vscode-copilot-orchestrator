@@ -16,7 +16,7 @@ function mockPlan(id = 'plan-1'): PlanInstance {
   return {
     id,
     spec: { name: 'Test Plan', jobs: [], baseBranch: 'main' },
-    nodes: new Map(),
+    jobs: new Map(),
     producerIdToNodeId: new Map(),
     roots: [],
     leaves: [],

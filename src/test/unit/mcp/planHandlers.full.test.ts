@@ -1,8 +1,8 @@
 /**
  * @fileoverview Comprehensive tests for plan handler files.
- * Covers createPlanHandler, getPlanHandler, nodeDetailsHandler,
- * cancelDeleteHandler, pauseResumeHandler, retryNodeHandler,
- * retryPlanHandler, updateNodeHandler.
+ * Covers createPlanHandler, getPlanHandler, jobDetailsHandler,
+ * cancelDeleteHandler, pauseResumeHandler, retryJobHandler,
+ * retryPlanHandler, updateJobHandler.
  */
 
 import { suite, test, setup, teardown } from 'mocha';
@@ -41,7 +41,7 @@ function makeMockPlan(overrides?: Record<string, any>): any {
   return {
     id: 'plan-1',
     spec: { name: 'Test Plan', jobs: [] },
-    nodes: new Map(),
+    jobs: new Map(),
     producerIdToNodeId: new Map(),
     roots: ['node-1'],
     leaves: ['node-1'],
@@ -207,7 +207,7 @@ suite('Plan Handlers', () => {
         type: 'job', dependencies: [], dependents: [],
         task: 'Build', work: 'npm build', group: 'backend',
       };
-      plan.nodes.set('node-1', jobNode);
+      plan.jobs.set('node-1', jobNode);
       plan.nodeStates.set('node-1', {
         status: 'succeeded', attempts: 1, startedAt: Date.now(),
         endedAt: Date.now(), completedCommit: 'abc123',
@@ -241,7 +241,7 @@ suite('Plan Handlers', () => {
       const statuses = ['succeeded', 'failed', 'running', 'pending', 'blocked', 'scheduled'];
       for (let i = 0; i < statuses.length; i++) {
         const node = { id: `n-${i}`, producerId: `job-${i}`, name: `Job ${i}`, type: 'job', dependencies: [], dependents: [], group: 'grp' };
-        plan.nodes.set(`n-${i}`, node);
+        plan.jobs.set(`n-${i}`, node);
         plan.nodeStates.set(`n-${i}`, { status: statuses[i], attempts: 1 });
       }
       const ctx = makeCtx({
@@ -293,119 +293,119 @@ suite('Plan Handlers', () => {
     });
   });
 
-  // ===== nodeDetailsHandler =====
-  suite('handleGetNodeDetails', () => {
+  // ===== jobDetailsHandler =====
+  suite('handleGetJobDetails', () => {
     test('should return error when planId/nodeId missing', async () => {
-      const { handleGetNodeDetails } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
-      const result = await handleGetNodeDetails({}, makeCtx());
+      const { handleGetJobDetails } = require('../../../mcp/handlers/plan/jobDetailsHandler');
+      const result = await handleGetJobDetails({}, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test('should return error when plan not found', async () => {
-      const { handleGetNodeDetails } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
-      const result = await handleGetNodeDetails({ planId: 'x', nodeId: 'y' }, makeCtx());
+      const { handleGetJobDetails } = require('../../../mcp/handlers/plan/jobDetailsHandler');
+      const result = await handleGetJobDetails({ planId: 'x', jobId: 'y' }, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test('should return node details by ID', async () => {
-      const { handleGetNodeDetails } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
+      const { handleGetJobDetails } = require('../../../mcp/handlers/plan/jobDetailsHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', producerId: 'build', name: 'Build', type: 'job', dependencies: [], dependents: [], task: 'Build it', work: 'npm build' };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'running', attempts: 1, scheduledAt: 100, startedAt: 200, worktreePath: '/wt' });
       const ctx = makeCtx({ get: sinon.stub().returns(plan) });
-      const result = await handleGetNodeDetails({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+      const result = await handleGetJobDetails({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.node.id, 'n1');
     });
 
     test('should lookup node by producer_id', async () => {
-      const { handleGetNodeDetails } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
+      const { handleGetJobDetails } = require('../../../mcp/handlers/plan/jobDetailsHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', producerId: 'build', name: 'Build', type: 'job', dependencies: [], dependents: [], task: 'T', work: 'W' };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'pending', attempts: 0 });
       plan.producerIdToNodeId.set('build', 'n1');
       const ctx = makeCtx({ get: sinon.stub().returns(plan) });
-      const result = await handleGetNodeDetails({ planId: 'plan-1', nodeId: 'build' }, ctx);
+      const result = await handleGetJobDetails({ planId: 'plan-1', jobId: 'build' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('should return error when node not found', async () => {
-      const { handleGetNodeDetails } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
+      const { handleGetJobDetails } = require('../../../mcp/handlers/plan/jobDetailsHandler');
       const plan = makeMockPlan();
       const ctx = makeCtx({ get: sinon.stub().returns(plan) });
-      const result = await handleGetNodeDetails({ planId: 'plan-1', nodeId: 'missing' }, ctx);
+      const result = await handleGetJobDetails({ planId: 'plan-1', jobId: 'missing' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
 
-  suite('handleGetNodeLogs', () => {
+  suite('handleGetJobLogs', () => {
     test('should return error when fields missing', async () => {
-      const { handleGetNodeLogs } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
-      const result = await handleGetNodeLogs({}, makeCtx());
+      const { handleGetJobLogs } = require('../../../mcp/handlers/plan/jobDetailsHandler');
+      const result = await handleGetJobLogs({}, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test('should return logs for a node', async () => {
-      const { handleGetNodeLogs } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
+      const { handleGetJobLogs } = require('../../../mcp/handlers/plan/jobDetailsHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'running' });
       const ctx = makeCtx({
         get: sinon.stub().returns(plan),
         getNodeLogs: sinon.stub().returns('log output'),
       });
-      const result = await handleGetNodeLogs({ planId: 'plan-1', nodeId: 'n1', phase: 'work' }, ctx);
+      const result = await handleGetJobLogs({ planId: 'plan-1', jobId: 'n1', phase: 'work' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.logs, 'log output');
       assert.strictEqual(result.phase, 'work');
     });
   });
 
-  suite('handleGetNodeAttempts', () => {
+  suite('handleGetJobAttempts', () => {
     test('should return error when fields missing', async () => {
-      const { handleGetNodeAttempts } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
-      const result = await handleGetNodeAttempts({}, makeCtx());
+      const { handleGetJobAttempts } = require('../../../mcp/handlers/plan/jobDetailsHandler');
+      const result = await handleGetJobAttempts({}, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test('should return specific attempt', async () => {
-      const { handleGetNodeAttempts } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
+      const { handleGetJobAttempts } = require('../../../mcp/handlers/plan/jobDetailsHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'failed' });
       const attempt = { number: 1, status: 'failed', logs: 'error log' };
       const ctx = makeCtx({
         get: sinon.stub().returns(plan),
         getNodeAttempt: sinon.stub().returns(attempt),
       });
-      const result = await handleGetNodeAttempts({ planId: 'plan-1', nodeId: 'n1', attemptNumber: 1 }, ctx);
+      const result = await handleGetJobAttempts({ planId: 'plan-1', jobId: 'n1', attemptNumber: 1 }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.attempt);
     });
 
     test('should return error for missing attempt', async () => {
-      const { handleGetNodeAttempts } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
+      const { handleGetJobAttempts } = require('../../../mcp/handlers/plan/jobDetailsHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'failed' });
       const ctx = makeCtx({
         get: sinon.stub().returns(plan),
         getNodeAttempt: sinon.stub().returns(null),
       });
-      const result = await handleGetNodeAttempts({ planId: 'plan-1', nodeId: 'n1', attemptNumber: 99 }, ctx);
+      const result = await handleGetJobAttempts({ planId: 'plan-1', jobId: 'n1', attemptNumber: 99 }, ctx);
       assert.strictEqual(result.success, false);
     });
 
     test('should return all attempts without logs by default', async () => {
-      const { handleGetNodeAttempts } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
+      const { handleGetJobAttempts } = require('../../../mcp/handlers/plan/jobDetailsHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'failed' });
       const attempts = [
         { number: 1, status: 'failed', logs: 'log1' },
@@ -415,56 +415,56 @@ suite('Plan Handlers', () => {
         get: sinon.stub().returns(plan),
         getNodeAttempts: sinon.stub().returns(attempts),
       });
-      const result = await handleGetNodeAttempts({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+      const result = await handleGetJobAttempts({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.totalAttempts, 2);
     });
 
     test('should include logs when includeLogs is true', async () => {
-      const { handleGetNodeAttempts } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
+      const { handleGetJobAttempts } = require('../../../mcp/handlers/plan/jobDetailsHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'failed' });
       const attempts = [{ number: 1, status: 'failed', logs: 'log1' }];
       const ctx = makeCtx({
         get: sinon.stub().returns(plan),
         getNodeAttempts: sinon.stub().returns(attempts),
       });
-      const result = await handleGetNodeAttempts({ planId: 'plan-1', nodeId: 'n1', includeLogs: true }, ctx);
+      const result = await handleGetJobAttempts({ planId: 'plan-1', jobId: 'n1', includeLogs: true }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.attempts[0].logs, 'log1');
     });
 
     test('should include attempt with logs when includeLogs for single attempt', async () => {
-      const { handleGetNodeAttempts } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
+      const { handleGetJobAttempts } = require('../../../mcp/handlers/plan/jobDetailsHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'failed' });
       const attempt = { number: 1, status: 'failed', logs: 'log1' };
       const ctx = makeCtx({
         get: sinon.stub().returns(plan),
         getNodeAttempt: sinon.stub().returns(attempt),
       });
-      const result = await handleGetNodeAttempts({ planId: 'plan-1', nodeId: 'n1', attemptNumber: 1, includeLogs: true }, ctx);
+      const result = await handleGetJobAttempts({ planId: 'plan-1', jobId: 'n1', attemptNumber: 1, includeLogs: true }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.attempt.logs, 'log1');
     });
   });
 
-  suite('handleGetNodeFailureContext', () => {
+  suite('handleGetJobFailureContext', () => {
     test('should return error when fields missing', async () => {
-      const { handleGetNodeFailureContext } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
-      const result = await handleGetNodeFailureContext({}, makeCtx());
+      const { handleGetJobFailureContext } = require('../../../mcp/handlers/plan/jobDetailsHandler');
+      const result = await handleGetJobFailureContext({}, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test('should return failure context', async () => {
-      const { handleGetNodeFailureContext } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
+      const { handleGetJobFailureContext } = require('../../../mcp/handlers/plan/jobDetailsHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build' };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       const ctx = makeCtx({
         getNodeFailureContext: sinon.stub().returns({
           phase: 'work', errorMessage: 'Build failed',
@@ -473,17 +473,17 @@ suite('Plan Handlers', () => {
         }),
         getPlan: sinon.stub().returns(plan),
       });
-      const result = await handleGetNodeFailureContext({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+      const result = await handleGetJobFailureContext({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.phase, 'work');
     });
 
     test('should return error on failure context error', async () => {
-      const { handleGetNodeFailureContext } = require('../../../mcp/handlers/plan/nodeDetailsHandler');
+      const { handleGetJobFailureContext } = require('../../../mcp/handlers/plan/jobDetailsHandler');
       const ctx = makeCtx({
         getNodeFailureContext: sinon.stub().returns({ error: 'Node not found' }),
       });
-      const result = await handleGetNodeFailureContext({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+      const result = await handleGetJobFailureContext({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -494,8 +494,8 @@ suite('Plan Handlers', () => {
       const { handleCreatePlan } = require('../../../mcp/handlers/plan/createPlanHandler');
       const plan = makeMockPlan({
         isPaused: false,
-        nodes: new Map([['n1', {}]]),
-        producerIdToNodeId: new Map([['build', 'n1']]),
+        jobs: new Map([['n1', {}]]),
+        producerIdTojobId: new Map([['build', 'n1']]),
       });
       const ctx = makeCtx({ enqueue: sinon.stub().returns(plan) });
       const result = await handleCreatePlan({
@@ -510,8 +510,8 @@ suite('Plan Handlers', () => {
       const { handleCreatePlan } = require('../../../mcp/handlers/plan/createPlanHandler');
       const plan = makeMockPlan({
         isPaused: true,
-        nodes: new Map([['n1', {}]]),
-        producerIdToNodeId: new Map([['build', 'n1']]),
+        jobs: new Map([['n1', {}]]),
+        producerIdTojobId: new Map([['build', 'n1']]),
       });
       const ctx = makeCtx({ enqueue: sinon.stub().returns(plan) });
       const result = await handleCreatePlan({
@@ -563,8 +563,8 @@ suite('Plan Handlers', () => {
     test.skip('should handle groups with jobs', async () => {
       const { handleCreatePlan } = require('../../../mcp/handlers/plan/createPlanHandler');
       const plan = makeMockPlan({
-        nodes: new Map([['n1', {}], ['n2', {}]]),
-        producerIdToNodeId: new Map([['grp/build', 'n1'], ['grp/test', 'n2']]),
+        jobs: new Map([['n1', {}], ['n2', {}]]),
+        producerIdTojobId: new Map([['grp/build', 'n1'], ['grp/test', 'n2']]),
       });
       const ctx = makeCtx({ enqueue: sinon.stub().returns(plan) });
       const result = await handleCreatePlan({
@@ -584,8 +584,8 @@ suite('Plan Handlers', () => {
     test.skip('should handle nested groups', async () => {
       const { handleCreatePlan } = require('../../../mcp/handlers/plan/createPlanHandler');
       const plan = makeMockPlan({
-        nodes: new Map([['n1', {}]]),
-        producerIdToNodeId: new Map([['phase1/sub/build', 'n1']]),
+        jobs: new Map([['n1', {}]]),
+        producerIdTojobId: new Map([['phase1/sub/build', 'n1']]),
       });
       const ctx = makeCtx({ enqueue: sinon.stub().returns(plan) });
       const result = await handleCreatePlan({
@@ -626,8 +626,8 @@ suite('Plan Handlers', () => {
           jobs: [{ producer_id: 'test', task: 'Test', dependencies: ['grp1/build'] }],
         }],
       }, makeCtx({ enqueue: sinon.stub().returns(makeMockPlan({
-        nodes: new Map([['n1', {}], ['n2', {}]]),
-        producerIdToNodeId: new Map([['grp1/build', 'n1'], ['grp2/test', 'n2']]),
+        jobs: new Map([['n1', {}], ['n2', {}]]),
+        producerIdTojobId: new Map([['grp1/build', 'n1'], ['grp2/test', 'n2']]),
       })) }));
       assert.strictEqual(result.success, true);
     });
@@ -650,7 +650,7 @@ suite('Plan Handlers', () => {
     test('should retry all failed nodes', async () => {
       const { handleRetryPlan } = require('../../../mcp/handlers/plan/retryPlanHandler');
       const plan = makeMockPlan();
-      plan.nodes.set('n1', { name: 'Build' });
+      plan.jobs.set('n1', { name: 'Build' });
       plan.nodeStates.set('n1', { status: 'failed' });
       const ctx = makeCtx({
         getPlan: sinon.stub().returns(plan),
@@ -665,7 +665,7 @@ suite('Plan Handlers', () => {
     test('should retry specific nodes', async () => {
       const { handleRetryPlan } = require('../../../mcp/handlers/plan/retryPlanHandler');
       const plan = makeMockPlan();
-      plan.nodes.set('n1', { name: 'Build' });
+      plan.jobs.set('n1', { name: 'Build' });
       plan.nodeStates.set('n1', { status: 'failed' });
       const ctx = makeCtx({
         getPlan: sinon.stub().returns(plan),
@@ -689,7 +689,7 @@ suite('Plan Handlers', () => {
     test('should handle retry errors', async () => {
       const { handleRetryPlan } = require('../../../mcp/handlers/plan/retryPlanHandler');
       const plan = makeMockPlan();
-      plan.nodes.set('n1', { name: 'Build' });
+      plan.jobs.set('n1', { name: 'Build' });
       plan.nodeStates.set('n1', { status: 'failed' });
       const ctx = makeCtx({
         getPlan: sinon.stub().returns(plan),
@@ -702,151 +702,151 @@ suite('Plan Handlers', () => {
     });
   });
 
-  // ===== retryNodeHandler =====
-  suite('handleRetryPlanNode', () => {
+  // ===== retryJobHandler =====
+  suite('handleRetryPlanJob', () => {
     test('should return error when fields missing', async () => {
-      const { handleRetryPlanNode } = require('../../../mcp/handlers/plan/retryNodeHandler');
-      const result = await handleRetryPlanNode({}, makeCtx());
+      const { handleRetryPlanJob } = require('../../../mcp/handlers/plan/retryJobHandler');
+      const result = await handleRetryPlanJob({}, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test('should return error when plan not found', async () => {
-      const { handleRetryPlanNode } = require('../../../mcp/handlers/plan/retryNodeHandler');
-      const result = await handleRetryPlanNode({ planId: 'x', nodeId: 'y' }, makeCtx());
+      const { handleRetryPlanJob } = require('../../../mcp/handlers/plan/retryJobHandler');
+      const result = await handleRetryPlanJob({ planId: 'x', jobId: 'y' }, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test('should retry a failed node', async () => {
-      const { handleRetryPlanNode } = require('../../../mcp/handlers/plan/retryNodeHandler');
+      const { handleRetryPlanJob } = require('../../../mcp/handlers/plan/retryJobHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'failed' });
       const ctx = makeCtx({
         getPlan: sinon.stub().returns(plan),
         retryNode: sinon.stub().resolves({ success: true }),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleRetryPlanNode({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+      const result = await handleRetryPlanJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('should return error for non-failed node', async () => {
-      const { handleRetryPlanNode } = require('../../../mcp/handlers/plan/retryNodeHandler');
+      const { handleRetryPlanJob } = require('../../../mcp/handlers/plan/retryJobHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'running' });
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
-      const result = await handleRetryPlanNode({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+      const result = await handleRetryPlanJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.error.includes('not in failed state'));
     });
 
     test('should handle retryNode failure', async () => {
-      const { handleRetryPlanNode } = require('../../../mcp/handlers/plan/retryNodeHandler');
+      const { handleRetryPlanJob } = require('../../../mcp/handlers/plan/retryJobHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'failed' });
       const ctx = makeCtx({
         getPlan: sinon.stub().returns(plan),
         retryNode: sinon.stub().resolves({ success: false, error: 'cannot retry' }),
       });
-      const result = await handleRetryPlanNode({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+      const result = await handleRetryPlanJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
 
-  // ===== updateNodeHandler =====
-  suite('handleUpdatePlanNode', () => {
+  // ===== updateJobHandler =====
+  suite('handleUpdatePlanJob', () => {
     test('should return error when fields missing', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
-      const result = await handleUpdatePlanNode({}, makeCtx());
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
+      const result = await handleUpdatePlanJob({}, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test('should return error when no stage provided', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', type: 'job', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'pending' });
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
-      const result = await handleUpdatePlanNode({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+      const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.error.includes('stage'));
     });
 
     test('should update work on a pending node', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', type: 'job', dependencies: [], dependents: [], work: 'old' };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'pending', stepStatuses: {} });
       const ctx = makeCtx({
         getPlan: sinon.stub().returns(plan),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleUpdatePlanNode({ planId: 'plan-1', nodeId: 'n1', work: 'new' }, ctx);
+      const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'n1', work: 'new' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('should update prechecks and postchecks', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', type: 'job', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'failed', stepStatuses: { prechecks: 'done', work: 'done', postchecks: 'failed', commit: 'pending' } });
       const ctx = makeCtx({
         getPlan: sinon.stub().returns(plan),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleUpdatePlanNode({ planId: 'plan-1', nodeId: 'n1', postchecks: 'npm test' }, ctx);
+      const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'n1', postchecks: 'npm test' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('should reject update on running node', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', type: 'job', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'running' });
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
-      const result = await handleUpdatePlanNode({ planId: 'plan-1', nodeId: 'n1', work: 'new' }, ctx);
+      const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'n1', work: 'new' }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.error.includes('running'));
     });
 
     test('should reject update on succeeded node', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', type: 'job', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'succeeded' });
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
-      const result = await handleUpdatePlanNode({ planId: 'plan-1', nodeId: 'n1', work: 'new' }, ctx);
+      const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'n1', work: 'new' }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.error.includes('completed'));
     });
 
     test('should reject update on non-job node', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Group', type: 'group', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'pending' });
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
-      const result = await handleUpdatePlanNode({ planId: 'plan-1', nodeId: 'n1', work: 'new' }, ctx);
+      const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'n1', work: 'new' }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.error.includes('not a job'));
     });
 
     test('should handle resetToStage', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', type: 'job', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', {
         status: 'failed',
         stepStatuses: { prechecks: 'done', work: 'done', postchecks: 'failed', commit: 'pending', 'merge-ri': 'pending' },
@@ -855,23 +855,23 @@ suite('Plan Handlers', () => {
         getPlan: sinon.stub().returns(plan),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleUpdatePlanNode({
-        planId: 'plan-1', nodeId: 'n1', work: 'new', resetToStage: 'prechecks',
+      const result = await handleUpdatePlanJob({
+        planId: 'plan-1', jobId: 'n1', work: 'new', resetToStage: 'prechecks',
       }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('should clear prechecks with null', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
       const node = { id: 'n1', name: 'Build', type: 'job', dependencies: [], dependents: [], prechecks: 'old' };
-      plan.nodes.set('n1', node);
+      plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'failed', stepStatuses: {} });
       const ctx = makeCtx({
         getPlan: sinon.stub().returns(plan),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleUpdatePlanNode({ planId: 'plan-1', nodeId: 'n1', prechecks: null }, ctx);
+      const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'n1', prechecks: null }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -911,70 +911,70 @@ suite('Plan Handlers', () => {
     });
   });
 
-  // ===== Validation failure tests for retryNodeHandler =====
-  suite('handleRetryPlanNode validation failures', () => {
+  // ===== Validation failure tests for retryJobHandler =====
+  suite('handleRetryPlanJob validation failures', () => {
     test('should return error when allowedFolders invalid', async () => {
-      const { handleRetryPlanNode } = require('../../../mcp/handlers/plan/retryNodeHandler');
-      const result = await handleRetryPlanNode({
-        planId: 'plan-1', nodeId: 'n1',
+      const { handleRetryPlanJob } = require('../../../mcp/handlers/plan/retryJobHandler');
+      const result = await handleRetryPlanJob({
+        planId: 'plan-1', jobId: 'n1',
         work: { type: 'agent', allowedFolders: ['/nonexistent/path/abc123'] },
       }, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test('should return error when allowedUrls invalid', async () => {
-      const { handleRetryPlanNode } = require('../../../mcp/handlers/plan/retryNodeHandler');
-      const result = await handleRetryPlanNode({
-        planId: 'plan-1', nodeId: 'n1',
+      const { handleRetryPlanJob } = require('../../../mcp/handlers/plan/retryJobHandler');
+      const result = await handleRetryPlanJob({
+        planId: 'plan-1', jobId: 'n1',
         work: { type: 'agent', allowedUrls: ['ftp://evil.com'] },
       }, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test.skip('should return error when agent model invalid', async () => {
-      const { handleRetryPlanNode } = require('../../../mcp/handlers/plan/retryNodeHandler');
+      const { handleRetryPlanJob } = require('../../../mcp/handlers/plan/retryJobHandler');
       sinon.stub(modelDiscovery, 'getCachedModels').resolves({
         models: [{ id: 'gpt-5', vendor: 'openai' as const, family: 'gpt-5', tier: 'standard' as const }],
         rawChoices: ['gpt-5'],
         discoveredAt: Date.now(),
       });
-      const result = await handleRetryPlanNode({
-        planId: 'plan-1', nodeId: 'n1',
+      const result = await handleRetryPlanJob({
+        planId: 'plan-1', jobId: 'n1',
         newWork: { type: 'agent', agentModel: 'nonexistent-model-xyz' },
       }, makeCtx());
       assert.strictEqual(result.success, false);
     });
   });
 
-  // ===== Validation failure tests for updateNodeHandler =====
-  suite('handleUpdatePlanNode validation failures', () => {
+  // ===== Validation failure tests for updateJobHandler =====
+  suite('handleUpdatePlanJob validation failures', () => {
     test('should return error when allowedFolders invalid', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
-      const result = await handleUpdatePlanNode({
-        planId: 'plan-1', nodeId: 'n1',
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
+      const result = await handleUpdatePlanJob({
+        planId: 'plan-1', jobId: 'n1',
         work: { type: 'agent', allowedFolders: ['/nonexistent/path/abc123'] },
       }, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test('should return error when allowedUrls invalid', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
-      const result = await handleUpdatePlanNode({
-        planId: 'plan-1', nodeId: 'n1',
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
+      const result = await handleUpdatePlanJob({
+        planId: 'plan-1', jobId: 'n1',
         work: { type: 'agent', allowedUrls: ['ftp://evil.com'] },
       }, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
     test.skip('should return error when agent model invalid', async () => {
-      const { handleUpdatePlanNode } = require('../../../mcp/handlers/plan/updateNodeHandler');
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       sinon.stub(modelDiscovery, 'getCachedModels').resolves({
         models: [{ id: 'gpt-5', vendor: 'openai' as const, family: 'gpt-5', tier: 'standard' as const }],
         rawChoices: ['gpt-5'],
         discoveredAt: Date.now(),
       });
-      const result = await handleUpdatePlanNode({
-        planId: 'plan-1', nodeId: 'n1',
+      const result = await handleUpdatePlanJob({
+        planId: 'plan-1', jobId: 'n1',
         work: { type: 'agent', agentModel: 'nonexistent-model-xyz' },
       }, makeCtx());
       assert.strictEqual(result.success, false);
@@ -982,4 +982,5 @@ suite('Plan Handlers', () => {
   });
 
 });
+
 

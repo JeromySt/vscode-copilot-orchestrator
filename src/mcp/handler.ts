@@ -16,30 +16,35 @@ import { Logger, ComponentLogger } from '../core/logger';
 import { JsonRpcRequest, JsonRpcResponse } from './types';
 import { IMcpRequestRouter } from '../interfaces/IMcpManager';
 import { getPlanToolDefinitions } from './tools/planTools';
-import { getNodeToolDefinitions } from './tools/nodeTools';
+import { getJobToolDefinitions } from './tools/jobTools';
 import { validateInput, hasSchema, validatePostchecksPresence } from './validation';
+import { BUILD_COMMIT, BUILD_TIMESTAMP, BUILD_VERSION } from '../core/buildInfo';
 import {
   PlanHandlerContext,
   handleCreatePlan,
   handleGetPlanStatus,
   handleListPlans,
-  handleGetNodeDetails,
-  handleGetNodeLogs,
-  handleGetNodeAttempts,
+  handleGetJobDetails,
+  handleGetJobLogs,
+  handleGetJobAttempts,
   handleCancelPlan,
   handlePausePlan,
   handleResumePlan,
   handleDeletePlan,
   handleRetryPlan,
-  handleGetNodeFailureContext,
-  handleRetryPlanNode,
-  handleUpdatePlanNode,
-  handleGetNode,
-  handleListNodes,
-  handleRetryNode,
-  handleForceFailNode,
-  handleNodeFailureContext,
+  handleGetJobFailureContext,
+  handleRetryPlanJob,
+  handleUpdatePlanJob,
+  handleUpdatePlan,
+  handleGetJob,
+  handleListJobs,
+  handleRetryJob,
+  handleForceFailJob,
+  handleJobFailureContext,
   handleReshapePlan,
+  handleScaffoldPlan,
+  handleAddPlanJob,
+  handleFinalizePlan,
 } from './handlers';
 
 /** MCP component logger */
@@ -99,18 +104,21 @@ export class McpHandler implements IMcpRequestRouter {
    * @param workspacePath   - Absolute path to the workspace root (git repository).
    * @param git             - Git operations interface.
    * @param configProvider  - Optional configuration provider for reading VS Code settings.
+   * @param planRepository  - Plan repository for filesystem-backed storage.
    */
   constructor(
     PlanRunner: PlanRunner,
     workspacePath: string,
     git: import('../interfaces/IGitOperations').IGitOperations,
     configProvider?: import('../interfaces/IConfigProvider').IConfigProvider,
+    planRepository?: import('../interfaces/IPlanRepository').IPlanRepository,
   ) {
     this.context = { 
       PlanRunner, 
       workspacePath,
       git,
       configProvider,
+      PlanRepository: planRepository!,
       // Legacy fields - kept for type compatibility
       runner: null as any,
       plans: null as any,
@@ -197,7 +205,7 @@ export class McpHandler implements IMcpRequestRouter {
   private async handleToolsList(request: JsonRpcRequest): Promise<JsonRpcResponse> {
     const tools = [
       ...(await getPlanToolDefinitions()),
-      ...(await getNodeToolDefinitions()),
+      ...(await getJobToolDefinitions()),
     ];
     log.info('Tools list requested', { toolCount: tools.length });
     log.debug('Tools list - tool names', { tools: tools.map(t => t.name) });
@@ -227,8 +235,10 @@ export class McpHandler implements IMcpRequestRouter {
         return this.successResponse(request.id, {
           content: [{ type: 'text', text: JSON.stringify({ 
             success: false, 
-            error: validation.error 
-          }) }]
+            error: validation.error,
+            _meta: { version: BUILD_VERSION, buildCommit: BUILD_COMMIT, buildTimestamp: BUILD_TIMESTAMP }
+          }) }],
+          isError: true
         });
       }
     }
@@ -254,16 +264,16 @@ export class McpHandler implements IMcpRequestRouter {
         result = await handleListPlans(args || {}, this.context);
         break;
         
-      case 'get_copilot_node_details':
-        result = await handleGetNodeDetails(args || {}, this.context);
+      case 'get_copilot_job_details':
+        result = await handleGetJobDetails(args || {}, this.context);
         break;
         
-      case 'get_copilot_node_logs':
-        result = await handleGetNodeLogs(args || {}, this.context);
+      case 'get_copilot_job_logs':
+        result = await handleGetJobLogs(args || {}, this.context);
         break;
         
-      case 'get_copilot_node_attempts':
-        result = await handleGetNodeAttempts(args || {}, this.context);
+      case 'get_copilot_job_attempts':
+        result = await handleGetJobAttempts(args || {}, this.context);
         break;
         
       case 'cancel_copilot_plan':
@@ -286,49 +296,71 @@ export class McpHandler implements IMcpRequestRouter {
         result = await handleRetryPlan(args || {}, this.context);
         break;
         
-      case 'get_copilot_plan_node_failure_context':
-        result = await handleGetNodeFailureContext(args || {}, this.context);
+      case 'get_copilot_plan_job_failure_context':
+        result = await handleGetJobFailureContext(args || {}, this.context);
         break;
         
-      case 'retry_copilot_plan_node':
-        result = await handleRetryPlanNode(args || {}, this.context);
+      case 'retry_copilot_plan_job':
+        result = await handleRetryPlanJob(args || {}, this.context);
         break;
         
-      case 'update_copilot_plan_node':
-        result = await handleUpdatePlanNode(args || {}, this.context);
+      case 'update_copilot_plan_job':
+        result = await handleUpdatePlanJob(args || {}, this.context);
+        break;
+
+      case 'update_copilot_plan':
+        result = await handleUpdatePlan(args || {}, this.context);
         break;
         
       case 'reshape_copilot_plan':
         result = await handleReshapePlan(args || {}, this.context);
         break;
         
-      // --- New node-centric tools ---
-      case 'get_copilot_node':
-        result = await handleGetNode(args || {}, this.context);
+      // --- New job-centric tools ---
+      case 'get_copilot_job':
+        result = await handleGetJob(args || {}, this.context);
         break;
         
-      case 'list_copilot_nodes':
-        result = await handleListNodes(args || {}, this.context);
+      case 'list_copilot_jobs':
+        result = await handleListJobs(args || {}, this.context);
         break;
         
-      case 'retry_copilot_node':
-        result = await handleRetryNode(args || {}, this.context);
+      case 'retry_copilot_job':
+        result = await handleRetryJob(args || {}, this.context);
         break;
         
-      case 'force_fail_copilot_node':
-        result = await handleForceFailNode(args || {}, this.context);
+      case 'force_fail_copilot_job':
+        result = await handleForceFailJob(args || {}, this.context);
         break;
         
-      case 'get_copilot_node_failure_context':
-        result = await handleNodeFailureContext(args || {}, this.context);
+      case 'get_copilot_job_failure_context':
+        result = await handleJobFailureContext(args || {}, this.context);
+        break;
+
+      case 'scaffold_copilot_plan':
+        result = await handleScaffoldPlan(args || {}, this.context);
+        break;
+      
+      case 'add_copilot_plan_job':
+        result = await handleAddPlanJob(args || {}, this.context);
+        break;
+      
+      case 'finalize_copilot_plan':
+        result = await handleFinalizePlan(args || {}, this.context);
         break;
         
       default:
         result = { success: false, error: `Unknown tool: ${name}` };
     }
     
+    // Inject build metadata so callers can verify they're talking to the right version
+    if (result && typeof result === 'object') {
+      result._meta = { version: BUILD_VERSION, buildCommit: BUILD_COMMIT, buildTimestamp: BUILD_TIMESTAMP };
+    }
+
     return this.successResponse(request.id, {
-      content: [{ type: 'text', text: JSON.stringify(result) }]
+      content: [{ type: 'text', text: JSON.stringify(result) }],
+      ...(result?.success === false ? { isError: true } : {})
     });
   }
 

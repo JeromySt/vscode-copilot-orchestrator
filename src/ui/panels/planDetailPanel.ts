@@ -332,7 +332,7 @@ export class planDetailPanel {
     while (toVisit.length > 0) {
       const nodeId = toVisit.shift()!;
       if (visited.has(nodeId)) { continue; }
-      const node = plan.nodes.get(nodeId);
+      const node = plan.jobs.get(nodeId);
       if (!node || node.type !== 'job') { continue; }
       const deps = (node as JobNode).dependencies || [];
       if (deps.some(d => !visited.has(d))) {
@@ -349,7 +349,7 @@ export class planDetailPanel {
         isLeaf: plan.leaves.includes(nodeId),
       });
       // Add dependents
-      for (const [otherId, otherNode] of plan.nodes) {
+      for (const [otherId, otherNode] of plan.jobs) {
         if (otherNode.type === 'job' && (otherNode as JobNode).dependencies.includes(nodeId)) {
           toVisit.push(otherId);
         }
@@ -409,7 +409,7 @@ export class planDetailPanel {
     }
     
     const sm = this._planRunner.getStateMachine(this._planId);
-    const status = sm?.computePlanStatus() || 'pending';
+    const status = (plan.spec as any)?.status === 'scaffolding' ? 'scaffolding' : (sm?.computePlanStatus() || 'pending');
     const recursiveCounts = this._planRunner.getRecursiveStatusCounts(this._planId);
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
     
@@ -437,7 +437,7 @@ export class planDetailPanel {
     }
     
     const sm = this._planRunner.getStateMachine(this._planId);
-    const status = sm?.computePlanStatus() || 'pending';
+    const status = (plan.spec as any)?.status === 'scaffolding' ? 'scaffolding' : (sm?.computePlanStatus() || 'pending');
     
     // Get recursive counts including all child plans (for accurate totals)
     const recursiveCounts = this._planRunner.getRecursiveStatusCounts(this._planId);
@@ -478,7 +478,7 @@ export class planDetailPanel {
     
     // Structure hash: nodes and their dependencies (doesn't change during execution)
     const structureHash = JSON.stringify({
-      nodes: Array.from(plan.nodes.entries()).map(([id, n]) => [id, n.name, (n as JobNode).dependencies]),
+      nodes: Array.from(plan.jobs.entries()).map(([id, n]) => [id, n.name, (n as JobNode).dependencies]),
       spec: plan.spec.name
     });
     
@@ -504,7 +504,7 @@ export class planDetailPanel {
     }
     
     // Otherwise, send incremental status update (preserves zoom/scroll)
-    const total = totalNodes ?? plan.nodes.size;
+    const total = totalNodes ?? plan.jobs.size;
     const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
@@ -541,11 +541,11 @@ export class planDetailPanel {
     if (!plan) {return;}
     
     const sm = this._planRunner.getStateMachine(this._planId);
-    const status = sm?.computePlanStatus() || 'pending';
+    const status = (plan.spec as any)?.status === 'scaffolding' ? 'scaffolding' : (sm?.computePlanStatus() || 'pending');
     const recursiveCounts = this._planRunner.getRecursiveStatusCounts(this._planId);
     const counts = recursiveCounts.counts;
     const totalNodes = recursiveCounts.totalNodes;
-    const total = totalNodes ?? plan.nodes.size;
+    const total = totalNodes ?? plan.jobs.size;
     const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
@@ -629,7 +629,7 @@ export class planDetailPanel {
     totalNodes?: number,
     globalCapacityStats?: { thisInstanceJobs: number; totalGlobalJobs: number; globalMaxParallel: number; activeInstances: number } | null
   ): string {
-    const total = totalNodes ?? plan.nodes.size;
+    const total = totalNodes ?? plan.jobs.size;
     const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
@@ -640,7 +640,7 @@ export class planDetailPanel {
     const nodeData: Record<string, { nodeId: string; planId: string; type: string; name: string; startedAt?: number; endedAt?: number; status: string; version: number }> = {};
     
     // Collect all node data with prefixes matching Mermaid IDs
-    for (const [nodeId, node] of plan.nodes) {
+    for (const [nodeId, node] of plan.jobs) {
       const sanitizedId = this._sanitizeId(nodeId);
       const state = plan.nodeStates.get(nodeId);
       
@@ -743,6 +743,15 @@ export class planDetailPanel {
     .status-badge.pending { background: rgba(133, 133, 133, 0.2); color: #858585; }
     .status-badge.paused { background: rgba(255, 165, 0, 0.2); color: #ffa500; }
     .status-badge.canceled { background: rgba(133, 133, 133, 0.2); color: #858585; }
+    .status-badge.scaffolding {
+      background: repeating-linear-gradient(
+        -45deg,
+        rgba(245, 197, 24, 0.2) 0px, rgba(245, 197, 24, 0.2) 6px,
+        rgba(26, 26, 26, 0.3) 6px, rgba(26, 26, 26, 0.3) 12px
+      );
+      color: #f5c518;
+      border: 1px solid rgba(245, 197, 24, 0.5);
+    }
     
     /* Duration display in header */
     .header-duration {
@@ -1366,6 +1375,15 @@ export class planDetailPanel {
       background: var(--vscode-list-hoverBackground);
     }
     
+    .scaffolding-message {
+      padding: 8px 12px;
+      background: rgba(55, 148, 255, 0.1);
+      border-left: 3px solid #3794ff;
+      margin-bottom: 12px;
+      font-style: italic;
+      color: var(--vscode-descriptionForeground);
+    }
+    
   </style>
 </head>
 <body>
@@ -1382,6 +1400,7 @@ export class planDetailPanel {
   })}
   </div>
   ${renderPlanControls({ status })}
+  ${status === 'scaffolding' ? '<div class="scaffolding-message">Plan is being built. Nodes appear as they are added via MCP.</div>' : ''}
   </div>
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}
@@ -1525,6 +1544,9 @@ export class planDetailPanel {
     // Track full names for tooltip display when labels are truncated
     const nodeTooltips: Record<string, string> = {};
     
+    // Check if this is a scaffolding plan
+    const isScaffolding = (plan.spec as any).status === 'scaffolding';
+    
     // Get branch names
     const baseBranchName = plan.baseBranch || 'main';
     const targetBranchName = plan.targetBranch || baseBranchName;
@@ -1538,6 +1560,7 @@ export class planDetailPanel {
     lines.push('  classDef succeeded fill:#1e4d40,stroke:#4ec9b0');
     lines.push('  classDef failed fill:#4d2929,stroke:#f48771');
     lines.push('  classDef blocked fill:#3c3c3c,stroke:#858585,stroke-dasharray:5');
+    lines.push('  classDef draft fill:#2d3748,stroke:#4a5568,stroke-dasharray:5,opacity:0.8');
     lines.push('  classDef branchNode fill:#0e639c,stroke:#0e639c,color:#ffffff');
     lines.push('  classDef baseBranchNode fill:#6e6e6e,stroke:#888888,color:#ffffff');
     lines.push('');
@@ -1622,7 +1645,7 @@ export class planDetailPanel {
       // non-started nodes after render.
       const DURATION_TEMPLATE = ' | 00h 00s '; // fixed-width sizing template (hours format with trailing space)
       let durationLabel = DURATION_TEMPLATE;
-      if (state?.startedAt) {
+      if (!isScaffolding && state?.startedAt) {
         const endTime = state.endedAt || Date.now();
         const duration = endTime - state.startedAt;
         durationLabel = ' | ' + formatDurationMs(duration);
@@ -1635,7 +1658,7 @@ export class planDetailPanel {
       }
       
       lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);
-      lines.push(`${indent}class ${sanitizedId} ${status}`);
+      lines.push(`${indent}class ${sanitizedId} ${isScaffolding ? 'draft' : status}`);
       
       nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
       
@@ -1660,7 +1683,7 @@ export class planDetailPanel {
       
       // First pass: determine which nodes are roots and leaves in this Plan
       const nodeHasDependents = new Set<string>();
-      for (const [nodeId, node] of d.nodes) {
+      for (const [nodeId, node] of d.jobs) {
         for (const depId of node.dependencies) {
           nodeHasDependents.add(depId);
         }
@@ -1670,7 +1693,7 @@ export class planDetailPanel {
       const groupedNodes = new Map<string, { nodeId: string; node: PlanNode }[]>();
       const ungroupedNodes: { nodeId: string; node: PlanNode }[] = [];
       
-      for (const [nodeId, node] of d.nodes) {
+      for (const [nodeId, node] of d.jobs) {
         const groupTag = node.group;
         if (groupTag) {
           if (!groupedNodes.has(groupTag)) {
@@ -1709,7 +1732,7 @@ export class planDetailPanel {
       // Pre-compute rendered label width for each node (icon + name + duration)
       // so that group labels can be truncated to the widest descendant node.
       const nodeLabelWidths = new Map<string, number>();
-      for (const [nodeId, node] of d.nodes) {
+      for (const [nodeId, node] of d.jobs) {
         const escapedName = this._escapeForMermaid(node.name);
         const st = d.nodeStates.get(nodeId);
         let dur = ' | --';
@@ -1850,7 +1873,8 @@ export class planDetailPanel {
         const mapping = nodeEntryExitMap.get(rootId);
         const entryIds = mapping ? mapping.entryIds : [rootId];
         for (const entryId of entryIds) {
-          lines.push(`  TARGET_SOURCE --> ${entryId}`);
+          const edgeStyle = isScaffolding ? '-.->' : '-->';
+          lines.push(`  TARGET_SOURCE ${edgeStyle} ${entryId}`);
           edgeData.push({ index: edgeIndex, from: 'TARGET_SOURCE', to: entryId });
           successEdges.push(edgeIndex++);
         }
@@ -1868,7 +1892,8 @@ export class planDetailPanel {
       for (const exit of fromExits) {
         for (const entry of toEntries) {
           // Dashed edge while source is pending/ready; solid once scheduled+
-          const edgeStyle = (!edge.status || edge.status === 'pending' || edge.status === 'ready') ? '-.->' : '-->';
+          // For scaffolding plans, all edges are dashed
+          const edgeStyle = isScaffolding || (!edge.status || edge.status === 'pending' || edge.status === 'ready') ? '-.->' : '-->';
           lines.push(`  ${exit} ${edgeStyle} ${entry}`);
           edgeData.push({ index: edgeIndex, from: exit, to: entry });
           if (edge.status === 'succeeded') {
@@ -1899,7 +1924,9 @@ export class planDetailPanel {
         const svState = leafnodeStates.get(svSanitizedId);
         const svSucceeded = svState?.status === 'succeeded';
         for (const exitId of exitIds) {
-          if (svSucceeded) {
+          if (isScaffolding) {
+            lines.push(`  ${exitId} -.-> TARGET_DEST`);
+          } else if (svSucceeded) {
             lines.push(`  ${exitId} --> TARGET_DEST`);
             successEdges.push(edgeIndex);
           } else {
@@ -1918,7 +1945,9 @@ export class planDetailPanel {
             const leafState = leafnodeStates.get(exitId);
             const isMerged = leafState?.mergedToTarget === true
               || leafState?.status === 'succeeded';
-            if (isMerged) {
+            if (isScaffolding) {
+              lines.push(`  ${exitId} -.-> TARGET_DEST`);
+            } else if (isMerged) {
               lines.push(`  ${exitId} --> TARGET_DEST`);
               successEdges.push(edgeIndex);
             } else {

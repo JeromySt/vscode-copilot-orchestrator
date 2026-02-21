@@ -54,12 +54,12 @@ interface SerializedPlan {
   workSummary?: WorkSummary;
   isPaused?: boolean;
   branchReady?: boolean;
+  env?: Record<string, string>;
   snapshot?: {
     branch: string;
     worktreePath: string;
     baseCommit: string;
   };
-  awaitingFinalMerge?: boolean;
 }
 
 interface SerializedNode {
@@ -131,6 +131,15 @@ export class PlanPersistence {
     return path.join(this.storagePath, 'plans-index.json');
   }
   
+  /** When true, save/saveSync become no-ops (new IPlanRepository handles persistence). */
+  private _disabled = false;
+
+  /** Disable legacy saves. Called when IPlanRepository is active. */
+  disableSaves(): void {
+    this._disabled = true;
+    log.info('Legacy PlanPersistence saves disabled (IPlanRepository active)');
+  }
+
   /**
    * Persist a Plan to disk as JSON and update the plans index.
    *
@@ -138,6 +147,7 @@ export class PlanPersistence {
    * @throws If the file system write fails.
    */
   save(plan: PlanInstance): void {
+    if (this._disabled) { return; }
     try {
       // Guard against deleted directories
       if (this.workspacePath) {
@@ -273,7 +283,7 @@ export class PlanPersistence {
   private serialize(plan: PlanInstance): SerializedPlan {
     const nodes: SerializedNode[] = [];
     
-    for (const node of plan.nodes.values()) {
+    for (const node of plan.jobs.values()) {
       const serializedNode: SerializedNode = {
         id: node.id,
         producerId: node.producerId,
@@ -358,8 +368,8 @@ export class PlanPersistence {
       workSummary: plan.workSummary,
       isPaused: plan.isPaused,
       branchReady: plan.branchReady,
+      env: plan.env,
       snapshot: plan.snapshot,
-      awaitingFinalMerge: plan.awaitingFinalMerge,
     };
   }
   
@@ -434,7 +444,7 @@ export class PlanPersistence {
     return {
       id: data.id,
       spec: data.spec,
-      nodes,
+      jobs: nodes,
       producerIdToNodeId,
       roots: data.roots,
       leaves: data.leaves,
@@ -458,8 +468,8 @@ export class PlanPersistence {
       workSummary: data.workSummary,
       isPaused: data.isPaused,
       branchReady: data.branchReady,
+      env: data.env,
       snapshot: data.snapshot,
-      awaitingFinalMerge: data.awaitingFinalMerge,
     };
   }
   
@@ -513,6 +523,13 @@ export class PlanPersistence {
     } catch {
       // Ignore errors
     }
+  }
+  
+  /**
+   * Get the storage path for this persistence instance.
+   */
+  getStoragePath(): string {
+    return this.storagePath;
   }
 }
 

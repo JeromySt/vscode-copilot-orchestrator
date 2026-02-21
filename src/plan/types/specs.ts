@@ -166,6 +166,12 @@ export interface AgentSpec {
    */
   instructions: string;
   
+  /** Workspace-relative path to .md file for file-backed agent instructions */
+  instructionsFile?: string;
+  
+  /** Relative path (within plan directory) to the instructions file on disk. Set by migration/store. */
+  instructionsRef?: string;
+  
   /** Optional model preference */
   model?: string;
   
@@ -238,6 +244,9 @@ export interface AgentSpec {
    * ```
    */
   allowedUrls?: string[];
+
+  /** Additional environment variables */
+  env?: Record<string, string>;
 
   /** Failure behavior for this phase */
   onFailure?: OnFailureConfig;

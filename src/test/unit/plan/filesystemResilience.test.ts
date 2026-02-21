@@ -57,11 +57,8 @@ suite('Filesystem Resilience', () => {
       assert.strictEqual(fs.existsSync(orchestratorPath), true);
       assert.strictEqual(resultPath, orchestratorPath);
       
-      // Verify all subdirectories were created
+      // Verify plans subdirectory was created (other subdirs removed from ORCHESTRATOR_SUBDIRS)
       assert.strictEqual(fs.existsSync(path.join(orchestratorPath, 'plans')), true);
-      assert.strictEqual(fs.existsSync(path.join(orchestratorPath, 'logs')), true);
-      assert.strictEqual(fs.existsSync(path.join(orchestratorPath, 'evidence')), true);
-      assert.strictEqual(fs.existsSync(path.join(orchestratorPath, '.copilot')), true);
     });
     
     test('does not recreate existing directories', () => {
@@ -91,19 +88,19 @@ suite('Filesystem Resilience', () => {
     test('creates missing subdirectories when orchestrator exists but subdirs are missing', () => {
       const testWorkspace = makeTmpDir();
       const orchestratorPath = path.join(testWorkspace, '.orchestrator');
-      const logsPath = path.join(orchestratorPath, 'logs');
+      const plansPath = path.join(orchestratorPath, 'plans');
       
       // Create only the orchestrator directory, but not subdirectories
       fs.mkdirSync(orchestratorPath, { recursive: true });
       
-      // Verify logs subdirectory doesn't exist
-      assert.strictEqual(fs.existsSync(logsPath), false);
+      // Verify plans subdirectory doesn't exist
+      assert.strictEqual(fs.existsSync(plansPath), false);
       
       // Call the function
       ensureOrchestratorDirs(testWorkspace);
       
-      // Verify logs subdirectory was created
-      assert.strictEqual(fs.existsSync(logsPath), true);
+      // Verify plans subdirectory was created
+      assert.strictEqual(fs.existsSync(plansPath), true);
     });
   });
 });

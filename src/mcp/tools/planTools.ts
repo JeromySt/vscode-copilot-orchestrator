@@ -11,7 +11,7 @@ import { McpTool } from '../types';
 import { discoverAvailableModelsLegacy } from '../../agent/modelDiscovery';
 
 /**
- * Regex pattern for valid `producer_id` values.
+ * Regex pattern for valid `producerId` values.
  *
  * Enforces lowercase alphanumeric characters and hyphens, 3–64 characters long.
  * Used both for schema validation in tool definitions and server-side input validation
@@ -36,10 +36,10 @@ export const PRODUCER_ID_PATTERN = /^[a-z0-9-]{3,64}$/;
  * Tools are grouped into three categories:
  * 1. **Creation** – `create_copilot_plan`
  * 2. **Status & Queries** – `get_copilot_plan_status`, `list_copilot_plans`,
- *    `get_copilot_node_details`, `get_copilot_node_logs`, `get_copilot_node_attempts`
+ *    `get_copilot_job_details`, `get_copilot_job_logs`, `get_copilot_job_attempts`
  * 3. **Control** – `cancel_copilot_plan`, `delete_copilot_plan`,
- *    `retry_copilot_plan`, `retry_copilot_plan_node`,
- *    `get_copilot_plan_node_failure_context`
+ *    `retry_copilot_plan`, `retry_copilot_plan_job`,
+ *    `get_copilot_plan_job_failure_context`
  *
  * @returns Array of {@link McpTool} definitions registered with the MCP server.
  *
@@ -62,100 +62,58 @@ export async function getPlanToolDefinitions(): Promise<McpTool[]> {
     {
       name: 'create_copilot_plan',
       description: `Create a Plan (Directed Acyclic Graph) of work units. Everything is a Plan - even a single job.
-After creation, use reshape_copilot_plan to add/remove/reorder nodes in a running or paused plan.
+After creation, use reshape_copilot_plan to add/remove/reorder jobs in a running or paused plan.
+For plans with 5+ jobs, consider using scaffold_copilot_plan + add_copilot_plan_job + finalize_copilot_plan instead to avoid large payloads.
 
-PRODUCER_ID IS REQUIRED:
-- Every job MUST have a 'producer_id' field
-- Format: lowercase letters (a-z), numbers (0-9), and hyphens (-) only, 3-64 characters
-- Used in 'dependencies' arrays to establish execution order
-- Jobs with dependencies: [] are root jobs that start immediately
+JOBS ARRAY (required):
+All jobs go in the flat 'jobs' array. Each job has: producerId, task, work, dependencies.
+- producerId: unique identifier (3-64 chars, lowercase a-z, 0-9, hyphens only)
+- task: description of what the job does
+- work: the command or agent spec to execute
+- dependencies: array of producerIds this job depends on ([] for root jobs)
 
-JOBS vs GROUPS (CRITICAL):
-- The 'jobs' array is for flat job definitions only. Jobs have: producer_id, task, work, dependencies.
-- The 'groups' array is for hierarchical organization. Groups have: name, jobs, groups.
-- DO NOT put groups in the 'jobs' array. DO NOT set type: "group" on jobs.
-- DO NOT put nested 'jobs' arrays inside items in the 'jobs' array.
+VISUAL GROUPING:
+Use the optional 'group' string on each job for visual hierarchy in the UI.
+- Jobs with the same group value render together in a collapsible box
+- Use '/' for nesting: "backend/api" nests inside "backend"
+- Groups are purely visual — they do NOT affect execution order (only dependencies do)
 
-GROUPS (VISUAL HIERARCHY + NAMESPACE):
-- Groups organize jobs visually and provide namespace isolation for producer_ids
-- Groups do NOT have dependencies - only jobs have dependencies
-- Groups do NOT have: task, work, producer_id, expects_no_changes, type
-- Jobs within a group can reference siblings by local producer_id (e.g., "sibling-job")
-- Cross-group references use qualified paths (e.g., "other-group/job-id" or "phase1/collection/count-files")
-- Nested groups form hierarchical paths: "phase1/collection/count-files"
-- Groups render as nested boxes in the UI with aggregate status
-
-DEPENDENCY RESOLUTION:
-- Local refs (no '/') are qualified with current group path: "sibling" → "mygroup/sibling"
-- Qualified refs (contain '/') are used as-is: "phase1/analysis/done" stays "phase1/analysis/done"
-- All dependencies must resolve to valid job producer_ids
-
-EXAMPLE WITH GROUPS:
+EXAMPLE:
 {
   "name": "Build Pipeline",
-  "jobs": [],  // Can be empty if all jobs are in groups
-  "groups": [{
-    "name": "phase1",
-    "groups": [
-      {
-        "name": "collection",
-        "jobs": [
-          { "producer_id": "count-files", "task": "Count files", "dependencies": [] },
-          { "producer_id": "count-dirs", "task": "Count dirs", "dependencies": [] }
-        ]
-      },
-      {
-        "name": "analysis",
-        "jobs": [{
-          "producer_id": "analyze",
-          "task": "Analyze",
-          "dependencies": ["collection/count-files", "collection/count-dirs"]  // Cross-group refs
-        }]
-      }
-    ]
-  }, {
-    "name": "phase2",
-    "groups": [{
-      "name": "reporting",
-      "jobs": [{
-        "producer_id": "report",
-        "task": "Generate report",
-        "dependencies": ["phase1/analysis/analyze"]  // Fully qualified cross-phase ref
-      }]
-    }]
-  }]
+  "jobs": [
+    { "producerId": "count-files", "task": "Count files", "dependencies": [], "group": "phase1/collection", "work": "find . -type f | wc -l" },
+    { "producerId": "count-dirs", "task": "Count dirs", "dependencies": [], "group": "phase1/collection", "work": "find . -type d | wc -l" },
+    { "producerId": "analyze", "task": "Analyze", "dependencies": ["count-files", "count-dirs"], "group": "phase1/analysis", "work": "@agent Analyze the counts" },
+    { "producerId": "report", "task": "Generate report", "dependencies": ["analyze"], "group": "phase2/reporting", "work": "npm run report" }
+  ]
 }
 
 EXECUTION CONTEXT:
 - Each job gets its own git worktree for isolated work
-- Dependencies chain commits - dependent jobs start from their parent's commit
+- Dependencies chain commits — dependent jobs start from their parent's commit
 
-WORK OPTIONS (work/prechecks/postchecks/verify_ri accept):
-1. String: "npm run build" (runs in default shell) or "@agent Implement feature" 
-2. Process spec: { type: "process", executable: "dotnet", args: ["build", "-c", "Release"] }
-3. Shell spec: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
-4. Agent spec: { type: "agent", instructions: "# Task\\n\\n1. Step one", model: "claude-sonnet-4.5" }
+WORK OPTIONS (work/prechecks/postchecks/verifyRi accept):
+1. STRING: Shell command like "npm run build" or "@agent Do something" for AI
+2. PROCESS OBJECT: { "type": "process", "executable": "dotnet", "args": ["build"] }
+3. SHELL OBJECT: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
+4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "claude-sonnet-4.5" }
 
-ON_FAILURE CONFIG (optional on any work/prechecks/postchecks object):
-Add "on_failure" to any work spec object to control retry behavior on failure:
-- no_auto_heal: true — prevents automatic AI-assisted retry, requires manual intervention
-- message: "User-facing explanation" — shown in the node detail panel on failure
-- resume_from_phase: "prechecks" — which phase to restart from on retry (merge-fi/prechecks/work/postchecks/commit/merge-ri)
-Example: { type: "shell", command: "npm test", on_failure: { no_auto_heal: true, message: "Tests must pass before merge" } }
+ON_FAILURE CONFIG (optional on any work spec object):
+- noAutoHeal: true — prevents AI retry, requires manual intervention
+- message: "User-facing explanation" — shown on failure
+- resumeFromPhase: "prechecks" — which phase to restart from on retry
 
 VERIFY_RI (SNAPSHOT VALIDATION — HIGHLY RECOMMENDED):
-The verify_ri command runs as the work phase of an auto-injected "Snapshot Validation" node that executes
-after all leaf nodes complete. It validates the accumulated snapshot branch before merging to targetBranch.
-Auto-healable: if verification fails, the AI agent attempts to fix the issue and re-runs.
-Example: "dotnet build --no-restore", "npm run build && npm test", or "@agent Verify compilation and fix any issues"
+Runs as the work phase of an auto-injected "Snapshot Validation" job after all leaf jobs complete.
+Validates the accumulated snapshot before merging to targetBranch.
+Example: "dotnet build --no-restore", "npm run build && npm test"
 
 IMPORTANT: For agent work, specify 'model' INSIDE the work object (not at job level).
 Agent instructions MUST be in Markdown format for proper rendering.
-If the project has .github/skills/ directories, incorporate relevant skill conventions into agent instructions for best results.
 
 SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"
-POWERSHELL NOTE: On Windows, PowerShell is the default shell. The orchestrator automatically wraps commands with $ErrorActionPreference='Continue' and 'exit $LASTEXITCODE' to prevent stderr from native commands causing false failures. Do NOT use '2>&1' in PowerShell commands — it causes NativeCommandError when commands write warnings to stderr, leading to false exit code 1 even when the command succeeds. The orchestrator captures stdout and stderr separately, so 2>&1 is never needed.
-To override $ErrorActionPreference, set "error_action" on the shell spec: "Continue" (default), "Stop", or "SilentlyContinue".`,
+POWERSHELL NOTE: Do NOT use '2>&1' in PowerShell commands.`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -173,7 +131,7 @@ To override $ErrorActionPreference, set "error_action" on the shell spec: "Conti
           },
           maxParallel: { 
             type: 'number', 
-            description: 'Max concurrent jobs (default: 4)' 
+            description: 'Max concurrent jobs for THIS plan. Default: 0 (unlimited — defers to global capacity). Only set this if you have a specific reason to limit concurrency for this plan.' 
           },
           cleanUpSuccessfulWork: { 
             type: 'boolean', 
@@ -188,7 +146,12 @@ To override $ErrorActionPreference, set "error_action" on the shell spec: "Conti
             type: 'boolean',
             description: 'Create the plan in paused state for review before execution (default: true). Set to false to start immediately.'
           },
-          verify_ri: {
+          env: {
+            type: 'object',
+            additionalProperties: { type: 'string' },
+            description: 'Environment variables applied to all jobs in this plan. Individual work specs (work/prechecks/postchecks) can override specific keys with their own env property.'
+          },
+          verifyRi: {
             description: 'Optional (but HIGHLY recommended) verification command run as the work phase of the auto-injected Snapshot Validation node. Executes after all leaf nodes complete, validating the accumulated snapshot before merging to targetBranch. Auto-healable: on failure, Copilot CLI attempts to fix the issue. String command or object with type: process/shell/agent. Example: "dotnet build --no-restore" or "npm run build"',
             oneOf: [
               { type: 'string', maxLength: 4000 },
@@ -203,7 +166,7 @@ To override $ErrorActionPreference, set "error_action" on the shell spec: "Conti
                   instructions: { type: 'string' },
                   model: { type: 'string' },
                   maxTurns: { type: 'number' },
-                  on_failure: { type: 'object' }
+                  onFailure: { type: 'object' }
                 }
               }
             ]
@@ -214,14 +177,14 @@ To override $ErrorActionPreference, set "error_action" on the shell spec: "Conti
             items: {
               type: 'object',
               properties: {
-                producer_id: { 
+                producerId: { 
                   type: 'string', 
                   description: 'REQUIRED. Unique identifier (3-64 chars, lowercase/numbers/hyphens)',
                   pattern: '^[a-z0-9-]{3,64}$'
                 },
                 name: { 
                   type: 'string', 
-                  description: 'Display name (defaults to producer_id)' 
+                  description: 'Display name (defaults to producerId)' 
                 },
                 task: { 
                   type: 'string', 
@@ -246,7 +209,7 @@ SKILL-AWARE INSTRUCTIONS: If the project has .github/skills/ directories, read t
                 dependencies: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'Array of producer_id values this job depends on. Empty [] for root jobs.'
+                  description: 'Array of producerId values this job depends on. Empty [] for root jobs.'
                 },
                 prechecks: { 
                   description: 'Validation before work. String command or object with type: process/shell' 
@@ -258,45 +221,16 @@ SKILL-AWARE INSTRUCTIONS: If the project has .github/skills/ directories, read t
                   type: 'string', 
                   description: 'Additional context for @agent tasks. MUST be in Markdown format (# headers, 1. numbered lists, - bullet lists).' 
                 },
-                expects_no_changes: {
+                expectsNoChanges: {
                   type: 'boolean',
                   description: 'When true, this node is expected to produce no file changes. The commit phase will succeed without a commit instead of failing. Use for validation-only nodes, external-system updates, or analysis tasks.'
                 },
                 group: {
                   type: 'string',
-                  description: 'Visual grouping tag. Jobs with the same group are rendered together in a box. Use / for nested groups (e.g., "backend/api" nests inside "backend"). Groups are purely visual and do not affect execution order.'
+                  description: 'Visual grouping tag. Jobs with the same group render together in the UI. Use / for nesting (e.g., "phase1/setup"). Purely visual — does not affect execution order.'
                 }
               },
-              required: ['producer_id', 'task', 'dependencies']
-            }
-          },
-          groups: {
-            type: 'array',
-            description: `Visual groups for organizing jobs with namespace isolation.
-Jobs within a group can reference each other by local producer_id.
-Cross-group references use qualified paths: "group_name/producer_id".
-Nested groups form paths like "backend/api/auth".
-Groups do NOT have dependencies - jobs describe the full dependency graph.`,
-            items: {
-              type: 'object',
-              properties: {
-                name: { 
-                  type: 'string', 
-                  description: 'Group name (forms part of qualified path for nested refs)'
-                },
-                jobs: {
-                  type: 'array',
-                  description: 'Jobs within this group. Producer IDs are scoped to this group.',
-                  items: { type: 'object' }
-                },
-                groups: {
-                  type: 'array',
-                  description: 'Nested groups (recursive). Forms hierarchical paths like "parent/child".',
-                  items: { type: 'object' }
-                }
-              },
-              required: ['name'],
-              additionalProperties: false
+              required: ['producerId', 'task', 'work', 'dependencies']
             }
           }
         },
@@ -313,12 +247,12 @@ Groups do NOT have dependencies - jobs describe the full dependency graph.`,
       inputSchema: {
         type: 'object',
         properties: {
-          id: { 
+          planId: { 
             type: 'string', 
             description: 'Plan ID (UUID returned from create_copilot_plan)' 
           }
         },
-        required: ['id']
+        required: ['planId']
       }
     },
     
@@ -338,8 +272,8 @@ Groups do NOT have dependencies - jobs describe the full dependency graph.`,
     },
     
     {
-      name: 'get_copilot_node_details',
-      description: 'Get detailed information about a specific node in a Plan.',
+      name: 'get_copilot_job_details',
+      description: 'Get detailed information about a specific job in a Plan.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -347,18 +281,18 @@ Groups do NOT have dependencies - jobs describe the full dependency graph.`,
             type: 'string', 
             description: 'Plan ID' 
           },
-          nodeId: { 
+          jobId: { 
             type: 'string', 
-            description: 'Node ID (UUID) or producer_id' 
+            description: 'Job ID (UUID) or producerId' 
           }
         },
-        required: ['planId', 'nodeId']
+        required: ['planId', 'jobId']
       }
     },
     
     {
-      name: 'get_copilot_node_logs',
-      description: 'Get execution logs for a node.',
+      name: 'get_copilot_job_logs',
+      description: 'Get execution logs for a job.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -366,25 +300,25 @@ Groups do NOT have dependencies - jobs describe the full dependency graph.`,
             type: 'string', 
             description: 'Plan ID' 
           },
-          nodeId: { 
+          jobId: { 
             type: 'string', 
-            description: 'Node ID or producer_id' 
+            description: 'Job ID or producerId' 
           },
           phase: {
             type: 'string',
-            enum: ['prechecks', 'work', 'postchecks', 'commit', 'all'],
-            description: 'Filter by execution phase (default: all)'
+            enum: ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri', 'all'],
+            description: 'Filter by execution phase (default: all). Phases run in order: merge-fi → setup → prechecks → work → commit → postchecks → merge-ri'
           }
         },
-        required: ['planId', 'nodeId']
+        required: ['planId', 'jobId']
       }
     },
     
     {
-      name: 'get_copilot_node_attempts',
-      description: `Get all execution attempts for a node with their logs.
+      name: 'get_copilot_job_attempts',
+      description: `Get all execution attempts for a job with their logs.
 
-Returns a list of all attempts for the node, including:
+Returns a list of all attempts for the job, including:
 - Attempt number and status
 - Start/end timestamps  
 - Which phase failed (if applicable)
@@ -402,9 +336,9 @@ Use this to analyze the history of retries and their outcomes.`,
             type: 'string', 
             description: 'Plan ID' 
           },
-          nodeId: { 
+          jobId: { 
             type: 'string', 
-            description: 'Node ID or producer_id' 
+            description: 'Job ID or producerId' 
           },
           attemptNumber: { 
             type: 'number', 
@@ -415,7 +349,7 @@ Use this to analyze the history of retries and their outcomes.`,
             description: 'Include full logs in response (default: false to keep response compact)'
           }
         },
-        required: ['planId', 'nodeId']
+        required: ['planId', 'jobId']
       }
     },
     
@@ -428,12 +362,12 @@ Use this to analyze the history of retries and their outcomes.`,
       inputSchema: {
         type: 'object',
         properties: {
-          id: { 
+          planId: { 
             type: 'string', 
             description: 'Plan ID to cancel' 
           }
         },
-        required: ['id']
+        required: ['planId']
       }
     },
     
@@ -443,12 +377,12 @@ Use this to analyze the history of retries and their outcomes.`,
       inputSchema: {
         type: 'object',
         properties: {
-          id: { 
+          planId: { 
             type: 'string', 
             description: 'Plan ID to pause' 
           }
         },
-        required: ['id']
+        required: ['planId']
       }
     },
     
@@ -458,12 +392,12 @@ Use this to analyze the history of retries and their outcomes.`,
       inputSchema: {
         type: 'object',
         properties: {
-          id: { 
+          planId: { 
             type: 'string', 
             description: 'Plan ID to resume' 
           }
         },
-        required: ['id']
+        required: ['planId']
       }
     },
     
@@ -473,26 +407,26 @@ Use this to analyze the history of retries and their outcomes.`,
       inputSchema: {
         type: 'object',
         properties: {
-          id: { 
+          planId: { 
             type: 'string', 
             description: 'Plan ID to delete' 
           }
         },
-        required: ['id']
+        required: ['planId']
       }
     },
     
     {
       name: 'retry_copilot_plan',
-      description: `Retry failed nodes in a Plan. 
+      description: `Retry failed jobs in a Plan. 
 
-This resets failed nodes back to 'ready' state and resumes execution.
+This resets failed jobs back to 'ready' state and resumes execution.
 Use after fixing issues that caused the failures.
 
 RETRY WORKFLOW:
-1. Use get_copilot_plan_node_failure_context to analyze why the node failed
+1. Use get_copilot_plan_job_failure_context to analyze why the job failed
 2. Optionally provide newWork to replace or augment the original work
-3. Call retry_copilot_plan with the node ID
+3. Call retry_copilot_plan with the job ID
 
 NEW WORK OPTIONS:
 - String: Shell command like "npm run build" or "@agent Do something"
@@ -506,20 +440,20 @@ the existing Copilot session or start fresh.
 IMPORTANT: Agent instructions MUST be in Markdown format (# headers, 1. numbered lists, - bullet lists).
 
 Options:
-- Retry all failed nodes (default)
-- Retry specific nodes by ID
+- Retry all failed jobs (default)
+- Retry specific jobs by ID
 - Provide replacement work spec`,
       inputSchema: {
         type: 'object',
         properties: {
-          id: { 
+          planId: { 
             type: 'string', 
             description: 'Plan ID to retry' 
           },
-          nodeIds: {
+          jobIds: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional: specific node IDs to retry. If omitted, retries all failed nodes.'
+            description: 'Optional: specific job IDs to retry. If omitted, retries all failed jobs.'
           },
           newWork: {
             description: `Optional replacement work for the retry. Can be:
@@ -542,13 +476,13 @@ Agent instructions MUST be in Markdown format.`
             description: 'Reset worktree to base commit before retry (default: false)'
           }
         },
-        required: ['id']
+        required: ['planId']
       }
     },
     
     {
-      name: 'get_copilot_plan_node_failure_context',
-      description: `Get detailed failure context for a failed node in a Plan.
+      name: 'get_copilot_plan_job_failure_context',
+      description: `Get detailed failure context for a failed job in a Plan.
 
 Returns:
 - Execution logs from the failed attempt
@@ -565,23 +499,23 @@ Use this to analyze failures before deciding how to retry.`,
             type: 'string', 
             description: 'Plan ID' 
           },
-          nodeId: { 
+          jobId: { 
             type: 'string', 
-            description: 'Node ID to get failure context for' 
+            description: 'Job ID to get failure context for' 
           }
         },
-        required: ['planId', 'nodeId']
+        required: ['planId', 'jobId']
       }
     },
     
     {
-      name: 'retry_copilot_plan_node',
-      description: `Retry a specific failed node in a Plan.
+      name: 'retry_copilot_plan_job',
+      description: `Retry a specific failed job in a Plan.
 
-This is a convenience tool for retrying a single node. For retrying multiple
-nodes at once, use retry_copilot_plan with nodeIds array.
+This is a convenience tool for retrying a single job. For retrying multiple
+jobs at once, use retry_copilot_plan with jobIds array.
 
-The node must be in 'failed' state to be retried.
+The job must be in 'failed' state to be retried.
 
 NEW WORK OPTIONS:
 - String: Shell command like "npm run build" or "@agent Do something"
@@ -595,19 +529,19 @@ the existing Copilot session or start fresh.
 IMPORTANT: Agent instructions MUST be in Markdown format.
 
 WORKFLOW:
-1. Use get_copilot_plan_node_failure_context to analyze why the node failed
-2. Call retry_copilot_plan_node with optional newWork
+1. Use get_copilot_plan_job_failure_context to analyze why the job failed
+2. Call retry_copilot_plan_job with optional newWork
 3. Monitor with get_copilot_plan_status`,
       inputSchema: {
         type: 'object',
         properties: {
           planId: { 
             type: 'string', 
-            description: 'Plan ID containing the node' 
+            description: 'Plan ID containing the job' 
           },
-          nodeId: { 
+          jobId: { 
             type: 'string', 
-            description: 'Node ID to retry' 
+            description: 'Job ID to retry' 
           },
           newWork: {
             description: `Optional replacement work for the retry. Can be:
@@ -630,7 +564,7 @@ Agent instructions MUST be in Markdown format.`
             description: 'Reset worktree to base commit before retry (default: false)'
           }
         },
-        required: ['planId', 'nodeId']
+        required: ['planId', 'jobId']
       }
     },
 
@@ -639,40 +573,40 @@ Agent instructions MUST be in Markdown format.`
     // =========================================================================
     {
       name: 'reshape_copilot_plan',
-      description: `Reshape a running or paused plan's DAG topology. Supports adding, removing, and reordering nodes.
+      description: `Reshape a running or paused plan's DAG topology. Supports adding, removing, and reordering jobs.
 
 OPERATIONS (executed sequentially):
-- add_node: Add a new node with spec (producer_id, task, work, dependencies)
-- remove_node: Remove a pending/ready node by nodeId or producer_id
-- update_deps: Replace a node's dependency list (nodeId + dependencies array)
-- add_before: Insert a new node before an existing node (new node uses spec.dependencies; existing node is rewired to depend on the new node)
-- add_after: Insert a new node after an existing node (takes over its dependents)
+- add_job: Add a new job with spec (producerId, task, work, dependencies)
+- remove_job: Remove a pending/ready job by jobId or producerId
+- update_deps: Replace a job's dependency list (jobId + dependencies array)
+- add_before: Insert a new job before an existing job (new job uses spec.dependencies; existing job is rewired to depend on the new job)
+- add_after: Insert a new job after an existing job (takes over its dependents)
 
 EXAMPLE:
 {
   "planId": "<uuid>",
   "operations": [
     {
-      "type": "add_node",
-      "spec": { "producer_id": "lint-fix", "task": "Fix lint errors", "dependencies": ["build"] }
+      "type": "add_job",
+      "spec": { "producerId": "lint-fix", "task": "Fix lint errors", "dependencies": ["build"] }
     },
     {
-      "type": "remove_node",
-      "producer_id": "obsolete-step"
+      "type": "remove_job",
+      "producerId": "obsolete-step"
     },
     {
       "type": "add_before",
-      "existingNodeId": "<node-uuid>",
-      "spec": { "producer_id": "setup-db", "task": "Initialize test DB", "dependencies": [] }
+      "existingJobId": "<job-uuid>",
+      "spec": { "producerId": "setup-db", "task": "Initialize test DB", "dependencies": [] }
     }
   ]
 }
 
 NOTES:
 - Plan must be running or paused
-- Only pending/ready nodes can be removed or have dependencies updated
+- Only pending/ready jobs can be removed or have dependencies updated
 - Cycle detection prevents invalid dependency additions
-- The "Snapshot Validation" node (producer_id: __snapshot-validation__) is auto-managed — it cannot be removed, updated, or have its dependencies changed. Its dependencies sync automatically when the plan topology changes.
+- The "Snapshot Validation" job (producerId: __snapshot-validation__) is auto-managed — it cannot be removed, updated, or have its dependencies changed. Its dependencies sync automatically when the plan topology changes.
 - Returns per-operation results and updated topology`,
       inputSchema: {
         type: 'object',
@@ -689,14 +623,14 @@ NOTES:
               properties: {
                 type: {
                   type: 'string',
-                  enum: ['add_node', 'remove_node', 'update_deps', 'add_before', 'add_after'],
+                  enum: ['add_job', 'remove_job', 'update_deps', 'add_before', 'add_after'],
                   description: 'Operation type'
                 },
                 spec: {
                   type: 'object',
-                  description: 'Node spec for add_node, add_before, add_after. Must include producer_id, task, dependencies.',
+                  description: 'Job spec for add_job, add_before, add_after. Must include producerId, task, dependencies.',
                   properties: {
-                    producer_id: { type: 'string', pattern: '^[a-z0-9-]{3,64}$' },
+                    producerId: { type: 'string', pattern: '^[a-z0-9-]{3,64}$' },
                     name: { type: 'string' },
                     task: { type: 'string' },
                     work: { description: 'Work spec (string or object)' },
@@ -704,25 +638,25 @@ NOTES:
                     prechecks: { description: 'Prechecks spec' },
                     postchecks: { description: 'Postchecks spec' },
                     instructions: { type: 'string' },
-                    expects_no_changes: { type: 'boolean' }
+                    expectsNoChanges: { type: 'boolean' }
                   }
                 },
-                nodeId: {
+                jobId: {
                   type: 'string',
-                  description: 'Node ID (UUID) or producer_id for remove_node / update_deps'
+                  description: 'Job ID (UUID) or producerId for remove_job / update_deps'
                 },
-                producer_id: {
+                producerId: {
                   type: 'string',
-                  description: 'Producer ID for remove_node (alternative to nodeId)'
+                  description: 'Producer ID for remove_job (alternative to jobId)'
                 },
-                existingNodeId: {
+                existingJobId: {
                   type: 'string',
-                  description: 'Existing node ID for add_before / add_after'
+                  description: 'Existing job ID for add_before / add_after'
                 },
                 dependencies: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'New dependency list for update_deps (node IDs or producer_ids)'
+                  description: 'New dependency list for update_deps (job IDs or producerIds)'
                 }
               },
               required: ['type']
@@ -730,6 +664,200 @@ NOTES:
           }
         },
         required: ['planId', 'operations']
+      }
+    },
+
+    // =========================================================================
+    // Plan Update Tool
+    // =========================================================================
+    {
+      name: 'update_copilot_plan',
+      description: `Update plan-level settings. Use to change environment variables or concurrency limits on an existing plan.
+
+The plan can be in any state (scaffolding, paused, running). Changes take effect for the next job execution.
+
+ENVIRONMENT VARIABLES:
+- Set env to apply environment variables to ALL jobs in the plan
+- Individual work specs can override specific keys via their own env field
+- Pass {} to clear all plan-level env vars
+
+EXAMPLES:
+- Set OpenSSL path: { "planId": "<uuid>", "env": { "OPENSSL_DIR": "C:\\\\vcpkg\\\\installed\\\\x64-windows" } }
+- Set multiple: { "planId": "<uuid>", "env": { "RUST_LOG": "debug", "CARGO_TARGET_DIR": "/tmp/target" } }
+- Change concurrency: { "planId": "<uuid>", "maxParallel": 4 }`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: { type: 'string', description: 'Plan ID to update' },
+          env: {
+            type: 'object',
+            additionalProperties: { type: 'string' },
+            description: 'Environment variables applied to all jobs. Job-level env overrides specific keys. Pass {} to clear.'
+          },
+          maxParallel: {
+            type: 'number',
+            description: 'Max concurrent jobs (0 = unlimited, defers to global capacity)'
+          }
+        },
+        required: ['planId']
+      }
+    },
+
+    // =========================================================================
+    // Scaffolding Tools
+    // =========================================================================
+    {
+      name: 'scaffold_copilot_plan',
+      description: 'Create an empty plan scaffold for incremental job building. Returns a planId. The plan appears in the UI as "Scaffolding". Use add_copilot_plan_job to add jobs one at a time, then finalize_copilot_plan to start. RECOMMENDED for plans with 5+ jobs to avoid large payloads.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { 
+            type: 'string', 
+            description: 'Human-readable name for the Plan' 
+          },
+          baseBranch: { 
+            type: 'string', 
+            description: 'Starting branch (default: main). Root jobs branch from here.' 
+          },
+          targetBranch: { 
+            type: 'string', 
+            description: 'Optional branch to merge final results into' 
+          },
+          maxParallel: { 
+            type: 'number', 
+            minimum: 1,
+            maximum: 64,
+            description: 'Max concurrent jobs for THIS plan. Default: unlimited (defers to global capacity). Only set if you need to limit this specific plan.' 
+          },
+          startPaused: {
+            type: 'boolean',
+            description: 'Create the plan in paused state for review before execution (default: true)'
+          },
+          cleanUpSuccessfulWork: { 
+            type: 'boolean', 
+            description: 'Clean up worktrees after successful merges (default: true)' 
+          },
+          env: {
+            type: 'object',
+            additionalProperties: { type: 'string' },
+            description: 'Environment variables applied to all jobs in this plan. Individual work specs (work/prechecks/postchecks) can override specific keys with their own env property.'
+          },
+          additionalSymlinkDirs: {
+            type: 'array',
+            description: "Additional directories to symlink from the main repo into worktrees (e.g. '.venv', 'vendor'). Merged with built-in list (node_modules). Must be .gitignored, read-only directories.",
+            items: { type: 'string' }
+          },
+          verifyRi: {
+            description: 'Optional verification command run as the work phase of the auto-injected Snapshot Validation node. Executes after all leaf nodes complete, validating the accumulated snapshot before merging to targetBranch. Auto-healable: on failure, Copilot CLI attempts to fix the issue.'
+          }
+        },
+        required: ['name']
+      }
+    },
+
+    {
+      name: 'add_copilot_plan_job',
+      description: `Add a job to a scaffolding plan (before finalize). REQUIRED fields: planId, producerId, task, work.
+
+NOTE: This tool only works on plans in 'scaffolding' status (before finalize_copilot_plan).
+To add jobs to a finalized/running/paused plan, use reshape_copilot_plan with an 'add_node' operation.
+
+- name: Short display title (max 80 chars). Do NOT put instructions here.
+- task: Brief description (max 200 chars). NOT the work instructions.
+- work: The actual work specification — agent instructions, shell commands, or process specs go here.
+
+For agent work: {"type": "agent", "model": "claude-opus-4.5", "instructions": "Detailed instructions..."}`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: {
+            type: 'string',
+            description: 'Plan unique identifier returned from scaffold_copilot_plan'
+          },
+          producerId: {
+            type: 'string',
+            pattern: PRODUCER_ID_PATTERN.source,
+            description: 'Producer identifier - lowercase letters, numbers, hyphens only, 3-64 characters'
+          },
+          name: {
+            type: 'string',
+            maxLength: 80,
+            description: 'Short display name (max 80 chars). Do NOT put instructions here — use the work field.'
+          },
+          task: {
+            type: 'string',
+            maxLength: 200,
+            description: 'Brief task description (max 200 chars). Detailed instructions go in the work field.'
+          },
+          dependencies: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of producerIds this job depends on'
+          },
+          group: {
+            type: 'string',
+            description: 'Optional group path for hierarchical organization'
+          },
+          work: {
+            description: 'Work specification - can be string, or object with type (agent/shell/process)',
+            oneOf: [
+              { type: 'string' },
+              {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', enum: ['agent', 'shell', 'process'] },
+                  instructionsFile: { type: 'string', description: 'Path to .md file with instructions (agent type only, mutually exclusive with instructions)' },
+                  instructions: { type: 'string', description: 'Inline instructions (agent type only, mutually exclusive with instructionsFile)' },
+                  model: { type: 'string', enum: modelEnum },
+                  modelTier: { type: 'string', enum: ['fast', 'balanced', 'premium'] },
+                  context_files: { type: 'array', items: { type: 'string' } },
+                  max_turns: { type: 'number', minimum: 1, maximum: 100 },
+                  allowed_folders: { type: 'array', items: { type: 'string' } },
+                  allowed_urls: { type: 'array', items: { type: 'string' } },
+                  command: { type: 'string' },
+                  executable: { type: 'string' },
+                  args: { type: 'array', items: { type: 'string' } },
+                  shell: { type: 'string', enum: ['cmd', 'powershell', 'pwsh', 'bash', 'sh'] }
+                }
+              }
+            ]
+          },
+          prechecks: {
+            description: 'Optional prechecks specification - runs before main work'
+          },
+          postchecks: {
+            description: 'Optional postchecks specification - runs after main work'
+          },
+          autoHeal: {
+            type: 'boolean',
+            description: 'Enable automatic healing on failure (default: true)'
+          },
+          expectsNoChanges: {
+            type: 'boolean',
+            description: 'If true, job should not modify any files (default: false)'
+          }
+        },
+        required: ['planId', 'producerId', 'task', 'work']
+      }
+    },
+
+    {
+      name: 'finalize_copilot_plan',
+      description: 'Validate and start a scaffolded plan. Resolves dependencies, checks for cycles, transitions from Scaffolding to execution.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: {
+            type: 'string',
+            description: 'Plan unique identifier returned from scaffold_copilot_plan'
+          },
+          startPaused: {
+            type: 'boolean',
+            description: 'Start the plan in paused state for review (default: false)'
+          }
+        },
+        required: ['planId']
       }
     },
   ];

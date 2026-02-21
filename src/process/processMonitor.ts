@@ -61,7 +61,7 @@ export class ProcessMonitor implements IProcessMonitor {
     const now = Date.now();
     
     // Return cached snapshot if still valid
-    if (now - this.lastSnapshotTime < this.cacheTtlMs && this.snapshotCache.length > 0) {
+    if (this.lastSnapshotTime > 0 && now - this.lastSnapshotTime < this.cacheTtlMs) {
       return this.snapshotCache;
     }
     

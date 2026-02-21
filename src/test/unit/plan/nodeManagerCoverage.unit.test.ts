@@ -44,11 +44,11 @@ function createJobNode(id: string, deps: string[] = [], dependents: string[] = [
   };
 }
 
-function createPlan(nodeOverrides?: { nodes?: Map<string, PlanNode>; nodeStates?: Map<string, NodeExecutionState> }): PlanInstance {
+function createPlan(nodeOverrides?: { jobs?: Map<string, PlanNode>; nodeStates?: Map<string, NodeExecutionState> }): PlanInstance {
   const node = createJobNode('n1');
   return {
     id: 'plan-1', spec: { name: 'Test', jobs: [], baseBranch: 'main' },
-    nodes: nodeOverrides?.nodes || new Map([['n1', node]]),
+    jobs: nodeOverrides?.jobs || new Map([['n1', node]]),
     producerIdToNodeId: new Map([['n1', 'n1']]),
     roots: ['n1'], leaves: ['n1'],
     nodeStates: nodeOverrides?.nodeStates || new Map([['n1', { status: 'failed', version: 1, attempts: 1 } as NodeExecutionState]]),
@@ -128,7 +128,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
 
     const result = await mgr.retryNode('plan-1', 'n1', { newWork: 'echo fixed' });
     assert.strictEqual(result.success, true);
-    const node = plan.nodes.get('n1') as JobNode;
+    const node = plan.jobs.get('n1') as JobNode;
     assert.strictEqual(node.work, 'echo fixed');
   });
 
@@ -186,7 +186,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
     const log = createMockLogger();
     const node = createJobNode('n1', [], [], { work: '@agent Fix the code' as any });
     const plan = createPlan({
-      nodes: new Map([['n1', node]]),
+      jobs: new Map([['n1', node]]),
       nodeStates: new Map([['n1', {
         status: 'failed', version: 1, attempts: 1,
         copilotSessionId: 'session-abc',
@@ -218,7 +218,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
     const result = await mgr.retryNode('plan-1', 'n1');
     assert.strictEqual(result.success, true);
     // Work should have been auto-generated with retry instructions
-    const jobNode = plan.nodes.get('n1') as JobNode;
+    const jobNode = plan.jobs.get('n1') as JobNode;
     assert.ok((jobNode.work as string).includes('@agent'));
   });
 
@@ -254,7 +254,7 @@ suite('NodeManager - retryNode and forceFailNode', () => {
     const dep = createJobNode('dep', [], ['n1']);
     const node = createJobNode('n1', ['dep'], []);
     const plan = createPlan({
-      nodes: new Map([['dep', dep], ['n1', node]]),
+      jobs: new Map([['dep', dep], ['n1', node]]),
       nodeStates: new Map([
         ['dep', { status: 'succeeded', version: 1, attempts: 1, completedCommit: 'dep-commit' } as NodeExecutionState],
         ['n1', { status: 'failed', version: 1, attempts: 1, worktreePath: '/wt', baseCommit: 'base' } as NodeExecutionState],

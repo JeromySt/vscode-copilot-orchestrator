@@ -63,6 +63,7 @@ function mockGitOperations(): IGitOperations {
       getCommitCount: sinon.stub().resolves(0),
       checkoutFile: sinon.stub().resolves(),
       resetHard: sinon.stub().resolves(),
+      resetMixed: sinon.stub().resolves(),
       clean: sinon.stub().resolves(),
       updateRef: sinon.stub().resolves(),
       stashPush: sinon.stub().resolves(true),
@@ -97,6 +98,7 @@ function mockGitOperations(): IGitOperations {
       list: sinon.stub().resolves(['main']),
       getCommit: sinon.stub().resolves('abc123'),
       getMergeBase: sinon.stub().resolves('abc123'),
+      isAncestor: sinon.stub().resolves(false),
       remove: sinon.stub().resolves(),
       deleteLocal: sinon.stub().resolves(true),
       deleteRemote: sinon.stub().resolves(true),
@@ -382,6 +384,105 @@ suite('CommitPhaseExecutor', () => {
     
     const result = await executor.execute(context);
     assert.strictEqual(result.success, true);
+  });
+
+  test('AI review passes allowedFolders with log directory when getLogFilePath returns path', async () => {
+    const git = mockGitOperations();
+    (git.repository.getDirtyFiles as sinon.SinonStub).resolves([]);
+    (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
+    (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('abc123');
+
+    const logs: LogEntry[] = [];
+    let capturedAllowedFolders: string[] | undefined;
+    const delegator = {
+      delegate: sinon.stub().callsFake(async (opts: any) => {
+        capturedAllowedFolders = opts.allowedFolders;
+        opts.logOutput('[ai-review] {"legitimate": true, "reason": "done"}');
+        return { success: true, metrics: { durationMs: 50 } };
+      }),
+    };
+    const logInfo = sinon.stub().callsFake((msg: string) => {
+      logs.push({ timestamp: Date.now(), phase: 'commit', type: 'info', message: msg });
+    });
+
+    const logFilePath = '/storage/plans/test-plan/specs/test-node/current/execution.log';
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const result = await executor.execute(makeCtx({
+      baseCommit: 'abc123',
+      logInfo,
+      getExecutionLogs: () => logs,
+      getLogFilePath: () => logFilePath,
+    }));
+
+    assert.strictEqual(result.success, true);
+    assert.ok(capturedAllowedFolders, 'allowedFolders should be passed to delegator');
+    assert.strictEqual(capturedAllowedFolders!.length, 1);
+    assert.strictEqual(capturedAllowedFolders![0], '/storage/plans/test-plan/specs/test-node/current');
+  });
+
+  test('AI review passes undefined allowedFolders when getLogFilePath is not provided', async () => {
+    const git = mockGitOperations();
+    (git.repository.getDirtyFiles as sinon.SinonStub).resolves([]);
+    (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
+    (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('abc123');
+
+    const logs: LogEntry[] = [];
+    let capturedAllowedFolders: string[] | undefined;
+    const delegator = {
+      delegate: sinon.stub().callsFake(async (opts: any) => {
+        capturedAllowedFolders = opts.allowedFolders;
+        opts.logOutput('[ai-review] {"legitimate": true, "reason": "done"}');
+        return { success: true, metrics: { durationMs: 50 } };
+      }),
+    };
+    const logInfo = sinon.stub().callsFake((msg: string) => {
+      logs.push({ timestamp: Date.now(), phase: 'commit', type: 'info', message: msg });
+    });
+
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    // Note: NOT providing getLogFilePath in context
+    const ctx = makeCtx({
+      baseCommit: 'abc123',
+      logInfo,
+      getExecutionLogs: () => logs,
+    });
+    delete (ctx as any).getLogFilePath;
+    
+    const result = await executor.execute(ctx);
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(capturedAllowedFolders, undefined, 'allowedFolders should be undefined when no log path');
+  });
+
+  test('AI review passes undefined allowedFolders when getLogFilePath returns undefined', async () => {
+    const git = mockGitOperations();
+    (git.repository.getDirtyFiles as sinon.SinonStub).resolves([]);
+    (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
+    (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('abc123');
+
+    const logs: LogEntry[] = [];
+    let capturedAllowedFolders: string[] | undefined;
+    const delegator = {
+      delegate: sinon.stub().callsFake(async (opts: any) => {
+        capturedAllowedFolders = opts.allowedFolders;
+        opts.logOutput('[ai-review] {"legitimate": true, "reason": "done"}');
+        return { success: true, metrics: { durationMs: 50 } };
+      }),
+    };
+    const logInfo = sinon.stub().callsFake((msg: string) => {
+      logs.push({ timestamp: Date.now(), phase: 'commit', type: 'info', message: msg });
+    });
+
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const result = await executor.execute(makeCtx({
+      baseCommit: 'abc123',
+      logInfo,
+      getExecutionLogs: () => logs,
+      getLogFilePath: () => undefined,
+    }));
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(capturedAllowedFolders, undefined, 'allowedFolders should be undefined when log path is undefined');
   });
 
   test('AI review with work description variations', async () => {

@@ -66,7 +66,7 @@ function makeMockPlan(overrides?: Record<string, any>): any {
   return {
     id: 'plan-1',
     spec: { name: 'Test Plan', jobs: [] },
-    nodes: new Map(),
+    jobs: new Map(),
     producerIdToNodeId: new Map(),
     roots: ['node-1'],
     leaves: ['node-1'],
@@ -182,7 +182,7 @@ suite('McpHandler', () => {
         name: 'create_copilot_plan',
         arguments: { 
           name: 'Test Plan', 
-          jobs: [{ producer_id: 'build', task: 'Build', dependencies: [] }],
+          jobs: [{ producerId: 'build', task: 'Build', dependencies: [] }],
         },
       }));
 
@@ -337,12 +337,12 @@ suite('McpHandler', () => {
   });
 
   // =========================================================================
-  // tools/call - get_copilot_node_details
+  // tools/call - get_copilot_job_details
   // =========================================================================
-  suite('tools/call - get_copilot_node_details', () => {
+  suite('tools/call - get_copilot_job_details', () => {
     test('returns error when required fields missing', async () => {
       const res = await handler.handleRequest(makeRequest('tools/call', {
-        name: 'get_copilot_node_details',
+        name: 'get_copilot_job_details',
         arguments: { planId: 'plan-1' },
       }));
 
@@ -368,7 +368,7 @@ suite('McpHandler', () => {
         endedAt: 2000,
       };
       const mockPlan = makeMockPlan({
-        nodes: new Map([['node-1', node]]),
+        jobs: new Map([['node-1', node]]),
         nodeStates: new Map([['node-1', nodeState]]),
         producerIdToNodeId: new Map([['build', 'node-1']]),
       });
@@ -378,7 +378,7 @@ suite('McpHandler', () => {
       const h = new McpHandler(mockRunner, '/workspace', {} as any);
 
       const res = await h.handleRequest(makeRequest('tools/call', {
-        name: 'get_copilot_node_details',
+        name: 'get_copilot_job_details',
         arguments: { planId: 'plan-1', nodeId: 'node-1' },
       }));
 

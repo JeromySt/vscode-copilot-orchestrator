@@ -42,7 +42,6 @@ import { ExecutionPump } from './executionPump';
 import { JobExecutionEngine } from './executionEngine';
 import { PlanEventEmitter } from './planEvents';
 import { SnapshotManager } from './phases/snapshotManager';
-import { FinalMergeExecutor } from './phases/finalMergePhase';
 import type { PlanConfigManager } from './configManager';
 
 const log = Logger.for('plan-runner');
@@ -158,7 +157,7 @@ export class PlanRunner extends EventEmitter {
           // Wire the snapshot worktree to the snapshot-validation node
           const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
           if (svNodeId) {
-            const svNode = plan.nodes.get(svNodeId);
+            const svNode = plan.jobs.get(svNodeId);
             if (svNode) {
               svNode.assignedWorktreePath = snapshot.worktreePath;
             }
@@ -223,6 +222,10 @@ export class PlanRunner extends EventEmitter {
     this._state.powerManager = pm;
   }
 
+  setPlanRepository(repo: import('../interfaces/IPlanRepository').IPlanRepository): void {
+    this._state.planRepository = repo;
+  }
+
   // -- Lifecycle -------------------------------------------------------------
 
   async initialize(): Promise<void> {
@@ -243,6 +246,11 @@ export class PlanRunner extends EventEmitter {
 
   enqueue(spec: PlanSpec): PlanInstance {
     return this._lifecycle.enqueue(spec);
+  }
+
+  /** Register an already-built PlanInstance with the runner (from IPlanRepository). */
+  registerPlan(plan: PlanInstance): void {
+    this._lifecycle.registerPlan(plan);
   }
 
   enqueueJob(jobSpec: {
@@ -314,7 +322,17 @@ export class PlanRunner extends EventEmitter {
     const plan = this._state.plans.get(planId);
     if (!plan) {return false;}
     this._state.persistence.save(plan);
+    
+    // Also save to plan repository if available
+    if (this._state.planRepository) {
+      this._state.planRepository.saveStateSync(plan);
+    }
     return true;
+  }
+
+  /** Get the plan storage directory path (for resolving relative refs). */
+  getStoragePath(): string {
+    return this._state.persistence.getStoragePath();
   }
 
   // -- Node control ----------------------------------------------------------
@@ -325,42 +343,6 @@ export class PlanRunner extends EventEmitter {
 
   async forceFailNode(planId: string, nodeId: string): Promise<void> {
     return this._nodeManager.forceFailNode(planId, nodeId);
-  }
-
-  /**
-   * Manually trigger the final merge (snapshot → targetBranch).
-   * Called from the "Complete RI Merge" UI button when the plan is in
-   * `awaitingFinalMerge` state.
-   */
-  async completeFinalMerge(planId: string): Promise<{ success: boolean; error?: string }> {
-    const plan = this._state.plans.get(planId);
-    if (!plan) { return { success: false, error: 'Plan not found' }; }
-    if (!plan.awaitingFinalMerge) { return { success: false, error: 'Plan is not awaiting final merge' }; }
-    if (!plan.snapshot || !plan.targetBranch) { return { success: false, error: 'No snapshot or target branch' }; }
-
-    const finalMerge = new FinalMergeExecutor({
-      git: this._git,
-      log: s => log.info(s),
-    });
-
-    const result = await finalMerge.execute(plan);
-    if (result.success) {
-      plan.awaitingFinalMerge = undefined;
-      // Cleanup snapshot
-      try {
-        const snapshotMgr = new SnapshotManager(this._git);
-        await snapshotMgr.cleanupSnapshot(plan.snapshot, plan.repoPath, s => log.debug(s));
-        plan.snapshot = undefined;
-      } catch (e: any) {
-        log.warn(`Snapshot cleanup failed: ${e.message}`);
-      }
-      this._state.persistence.save(plan);
-      this._state.events.emitPlanCompleted(plan, 'succeeded');
-      return { success: true };
-    }
-
-    this._state.persistence.save(plan);
-    return { success: false, error: result.error };
   }
 }
 

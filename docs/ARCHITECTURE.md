@@ -300,7 +300,7 @@ graph LR
 - **Plan creation**: `enqueue(spec)` builds the DAG via `buildPlan()` and persists it
 - **Pump loop**: Selects ready nodes → schedules → executes → transitions state → checks completion
 - **Retry**: `retryNode()` resets a failed node to `pending`, unblocks descendants, optionally resumes from the failed phase
-- **Events**: Emits `planCreated`, `planCompleted`, `nodeTransition`, `planDeleted`
+- **Events**: Emits `planCreated`, `planScaffolded`, `scaffoldNodeAdded`, `planFinalized`, `planCompleted`, `nodeTransition`, `planDeleted`
 
 ### DAG Builder
 
@@ -375,7 +375,7 @@ merge-fi → setup → prechecks → work → commit → postchecks → merge-ri
 - **Merge FI** — Forward integration of dependency commits into the worktree
 - **Setup** — Worktree environment preparation (symlinks, instructions)
 - **Prechecks/Postchecks** — Optional validation commands (auto-healable unless `onFailure.noAutoHeal` is set)
-- **Work** — Routed by `WorkSpec` type (see [Work Specification Types](#work-specification-types))
+- **Work** — Routed by `WorkSpec` type (lazy-loaded via `IPlanDefinition.getWorkSpec()`) (see [Work Specification Types](#work-specification-types))
 - **Commit** — Validates work evidence, stages and commits changes in the worktree
 - **Merge RI** — Reverse integration merge. In v0.12.0+, leaf merges go into a **snapshot branch** (not targetBranch directly). Uses in-memory `git merge-tree --write-tree`; conflicts resolved by extracting files to temp dir → Copilot CLI → hash objects back.
 
@@ -410,6 +410,51 @@ Defined in `src/plan/types/specs.ts`:
 | `string` | Legacy format — shell command or `@agent ...` | `"npm run lint"` |
 
 All structured specs support an optional `onFailure: OnFailureConfig` field (snake_case `on_failure` accepted from MCP) to control auto-heal behavior, user-facing failure messages, and retry resume points.
+
+### Plan Repository & Storage
+
+The plan storage system uses a **three-layer abstraction** for efficient memory usage and clear separation of concerns:
+
+#### Architecture Layers
+
+1. **IPlanRepository** (`src/interfaces/IPlanRepository.ts`) — High-level lifecycle operations
+   - `scaffold(spec)` → create plan structure without loading specs
+   - `addNode(planId, spec)` → add work specs to scaffolded plan
+   - `finalize(planId)` → mark plan complete and ready for execution
+   - `load(planId)` → get existing plan with lazy-loading capabilities
+
+2. **IPlanDefinition** (`src/interfaces/IPlanDefinition.ts`) — Lazy work spec access
+   - `getWorkSpec(nodeId)` → loads specs on-demand from storage
+   - `getAllWorkSpecs()` → bulk load for execution scenarios
+   - Prevents memory bloat by keeping large instruction strings on disk
+
+3. **IPlanRepositoryStore** (`src/plan/store/`) — Low-level filesystem operations
+   - `FileSystemPlanStore.ts` — concrete implementation with direct fs calls
+   - JSON serialization/deserialization
+   - Migration from legacy `plan-{id}.json` format
+
+#### Filesystem Layout
+
+```
+.orchestrator/plans/<plan-id>/
+├── plan.json              # Plan topology + execution state 
+└── specs/<producer-id>/   # Work specifications (lazy-loaded)
+    └── work.md            # Instruction files
+```
+
+#### Benefits
+
+- **Memory efficiency**: Work specs (often large instructions) loaded on-demand only
+- **Write-once pattern**: Specs written during scaffold/addNode, read during execution
+- **Legacy migration**: Old `plan-{id}.json` files auto-migrated on first load
+- **Clean separation**: PlanInstance holds IPlanDefinition reference, not inline strings
+
+#### Scaffold Workflow
+
+For plans with 5+ nodes, use the scaffold workflow:
+1. `scaffold()` — create plan structure
+2. `addNode()` — add each work spec individually  
+3. `finalize()` — mark complete and ready for execution
 
 ### PlanPersistence — State Durability
 
@@ -595,7 +640,7 @@ graph TB
     PDP -->|openNode| NDP
     SB -->|click| PDP
 
-    PR[PlanRunner Events] -->|planCreated<br/>nodeTransition<br/>planCompleted| PV
+    PR[PlanRunner Events] -->|planCreated<br/>planScaffolded<br/>planFinalized<br/>nodeTransition<br/>planCompleted| PV
     PR -->|nodeTransition| PDP
     PR -->|nodeTransition| NDP
     PR -->|polling| SB
@@ -605,7 +650,7 @@ graph TB
 
 `PlansViewProvider` (`src/ui/plansViewProvider.ts`) implements `vscode.WebviewViewProvider`:
 - Displays all plans with progress bars, status badges, and node counts
-- **Auto-refresh**: Listens to PlanRunner events (`planCreated`, `planCompleted`, `planDeleted`, `nodeTransition`) with debouncing
+- **Auto-refresh**: Listens to PlanRunner events (`planCreated`, `planScaffolded`, `planFinalized`, `planCompleted`, `planDeleted`, `nodeTransition`) with debouncing
 - **Message protocol**: Webview sends `openPlan`, `cancelPlan`, `deletePlan`, `refresh`; extension sends `update` with plan list
 
 ### Detail Panels

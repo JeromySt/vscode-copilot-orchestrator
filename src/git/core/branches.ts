@@ -12,6 +12,11 @@ import { execAsync, execAsyncOrNull, execAsyncOrThrow, GitLogger } from './execu
 // Cache for default branch per repo (doesn't change during session)
 const defaultBranchCache = new Map<string, string | null>();
 
+/** Clear the default-branch cache (for tests only). */
+export function clearDefaultBranchCache(): void {
+  defaultBranchCache.clear();
+}
+
 /**
  * Get the default branch for a repository (cached).
  */
@@ -250,4 +255,25 @@ export async function getCommit(branchName: string, repoPath: string): Promise<s
  */
 export async function getMergeBase(branch1: string, branch2: string, repoPath: string): Promise<string | null> {
   return execAsyncOrNull(['merge-base', branch1, branch2], repoPath);
+}
+
+/**
+ * Check if commit A is an ancestor of commit B.
+ * 
+ * Equivalent to: git merge-base --is-ancestor A B
+ * 
+ * @param ancestor - The potential ancestor commit
+ * @param descendant - The potential descendant commit  
+ * @param repoPath - Repository path (can be main repo or worktree)
+ * @returns true if ancestor is an ancestor of descendant, false otherwise
+ */
+export async function isAncestor(ancestor: string, descendant: string, repoPath: string): Promise<boolean> {
+  try {
+    // --is-ancestor returns exit code 0 if true, 1 if false
+    // execAsyncOrNull returns null on non-zero exit, so we need to handle differently
+    const result = await execAsync(['merge-base', '--is-ancestor', ancestor, descendant], { cwd: repoPath });
+    return true; // Command succeeded = is ancestor
+  } catch {
+    return false; // Command failed = not ancestor (or error, treated as not ancestor)
+  }
 }

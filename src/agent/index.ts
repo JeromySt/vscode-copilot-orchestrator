@@ -13,7 +13,7 @@ export {
 } from './agentDelegator';
 
 export { isCopilotCliAvailable, checkCopilotCliAsync, resetCliCache, isCliCachePopulated } from './cliCheckCore';
-export { ensureCopilotCliInteractive, registerCopilotCliCheck } from './cliCheck';
+export { ensureCopilotCliInteractive, registerCopilotCliCheck, checkCopilotCliOnStartup } from './cliCheck';
 
 export {
   CopilotCliRunner,

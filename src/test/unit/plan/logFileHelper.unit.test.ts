@@ -35,17 +35,17 @@ suite('logFileHelper', () => {
       assert.strictEqual(getLogFilePathByKey('key', undefined, logFiles), undefined);
     });
 
-    test('returns a path under storagePath/logs', () => {
+    test('returns a path under storagePath/plans', () => {
       const logFiles = new Map<string, string>();
       const result = getLogFilePathByKey('plan-1:node-1:1', '/storage', logFiles);
       assert.ok(result);
-      assert.ok(result.includes('logs'));
+      assert.ok(result.includes('plans'));
     });
 
     test('caches the path in logFiles map', () => {
       const logFiles = new Map<string, string>();
-      const first = getLogFilePathByKey('key1', '/storage', logFiles);
-      const second = getLogFilePathByKey('key1', '/storage', logFiles);
+      const first = getLogFilePathByKey('plan1:node1:1', '/storage', logFiles);
+      const second = getLogFilePathByKey('plan1:node1:1', '/storage', logFiles);
       assert.strictEqual(first, second);
       assert.strictEqual(logFiles.size, 1);
     });
@@ -61,8 +61,6 @@ suite('logFileHelper', () => {
   suite('appendToLogFile', () => {
     test('creates log file with header on first append', () => {
       const dir = makeTmpDir();
-      const orchDir = path.join(dir, '.orchestrator');
-      fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
       const logFiles = new Map<string, string>();
       const entry: LogEntry = {
         timestamp: Date.now(),
@@ -70,8 +68,8 @@ suite('logFileHelper', () => {
         type: 'info',
         message: 'test message',
       };
-      appendToLogFile('key1', entry, orchDir, logFiles);
-      const logFile = logFiles.get('key1')!;
+      appendToLogFile('plan1:node1:1', entry, dir, logFiles);
+      const logFile = logFiles.get('plan1:node1:1')!;
       assert.ok(fs.existsSync(logFile));
       const content = fs.readFileSync(logFile, 'utf8');
       assert.ok(content.includes('test message'));
@@ -83,40 +81,34 @@ suite('logFileHelper', () => {
     test('does nothing when storagePath is undefined', () => {
       const logFiles = new Map<string, string>();
       const entry: LogEntry = { timestamp: Date.now(), phase: 'work', type: 'info', message: 'msg' };
-      appendToLogFile('key1', entry, undefined, logFiles);
+      appendToLogFile('plan1:node1:1', entry, undefined, logFiles);
       assert.strictEqual(logFiles.size, 0);
     });
 
     test('handles stderr prefix', () => {
       const dir = makeTmpDir();
-      const orchDir = path.join(dir, '.orchestrator');
-      fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
       const logFiles = new Map<string, string>();
       const entry: LogEntry = { timestamp: Date.now(), phase: 'work', type: 'stderr', message: 'error msg' };
-      appendToLogFile('key1', entry, orchDir, logFiles);
-      const content = fs.readFileSync(logFiles.get('key1')!, 'utf8');
+      appendToLogFile('plan1:node1:1', entry, dir, logFiles);
+      const content = fs.readFileSync(logFiles.get('plan1:node1:1')!, 'utf8');
       assert.ok(content.includes('[ERR]'));
     });
 
     test('handles error prefix', () => {
       const dir = makeTmpDir();
-      const orchDir = path.join(dir, '.orchestrator');
-      fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
       const logFiles = new Map<string, string>();
       const entry: LogEntry = { timestamp: Date.now(), phase: 'work', type: 'error', message: 'err' };
-      appendToLogFile('key1', entry, orchDir, logFiles);
-      const content = fs.readFileSync(logFiles.get('key1')!, 'utf8');
+      appendToLogFile('plan1:node1:1', entry, dir, logFiles);
+      const content = fs.readFileSync(logFiles.get('plan1:node1:1')!, 'utf8');
       assert.ok(content.includes('[ERROR]'));
     });
 
     test('handles stdout prefix (empty)', () => {
       const dir = makeTmpDir();
-      const orchDir = path.join(dir, '.orchestrator');
-      fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
       const logFiles = new Map<string, string>();
       const entry: LogEntry = { timestamp: Date.now(), phase: 'prechecks', type: 'stdout', message: 'out' };
-      appendToLogFile('key1', entry, orchDir, logFiles);
-      const content = fs.readFileSync(logFiles.get('key1')!, 'utf8');
+      appendToLogFile('plan1:node1:1', entry, dir, logFiles);
+      const content = fs.readFileSync(logFiles.get('plan1:node1:1')!, 'utf8');
       assert.ok(content.includes('[PRECHECKS]'));
     });
   });
@@ -124,28 +116,24 @@ suite('logFileHelper', () => {
   suite('readLogsFromFile', () => {
     test('returns "No log file found." when log file does not exist on disk', () => {
       const dir = makeTmpDir();
-      const orchDir = path.join(dir, '.orchestrator');
-      fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
       const logFiles = new Map<string, string>();
-      const result = readLogsFromFile('key1', orchDir, logFiles);
+      const result = readLogsFromFile('plan1:node1:1', dir, logFiles);
       // getLogFilePathByKey no longer auto-creates — read should report not found
       assert.ok(result.includes('No log file found'));
     });
 
     test('returns "No log file found." when storagePath is undefined', () => {
       const logFiles = new Map<string, string>();
-      const result = readLogsFromFile('key1', undefined, logFiles);
+      const result = readLogsFromFile('plan1:node1:1', undefined, logFiles);
       assert.ok(result.includes('No log file found'));
     });
 
     test('reads existing log file', () => {
       const dir = makeTmpDir();
-      const orchDir = path.join(dir, '.orchestrator');
-      fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
       const logFiles = new Map<string, string>();
       const entry: LogEntry = { timestamp: Date.now(), phase: 'work', type: 'info', message: 'hello' };
-      appendToLogFile('key1', entry, orchDir, logFiles);
-      const result = readLogsFromFile('key1', orchDir, logFiles);
+      appendToLogFile('plan1:node1:1', entry, dir, logFiles);
+      const result = readLogsFromFile('plan1:node1:1', dir, logFiles);
       assert.ok(result.includes('hello'));
     });
   });
@@ -153,47 +141,41 @@ suite('logFileHelper', () => {
   suite('readLogsFromFileOffset', () => {
     test('returns "No log file found." when no storagePath', () => {
       const logFiles = new Map<string, string>();
-      const result = readLogsFromFileOffset('key1', 0, undefined, logFiles);
+      const result = readLogsFromFileOffset('plan1:node1:1', 0, undefined, logFiles);
       assert.ok(result.includes('No log file found'));
     });
 
     test('reads full file when offset <= 0', () => {
       const dir = makeTmpDir();
-      const orchDir = path.join(dir, '.orchestrator');
-      fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
       const logFiles = new Map<string, string>();
       const entry: LogEntry = { timestamp: Date.now(), phase: 'work', type: 'info', message: 'full read' };
-      appendToLogFile('key1', entry, orchDir, logFiles);
-      const result = readLogsFromFileOffset('key1', 0, orchDir, logFiles);
+      appendToLogFile('plan1:node1:1', entry, dir, logFiles);
+      const result = readLogsFromFileOffset('plan1:node1:1', 0, dir, logFiles);
       assert.ok(result.includes('full read'));
     });
 
     test('reads from offset', () => {
       const dir = makeTmpDir();
-      const orchDir = path.join(dir, '.orchestrator');
-      fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
       const logFiles = new Map<string, string>();
-      appendToLogFile('key1', { timestamp: Date.now(), phase: 'work', type: 'info', message: 'line1' }, orchDir, logFiles);
-      appendToLogFile('key1', { timestamp: Date.now(), phase: 'work', type: 'info', message: 'line2' }, orchDir, logFiles);
-      const fullContent = readLogsFromFile('key1', orchDir, logFiles);
-      const partialContent = readLogsFromFileOffset('key1', 10, orchDir, logFiles);
+      appendToLogFile('plan1:node1:1', { timestamp: Date.now(), phase: 'work', type: 'info', message: 'line1' }, dir, logFiles);
+      appendToLogFile('plan1:node1:1', { timestamp: Date.now(), phase: 'work', type: 'info', message: 'line2' }, dir, logFiles);
+      const fullContent = readLogsFromFile('plan1:node1:1', dir, logFiles);
+      const partialContent = readLogsFromFileOffset('plan1:node1:1', 10, dir, logFiles);
       assert.ok(partialContent.length < fullContent.length);
     });
 
     test('returns empty string when offset >= file size', () => {
       const dir = makeTmpDir();
-      const orchDir = path.join(dir, '.orchestrator');
-      fs.mkdirSync(path.join(orchDir, 'logs'), { recursive: true });
       const logFiles = new Map<string, string>();
-      appendToLogFile('key1', { timestamp: Date.now(), phase: 'work', type: 'info', message: 'x' }, orchDir, logFiles);
-      const result = readLogsFromFileOffset('key1', 999999, orchDir, logFiles);
+      appendToLogFile('plan1:node1:1', { timestamp: Date.now(), phase: 'work', type: 'info', message: 'x' }, dir, logFiles);
+      const result = readLogsFromFileOffset('plan1:node1:1', 999999, dir, logFiles);
       assert.strictEqual(result, '');
     });
 
     test('returns "No log file found." for ENOENT', () => {
       const logFiles = new Map<string, string>();
-      logFiles.set('key1', '/nonexistent/path.log');
-      const result = readLogsFromFileOffset('key1', 5, '/nonexistent', logFiles);
+      logFiles.set('plan1:node1:1', '/nonexistent/path.log');
+      const result = readLogsFromFileOffset('plan1:node1:1', 5, '/nonexistent', logFiles);
       assert.ok(result.includes('No log file found'));
     });
   });

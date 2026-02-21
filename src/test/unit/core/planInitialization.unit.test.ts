@@ -306,7 +306,7 @@ suite('registerPlanCommands', () => {
     test('shows info when plan has no nodes', async () => {
       registerCommands();
       const spy = sandbox.spy(vscode.window, 'showInformationMessage');
-      mockPlanRunner.get.returns({ id: 'p1', nodes: new Map() });
+      mockPlanRunner.get.returns({ id: 'p1', jobs: new Map() });
 
       await executeCommand('orchestrator.showNodeDetails', 'p1');
       assert.ok(spy.calledWith('No nodes in this plan'));
@@ -316,7 +316,7 @@ suite('registerPlanCommands', () => {
       registerCommands();
       const nodeMap = new Map();
       nodeMap.set('n1', { id: 'n1', spec: { name: 'Node 1' } });
-      mockPlanRunner.get.returns({ id: 'p1', nodes: nodeMap });
+      mockPlanRunner.get.returns({ id: 'p1', jobs: nodeMap });
       sandbox.stub(vscode.window, 'showQuickPick').resolves(undefined);
 
       await executeCommand('orchestrator.showNodeDetails', 'p1');
@@ -335,7 +335,7 @@ suite('registerPlanCommands', () => {
       registerCommands();
       const nodeMap = new Map();
       nodeMap.set('n1', { id: 'n1' }); // No spec property
-      mockPlanRunner.get.returns({ id: 'p1', nodes: nodeMap });
+      mockPlanRunner.get.returns({ id: 'p1', jobs: nodeMap });
       sandbox.stub(vscode.window, 'showQuickPick').resolves(undefined);
 
       await executeCommand('orchestrator.showNodeDetails', 'p1');
@@ -354,7 +354,7 @@ suite('registerPlanCommands', () => {
       registerCommands();
       const nodeMap = new Map();
       nodeMap.set('n1', { id: 'n1', spec: { name: 'Node 1' } });
-      mockPlanRunner.get.returns({ id: 'p1', nodes: nodeMap });
+      mockPlanRunner.get.returns({ id: 'p1', jobs: nodeMap });
       sandbox.stub(vscode.window, 'showQuickPick').resolves({ label: 'Node 1', nodeId: 'n1' } as any);
 
       try {
@@ -375,7 +375,7 @@ suite('registerPlanCommands', () => {
       const qpStub = sandbox.stub(vscode.window, 'showQuickPick');
       qpStub.onFirstCall().resolves({ label: 'Plan 1', planId: 'p1' } as any);
       qpStub.onSecondCall().resolves({ label: 'Node 1', nodeId: 'n1' } as any);
-      mockPlanRunner.get.returns({ id: 'p1', nodes: nodeMap });
+      mockPlanRunner.get.returns({ id: 'p1', jobs: nodeMap });
 
       try {
         await executeCommand('orchestrator.showNodeDetails');

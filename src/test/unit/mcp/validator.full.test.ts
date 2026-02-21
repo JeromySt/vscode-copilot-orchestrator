@@ -103,24 +103,24 @@ suite('MCP Validator', () => {
       assert.strictEqual(validateInput('retry_copilot_plan', { id: 'test', clearWorktree: true }).valid, true);
     });
 
-    test('should validate get_copilot_node_details', () => {
+    test('should validate get_copilot_job_details', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
-      assert.strictEqual(validateInput('get_copilot_node_details', { planId: 'p', nodeId: 'n' }).valid, true);
+      assert.strictEqual(validateInput('get_copilot_job_details', { planId: 'p', nodeId: 'n' }).valid, true);
     });
 
     test('should validate node-centric tools', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
-      assert.strictEqual(validateInput('get_copilot_node', { node_id: 'n1' }).valid, true);
-      assert.strictEqual(validateInput('list_copilot_nodes', {}).valid, true);
-      assert.strictEqual(validateInput('list_copilot_nodes', { status: 'failed' }).valid, true);
-      assert.strictEqual(validateInput('retry_copilot_node', { node_id: 'n1' }).valid, true);
-      assert.strictEqual(validateInput('force_fail_copilot_node', { node_id: 'n1' }).valid, true);
+      assert.strictEqual(validateInput('get_copilot_job', { job_id: 'n1' }).valid, true);
+      assert.strictEqual(validateInput('list_copilot_jobs', {}).valid, true);
+      assert.strictEqual(validateInput('list_copilot_jobs', { status: 'failed' }).valid, true);
+      assert.strictEqual(validateInput('retry_copilot_job', { job_id: 'n1' }).valid, true);
+      assert.strictEqual(validateInput('force_fail_copilot_job', { job_id: 'n1' }).valid, true);
     });
 
-    test('should validate update_copilot_plan_node', () => {
+    test('should validate update_copilot_plan_job', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
-      assert.strictEqual(validateInput('update_copilot_plan_node', { planId: 'p', nodeId: 'n' }).valid, true);
-      assert.strictEqual(validateInput('update_copilot_plan_node', {
+      assert.strictEqual(validateInput('update_copilot_plan_job', { planId: 'p', nodeId: 'n' }).valid, true);
+      assert.strictEqual(validateInput('update_copilot_plan_job', {
         planId: 'p', nodeId: 'n', work: 'npm build', resetToStage: 'work',
       }).valid, true);
     });
@@ -186,7 +186,7 @@ suite('MCP Validator', () => {
       const tools = getRegisteredTools();
       assert.ok(Array.isArray(tools));
       assert.ok(tools.includes('create_copilot_plan'));
-      assert.ok(tools.includes('get_copilot_node'));
+      assert.ok(tools.includes('get_copilot_job'));
     });
   });
 
@@ -332,7 +332,7 @@ suite('MCP Validator', () => {
     test('should traverse nodes for URLs', async () => {
       const { validateAllowedUrls } = require('../../../mcp/validation/validator');
       const result = await validateAllowedUrls({
-        nodes: [{ work: { type: 'agent', allowedUrls: ['https://ok.com'] } }],
+        jobs: [{ work: { type: 'agent', allowedUrls: ['https://ok.com'] } }],
       }, 'test');
       assert.strictEqual(result.valid, true);
     });
@@ -402,7 +402,7 @@ suite('MCP Validator', () => {
     test('should traverse nodes for folders', async () => {
       const { validateAllowedFolders } = require('../../../mcp/validation/validator');
       const result = await validateAllowedFolders({
-        nodes: [{ work: { type: 'agent', allowedFolders: ['relative'] } }],
+        jobs: [{ work: { type: 'agent', allowedFolders: ['relative'] } }],
       }, 'test');
       assert.strictEqual(result.valid, false);
     });
@@ -445,7 +445,7 @@ suite('MCP Validator', () => {
     test('traverses nodes array', () => {
       const { validatePowerShellCommands } = require('../../../mcp/validation/validator');
       const result = validatePowerShellCommands({
-        nodes: [{ work: { type: 'shell', command: 'test 2>&1', shell: 'pwsh' } }],
+        jobs: [{ work: { type: 'shell', command: 'test 2>&1', shell: 'pwsh' } }],
       });
       assert.strictEqual(result.valid, false);
       assert.ok(result.error?.includes('2>&1'));
@@ -468,18 +468,18 @@ suite('MCP Validator', () => {
       assert.ok(schemas.create_copilot_plan);
       assert.ok(schemas.get_copilot_plan_status);
       assert.ok(schemas.list_copilot_plans);
-      assert.ok(schemas.get_copilot_node_details);
-      assert.ok(schemas.get_copilot_node_logs);
-      assert.ok(schemas.get_copilot_node_attempts);
+      assert.ok(schemas.get_copilot_job_details);
+      assert.ok(schemas.get_copilot_job_logs);
+      assert.ok(schemas.get_copilot_job_attempts);
       assert.ok(schemas.cancel_copilot_plan);
       assert.ok(schemas.delete_copilot_plan);
       assert.ok(schemas.retry_copilot_plan);
-      assert.ok(schemas.retry_copilot_plan_node);
-      assert.ok(schemas.get_copilot_node);
-      assert.ok(schemas.list_copilot_nodes);
-      assert.ok(schemas.retry_copilot_node);
-      assert.ok(schemas.force_fail_copilot_node);
-      assert.ok(schemas.update_copilot_plan_node);
+      assert.ok(schemas.retry_copilot_plan_job);
+      assert.ok(schemas.get_copilot_job);
+      assert.ok(schemas.list_copilot_jobs);
+      assert.ok(schemas.retry_copilot_job);
+      assert.ok(schemas.force_fail_copilot_job);
+      assert.ok(schemas.update_copilot_plan_job);
     });
   });
 });

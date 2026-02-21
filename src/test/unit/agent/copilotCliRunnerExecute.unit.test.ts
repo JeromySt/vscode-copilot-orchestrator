@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { CopilotCliRunner } from '../../../agent/copilotCliRunner';
+import { resetCliCache } from '../../../agent/cliCheckCore';
 
 /**
  * Testable subclass that overrides buildCommand to use simple shell commands
@@ -25,6 +26,10 @@ class TestableCliRunner extends CopilotCliRunner {
 
   setTestCommand(cmd: string): void {
     this._testCommand = cmd;
+  }
+
+  isAvailable(): boolean {
+    return true;
   }
 
   buildCommand(_options: any): string {
@@ -48,6 +53,12 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
   setup(() => {
     logMessages = [];
     runner = new CopilotCliRunner(createLogger());
+    // Ensure isCopilotCliAvailable() returns true optimistically
+    resetCliCache();
+  });
+
+  teardown(() => {
+    resetCliCache();
   });
 
   // ==========================================================================
@@ -128,7 +139,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
   // run() method - integration via execute
   // ==========================================================================
   suite('run() method', () => {
-    test('run with CLI not available returns silent success', async () => {
+    test('run with CLI not available returns failure', async () => {
       // Clear module cache and mock isCopilotCliAvailable
       const cliCheckPath = require.resolve('../../../agent/cliCheckCore');
       const savedCache = require.cache[cliCheckPath];
@@ -154,7 +165,9 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
           label: 'test',
         });
 
-        assert.strictEqual(result.success, true, 'Should return success when CLI not available');
+        assert.strictEqual(result.success, false, 'Should return failure when CLI not available');
+        assert.ok(result.error?.includes('Copilot CLI not available'), 'Should include error message');
+        assert.strictEqual(result.exitCode, 127, 'Should return exit code 127');
       } finally {
         // Restore
         if (savedCache) {

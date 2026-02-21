@@ -29,6 +29,8 @@ import { ORCHESTRATOR_SKILL_DIR } from './setupPhase';
 export interface CommitPhaseContext extends PhaseContext {
   /** Get execution logs for AI review */
   getExecutionLogs: () => LogEntry[];
+  /** Get the log file path for the current execution (for granting AI review access) */
+  getLogFilePath?: () => string | undefined;
 }
 
 /**
@@ -56,6 +58,8 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
     try {
       // Remove projected orchestrator skill directory before staging
       this.removeOrchestratorSkillDir(worktreePath, ctx);
+      // Remove .copilot-cli session state that copilot-cli may create in cwd despite --config-dir
+      this.removeCopilotCliDir(worktreePath, ctx);
 
       ctx.logInfo(`Checking git status in ${worktreePath}`);
       const statusOutput = await this.getGitStatus(worktreePath);
@@ -151,6 +155,18 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
       }
     } catch {
       // Non-fatal: directory may already be gone
+    }
+  }
+
+  private removeCopilotCliDir(worktreePath: string, ctx: CommitPhaseContext): void {
+    const copilotCliDir = path.join(worktreePath, '.copilot-cli');
+    try {
+      if (fs.existsSync(copilotCliDir)) {
+        fs.rmSync(copilotCliDir, { recursive: true, force: true });
+        ctx.logInfo('Removed .copilot-cli directory leaked by copilot-cli into worktree');
+      }
+    } catch {
+      // Non-fatal
     }
   }
 
@@ -254,12 +270,18 @@ OR
 
 **YOUR RESPONSE (JSON ONLY):**`;
 
+      // Grant the AI reviewer read access to the attempt log directory so it can
+      // inspect execution logs for diagnostic context.
+      const logFilePath = ctx.getLogFilePath?.();
+      const logDir = logFilePath ? path.dirname(logFilePath) : undefined;
+
       const result = await this.agentDelegator.delegate({
         task: 'Complete the task described in the instructions.',
         instructions: aiInstructions,
         worktreePath,
         model: 'claude-haiku-4.5',
         jobId: node.id,
+        allowedFolders: logDir ? [logDir] : undefined,
         logOutput: (line: string) => ctx.logInfo(`[ai-review] ${line}`),
         onProcess: () => {},
       });

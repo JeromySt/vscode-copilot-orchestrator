@@ -138,9 +138,7 @@ export interface IPlanRunner extends EventEmitter {
 
   retryNode(planId: string, nodeId: string, options?: RetryNodeOptions): Promise<{ success: boolean; error?: string }>;
   forceFailNode(planId: string, nodeId: string): Promise<void>;
-  
-  /** Trigger the final merge (snapshot → targetBranch) when plan is awaiting user action. */
-  completeFinalMerge(planId: string): Promise<{ success: boolean; error?: string }>;
+
 
   // ── Lifecycle ──────────────────────────────────────────────────────
 

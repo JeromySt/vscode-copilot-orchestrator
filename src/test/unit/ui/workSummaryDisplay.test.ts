@@ -68,7 +68,7 @@ function createMockPlan(opts: {
     targetBranch: opts.targetBranch,
     // Required fields (minimal stubs)
     spec: { name: 'test-plan', jobs: [] },
-    nodes: new Map<string, JobNode>(),
+    jobs: new Map<string, JobNode>(),
     nodeStates: new Map<string, NodeExecutionState>(),
     producerIdToNodeId: new Map(),
     roots: [],

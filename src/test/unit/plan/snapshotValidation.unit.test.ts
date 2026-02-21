@@ -97,7 +97,7 @@ suite('Snapshot Validation Node', () => {
 
       const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
       assert.ok(svNodeId, 'Snapshot-validation node must exist');
-      const svNode = plan.nodes.get(svNodeId!)!;
+      const svNode = plan.jobs.get(svNodeId!)!;
       assert.strictEqual(svNode.type, 'job');
       assert.strictEqual(svNode.name, 'Snapshot Validation');
       assert.strictEqual(svNode.group, undefined, 'SV node should not have a group when plan has no groups');
@@ -113,7 +113,7 @@ suite('Snapshot Validation Node', () => {
 
       const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
       assert.ok(svNodeId);
-      const svNode = plan.nodes.get(svNodeId!)!;
+      const svNode = plan.jobs.get(svNodeId!)!;
       assert.strictEqual(svNode.group, 'Final Merge Validation');
     });
 
@@ -132,7 +132,7 @@ suite('Snapshot Validation Node', () => {
       const bId = plan.producerIdToNodeId.get('b')!;
       const cId = plan.producerIdToNodeId.get('c')!;
       const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
-      const svNode = plan.nodes.get(svNodeId)!;
+      const svNode = plan.jobs.get(svNodeId)!;
 
       assert.ok(svNode.dependencies.includes(bId), 'Should depend on leaf b');
       assert.ok(svNode.dependencies.includes(cId), 'Should depend on leaf c');
@@ -151,7 +151,7 @@ suite('Snapshot Validation Node', () => {
       const plan = buildPlan(spec);
       assert.strictEqual(plan.leaves.length, 1);
 
-      const leafNode = plan.nodes.get(plan.leaves[0])!;
+      const leafNode = plan.jobs.get(plan.leaves[0])!;
       assert.strictEqual(leafNode.producerId, '__snapshot-validation__');
     });
 
@@ -164,7 +164,7 @@ suite('Snapshot Validation Node', () => {
       };
       const plan = buildPlan(spec);
       const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
-      const svNode = plan.nodes.get(svNodeId)!;
+      const svNode = plan.jobs.get(svNodeId)!;
       assert.strictEqual(svNode.work, 'npm test');
     });
 
@@ -213,7 +213,7 @@ suite('Snapshot Validation Node', () => {
       const plan = buildPlan(spec);
       assert.ok(!plan.groupPathToId.has('Final Merge Validation'));
       const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
-      const svNode = plan.nodes.get(svNodeId)!;
+      const svNode = plan.jobs.get(svNodeId)!;
       assert.strictEqual(svNode.group, undefined);
       assert.strictEqual(svNode.groupId, undefined);
     });
@@ -226,7 +226,7 @@ suite('Snapshot Validation Node', () => {
       };
       const plan = buildPlan(spec);
       const aId = plan.producerIdToNodeId.get('a')!;
-      const aNode = plan.nodes.get(aId)!;
+      const aNode = plan.jobs.get(aId)!;
       const svId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
       assert.ok(aNode.dependents.includes(svId));
     });
@@ -239,7 +239,7 @@ suite('Snapshot Validation Node', () => {
       };
       const plan = buildPlan(spec);
       const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
-      const svNode = plan.nodes.get(svNodeId)!;
+      const svNode = plan.jobs.get(svNodeId)!;
       assert.strictEqual(svNode.assignedWorktreePath, undefined);
     });
   });
@@ -292,7 +292,7 @@ suite('Snapshot Validation Node', () => {
 
       // Simulate snapshot creation setting assignedWorktreePath
       const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__')!;
-      const svNode = plan.nodes.get(svNodeId)!;
+      const svNode = plan.jobs.get(svNodeId)!;
       svNode.assignedWorktreePath = '/tmp/snapshot-worktree';
 
       persistence.save(plan);
@@ -300,7 +300,7 @@ suite('Snapshot Validation Node', () => {
       const loaded = persistence.load(plan.id);
       assert.ok(loaded);
 
-      const loadedSvNode = loaded!.nodes.get(svNodeId)!;
+      const loadedSvNode = loaded!.jobs.get(svNodeId)!;
       assert.strictEqual(loadedSvNode.name, 'Snapshot Validation');
       assert.strictEqual(loadedSvNode.assignedWorktreePath, '/tmp/snapshot-worktree');
       assert.strictEqual(loadedSvNode.group, undefined, 'SV node should not have group in ungrouped plan');

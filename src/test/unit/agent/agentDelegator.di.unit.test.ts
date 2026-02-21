@@ -15,6 +15,7 @@ import type { ICopilotRunner } from '../../../interfaces/ICopilotRunner';
 import type { IGitOperations } from '../../../interfaces/IGitOperations';
 import type { CopilotRunOptions, CopilotRunResult } from '../../../agent/copilotCliRunner';
 import * as modelDiscovery from '../../../agent/modelDiscovery';
+import * as cliCheckCore from '../../../agent/cliCheckCore';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ function createMockGitOps(): IGitOperations {
       getDirtyFiles: async () => [],
       checkoutFile: async () => {},
       resetHard: async () => {},
+      resetMixed: async () => {},
       clean: async () => {},
       updateRef: async () => {},
       stashPush: async () => true,
@@ -109,6 +111,8 @@ suite('AgentDelegator DI', () => {
     sandbox = sinon.createSandbox();
     // Stub model validation to avoid needing a spawner
     sandbox.stub(modelDiscovery, 'isValidModel').resolves(true);
+    // Stub CLI availability so delegate() calls the injected runner
+    sandbox.stub(cliCheckCore, 'isCopilotCliAvailable').returns(true);
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'delegator-test-'));
     // Create .copilot-orchestrator dir structure
     fs.mkdirSync(path.join(tmpDir, '.orchestrator', '.copilot'), { recursive: true });

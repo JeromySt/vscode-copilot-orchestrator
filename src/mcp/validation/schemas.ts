@@ -31,7 +31,7 @@ import { JSONSchemaType } from 'ajv';
 // ============================================================================
 
 /**
- * Pattern for valid producer_id values.
+ * Pattern for valid producerId values.
  * Lowercase alphanumeric and hyphens, 3-64 characters.
  */
 export const PRODUCER_ID_PATTERN = '^[a-z0-9-]{3,64}$';
@@ -53,11 +53,13 @@ export interface WorkSpec {
   allowedFolders?: string[];
   /** URLs or URL patterns the agent is allowed to access */
   allowedUrls?: string[];
-  /** Per-phase failure behavior (snake_case from MCP, converted to camelCase internally) */
-  on_failure?: {
-    no_auto_heal?: boolean;
+  /** Additional environment variables for this work spec */
+  env?: Record<string, string>;
+  /** Per-phase failure behavior */
+  onFailure?: {
+    noAutoHeal?: boolean;
     message?: string;
-    resume_from_phase?: string;
+    resumeFromPhase?: string;
   };
 }
 
@@ -65,7 +67,7 @@ export interface WorkSpec {
  * Job specification within a plan
  */
 export interface JobInput {
-  producer_id: string;
+  producerId: string;
   name?: string;
   task: string;
   work?: string | WorkSpec;
@@ -74,7 +76,7 @@ export interface JobInput {
   postchecks?: string | WorkSpec;
   instructions?: string;
   baseBranch?: string;
-  expects_no_changes?: boolean;
+  expectsNoChanges?: boolean;
   group?: string;
 }
 
@@ -100,7 +102,9 @@ export interface CreatePlanInput {
   jobs: JobInput[];
   groups?: GroupInput[];
   startPaused?: boolean;
-  verify_ri?: string | WorkSpec;
+  verifyRi?: string | WorkSpec;
+  /** Environment variables applied to all jobs. Individual work specs can override. */
+  env?: Record<string, string>;
 }
 
 // ============================================================================
@@ -118,10 +122,10 @@ const workSpecObjectSchema = {
     executable: { type: 'string' },
     args: { type: 'array', items: { type: 'string' } },
     shell: { type: 'string', enum: ['cmd', 'powershell', 'pwsh', 'bash', 'sh'] },
-    error_action: { type: 'string', enum: ['Continue', 'Stop', 'SilentlyContinue'], description: 'PowerShell $ErrorActionPreference. Default: Continue. Only applies to powershell/pwsh shells.' },
+    errorAction: { type: 'string', enum: ['Continue', 'Stop', 'SilentlyContinue'], description: 'PowerShell $ErrorActionPreference. Default: Continue. Only applies to powershell/pwsh shells.' },
     instructions: { type: 'string' },
     model: { type: 'string', maxLength: 100 },
-    model_tier: { type: 'string', enum: ['fast', 'standard', 'premium'], description: 'Model tier preference. When set and model is not specified, auto-selects a model matching this tier.' },
+    modelTier: { type: 'string', enum: ['fast', 'standard', 'premium'], description: 'Model tier preference. When set and model is not specified, auto-selects a model matching this tier.' },
     maxTurns: { type: 'number', minimum: 1, maximum: 100 },
     resumeSession: { type: 'boolean' },
     allowedFolders: {
@@ -135,12 +139,17 @@ const workSpecObjectSchema = {
       maxItems: 50,
       description: 'URLs or URL patterns the agent is allowed to access. Default: none (no network access).'
     },
-    on_failure: {
+    env: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      description: 'Environment variables for this work spec. Overrides plan-level env for this specific phase.'
+    },
+    onFailure: {
       type: 'object',
       properties: {
-        no_auto_heal: { type: 'boolean', description: 'When true, skip auto-heal on failure — require manual retry.' },
+        noAutoHeal: { type: 'boolean', description: 'When true, skip auto-heal on failure — require manual retry.' },
         message: { type: 'string', maxLength: 1000, description: 'User-facing message displayed on failure.' },
-        resume_from_phase: { 
+        resumeFromPhase: { 
           type: 'string', 
           enum: ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'],
           description: 'Phase to resume from when the node is retried after this failure.'
@@ -158,7 +167,7 @@ const workSpecObjectSchema = {
 const jobSchema = {
   type: 'object',
   properties: {
-    producer_id: { 
+    producerId: { 
       type: 'string', 
       pattern: PRODUCER_ID_PATTERN,
       minLength: 3,
@@ -191,35 +200,12 @@ const jobSchema = {
     },
     instructions: { type: 'string', maxLength: 100000 },
     baseBranch: { type: 'string', maxLength: 200 },
-    expects_no_changes: { type: 'boolean' },
+    expectsNoChanges: { type: 'boolean' },
     group: { type: 'string', maxLength: 200 }
   },
-  required: ['producer_id', 'task', 'dependencies'],
+  required: ['producerId', 'task', 'work', 'dependencies'],
   additionalProperties: false
 } as const;
-
-/**
- * Schema for a group (recursive)
- * Note: We can't use JSONSchemaType for recursive schemas, so this is a plain object
- */
-const groupSchema: Record<string, unknown> = {
-  type: 'object',
-  properties: {
-    name: { type: 'string', minLength: 1, maxLength: 100 },
-    jobs: {
-      type: 'array',
-      items: jobSchema,
-      maxItems: 500
-    },
-    groups: {
-      type: 'array',
-      items: { $ref: '#/$defs/group' },
-      maxItems: 50
-    }
-  },
-  required: ['name'],
-  additionalProperties: false
-};
 
 /**
  * Schema for create_copilot_plan input
@@ -231,7 +217,7 @@ export const createPlanSchema = {
     name: { type: 'string', minLength: 1, maxLength: 200 },
     baseBranch: { type: 'string', maxLength: 200 },
     targetBranch: { type: 'string', maxLength: 200 },
-    maxParallel: { type: 'number', minimum: 1, maximum: 32 },
+    maxParallel: { type: 'number', minimum: 0, maximum: 1024 },
     cleanUpSuccessfulWork: { type: 'boolean' },
     additionalSymlinkDirs: {
       type: 'array',
@@ -242,26 +228,24 @@ export const createPlanSchema = {
     jobs: {
       type: 'array',
       items: jobSchema,
+      minItems: 1,
       maxItems: 500
     },
-    groups: {
-      type: 'array',
-      items: { $ref: '#/$defs/group' },
-      maxItems: 50
-    },
     startPaused: { type: 'boolean' },
-    verify_ri: {
+    verifyRi: {
       oneOf: [
         { type: 'string', maxLength: 50000 },
         workSpecObjectSchema
       ]
+    },
+    env: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      description: 'Environment variables applied to all jobs. Individual work specs can override specific keys.'
     }
   },
   required: ['name', 'jobs'],
-  additionalProperties: false,
-  $defs: {
-    group: groupSchema
-  }
+  additionalProperties: false
 } as const;
 
 /**
@@ -271,9 +255,9 @@ export const getPlanStatusSchema = {
   $id: 'get_copilot_plan_status',
   type: 'object',
   properties: {
-    id: { type: 'string', minLength: 1, maxLength: 100 }
+    planId: { type: 'string', minLength: 1, maxLength: 100 }
   },
-  required: ['id'],
+  required: ['planId'],
   additionalProperties: false
 } as const;
 
@@ -286,52 +270,52 @@ export const listPlansSchema = {
   properties: {
     status: { 
       type: 'string', 
-      enum: ['all', 'running', 'completed', 'failed', 'pending'] 
+      enum: ['all', 'running', 'completed', 'failed', 'pending', 'scaffolding', 'canceled'] 
     }
   },
   additionalProperties: false
 } as const;
 
 /**
- * Schema for get_copilot_node_details input
+ * Schema for get_copilot_job_details input
  */
 export const getNodeDetailsSchema = {
-  $id: 'get_copilot_node_details',
+  $id: 'get_copilot_job_details',
   type: 'object',
   properties: {
     planId: { type: 'string', minLength: 1, maxLength: 100 },
-    nodeId: { type: 'string', minLength: 1, maxLength: 100 }
+    jobId: { type: 'string', minLength: 1, maxLength: 100 }
   },
-  required: ['planId', 'nodeId'],
+  required: ['planId', 'jobId'],
   additionalProperties: false
 } as const;
 
 /**
- * Schema for get_copilot_node_logs input
+ * Schema for get_copilot_job_logs input
  */
 export const getNodeLogsSchema = {
-  $id: 'get_copilot_node_logs',
+  $id: 'get_copilot_job_logs',
   type: 'object',
   properties: {
     planId: { type: 'string', minLength: 1, maxLength: 100 },
-    nodeId: { type: 'string', minLength: 1, maxLength: 100 },
+    jobId: { type: 'string', minLength: 1, maxLength: 100 },
     tail: { type: 'number', minimum: 1, maximum: 10000 }
   },
-  required: ['planId', 'nodeId'],
+  required: ['planId', 'jobId'],
   additionalProperties: false
 } as const;
 
 /**
- * Schema for get_copilot_node_attempts input
+ * Schema for get_copilot_job_attempts input
  */
 export const getNodeAttemptsSchema = {
-  $id: 'get_copilot_node_attempts',
+  $id: 'get_copilot_job_attempts',
   type: 'object',
   properties: {
     planId: { type: 'string', minLength: 1, maxLength: 100 },
-    nodeId: { type: 'string', minLength: 1, maxLength: 100 }
+    jobId: { type: 'string', minLength: 1, maxLength: 100 }
   },
-  required: ['planId', 'nodeId'],
+  required: ['planId', 'jobId'],
   additionalProperties: false
 } as const;
 
@@ -342,9 +326,9 @@ export const cancelPlanSchema = {
   $id: 'cancel_copilot_plan',
   type: 'object',
   properties: {
-    id: { type: 'string', minLength: 1, maxLength: 100 }
+    planId: { type: 'string', minLength: 1, maxLength: 100 }
   },
-  required: ['id'],
+  required: ['planId'],
   additionalProperties: false
 } as const;
 
@@ -355,9 +339,9 @@ export const deletePlanSchema = {
   $id: 'delete_copilot_plan',
   type: 'object',
   properties: {
-    id: { type: 'string', minLength: 1, maxLength: 100 }
+    planId: { type: 'string', minLength: 1, maxLength: 100 }
   },
-  required: ['id'],
+  required: ['planId'],
   additionalProperties: false
 } as const;
 
@@ -368,8 +352,8 @@ export const retryPlanSchema = {
   $id: 'retry_copilot_plan',
   type: 'object',
   properties: {
-    id: { type: 'string', minLength: 1, maxLength: 100 },
-    nodeIds: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    jobIds: {
       type: 'array',
       items: { type: 'string', minLength: 1, maxLength: 100 },
       maxItems: 100
@@ -396,19 +380,19 @@ export const retryPlanSchema = {
     },
     clearWorktree: { type: 'boolean' }
   },
-  required: ['id'],
+  required: ['planId'],
   additionalProperties: false
 } as const;
 
 /**
- * Schema for retry_copilot_plan_node input
+ * Schema for retry_copilot_plan_job input
  */
 export const retryNodeSchema = {
-  $id: 'retry_copilot_plan_node',
+  $id: 'retry_copilot_plan_job',
   type: 'object',
   properties: {
     planId: { type: 'string', minLength: 1, maxLength: 100 },
-    nodeId: { type: 'string', minLength: 1, maxLength: 100 },
+    jobId: { type: 'string', minLength: 1, maxLength: 100 },
     newWork: {
       oneOf: [
         { type: 'string', maxLength: 50000 },
@@ -431,32 +415,32 @@ export const retryNodeSchema = {
     },
     clearWorktree: { type: 'boolean' }
   },
-  required: ['planId', 'nodeId'],
+  required: ['planId', 'jobId'],
   additionalProperties: false
 } as const;
 
 /**
- * Schema for get_copilot_plan_node_failure_context input
+ * Schema for get_copilot_plan_job_failure_context input
  */
 export const getFailureContextSchema = {
-  $id: 'get_copilot_plan_node_failure_context',
+  $id: 'get_copilot_plan_job_failure_context',
   type: 'object',
   properties: {
-    plan_id: { type: 'string', minLength: 1, maxLength: 100 },
-    node_id: { type: 'string', minLength: 1, maxLength: 100 }
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    jobId: { type: 'string', minLength: 1, maxLength: 100 }
   },
-  required: ['plan_id', 'node_id'],
+  required: ['planId', 'jobId'],
   additionalProperties: false
 } as const;
 
 /**
- * Schema for add_copilot_node input
+ * Schema for add_copilot_job input
  */
 export const addNodeSchema = {
-  $id: 'add_copilot_node',
+  $id: 'add_copilot_job',
   type: 'object',
   properties: {
-    plan_id: { type: 'string', minLength: 1, maxLength: 100 },
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
     nodes: {
       type: 'array',
       items: jobSchema,
@@ -464,7 +448,7 @@ export const addNodeSchema = {
       maxItems: 100
     }
   },
-  required: ['plan_id', 'nodes'],
+  required: ['planId', 'nodes'],
   additionalProperties: false
 } as const;
 
@@ -488,7 +472,7 @@ export const reshapePlanSchema = {
           spec: {
             type: 'object',
             properties: {
-              producer_id: { type: 'string', pattern: PRODUCER_ID_PATTERN, minLength: 3, maxLength: 64 },
+              producerId: { type: 'string', pattern: PRODUCER_ID_PATTERN, minLength: 3, maxLength: 64 },
               name: { type: 'string', maxLength: 200 },
               task: { type: 'string', minLength: 1, maxLength: 5000 },
               work: {
@@ -515,13 +499,13 @@ export const reshapePlanSchema = {
                 ]
               },
               instructions: { type: 'string', maxLength: 100000 },
-              expects_no_changes: { type: 'boolean' }
+              expectsNoChanges: { type: 'boolean' }
             },
             additionalProperties: false
           },
-          nodeId: { type: 'string', maxLength: 100 },
-          producer_id: { type: 'string', maxLength: 100 },
-          existingNodeId: { type: 'string', maxLength: 100 },
+          jobId: { type: 'string', maxLength: 100 },
+          producerId: { type: 'string', maxLength: 100 },
+          existingJobId: { type: 'string', maxLength: 100 },
           dependencies: {
             type: 'array',
             items: { type: 'string', maxLength: 200 },
@@ -540,47 +524,47 @@ export const reshapePlanSchema = {
 } as const;
 
 // ============================================================================
-// NODE-CENTRIC TOOL SCHEMAS
+// JOB-CENTRIC TOOL SCHEMAS
 // ============================================================================
 
 /**
- * Schema for get_copilot_node input
+ * Schema for get_copilot_job input
  */
 export const getNodeSchema = {
-  $id: 'get_copilot_node',
+  $id: 'get_copilot_job',
   type: 'object',
   properties: {
-    node_id: { type: 'string', minLength: 1, maxLength: 100 }
+    jobId: { type: 'string', minLength: 1, maxLength: 100 }
   },
-  required: ['node_id'],
+  required: ['jobId'],
   additionalProperties: false
 } as const;
 
 /**
- * Schema for list_copilot_nodes input
+ * Schema for list_copilot_jobs input
  */
 export const listNodesSchema = {
-  $id: 'list_copilot_nodes',
+  $id: 'list_copilot_jobs',
   type: 'object',
   properties: {
-    group_id: { type: 'string', maxLength: 100 },
+    groupId: { type: 'string', maxLength: 100 },
     status: {
       type: 'string',
       enum: ['pending', 'ready', 'scheduled', 'running', 'succeeded', 'failed', 'blocked', 'canceled']
     },
-    group_name: { type: 'string', maxLength: 200 }
+    groupName: { type: 'string', maxLength: 200 }
   },
   additionalProperties: false
 } as const;
 
 /**
- * Schema for retry_copilot_node input (node-centric, no planId)
+ * Schema for retry_copilot_job input (job-centric, no planId)
  */
 export const retryNodeCentricSchema = {
-  $id: 'retry_copilot_node',
+  $id: 'retry_copilot_job',
   type: 'object',
   properties: {
-    node_id: { type: 'string', minLength: 1, maxLength: 100 },
+    jobId: { type: 'string', minLength: 1, maxLength: 100 },
     newWork: {
       oneOf: [
         { type: 'string', maxLength: 50000 },
@@ -603,46 +587,46 @@ export const retryNodeCentricSchema = {
     },
     clearWorktree: { type: 'boolean' }
   },
-  required: ['node_id'],
+  required: ['jobId'],
   additionalProperties: false
 } as const;
 
 /**
- * Schema for force_fail_copilot_node input
+ * Schema for force_fail_copilot_job input
  */
 export const forceFailNodeSchema = {
-  $id: 'force_fail_copilot_node',
+  $id: 'force_fail_copilot_job',
   type: 'object',
   properties: {
-    node_id: { type: 'string', minLength: 1, maxLength: 100 },
+    jobId: { type: 'string', minLength: 1, maxLength: 100 },
     reason: { type: 'string', maxLength: 1000 }
   },
-  required: ['node_id'],
+  required: ['jobId'],
   additionalProperties: false
 } as const;
 
 /**
- * Schema for get_copilot_node_failure_context input (node-centric)
+ * Schema for get_copilot_job_failure_context input (job-centric)
  */
 export const getNodeFailureContextSchema = {
-  $id: 'get_copilot_node_failure_context',
+  $id: 'get_copilot_job_failure_context',
   type: 'object',
   properties: {
-    node_id: { type: 'string', minLength: 1, maxLength: 100 }
+    jobId: { type: 'string', minLength: 1, maxLength: 100 }
   },
-  required: ['node_id'],
+  required: ['jobId'],
   additionalProperties: false
 } as const;
 
 /**
- * Schema for update_copilot_plan_node input
+ * Schema for update_copilot_plan_job input
  */
 export const updateCopilotPlanNodeSchema = {
-  $id: 'update_copilot_plan_node',
+  $id: 'update_copilot_plan_job',
   type: 'object',
   properties: {
     planId: { type: 'string', minLength: 1, maxLength: 100 },
-    nodeId: { type: 'string', minLength: 1, maxLength: 100 },
+    jobId: { type: 'string', minLength: 1, maxLength: 100 },
     prechecks: {
       oneOf: [
         { type: 'string', maxLength: 10000 },
@@ -666,7 +650,121 @@ export const updateCopilotPlanNodeSchema = {
       enum: ['prechecks', 'work', 'postchecks']
     }
   },
-  required: ['planId', 'nodeId'],
+  required: ['planId', 'jobId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for update_copilot_plan input (plan-level settings)
+ */
+export const updatePlanSchema = {
+  $id: 'update_copilot_plan',
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    env: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      description: 'Replace plan-level environment variables. Pass {} to clear.'
+    },
+    maxParallel: { type: 'number', minimum: 0, maximum: 1024, description: 'Update max concurrent jobs (0 = unlimited)' },
+  },
+  required: ['planId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for scaffold_copilot_plan input
+ */
+export const scaffoldPlanSchema = {
+  $id: 'scaffold_copilot_plan',
+  type: 'object',
+  properties: {
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    baseBranch: { type: 'string', maxLength: 200 },
+    targetBranch: { type: 'string', maxLength: 200 },
+    maxParallel: { type: 'number', minimum: 1, maximum: 64 },
+    startPaused: { type: 'boolean' },
+    cleanUpSuccessfulWork: { type: 'boolean' },
+    additionalSymlinkDirs: {
+      type: 'array',
+      items: { type: 'string', maxLength: 200 },
+      maxItems: 20
+    },
+    verifyRi: {
+      oneOf: [
+        { type: 'string', maxLength: 10000 },
+        workSpecObjectSchema
+      ]
+    },
+    env: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      description: 'Environment variables applied to all jobs. Individual work specs can override specific keys.'
+    }
+  },
+  required: ['name'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for add_copilot_plan_job input
+ */
+export const addPlanNodeSchema = {
+  $id: 'add_copilot_plan_job',
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    producerId: {
+      type: 'string',
+      pattern: PRODUCER_ID_PATTERN,
+      minLength: 3,
+      maxLength: 64
+    },
+    name: { type: 'string', maxLength: 80, description: 'Short display name for the job (max 80 chars). Do NOT put instructions here.' },
+    task: { type: 'string', minLength: 1, maxLength: 200, description: 'Brief task description (max 200 chars). Detailed instructions go in the work field.' },
+    dependencies: {
+      type: 'array',
+      items: { type: 'string', pattern: '^[a-z0-9-/]{3,64}$' },
+      maxItems: 100
+    },
+    group: { type: 'string', maxLength: 200 },
+    work: {
+      oneOf: [
+        { type: 'string', maxLength: 50000 },
+        workSpecObjectSchema
+      ]
+    },
+    prechecks: {
+      oneOf: [
+        { type: 'string', maxLength: 10000 },
+        workSpecObjectSchema
+      ]
+    },
+    postchecks: {
+      oneOf: [
+        { type: 'string', maxLength: 10000 },
+        workSpecObjectSchema
+      ]
+    },
+    autoHeal: { type: 'boolean' },
+    expectsNoChanges: { type: 'boolean' }
+  },
+  required: ['planId', 'producerId', 'task', 'work'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for finalize_copilot_plan input
+ */
+export const finalizePlanSchema = {
+  $id: 'finalize_copilot_plan',
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    startPaused: { type: 'boolean' }
+  },
+  required: ['planId'],
   additionalProperties: false
 } as const;
 
@@ -678,22 +776,28 @@ export const schemas: Record<string, object> = {
   create_copilot_plan: createPlanSchema,
   get_copilot_plan_status: getPlanStatusSchema,
   list_copilot_plans: listPlansSchema,
-  get_copilot_node_details: getNodeDetailsSchema,
-  get_copilot_node_logs: getNodeLogsSchema,
-  get_copilot_node_attempts: getNodeAttemptsSchema,
+  get_copilot_job_details: getNodeDetailsSchema,
+  get_copilot_job_logs: getNodeLogsSchema,
+  get_copilot_job_attempts: getNodeAttemptsSchema,
   cancel_copilot_plan: cancelPlanSchema,
   delete_copilot_plan: deletePlanSchema,
   retry_copilot_plan: retryPlanSchema,
-  retry_copilot_plan_node: retryNodeSchema,
-  get_copilot_plan_node_failure_context: getFailureContextSchema,
-  add_copilot_node: addNodeSchema,
+  retry_copilot_plan_job: retryNodeSchema,
+  get_copilot_plan_job_failure_context: getFailureContextSchema,
+  add_copilot_job: addNodeSchema,
   reshape_copilot_plan: reshapePlanSchema,
   
-  // Node-centric tools (NEW)
-  get_copilot_node: getNodeSchema,
-  list_copilot_nodes: listNodesSchema,
-  retry_copilot_node: retryNodeCentricSchema,
-  force_fail_copilot_node: forceFailNodeSchema,
-  get_copilot_node_failure_context: getNodeFailureContextSchema,
-  update_copilot_plan_node: updateCopilotPlanNodeSchema,
+  // Job-centric tools (NEW)
+  get_copilot_job: getNodeSchema,
+  list_copilot_jobs: listNodesSchema,
+  retry_copilot_job: retryNodeCentricSchema,
+  force_fail_copilot_job: forceFailNodeSchema,
+  get_copilot_job_failure_context: getNodeFailureContextSchema,
+  update_copilot_plan_job: updateCopilotPlanNodeSchema,
+  update_copilot_plan: updatePlanSchema,
+  
+  // Scaffolding tools (NEW)
+  scaffold_copilot_plan: scaffoldPlanSchema,
+  add_copilot_plan_job: addPlanNodeSchema,
+  finalize_copilot_plan: finalizePlanSchema,
 };

@@ -213,6 +213,50 @@ export function computePlanStatus(
 // ============================================================================
 
 /**
+ * Compute the overall start time for a node across all attempts.
+ * Returns the earliest startedAt from attemptHistory, falling back to state.startedAt.
+ */
+export function getNodeOverallStartedAt(state: NodeExecutionState): number | undefined {
+  if (state.attemptHistory?.length) {
+    return Math.min(...state.attemptHistory.map(a => a.startedAt));
+  }
+  return state.startedAt;
+}
+
+/**
+ * Compute the overall end time for a node across all attempts.
+ * Returns the latest endedAt from attemptHistory, falling back to state.endedAt.
+ */
+export function getNodeOverallEndedAt(state: NodeExecutionState): number | undefined {
+  if (state.attemptHistory?.length) {
+    const ended = state.attemptHistory
+      .filter(a => a.endedAt)
+      .map(a => a.endedAt);
+    return ended.length ? Math.max(...ended) : state.endedAt;
+  }
+  return state.endedAt;
+}
+
+/**
+ * Compute the effective startedAt for a plan from node states.
+ * Returns the earliest overall startedAt across all nodes.
+ */
+export function computeEffectiveStartedAt(
+  nodeStates: Iterable<NodeExecutionState>
+): number | undefined {
+  let minStartedAt: number | undefined;
+  for (const state of nodeStates) {
+    const nodeStart = getNodeOverallStartedAt(state);
+    if (nodeStart) {
+      if (!minStartedAt || nodeStart < minStartedAt) {
+        minStartedAt = nodeStart;
+      }
+    }
+  }
+  return minStartedAt;
+}
+
+/**
  * Compute the effective endedAt timestamp from node states.
  * Returns the maximum `endedAt` across all nodes, which is the true
  * completion time even if child plans took longer than originally recorded.
@@ -224,15 +268,14 @@ export function computeEffectiveEndedAt(
   nodeStates: Iterable<NodeExecutionState>
 ): number | undefined {
   let maxEndedAt: number | undefined;
-
   for (const state of nodeStates) {
-    if (state.endedAt) {
-      if (!maxEndedAt || state.endedAt > maxEndedAt) {
-        maxEndedAt = state.endedAt;
+    const nodeEnd = getNodeOverallEndedAt(state);
+    if (nodeEnd) {
+      if (!maxEndedAt || nodeEnd > maxEndedAt) {
+        maxEndedAt = nodeEnd;
       }
     }
   }
-
   return maxEndedAt;
 }
 

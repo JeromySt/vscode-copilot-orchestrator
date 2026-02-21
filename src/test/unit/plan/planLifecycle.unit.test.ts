@@ -37,7 +37,7 @@ function createTestPlan(id = 'plan-1'): PlanInstance {
   return {
     id,
     spec: { name: 'Test Plan', jobs: [{ producerId: 'node-1', name: 'Test Job', task: 'test', work: 'echo hi' }], baseBranch: 'main' },
-    nodes: new Map([['node-1', node]]),
+    jobs: new Map([['node-1', node]]),
     producerIdToNodeId: new Map([['node-1', 'node-1']]),
     roots: ['node-1'],
     leaves: ['node-1'],
@@ -420,5 +420,226 @@ suite('PlanLifecycleManager', () => {
     mgr.setupStateMachineListeners(sm as any);
     assert.ok(sm.on.calledWith('transition'));
     assert.ok(sm.on.calledWith('planComplete'));
+  });
+
+  // ── planComplete handler ─────────────────────────────────────────
+
+  suite('planComplete handler', () => {
+    test('cleans up snapshot on successful completion', async () => {
+      const plan = createTestPlan();
+      plan.snapshot = {
+        branch: 'orchestrator/snapshot/plan-1',
+        worktreePath: '/worktrees/snapshot',
+        baseCommit: 'abc123',
+      };
+      state.plans.set(plan.id, plan);
+
+      // Capture the planComplete handler
+      let planCompleteHandler: (event: any) => Promise<void> = async () => {};
+      const sm = {
+        on: (event: string, handler: any) => {
+          if (event === 'planComplete') { planCompleteHandler = handler; }
+        },
+      };
+      mgr.setupStateMachineListeners(sm as any);
+
+      // Mock SnapshotManager
+      const cleanupSnapshotStub = sinon.stub().resolves();
+      const mockSnapshotManager = { cleanupSnapshot: cleanupSnapshotStub };
+      
+      // Stub the dynamic import
+      const importStub = sinon.stub().resolves({ SnapshotManager: function() { return mockSnapshotManager; } });
+      const origImport = (global as any).__importStar;
+      
+      // Call the handler with succeeded status
+      await planCompleteHandler({ planId: plan.id, status: 'succeeded' });
+
+      // After cleanup, snapshot should be cleared and persistence called
+      // Note: The actual SnapshotManager import happens dynamically, so we verify effects
+      assert.ok((state.persistence.save as sinon.SinonStub).called);
+    });
+
+    test('does not clean up snapshot on failure', async () => {
+      const plan = createTestPlan();
+      plan.snapshot = {
+        branch: 'orchestrator/snapshot/plan-1',
+        worktreePath: '/worktrees/snapshot',
+        baseCommit: 'abc123',
+      };
+      state.plans.set(plan.id, plan);
+
+      let planCompleteHandler: (event: any) => Promise<void> = async () => {};
+      const sm = {
+        on: (event: string, handler: any) => {
+          if (event === 'planComplete') { planCompleteHandler = handler; }
+        },
+      };
+      mgr.setupStateMachineListeners(sm as any);
+
+      await planCompleteHandler({ planId: plan.id, status: 'failed' });
+
+      // Snapshot should still exist for failed plans
+      assert.ok(plan.snapshot !== undefined);
+    });
+
+    test('handles missing plan gracefully', async () => {
+      let planCompleteHandler: (event: any) => Promise<void> = async () => {};
+      const sm = {
+        on: (event: string, handler: any) => {
+          if (event === 'planComplete') { planCompleteHandler = handler; }
+        },
+      };
+      mgr.setupStateMachineListeners(sm as any);
+
+      // Should not throw for non-existent plan
+      await planCompleteHandler({ planId: 'nonexistent', status: 'succeeded' });
+    });
+  });
+
+  // ── registerPlan ─────────────────────────────────────────────────
+
+  suite('registerPlan', () => {
+    test('forces isPaused for scaffolding plans', () => {
+      const plan = createTestPlan();
+      (plan.spec as any).status = 'scaffolding';
+      plan.isPaused = false;
+
+      mgr.registerPlan(plan);
+
+      assert.strictEqual(plan.isPaused, true);
+      assert.ok(state.plans.has(plan.id));
+      assert.ok(state.stateMachines.has(plan.id));
+    });
+
+    test('preserves isPaused state for non-scaffolding plans', () => {
+      const plan = createTestPlan();
+      plan.isPaused = false;
+
+      mgr.registerPlan(plan);
+
+      assert.strictEqual(plan.isPaused, false);
+    });
+
+    test('emits planCreated event', () => {
+      const plan = createTestPlan();
+      const spy = sinon.spy();
+      state.events.on('planCreated', spy);
+
+      mgr.registerPlan(plan);
+
+      assert.ok(spy.calledOnce);
+      assert.strictEqual(spy.firstCall.args[0], plan);
+    });
+
+    test('saves via planRepository when available', () => {
+      const plan = createTestPlan();
+      state.planRepository = {
+        saveStateSync: sinon.stub(),
+      } as any;
+
+      mgr.registerPlan(plan);
+
+      assert.ok((state.planRepository!.saveStateSync as sinon.SinonStub).calledWith(plan));
+    });
+  });
+
+  // ── resume scaffolding blocking ──────────────────────────────────
+
+  suite('resume scaffolding blocking', () => {
+    function createMockGitForResume() {
+      return {
+        repository: { fetch: sinon.stub().resolves() },
+        branches: {},
+        gitignore: {},
+      };
+    }
+
+    test('blocks resume for scaffolding plans', async () => {
+      const mockGit = createMockGitForResume();
+      const localMgr = new PlanLifecycleManager(state, log, mockGit as any);
+      
+      const plan = createTestPlan();
+      (plan.spec as any).status = 'scaffolding';
+      plan.isPaused = true;
+      state.plans.set(plan.id, plan);
+
+      const pumpStub = sinon.stub();
+      const result = await localMgr.resume(plan.id, pumpStub);
+
+      assert.strictEqual(result, false);
+      assert.ok(pumpStub.notCalled);
+      assert.strictEqual(plan.isPaused, true); // Should remain paused
+    });
+
+    test('allows resume for finalized plans', async () => {
+      const mockGit = createMockGitForResume();
+      const localMgr = new PlanLifecycleManager(state, log, mockGit as any);
+      
+      const plan = createTestPlan();
+      plan.isPaused = true;
+      state.plans.set(plan.id, plan);
+
+      const pumpStub = sinon.stub();
+      const result = await localMgr.resume(plan.id, pumpStub);
+
+      assert.strictEqual(result, true);
+      assert.ok(pumpStub.calledOnce);
+      assert.strictEqual(plan.isPaused, false);
+    });
+  });
+
+  // ── delete with planRepository ───────────────────────────────────
+
+  suite('delete with planRepository', () => {
+    test('calls markDeletedSync then planRepository.delete when available', async () => {
+      const plan = createTestPlan();
+      state.plans.set(plan.id, plan);
+      const sm = { cancelAll: sinon.stub(), computePlanStatus: sinon.stub() };
+      state.stateMachines.set(plan.id, sm as any);
+
+      const markDeletedSyncStub = sinon.stub();
+      const deleteStub = sinon.stub().resolves();
+      state.planRepository = {
+        markDeletedSync: markDeletedSyncStub,
+        delete: deleteStub,
+      } as any;
+
+      mgr.delete(plan.id);
+
+      // Sync tombstone must be written BEFORE the async delete is called
+      assert.ok(markDeletedSyncStub.calledWith(plan.id));
+      assert.ok(markDeletedSyncStub.calledBefore(deleteStub));
+      assert.ok(deleteStub.calledWith(plan.id));
+    });
+
+    test('logs warning when planRepository.delete fails', async () => {
+      const plan = createTestPlan();
+      state.plans.set(plan.id, plan);
+      const sm = { cancelAll: sinon.stub(), computePlanStatus: sinon.stub() };
+      state.stateMachines.set(plan.id, sm as any);
+
+      const deleteStub = sinon.stub().rejects(new Error('repo error'));
+      state.planRepository = {
+        markDeletedSync: sinon.stub(),
+        delete: deleteStub,
+      } as any;
+
+      mgr.delete(plan.id);
+
+      // Wait for async rejection to be logged
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.ok((log.warn as sinon.SinonStub).called);
+    });
+
+    test('also tries legacy persistence delete', () => {
+      const plan = createTestPlan();
+      state.plans.set(plan.id, plan);
+      const sm = { cancelAll: sinon.stub(), computePlanStatus: sinon.stub() };
+      state.stateMachines.set(plan.id, sm as any);
+
+      mgr.delete(plan.id);
+
+      assert.ok((state.persistence.delete as sinon.SinonStub).calledWith(plan.id));
+    });
   });
 });

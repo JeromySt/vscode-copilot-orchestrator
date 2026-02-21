@@ -47,7 +47,6 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
       return { success: true };
     }
     
-    context.logInfo(`========== FORWARD INTEGRATION MERGE START ==========`);
     context.logInfo(`Merging ${dependencyCommits.length} dependency commit(s) into worktree...`);
     
     // Create dependency info map for logging
@@ -61,6 +60,7 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
     });
     
     let accumulatedMetrics: CopilotUsageMetrics | undefined;
+    let mergedCount = 0;
     
     // Merge each dependency commit
     for (const { commit: sourceCommit, nodeName } of dependencyCommits) {
@@ -69,6 +69,12 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
       
       context.logInfo(`[Merge Source] ${nodeName}`);
       context.logInfo(`  Commit: ${shortSha} (from dependency "${nodeName}")`);
+      
+      // NOTE: We intentionally do NOT check isAncestor before merging.
+      // The previous optimization (`git merge-base --is-ancestor`) caused false
+      // positives in multi-dependency fan-in scenarios, silently skipping merges
+      // and dropping upstream commits. `git merge` itself is idempotent — if the
+      // commit is truly already merged, it returns "Already up to date" harmlessly.
       
       // Show work summary from the dependency node if available
       if (depInfo?.workSummary) {
@@ -88,6 +94,7 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
         
         if (mergeResult.success) {
           context.logInfo(`  ✓ Merged successfully`);
+          mergedCount++;
         } else if (mergeResult.hasConflicts) {
           context.logInfo(`  ⚠ Merge conflict detected`);
           context.logInfo(`    Conflicts: ${mergeResult.conflictFiles?.join(', ')}`);
@@ -108,7 +115,6 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
           if (!cliResult.success) {
             context.logError(`  ✗ Copilot CLI failed to resolve conflict`);
             await this.git.merge.abort(worktreePath, s => context.logInfo(s));
-            context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
             return { 
               success: false, 
               error: `Failed to resolve merge conflict for dependency ${nodeName} (${shortSha})`,
@@ -117,6 +123,7 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
           }
           
           context.logInfo(`  ✓ Conflict resolved by Copilot CLI`);
+          mergedCount++;
           
           // Accumulate CLI metrics
           if (cliResult.metrics) {
@@ -151,6 +158,7 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
               
               if (retryResult.success) {
                 context.logInfo(`  ✓ Merged successfully (after stash)`);
+                mergedCount++;
               } else if (retryResult.hasConflicts) {
                 // AI conflict resolution on retry
                 context.logInfo(`  ⚠ Merge conflict on retry — invoking AI resolution`);
@@ -162,17 +170,16 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
                 if (!cliResult.success) {
                   await this.git.merge.abort(worktreePath, s => context.logInfo(s));
                   await this.popStash(worktreePath, true, context);
-                  context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
                   return { success: false, error: `Failed to resolve conflict for ${nodeName} (${shortSha}) after stash retry`, metrics: accumulatedMetrics };
                 }
                 context.logInfo(`  ✓ Conflict resolved after stash retry`);
+                mergedCount++;
                 if (cliResult.metrics) {
                   accumulatedMetrics = accumulatedMetrics ? aggregateMetrics([accumulatedMetrics, cliResult.metrics]) : cliResult.metrics;
                 }
               } else {
                 // Retry also failed for non-conflict reason
                 await this.popStash(worktreePath, true, context);
-                context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
                 return { success: false, error: `Merge failed for ${nodeName} (${shortSha}) even after stash: ${retryResult.error}`, metrics: accumulatedMetrics };
               }
               
@@ -180,12 +187,10 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
               await this.popStash(worktreePath, true, context);
             } else {
               context.logError(`  ✗ Could not stash local changes`);
-              context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
               return { success: false, error: `Merge failed for ${nodeName} (${shortSha}): ${mergeResult.error}`, metrics: accumulatedMetrics };
             }
           } else {
             context.logError(`  ✗ Merge failed: ${mergeResult.error}`);
-            context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
             return { 
               success: false, 
               error: `Merge failed for dependency ${nodeName} (${shortSha}): ${mergeResult.error}`,
@@ -196,7 +201,6 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
         
       } catch (error: any) {
         context.logError(`  ✗ Merge error: ${error.message}`);
-        context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
         return { 
           success: false, 
           error: `Merge error for dependency ${nodeName} (${shortSha}): ${error.message}`,
@@ -205,7 +209,8 @@ export class MergeFiPhaseExecutor implements IPhaseExecutor {
       }
     }
     
-    context.logInfo('========== FORWARD INTEGRATION MERGE END ==========');
+    // Log summary
+    context.logInfo(`Forward integration complete: ${mergedCount} merged`);
     
     return { success: true, metrics: accumulatedMetrics };
   }

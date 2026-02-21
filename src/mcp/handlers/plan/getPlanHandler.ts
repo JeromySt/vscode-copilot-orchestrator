@@ -19,17 +19,17 @@ import {
  * Returns the overall plan status, per-node states, progress percentage,
  * and timing information.
  *
- * @param args - Must contain `id` (Plan UUID).
+ * @param args - Must contain `planId` (Plan UUID).
  * @param ctx  - Handler context.
  * @returns Plan status object including `{ planId, status, progress, counts, nodes, ... }`.
  */
 export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): Promise<any> {
-  const fieldError = validateRequired(args, ['id']);
+  const fieldError = validateRequired(args, ['planId']);
   if (fieldError) {return fieldError;}
   
-  const status = ctx.PlanRunner.getStatus(args.id);
+  const status = ctx.PlanRunner.getStatus(args.planId);
   if (!status) {
-    return errorResult(`Plan not found: ${args.id}`);
+    return errorResult(`Plan not found: ${args.planId}`);
   }
   
   const { plan, status: planStatus, counts, progress } = status;
@@ -40,7 +40,7 @@ export async function handleGetPlanStatus(args: any, ctx: PlanHandlerContext): P
   // Build node status list
   const nodes: any[] = [];
   for (const [nodeId, state] of plan.nodeStates) {
-    const node = plan.nodes.get(nodeId);
+    const node = plan.jobs.get(nodeId);
     const isLeaf = plan.leaves.includes(nodeId);
     
     // Get group from JobNode
@@ -152,7 +152,7 @@ export async function handleListPlans(args: any, ctx: PlanHandlerContext): Promi
         id: plan.id,
         name: plan.spec.name,
         status: sm?.computePlanStatus() || 'unknown',
-        nodes: plan.nodes.size,
+        nodes: plan.jobs.size,
         counts,
         createdAt: plan.createdAt,
         startedAt: plan.startedAt,

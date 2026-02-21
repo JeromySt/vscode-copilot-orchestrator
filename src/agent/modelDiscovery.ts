@@ -33,7 +33,7 @@ export interface ModelDiscoveryResult {
 // CONSTANTS
 // ============================================================================
 
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const DEFAULT_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const FAILURE_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 
 // ============================================================================
@@ -48,10 +48,12 @@ export interface ModelDiscoveryDeps {
   clock?: () => number;
   /** Logger for warning messages. */
   logger?: ILogger;
+  /** Cache TTL in milliseconds (default: 30 minutes). Injectable for testing. */
+  cacheTtlMs?: number;
 }
 
 // ============================================================================
-// CACHE
+// CACHE (keyed by CLI version)
 // ============================================================================
 
 let cachedResult: ModelDiscoveryResult | null = null;
@@ -140,6 +142,9 @@ export async function discoverAvailableModels(deps?: ModelDiscoveryDeps): Promis
     const helpOutput = await runCopilotHelp(spawner);
     const rawChoices = parseModelChoices(helpOutput);
 
+    // Extract CLI version from help output (e.g. "GitHub Copilot CLI 0.0.412-1")
+    const cliVersion = parseCliVersion(helpOutput);
+
     if (rawChoices.length === 0) {
       if (logger) {
         logger.warn('[modelDiscovery] No model choices found in copilot --help output');
@@ -159,6 +164,7 @@ export async function discoverAvailableModels(deps?: ModelDiscoveryDeps): Promis
       models,
       rawChoices,
       discoveredAt: clock(),
+      cliVersion,
     };
 
     cachedResult = result;
@@ -190,14 +196,18 @@ export async function discoverAvailableModelsLegacy(deps?: Omit<ModelDiscoveryDe
 }
 
 /**
- * Return cached models if fresh (within TTL), otherwise re-discover.
+ * Return cached models if fresh (within TTL and same CLI version), otherwise re-discover.
  * Falls back to legacy discovery (DefaultProcessSpawner) when no spawner is provided.
  */
 export async function getCachedModels(deps?: ModelDiscoveryDeps): Promise<ModelDiscoveryResult> {
   const clock = deps?.clock ?? Date.now;
-  if (cachedResult && (clock() - cachedResult.discoveredAt) < CACHE_TTL_MS) {
+  const ttl = deps?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+  
+  if (cachedResult && (clock() - cachedResult.discoveredAt) < ttl) {
     return cachedResult;
   }
+  
+  // Cache expired or missing — re-discover
   if (!deps?.spawner) {
     return discoverAvailableModelsLegacy(deps);
   }
@@ -266,6 +276,15 @@ function emptyResult(clock?: () => number): ModelDiscoveryResult {
     rawChoices: [],
     discoveredAt: (clock ?? Date.now)(),
   };
+}
+
+/**
+ * Extract CLI version from `copilot --help` or `copilot --version` output.
+ * Matches patterns like "GitHub Copilot CLI 0.0.412-1" or "0.0.412-1".
+ */
+export function parseCliVersion(output: string): string | undefined {
+  const match = output.match(/(?:Copilot\s+CLI\s+)?(\d+\.\d+\.\d+(?:-\d+)?)/i);
+  return match?.[1];
 }
 
 /**

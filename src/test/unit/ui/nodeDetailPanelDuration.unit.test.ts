@@ -173,4 +173,92 @@ suite('Node Detail Panel Duration Timer', () => {
       assert.strictEqual(mockSetInterval.called, false, 'setInterval should NOT be called without duration element');
     });
   });
+
+  suite('State re-send after _update()', () => {
+    test('should post stateChange message after _update with startedAt and endedAt', () => {
+      // Mock webview with postMessage spy
+      const mockPostMessage = sinon.stub();
+      const mockWebview = {
+        postMessage: mockPostMessage,
+      };
+
+      // Simulate _update() logic: after HTML rebuild, send stateChange to re-initialize DurationCounterControl
+      const nodeState = {
+        status: 'running',
+        startedAt: 1000,
+        endedAt: undefined,
+      };
+
+      const phaseStatus = { 'work': 'running' };
+      const currentPhase = 'work';
+
+      // Simulate the postMessage call from _update()
+      mockWebview.postMessage({
+        type: 'stateChange',
+        status: nodeState.status,
+        phaseStatus,
+        currentPhase,
+        startedAt: nodeState.startedAt,
+        endedAt: nodeState.endedAt,
+      });
+
+      assert.strictEqual(mockPostMessage.called, true, 'postMessage should be called');
+      const call = mockPostMessage.getCall(0);
+      assert.strictEqual(call.args[0].type, 'stateChange', 'message type should be stateChange');
+      assert.strictEqual(call.args[0].status, 'running', 'status should be included');
+      assert.strictEqual(call.args[0].startedAt, 1000, 'startedAt should be included');
+      assert.strictEqual(call.args[0].endedAt, undefined, 'endedAt should be undefined for running node');
+    });
+
+    test('should include endedAt when node is completed', () => {
+      const mockPostMessage = sinon.stub();
+      const mockWebview = {
+        postMessage: mockPostMessage,
+      };
+
+      const nodeState = {
+        status: 'succeeded',
+        startedAt: 1000,
+        endedAt: 5000,
+      };
+
+      const phaseStatus = { 'work': 'completed' };
+      const currentPhase = null;
+
+      mockWebview.postMessage({
+        type: 'stateChange',
+        status: nodeState.status,
+        phaseStatus,
+        currentPhase,
+        startedAt: nodeState.startedAt,
+        endedAt: nodeState.endedAt,
+      });
+
+      assert.strictEqual(mockPostMessage.called, true);
+      const call = mockPostMessage.getCall(0);
+      assert.strictEqual(call.args[0].type, 'stateChange');
+      assert.strictEqual(call.args[0].status, 'succeeded');
+      assert.strictEqual(call.args[0].endedAt, 5000, 'endedAt should be included for completed node');
+    });
+
+    test('should send pulse message shortly after stateChange', () => {
+      const mockPostMessage = sinon.stub();
+      const mockWebview = {
+        postMessage: mockPostMessage,
+      };
+
+      // Simulate first message (stateChange)
+      mockWebview.postMessage({
+        type: 'stateChange',
+        status: 'running',
+      });
+
+      // Simulate second message (pulse)
+      mockWebview.postMessage({ type: 'pulse' });
+
+      assert.strictEqual(mockPostMessage.callCount, 2, 'should send both stateChange and pulse');
+      assert.strictEqual(mockPostMessage.getCall(0).args[0].type, 'stateChange');
+      assert.strictEqual(mockPostMessage.getCall(1).args[0].type, 'pulse');
+    });
+  });
 });

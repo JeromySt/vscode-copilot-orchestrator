@@ -33,11 +33,11 @@ suite('CLI Check Core - Cache & Async Coverage', () => {
     assert.strictEqual(mod.isCliCachePopulated(), false);
   });
 
-  test('isCopilotCliAvailable returns true optimistically on first call', () => {
+  test('isCopilotCliAvailable returns false when cache is empty', () => {
     const mod = getFreshModule();
     mod.resetCliCache();
     const result = mod.isCopilotCliAvailable();
-    assert.strictEqual(result, true, 'Should return true optimistically on first call');
+    assert.strictEqual(result, false, 'Should return false when cache is empty (triggers async check)');
   });
 
   test('second call to isCopilotCliAvailable uses cached value', () => {

@@ -130,23 +130,11 @@ suite('BranchChangeWatcher', () => {
     sinon.restore();
   });
   
-  test('should call ensureOrchestratorGitIgnore on branch change', async () => {
-    const ensureSpy = sinon.stub().resolves(true);
-    
-    // Create a mock module to replace the import
-    const gitModule = await import('../../../git');
-    const originalEnsure = gitModule.gitignore.ensureOrchestratorGitIgnore;
-    (gitModule.gitignore as any).ensureOrchestratorGitIgnore = ensureSpy;
-    
+  test('should NOT call ensureOrchestratorGitIgnore on branch change (no longer aggressive)', async () => {
+    // The branch watcher no longer writes .gitignore on branch change.
+    // This prevents uncommitted changes that block git checkout.
     const watcher = new BranchChangeWatcher(mockLogger);
-    
-    // Simulate branch change callback
-    await watcher['ensureGitIgnoreOnBranchChange']('/workspace');
-    
-    assert.ok(ensureSpy.calledWith('/workspace'));
-    
-    // Restore original function
-    (gitModule.gitignore as any).ensureOrchestratorGitIgnore = originalEnsure;
+    assert.ok(watcher); // Just verify it constructs without error
   });
   
   test('should detect branch change via repository state', async () => {

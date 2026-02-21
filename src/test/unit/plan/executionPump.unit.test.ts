@@ -43,7 +43,7 @@ function createTestPlan(opts?: { isPaused?: boolean; startedAt?: number }): Plan
   return {
     id: 'plan-1',
     spec: { name: 'Test Plan', jobs: [], baseBranch: 'main' },
-    nodes: new Map([['node-1', node]]),
+    jobs: new Map([['node-1', node]]),
     producerIdToNodeId: new Map([['node-1', 'node-1']]),
     roots: ['node-1'],
     leaves: ['node-1'],
@@ -408,7 +408,7 @@ suite('ExecutionPump', () => {
   test('pump counts work-performing running nodes for local capacity', async () => {
     const plan = createTestPlan();
     // Set the node to have work and be running
-    const node = plan.nodes.get('node-1')!;
+    const node = plan.jobs.get('node-1')!;
     (node as any).work = { type: 'shell', command: 'echo test' };
     plan.nodeStates.get('node-1')!.status = 'running';
     const sm = createMockStateMachine('running');

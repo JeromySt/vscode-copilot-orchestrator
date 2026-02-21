@@ -176,6 +176,26 @@ suite('Node Detail Scripts Template', () => {
       assert.ok(script.includes('formatDuration'));
     });
 
+    test('DurationCounterControl subscribes to pulse events', () => {
+      const script = webviewScripts(baseConfig);
+      assert.ok(script.includes('DurationCounterControl'), 'should include DurationCounterControl class');
+      assert.ok(script.includes("this.subscribe(T.PULSE, function() { self._tick(); })"), 'should subscribe to PULSE events for ticking');
+      assert.ok(script.includes('function DCC(bus, controlId, elementId)'), 'should define DCC constructor');
+    });
+
+    test('DurationCounterControl has _tick method', () => {
+      const script = webviewScripts(baseConfig);
+      assert.ok(script.includes('DCC.prototype._tick'), 'should define _tick prototype method');
+      assert.ok(script.includes('formatDuration'), '_tick should format duration');
+      assert.ok(script.includes('data-started-at'), '_tick should check for started-at attribute');
+    });
+
+    test('DurationCounterControl responds to NODE_STATE events', () => {
+      const script = webviewScripts(baseConfig);
+      assert.ok(script.includes("this.subscribe(T.NODE_STATE, function(data) { self._onStateChange(data); })"), 'should subscribe to NODE_STATE events');
+      assert.ok(script.includes('DCC.prototype._onStateChange'), 'should define _onStateChange method');
+    });
+
     test('includes escapeHtml client-side function', () => {
       const script = webviewScripts(baseConfig);
       assert.ok(script.includes('function escapeHtml(text)'));

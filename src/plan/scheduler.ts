@@ -81,7 +81,7 @@ export class PlanScheduler {
     let currentPlanRunning = 0;
     for (const [nodeId, state] of plan.nodeStates) {
       if (state.status === 'running' || state.status === 'scheduled') {
-        const node = plan.nodes.get(nodeId);
+        const node = plan.jobs.get(nodeId);
         if (node && nodePerformsWork(node)) {
           currentPlanRunning++;
         }
@@ -90,7 +90,8 @@ export class PlanScheduler {
     
     // Step 3: Calculate available execution slots
     // Must respect both plan-level limits and global system limits
-    const planAvailable = plan.maxParallel - currentPlanRunning;
+    // maxParallel of 0 means unlimited (defers entirely to global capacity)
+    const planAvailable = plan.maxParallel > 0 ? plan.maxParallel - currentPlanRunning : Infinity;
     const globalAvailable = this.globalMaxParallel - currentGlobalRunning;
     const available = Math.min(planAvailable, globalAvailable);
     
@@ -129,8 +130,8 @@ export class PlanScheduler {
    */
   private prioritizeNodes(plan: PlanInstance, nodeIds: string[]): string[] {
     return nodeIds.sort((a, b) => {
-      const nodeA = plan.nodes.get(a);
-      const nodeB = plan.nodes.get(b);
+      const nodeA = plan.jobs.get(a);
+      const nodeB = plan.jobs.get(b);
       
       if (!nodeA || !nodeB) {return 0;}
       

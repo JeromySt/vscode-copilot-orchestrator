@@ -102,6 +102,7 @@ function createAgentDelegatorAdapter(runner: ICopilotRunner, log: any) {
       onProcess?: (proc: any) => void;
       allowedFolders?: string[];
       allowedUrls?: string[];
+      configDir?: string;
     }): Promise<{
       success: boolean;
       sessionId?: string;
@@ -109,7 +110,7 @@ function createAgentDelegatorAdapter(runner: ICopilotRunner, log: any) {
       exitCode?: number;
       metrics?: CopilotUsageMetrics;
     }> {
-      const { task, instructions, worktreePath, sessionId, logOutput, onProcess, model, jobId, allowedFolders, allowedUrls } = options;
+      const { task, instructions, worktreePath, sessionId, logOutput, onProcess, model, jobId, allowedFolders, allowedUrls, configDir } = options;
       
       const statsParser = new CopilotStatsParser();
       
@@ -123,6 +124,7 @@ function createAgentDelegatorAdapter(runner: ICopilotRunner, log: any) {
         jobId,
         allowedFolders,
         allowedUrls,
+        configDir,
         timeout: 0, // No timeout — agent work can run for a long time
         onOutput: logOutput ? (line) => {
           statsParser.feedLine(line);
@@ -192,6 +194,10 @@ export async function initializePlanRunner(
   
   planRunner.setExecutor(executor);
   
+  // Wire plan repository from DI container BEFORE initialize() so legacy migration can run
+  const planRepository = container.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
+  planRunner.setPlanRepository(planRepository);
+
   // Ensure .orchestrator and .worktrees are in .gitignore
   if (workspacePath) {
     git.gitignore.ensureGitignoreEntries(workspacePath, ['.orchestrator/', '.worktrees/'], log.debug).catch((err: any) => {
@@ -248,11 +254,15 @@ export async function initializeMcpServer(
   // Resolve McpHandler from a scoped container with runtime dependencies
   const scope = container.createScope();
   const { McpHandler } = require('../mcp/handler');
+  
+  // Plan repository services are already registered in the main container (composition.ts)
+  // The scoped container inherits those registrations
    
   scope.register(Tokens.IMcpRequestRouter, (c) => {
     const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
     const configProvider = c.resolve<import('../interfaces/IConfigProvider').IConfigProvider>(Tokens.IConfigProvider);
-    return new McpHandler(planRunner, workspacePath, git, configProvider);
+    const repo = c.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
+    return new McpHandler(planRunner, workspacePath, git, configProvider, repo);
   });
   const mcpHandler = scope.resolve<IMcpRequestRouter>(Tokens.IMcpRequestRouter);
 
@@ -438,7 +448,7 @@ export function registerPlanCommands(
           return;
         }
         
-        const nodeItems = Array.from(plan.nodes.values()).map(n => {
+        const nodeItems = Array.from(plan.jobs.values()).map(n => {
           // Get display name - check for spec.name if available
           const spec = (n as any).spec;
           const displayName = (spec && typeof spec.name === 'string') ? spec.name : n.id;

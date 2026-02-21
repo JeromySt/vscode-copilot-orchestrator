@@ -45,8 +45,8 @@ Thank you for your interest in contributing to Copilot Orchestrator! This docume
 | `npm run compile:tsc` | Compile TypeScript only (for tests) |
 | `npm run watch` | Compile in watch mode |
 | `npm run lint` | Run ESLint |
-| `npm run test:unit` | Run unit tests (headless) |
-| `npm test` | Run integration tests (VS Code Electron) |
+| `npm test` | Run unit tests (headless - no VS Code required) |
+| `npm run test:unit` | Run unit tests (same as `npm test`) |
 | `npm run test:coverage` | Run tests with 95% coverage enforcement |
 | `npm run package` | Create VSIX package |
 | `npm run deploy:local` | Build, package, and install locally (see below) |
@@ -134,10 +134,9 @@ src/
 ├── process/                # Process monitoring
 │   └── processMonitor.ts   # Child process tracking
 └── test/
-    ├── unit/               # Unit tests (mocha + c8, headless)
-    │   ├── register-vscode-mock.js # VS Code API mock registration
-    │   └── ...             # Mirrors src/ structure
-    └── suite/              # Integration tests (@vscode/test-electron)
+    └── unit/               # Unit tests (mocha + c8, headless)
+        ├── register-vscode-mock.js # VS Code API mock registration
+        └── ...             # Mirrors src/ structure
 ```
 
 ## Coding Standards
@@ -244,29 +243,22 @@ For feature requests, please describe:
 ### Running Tests
 
 ```bash
-# Unit tests (headless, fast — ~2400 tests)
-npm run test:unit
-
-# Integration tests (launches VS Code Electron)
+# Unit tests (headless - no VS Code required)
 npm test
+# or
+npm run test:unit
 
 # Coverage report (95% line threshold enforced)
 npm run test:coverage
 ```
-
-### Dual-Runner Architecture
-
-| Runner | Command | Use | Coverage |
-|--------|---------|-----|----------|
-| **mocha** (direct) | `npm run test:unit` | Unit tests — all `src/test/unit/**/*.unit.test.ts` | ✅ c8 instrumented |
-| **@vscode/test-electron** | `npm test` | Integration tests requiring VS Code runtime | ❌ No coverage |
 
 ### Writing Tests
 
 - Place unit tests in `src/test/unit/` mirroring the `src/` structure
 - Use Mocha TDD interface (`suite`, `test`, `setup`, `teardown`)
 - Use Sinon for mocking/stubbing
-- Tests run headless via `register-vscode-mock.js` — no VS Code required
+- Tests run headless via `register-vscode-mock.js` — no VS Code or Electron required
+- The comprehensive VS Code API mock in `src/test/unit/mocks/vscode.ts` provides full API coverage
 - **Use DI interfaces**: Inject mock services instead of stubbing modules
 
 ```typescript
@@ -283,8 +275,12 @@ sinon.stub(git.worktrees, 'createOrReuseDetached');
 All PRs must maintain **95% line coverage**. Coverage is enforced by c8:
 ```bash
 c8 --check-coverage --lines 95 --all \
-   --include "out/**/*.js" --exclude "out/test/**" --exclude "out/ui/**" \
-   mocha --ui tdd --exit "out/test/unit/**/*.unit.test.js"
+   --include "out/**/*.js" \
+   --exclude "out/test/**" --exclude "out/ui/**" \
+   --exclude "out/extension.js" --exclude "out/vscode/adapters.js" \
+   --exclude "out/core/planInitialization.js" \
+   mocha --ui tdd --exit "out/test/unit/**/*.test.js" \
+   --require src/test/unit/register-vscode-mock.js
 ```
 
 ## Dependency Injection
@@ -297,6 +293,18 @@ New services should use the DI container:
 4. **Inject via constructor** — avoid importing concrete implementations
 
 See `docs/DI_GUIDE.md` for comprehensive patterns and examples.
+
+## Agent Instructions & Plan Creation
+
+For complex tasks requiring detailed agent instructions:
+
+- **Large Instructions**: Use `instructionsFile` parameter instead of inline `instructions` to keep MCP payloads manageable and improve readability.
+- **Complex Plans**: For plans with 5+ nodes, use the scaffold workflow:
+  1. Create plan structure with `scaffold()`
+  2. Add individual work specs with `addNode()`  
+  3. Mark complete with `finalize()`
+
+This approach provides better memory efficiency and enables lazy-loading of work specifications during execution.
 
 ## Release Process
 

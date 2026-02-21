@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import { suite, test, setup, teardown } from 'mocha';
 import * as sinon from 'sinon';
-import { handleUpdatePlanNode } from '../../../../../mcp/handlers/plan/updateNodeHandler';
+import { handleUpdatePlanJob } from '../../../../../mcp/handlers/plan/updateJobHandler';
 import type { PlanInstance, PlanNode, NodeExecutionState } from '../../../../../plan/types';
 
 function makeNode(id: string, opts: Partial<PlanNode> = {}): PlanNode {
@@ -34,7 +34,7 @@ function makePlan(
   return {
     id: 'plan-1',
     spec: {} as any,
-    nodes: nodesMap,
+    jobs: nodesMap,
     producerIdToNodeId: producerMap,
     roots: [],
     leaves: [],
@@ -78,8 +78,8 @@ suite('updateNodeHandler', () => {
     const node = makeNode('n1');
     const plan = makePlan([node], new Map([['n1', makeState('failed')]]));
     const ctx = makeCtx(plan);
-    const result = await handleUpdatePlanNode({
-      planId: 'plan-1', nodeId: 'n1',
+    const result = await handleUpdatePlanJob({
+      planId: 'plan-1', jobId: 'n1',
       work: { type: 'shell', command: 'cmd 2>&1', shell: 'powershell' },
     }, ctx);
     assert.strictEqual(result.success, false);
@@ -90,8 +90,8 @@ suite('updateNodeHandler', () => {
     const svNode = makeNode('sv-id', { producerId: '__snapshot-validation__', name: 'Snapshot Validation' });
     const plan = makePlan([svNode], new Map([['sv-id', makeState('failed')]]));
     const ctx = makeCtx(plan);
-    const result = await handleUpdatePlanNode({
-      planId: 'plan-1', nodeId: 'sv-id',
+    const result = await handleUpdatePlanJob({
+      planId: 'plan-1', jobId: 'sv-id',
       work: 'echo hello',
     }, ctx);
     assert.strictEqual(result.success, false);
@@ -102,13 +102,50 @@ suite('updateNodeHandler', () => {
     const node = makeNode('n1');
     const plan = makePlan([node], new Map([['n1', makeState('failed')]]));
     const ctx = makeCtx(plan);
-    const result = await handleUpdatePlanNode({
-      planId: 'plan-1', nodeId: 'n1',
+    const result = await handleUpdatePlanJob({
+      planId: 'plan-1', jobId: 'n1',
       work: 'echo hello',
     }, ctx);
     assert.strictEqual(result.success, true);
     assert.ok(result.message);
     assert.strictEqual(result.planId, 'plan-1');
-    assert.strictEqual(result.nodeId, 'n1');
+    assert.strictEqual(result.jobId, 'n1');
+  });
+
+  test('does not set resumeFromPhase for never-executed nodes', async () => {
+    // Node that has never been executed (attempts=0, status=pending)
+    const node = makeNode('n1');
+    const nodeState = makeState('pending', { attempts: 0 });
+    const plan = makePlan([node], new Map([['n1', nodeState]]));
+    const ctx = makeCtx(plan);
+    
+    // Update only postchecks on a never-executed node
+    const result = await handleUpdatePlanJob({
+      planId: 'plan-1', jobId: 'n1',
+      postchecks: { type: 'shell', command: 'echo ok', shell: 'bash' },
+    }, ctx);
+    
+    assert.strictEqual(result.success, true);
+    // Critical: resumeFromPhase should NOT be set for a node that's never executed
+    // Setting it would cause merge-fi and other phases to be skipped on first execution
+    assert.strictEqual(nodeState.resumeFromPhase, undefined);
+  });
+
+  test('sets resumeFromPhase for previously-executed nodes', async () => {
+    // Node that has been executed (attempts > 0, status=failed)
+    const node = makeNode('n1');
+    const nodeState = makeState('failed', { attempts: 1 });
+    const plan = makePlan([node], new Map([['n1', nodeState]]));
+    const ctx = makeCtx(plan);
+    
+    // Update postchecks on a failed node
+    const result = await handleUpdatePlanJob({
+      planId: 'plan-1', jobId: 'n1',
+      postchecks: { type: 'shell', command: 'echo ok', shell: 'bash' },
+    }, ctx);
+    
+    assert.strictEqual(result.success, true);
+    // For a node that has executed, resumeFromPhase should be set
+    assert.strictEqual(nodeState.resumeFromPhase, 'postchecks');
   });
 });

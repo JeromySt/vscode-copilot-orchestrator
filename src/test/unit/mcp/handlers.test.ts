@@ -54,6 +54,7 @@ function makeMockContext(overrides?: Record<string, any>): PlanHandlerContext {
     plans: null as any,
     workspacePath: '/workspace',
     git: {} as any,
+    PlanRepository: {} as any,
   };
 }
 
@@ -61,7 +62,7 @@ function makeMockPlan(overrides?: Record<string, any>): any {
   return {
     id: 'plan-1',
     spec: { name: 'Test Plan', jobs: [] },
-    nodes: new Map(),
+    jobs: new Map(),
     producerIdToNodeId: new Map(),
     roots: [],
     leaves: [],
@@ -225,7 +226,7 @@ suite('MCP Handler Utilities', () => {
       const node = { id: 'node-1', name: 'Build', type: 'job' };
       const state = { status: 'pending', attempts: 0 };
       const plan = makeMockPlan({
-        nodes: new Map([['node-1', node]]),
+        jobs: new Map([['node-1', node]]),
         nodeStates: new Map([['node-1', state]]),
       });
 

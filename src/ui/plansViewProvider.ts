@@ -49,6 +49,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   private _pulseSubscription?: PulseDisposable;
   private _debounceTimer?: NodeJS.Timeout;
   private _pulseCounter: number = 0;
+  private _initialRefreshDone: boolean = false;
   
   /**
    * @param _context - The extension context for managing subscriptions and resources.
@@ -73,6 +74,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       planDetailPanel.closeForPlan(planId);
       NodeDetailPanel.closeForPlan(planId);
       this._sendPlanDeleted(planId);
+    });
+    _planRunner.on('planUpdated', (planId: string) => {
+      this._sendPlanStateChange(planId);
     });
     _planRunner.on('nodeTransition', (event: any) => {
       const planId = typeof event === 'string' ? event : event?.planId;
@@ -99,6 +103,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ) {
     this._view = webviewView;
+    this._initialRefreshDone = false;
     
     webviewView.webview.options = {
       enableScripts: true,
@@ -125,13 +130,21 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
           vscode.commands.executeCommand('orchestrator.deletePlan', message.planId);
           break;
         case 'refresh':
+          this._initialRefreshDone = true;
           this.refresh();
           break;
       }
     });
     
-    // Send initial data (full plan list for first render)
-    setTimeout(() => this.refresh(), 100);
+    // Send initial data when the webview signals 'refresh' (sent at end of
+    // its script).  The setTimeout backup handles the case where the webview
+    // script fails to send the 'refresh' message.
+    setTimeout(() => {
+      if (!this._initialRefreshDone) {
+        this._initialRefreshDone = true;
+        this.refresh();
+      }
+    }, 500);
     
     // Pulse: 1-second signal forwarding to webview + capacity refresh counter
     this._pulseSubscription = this._pulse.onPulse(() => {
@@ -162,13 +175,14 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
    */
   private _buildPlanData(plan: PlanInstance) {
     const sm = this._planRunner.getStateMachine(plan.id);
-    const status = sm?.computePlanStatus() || 'pending';
+    // Scaffolding plans use their spec status directly (state machine doesn't understand them)
+    const status = (plan.spec as any)?.status === 'scaffolding' ? 'scaffolding' : (sm?.computePlanStatus() || 'pending');
     const defaultCounts: Record<NodeStatus, number> = {
       pending: 0, ready: 0, scheduled: 0, running: 0,
       succeeded: 0, failed: 0, blocked: 0, canceled: 0
     };
     const counts = sm?.getStatusCounts() || defaultCounts;
-    const total = plan.nodes.size;
+    const total = plan.jobs.size;
     const completed = counts.succeeded + counts.failed + counts.blocked;
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
@@ -176,7 +190,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       id: plan.id,
       name: plan.spec.name,
       status,
-      nodes: plan.nodes.size,
+      nodes: plan.jobs.size,
       progress,
       counts: {
         succeeded: counts.succeeded,
@@ -247,9 +261,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     const Plans = this._planRunner.getAll();
     Plans.sort((a, b) => b.createdAt - a.createdAt);
     
-    const planData = Plans
-      .filter(plan => !plan.parentPlanId)
-      .map(plan => this._buildPlanData(plan));
+    // All plans (including scaffolding) render in the same list — status badge differentiates
+    const allPlans = Plans.filter(p => !p.parentPlanId);
+    const planData = allPlans.map(plan => this._buildPlanData(plan));
     
     this._view.webview.postMessage({
       type: 'update',
@@ -303,6 +317,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-list-hoverBackground);
       cursor: pointer;
       border-left: 3px solid transparent;
+      min-width: 180px;
     }
     .plan-item:hover,
     .plan-item:focus {
@@ -318,6 +333,14 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     .plan-item.failed { border-left-color: var(--vscode-testing-iconFailed); }
     .plan-item.partial { border-left-color: var(--vscode-editorWarning-foreground); }
     .plan-item.canceled { border-left-color: var(--vscode-descriptionForeground); }
+    .plan-item.scaffolding {
+      border-left: 4px solid transparent;
+      border-image: repeating-linear-gradient(
+        -45deg,
+        #f5c518 0px, #f5c518 4px,
+        #1a1a1a 4px, #1a1a1a 8px
+      ) 4;
+    }
     
     .plan-name { 
       font-weight: 600; 
@@ -350,6 +373,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     .plan-status.pending { background: rgba(133, 133, 133, 0.2); color: var(--vscode-descriptionForeground); }
     .plan-status.paused { background: rgba(255, 165, 0, 0.2); color: #ffa500; }
     .plan-status.canceled { background: rgba(133, 133, 133, 0.2); color: var(--vscode-descriptionForeground); }
+    .plan-status.scaffolding { background: rgba(245, 197, 24, 0.15); color: #f5c518; }
+    
+    .scaffolding { background: rgba(245, 197, 24, 0.08); border: 1px dashed rgba(245, 197, 24, 0.4); }
     
     .plan-details {
       font-size: 11px;
@@ -586,7 +612,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       this.element.innerHTML = 
         '<div class="plan-name">' +
           '<span class="plan-name-text" title="' + escapeHtml(data.name) + '">' + escapeHtml(data.name) + '</span>' +
-          '<span class="plan-status ' + data.status + '">' + data.status + '</span>' +
+          '<span class="plan-status ' + data.status + '">' + (data.status === 'scaffolding' ? '🚧 Under Construction' : data.status) + '</span>' +
         '</div>' +
         '<div class="plan-details">' +
           '<span class="plan-node-count">' + data.nodes + ' nodes</span>' +
@@ -616,7 +642,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       var nameEl = this.element.querySelector('.plan-name-text');
       if (nameEl) { nameEl.textContent = data.name; nameEl.title = data.name; }
       var statusEl = this.element.querySelector('.plan-status');
-      if (statusEl) { statusEl.className = 'plan-status ' + data.status; statusEl.textContent = data.status; }
+      if (statusEl) { 
+        statusEl.className = 'plan-status ' + data.status; 
+        statusEl.textContent = data.status === 'scaffolding' ? '🚧 Under Construction' : data.status; 
+      }
       var countEl = this.element.querySelector('.plan-node-count');
       if (countEl) countEl.textContent = data.nodes + ' nodes';
       var sEl = this.element.querySelector('.plan-succeeded');
@@ -1009,6 +1038,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
             globalStats: msg.globalStats
           });
           break;
+          
+
       }
     });
     

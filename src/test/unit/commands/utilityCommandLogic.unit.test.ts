@@ -11,7 +11,7 @@ import * as assert from 'assert';
 import { suite, test, setup, teardown } from 'mocha';
 import * as sinon from 'sinon';
 import { Module } from 'module';
-import { handleRefreshModels, type ModelRefreshResult } from '../../../commands/utilityCommandLogic';
+import { handleRefreshModels, handleSetupCopilotCli, type ModelRefreshResult, type CliSetupDeps } from '../../../commands/utilityCommandLogic';
 import { MockDialogService } from '../../../vscode/testAdapters';
 
 // Mock types matching the real modelDiscovery module
@@ -309,6 +309,159 @@ suite('Utility Command Logic Unit Tests', () => {
       assert.strictEqual(dialogCalls[0].method, 'showWarning');
       assert.ok(dialogCalls[0].args.length >= 1);
       assert.strictEqual(typeof dialogCalls[0].args[0], 'string');
+    });
+  });
+
+  suite('handleSetupCopilotCli', () => {
+    function createDeps(overrides?: Partial<CliSetupDeps>): CliSetupDeps & { infoCalls: string[]; warningCalls: string[]; terminalCalls: Array<{ name: string; command: string }> } {
+      const infoCalls: string[] = [];
+      const warningCalls: string[] = [];
+      const terminalCalls: Array<{ name: string; command: string }> = [];
+      return {
+        dialog: {
+          showInfo: (msg: string) => { infoCalls.push(msg); },
+          showWarning: (msg: string) => { warningCalls.push(msg); },
+          ...overrides?.dialog,
+        },
+        openTerminal: (name: string, command: string) => { terminalCalls.push({ name, command }); },
+        ...overrides?.openTerminal ? { openTerminal: overrides.openTerminal as any } : {},
+        infoCalls,
+        warningCalls,
+        terminalCalls,
+      };
+    }
+
+    test('should return install-prompted when CLI is not available', async () => {
+      Module.prototype.require = sandbox.stub().callsFake((id: string) => {
+        if (id === '../agent/cliCheckCore') {
+          return {
+            checkCopilotCliAsync: sandbox.stub().resolves(false),
+            checkCopilotAuthAsync: sandbox.stub().resolves({ authenticated: false, method: 'unknown' }),
+            resetCliCache: sandbox.stub(),
+          };
+        }
+        return originalRequire.call(this, id);
+      });
+
+      const deps = createDeps();
+      const result = await handleSetupCopilotCli(deps);
+
+      assert.strictEqual(result.status, 'install-prompted');
+      assert.strictEqual(deps.warningCalls.length, 1);
+      assert.ok(deps.warningCalls[0].includes('not installed'));
+    });
+
+    test('should return already-setup when CLI is available and authenticated', async () => {
+      Module.prototype.require = sandbox.stub().callsFake((id: string) => {
+        if (id === '../agent/cliCheckCore') {
+          return {
+            checkCopilotCliAsync: sandbox.stub().resolves(true),
+            checkCopilotAuthAsync: sandbox.stub().resolves({ authenticated: true, method: 'gh' }),
+            resetCliCache: sandbox.stub(),
+          };
+        }
+        return originalRequire.call(this, id);
+      });
+
+      const deps = createDeps();
+      const result = await handleSetupCopilotCli(deps);
+
+      assert.strictEqual(result.status, 'already-setup');
+      assert.strictEqual(deps.infoCalls.length, 1);
+      assert.ok(deps.infoCalls[0].includes('authenticated'));
+    });
+
+    test('should open terminal with gh auth login for unauthenticated gh CLI', async () => {
+      Module.prototype.require = sandbox.stub().callsFake((id: string) => {
+        if (id === '../agent/cliCheckCore') {
+          return {
+            checkCopilotCliAsync: sandbox.stub().resolves(true),
+            checkCopilotAuthAsync: sandbox.stub().resolves({ authenticated: false, method: 'gh' }),
+            resetCliCache: sandbox.stub(),
+          };
+        }
+        return originalRequire.call(this, id);
+      });
+
+      const deps = createDeps();
+      const result = await handleSetupCopilotCli(deps);
+
+      assert.strictEqual(result.status, 'login-prompted');
+      assert.strictEqual((result as any).method, 'gh');
+      assert.strictEqual(deps.terminalCalls.length, 1);
+      assert.ok(deps.terminalCalls[0].command.includes('gh auth login'));
+    });
+
+    test('should open terminal with copilot auth login for standalone CLI', async () => {
+      Module.prototype.require = sandbox.stub().callsFake((id: string) => {
+        if (id === '../agent/cliCheckCore') {
+          return {
+            checkCopilotCliAsync: sandbox.stub().resolves(true),
+            checkCopilotAuthAsync: sandbox.stub().resolves({ authenticated: false, method: 'standalone' }),
+            resetCliCache: sandbox.stub(),
+          };
+        }
+        return originalRequire.call(this, id);
+      });
+
+      const deps = createDeps();
+      const result = await handleSetupCopilotCli(deps);
+
+      assert.strictEqual(result.status, 'login-prompted');
+      assert.strictEqual((result as any).method, 'standalone');
+      assert.strictEqual(deps.terminalCalls.length, 1);
+      assert.ok(deps.terminalCalls[0].command.includes('copilot auth login'));
+    });
+
+    test('should default to gh method when auth method is unknown', async () => {
+      Module.prototype.require = sandbox.stub().callsFake((id: string) => {
+        if (id === '../agent/cliCheckCore') {
+          return {
+            checkCopilotCliAsync: sandbox.stub().resolves(true),
+            checkCopilotAuthAsync: sandbox.stub().resolves({ authenticated: false, method: 'unknown' }),
+            resetCliCache: sandbox.stub(),
+          };
+        }
+        return originalRequire.call(this, id);
+      });
+
+      const deps = createDeps();
+      const result = await handleSetupCopilotCli(deps);
+
+      assert.strictEqual(result.status, 'login-prompted');
+      assert.strictEqual((result as any).method, 'gh');
+    });
+
+    test('should return error when import throws', async () => {
+      Module.prototype.require = sandbox.stub().callsFake((id: string) => {
+        if (id === '../agent/cliCheckCore') {
+          throw new Error('Module load failed');
+        }
+        return originalRequire.call(this, id);
+      });
+
+      const deps = createDeps();
+      const result = await handleSetupCopilotCli(deps);
+
+      assert.strictEqual(result.status, 'error');
+      assert.strictEqual((result as any).error, 'Module load failed');
+      assert.strictEqual(deps.warningCalls.length, 1);
+      assert.ok(deps.warningCalls[0].includes('setup failed'));
+    });
+
+    test('should handle error without message property', async () => {
+      Module.prototype.require = sandbox.stub().callsFake((id: string) => {
+        if (id === '../agent/cliCheckCore') {
+          throw { code: 'ENOENT' }; // eslint-disable-line no-throw-literal
+        }
+        return originalRequire.call(this, id);
+      });
+
+      const deps = createDeps();
+      const result = await handleSetupCopilotCli(deps);
+
+      assert.strictEqual(result.status, 'error');
+      assert.strictEqual((result as any).error, 'Unknown error');
     });
   });
 

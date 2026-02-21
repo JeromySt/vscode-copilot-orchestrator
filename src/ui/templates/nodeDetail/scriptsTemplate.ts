@@ -496,7 +496,14 @@ export function webviewScripts(config: ScriptsConfig): string {
           this._knownAttempts[key] = true;
           var cardDiv = document.createElement('div');
           cardDiv.innerHTML = this._renderAttemptCard(attempt);
-          if (cardDiv.firstChild) container.appendChild(cardDiv.firstChild);
+          if (cardDiv.firstChild) {
+            // Prepend: newest attempt at the top
+            if (container.firstChild) {
+              container.insertBefore(cardDiv.firstChild, container.firstChild);
+            } else {
+              container.appendChild(cardDiv.firstChild);
+            }
+          }
         }
         this.publishUpdate(data);
       };
@@ -514,6 +521,49 @@ export function webviewScripts(config: ScriptsConfig): string {
           ? '<div class="attempt-error"><strong>Error:</strong> <span class="error-message">' + escapeHtml(attempt.error) + '</span>'
             + (attempt.failedPhase ? '<div style="margin-top: 4px;">Failed in phase: <strong>' + escapeHtml(attempt.failedPhase) + '</strong></div>' : '')
             + '</div>' : '';
+
+        // Step statuses (phase progression)
+        var stepsHtml = '';
+        if (attempt.stepStatuses) {
+          var phases = ['merge-fi','prechecks','work','commit','postchecks','merge-ri'];
+          var stepIcons = { success:'✓', failed:'✗', running:'▶', skipped:'○' };
+          stepsHtml = '<div class="attempt-steps">';
+          for (var p = 0; p < phases.length; p++) {
+            var phase = phases[p];
+            var pStatus = attempt.stepStatuses[phase] || '';
+            if (pStatus) {
+              var icon = stepIcons[pStatus] || '○';
+              stepsHtml += '<span class="step-badge step-' + pStatus + '" title="' + phase + ': ' + pStatus + '">' + icon + ' ' + phase + '</span>';
+            }
+          }
+          stepsHtml += '</div>';
+        }
+
+        // Work spec HTML (if provided)
+        var workHtml = attempt.workUsedHtml
+          ? '<div class="attempt-work">' + attempt.workUsedHtml + '</div>' : '';
+
+        // Metrics HTML (if provided)
+        var metricsHtml = attempt.metricsHtml
+          ? '<div class="attempt-metrics">' + attempt.metricsHtml + '</div>' : '';
+
+        // Log content (collapsible)
+        var logsHtml = '';
+        if (attempt.logs) {
+          logsHtml = '<details class="attempt-logs"><summary>Execution Log</summary><pre class="log-content">' + escapeHtml(attempt.logs) + '</pre></details>';
+        }
+
+        // Meta details
+        var metaHtml = '<div class="attempt-meta">'
+          + '<div class="attempt-meta-row"><strong>Status:</strong> <span class="' + statusClass + '">' + (attempt.status || 'pending') + '</span></div>';
+        if (attempt.copilotSessionId) {
+          metaHtml += '<div class="attempt-meta-row"><strong>Session:</strong> <code>' + escapeHtml(attempt.copilotSessionId) + '</code></div>';
+        }
+        if (attempt.exitCode !== undefined && attempt.exitCode !== null) {
+          metaHtml += '<div class="attempt-meta-row"><strong>Exit code:</strong> ' + attempt.exitCode + '</div>';
+        }
+        metaHtml += '</div>';
+
         return '<div class="attempt-card" data-attempt="' + attempt.attemptNumber + '">'
           + '<div class="attempt-header" data-expanded="false">'
           + '<div class="attempt-header-left">'
@@ -524,8 +574,12 @@ export function webviewScripts(config: ScriptsConfig): string {
           + '<span class="chevron">▶</span>'
           + '</div>'
           + '<div class="attempt-body" style="display: none;">'
-          + '<div class="attempt-meta"><div class="attempt-meta-row"><strong>Status:</strong> <span class="' + statusClass + '">' + (attempt.status || 'pending') + '</span></div></div>'
+          + stepsHtml
+          + metaHtml
           + errorHtml
+          + workHtml
+          + metricsHtml
+          + logsHtml
           + '</div></div>';
       };
       return ALC;

@@ -38,6 +38,11 @@ export interface IGitBranches {
   list(repoPath: string): Promise<string[]>;
   getCommit(branchName: string, repoPath: string): Promise<string | null>;
   getMergeBase(branch1: string, branch2: string, repoPath: string): Promise<string | null>;
+  /**
+   * Check if commit A is an ancestor of commit B.
+   * Used by merge-fi to detect already-merged dependencies on resume.
+   */
+  isAncestor(ancestor: string, descendant: string, repoPath: string): Promise<boolean>;
   remove(branchName: string, repoPath: string, options?: { force?: boolean; log?: GitLogger }): Promise<void>;
   deleteLocal(repoPath: string, branchName: string, options?: { force?: boolean; log?: GitLogger }): Promise<boolean>;
   deleteRemote(repoPath: string, branchName: string, options?: { remote?: string; log?: GitLogger }): Promise<boolean>;
@@ -108,6 +113,8 @@ export interface IGitRepository {
   getDirtyFiles(cwd: string): Promise<string[]>;
   checkoutFile(cwd: string, filePath: string, log?: GitLogger): Promise<void>;
   resetHard(cwd: string, ref: string, log?: GitLogger): Promise<void>;
+  /** Mixed reset — updates index to match ref, leaves working tree untouched. */
+  resetMixed(cwd: string, ref: string, log?: GitLogger): Promise<void>;
   clean(cwd: string, log?: GitLogger): Promise<void>;
   updateRef(cwd: string, refName: string, commit: string, log?: GitLogger): Promise<void>;
   stashPush(cwd: string, message: string, log?: GitLogger): Promise<boolean>;

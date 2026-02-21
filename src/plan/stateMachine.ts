@@ -143,7 +143,7 @@ export class PlanStateMachine extends EventEmitter {
     
     log.debug(`Node transition: ${nodeId} ${currentStatus} -> ${newStatus}`, {
       planId: this.plan.id,
-      nodeName: this.plan.nodes.get(nodeId)?.name,
+      nodeName: this.plan.jobs.get(nodeId)?.name,
     });
     
     // Emit transition event
@@ -194,7 +194,7 @@ export class PlanStateMachine extends EventEmitter {
    * Jobs push their state changes to their parent group.
    */
   private updateGroupState(nodeId: string, _from: NodeStatus, _to: NodeStatus): void {
-    const node = this.plan.nodes.get(nodeId);
+    const node = this.plan.jobs.get(nodeId);
     if (!node || !node.groupId) {return;}
     
     // Recompute the group state from its direct children and propagate up
@@ -341,7 +341,7 @@ export class PlanStateMachine extends EventEmitter {
    * Check if dependents of a succeeded node are now ready
    */
   private checkDependentsReady(succeededNodeId: string): void {
-    const node = this.plan.nodes.get(succeededNodeId);
+    const node = this.plan.jobs.get(succeededNodeId);
     if (!node) {return;}
     
     for (const dependentId of node.dependents) {
@@ -364,7 +364,7 @@ export class PlanStateMachine extends EventEmitter {
     
     while (queue.length > 0) {
       const nodeId = queue.shift()!;
-      const node = this.plan.nodes.get(nodeId);
+      const node = this.plan.jobs.get(nodeId);
       if (!node) {continue;}
       
       for (const dependentId of node.dependents) {
@@ -389,7 +389,7 @@ export class PlanStateMachine extends EventEmitter {
    * @returns `true` if every dependency is in `'succeeded'` status, `false` otherwise.
    */
   areDependenciesMet(nodeId: string): boolean {
-    const node = this.plan.nodes.get(nodeId);
+    const node = this.plan.jobs.get(nodeId);
     if (!node) {return false;}
     
     for (const depId of node.dependencies) {
@@ -409,7 +409,7 @@ export class PlanStateMachine extends EventEmitter {
    * @returns `true` if at least one dependency is in `'failed'` or `'blocked'` status.
    */
   hasDependencyFailed(nodeId: string): boolean {
-    const node = this.plan.nodes.get(nodeId);
+    const node = this.plan.jobs.get(nodeId);
     if (!node) {return false;}
     
     for (const depId of node.dependencies) {
@@ -520,7 +520,7 @@ export class PlanStateMachine extends EventEmitter {
     
     log.info(`Node reset for retry: ${nodeId} ${oldStatus} -> ${newStatus}`, {
       planId: this.plan.id,
-      nodeName: this.plan.nodes.get(nodeId)?.name,
+      nodeName: this.plan.jobs.get(nodeId)?.name,
     });
     
     // Emit transition event
@@ -549,7 +549,7 @@ export class PlanStateMachine extends EventEmitter {
    * Called when a failed node is being retried.
    */
   private unblockDownstream(nodeId: string): void {
-    const node = this.plan.nodes.get(nodeId);
+    const node = this.plan.jobs.get(nodeId);
     if (!node) {return;}
     
     for (const dependentId of node.dependents) {
@@ -563,7 +563,7 @@ export class PlanStateMachine extends EventEmitter {
           
           log.debug(`Unblocked downstream node: ${dependentId}`, {
             planId: this.plan.id,
-            nodeName: this.plan.nodes.get(dependentId)?.name,
+            nodeName: this.plan.jobs.get(dependentId)?.name,
           });
           
           // Recursively unblock further downstream
@@ -604,7 +604,7 @@ export class PlanStateMachine extends EventEmitter {
    * @returns Array of commit SHAs from completed dependencies
    */
   getBaseCommitsForNode(nodeId: string): string[] {
-    const node = this.plan.nodes.get(nodeId);
+    const node = this.plan.jobs.get(nodeId);
     if (!node) {return [];}
     
     // If no dependencies, use the Plan's base branch (caller handles this)

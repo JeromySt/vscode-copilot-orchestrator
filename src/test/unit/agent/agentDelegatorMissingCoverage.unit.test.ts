@@ -20,6 +20,7 @@ import type { ICopilotRunner } from '../../../interfaces/ICopilotRunner';
 import type { IGitOperations } from '../../../interfaces/IGitOperations';
 import type { CopilotRunOptions, CopilotRunResult } from '../../../agent/copilotCliRunner';
 import type { CopilotUsageMetrics } from '../../../plan/types';
+import * as cliCheckCore from '../../../agent/cliCheckCore';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -69,6 +70,7 @@ function createMockGitOps(): IGitOperations {
       getDirtyFiles: async () => [],
       checkoutFile: async () => {},
       resetHard: async () => {},
+      resetMixed: async () => {},
       clean: async () => {},
       updateRef: async () => {},
       stashPush: async () => true,
@@ -103,6 +105,8 @@ suite('AgentDelegator - Missing Coverage', () => {
   setup(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'delegator-missing-coverage-'));
     sandbox = sinon.createSandbox();
+    // Stub CLI availability so delegate() calls the injected runner
+    sandbox.stub(cliCheckCore, 'isCopilotCliAvailable').returns(true);
     // Create basic directory structure
     fs.mkdirSync(path.join(tmpDir, '.orchestrator', '.copilot'), { recursive: true });
   });
@@ -191,10 +195,6 @@ suite('AgentDelegator - Missing Coverage', () => {
       const logger = createLogger();
       const callbacks = createCallbacksTracker();
       
-      // Mock CLI availability to ensure delegateViaCopilot is called
-      const cliCheckStub = sandbox.stub(require('../../../agent/cliCheckCore'), 'isCopilotCliAvailable');
-      cliCheckStub.returns(true);
-      
       const runner: ICopilotRunner = {
         run: async (options: CopilotRunOptions) => {
           // Simulate output with session ID but don't return session from runner
@@ -277,10 +277,6 @@ suite('AgentDelegator - Missing Coverage', () => {
     test('triggers session callback from file fallback (lines 414-415)', async () => {
       const logger = createLogger();
       const callbacks = createCallbacksTracker();
-      
-      // Mock CLI availability to ensure delegateViaCopilot is called
-      const cliCheckStub = sandbox.stub(require('../../../agent/cliCheckCore'), 'isCopilotCliAvailable');
-      cliCheckStub.returns(true);
       
       // Create the expected directory structure for session share file
       const sessionSharePath = path.join(tmpDir, '.copilot-orchestrator', 'session-test.md');
@@ -376,10 +372,6 @@ suite('AgentDelegator - Missing Coverage', () => {
     test('handles complete delegation flow with session extraction from output', async () => {
       const logger = createLogger();
       const callbacks = createCallbacksTracker();
-      
-      // Mock CLI availability to ensure delegateViaCopilot is called
-      const cliCheckStub = sandbox.stub(require('../../../agent/cliCheckCore'), 'isCopilotCliAvailable');
-      cliCheckStub.returns(true);
 
       // Setup log files for legacy token extraction
       const logDir = path.join(tmpDir, '.copilot-orchestrator', 'logs');

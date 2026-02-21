@@ -4,7 +4,7 @@ applyTo: "src/**/*.ts,!src/test/**"
 
 # Source Code Conventions
 
-> **Detailed guides**: See `.github/skills/di-refactor/SKILL.md` for the full DI pipeline and `.github/skills/security-hardener/SKILL.md` for security patterns.
+> **Detailed guides**: See `di-refactor.instructions.md` for the full DI pipeline and `security-hardener.instructions.md` for security patterns.
 
 ## TypeScript Patterns
 
@@ -116,7 +116,7 @@ export async function handleMyTool(
 All `create_copilot_plan` and `create_copilot_job` inputs are validated through a single schema validation framework:
 
 1. **JSON Schema** in `src/mcp/validation/schemas.ts` — Ajv validates structure, types, required fields, patterns
-2. **Semantic validation** in handler (`validatePlanInput()`) — dependency resolution, duplicate producer_ids, group flattening
+2. **Semantic validation** in handler (`validatePlanInput()`) — dependency resolution, duplicate producerIds, group flattening
 3. **Security validation** — `validateAllowedFolders()`, `validateAllowedUrls()`, `validateAgentModels()`, `validateAdditionalSymlinkDirs()`
 
 When adding new fields to `create_*` APIs:

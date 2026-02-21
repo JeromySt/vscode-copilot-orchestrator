@@ -38,13 +38,13 @@ const KITCHEN_SINK_PLAN = {
   cleanUpSuccessfulWork: true,
   startPaused: false,
   additionalSymlinkDirs: ['.venv', 'vendor'],
-  verify_ri: {
+  verifyRi: {
     type: 'shell',
     command: 'npm run build && npm test',
-    on_failure: {
-      no_auto_heal: true,
+    onFailure: {
+      noAutoHeal: true,
       message: 'Build failed after merge',
-      resume_from_phase: 'prechecks',
+      resumeFromPhase: 'prechecks',
     },
   },
 
@@ -52,12 +52,12 @@ const KITCHEN_SINK_PLAN = {
   jobs: [
     {
       // Agent spec with ALL agent-specific properties
-      producer_id: 'agent-job',
+      producerId: 'agent-job',
       name: 'Agent Work',
       task: 'Implement feature X',
       instructions: '# Detailed instructions\n\nDo the thing.',
       group: 'build',
-      expects_no_changes: false,
+      expectsNoChanges: false,
       dependencies: [],
       work: {
         type: 'agent',
@@ -68,27 +68,27 @@ const KITCHEN_SINK_PLAN = {
         resumeSession: true,
         allowedFolders: ['/shared/libs'],
         allowedUrls: ['https://api.example.com'],
-        on_failure: {
-          no_auto_heal: false,
+        onFailure: {
+          noAutoHeal: false,
           message: 'Agent failed',
-          resume_from_phase: 'work',
+          resumeFromPhase: 'work',
         },
       },
       prechecks: {
         type: 'shell',
         command: 'npm run lint',
         shell: 'bash',
-        on_failure: {
-          no_auto_heal: true,
+        onFailure: {
+          noAutoHeal: true,
           message: 'Lint must pass',
-          resume_from_phase: 'prechecks',
+          resumeFromPhase: 'prechecks',
         },
       },
       postchecks: 'npm test',
     },
     {
       // Shell spec
-      producer_id: 'shell-job',
+      producerId: 'shell-job',
       task: 'Run shell command',
       dependencies: ['agent-job'],
       work: {
@@ -99,7 +99,7 @@ const KITCHEN_SINK_PLAN = {
     },
     {
       // Process spec
-      producer_id: 'process-job',
+      producerId: 'process-job',
       task: 'Run process',
       dependencies: [],
       work: {
@@ -110,7 +110,7 @@ const KITCHEN_SINK_PLAN = {
     },
     {
       // String spec (legacy)
-      producer_id: 'string-job',
+      producerId: 'string-job',
       task: 'Run string command',
       dependencies: ['shell-job', 'process-job'],
       work: 'npm run build',
@@ -125,13 +125,13 @@ const KITCHEN_SINK_PLAN = {
       name: 'build',
       jobs: [
         {
-          producer_id: 'grouped-job',
+          producerId: 'grouped-job',
           task: 'Grouped task',
           dependencies: [],
           work: {
             type: 'agent',
             instructions: '# Grouped agent work',
-            on_failure: { message: 'Grouped agent failed' },
+            onFailure: { message: 'Grouped agent failed' },
           },
         },
       ],
@@ -140,7 +140,7 @@ const KITCHEN_SINK_PLAN = {
           name: 'sub-build',
           jobs: [
             {
-              producer_id: 'sub-grouped-job',
+              producerId: 'sub-grouped-job',
               task: 'Sub-grouped task',
               dependencies: [],
             },
@@ -152,7 +152,7 @@ const KITCHEN_SINK_PLAN = {
 };
 
 /**
- * Kitchen-sink retry_copilot_plan_node input.
+ * Kitchen-sink retry_copilot_plan_job input.
  */
 const KITCHEN_SINK_RETRY_NODE = {
   planId: 'plan-123',
@@ -166,23 +166,23 @@ const KITCHEN_SINK_RETRY_NODE = {
     resumeSession: false,
     allowedFolders: ['/tmp/shared'],
     allowedUrls: ['https://registry.npmjs.org'],
-    on_failure: {
-      no_auto_heal: true,
+    onFailure: {
+      noAutoHeal: true,
       message: 'Cannot auto-heal this',
-      resume_from_phase: 'work',
+      resumeFromPhase: 'work',
     },
   },
   newPrechecks: {
     type: 'shell',
     command: 'npm run lint',
-    on_failure: { resume_from_phase: 'prechecks' },
+    onFailure: { resumeFromPhase: 'prechecks' },
   },
   newPostchecks: null,
   clearWorktree: true,
 };
 
 /**
- * Kitchen-sink update_copilot_plan_node input.
+ * Kitchen-sink update_copilot_plan_job input.
  */
 const KITCHEN_SINK_UPDATE_NODE = {
   planId: 'plan-123',
@@ -190,16 +190,16 @@ const KITCHEN_SINK_UPDATE_NODE = {
   work: {
     type: 'shell',
     command: 'npm test',
-    on_failure: {
-      no_auto_heal: true,
+    onFailure: {
+      noAutoHeal: true,
       message: 'Tests must pass',
-      resume_from_phase: 'work',
+      resumeFromPhase: 'work',
     },
   },
   prechecks: {
     type: 'shell',
     command: 'npm run lint',
-    on_failure: { message: 'Lint failed' },
+    onFailure: { message: 'Lint failed' },
   },
   postchecks: 'npm run e2e',
   resetToStage: 'prechecks',
@@ -214,51 +214,51 @@ const KITCHEN_SINK_RESHAPE = {
     {
       type: 'add_node',
       spec: {
-        producer_id: 'new-node',
+        producerId: 'new-node',
         task: 'New task',
         dependencies: [],
         work: {
           type: 'agent',
           instructions: '# New work',
-          on_failure: { no_auto_heal: true },
+          onFailure: { noAutoHeal: true },
         },
         prechecks: {
           type: 'shell',
           command: 'npm run lint',
-          on_failure: { resume_from_phase: 'prechecks' },
+          onFailure: { resumeFromPhase: 'prechecks' },
         },
         postchecks: 'npm test',
         instructions: '# Extra instructions',
-        expects_no_changes: false,
+        expectsNoChanges: false,
       },
     },
     {
       type: 'remove_node',
-      producer_id: 'old-node',
+      producerId: 'old-node',
     },
     {
       type: 'update_deps',
-      producer_id: 'shell-job',
+      producerId: 'shell-job',
       dependencies: ['new-node'],
     },
   ],
 };
 
 /**
- * Kitchen-sink retry_copilot_node (node-centric, no planId) input.
+ * Kitchen-sink retry_copilot_job (job-centric, no planId) input.
  */
 const KITCHEN_SINK_RETRY_NODE_CENTRIC = {
-  node_id: 'node-789',
+  jobId: 'job-789',
   newWork: {
     type: 'shell',
     command: 'npm run build',
-    on_failure: { no_auto_heal: false },
+    onFailure: { noAutoHeal: false },
   },
   newPrechecks: null,
   newPostchecks: {
     type: 'agent',
     instructions: '# Verify output',
-    on_failure: { message: 'Post-check failed', resume_from_phase: 'postchecks' },
+    onFailure: { message: 'Post-check failed', resumeFromPhase: 'postchecks' },
   },
   clearWorktree: false,
 };
@@ -281,13 +281,13 @@ suite('MCP Schema Completeness', () => {
       assert.strictEqual(result.valid, true, `Validation errors: ${result.error}`);
     });
 
-    test('retry_copilot_plan_node accepts full kitchen-sink input', () => {
-      const result = validateInput('retry_copilot_plan_node', KITCHEN_SINK_RETRY_NODE);
+    test('retry_copilot_plan_job accepts full kitchen-sink input', () => {
+      const result = validateInput('retry_copilot_plan_job', KITCHEN_SINK_RETRY_NODE);
       assert.strictEqual(result.valid, true, `Validation errors: ${result.error}`);
     });
 
-    test('update_copilot_plan_node accepts full kitchen-sink input', () => {
-      const result = validateInput('update_copilot_plan_node', KITCHEN_SINK_UPDATE_NODE);
+    test('update_copilot_plan_job accepts full kitchen-sink input', () => {
+      const result = validateInput('update_copilot_plan_job', KITCHEN_SINK_UPDATE_NODE);
       assert.strictEqual(result.valid, true, `Validation errors: ${result.error}`);
     });
 
@@ -296,8 +296,8 @@ suite('MCP Schema Completeness', () => {
       assert.strictEqual(result.valid, true, `Validation errors: ${result.error}`);
     });
 
-    test('retry_copilot_node (node-centric) accepts full kitchen-sink input', () => {
-      const result = validateInput('retry_copilot_node', KITCHEN_SINK_RETRY_NODE_CENTRIC);
+    test('retry_copilot_job (node-centric) accepts full kitchen-sink input', () => {
+      const result = validateInput('retry_copilot_job', KITCHEN_SINK_RETRY_NODE_CENTRIC);
       assert.strictEqual(result.valid, true, `Validation errors: ${result.error}`);
     });
   });
@@ -309,7 +309,7 @@ suite('MCP Schema Completeness', () => {
   suite('Plan-level fields accepted individually', () => {
     const minimalPlan = (overrides: Record<string, unknown>) => ({
       name: 'Test',
-      jobs: [{ producer_id: 'job-one', task: 'X', dependencies: [] }],
+      jobs: [{ producerId: 'job-one', task: 'X', dependencies: [] }],
       ...overrides,
     });
 
@@ -344,23 +344,23 @@ suite('MCP Schema Completeness', () => {
     });
 
     test('verify_ri as string', () => {
-      const r = validateInput('create_copilot_plan', minimalPlan({ verify_ri: 'npm test' }));
+      const r = validateInput('create_copilot_plan', minimalPlan({ verifyRi: 'npm test' }));
       assert.strictEqual(r.valid, true, r.error);
     });
 
     test('verify_ri as object', () => {
       const r = validateInput('create_copilot_plan', minimalPlan({
-        verify_ri: { type: 'shell', command: 'npm test' },
+        verifyRi: { type: 'shell', command: 'npm test' },
       }));
       assert.strictEqual(r.valid, true, r.error);
     });
 
     test('verify_ri with on_failure', () => {
       const r = validateInput('create_copilot_plan', minimalPlan({
-        verify_ri: {
+        verifyRi: {
           type: 'agent',
           instructions: '# Verify',
-          on_failure: { no_auto_heal: true, message: 'Verify failed' },
+          onFailure: { noAutoHeal: true, message: 'Verify failed' },
         },
       }));
       assert.strictEqual(r.valid, true, r.error);
@@ -368,7 +368,7 @@ suite('MCP Schema Completeness', () => {
 
     test('groups', () => {
       const r = validateInput('create_copilot_plan', minimalPlan({
-        groups: [{ name: 'g1', jobs: [{ producer_id: 'g-job', task: 'T', dependencies: [] }] }],
+        groups: [{ name: 'g1', jobs: [{ producerId: 'g-job', task: 'T', dependencies: [] }] }],
       }));
       assert.strictEqual(r.valid, true, r.error);
     });
@@ -382,7 +382,7 @@ suite('MCP Schema Completeness', () => {
     const planWith = (jobOverrides: Record<string, unknown>) => ({
       name: 'Test',
       jobs: [{
-        producer_id: 'job-one',
+        producerId: 'job-one',
         task: 'X',
         dependencies: [],
         ...jobOverrides,
@@ -405,7 +405,7 @@ suite('MCP Schema Completeness', () => {
     });
 
     test('expects_no_changes', () => {
-      const r = validateInput('create_copilot_plan', planWith({ expects_no_changes: true }));
+      const r = validateInput('create_copilot_plan', planWith({ expectsNoChanges: true }));
       assert.strictEqual(r.valid, true, r.error);
     });
 
@@ -438,7 +438,7 @@ suite('MCP Schema Completeness', () => {
     const planWithWork = (workSpec: Record<string, unknown>) => ({
       name: 'Test',
       jobs: [{
-        producer_id: 'job-one',
+        producerId: 'job-one',
         task: 'X',
         dependencies: [],
         work: workSpec,
@@ -488,10 +488,10 @@ suite('MCP Schema Completeness', () => {
       const r = validateInput('create_copilot_plan', planWithWork({
         type: 'shell',
         command: 'npm test',
-        on_failure: {
-          no_auto_heal: true,
+        onFailure: {
+          noAutoHeal: true,
           message: 'Tests must pass',
-          resume_from_phase: 'work',
+          resumeFromPhase: 'work',
         },
       }));
       assert.strictEqual(r.valid, true, r.error);
@@ -500,7 +500,7 @@ suite('MCP Schema Completeness', () => {
     test('on_failure with only no_auto_heal', () => {
       const r = validateInput('create_copilot_plan', planWithWork({
         type: 'shell', command: 'npm test',
-        on_failure: { no_auto_heal: true },
+        onFailure: { noAutoHeal: true },
       }));
       assert.strictEqual(r.valid, true, r.error);
     });
@@ -508,7 +508,7 @@ suite('MCP Schema Completeness', () => {
     test('on_failure with only message', () => {
       const r = validateInput('create_copilot_plan', planWithWork({
         type: 'shell', command: 'npm test',
-        on_failure: { message: 'Fix manually' },
+        onFailure: { message: 'Fix manually' },
       }));
       assert.strictEqual(r.valid, true, r.error);
     });
@@ -516,7 +516,7 @@ suite('MCP Schema Completeness', () => {
     test('on_failure with only resume_from_phase', () => {
       const r = validateInput('create_copilot_plan', planWithWork({
         type: 'shell', command: 'npm test',
-        on_failure: { resume_from_phase: 'prechecks' },
+        onFailure: { resumeFromPhase: 'prechecks' },
       }));
       assert.strictEqual(r.valid, true, r.error);
     });
@@ -526,7 +526,7 @@ suite('MCP Schema Completeness', () => {
       for (const phase of phases) {
         const r = validateInput('create_copilot_plan', planWithWork({
           type: 'shell', command: 'x',
-          on_failure: { resume_from_phase: phase },
+          onFailure: { resumeFromPhase: phase },
         }));
         assert.strictEqual(r.valid, true, `Phase '${phase}' should be valid: ${r.error}`);
       }
@@ -536,10 +536,10 @@ suite('MCP Schema Completeness', () => {
       const r = validateInput('create_copilot_plan', {
         name: 'Test',
         jobs: [{
-          producer_id: 'job-one', task: 'X', dependencies: [],
+          producerId: 'job-one', task: 'X', dependencies: [],
           prechecks: {
             type: 'shell', command: 'npm run lint',
-            on_failure: { no_auto_heal: true, message: 'Lint failed' },
+            onFailure: { noAutoHeal: true, message: 'Lint failed' },
           },
         }],
       });
@@ -550,10 +550,10 @@ suite('MCP Schema Completeness', () => {
       const r = validateInput('create_copilot_plan', {
         name: 'Test',
         jobs: [{
-          producer_id: 'job-one', task: 'X', dependencies: [],
+          producerId: 'job-one', task: 'X', dependencies: [],
           postchecks: {
             type: 'shell', command: 'npm test',
-            on_failure: { no_auto_heal: false },
+            onFailure: { noAutoHeal: false },
           },
         }],
       });
@@ -593,7 +593,7 @@ suite('MCP Schema Completeness', () => {
     test('unknown plan-level property', () => {
       const r = validateInput('create_copilot_plan', {
         name: 'Test',
-        jobs: [{ producer_id: 'job-one', task: 'X', dependencies: [] }],
+        jobs: [{ producerId: 'job-one', task: 'X', dependencies: [] }],
         unknownField: true,
       });
       assert.strictEqual(r.valid, false);
@@ -603,7 +603,7 @@ suite('MCP Schema Completeness', () => {
     test('unknown job-level property', () => {
       const r = validateInput('create_copilot_plan', {
         name: 'Test',
-        jobs: [{ producer_id: 'job-one', task: 'X', dependencies: [], foo: 'bar' }],
+        jobs: [{ producerId: 'job-one', task: 'X', dependencies: [], foo: 'bar' }],
       });
       assert.strictEqual(r.valid, false);
       assert.ok(r.error!.includes('foo'));
@@ -613,7 +613,7 @@ suite('MCP Schema Completeness', () => {
       const r = validateInput('create_copilot_plan', {
         name: 'Test',
         jobs: [{
-          producer_id: 'job-one', task: 'X', dependencies: [],
+          producerId: 'job-one', task: 'X', dependencies: [],
           work: { type: 'shell', command: 'x', unknownProp: true },
         }],
       });
@@ -624,10 +624,10 @@ suite('MCP Schema Completeness', () => {
       const r = validateInput('create_copilot_plan', {
         name: 'Test',
         jobs: [{
-          producer_id: 'job-one', task: 'X', dependencies: [],
+          producerId: 'job-one', task: 'X', dependencies: [],
           work: {
             type: 'shell', command: 'x',
-            on_failure: { no_auto_heal: true, unknownConfig: 'bad' },
+            onFailure: { noAutoHeal: true, unknownConfig: 'bad' },
           },
         }],
       });
@@ -638,10 +638,10 @@ suite('MCP Schema Completeness', () => {
       const r = validateInput('create_copilot_plan', {
         name: 'Test',
         jobs: [{
-          producer_id: 'job-one', task: 'X', dependencies: [],
+          producerId: 'job-one', task: 'X', dependencies: [],
           work: {
             type: 'shell', command: 'x',
-            on_failure: { resume_from_phase: 'invalid-phase' },
+            onFailure: { resumeFromPhase: 'invalid-phase' },
           },
         }],
       });
@@ -657,7 +657,7 @@ suite('MCP Schema Completeness', () => {
     const workWithOnFailure = {
       type: 'shell',
       command: 'npm test',
-      on_failure: { no_auto_heal: true, message: 'fail' },
+      onFailure: { noAutoHeal: true, message: 'fail' },
     };
 
     test('retry_copilot_plan — newWork', () => {
@@ -684,24 +684,24 @@ suite('MCP Schema Completeness', () => {
       assert.strictEqual(r.valid, true, r.error);
     });
 
-    test('retry_copilot_plan_node — newWork', () => {
-      const r = validateInput('retry_copilot_plan_node', {
+    test('retry_copilot_plan_job — newWork', () => {
+      const r = validateInput('retry_copilot_plan_job', {
         planId: 'p', nodeId: 'n',
         newWork: workWithOnFailure,
       });
       assert.strictEqual(r.valid, true, r.error);
     });
 
-    test('retry_copilot_node (node-centric) — newWork', () => {
-      const r = validateInput('retry_copilot_node', {
-        node_id: 'n',
+    test('retry_copilot_job (job-centric) — newWork', () => {
+      const r = validateInput('retry_copilot_job', {
+        jobId: 'n',
         newWork: workWithOnFailure,
       });
       assert.strictEqual(r.valid, true, r.error);
     });
 
-    test('update_copilot_plan_node — work', () => {
-      const r = validateInput('update_copilot_plan_node', {
+    test('update_copilot_plan_job — work', () => {
+      const r = validateInput('update_copilot_plan_job', {
         planId: 'p', nodeId: 'n',
         work: workWithOnFailure,
       });
@@ -714,7 +714,7 @@ suite('MCP Schema Completeness', () => {
         operations: [{
           type: 'add_node',
           spec: {
-            producer_id: 'new-job', task: 'T', dependencies: [],
+            producerId: 'new-job', task: 'T', dependencies: [],
             work: workWithOnFailure,
           },
         }],
@@ -722,11 +722,11 @@ suite('MCP Schema Completeness', () => {
       assert.strictEqual(r.valid, true, r.error);
     });
 
-    test('add_copilot_node — work', () => {
-      const r = validateInput('add_copilot_node', {
+    test('add_copilot_job — work', () => {
+      const r = validateInput('add_copilot_job', {
         plan_id: 'p',
         nodes: [{
-          producer_id: 'new-job', task: 'T', dependencies: [],
+          producerId: 'new-job', task: 'T', dependencies: [],
           work: workWithOnFailure,
         }],
       });
@@ -738,7 +738,7 @@ suite('MCP Schema Completeness', () => {
     test('returns warning when job has work but no postchecks', () => {
       const warnings = validatePostchecksPresence({
         name: 'Test Plan',
-        jobs: [{ producer_id: 'j1', task: 'Do stuff', dependencies: [], work: { type: 'shell', command: 'echo hi' } }],
+        jobs: [{ producerId: 'j1', task: 'Do stuff', dependencies: [], work: { type: 'shell', command: 'echo hi' } }],
       });
       assert.strictEqual(warnings.length, 1);
       assert.ok(warnings[0].includes('postchecks'));
@@ -747,7 +747,7 @@ suite('MCP Schema Completeness', () => {
     test('returns no warning when job has both work and postchecks', () => {
       const warnings = validatePostchecksPresence({
         name: 'Test Plan',
-        jobs: [{ producer_id: 'j1', task: 'Do stuff', dependencies: [], work: { type: 'shell', command: 'echo hi' }, postchecks: { type: 'shell', command: 'echo check' } }],
+        jobs: [{ producerId: 'j1', task: 'Do stuff', dependencies: [], work: { type: 'shell', command: 'echo hi' }, postchecks: { type: 'shell', command: 'echo check' } }],
       });
       assert.strictEqual(warnings.length, 0);
     });
@@ -755,7 +755,7 @@ suite('MCP Schema Completeness', () => {
     test('returns no warning when no work specified', () => {
       const warnings = validatePostchecksPresence({
         name: 'Test Plan',
-        jobs: [{ producer_id: 'j1', task: 'Do stuff', dependencies: [] }],
+        jobs: [{ producerId: 'j1', task: 'Do stuff', dependencies: [] }],
       });
       assert.strictEqual(warnings.length, 0);
     });
@@ -763,7 +763,7 @@ suite('MCP Schema Completeness', () => {
     test('checks nested groups', () => {
       const warnings = validatePostchecksPresence({
         name: 'Test Plan',
-        groups: [{ name: 'g1', jobs: [{ producer_id: 'j1', task: 'Do stuff', dependencies: [], work: 'echo hi' }] }],
+        groups: [{ name: 'g1', jobs: [{ producerId: 'j1', task: 'Do stuff', dependencies: [], work: 'echo hi' }] }],
       });
       assert.strictEqual(warnings.length, 1);
     });

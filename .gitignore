@@ -55,5 +55,4 @@ yarn-error.log*
 
 # Auto-generated orchestrator instruction files (per-job UUID patterns)
 # Auto-generated healing instructions
-.github/instructions/*.instructions.md
 .github/instructions/orchestrator-*.instructions.md

@@ -116,7 +116,7 @@ function buildPlan(
   return {
     id: 'plan-1',
     spec: { name: 'Test Plan', jobs: [] },
-    nodes,
+    jobs: nodes,
     producerIdToNodeId,
     roots,
     leaves,

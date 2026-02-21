@@ -65,7 +65,7 @@ suite('createPlanHandler', () => {
             spec: { name: 'Test Plan' },
             baseBranch: 'main',
             targetBranch: 'copilot_plan/test',
-            nodes: new Map([['node-1', {}]]),
+            jobs: new Map([['node-1', {}]]),
             roots: ['node-1'],
             leaves: ['node-1'],
             producerIdToNodeId: new Map([['test', 'node-1']])

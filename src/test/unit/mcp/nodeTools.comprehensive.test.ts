@@ -1,49 +1,49 @@
 /**
- * @fileoverview Comprehensive unit tests for MCP Node Tools  
+ * @fileoverview Comprehensive unit tests for MCP Job Tools  
  * 
  * Tests cover:
- * - Node tool definition structure and schemas
- * - All node tool definitions exported correctly
+ * - Job tool definition structure and schemas
+ * - All job tool definitions exported correctly
  * - Input validation and edge cases
  * - Tool metadata validation
  * 
- * Target: 95%+ line coverage for tools/nodeTools.ts
+ * Target: 95%+ line coverage for tools/jobTools.ts
  */
 
 import { suite, test, setup } from 'mocha';
 import * as assert from 'assert';
-import { getNodeToolDefinitions } from '../../../mcp/tools/nodeTools';
+import { getJobToolDefinitions } from '../../../mcp/tools/jobTools';
 import { McpTool } from '../../../mcp/types';
 
-suite('MCP Node Tools Unit Tests', () => {
-  let nodeTools: McpTool[];
+suite('MCP Job Tools Unit Tests', () => {
+  let jobTools: McpTool[];
   
   setup(async () => {
-    nodeTools = await getNodeToolDefinitions();
+    jobTools = await getJobToolDefinitions();
   });
   
-  suite('getNodeToolDefinitions', () => {
-    test('should return array of node tool definitions', () => {
-      assert.ok(Array.isArray(nodeTools));
-      assert.ok(nodeTools.length > 0);
+  suite('getJobToolDefinitions', () => {
+    test('should return array of job tool definitions', () => {
+      assert.ok(Array.isArray(jobTools));
+      assert.ok(jobTools.length > 0);
     });
     
-    test.skip('should include expected node tools', () => {
-      const toolNames = nodeTools.map(tool => tool.name);
+    test.skip('should include expected job tools', () => {
+      const toolNames = jobTools.map(tool => tool.name);
       
-      // Core node inspection tools
-      assert.ok(toolNames.includes('get_node_details'));
-      assert.ok(toolNames.includes('get_node_logs'));
-      assert.ok(toolNames.includes('get_node_attempts'));
+      // Core job inspection tools
+      assert.ok(toolNames.includes('get_job_details'));
+      assert.ok(toolNames.includes('get_job_logs'));
+      assert.ok(toolNames.includes('get_job_attempts'));
       
-      // Node management tools  
-      assert.ok(toolNames.includes('retry_node'));
-      assert.ok(toolNames.includes('force_fail_node'));
-      assert.ok(toolNames.includes('update_node'));
+      // Job management tools  
+      assert.ok(toolNames.includes('retry_job'));
+      assert.ok(toolNames.includes('force_fail_job'));
+      assert.ok(toolNames.includes('update_job'));
     });
     
     test('should have valid tool structure', () => {
-      nodeTools.forEach(tool => {
+      jobTools.forEach(tool => {
         assert.ok(tool.name);
         assert.ok(tool.description);
         assert.ok(tool.inputSchema);
@@ -54,16 +54,16 @@ suite('MCP Node Tools Unit Tests', () => {
     });
   });
   
-  suite.skip('get_node_details tool', () => {
-    let nodeDetailsTool: McpTool;
+  suite.skip('get_job_details tool', () => {
+    let jobDetailsTool: McpTool;
     
     setup(() => {
-      nodeDetailsTool = nodeTools.find(tool => tool.name === 'get_node_details')!;
-      assert.ok(nodeDetailsTool, 'get_node_details tool should exist');
+      jobDetailsTool = jobTools.find(tool => tool.name === 'get_job_details')!;
+      assert.ok(jobDetailsTool, 'get_job_details tool should exist');
     });
     
     test('should require planId and nodeId', () => {
-      const schema = nodeDetailsTool.inputSchema;
+      const schema = jobDetailsTool.inputSchema;
       
       assert.ok(schema.required && schema.required.includes('planId'));
       assert.ok(schema.required && schema.required.includes('nodeId'));
@@ -74,7 +74,7 @@ suite('MCP Node Tools Unit Tests', () => {
     });
     
     test('should have optional include flags', () => {
-      const schema = nodeDetailsTool.inputSchema;
+      const schema = jobDetailsTool.inputSchema;
       
       // Common include options for node details
       const possibleIncludes = ['includeLogs', 'includeAttempts', 'includeMetrics', 'includeConfig'];
@@ -87,16 +87,16 @@ suite('MCP Node Tools Unit Tests', () => {
     });
   });
   
-  suite.skip('get_node_logs tool', () => {
-    let nodeLogsTool: McpTool;
+  suite.skip('get_job_logs tool', () => {
+    let jobLogsTool: McpTool;
     
     setup(() => {
-      nodeLogsTool = nodeTools.find(tool => tool.name === 'get_node_logs')!;
-      assert.ok(nodeLogsTool, 'get_node_logs tool should exist');
+      jobLogsTool = jobTools.find(tool => tool.name === 'get_job_logs')!;
+      assert.ok(jobLogsTool, 'get_job_logs tool should exist');
     });
     
     test('should require planId and nodeId', () => {
-      const schema = nodeLogsTool.inputSchema;
+      const schema = jobLogsTool.inputSchema;
       
       assert.ok(schema.required && schema.required.includes('planId'));
       assert.ok(schema.required && schema.required.includes('nodeId'));
@@ -105,7 +105,7 @@ suite('MCP Node Tools Unit Tests', () => {
     });
     
     test('should have log filtering options', () => {
-      const schema = nodeLogsTool.inputSchema;
+      const schema = jobLogsTool.inputSchema;
       
       // Common log filtering options
       const logOptions = ['lines', 'follow', 'phase', 'attemptNumber'];
@@ -118,12 +118,12 @@ suite('MCP Node Tools Unit Tests', () => {
     });
   });
   
-  suite.skip('get_node_attempts tool', () => {
+  suite.skip('get_job_attempts tool', () => {
     let attemptsTool: McpTool;
     
     setup(() => {
-      attemptsTool = nodeTools.find(tool => tool.name === 'get_node_attempts')!;
-      assert.ok(attemptsTool, 'get_node_attempts tool should exist');
+      attemptsTool = jobTools.find(tool => tool.name === 'get_job_attempts')!;
+      assert.ok(attemptsTool, 'get_job_attempts tool should exist');
     });
     
     test('should require planId and nodeId', () => {
@@ -136,16 +136,16 @@ suite('MCP Node Tools Unit Tests', () => {
     });
   });
   
-  suite.skip('retry_node tool', () => {
-    let retryNodeTool: McpTool;
+  suite.skip('retry_job tool', () => {
+    let retryJobTool: McpTool;
     
     setup(() => {
-      retryNodeTool = nodeTools.find(tool => tool.name === 'retry_node')!;
-      assert.ok(retryNodeTool, 'retry_node tool should exist');
+      retryJobTool = jobTools.find(tool => tool.name === 'retry_job')!;
+      assert.ok(retryJobTool, 'retry_job tool should exist');
     });
     
     test('should require planId and nodeId', () => {
-      const schema = retryNodeTool.inputSchema;
+      const schema = retryJobTool.inputSchema;
       
       assert.ok(schema.required && schema.required.includes('planId'));
       assert.ok(schema.required && schema.required.includes('nodeId'));
@@ -154,7 +154,7 @@ suite('MCP Node Tools Unit Tests', () => {
     });
     
     test('should have optional retry parameters', () => {
-      const schema = retryNodeTool.inputSchema;
+      const schema = retryJobTool.inputSchema;
       
       // Common retry options
       const retryOptions = ['fromPhase', 'clearHistory', 'newWork'];
@@ -167,12 +167,12 @@ suite('MCP Node Tools Unit Tests', () => {
     });
   });
   
-  suite.skip('force_fail_node tool', () => {
+  suite.skip('force_fail_job tool', () => {
     let forceFailTool: McpTool;
     
     setup(() => {
-      forceFailTool = nodeTools.find(tool => tool.name === 'force_fail_node')!;
-      assert.ok(forceFailTool, 'force_fail_node tool should exist');
+      forceFailTool = jobTools.find(tool => tool.name === 'force_fail_job')!;
+      assert.ok(forceFailTool, 'force_fail_job tool should exist');
     });
     
     test('should require planId and nodeId', () => {
@@ -193,16 +193,16 @@ suite('MCP Node Tools Unit Tests', () => {
     });
   });
   
-  suite.skip('update_node tool', () => {
-    let updateNodeTool: McpTool;
+  suite.skip('update_job tool', () => {
+    let updateJobTool: McpTool;
     
     setup(() => {
-      updateNodeTool = nodeTools.find(tool => tool.name === 'update_node')!;
-      assert.ok(updateNodeTool, 'update_node tool should exist');
+      updateJobTool = jobTools.find(tool => tool.name === 'update_job')!;
+      assert.ok(updateJobTool, 'update_job tool should exist');
     });
     
     test('should require planId and nodeId', () => {
-      const schema = updateNodeTool.inputSchema;
+      const schema = updateJobTool.inputSchema;
       
       assert.ok(schema.required && schema.required.includes('planId'));
       assert.ok(schema.required && schema.required.includes('nodeId'));
@@ -211,7 +211,7 @@ suite('MCP Node Tools Unit Tests', () => {
     });
     
     test('should have update parameters', () => {
-      const schema = updateNodeTool.inputSchema;
+      const schema = updateJobTool.inputSchema;
       
       // Common update options
       const updateOptions = ['work', 'prechecks', 'postchecks', 'instructions', 'task'];
@@ -226,7 +226,7 @@ suite('MCP Node Tools Unit Tests', () => {
   
   suite('Schema validation', () => {
     test.skip('all node tools should have valid JSON schema structure', () => {
-      nodeTools.forEach(tool => {
+      jobTools.forEach(tool => {
         const schema = tool.inputSchema;
         
         // Basic JSON schema structure
@@ -255,7 +255,7 @@ suite('MCP Node Tools Unit Tests', () => {
     });
     
     test.skip('node tools should require planId and nodeId', () => {
-      nodeTools.forEach(tool => {
+      jobTools.forEach(tool => {
         const schema = tool.inputSchema;
         
         // All node tools need these identifiers
@@ -267,20 +267,20 @@ suite('MCP Node Tools Unit Tests', () => {
     });
     
     test('tool names should follow naming convention', () => {
-      nodeTools.forEach(tool => {
+      jobTools.forEach(tool => {
         // Should use snake_case
         assert.ok(tool.name.match(/^[a-z][a-z0-9_]*$/), 
           `Tool name ${tool.name} should be snake_case`);
         
-        // Node tools often have _node suffix or node prefix
-        const hasNodeContext = tool.name.includes('node') || tool.name.includes('retry') || tool.name.includes('force');
-        assert.ok(hasNodeContext, 
-          `Tool ${tool.name} should indicate node context`);
+        // Job tools often have _job suffix or job in the name
+        const hasJobContext = tool.name.includes('job') || tool.name.includes('retry') || tool.name.includes('force');
+        assert.ok(hasJobContext, 
+          `Tool ${tool.name} should indicate job context`);
       });
     });
     
     test('descriptions should be descriptive', () => {
-      nodeTools.forEach(tool => {
+      jobTools.forEach(tool => {
         assert.ok(tool.description);
         assert.ok(tool.description.trim().length > 0);
         assert.ok(tool.description.length > 10, 
@@ -298,8 +298,8 @@ suite('MCP Node Tools Unit Tests', () => {
   
   suite('Edge cases', () => {
     test('should handle tools array mutations safely', async () => {
-      const tools1 = await getNodeToolDefinitions();
-      const tools2 = await getNodeToolDefinitions();
+      const tools1 = await getJobToolDefinitions();
+      const tools2 = await getJobToolDefinitions();
       
       // Modifying one array should not affect the other
       tools1.push({} as any);
@@ -307,8 +307,8 @@ suite('MCP Node Tools Unit Tests', () => {
     });
     
     test('should handle schema mutations safely', async () => {
-      const tools1 = await getNodeToolDefinitions();
-      const tools2 = await getNodeToolDefinitions();
+      const tools1 = await getJobToolDefinitions();
+      const tools2 = await getJobToolDefinitions();
       
       const firstTool1 = tools1[0];
       const firstTool2 = tools2[0];
@@ -322,16 +322,16 @@ suite('MCP Node Tools Unit Tests', () => {
     
     test('should handle missing tools gracefully', () => {
       // Test for robustness if specific tools are missing
-      const toolNames = nodeTools.map(tool => tool.name);
+      const toolNames = jobTools.map(tool => tool.name);
       
       toolNames.forEach(name => {
-        const tool = nodeTools.find(t => t.name === name);
+        const tool = jobTools.find(t => t.name === name);
         assert.ok(tool, `Tool ${name} should be findable in the array`);
       });
     });
     
     test('should not have duplicate tool names', () => {
-      const toolNames = nodeTools.map(tool => tool.name);
+      const toolNames = jobTools.map(tool => tool.name);
       const uniqueNames = new Set(toolNames);
       
       assert.strictEqual(toolNames.length, uniqueNames.size, 

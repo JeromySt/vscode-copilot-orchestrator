@@ -34,7 +34,7 @@ function makePlan(
   return {
     id: 'plan-1',
     spec: {} as any,
-    nodes: nodesMap,
+    jobs: nodesMap,
     producerIdToNodeId: producerMap,
     roots: [],
     leaves: [],

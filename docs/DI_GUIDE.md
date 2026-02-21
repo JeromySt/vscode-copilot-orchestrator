@@ -671,6 +671,35 @@ container.register<ILogger>(
 
 ---
 
+## Token Reference
+
+Available DI tokens for service resolution:
+
+| Token | Interface | Description |
+|-------|-----------|-------------|
+| `IPlanRepository` | `IPlanRepository` | High-level plan lifecycle management |
+| `IPlanRepositoryStore` | `IPlanRepositoryStore` | Low-level plan storage operations |
+| `ILogger` | `ILogger` | Application logging service |
+| `IGitOperations` | `IGitOperations` | Git repository operations |
+| `IProcessMonitor` | `IProcessMonitor` | Process lifecycle monitoring |
+| `IConfigProvider` | `IConfigProvider` | VS Code configuration access |
+| `IDialogService` | `IDialogService` | VS Code dialog interactions |
+| `IClipboardService` | `IClipboardService` | System clipboard operations |
+| `IPulseEmitter` | `IPulseEmitter` | Realtime pulse/heartbeat events |
+| `IProcessSpawner` | `IProcessSpawner` | Child process management |
+| `ICopilotRunner` | `ICopilotRunner` | Copilot CLI execution |
+| `IEnvironment` | `IEnvironment` | System environment access |
+| `IGlobalCapacity` | `IGlobalCapacity` | Cross-extension resource coordination |
+| `IPlanConfigManager` | `IPlanConfigManager` | Plan configuration management |
+| `IEvidenceValidator` | `IEvidenceValidator` | Work completion validation |
+| `IMcpManager` | `IMcpManager` | MCP server lifecycle |
+| `INodeRunner` | `INodeRunner` | Individual node execution |
+| `INodeExecutor` | `INodeExecutor` | Node phase execution |
+| `INodeStateMachine` | `INodeStateMachine` | Node state transitions |
+| `IFileSystem` | `IFileSystem` | Filesystem operations |
+
+---
+
 ## Best Practices
 
 ### Interface Design

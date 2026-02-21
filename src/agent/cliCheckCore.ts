@@ -3,6 +3,8 @@ import type { IProcessSpawner } from '../interfaces/IProcessSpawner';
 
 // Cache the CLI availability result - it doesn't change during extension lifetime
 let cachedCliAvailable: boolean | null = null;
+let cacheTimestamp: number = 0;
+const CACHE_TTL_MS = 30_000; // 30 seconds for negative results
 let checkInProgress: Promise<boolean> | null = null;
 
 /** @internal Lazy-loaded process spawner for fallback. Production code must inject via DI. */
@@ -18,22 +20,27 @@ function getFallbackSpawner(): IProcessSpawner {
  */
 export function isCopilotCliAvailable(): boolean {
   if (cachedCliAvailable !== null) {
-    return cachedCliAvailable;
+    // Positive results are cached indefinitely (CLI won't disappear mid-session)
+    // Negative results expire after TTL so fresh installs are detected
+    if (cachedCliAvailable === true || (Date.now() - cacheTimestamp) < CACHE_TTL_MS) {
+      return cachedCliAvailable;
+    }
+    // Negative cache expired — reset and re-check
+    cachedCliAvailable = null;
   }
   
-  // First call - trigger async check and return optimistic true
-  // (most users will have it available, and we'll update on next call)
+  // First call or expired - trigger async check
   if (!checkInProgress) {
     checkInProgress = checkCopilotCliAsync().then(result => {
       cachedCliAvailable = result;
+      cacheTimestamp = Date.now();
       checkInProgress = null;
       return result;
     });
   }
   
-  // Return true optimistically on first call to avoid blocking
-  // The actual check will update the cache
-  return true;
+  // Return false when cache is expired/unknown (don't optimistically return true)
+  return false;
 }
 
 /**
@@ -47,6 +54,7 @@ export async function checkCopilotCliAsync(spawner?: IProcessSpawner): Promise<b
                  await cmdOkAsync('github-copilot --help', spawner) || 
                  await cmdOkAsync('github-copilot-cli --help', spawner);
   cachedCliAvailable = result;
+  cacheTimestamp = Date.now();
   return result;
 }
 
@@ -55,6 +63,7 @@ export async function checkCopilotCliAsync(spawner?: IProcessSpawner): Promise<b
  */
 export function resetCliCache(): void {
   cachedCliAvailable = null;
+  cacheTimestamp = 0;
   checkInProgress = null;
 }
 
@@ -95,4 +104,27 @@ async function hasGhCopilotAsync(spawner?: IProcessSpawner): Promise<boolean> {
       resolve(false);
     }, 5000);
   });
+}
+
+/**
+ * Check if Copilot CLI is authenticated (can access GitHub).
+ * Runs `gh auth status` and checks exit code.
+ */
+export async function checkCopilotAuthAsync(spawner?: IProcessSpawner): Promise<{ authenticated: boolean; method: 'gh' | 'standalone' | 'unknown' }> {
+  // Try gh auth status first
+  const ghAuth = await cmdOkAsync('gh auth status', spawner);
+  if (ghAuth) return { authenticated: true, method: 'gh' };
+  
+  // Try standalone copilot auth
+  const copilotAuth = await cmdOkAsync('copilot auth status', spawner);
+  if (copilotAuth) return { authenticated: true, method: 'standalone' };
+  
+  // Try to determine which CLI variant is installed
+  const hasGh = await cmdOkAsync('gh --version', spawner);
+  if (hasGh) return { authenticated: false, method: 'gh' };
+  
+  const hasCopilot = await cmdOkAsync('copilot --version', spawner);
+  if (hasCopilot) return { authenticated: false, method: 'standalone' };
+  
+  return { authenticated: false, method: 'unknown' };
 }

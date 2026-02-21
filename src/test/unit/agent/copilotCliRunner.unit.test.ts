@@ -5,12 +5,24 @@
  * - Config directory parameter handling
  * - Command construction with and without configDir
  * - Path quoting for paths with spaces
+ * - CLI availability checks in run() method
  */
 
 import * as assert from 'assert';
+import * as sinon from 'sinon';
 import { CopilotCliRunner } from '../../../agent/copilotCliRunner';
+import * as cliCheckCore from '../../../agent/cliCheckCore';
 
 suite('CopilotCliRunner', () => {
+  let sandbox: sinon.SinonSandbox;
+
+  setup(() => {
+    sandbox = sinon.createSandbox();
+  });
+
+  teardown(() => {
+    sandbox.restore();
+  });
   
   suite('buildCommand - Config Directory', () => {
     
@@ -173,6 +185,63 @@ suite('CopilotCliRunner', () => {
       });
       
       assert.ok(cmd.includes('--allow-url "https://api.example.com/v1?key=value&other=param"'), 'Command should properly quote URL with query params');
+    });
+  });
+
+  suite('run() - CLI Availability', () => {
+    test('should return failure when CLI is not available', async () => {
+      // Stub isCopilotCliAvailable to return false
+      sandbox.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
+
+      const runner = new CopilotCliRunner();
+      const result = await runner.run({
+        cwd: '/test/path',
+        task: 'test task'
+      });
+
+      // Assert result indicates failure
+      assert.strictEqual(result.success, false, 'Result should indicate failure');
+      assert.ok(result.error, 'Result should contain an error message');
+      assert.ok(result.error.includes('not available'), 'Error should mention CLI not available');
+      assert.strictEqual(result.exitCode, 127, 'Exit code should be 127');
+    });
+
+    test('should not write instructions file when CLI is unavailable', async () => {
+      // Stub isCopilotCliAvailable to return false
+      sandbox.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
+
+      const runner = new CopilotCliRunner();
+      
+      // Spy on writeInstructionsFile to verify it's not called
+      const writeInstructionsFileSpy = sandbox.spy(runner, 'writeInstructionsFile');
+
+      await runner.run({
+        cwd: '/test/path',
+        task: 'test task'
+      });
+
+      // Assert writeInstructionsFile was NOT called
+      assert.strictEqual(writeInstructionsFileSpy.callCount, 0, 'writeInstructionsFile should not be called when CLI is unavailable');
+    });
+
+    test('should skip instructions file entirely when CLI unavailable', async () => {
+      // Stub isCopilotCliAvailable to return false
+      sandbox.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
+
+      const runner = new CopilotCliRunner();
+      
+      // Spy on writeInstructionsFile
+      const writeInstructionsFileSpy = sandbox.spy(runner, 'writeInstructionsFile');
+
+      const result = await runner.run({
+        cwd: '/test/path',
+        task: 'test task',
+        instructions: 'additional context'
+      });
+
+      // Verify early return prevented instructions file from being created
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(writeInstructionsFileSpy.callCount, 0, 'Should not attempt to write instructions when CLI unavailable');
     });
   });
 });

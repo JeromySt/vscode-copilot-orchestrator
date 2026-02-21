@@ -61,7 +61,7 @@ function createTestPlan(opts?: {
   ]);
   return {
     id: 'plan-1', spec: { name: 'Test Plan', jobs: [], baseBranch: 'main' },
-    nodes, producerIdToNodeId: new Map([['node-1', 'node-1']]),
+    jobs: nodes, producerIdToNodeId: new Map([['node-1', 'node-1']]),
     roots: opts?.roots || ['node-1'], leaves: opts?.leaves || ['node-1'],
     nodeStates, groups: new Map(), groupStates: new Map(), groupPathToId: new Map(),
     repoPath: '/repo', baseBranch: 'main', targetBranch: opts?.targetBranch,
@@ -166,7 +166,7 @@ suite('JobExecutionEngine', () => {
     test('root node succeeds with shell work', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
 
@@ -200,7 +200,7 @@ suite('JobExecutionEngine', () => {
     test('executor failure transitions node to failed', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.autoHeal = false;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
@@ -232,7 +232,7 @@ suite('JobExecutionEngine', () => {
     test('worktree creation failure fails the node', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
 
@@ -258,7 +258,7 @@ suite('JobExecutionEngine', () => {
       const nodeState = plan.nodeStates.get('node-1')!;
       nodeState.baseCommit = 'original-base';
       nodeState.attempts = 1;
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
 
@@ -323,7 +323,7 @@ suite('JobExecutionEngine', () => {
     test('leaf node with targetBranch performs RI merge', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'feature-branch' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
 
@@ -350,7 +350,7 @@ suite('JobExecutionEngine', () => {
     test('auto-heal swaps to agent on shell failure', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'npm test' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -388,7 +388,7 @@ suite('JobExecutionEngine', () => {
     test('auto-heal failure still results in failed node', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'npm test' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -418,7 +418,7 @@ suite('JobExecutionEngine', () => {
     test('no auto-heal when autoHeal is false', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'npm test' };
       node.autoHeal = false;
       const sm = new PlanStateMachine(plan);
@@ -451,7 +451,7 @@ suite('JobExecutionEngine', () => {
       ns.resumeFromPhase = 'merge-ri' as any;
       ns.completedCommit = 'existing-commit-12345678901234567890';
       ns.baseCommit = 'base123';
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
 
@@ -484,7 +484,7 @@ suite('JobExecutionEngine', () => {
     test('expectsNoChanges node carries forward baseCommit', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.expectsNoChanges = true;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
@@ -548,7 +548,7 @@ suite('JobExecutionEngine', () => {
     test('slow worktree creation is logged', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
 
@@ -577,7 +577,7 @@ suite('JobExecutionEngine', () => {
     test('gitignore is NOT managed per-worktree (handled at repo level)', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
 
@@ -603,7 +603,7 @@ suite('JobExecutionEngine', () => {
     test('RI merge failure marks node as failed with preserved worktree', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
 
@@ -652,7 +652,7 @@ suite('JobExecutionEngine', () => {
     test('RI merge with conflict resolved by Copilot CLI succeeds', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
 
@@ -700,7 +700,7 @@ suite('JobExecutionEngine', () => {
     test('RI merge-tree fails without conflicts returns false', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
       const log = createMockLogger();
 

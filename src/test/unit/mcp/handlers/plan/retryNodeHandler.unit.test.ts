@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import { suite, test, setup, teardown } from 'mocha';
 import * as sinon from 'sinon';
-import { handleRetryPlanNode } from '../../../../../mcp/handlers/plan/retryNodeHandler';
+import { handleRetryPlanJob } from '../../../../../mcp/handlers/plan/retryJobHandler';
 import type { PlanInstance, PlanNode, NodeExecutionState } from '../../../../../plan/types';
 
 function makeNode(id: string, opts: Partial<PlanNode> = {}): PlanNode {
@@ -34,7 +34,7 @@ function makePlan(
   return {
     id: 'plan-1',
     spec: {} as any,
-    nodes: nodesMap,
+    jobs: nodesMap,
     producerIdToNodeId: producerMap,
     roots: [],
     leaves: [],
@@ -81,8 +81,8 @@ suite('retryNodeHandler', () => {
     const ctx = makeCtx(plan);
     // newWork must be truthy to enter the validation branch;
     // validatePowerShellCommands traverses 'work'/'prechecks'/'postchecks' fields
-    const result = await handleRetryPlanNode({
-      planId: 'plan-1', nodeId: 'n1',
+    const result = await handleRetryPlanJob({
+      planId: 'plan-1', jobId: 'n1',
       newWork: { type: 'shell', command: 'test 2>&1', shell: 'powershell' },
       work: { type: 'shell', command: 'test 2>&1', shell: 'powershell' },
     }, ctx);

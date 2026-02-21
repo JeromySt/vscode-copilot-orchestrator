@@ -49,6 +49,10 @@ export interface CopilotRunOptions {
   allowedUrls?: string[];
   /** Maximum agent turns/iterations (e.g., 1 for single-turn augmentation calls). */
   maxTurns?: number;
+  /** Override config directory for CLI session isolation. If set, used instead of worktree-derived default. */
+  configDir?: string;
+  /** Additional environment variables to inject into the spawned process */
+  env?: Record<string, string>;
 }
 
 /**
@@ -136,7 +140,11 @@ export class CopilotCliRunner {
     // Check if Copilot CLI is available
     if (!this.isAvailable()) {
       this.logger.warn(`[${label}] Copilot CLI not available`);
-      return { success: true }; // Silent success - work can be done manually
+      return {
+        success: false,
+        error: 'Copilot CLI not available. Install via "npm install -g @github/copilot" or "gh extension install github/gh-copilot", then run "Copilot Orchestrator: Refresh Copilot CLI" from the Command Palette.',
+        exitCode: 127,
+      };
     }
     
     // Setup instructions file if not skipped
@@ -160,6 +168,7 @@ export class CopilotCliRunner {
       logDir,
       sharePath,
       cwd,
+      configDir: options.configDir,
       allowedFolders: options.allowedFolders,
       allowedUrls: options.allowedUrls,
       maxTurns: options.maxTurns,
@@ -177,6 +186,7 @@ export class CopilotCliRunner {
         timeout,
         onOutput,
         onProcess,
+        env: options.env,
       });
       
       return result;
@@ -258,12 +268,13 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     command: string; cwd: string; label: string; sessionId?: string;
     timeout: number; onOutput?: (line: string) => void;
     onProcess?: (proc: ChildProcessLike) => void;
+    env?: Record<string, string>;
   }): Promise<CopilotRunResult> {
     const { command, cwd, label, sessionId, timeout, onOutput, onProcess } = options;
     
     return new Promise((resolve) => {
       // Clean environment: remove NODE_OPTIONS to avoid passing VS Code flags to CLI
-      const cleanEnv = { ...this.environment.env };
+      const cleanEnv = { ...this.environment.env, ...options.env };
       delete cleanEnv.NODE_OPTIONS;
       
       // Log the full invocation for diagnostics (to both logger AND onOutput for node log visibility)
@@ -500,6 +511,7 @@ export interface BuildCommandOptions {
   logDir?: string;
   sharePath?: string;
   cwd?: string;
+  configDir?: string;
   allowedFolders?: string[];
   allowedUrls?: string[];
   maxTurns?: number;
@@ -556,6 +568,18 @@ export function buildCommand(
     log.info(`[SECURITY]   - ${p}`);
   }
 
+  // Resolve configDir early so we can include it in the sandbox allowlist.
+  // Without this, copilot-cli can't write to the config dir and falls back to
+  // creating .copilot-cli/ in the cwd (worktree), which then gets committed.
+  const resolvedConfigDir = options.configDir || (cwd ? path.join(cwd, '.orchestrator', '.copilot-cli') : undefined);
+  if (resolvedConfigDir) {
+    const resolvedConfigPath = path.resolve(resolvedConfigDir);
+    if (!allowedPaths.includes(resolvedConfigPath)) {
+      allowedPaths.push(resolvedConfigPath);
+      log.info(`[SECURITY] Added config-dir to sandbox: ${resolvedConfigPath}`);
+    }
+  }
+
   let pathsArg: string;
   if (allowedPaths.length === 0) {
     const fallbackPath = cwd || deps?.fallbackCwd || process.cwd();
@@ -596,8 +620,7 @@ export function buildCommand(
 
   let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-tools --no-auto-update`;
   if (urlsArg) { cmd += ` ${urlsArg}`; }
-  // Always derive configDir from cwd for session isolation
-  if (cwd) { cmd += ` --config-dir ${JSON.stringify(path.join(cwd, '.orchestrator', '.copilot-cli'))}`; }
+  if (resolvedConfigDir) { cmd += ` --config-dir ${JSON.stringify(resolvedConfigDir)}`; }
   if (model) { cmd += ` --model ${model}`; }
   if (logDir) { cmd += ` --log-dir ${JSON.stringify(logDir)} --log-level debug`; }
   if (sharePath) { cmd += ` --share ${JSON.stringify(sharePath)}`; }

@@ -5,6 +5,29 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-02-19
+
+### Added
+- **IPlanRepository architecture with file-backed lazy plan storage**: New abstraction layer for plan storage supporting lazy loading of large specs from disk. Includes `IPlanRepository`, `IPlanRepositoryStore`, `IPlanDefinition` interfaces and `DefaultPlanRepository`, `FileSystemPlanStore`, `FilePlanDefinition` implementations.
+- **Scaffold MCP tools for incremental plan building**: New tools `scaffold_copilot_plan`, `add_plan_node`, and `finalize_plan` for building plans incrementally instead of all-at-once.
+- **Scaffolding plans UI support**: Plans sidebar now shows scaffolding plans with distinct state and controls.
+- **Copilot CLI setup/login command**: New command `copilotOrchestrator.setupCopilotCli` guides users through CLI installation and authentication.
+- **Duration helpers for attempt history**: Helper functions to compute node/plan duration from attempt history for accurate timing across retries.
+
+### Fixed
+- **CLI detection cache bug**: Fixed silent no-op when CLI became unavailable. Added TTL-based cache invalidation and `Refresh Copilot CLI` command.
+- **Node/plan duration spanning all attempts**: Duration now correctly spans all attempts instead of just the current attempt.
+- **NodeDetailPanel duration counter after sleep/resume**: Fixed drift detection in PulseEmitter and state re-initialization on wake.
+- **EventEmitter listener leak on extension reload**: Process event listeners (exit, SIGINT, SIGTERM) are now properly cleaned up on deactivate.
+- **Eliminated @vscode/test-electron**: Migrated all tests to pure unit test runner with Mocha, removing VS Code host dependency.
+- **CRITICAL: Merge-FI data loss on node resume**: Fixed bug where merge-fi phase was skipped when resuming a node, causing dependency commits to be dropped from the final merge. The executor's `skip()` function now never skips merge-fi, and merge-fi is idempotent (checks if commits are already ancestors before merging).
+- **CRITICAL: updateNodeHandler sets resumeFromPhase for never-executed nodes**: When updating a node via `update_copilot_plan_node` that had never been executed (attempts=0), the handler incorrectly set `resumeFromPhase`, causing the executor to skip merge-fi/setup/prechecks/work phases on first execution. The fix checks if the node has executed before setting resumeFromPhase.
+- **MCP phase enum missing phases**: The `get_copilot_node_logs` tool's phase enum was missing phases. Updated from `['prechecks', 'work', 'postchecks', 'commit', 'all']` to include all phases: `['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri', 'cleanup', 'all']`.
+
+### Changed
+- Test runner simplified to pure Mocha (`npm test` now runs unit tests directly)
+- Updated architecture documentation for new plan repository system
+
 ## [0.12.1] - 2026-02-18
 
 ### Fixed

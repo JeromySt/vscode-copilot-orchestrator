@@ -41,7 +41,7 @@ const mockGit = {
 // Mock PlanInstance
 interface MockPlan {
   id: string;
-  nodes: Map<string, any>;
+  jobs: Map<string, any>;
   nodeStates: Map<string, any>;
 }
 
@@ -96,6 +96,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
       runner: null as any,
       plans: null as any,
       git: {} as any,
+      PlanRepository: {} as any,
     };
     
     // Reset git mocks
@@ -221,7 +222,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
     test('should return plan when found with get method', () => {
       const mockPlan: MockPlan = {
         id: 'plan-123',
-        nodes: new Map(),
+        jobs: new Map(),
         nodeStates: new Map()
       };
       mockPlanRunner.addMockPlan('plan-123', mockPlan);
@@ -234,7 +235,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
     test('should return plan when found with getPlan method', () => {
       const mockPlan: MockPlan = {
         id: 'plan-456',
-        nodes: new Map(),
+        jobs: new Map(),
         nodeStates: new Map()
       };
       mockPlanRunner.addMockPlan('plan-456', mockPlan);
@@ -247,7 +248,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
     test('should default to get method', () => {
       const mockPlan: MockPlan = {
         id: 'plan-789',
-        nodes: new Map(),
+        jobs: new Map(),
         nodeStates: new Map()
       };
       mockPlanRunner.addMockPlan('plan-789', mockPlan);
@@ -289,7 +290,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
       const mockState = { status: 'pending', phase: 'work' };
       const mockPlan: MockPlan = {
         id: 'plan-123',
-        nodes: new Map([['node-123', mockNode]]),
+        jobs: new Map([['node-123', mockNode]]),
         nodeStates: new Map([['node-123', mockState]])
       };
       
@@ -305,7 +306,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
     test('should return error when node not found', () => {
       const mockPlan: MockPlan = {
         id: 'plan-123',
-        nodes: new Map(),
+        jobs: new Map(),
         nodeStates: new Map()
       };
       
@@ -322,7 +323,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
       const mockNode = { id: 'node-456', name: 'Node Without State' };
       const mockPlan: MockPlan = {
         id: 'plan-123',
-        nodes: new Map([['node-456', mockNode]]),
+        jobs: new Map([['node-456', mockNode]]),
         nodeStates: new Map() // No state for this node
       };
       

@@ -229,4 +229,91 @@ suite('PulseEmitter', () => {
     sub.dispose();
     assert.strictEqual(pulse.isRunning, false, 'isRunning is false when interval is stopped');
   });
+
+  // ── Drift detection (sleep/resume) ────────────────────────────────────
+
+  test('should detect timer drift and restart interval after sleep/resume', () => {
+    let count = 0;
+    const sub = pulse.onPulse(() => count++);
+
+    // First normal tick
+    clock.tick(1000);
+    assert.strictEqual(count, 1, 'first pulse fires normally');
+
+    // Simulate sleep/resume: set _lastTick far in the past so the next
+    // interval callback sees elapsed > DRIFT_THRESHOLD_MS (3 000 ms).
+    // This mirrors what happens when the OS suspends — the timer doesn't
+    // fire during sleep but Date.now() jumps forward on resume.
+    (pulse as any)._lastTick = Date.now() - 10_000;
+
+    // Fire the next interval tick — drift detection should trigger
+    clock.tick(1000);
+    assert.strictEqual(count, 2, 'pulse fires after drift detection');
+
+    // Verify interval was restarted: next pulse should be ~1s later
+    clock.tick(1000);
+    assert.strictEqual(count, 3, 'interval restarted: next pulse at 1s after drift');
+
+    clock.tick(1000);
+    assert.strictEqual(count, 4, 'interval continues normally after restart');
+
+    sub.dispose();
+  });
+
+  test('should continue ticking normally without drift', () => {
+    let count = 0;
+    const sub = pulse.onPulse(() => count++);
+
+    // Advance in normal 1s increments
+    for (let i = 0; i < 5; i++) {
+      clock.tick(1000);
+    }
+    
+    assert.strictEqual(count, 5, 'all 5 pulses fire without drift detection');
+
+    sub.dispose();
+  });
+
+  test('should emit pulse even when drift is detected', () => {
+    let count = 0;
+    const sub = pulse.onPulse(() => count++);
+
+    // Normal tick
+    clock.tick(1000);
+    assert.strictEqual(count, 1);
+
+    // Simulate drift by setting _lastTick far in the past
+    (pulse as any)._lastTick = Date.now() - 5000;
+
+    // Next interval tick triggers drift detection and emits pulse
+    clock.tick(1000);
+    assert.strictEqual(count, 2, 'pulse emitted after drift detection');
+
+    sub.dispose();
+  });
+
+  test('should reset lastTick on start', () => {
+    // Start pulse
+    pulse.start();
+    assert.strictEqual(pulse.isRunning, true);
+
+    // Advance time
+    clock.tick(2000);
+
+    // Stop and restart
+    pulse.stop();
+    pulse.start();
+
+    // Subscribe and verify no drift detected on first tick after restart
+    let count = 0;
+    const sub = pulse.onPulse(() => count++);
+
+    clock.tick(1000);
+    assert.strictEqual(count, 1, 'first tick after restart fires normally');
+
+    clock.tick(1000);
+    assert.strictEqual(count, 2, 'second tick continues normally');
+
+    sub.dispose();
+  });
 });

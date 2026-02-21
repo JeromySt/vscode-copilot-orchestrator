@@ -347,10 +347,15 @@ suite('ProcessMonitor', () => {
     });
 
     test('returns cached snapshot within TTL', async function() {
-      this.timeout(20000); // PowerShell snapshot can take time on Windows
+      this.timeout(20000);
       const Monitor = getMonitorClass();
       const { DefaultProcessSpawner } = require('../../../interfaces/IProcessSpawner');
       const monitor = new Monitor(new DefaultProcessSpawner(), 60000); // very long TTL
+
+      // Stub platform-specific method to avoid real PowerShell/ps calls
+      const stubData = [makeProcessInfo(1, 0), makeProcessInfo(2, 1)];
+      sandbox.stub(monitor as any, 'getWindowsProcesses').resolves(stubData);
+      sandbox.stub(monitor as any, 'getUnixProcesses').resolves(stubData);
 
       // Get first snapshot
       const first = await monitor.getSnapshot();

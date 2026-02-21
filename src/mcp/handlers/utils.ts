@@ -12,6 +12,7 @@ import { PlanInstance } from '../../plan/types';
 import { PlanRunner } from '../../plan/runner';
 import type { IGitOperations } from '../../interfaces/IGitOperations';
 import type { IConfigProvider } from '../../interfaces/IConfigProvider';
+import type { IPlanRepository } from '../../interfaces/IPlanRepository';
 
 /**
  * Extended handler context with access to the {@link PlanRunner} instance.
@@ -27,6 +28,8 @@ export interface PlanHandlerContext extends ToolHandlerContext {
   git: IGitOperations;
   /** Configuration provider for reading VS Code settings without direct API coupling. */
   configProvider?: IConfigProvider;
+  /** Plan repository for filesystem-backed storage */
+  PlanRepository: IPlanRepository;
 }
 
 /**
@@ -124,7 +127,7 @@ export function isError(value: any): value is ErrorResult {
  * @returns `{ node, state }` if found, otherwise an {@link ErrorResult}.
  */
 export function lookupNode(plan: PlanInstance, nodeId: string): { node: any; state: any } | ErrorResult {
-  const node = plan.nodes.get(nodeId);
+  const node = plan.jobs.get(nodeId);
   if (!node) {
     return errorResult(`Node not found: ${nodeId}`);
   }
@@ -221,11 +224,29 @@ export async function resolveTargetBranch(
         return await generateFeatureBranch();
       }
       
-      // Not a default branch - create from base if needed and requested
-      if (createBranch) {
+      // Not a default branch — validate existing branch is compatible
+      try {
         const exists = await git.branches.exists(requested, repoPath);
-        if (!exists) {
+        if (exists) {
+          // Branch exists — verify it's compatible with this plan's base.
+          // If the branch has diverged (e.g. from a prior plan), reset it
+          // to the base so the plan starts clean. Otherwise the SV postchecks
+          // will fail because the target has "moved".
+          const branchHead = await git.repository.resolveRef(requested, repoPath);
+          const baseHead = await git.repository.resolveRef(baseBranch, repoPath);
+          if (branchHead !== baseHead) {
+            await git.repository.updateRef(repoPath, `refs/heads/${requested}`, baseHead);
+          }
+        } else if (createBranch) {
           await git.branches.create(requested, baseBranch, repoPath);
+        }
+      } catch {
+        // If ref resolution fails, proceed anyway — postchecks will catch issues
+        if (createBranch) {
+          try {
+            const exists2 = await git.branches.exists(requested, repoPath);
+            if (!exists2) { await git.branches.create(requested, baseBranch, repoPath); }
+          } catch { /* ignore */ }
         }
       }
       return requested;
