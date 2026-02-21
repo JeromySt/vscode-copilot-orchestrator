@@ -160,6 +160,7 @@ const workSpecObjectSchema = {
       additionalProperties: false
     }
   },
+  required: ['type'],
   additionalProperties: false
 } as const;
 
