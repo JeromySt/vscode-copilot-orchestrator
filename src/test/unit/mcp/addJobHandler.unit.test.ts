@@ -172,6 +172,22 @@ suite('addJobHandler', () => {
       assert.ok(plan.jobs.has('node-1'));
     });
 
+    test('should copy definition from rebuilt plan for spec hydration', async () => {
+      const { handleAddPlanJob } = require('../../../mcp/handlers/plan/addJobHandler');
+      const plan = makeMockPlan();
+      assert.strictEqual(plan.definition, undefined);
+
+      const mockDefinition = { getWorkSpec: sinon.stub(), getPrechecksSpec: sinon.stub(), getPostchecksSpec: sinon.stub() };
+      const rebuiltPlan = makeMockPlan();
+      rebuiltPlan.definition = mockDefinition;
+
+      const ctx = makeCtx({ get: sinon.stub().returns(plan) });
+      ctx.PlanRepository.addNode.resolves(rebuiltPlan);
+
+      await handleAddPlanJob({ planId: 'plan-1', producerId: 'job-1', task: 'test' }, ctx);
+      assert.strictEqual(plan.definition, mockDefinition, 'definition must be copied from rebuiltPlan to existingPlan');
+    });
+
     test('should emit planUpdated event', async () => {
       const { handleAddPlanJob } = require('../../../mcp/handlers/plan/addJobHandler');
       const plan = makeMockPlan();
