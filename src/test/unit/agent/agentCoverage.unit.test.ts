@@ -665,7 +665,7 @@ suite('buildCommand path handling', () => {
       debug: sinon.stub(),
     };
     
-    const cmd = buildCommand(
+    buildCommand(
       {
         task: 'test task',
         cwd: '/worktrees/test',

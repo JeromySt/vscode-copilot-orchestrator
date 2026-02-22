@@ -49,6 +49,7 @@ export async function handleResumePlan(args: any, ctx: PlanHandlerContext): Prom
   if (fieldError) {return fieldError;}
   
   // Block resuming scaffolding plans — they must be finalized first
+  // TODO: Replace (plan.spec as any).status with a typed PlanLifecycleStatus field
   const plan = ctx.PlanRunner.get(args.planId);
   if (plan && (plan.spec as any)?.status === 'scaffolding') {
     return {

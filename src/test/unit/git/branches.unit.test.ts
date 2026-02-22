@@ -582,17 +582,13 @@ suite('Git Core Branches Unit Tests', () => {
       ));
     });
 
-    test('should return true even when commits are not ancestors (current implementation)', async () => {
-      // Note: Current implementation has a bug - it returns true for any resolved promise
-      // because it doesn't check result.success. --is-ancestor with exit code 1 means
-      // NOT an ancestor, but execAsync doesn't throw on exit code 1.
-      // This test documents current behavior.
+    test('should return false when commits are not ancestors', async () => {
+      // isAncestor checks result.success — exit code 1 means NOT an ancestor
       execAsyncStub.resolves(mockFailure(''));
 
       const result = await branches.isAncestor('abc123', 'def456', '/test/repo');
 
-      // Current implementation returns true because execAsync resolves (doesn't throw)
-      assert.strictEqual(result, true);
+      assert.strictEqual(result, false);
     });
 
     test('should return false when command throws error (invalid commits)', async () => {

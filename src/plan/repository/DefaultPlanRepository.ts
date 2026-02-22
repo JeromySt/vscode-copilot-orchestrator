@@ -37,7 +37,6 @@ import {
   detectCycles, 
   computeRootsAndLeaves, 
   validateAllDepsExist, 
-  computeDependents,
   type DagJob 
 } from '../dagUtils';
 

@@ -85,10 +85,14 @@ export class DefaultFileSystem implements IFileSystem {
   }
 
   async writeFileAsync(filePath: string, content: string): Promise<void> {
+    const dir = path.dirname(filePath);
+    await this.ensureDirAsync(dir);
     await fs.promises.writeFile(filePath, content, 'utf-8');
   }
 
   writeFileSync(filePath: string, content: string): void {
+    const dir = path.dirname(filePath);
+    this.ensureDir(dir);
     fs.writeFileSync(filePath, content, 'utf-8');
   }
 

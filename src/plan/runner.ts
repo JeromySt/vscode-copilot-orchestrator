@@ -325,7 +325,11 @@ export class PlanRunner extends EventEmitter {
     
     // Also save to plan repository if available
     if (this._state.planRepository) {
-      this._state.planRepository.saveStateSync(plan);
+      try {
+        this._state.planRepository.saveStateSync(plan);
+      } catch (err: any) {
+        log.warn('Failed to persist plan to repository', { planId, error: err?.message });
+      }
     }
     return true;
   }

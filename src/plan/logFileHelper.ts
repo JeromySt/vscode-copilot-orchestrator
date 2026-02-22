@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { LogEntry } from './types';
-import { ensureOrchestratorDirs } from '../core/utils';
+
 
 const ensuredDirs = new Set<string>();
 
@@ -27,6 +27,9 @@ export function getLogFilePathByKey(
     const planId = keyParts[0];
     const nodeId = keyParts[1];
     if (!planId || !nodeId) {return undefined;}
+    // Validate planId/nodeId to prevent path traversal
+    const safePattern = /^[A-Za-z0-9_-]+$/;
+    if (!safePattern.test(planId) || !safePattern.test(nodeId)) {return undefined;}
     // Write to specs/<nodeId>/current/execution.log (resolves through symlink to attempts/<n>/)
     logFile = path.join(storagePath, 'plans', planId, 'specs', nodeId, 'current', 'execution.log');
     logFiles.set(executionKey, logFile);
@@ -44,6 +47,8 @@ export function getLogFilePathForAttempt(
   storagePath: string | undefined,
 ): string | undefined {
   if (!storagePath) {return undefined;}
+  const safePattern = /^[A-Za-z0-9_-]+$/;
+  if (!safePattern.test(planId) || !safePattern.test(nodeId)) {return undefined;}
   return path.join(storagePath, 'plans', planId, 'specs', nodeId, 'attempts', String(attemptNumber), 'execution.log');
 }
 

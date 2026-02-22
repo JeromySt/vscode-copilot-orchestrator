@@ -89,8 +89,8 @@ export function runProcess(spec: ProcessSpec, ctx: PhaseContext, spawner: IProce
   const cwd = spec.cwd ? path.resolve(ctx.worktreePath, spec.cwd) : ctx.worktreePath;
   const args = spec.args || [];
   ctx.logInfo(`Arguments: ${JSON.stringify(args)}`);
-  if (ctx.env) {ctx.logInfo(`Plan/spec environment overrides: ${JSON.stringify(ctx.env)}`);}
-  if (spec.env) {ctx.logInfo(`Spec environment overrides: ${JSON.stringify(spec.env)}`);}
+  if (ctx.env) {ctx.logInfo(`Plan/spec environment override keys: ${Object.keys(ctx.env).join(', ')}`);}
+  if (spec.env) {ctx.logInfo(`Spec environment override keys: ${Object.keys(spec.env).join(', ')}`);}
   return spawnAndTrack(spawner, spec.executable, args, cwd, { ...process.env, ...ctx.env, ...spec.env }, spec.timeout || 0, ctx, 'Process');
 }
 
@@ -113,8 +113,8 @@ export function runShell(spec: ShellSpec, ctx: PhaseContext, spawner: IProcessSp
   ctx.logInfo(`Command: ${spec.command}`);
   if (spec.shell) {ctx.logInfo(`Shell: ${shell}`);}
   if (spec.errorAction) {ctx.logInfo(`ErrorActionPreference: ${spec.errorAction}`);}
-  if (ctx.env) {ctx.logInfo(`Plan/spec environment overrides: ${JSON.stringify(ctx.env)}`);}  
-  if (spec.env) {ctx.logInfo(`Spec environment overrides: ${JSON.stringify(spec.env)}`);}  
+  if (ctx.env) {ctx.logInfo(`Plan/spec environment override keys: ${Object.keys(ctx.env).join(', ')}`);}  
+  if (spec.env) {ctx.logInfo(`Spec environment override keys: ${Object.keys(spec.env).join(', ')}`);}  
   return spawnAndTrack(spawner, shell, shellArgs, cwd, { ...process.env, ...ctx.env, ...spec.env }, spec.timeout || 0, ctx, 'Shell');
 }
 
@@ -149,7 +149,7 @@ export async function runAgent(
   if (ctx.sessionId) {ctx.logInfo(`Resuming Copilot session: ${ctx.sessionId}`);}
   if (spec.allowedFolders?.length) {ctx.logInfo(`Agent allowed folders: ${spec.allowedFolders.join(', ')}`);}
   if (spec.allowedUrls?.length) {ctx.logInfo(`Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);}
-  if (ctx.env) {ctx.logInfo(`Plan/spec environment overrides: ${JSON.stringify(ctx.env)}`);}
+  if (ctx.env) {ctx.logInfo(`Plan/spec environment override keys: ${Object.keys(ctx.env).join(', ')}`);}
   try {
     const result = await agentDelegator.delegate({
       task: spec.instructions,

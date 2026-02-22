@@ -6,7 +6,7 @@
 import { suite, test, setup, teardown } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import * as validation from '../../../mcp/validation';
+
 
 function makeMockPlan(): any {
   return {

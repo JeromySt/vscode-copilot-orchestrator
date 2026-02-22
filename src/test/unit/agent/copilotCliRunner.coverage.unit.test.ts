@@ -650,7 +650,7 @@ suite('copilotCliRunner', () => {
       });
 
       test('should omit Additional Context section when no instructions', () => {
-        const result = runner.writeInstructionsFile(
+        runner.writeInstructionsFile(
           testWorktreeCwd,
           'Test task',
           undefined,

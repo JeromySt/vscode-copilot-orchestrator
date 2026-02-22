@@ -246,27 +246,27 @@ suite('McpHandler', () => {
     });
 
     test('routes get_copilot_job', async () => {
-      const response = await handler.handleRequest(makeToolCall('get_copilot_job', { planId: 'a', nodeId: 'b' }));
+      const response = await handler.handleRequest(makeToolCall('get_copilot_job', { planId: 'a', jobId: 'b' }));
       assert.ok(response.result);
     });
 
     test('routes get_copilot_job_logs', async () => {
-      const response = await handler.handleRequest(makeToolCall('get_copilot_job_logs', { planId: 'a', nodeId: 'b' }));
+      const response = await handler.handleRequest(makeToolCall('get_copilot_job_logs', { planId: 'a', jobId: 'b' }));
       assert.ok(response.result);
     });
 
     test('routes get_copilot_job_attempts', async () => {
-      const response = await handler.handleRequest(makeToolCall('get_copilot_job_attempts', { planId: 'a', nodeId: 'b' }));
+      const response = await handler.handleRequest(makeToolCall('get_copilot_job_attempts', { planId: 'a', jobId: 'b' }));
       assert.ok(response.result);
     });
 
     test('routes retry_copilot_plan_job', async () => {
-      const response = await handler.handleRequest(makeToolCall('retry_copilot_plan_job', { planId: 'a', nodeId: 'b' }));
+      const response = await handler.handleRequest(makeToolCall('retry_copilot_plan_job', { planId: 'a', jobId: 'b' }));
       assert.ok(response.result);
     });
 
     test('routes get_copilot_plan_job_failure_context', async () => {
-      const response = await handler.handleRequest(makeToolCall('get_copilot_plan_job_failure_context', { planId: 'a', nodeId: 'b' }));
+      const response = await handler.handleRequest(makeToolCall('get_copilot_plan_job_failure_context', { planId: 'a', jobId: 'b' }));
       assert.ok(response.result);
     });
 

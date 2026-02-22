@@ -34,7 +34,7 @@ export async function handleScaffoldPlan(args: any, ctx: PlanHandlerContext): Pr
     return errorResult(validation.error || 'Invalid input');
   }
 
-  const { name, baseBranch, targetBranch, maxParallel, startPaused, cleanUpSuccessfulWork, additionalSymlinkDirs, verifyRi, env, resumeAfterPlan } = args;
+  const { name, baseBranch, targetBranch, maxParallel, env, resumeAfterPlan } = args;
 
   try {
     const repoPath = ctx.workspacePath;
@@ -45,7 +45,8 @@ export async function handleScaffoldPlan(args: any, ctx: PlanHandlerContext): Pr
       resolvedBaseBranch, repoPath, ctx.git, targetBranch, name, ctx.configProvider
     );
     
-    // Use the worktree root from the PlanRunner or default
+    // specsDir is the runtime path where MCP callers write spec files during scaffolding.
+    // This is distinct from the repository store path (internal implementation detail).
     const worktreeRoot = repoPath ? `${repoPath}/.worktrees` : '';
 
     const scaffoldOptions = {

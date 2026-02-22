@@ -272,7 +272,7 @@ export async function isAncestor(ancestor: string, descendant: string, repoPath:
     // --is-ancestor returns exit code 0 if true, 1 if false
     // execAsyncOrNull returns null on non-zero exit, so we need to handle differently
     const result = await execAsync(['merge-base', '--is-ancestor', ancestor, descendant], { cwd: repoPath });
-    return true; // Command succeeded = is ancestor
+    return result.success === true;
   } catch {
     return false; // Command failed = not ancestor (or error, treated as not ancestor)
   }

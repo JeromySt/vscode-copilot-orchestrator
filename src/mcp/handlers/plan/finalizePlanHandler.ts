@@ -38,6 +38,7 @@ export async function handleFinalizePlan(args: any, ctx: PlanHandlerContext): Pr
     // Finalize the plan through the repository (validates DAG, resolves deps)
     const finalizedPlan = await ctx.PlanRepository.finalize(planId);
 
+    // TODO: Replace (ctx.PlanRunner as any) access with a typed finalizeScaffoldPlan() method on IPlanRunner
     // Update the existing in-memory plan with finalized state
     const existingPlan = ctx.PlanRunner.get(planId);
     if (existingPlan) {

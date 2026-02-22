@@ -148,6 +148,7 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
 
   // ---------- private helpers ----------
 
+  // Direct fs usage: Non-fatal worktree cleanup before commit (approved exception — see code-review.instructions.md)
   private removeOrchestratorSkillDir(worktreePath: string, ctx: CommitPhaseContext): void {
     const skillDir = path.join(worktreePath, ORCHESTRATOR_SKILL_DIR);
     try {
