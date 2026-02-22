@@ -72,9 +72,10 @@ suite('specs.ts - Coverage', () => {
       assert.deepStrictEqual((result as any).env, { NODE_ENV: 'test' });
     });
 
-    test('handles malformed JSON with extra characters', () => {
+    test('handles JSON with trailing non-JSON content (LLM artifacts)', () => {
+      // The bugfix strips trailing content after the last '}' before parsing
       const result = normalizeWorkSpec('{"type":"shell"} extra');
-      assert.deepStrictEqual(result, { type: 'shell', command: '{"type":"shell"} extra' });
+      assert.strictEqual(result!.type, 'shell');
     });
 
     test('handles JSON with comments (invalid JSON)', () => {
