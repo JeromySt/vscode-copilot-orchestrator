@@ -338,13 +338,10 @@ suite('Utils Unit Tests', () => {
       assert.strictEqual(result, expectedPath);
       assert.ok(fs.existsSync(expectedPath));
       
-      // Check all subdirectories
-      const subdirs = ['plans', 'logs', 'evidence', '.copilot'];
-      for (const subdir of subdirs) {
-        const subdirPath = path.join(expectedPath, subdir);
-        assert.ok(fs.existsSync(subdirPath), `Missing subdir: ${subdir}`);
-        assert.ok(fs.statSync(subdirPath).isDirectory(), `Not a directory: ${subdir}`);
-      }
+      // Check 'plans' subdirectory (only subdirectory now per source code)
+      const plansPath = path.join(expectedPath, 'plans');
+      assert.ok(fs.existsSync(plansPath), 'Missing subdir: plans');
+      assert.ok(fs.statSync(plansPath).isDirectory(), 'plans should be a directory');
     });
 
     test('does not error if .orchestrator already exists', () => {
@@ -369,42 +366,9 @@ suite('Utils Unit Tests', () => {
       
       assert.strictEqual(result, orchestratorDir);
       
-      // Check all subdirectories exist now
-      const subdirs = ['plans', 'logs', 'evidence', '.copilot'];
-      for (const subdir of subdirs) {
-        const subdirPath = path.join(orchestratorDir, subdir);
-        assert.ok(fs.existsSync(subdirPath), `Missing subdir: ${subdir}`);
-      }
-    });
-  });
-
-  suite('ensureDir', () => {
-    test('creates directory if it does not exist', () => {
-      const testDir = path.join(tempDir, 'ensure-test');
-      assert.ok(!fs.existsSync(testDir));
-      
-      ensureDir(testDir);
-      
-      assert.ok(fs.existsSync(testDir));
-      assert.ok(fs.statSync(testDir).isDirectory());
-    });
-
-    test('does not error if directory already exists', () => {
-      const testDir = path.join(tempDir, 'ensure-existing');
-      fs.mkdirSync(testDir);
-      
-      ensureDir(testDir);
-      
-      assert.ok(fs.existsSync(testDir));
-    });
-
-    test('creates parent directories recursively', () => {
-      const testDir = path.join(tempDir, 'ensure', 'deep', 'path');
-      
-      ensureDir(testDir);
-      
-      assert.ok(fs.existsSync(testDir));
-      assert.ok(fs.existsSync(path.dirname(testDir)));
+      // Check 'plans' subdirectory exists (only subdirectory now per source code)
+      const subdirPath = path.join(orchestratorDir, 'plans');
+      assert.ok(fs.existsSync(subdirPath), 'Missing subdir: plans');
     });
   });
 

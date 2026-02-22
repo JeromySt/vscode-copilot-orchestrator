@@ -32,7 +32,7 @@ function makeMockPlan(overrides?: Record<string, any>): any {
   return {
     id: 'plan-1',
     spec: { name: 'Test Plan' },
-    nodes: new Map(),
+    jobs: new Map(),
     producerIdToNodeId: new Map(),
     roots: ['node-1'],
     leaves: ['node-1'],
@@ -75,7 +75,7 @@ suite('Legacy Adapters', () => {
     test('should delegate to handleGetGroupStatus and add planId', async () => {
       const { adaptGetPlanStatus } = require('../../../mcp/handlers/legacyAdapters');
       const plan = makeMockPlan();
-      plan.nodes.set('n1', { id: 'n1', producerId: 'build', name: 'Build', type: 'job' });
+      plan.jobs.set('n1', { id: 'n1', producerId: 'build', name: 'Build', type: 'job' });
       plan.nodeStates.set('n1', { status: 'succeeded', attempts: 1 });
       const ctx = makeCtx({
         getStatus: sinon.stub().returns({
@@ -83,14 +83,14 @@ suite('Legacy Adapters', () => {
           counts: { succeeded: 1 }, progress: 1.0,
         }),
       });
-      const result = await adaptGetPlanStatus({ id: 'plan-1' }, ctx);
+      const result = await adaptGetPlanStatus({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.planId, result.groupId);
     });
 
     test('should return error when plan not found', async () => {
       const { adaptGetPlanStatus } = require('../../../mcp/handlers/legacyAdapters');
-      const result = await adaptGetPlanStatus({ id: 'missing' }, makeCtx());
+      const result = await adaptGetPlanStatus({ planId: 'missing' }, makeCtx());
       assert.strictEqual(result.success, false);
     });
   });
@@ -117,7 +117,7 @@ suite('Legacy Adapters', () => {
       const { adaptCancelPlan } = require('../../../mcp/handlers/legacyAdapters');
       const plan = makeMockPlan();
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
-      const result = await adaptCancelPlan({ id: 'plan-1' }, ctx);
+      const result = await adaptCancelPlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -127,7 +127,7 @@ suite('Legacy Adapters', () => {
       const { adaptDeletePlan } = require('../../../mcp/handlers/legacyAdapters');
       const plan = makeMockPlan();
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan), delete: sinon.stub().resolves(true) });
-      const result = await adaptDeletePlan({ id: 'plan-1' }, ctx);
+      const result = await adaptDeletePlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -136,55 +136,57 @@ suite('Legacy Adapters', () => {
     test('should delegate to handleRetryGroup with mapped args', async () => {
       const { adaptRetryPlan } = require('../../../mcp/handlers/legacyAdapters');
       const plan = makeMockPlan();
-      plan.nodes.set('n1', { name: 'Build' });
+      plan.jobs.set('n1', { name: 'Build' });
       plan.nodeStates.set('n1', { status: 'failed' });
       const ctx = makeCtx({
         getPlan: sinon.stub().returns(plan),
         retryNode: sinon.stub().resolves({ success: true }),
         resume: sinon.stub().resolves(true),
       });
-      const result = await adaptRetryPlan({ id: 'plan-1' }, ctx);
+      const result = await adaptRetryPlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
 
-  suite('adaptGetNodeDetails', () => {
-    test('should delegate to handleGetNode with mapped args', async () => {
-      const { adaptGetNodeDetails } = require('../../../mcp/handlers/legacyAdapters');
-      const plan = makeMockPlan();
-      const node = { id: 'n1', producerId: 'build', name: 'Build', type: 'job', dependencies: [], dependents: [] };
-      plan.nodes.set('n1', node);
-      plan.nodeStates.set('n1', { status: 'running', attempts: 1 });
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await adaptGetNodeDetails({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+  suite('adaptGetJobDetails', () => {
+    test('should delegate to handleGetJob with mapped args', async () => {
+      const jobHandlers = require('../../../mcp/handlers/jobHandlers');
+      const stub = sinon.stub(jobHandlers, 'handleGetJob').resolves({ success: true, node: { id: 'n1' }, state: {} });
+      const { adaptGetJobDetails } = require('../../../mcp/handlers/legacyAdapters');
+      const ctx = makeCtx();
+      const result = await adaptGetJobDetails({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
+      assert.ok(stub.calledOnce);
+      assert.strictEqual(stub.firstCall.args[0].jobId, 'n1');
+      stub.restore();
     });
   });
 
-  suite('adaptRetryPlanNode', () => {
-    test('should delegate to handleRetryNode', async () => {
-      const { adaptRetryPlanNode } = require('../../../mcp/handlers/legacyAdapters');
-      const plan = makeMockPlan();
-      plan.nodes.set('n1', { id: 'n1' });
-      const ctx = makeCtx({
-        getAll: sinon.stub().returns([plan]),
-        retryNode: sinon.stub().resolves({ success: true }),
-        resume: sinon.stub().resolves(true),
-      });
-      const result = await adaptRetryPlanNode({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+  suite('adaptRetryPlanJob', () => {
+    test('should delegate to handleRetryJob', async () => {
+      const jobHandlers = require('../../../mcp/handlers/jobHandlers');
+      const stub = sinon.stub(jobHandlers, 'handleRetryJob').resolves({ success: true });
+      const { adaptRetryPlanJob } = require('../../../mcp/handlers/legacyAdapters');
+      const ctx = makeCtx();
+      const result = await adaptRetryPlanJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
+      assert.ok(stub.calledOnce);
+      assert.strictEqual(stub.firstCall.args[0].jobId, 'n1');
+      stub.restore();
     });
   });
 
-  suite('adaptGetNodeFailureContext', () => {
-    test('should delegate to handleNodeFailureContext', async () => {
-      const { adaptGetNodeFailureContext } = require('../../../mcp/handlers/legacyAdapters');
-      const plan = makeMockPlan();
-      plan.nodes.set('n1', { id: 'n1', producerId: 'build', name: 'Build' });
-      plan.nodeStates.set('n1', { status: 'failed', error: 'err', lastAttempt: {} });
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await adaptGetNodeFailureContext({ planId: 'plan-1', nodeId: 'n1' }, ctx);
+  suite('adaptGetJobFailureContext', () => {
+    test('should delegate to handleJobFailureContext', async () => {
+      const jobHandlers = require('../../../mcp/handlers/jobHandlers');
+      const stub = sinon.stub(jobHandlers, 'handleJobFailureContext').resolves({ success: true });
+      const { adaptGetJobFailureContext } = require('../../../mcp/handlers/legacyAdapters');
+      const ctx = makeCtx();
+      const result = await adaptGetJobFailureContext({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
+      assert.ok(stub.calledOnce);
+      assert.strictEqual(stub.firstCall.args[0].jobId, 'n1');
+      stub.restore();
     });
   });
 });

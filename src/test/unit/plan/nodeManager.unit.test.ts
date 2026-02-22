@@ -44,7 +44,7 @@ function createTestPlan(opts?: { nodeStatus?: string; pid?: number }): PlanInsta
   return {
     id: 'plan-1',
     spec: { name: 'Test Plan', jobs: [], baseBranch: 'main' },
-    nodes: new Map([['node-1', node]]),
+    jobs: new Map([['node-1', node]]),
     producerIdToNodeId: new Map([['node-1', 'node-1']]),
     roots: ['node-1'],
     leaves: ['node-1'],
@@ -326,7 +326,7 @@ suite('NodeManager', () => {
     const newWork = { type: 'shell' as const, command: 'echo new' };
     const result = await mgr.retryNode('plan-1', 'node-1', { newWork });
     assert.strictEqual(result.success, true);
-    const jobNode = plan.nodes.get('node-1') as JobNode;
+    const jobNode = plan.jobs.get('node-1') as JobNode;
     assert.deepStrictEqual(jobNode.work, newWork);
   });
 
@@ -341,8 +341,8 @@ suite('NodeManager', () => {
     const plan = state.plans.get('plan-1')!;
     const depNode = createTestJobNode('dep-1', 'Dep Job');
     depNode.dependents = ['node-1'];
-    plan.nodes.set('dep-1', depNode);
-    const node = plan.nodes.get('node-1')!;
+    plan.jobs.set('dep-1', depNode);
+    const node = plan.jobs.get('node-1')!;
     node.dependencies = ['dep-1'];
     plan.nodeStates.set('dep-1', {
       status: 'succeeded',

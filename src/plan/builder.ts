@@ -161,6 +161,10 @@ export function buildPlan(
       errors.push(`Job is missing required 'producerId' field`);
       continue;
     }
+
+    // Skip any SV producer that leaked into spec.jobs (e.g. from a bad
+    // serialization round-trip).  The SV node is always auto-injected later.
+    if (jobSpec.producerId === '__snapshot-validation__') { continue; }
     
     if (producerIdToNodeId.has(jobSpec.producerId)) {
       errors.push(`Duplicate producerId: '${jobSpec.producerId}'`);
@@ -324,6 +328,12 @@ export function buildPlan(
   }
 
   // ── Inject snapshot-validation node ──────────────────────────────────────
+  // Guard: if an SV node was already in the input (shouldn't happen, but
+  // belt-and-suspenders), skip injection to avoid duplicates.
+  if (producerIdToNodeId.has('__snapshot-validation__')) {
+    // Already present (shouldn't happen, but belt-and-suspenders)
+  } else {
+
   // Every plan has a targetBranch (defaults to baseBranch). The snapshot-
   // validation node depends on all current leaves and becomes the new sole
   // leaf. It handles: merge-fi (accumulate leaves) → prechecks (target health)
@@ -360,17 +370,8 @@ export function buildPlan(
       `    Exit successfully with no further action.`,
       ``,
       `  Case B — TARGET_HEAD does NOT equal SNAPSHOT_BASE:`,
-      `    The target branch has advanced. Check if the target ref is clean:`,
-      `    Run: git diff --quiet "refs/heads/${svTargetBranch}"`,
-      ``,
-      `    If the diff command FAILS (non-zero exit = dirty):`,
-      `      Print "❌ Target branch '${svTargetBranch}' has uncommitted changes in the working tree."`,
-      `      Print "Please commit or stash your changes on '${svTargetBranch}' before retrying."`,
-      `      Exit with failure.`,
-      ``,
-      `    If the diff command SUCCEEDS (clean):`,
-      `      The target advanced but is clean. Rebase the snapshot onto the new target HEAD:`,
-      `      Run: git rebase --onto $TARGET_HEAD $SNAPSHOT_BASE HEAD`,
+      `    The target branch has advanced. Rebase the snapshot onto the new target HEAD:`,
+      `    Run: git rebase --onto $TARGET_HEAD $SNAPSHOT_BASE HEAD`,
       ``,
       `      If the rebase succeeds cleanly:`,
       `        Update .orchestrator/snapshot-base to contain $TARGET_HEAD (the new base).`,
@@ -400,6 +401,11 @@ export function buildPlan(
   // targetBranch HEAD. If target advanced during work, fail and resume from prechecks
   // so the snapshot gets rebased again. Uses node.js for cross-platform compatibility
   // (bash not guaranteed on Windows, PowerShell can't handle bash syntax).
+  //
+  // NOTE: This runs in the SNAPSHOT worktree, so `git diff --quiet <target-ref>`
+  // would compare the snapshot's files against the target branch — which will
+  // ALWAYS differ because the snapshot has the merged plan work. We only need
+  // to compare commit SHAs, not working tree content.
   const postcheckScript = [
     `const fs = require('fs');`,
     `const { execSync } = require('child_process');`,
@@ -409,10 +415,6 @@ export function buildPlan(
     `  if (head === base) {`,
     `    console.log('✅ Target branch ${svTargetBranch} unchanged since prechecks. Safe to merge.');`,
     `    process.exit(0);`,
-    `  }`,
-    `  try { execSync('git diff --quiet "refs/heads/${svTargetBranch}"'); } catch {`,
-    `    console.error('❌ Target branch ${svTargetBranch} has uncommitted changes. Please clean up before retrying.');`,
-    `    process.exit(1);`,
     `  }`,
     `  console.error('❌ Target branch ${svTargetBranch} advanced during validation (' + base.slice(0,8) + ' -> ' + head.slice(0,8) + '). Needs rebase.');`,
     `  process.exit(1);`,
@@ -428,7 +430,7 @@ export function buildPlan(
     args: ['-e', postcheckScript],
     env: { ELECTRON_RUN_AS_NODE: '1' },
     onFailure: {
-      noAutoHeal: false,
+      noAutoHeal: true,
       message: `Target branch '${svTargetBranch}' changed during validation. The plan will automatically retry from prechecks to rebase the snapshot.`,
       resumeFromPhase: 'prechecks',
     },
@@ -502,6 +504,13 @@ export function buildPlan(
   
   // Snapshot-validation node is now the sole leaf
   leaves = [svNodeId];
+
+  // If SV has no dependencies (0-job scaffolding plan), it's also a root
+  if (svNode.dependencies.length === 0) {
+    roots.push(svNodeId);
+  }
+
+  } // end SV injection guard
   
   // Validate: Check for cycles
   const cycleError = detectCycles(nodes);
@@ -542,7 +551,7 @@ export function buildPlan(
   return {
     id: planId,
     spec,
-    nodes,
+    jobs: nodes,
     producerIdToNodeId,
     roots,
     leaves,
@@ -559,7 +568,7 @@ export function buildPlan(
     createdAt: Date.now(),
     stateVersion: 0,
     cleanUpSuccessfulWork: spec.cleanUpSuccessfulWork !== false,
-    maxParallel: spec.maxParallel || 4,
+    maxParallel: spec.maxParallel || 0, // 0 = unlimited (defers to global capacity manager)
   };
 }
 

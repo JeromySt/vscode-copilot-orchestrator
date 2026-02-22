@@ -24,7 +24,7 @@ import { validateAgentModels } from '../../validation';
  * by `nodeIds`.  An optional `newWork` spec replaces the original work
  * for the retried nodes.
  *
- * @param args - Must contain `id`. Optional `nodeIds`, `newWork`, `clearWorktree`.
+ * @param args - Must contain `planId`. Optional `nodeIds`, `newWork`, `clearWorktree`.
  * @param ctx  - Handler context.
  * @returns `{ success, retriedNodes, errors }`.
  *
@@ -34,14 +34,14 @@ import { validateAgentModels } from '../../validation';
  * {
  *   "name": "retry_copilot_plan",
  *   "arguments": {
- *     "id": "plan-uuid",
+ *     "planId": "plan-uuid",
  *     "newWork": "@agent Fix the build errors"
  *   }
  * }
  * ```
  */
 export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promise<any> {
-  const fieldError = validateRequired(args, ['id']);
+  const fieldError = validateRequired(args, ['planId']);
   if (fieldError) {return fieldError;}
 
   // Validate allowedFolders paths exist
@@ -69,12 +69,12 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
     }
   }
   
-  const planResult = lookupPlan(ctx, args.id, 'getPlan');
+  const planResult = lookupPlan(ctx, args.planId, 'getPlan');
   if (isError(planResult)) {return planResult;}
   const plan = planResult;
   
   // Determine which nodes to retry
-  let nodeIdsToRetry: string[] = args.nodeIds || [];
+  let nodeIdsToRetry: string[] = args.jobIds || [];
   
   if (nodeIdsToRetry.length === 0) {
     // No specific nodes - retry all failed nodes
@@ -87,8 +87,8 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   
   if (nodeIdsToRetry.length === 0) {
     return { 
-      ...errorResult('No failed nodes to retry'),
-      planId: args.id,
+      ...errorResult('No failed jobs to retry'),
+      planId: args.planId,
     };
   }
   
@@ -105,8 +105,8 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   const errors: Array<{ id: string; error: string }> = [];
   
   for (const nodeId of nodeIdsToRetry) {
-    const result = await ctx.PlanRunner.retryNode(args.id, nodeId, retryOptions);
-    const node = plan.nodes.get(nodeId);
+    const result = await ctx.PlanRunner.retryNode(args.planId, nodeId, retryOptions);
+    const node = plan.jobs.get(nodeId);
     
     if (result.success) {
       retriedNodes.push({ id: nodeId, name: node?.name || nodeId });
@@ -116,14 +116,14 @@ export async function handleRetryPlan(args: any, ctx: PlanHandlerContext): Promi
   }
   
   // Resume the Plan if it was stopped
-  await ctx.PlanRunner.resume(args.id);
+  await ctx.PlanRunner.resume(args.planId);
   
   return {
     success: retriedNodes.length > 0,
     message: retriedNodes.length > 0 
-      ? `Retrying ${retriedNodes.length} node(s)` 
-      : 'No nodes were retried',
-    planId: args.id,
+      ? `Retrying ${retriedNodes.length} job(s)` 
+      : 'No jobs were retried',
+    planId: args.planId,
     retriedNodes,
     errors: errors.length > 0 ? errors : undefined,
   };

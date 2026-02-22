@@ -15,7 +15,7 @@ suite('Plan Builder (extended coverage)', () => {
       };
       const plan = buildPlan(spec);
       assert.ok(plan.id);
-      assert.strictEqual(plan.nodes.size, 2); // 1 job + snapshot-validation
+      assert.strictEqual(plan.jobs.size, 2); // 1 job + snapshot-validation
       assert.strictEqual(plan.roots.length, 1);
       assert.strictEqual(plan.leaves.length, 1); // snapshot-validation is the sole leaf
       assert.strictEqual(plan.baseBranch, 'main');
@@ -32,7 +32,7 @@ suite('Plan Builder (extended coverage)', () => {
         ],
       };
       const plan = buildPlan(spec);
-      assert.strictEqual(plan.nodes.size, 4); // 3 jobs + snapshot-validation
+      assert.strictEqual(plan.jobs.size, 4); // 3 jobs + snapshot-validation
       assert.strictEqual(plan.roots.length, 1);
       assert.strictEqual(plan.leaves.length, 1); // snapshot-validation is the sole leaf
     });
@@ -96,9 +96,11 @@ suite('Plan Builder (extended coverage)', () => {
       });
     });
 
-    test('throws when no nodes', () => {
+    test('0-job plan is valid (SV node is auto-injected)', () => {
       const spec: PlanSpec = { name: 'P', baseBranch: 'main', jobs: [] };
-      assert.throws(() => buildPlan(spec), PlanValidationError);
+      // Empty jobs array is valid because SV node is always injected
+      const plan = buildPlan(spec);
+      assert.strictEqual(plan.jobs.size, 1); // Just the SV node
     });
 
     test('throws on missing producerId', () => {
@@ -118,13 +120,13 @@ suite('Plan Builder (extended coverage)', () => {
       assert.strictEqual(plan.baseBranch, 'main');
     });
 
-    test('uses default maxParallel when not specified', () => {
+    test('uses default maxParallel when not specified (0 = unlimited)', () => {
       const spec: PlanSpec = {
         name: 'P', baseBranch: 'main',
         jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
       };
       const plan = buildPlan(spec);
-      assert.strictEqual(plan.maxParallel, 4);
+      assert.strictEqual(plan.maxParallel, 0);
     });
 
     test('respects custom maxParallel', () => {
@@ -195,7 +197,7 @@ suite('Plan Builder (extended coverage)', () => {
       assert.ok(plan.groupPathToId.has('backend'));
       assert.ok(plan.groupPathToId.has('backend/api'));
       const nodeId = plan.producerIdToNodeId.get('a')!;
-      const node = plan.nodes.get(nodeId)!;
+      const node = plan.jobs.get(nodeId)!;
       assert.ok(node.groupId);
     });
 
@@ -216,7 +218,7 @@ suite('Plan Builder (extended coverage)', () => {
       };
       const plan = buildPlan(spec);
       const nodeId = plan.producerIdToNodeId.get('a')!;
-      const node = plan.nodes.get(nodeId)! as any;
+      const node = plan.jobs.get(nodeId)! as any;
       assert.strictEqual(node.name, 'Custom Name');
       assert.strictEqual(node.work, 'npm run build');
       assert.strictEqual(node.prechecks, 'npm run lint');
@@ -238,7 +240,7 @@ suite('Plan Builder (extended coverage)', () => {
       const plan = buildPlan(spec);
       const aId = plan.producerIdToNodeId.get('a')!;
       const bId = plan.producerIdToNodeId.get('b')!;
-      const aNode = plan.nodes.get(aId)!;
+      const aNode = plan.jobs.get(aId)!;
       assert.ok(aNode.dependents.includes(bId));
     });
 
@@ -260,7 +262,7 @@ suite('Plan Builder (extended coverage)', () => {
   suite('buildSingleJobPlan', () => {
     test('creates a plan with one node', () => {
       const plan = buildSingleJobPlan({ name: 'My Job', task: 'do stuff' });
-      assert.strictEqual(plan.nodes.size, 2); // 1 job + snapshot-validation
+      assert.strictEqual(plan.jobs.size, 2); // 1 job + snapshot-validation
       assert.strictEqual(plan.roots.length, 1);
     });
 
@@ -285,7 +287,7 @@ suite('Plan Builder (extended coverage)', () => {
         expectsNoChanges: true,
         autoHeal: false,
       });
-      const node = [...plan.nodes.values()][0] as any;
+      const node = [...plan.jobs.values()][0] as any;
       assert.strictEqual(node.work, 'npm run build');
       assert.strictEqual(node.prechecks, 'npm run lint');
       assert.strictEqual(node.postchecks, 'npm test');

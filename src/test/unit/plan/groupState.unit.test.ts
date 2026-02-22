@@ -67,7 +67,7 @@ function buildGroupPlan(): PlanInstance {
 
   return {
     id: 'plan-1', spec: { name: 'Group Test Plan', jobs: [] },
-    nodes, producerIdToNodeId, roots: ['a', 'b'], leaves: ['b', 'c'],
+    jobs: nodes, producerIdToNodeId, roots: ['a', 'b'], leaves: ['b', 'c'],
     nodeStates, groups, groupStates, groupPathToId,
     repoPath: '/repo', baseBranch: 'main', worktreeRoot: '/wt',
     createdAt: 1000, stateVersion: 0, cleanUpSuccessfulWork: true, maxParallel: 4,
@@ -161,7 +161,7 @@ suite('PlanStateMachine - Group State', () => {
     const plan = buildGroupPlan();
     // Add a node without groupId
     const node = makeJobNode('d', [], []);
-    plan.nodes.set('d', node);
+    plan.jobs.set('d', node);
     plan.nodeStates.set('d', { status: 'ready', version: 0, attempts: 0 });
     const sm = new PlanStateMachine(plan);
     sm.transition('d', 'scheduled');

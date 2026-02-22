@@ -41,7 +41,7 @@ export function renderPlanNodeCard(data: PlanNodeCardData): string {
   <div class="stats">
     <div class="stat">
       <div class="stat-value">${total}</div>
-      <div class="stat-label">Total Nodes</div>
+      <div class="stat-label">Total Jobs</div>
     </div>
     <div class="stat">
       <div class="stat-value succeeded">${counts.succeeded || 0}</div>

@@ -24,3 +24,6 @@ export * from './ICopilotRunner';
 export * from './IProcessSpawner';
 export * from './IEnvironment';
 export * from './IPulseEmitter';
+export * from './IPlanRepository';
+export * from './IPlanDefinition';
+export * from './IPlanRepositoryStore';

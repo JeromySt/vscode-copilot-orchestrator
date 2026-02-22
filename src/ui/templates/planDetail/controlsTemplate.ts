@@ -13,6 +13,8 @@
 export interface PlanControlsData {
   /** Computed plan status */
   status: string;
+  /** True if the plan is paused because it's waiting on another plan to finish */
+  isChainedPause?: boolean;
 }
 
 /**
@@ -31,16 +33,17 @@ export function renderPlanControls(data: PlanControlsData): string {
   const isActive = status === 'running' || status === 'pending';
   const isPaused = status === 'paused';
   const canControl = isActive || isPaused;
+  const isScaffolding = status === 'scaffolding';
 
   const pauseBtn = isActive
     ? '<button id="pauseBtn" class="action-btn secondary" onclick="pausePlan()">Pause</button>'
     : '<button id="pauseBtn" class="action-btn secondary" onclick="pausePlan()" style="display:none">Pause</button>';
 
-  const resumeBtn = isPaused
+  const resumeBtn = isPaused && !data.isChainedPause
     ? '<button id="resumeBtn" class="action-btn primary" onclick="resumePlan()">Resume</button>'
     : '<button id="resumeBtn" class="action-btn primary" onclick="resumePlan()" style="display:none">Resume</button>';
 
-  const cancelBtn = canControl
+  const cancelBtn = canControl && !isScaffolding
     ? '<button id="cancelBtn" class="action-btn secondary" onclick="cancelPlan()">Cancel</button>'
     : '<button id="cancelBtn" class="action-btn secondary" onclick="cancelPlan()" style="display:none">Cancel</button>';
 
@@ -51,11 +54,11 @@ export function renderPlanControls(data: PlanControlsData): string {
   return `
   <div class="plan-toolbar">
     <div class="actions">
-      ${pauseBtn}
-      ${resumeBtn}
-      ${cancelBtn}
+      ${isScaffolding ? '' : pauseBtn}
+      ${isScaffolding ? '' : resumeBtn}
+      ${isScaffolding ? '' : cancelBtn}
       <button class="action-btn secondary" onclick="refresh()">Refresh</button>
-      ${workSummaryBtn}
+      ${isScaffolding ? '' : workSummaryBtn}
       <button class="action-btn danger" onclick="deletePlan()">Delete</button>
     </div>
   </div>

@@ -35,6 +35,7 @@ export interface NodeManagerState {
   executor?: JobExecutor;
   events: PlanEventEmitter;
   processMonitor: IProcessMonitor;
+  planRepository?: import('../interfaces/IPlanRepository').IPlanRepository;
 }
 
 /**
@@ -147,7 +148,7 @@ export class NodeManager {
     const rootHierarchy: any[] = [];
 
     for (const [nodeId, state] of plan.nodeStates) {
-      const node = plan.nodes.get(nodeId);
+      const node = plan.jobs.get(nodeId);
       if (!node || node.type !== 'job') {continue;}
       if (state.status !== 'running' && state.status !== 'scheduled') {continue;}
       const name = node.name || nodeId.slice(0, 8);
@@ -208,7 +209,7 @@ export class NodeManager {
   } | { error: string } {
     const plan = this.state.plans.get(planId);
     if (!plan) {return { error: `Plan not found: ${planId}` };}
-    const node = plan.nodes.get(nodeId);
+    const node = plan.jobs.get(nodeId);
     if (!node) {return { error: `Node not found: ${nodeId}` };}
     const nodeState = plan.nodeStates.get(nodeId);
     if (!nodeState) {return { error: `Node state not found: ${nodeId}` };}
@@ -229,7 +230,7 @@ export class NodeManager {
   async forceFailNode(planId: string, nodeId: string): Promise<void> {
     const plan = this.state.plans.get(planId);
     if (!plan) {throw new Error(`Plan ${planId} not found`);}
-    const node = plan.nodes.get(nodeId);
+    const node = plan.jobs.get(nodeId);
     if (!node) {throw new Error(`Node ${nodeId} not found in plan ${planId}`);}
     const nodeState = plan.nodeStates.get(nodeId);
     if (!nodeState) {throw new Error(`Node state ${nodeId} not found in plan ${planId}`);}
@@ -282,7 +283,7 @@ export class NodeManager {
   async retryNode(planId: string, nodeId: string, options?: RetryNodeOptions, startPump?: () => void): Promise<{ success: boolean; error?: string }> {
     const plan = this.state.plans.get(planId);
     if (!plan) {return { success: false, error: `Plan not found: ${planId}` };}
-    const node = plan.nodes.get(nodeId);
+    const node = plan.jobs.get(nodeId);
     if (!node) {return { success: false, error: `Node not found: ${nodeId}` };}
     const nodeState = plan.nodeStates.get(nodeId);
     if (!nodeState) {return { success: false, error: `Node state not found: ${nodeId}` };}
@@ -311,6 +312,15 @@ export class NodeManager {
         jobNode.work = newWork;
         nodeState.copilotSessionId = undefined;
       }
+      
+      // If plan uses repository, write new work spec to store
+      if (plan.definition && this.state.planRepository) {
+        try {
+          await this.state.planRepository.writeNodeSpec(plan.id, jobNode.producerId, 'work', jobNode.work!);
+        } catch (err) {
+          this.log.warn('Failed to write newWork spec to store, continuing with in-memory update', { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
     }
 
     // Handle new prechecks/postchecks
@@ -319,19 +329,43 @@ export class NodeManager {
       if (options?.newPrechecks !== undefined) {
         jobNode.prechecks = options.newPrechecks === null ? undefined : options.newPrechecks;
         this.log.info(`Updated prechecks for retry: ${node.name}`);
+        
+        // If plan uses repository, write new prechecks spec to store
+        if (plan.definition && this.state.planRepository) {
+          try {
+            if (options.newPrechecks !== null) {
+              await this.state.planRepository.writeNodeSpec(plan.id, jobNode.producerId, 'prechecks', jobNode.prechecks!);
+            }
+          } catch (err) {
+            this.log.warn('Failed to write newPrechecks spec to store, continuing with in-memory update', { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
       }
       if (options?.newPostchecks !== undefined) {
         jobNode.postchecks = options.newPostchecks === null ? undefined : options.newPostchecks;
         this.log.info(`Updated postchecks for retry: ${node.name}`);
+        
+        // If plan uses repository, write new postchecks spec to store
+        if (plan.definition && this.state.planRepository) {
+          try {
+            if (options.newPostchecks !== null) {
+              await this.state.planRepository.writeNodeSpec(plan.id, jobNode.producerId, 'postchecks', jobNode.postchecks!);
+            }
+          } catch (err) {
+            this.log.warn('Failed to write newPostchecks spec to store, continuing with in-memory update', { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
       }
     }
 
     // Auto-generate failure-fixing instructions for agent jobs
     if (!options?.newWork && node.type === 'job') {
       const jobNode = node as JobNode;
-      const isAgentWork = typeof jobNode.work === 'string'
-        ? jobNode.work.startsWith('@agent')
-        : (jobNode.work && 'type' in jobNode.work && jobNode.work.type === 'agent');
+      // Resolve work spec: prefer inline, fall back to disk for finalized plans
+      const resolvedWork = jobNode.work || await plan.definition?.getWorkSpec(nodeId);
+      const isAgentWork = typeof resolvedWork === 'string'
+        ? resolvedWork.startsWith('@agent')
+        : (resolvedWork && typeof resolvedWork === 'object' && 'type' in resolvedWork && resolvedWork.type === 'agent');
 
       if (isAgentWork && nodeState.copilotSessionId) {
         const failureContext = this.getNodeFailureContext(planId, nodeId);
@@ -374,7 +408,7 @@ export class NodeManager {
       for (const depId of node.dependencies) {
         const depState = plan.nodeStates.get(depId);
         if (depState?.completedCommit) {
-          const depNode = plan.nodes.get(depId);
+          const depNode = plan.jobs.get(depId);
           upstreamWithCommits.push(depNode?.name || depId);
         }
       }

@@ -115,6 +115,8 @@ src/
 │   └── validation/           # Ajv-based input validation
 ├── plan/                     # DAG execution engine
 │   ├── phases/               # Execution phase handlers (prechecks, work, etc.)
+│   ├── repository/           # Plan repository (DefaultPlanRepository, FilePlanDefinition)
+│   ├── store/                # Plan storage (FileSystemPlanStore)
 │   └── types/                # Type definitions (nodes, plans, specs)
 ├── process/                  # OS process monitoring
 ├── types/                    # Shared types (config, job, process)
@@ -300,7 +302,19 @@ graph LR
 - **Plan creation**: `enqueue(spec)` builds the DAG via `buildPlan()` and persists it
 - **Pump loop**: Selects ready nodes → schedules → executes → transitions state → checks completion
 - **Retry**: `retryNode()` resets a failed node to `pending`, unblocks descendants, optionally resumes from the failed phase
-- **Events**: Emits `planCreated`, `planCompleted`, `nodeTransition`, `planDeleted`
+- **Events**: Emits `planCreated`, `planScaffolded`, `scaffoldNodeAdded`, `planFinalized`, `planCompleted`, `nodeTransition`, `planDeleted`
+
+#### Plan Chaining (`resumeAfterPlan`)
+
+Plans can declare a dependency on another plan via the `resumeAfterPlan` field. When set:
+
+1. The dependent plan is created in **paused** state
+2. `PlanLifecycle` listens for the prerequisite plan's completion
+3. On **success** → the dependent plan auto-resumes
+4. On **cancel/delete** → the dependency link is cleared (plan stays paused for manual decision)
+5. On **failure** → the dependent remains paused (does not auto-resume)
+
+The UI shows a chain reason message when paused for dependency and hides the Resume button. Use `update_copilot_plan` to set or modify `resumeAfterPlan` on an existing plan.
 
 ### DAG Builder
 
@@ -375,7 +389,7 @@ merge-fi → setup → prechecks → work → commit → postchecks → merge-ri
 - **Merge FI** — Forward integration of dependency commits into the worktree
 - **Setup** — Worktree environment preparation (symlinks, instructions)
 - **Prechecks/Postchecks** — Optional validation commands (auto-healable unless `onFailure.noAutoHeal` is set)
-- **Work** — Routed by `WorkSpec` type (see [Work Specification Types](#work-specification-types))
+- **Work** — Routed by `WorkSpec` type (lazy-loaded via `IPlanDefinition.getWorkSpec()`) (see [Work Specification Types](#work-specification-types))
 - **Commit** — Validates work evidence, stages and commits changes in the worktree
 - **Merge RI** — Reverse integration merge. In v0.12.0+, leaf merges go into a **snapshot branch** (not targetBranch directly). Uses in-memory `git merge-tree --write-tree`; conflicts resolved by extracting files to temp dir → Copilot CLI → hash objects back.
 
@@ -410,6 +424,51 @@ Defined in `src/plan/types/specs.ts`:
 | `string` | Legacy format — shell command or `@agent ...` | `"npm run lint"` |
 
 All structured specs support an optional `onFailure: OnFailureConfig` field (snake_case `on_failure` accepted from MCP) to control auto-heal behavior, user-facing failure messages, and retry resume points.
+
+### Plan Repository & Storage
+
+The plan storage system uses a **three-layer abstraction** for efficient memory usage and clear separation of concerns:
+
+#### Architecture Layers
+
+1. **IPlanRepository** (`src/interfaces/IPlanRepository.ts`) — High-level lifecycle operations
+   - `scaffold(spec)` → create plan structure without loading specs
+   - `addNode(planId, spec)` → add work specs to scaffolded plan
+   - `finalize(planId)` → mark plan complete and ready for execution
+   - `load(planId)` → get existing plan with lazy-loading capabilities
+
+2. **IPlanDefinition** (`src/interfaces/IPlanDefinition.ts`) — Lazy work spec access
+   - `getWorkSpec(nodeId)` → loads specs on-demand from storage
+   - `getAllWorkSpecs()` → bulk load for execution scenarios
+   - Prevents memory bloat by keeping large instruction strings on disk
+
+3. **IPlanRepositoryStore** (`src/plan/store/`) — Low-level filesystem operations
+   - `FileSystemPlanStore.ts` — concrete implementation with direct fs calls
+   - JSON serialization/deserialization
+   - Migration from legacy `plan-{id}.json` format
+
+#### Filesystem Layout
+
+```
+.orchestrator/plans/<plan-id>/
+├── plan.json              # Plan topology + execution state 
+└── specs/<producer-id>/   # Work specifications (lazy-loaded)
+    └── work.md            # Instruction files
+```
+
+#### Benefits
+
+- **Memory efficiency**: Work specs (often large instructions) loaded on-demand only
+- **Write-once pattern**: Specs written during scaffold/addNode, read during execution
+- **Legacy migration**: Old `plan-{id}.json` files auto-migrated on first load
+- **Clean separation**: PlanInstance holds IPlanDefinition reference, not inline strings
+
+#### Scaffold Workflow
+
+For plans with 5+ nodes, use the scaffold workflow:
+1. `scaffold()` — create plan structure
+2. `addNode()` — add each work spec individually  
+3. `finalize()` — mark complete and ready for execution
 
 ### PlanPersistence — State Durability
 
@@ -460,8 +519,8 @@ The MCP server uses a **child-process architecture** with IPC:
 
 Tools are statically defined with JSON Schemas for LLM discoverability:
 
-- **Plan tools** (`src/mcp/tools/planTools.ts`) — 13 tools: `create_copilot_plan`, `get_copilot_plan_status`, `list_copilot_plans`, `cancel_copilot_plan`, `delete_copilot_plan`, `retry_copilot_plan`, `create_copilot_job`, `get_copilot_node_details`, `get_copilot_node_logs`, `get_copilot_node_attempts`, `get_copilot_group_status`, `list_copilot_groups`, `cancel_copilot_group`
-- **Node tools** (`src/mcp/tools/nodeTools.ts`) — 5 tools: `create_copilot_node`, `get_copilot_node`, `list_copilot_nodes`, `retry_copilot_node`, `get_copilot_node_failure_context`
+- **Plan tools** (`src/mcp/tools/planTools.ts`) — 15 tools: `create_copilot_plan`, `get_copilot_plan_status`, `list_copilot_plans`, `get_copilot_job_logs`, `get_copilot_job_attempts`, `cancel_copilot_plan`, `pause_copilot_plan`, `resume_copilot_plan`, `delete_copilot_plan`, `retry_copilot_plan`, `reshape_copilot_plan`, `update_copilot_plan`, `scaffold_copilot_plan`, `add_copilot_plan_job`, `finalize_copilot_plan`
+- **Job tools** (`src/mcp/tools/jobTools.ts`) — 6 tools: `get_copilot_job`, `list_copilot_jobs`, `retry_copilot_job`, `force_fail_copilot_job`, `get_copilot_job_failure_context`, `update_copilot_plan_job`
 
 ### Request Pipeline
 
@@ -473,7 +532,9 @@ Tool call → Ajv schema validation → Handler dispatch → PlanRunner operatio
 
 **Handlers** (`src/mcp/handlers/`) implement business logic:
 - `planHandlers.ts` — Plan CRUD, status queries, cancel/retry
-- `nodeHandlers.ts` — Node-centric API (create, query, retry)
+- `jobHandlers.ts` — Job-centric API (query, retry, force-fail, update)
+- `plan/scaffoldPlanHandler.ts` — Scaffold, add job, and finalize handlers
+- `plan/updatePlanHandler.ts` — Plan-level settings (env, maxParallel, resumeAfterPlan)
 - `utils.ts` — Shared utilities: `errorResult()`, `lookupPlan()`, `lookupNode()`, `resolveBaseBranch()`
 
 ---
@@ -595,7 +656,7 @@ graph TB
     PDP -->|openNode| NDP
     SB -->|click| PDP
 
-    PR[PlanRunner Events] -->|planCreated<br/>nodeTransition<br/>planCompleted| PV
+    PR[PlanRunner Events] -->|planCreated<br/>planScaffolded<br/>planFinalized<br/>nodeTransition<br/>planCompleted| PV
     PR -->|nodeTransition| PDP
     PR -->|nodeTransition| NDP
     PR -->|polling| SB
@@ -605,7 +666,7 @@ graph TB
 
 `PlansViewProvider` (`src/ui/plansViewProvider.ts`) implements `vscode.WebviewViewProvider`:
 - Displays all plans with progress bars, status badges, and node counts
-- **Auto-refresh**: Listens to PlanRunner events (`planCreated`, `planCompleted`, `planDeleted`, `nodeTransition`) with debouncing
+- **Auto-refresh**: Listens to PlanRunner events (`planCreated`, `planScaffolded`, `planFinalized`, `planCompleted`, `planDeleted`, `nodeTransition`) with debouncing
 - **Message protocol**: Webview sends `openPlan`, `cancelPlan`, `deletePlan`, `refresh`; extension sends `update` with plan list
 
 ### Detail Panels

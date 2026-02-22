@@ -81,6 +81,7 @@ function mockGitOperations(): IGitOperations {
       getCommitCount: sinon.stub().resolves(0),
       checkoutFile: sinon.stub().resolves(),
       resetHard: sinon.stub().resolves(),
+      resetMixed: sinon.stub().resolves(),
       clean: sinon.stub().resolves(),
       updateRef: sinon.stub().resolves(),
       stashPush: sinon.stub().resolves(true),
@@ -115,6 +116,7 @@ function mockGitOperations(): IGitOperations {
       list: sinon.stub().resolves(['main']),
       getCommit: sinon.stub().resolves('abc123'),
       getMergeBase: sinon.stub().resolves('abc123'),
+      isAncestor: sinon.stub().resolves(false),
       remove: sinon.stub().resolves(),
       deleteLocal: sinon.stub().resolves(true),
       deleteRemote: sinon.stub().resolves(true),
@@ -214,9 +216,9 @@ suite('MergeFiPhaseExecutor', () => {
     const result = await executor.execute(context);
 
     assert.strictEqual(result.success, true);
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith('========== FORWARD INTEGRATION MERGE START =========='));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('Merging 1 dependency commit(s) into worktree...'));
     assert.ok((context.logInfo as sinon.SinonStub).calledWith('  ✓ Merged successfully'));
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith('========== FORWARD INTEGRATION MERGE END =========='));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('Forward integration complete: 1 merged'));
 
     // Check that git.merge.merge was called correctly
     const mergeCall = (git.merge.merge as sinon.SinonStub).getCall(0);
@@ -458,5 +460,59 @@ suite('MergeFiPhaseExecutor', () => {
     assert.ok(logCalls.includes('    Line 2'));
     assert.ok(logCalls.includes('    Line 3'));
     assert.ok(logCalls.includes('    ... (3 more lines)'));
+  });
+
+  test('merges all dependency commits without isAncestor check - direct merge for all deps', async () => {
+    // This test verifies that MergeFiPhaseExecutor does NOT use isAncestor check
+    // before merging. The comment at lines 73-77 explains why: isAncestor caused
+    // false positives in multi-dependency fan-in scenarios, silently skipping merges.
+    // Instead, git merge itself is idempotent and handles already-merged commits.
+    
+    const git = mockGitOperations();
+    const mergeStub = git.merge.merge as sinon.SinonStub;
+    mergeStub.resolves({ success: true, hasConflicts: false, conflictFiles: [] });
+
+    // isAncestor should NOT be called - we don't skip based on ancestry
+    const isAncestorStub = git.branches.isAncestor as sinon.SinonStub;
+    isAncestorStub.resolves(true); // Even if it would return true, we shouldn't call it
+
+    const executor = new MergeFiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext({
+      dependencyCommits: [
+        {
+          commit: 'commit1_123456789012345678901234567890123456',
+          nodeId: 'node1',
+          nodeName: 'Node 1'
+        },
+        {
+          commit: 'commit2_123456789012345678901234567890123456',
+          nodeId: 'node2',
+          nodeName: 'Node 2'
+        },
+        {
+          commit: 'commit3_123456789012345678901234567890123456',
+          nodeId: 'node3',
+          nodeName: 'Node 3'
+        }
+      ]
+    });
+
+    const result = await executor.execute(context);
+
+    assert.strictEqual(result.success, true);
+    
+    // Verify isAncestor was NOT called - we don't check ancestry before merging
+    assert.strictEqual(isAncestorStub.callCount, 0, 'isAncestor should NOT be called');
+    
+    // Verify all 3 commits were merged directly
+    assert.strictEqual(mergeStub.callCount, 3, 'All 3 dependency commits should be merged');
+    
+    // Verify merge was called for each commit
+    assert.strictEqual(mergeStub.getCall(0).args[0].source, 'commit1_123456789012345678901234567890123456');
+    assert.strictEqual(mergeStub.getCall(1).args[0].source, 'commit2_123456789012345678901234567890123456');
+    assert.strictEqual(mergeStub.getCall(2).args[0].source, 'commit3_123456789012345678901234567890123456');
+    
+    // Verify logging confirms forward integration for all
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith('Forward integration complete: 3 merged'));
   });
 });

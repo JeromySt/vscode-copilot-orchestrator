@@ -77,6 +77,12 @@ export function isValidTransition(from: NodeStatus, to: NodeStatus): boolean {
  * Jobs execute processes, shell commands, or delegate to AI agents.
  */
 export interface JobNodeSpec {
+  /**
+   * Stable node UUID. Assigned at scaffold addNode() and persisted in
+   * metadata.producerIdToNodeId. Optional — only set during scaffolding.
+   */
+  id?: string;
+
   /** User-controlled identifier for Plan references (used in consumesFrom) */
   producerId: string;
   
@@ -154,9 +160,9 @@ export interface JobNodeSpec {
 
 /**
  * Specification for a group (user input).
- * Groups provide namespace isolation for producer_ids and visual hierarchy.
- * Jobs within a group can reference each other by local producer_id.
- * Cross-group references use qualified paths: "group/producer_id".
+ * Groups provide namespace isolation for producerIds and visual hierarchy.
+ * Jobs within a group can reference each other by local producerId.
+ * Cross-group references use qualified paths: "group/producerId".
  * 
  * Groups do NOT have dependencies - jobs describe the full dependency graph.
  */
@@ -269,6 +275,13 @@ export interface JobNode extends BaseNode {
  * Groups are visual hierarchy only, not a separate node type.
  */
 export type PlanNode = JobNode;
+
+/**
+ * Type alias for PlanNode to use "job" terminology.
+ * PlanJob and PlanNode are identical - both refer to JobNode.
+ */
+export type PlanJob = JobNode;
+
 /**
  * Check if a node performs work (has a work specification).
  *

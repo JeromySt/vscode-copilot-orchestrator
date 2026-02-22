@@ -60,11 +60,11 @@ export function formatPlanDuration(startedAt?: number, endedAt?: number): string
  */
 export function renderPlanHeader(data: PlanHeaderData): string {
   const { planName, status, startedAt, effectiveEndedAt, baseBranch, targetBranch, showBranchFlow, globalCapacityStats } = data;
-  const durationText = formatPlanDuration(startedAt, effectiveEndedAt);
+  const durationText = status === 'scaffolding' ? '--' : formatPlanDuration(startedAt, effectiveEndedAt);
   const targetBranchName = targetBranch || baseBranch;
 
   let html = `  <div class="header">
-    <span class="status-badge ${status}" id="statusBadge"><span id="currentPhaseIndicator">${status}</span></span>
+    <span class="status-badge ${status}" id="statusBadge"><span id="currentPhaseIndicator">${status === 'scaffolding' ? '🚧 Under Construction' : status}</span></span>
     <h2>${escapeHtml(planName)}</h2>
     <div class="header-duration">
       <span class="duration-icon">⏱</span>

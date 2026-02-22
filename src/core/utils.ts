@@ -57,12 +57,14 @@ export function cpuCountMinusOne(): number { const os = require('os'); const n: 
 /**
  * Required subdirectories under .orchestrator/
  * These are created on-demand before any filesystem operation.
+ * 
+ * Note: 'logs', 'evidence', and '.copilot' are no longer top-level dirs.
+ * - Logs are now per-attempt: plans/<planId>/specs/<nodeId>/attempts/<n>/execution.log
+ * - Evidence files are in worktrees: <worktree>/.orchestrator/evidence/
+ * - Copilot CLI config is per-plan: plans/<planId>/.copilot-cli/
  */
 const ORCHESTRATOR_SUBDIRS = [
   'plans',
-  'logs', 
-  'evidence',
-  '.copilot'  // Session storage
 ] as const;
 
 /**
@@ -74,9 +76,6 @@ const ORCHESTRATOR_SUBDIRS = [
  * Creates:
  * - .orchestrator/
  * - .orchestrator/plans/
- * - .orchestrator/logs/
- * - .orchestrator/evidence/
- * - .orchestrator/.copilot/
  * 
  * @param workspacePath - Root path of the workspace
  * @returns Path to the .orchestrator directory

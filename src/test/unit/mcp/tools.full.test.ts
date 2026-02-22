@@ -1,6 +1,6 @@
 /**
  * @fileoverview Comprehensive tests for MCP tool definitions
- * Covers planTools.ts and nodeTools.ts to reach 95%+ coverage.
+ * Covers planTools.ts and jobTools.ts to reach 95%+ coverage.
  */
 
 import { suite, test } from 'mocha';
@@ -34,16 +34,13 @@ suite('MCP Tool Definitions', () => {
       assert.ok(names.includes('create_copilot_plan'));
       assert.ok(names.includes('get_copilot_plan_status'));
       assert.ok(names.includes('list_copilot_plans'));
-      assert.ok(names.includes('get_copilot_node_details'));
-      assert.ok(names.includes('get_copilot_node_logs'));
-      assert.ok(names.includes('get_copilot_node_attempts'));
+      assert.ok(names.includes('get_copilot_job_logs'));
+      assert.ok(names.includes('get_copilot_job_attempts'));
       assert.ok(names.includes('cancel_copilot_plan'));
       assert.ok(names.includes('pause_copilot_plan'));
       assert.ok(names.includes('resume_copilot_plan'));
       assert.ok(names.includes('delete_copilot_plan'));
       assert.ok(names.includes('retry_copilot_plan'));
-      assert.ok(names.includes('get_copilot_plan_node_failure_context'));
-      assert.ok(names.includes('retry_copilot_plan_node'));
     });
 
     test('each tool has required fields', async () => {
@@ -78,25 +75,25 @@ suite('MCP Tool Definitions', () => {
     });
   });
 
-  suite('getNodeToolDefinitions', () => {
-    test('should return array of node tool definitions', async () => {
-      const { getNodeToolDefinitions } = require('../../../mcp/tools/nodeTools');
-      const tools = await getNodeToolDefinitions();
+  suite('getJobToolDefinitions', () => {
+    test('should return array of job tool definitions', async () => {
+      const { getJobToolDefinitions } = require('../../../mcp/tools/jobTools');
+      const tools = await getJobToolDefinitions();
 
       assert.ok(Array.isArray(tools));
       assert.ok(tools.length > 0);
       const names = tools.map((t: any) => t.name);
-      assert.ok(names.includes('get_copilot_node'));
-      assert.ok(names.includes('list_copilot_nodes'));
-      assert.ok(names.includes('retry_copilot_node'));
-      assert.ok(names.includes('force_fail_copilot_node'));
-      assert.ok(names.includes('get_copilot_node_failure_context'));
-      assert.ok(names.includes('update_copilot_plan_node'));
+      assert.ok(names.includes('get_copilot_job'));
+      assert.ok(names.includes('list_copilot_jobs'));
+      assert.ok(names.includes('retry_copilot_job'));
+      assert.ok(names.includes('force_fail_copilot_job'));
+      assert.ok(names.includes('get_copilot_job_failure_context'));
+      assert.ok(names.includes('update_copilot_plan_job'));
     });
 
     test('each tool has required fields', async () => {
-      const { getNodeToolDefinitions } = require('../../../mcp/tools/nodeTools');
-      const tools = await getNodeToolDefinitions();
+      const { getJobToolDefinitions } = require('../../../mcp/tools/jobTools');
+      const tools = await getJobToolDefinitions();
 
       for (const tool of tools) {
         assert.ok(tool.name, `Tool missing name`);
@@ -108,21 +105,21 @@ suite('MCP Tool Definitions', () => {
 
     test('should use fallback models when discovery returns empty', async () => {
       discoverStub.resolves({ models: [], rawChoices: [], discoveredAt: Date.now() });
-      const { getNodeToolDefinitions } = require('../../../mcp/tools/nodeTools');
-      const tools = await getNodeToolDefinitions();
+      const { getJobToolDefinitions } = require('../../../mcp/tools/jobTools');
+      const tools = await getJobToolDefinitions();
       assert.ok(tools.length > 0);
     });
   });
 
   suite('getAllToolDefinitions', () => {
-    test('should combine plan and node tools', async () => {
+    test('should combine plan and job tools', async () => {
       const { getAllToolDefinitions } = require('../../../mcp/tools');
       const tools = await getAllToolDefinitions();
       assert.ok(Array.isArray(tools));
-      // Should have both plan and node tools
+      // Should have both plan and job tools
       const names = tools.map((t: any) => t.name);
       assert.ok(names.includes('create_copilot_plan'));
-      assert.ok(names.includes('get_copilot_node'));
+      assert.ok(names.includes('get_copilot_job'));
     });
   });
 });

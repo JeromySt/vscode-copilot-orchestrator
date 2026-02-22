@@ -17,21 +17,21 @@ import {
  * Cancels a running plan, stopping all executing nodes and
  * preventing new nodes from starting.
  *
- * @param args - Must contain `id` (Plan UUID).
+ * @param args - Must contain `planId` (Plan UUID).
  * @param ctx  - Handler context.
  * @returns `{ success, message }`.
  */
 export async function handleCancelPlan(args: any, ctx: PlanHandlerContext): Promise<any> {
-  const fieldError = validateRequired(args, ['id']);
+  const fieldError = validateRequired(args, ['planId']);
   if (fieldError) {return fieldError;}
   
-  const success = ctx.PlanRunner.cancel(args.id);
+  const success = ctx.PlanRunner.cancel(args.planId);
   
   return {
     success,
     message: success 
-      ? `Plan ${args.id} has been canceled` 
-      : `Failed to cancel Plan ${args.id}`,
+      ? `Plan ${args.planId} has been canceled` 
+      : `Failed to cancel Plan ${args.planId}`,
   };
 }
 
@@ -40,20 +40,20 @@ export async function handleCancelPlan(args: any, ctx: PlanHandlerContext): Prom
  *
  * Permanently deletes a plan and its execution history.
  *
- * @param args - Must contain `id` (Plan UUID).
+ * @param args - Must contain `planId` (Plan UUID).
  * @param ctx  - Handler context.
  * @returns `{ success, message }`.
  */
 export async function handleDeletePlan(args: any, ctx: PlanHandlerContext): Promise<any> {
-  const fieldError = validateRequired(args, ['id']);
+  const fieldError = validateRequired(args, ['planId']);
   if (fieldError) {return fieldError;}
   
-  const success = ctx.PlanRunner.delete(args.id);
+  const success = ctx.PlanRunner.delete(args.planId);
   
   return {
     success,
     message: success 
-      ? `Plan ${args.id} has been deleted` 
-      : `Failed to delete Plan ${args.id}`,
+      ? `Plan ${args.planId} has been deleted` 
+      : `Failed to delete Plan ${args.planId}`,
   };
 }

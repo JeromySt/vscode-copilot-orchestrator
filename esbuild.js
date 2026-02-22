@@ -1,7 +1,19 @@
 const esbuild = require('esbuild');
+const { execSync } = require('child_process');
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
+
+// Capture build-time metadata as compile-time constants
+let buildCommit = 'unknown';
+try { buildCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000 }).trim(); } catch { /* not in git */ }
+const buildTimestamp = new Date().toISOString();
+const buildVersion = require('./package.json').version || 'unknown';
+const buildDefines = {
+  '__BUILD_COMMIT__': JSON.stringify(buildCommit),
+  '__BUILD_TIMESTAMP__': JSON.stringify(buildTimestamp),
+  '__BUILD_VERSION__': JSON.stringify(buildVersion),
+};
 
 async function main() {
   // Main extension bundle
@@ -16,6 +28,7 @@ async function main() {
     outfile: 'dist/extension.js',
     external: ['vscode'],
     logLevel: 'warning',
+    define: buildDefines,
     plugins: [esbuildProblemMatcherPlugin]
   });
 
@@ -31,6 +44,7 @@ async function main() {
     outfile: 'dist/mcp-stdio-server.js',
     external: ['vscode'],
     logLevel: 'warning',
+    define: buildDefines,
     plugins: [esbuildProblemMatcherPlugin]
   });
   if (watch) {

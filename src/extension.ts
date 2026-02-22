@@ -57,6 +57,11 @@ let powerMgr: import('./core/powerManager').PowerManager | undefined;
 /** Global Capacity Manager - retained for cleanup */
 let globalCapacity: GlobalCapacityManager | undefined;
 
+/** Process event handlers - retained for cleanup */
+let exitHandler: (() => void) | undefined;
+let sigintHandler: (() => void) | undefined;
+let sigtermHandler: (() => void) | undefined;
+
 // ============================================================================
 // ACTIVATION
 // ============================================================================
@@ -100,10 +105,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   powerMgr = new PowerManagerImpl(spawner);
   planRunner.setPowerManager(powerMgr!);
   // Register process exit handlers for wake lock cleanup
+  // Store references so we can remove them in deactivate()
   const pmRef = powerMgr;
-  process.on('exit', () => pmRef?.releaseAll());
-  process.on('SIGINT', () => pmRef?.releaseAll());
-  process.on('SIGTERM', () => pmRef?.releaseAll());
+  exitHandler = () => pmRef?.releaseAll();
+  sigintHandler = () => pmRef?.releaseAll();
+  sigtermHandler = () => pmRef?.releaseAll();
+  process.on('exit', exitHandler);
+  process.on('SIGINT', sigintHandler);
+  process.on('SIGTERM', sigtermHandler);
 
   // ── Global Capacity Manager ────────────────────────────────────────────
   const globalMaxParallel = vscode.workspace.getConfiguration('copilotOrchestrator').get<number>('globalMaxParallel', 16);
@@ -165,6 +174,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Trigger cleanup asynchronously after extension is fully activated
   triggerOrphanedWorktreeCleanup(planRunner, context, git).catch(err => {
     extLog.warn('Orphaned worktree cleanup failed', { error: err.message });
+  });
+
+  // ── CLI Availability Check ─────────────────────────────────────────────
+  // Check if Copilot CLI is available and offer setup if needed
+  const { checkCopilotCliOnStartup } = await import('./agent/cliCheck');
+  checkCopilotCliOnStartup().catch(err => {
+    extLog.warn('CLI startup check failed', { error: err.message });
   });
 
   // ── Complete ───────────────────────────────────────────────────────────
@@ -269,6 +285,11 @@ async function triggerOrphanedWorktreeCleanup(
  * Cleans up resources and persists state when the extension is unloaded.
  */
 export function deactivate(): void {
+  // Remove process listeners to prevent accumulation across reloads
+  if (exitHandler) { process.removeListener('exit', exitHandler); exitHandler = undefined; }
+  if (sigintHandler) { process.removeListener('SIGINT', sigintHandler); sigintHandler = undefined; }
+  if (sigtermHandler) { process.removeListener('SIGTERM', sigtermHandler); sigtermHandler = undefined; }
+
   // Release all wake locks
   powerMgr?.releaseAll();
   

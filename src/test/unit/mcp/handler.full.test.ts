@@ -38,7 +38,7 @@ function makeMockPlan(overrides?: Record<string, any>): any {
   return {
     id: 'plan-1',
     spec: { name: 'Test Plan', jobs: [] },
-    nodes: new Map(),
+    jobs: new Map(),
     producerIdToNodeId: new Map(),
     roots: ['node-1'],
     leaves: ['node-1'],
@@ -117,12 +117,12 @@ suite('McpHandler Full Coverage', () => {
 
     test('create_copilot_plan routes correctly', async () => {
       const plan = makeMockPlan({
-        nodes: new Map([['n1', {}]]),
+        jobs: new Map([['n1', {}]]),
         producerIdToNodeId: new Map([['build', 'n1']]),
       });
       mockRunner.enqueue.returns(plan);
       const res = await handler.handleRequest(toolCall('create_copilot_plan', {
-        name: 'Test', jobs: [{ producer_id: 'build', task: 'Build', dependencies: [] }],
+        name: 'Test', jobs: [{ producerId: 'build', task: 'Build', dependencies: [] }],
       }));
       assert.ok(res.result);
       assert.ok(res.result.content);
@@ -138,18 +138,18 @@ suite('McpHandler Full Coverage', () => {
       assert.ok(res.result);
     });
 
-    test('get_copilot_node_details routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('get_copilot_node_details', { planId: 'p', nodeId: 'n' }));
+    test('get_copilot_job routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('get_copilot_job', { planId: 'p', nodeId: 'n' }));
       assert.ok(res.result);
     });
 
-    test('get_copilot_node_logs routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('get_copilot_node_logs', { planId: 'p', nodeId: 'n' }));
+    test('get_copilot_job_logs routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('get_copilot_job_logs', { planId: 'p', nodeId: 'n' }));
       assert.ok(res.result);
     });
 
-    test('get_copilot_node_attempts routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('get_copilot_node_attempts', { planId: 'p', nodeId: 'n' }));
+    test('get_copilot_job_attempts routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('get_copilot_job_attempts', { planId: 'p', nodeId: 'n' }));
       assert.ok(res.result);
     });
 
@@ -178,43 +178,43 @@ suite('McpHandler Full Coverage', () => {
       assert.ok(res.result);
     });
 
-    test('get_copilot_plan_node_failure_context routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('get_copilot_plan_node_failure_context', { planId: 'p', nodeId: 'n' }));
+    test('get_copilot_plan_job_failure_context routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('get_copilot_plan_job_failure_context', { planId: 'p', nodeId: 'n' }));
       assert.ok(res.result);
     });
 
-    test('retry_copilot_plan_node routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('retry_copilot_plan_node', { planId: 'p', nodeId: 'n' }));
+    test('retry_copilot_plan_job routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('retry_copilot_plan_job', { planId: 'p', nodeId: 'n' }));
       assert.ok(res.result);
     });
 
-    test('update_copilot_plan_node routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('update_copilot_plan_node', { planId: 'p', nodeId: 'n' }));
+    test('update_copilot_plan_job routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('update_copilot_plan_job', { planId: 'p', nodeId: 'n' }));
       assert.ok(res.result);
     });
 
-    test('get_copilot_node routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('get_copilot_node', { node_id: 'n1' }));
+    test('get_copilot_job routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('get_copilot_job', { jobId: 'n1' }));
       assert.ok(res.result);
     });
 
-    test('list_copilot_nodes routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('list_copilot_nodes', {}));
+    test('list_copilot_jobs routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('list_copilot_jobs', {}));
       assert.ok(res.result);
     });
 
-    test('retry_copilot_node routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('retry_copilot_node', { node_id: 'n1' }));
+    test('retry_copilot_job routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('retry_copilot_job', { jobId: 'n1' }));
       assert.ok(res.result);
     });
 
-    test('force_fail_copilot_node routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('force_fail_copilot_node', { node_id: 'n1' }));
+    test('force_fail_copilot_job routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('force_fail_copilot_job', { jobId: 'n1' }));
       assert.ok(res.result);
     });
 
-    test('get_copilot_node_failure_context routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('get_copilot_node_failure_context', { node_id: 'n1' }));
+    test('get_copilot_job_failure_context routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('get_copilot_job_failure_context', { jobId: 'n1' }));
       assert.ok(res.result);
     });
 

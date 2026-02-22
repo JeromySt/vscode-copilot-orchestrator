@@ -87,4 +87,64 @@ export interface IFileSystem {
    * @returns true if the path exists
    */
   existsAsync(filePath: string): Promise<boolean>;
+
+  // ─── Low-Level File Operations ─────────────────────────────────────────
+  // Used by FileSystemPlanStore for plan storage management.
+
+  /** Check if a path exists synchronously. */
+  existsSync(filePath: string): boolean;
+
+  /** Read a file as UTF-8 string (async). */
+  readFileAsync(filePath: string): Promise<string>;
+
+  /** Read a file as UTF-8 string (sync). */
+  readFileSync(filePath: string): string;
+
+  /** Write a UTF-8 string to a file (async). Creates parent dirs if needed. */
+  writeFileAsync(filePath: string, content: string): Promise<void>;
+
+  /** Write a UTF-8 string to a file (sync). */
+  writeFileSync(filePath: string, content: string): void;
+
+  /** Rename/move a file or directory (async). */
+  renameAsync(oldPath: string, newPath: string): Promise<void>;
+
+  /** Rename/move a file or directory (sync). */
+  renameSync(oldPath: string, newPath: string): void;
+
+  /** Delete a file (async). */
+  unlinkAsync(filePath: string): Promise<void>;
+
+  /** Delete a file (sync). */
+  unlinkSync(filePath: string): void;
+
+  /** Remove a file or directory recursively (async). */
+  rmAsync(filePath: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
+
+  /** Remove an empty directory (async). */
+  rmdirAsync(dirPath: string): Promise<void>;
+
+  /** Create directories recursively (async). */
+  mkdirAsync(dirPath: string, options?: { recursive?: boolean }): Promise<void>;
+
+  /** Create directories recursively (sync). */
+  mkdirSync(dirPath: string, options?: { recursive?: boolean }): void;
+
+  /** Read directory entries (async). */
+  readdirAsync(dirPath: string): Promise<string[]>;
+
+  /** Get file/link stats without following symlinks (async). */
+  lstatAsync(filePath: string): Promise<{ isSymbolicLink(): boolean; isDirectory(): boolean; isFile(): boolean }>;
+
+  /** Create a symbolic link or junction (async). */
+  symlinkAsync(target: string, linkPath: string, type?: 'file' | 'dir' | 'junction'): Promise<void>;
+
+  /** Read the target of a symbolic link (async). */
+  readlinkAsync(linkPath: string): Promise<string>;
+
+  /** Check if a path is accessible (async). Throws if not. */
+  accessAsync(filePath: string): Promise<void>;
+
+  /** Copy a file (async). */
+  copyFileAsync(src: string, dest: string): Promise<void>;
 }

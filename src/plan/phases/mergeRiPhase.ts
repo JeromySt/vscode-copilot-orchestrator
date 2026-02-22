@@ -7,11 +7,15 @@
  * 
  * ## Safety guarantees
  * 
- * - **Never touches the user's working directory.** All merges happen
- *   via `git merge-tree --write-tree` (in-memory). Conflict resolution
+ * - **Never touches the user's working directory during merges.** All merges
+ *   happen via `git merge-tree --write-tree` (in-memory). Conflict resolution
  *   extracts conflicted files to a temp directory, resolves them with
  *   Copilot CLI, then hashes the resolved files back into git objects
  *   and rebuilds the tree — all without modifying any checkout.
+ * - **Preserves user's uncommitted changes.** After the merge completes and
+ *   the branch ref is updated, plan-changed files are selectively checked
+ *   out in the working tree. Pre-existing user modifications are left
+ *   untouched — they remain as unstaged modifications.
  * - **Never stashes user changes.** The stash/pop pattern is inherently
  *   dangerous because it mixes user state with orchestrator state.
  * - **Validates the merged tree.** After every RI merge, the file count
@@ -194,8 +198,9 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
    * If the user has `targetBranch` checked out AND their working tree
    * was clean *before* the ref move, we do `git reset --hard HEAD` to
    * keep the checkout in sync — this is safe because there is nothing
-   * to lose.  If the tree was dirty (user has pending work), we leave
-   * it alone and log a hint so nothing is silently destroyed.
+   * to lose.  If the tree was dirty (user has pending work), we sync
+   * the index + selectively update plan-changed files in the working
+   * tree while preserving the user's pre-existing uncommitted changes.
    */
   private async updateBranchRef(
     context: PhaseContext,
@@ -207,13 +212,15 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
     // index will always look dirty relative to the new HEAD.
     let branchCheckedOut = false;
     let wasDirtyBeforeRefUpdate = true; // conservative default
+    let dirtyFilesBefore: string[] = [];
     try {
       const currentBranch = await this.git.branches.currentOrNull(repoPath);
       branchCheckedOut = currentBranch === targetBranch;
       context.logInfo(`Main worktree branch: ${currentBranch || '(detached)'}, target: ${targetBranch}, match: ${branchCheckedOut}`);
       if (branchCheckedOut) {
-        wasDirtyBeforeRefUpdate = await this.git.repository.hasUncommittedChanges(repoPath);
-        context.logInfo(`Main worktree dirty before ref update: ${wasDirtyBeforeRefUpdate}`);
+        dirtyFilesBefore = await this.git.repository.getDirtyFiles(repoPath);
+        wasDirtyBeforeRefUpdate = dirtyFilesBefore.length > 0;
+        context.logInfo(`Main worktree dirty before ref update: ${wasDirtyBeforeRefUpdate} (${dirtyFilesBefore.length} files)`);
       }
     } catch { /* non-fatal — assume dirty to be safe */ }
 
@@ -238,10 +245,60 @@ export class MergeRiPhaseExecutor implements IPhaseExecutor {
           context.logInfo(`⚠ Could not sync main worktree: ${err.message}`);
         }
       } else {
-        context.logInfo(
-          `ℹ Your checkout on ${targetBranch} has uncommitted changes. ` +
-          `Run 'git reset --hard ${newCommit.slice(0, 8)}' after saving your work to sync with the merge.`
-        );
+        // Working tree is dirty — we must NOT do a hard reset (would
+        // destroy user changes).  Strategy:
+        //
+        // 1. Mixed reset: syncs the INDEX to the new HEAD so
+        //    `git diff --cached` is clean (no staged reverse-diff).
+        // 2. Selective checkout: for every file that now differs between
+        //    the working tree and the index AND was NOT in the user's
+        //    pre-existing dirty list, run `git checkout -- <file>`.
+        //    This updates plan-changed files in the working tree while
+        //    leaving the user's uncommitted modifications untouched.
+        try {
+          await this.git.repository.resetMixed(repoPath, newCommit, s => context.logInfo(s));
+          context.logInfo(`Synced index to ${newCommit.slice(0, 8)}`);
+
+          // After mixed reset, get the list of files that now differ
+          // between working tree and the (updated) index.
+          const dirtyAfter = await this.git.repository.getDirtyFiles(repoPath);
+          const dirtyBeforeSet = new Set(dirtyFilesBefore);
+          // Files dirty now that were NOT dirty before = plan-changed
+          // files whose working-tree content is stale.
+          const planChangedFiles = dirtyAfter.filter(f => !dirtyBeforeSet.has(f));
+
+          if (planChangedFiles.length > 0) {
+            context.logInfo(`Updating ${planChangedFiles.length} plan-changed files in working tree`);
+            let restored = 0;
+            for (const file of planChangedFiles) {
+              try {
+                await this.git.repository.checkoutFile(repoPath, file);
+                restored++;
+              } catch {
+                // File may have been deleted by the plan — clean up from
+                // working tree.  checkoutFile fails on deleted paths.
+                try {
+                  await this.git.command.execAsync(['rm', '-f', '--', file], { cwd: repoPath });
+                  restored++;
+                } catch { /* non-fatal */ }
+              }
+            }
+            context.logInfo(`Restored ${restored}/${planChangedFiles.length} files`);
+          }
+
+          if (dirtyFilesBefore.length > 0) {
+            context.logInfo(
+              `ℹ Preserved ${dirtyFilesBefore.length} pre-existing uncommitted file(s): ` +
+              dirtyFilesBefore.slice(0, 5).join(', ') +
+              (dirtyFilesBefore.length > 5 ? ` (+${dirtyFilesBefore.length - 5} more)` : '')
+            );
+          }
+        } catch (err: any) {
+          context.logInfo(
+            `⚠ Could not sync working tree: ${err.message}. ` +
+            `Run 'git reset --hard ${newCommit.slice(0, 8)}' to sync manually.`
+          );
+        }
       }
     } else {
       context.logInfo(`Main worktree is not on ${targetBranch} — skipping working tree sync`);

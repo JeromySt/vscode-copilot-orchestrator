@@ -47,7 +47,7 @@ function createTestPlan(): PlanInstance {
   const plan: PlanInstance = {
     id: 'test-plan',
     spec: { name: 'Test Plan', jobs: [], baseBranch: 'main' },
-    nodes: new Map([['test-node', node]]),
+    jobs: new Map([['test-node', node]]),
     producerIdToNodeId: new Map([['test-node', 'test-node']]),
     roots: ['test-node'],
     leaves: ['test-node'],
@@ -87,7 +87,7 @@ function createMockRunner(): MockRunner {
       throw new Error(`Plan ${planId} not found`);
     }
     
-    const node = plan.nodes.get(nodeId);
+    const node = plan.jobs.get(nodeId);
     if (!node) {
       throw new Error(`Node ${nodeId} not found in plan ${planId}`);
     }
@@ -166,7 +166,7 @@ suite('Force Fail Node', () => {
   suite('forceFailNode', () => {
     test('should fail a running node', async () => {
       const plan = createTestPlan();
-      const node = plan.nodes.get('test-node')!;
+      const node = plan.jobs.get('test-node')!;
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'running';
       nodeState.attempts = 1;
@@ -182,7 +182,7 @@ suite('Force Fail Node', () => {
     
     test('should fail a node on attempt 3', async () => {
       const plan = createTestPlan();
-      const node = plan.nodes.get('test-node')!;
+      const node = plan.jobs.get('test-node')!;
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'running';
       nodeState.attempts = 3;
@@ -197,7 +197,7 @@ suite('Force Fail Node', () => {
     
     test('should kill running process', async () => {
       const plan = createTestPlan();
-      const node = plan.nodes.get('test-node')!;
+      const node = plan.jobs.get('test-node')!;
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'running';
       nodeState.pid = 12345;
@@ -213,7 +213,7 @@ suite('Force Fail Node', () => {
     
     test('should handle missing process gracefully', async () => {
       const plan = createTestPlan();
-      const node = plan.nodes.get('test-node')!;
+      const node = plan.jobs.get('test-node')!;
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'running';
       nodeState.pid = 99999;
@@ -228,7 +228,7 @@ suite('Force Fail Node', () => {
     
     test('should persist state after force fail', async () => {
       const plan = createTestPlan();
-      const node = plan.nodes.get('test-node')!;
+      const node = plan.jobs.get('test-node')!;
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'running';
       
@@ -241,7 +241,7 @@ suite('Force Fail Node', () => {
     
     test('should emit nodeTransition event', async () => {
       const plan = createTestPlan();
-      const node = plan.nodes.get('test-node')!;
+      const node = plan.jobs.get('test-node')!;
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'running';
       
@@ -264,7 +264,7 @@ suite('Force Fail Node', () => {
     
     test('should work on already failed node (no-op for attempts)', async () => {
       const plan = createTestPlan();
-      const node = plan.nodes.get('test-node')!;
+      const node = plan.jobs.get('test-node')!;
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'failed';
       nodeState.attempts = 2;
@@ -279,7 +279,7 @@ suite('Force Fail Node', () => {
     
     test('should set forceFailed flag', async () => {
       const plan = createTestPlan();
-      const node = plan.nodes.get('test-node')!;
+      const node = plan.jobs.get('test-node')!;
       const nodeState = plan.nodeStates.get('test-node')!;
       nodeState.status = 'running';
       

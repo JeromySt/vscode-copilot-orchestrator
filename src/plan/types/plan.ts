@@ -8,7 +8,7 @@
  */
 
 import type { WorkSpec, CopilotUsageMetrics } from './specs';
-import type { NodeStatus, JobNodeSpec, GroupSpec, PlanNode, JobNode } from './nodes';
+import type { NodeStatus, JobNodeSpec, GroupSpec, PlanNode, PlanJob, JobNode } from './nodes';
 
 // ============================================================================
 // PLAN SPECIFICATION (User Input)
@@ -53,12 +53,26 @@ export interface PlanSpec {
    */
   verifyRiSpec?: WorkSpec;
   
+  /** 
+   * Environment variables applied to all jobs in this plan.
+   * Individual work specs can override specific keys.
+   * At execution time: { ...planEnv, ...workSpecEnv, ...processEnv }
+   */
+  env?: Record<string, string>;
+  
   /** Job nodes at the top level of this Plan */
   jobs: JobNodeSpec[];
   
+  /**
+   * Plan ID that must complete successfully before this plan auto-resumes.
+   * When set, the plan is created paused and automatically resumed when the
+   * dependency plan reaches 'succeeded' status.
+   */
+  resumeAfterPlan?: string;
+  
   /** 
    * Visual groups for organizing jobs.
-   * Groups provide namespace isolation for producer_ids and visual hierarchy.
+   * Groups provide namespace isolation for producerIds and visual hierarchy.
    */
   groups?: GroupSpec[];
 }
@@ -290,14 +304,29 @@ export interface AttemptRecord {
   /** Completed commit SHA from this attempt (if work succeeded) */
   completedCommit?: string;
   
-  /** Logs captured during this attempt (stored as string to reduce memory) */
+  /** Logs captured during this attempt (deprecated — use logsRef) */
   logs?: string;
   
   /** Path to the log file for this attempt (separate file per attempt) */
   logFilePath?: string;
+
+  /** Ref to execution log file: specs/<nodeId>/attempts/<n>/execution.log */
+  logsRef?: string;
   
-  /** Work spec used for this attempt (for reference) */
+  /** Work spec used for this attempt (deprecated — use workRef) */
   workUsed?: WorkSpec;
+
+  /** Ref to work spec file: specs/<nodeId>/attempts/<n>/work.json */
+  workRef?: string;
+
+  /** Ref to prechecks spec file: specs/<nodeId>/attempts/<n>/prechecks.json */
+  prechecksRef?: string;
+
+  /** Ref to postchecks spec file: specs/<nodeId>/attempts/<n>/postchecks.json */
+  postchecksRef?: string;
+
+  /** Ref to the attempt directory: specs/<nodeId>/attempts/<n>/ */
+  attemptDir?: string;
   
   /** Execution metrics captured during this attempt */
   metrics?: CopilotUsageMetrics;
@@ -382,6 +411,7 @@ export interface GroupExecutionState {
  * Overall Plan status (derived from node states)
  */
 export type PlanStatus = 
+  | 'scaffolding' // Plan being built (not ready for execution)
   | 'pending'    // Not started
   | 'running'    // At least one node running
   | 'paused'     // Paused by user (can resume)
@@ -400,8 +430,8 @@ export interface PlanInstance {
   /** The Plan specification */
   spec: PlanSpec;
   
-  /** Map of node ID to node definition */
-  nodes: Map<string, PlanNode>;
+  /** Map of node ID to job definition */
+  jobs: Map<string, PlanJob>;
   
   /** Map of producerId to node ID (for resolving references) */
   producerIdToNodeId: Map<string, string>;
@@ -472,8 +502,21 @@ export interface PlanInstance {
   /** Whether the plan is paused (no new work scheduled, worktrees preserved) */
   isPaused?: boolean;
 
+  /**
+   * Plan ID that must complete successfully before this plan auto-resumes.
+   * When set, the plan stays paused until the dependency plan succeeds.
+   */
+  resumeAfterPlan?: string;
+
   /** Whether the target branch has been created and .gitignore committed */
   branchReady?: boolean;
+  
+  /** 
+   * Environment variables applied to all jobs in this plan.
+   * Individual work specs can override specific keys.
+   * At execution time: { ...planEnv, ...workSpecEnv, ...processEnv }
+   */
+  env?: Record<string, string>;
   
   /** Snapshot branch info for accumulated RI merges (set after plan start) */
   snapshot?: {
@@ -485,12 +528,11 @@ export interface PlanInstance {
     baseCommit: string;
   };
 
-  /** True when all nodes succeeded but the final merge (snapshot → targetBranch) failed.
-   *  The "Complete RI Merge" button is shown in this state. */
-  awaitingFinalMerge?: boolean;
-
   /** Aggregated work summary */
   workSummary?: WorkSummary;
+  
+  /** Plan definition for lazy spec loading (set when loaded from repository) */
+  definition?: import('../../interfaces/IPlanDefinition').IPlanDefinition;
 }
 
 // ============================================================================
@@ -674,6 +716,14 @@ export interface ExecutionContext {
   snapshotBranch?: string;
   /** Snapshot worktree path (real worktree on disk for the snapshot branch) */
   snapshotWorktreePath?: string;
+  
+  // --- Hydrated specs from IPlanRepository ---
+  /** Hydrated work specification (lazily loaded from repository) */
+  hydratedWork?: WorkSpec;
+  /** Hydrated prechecks specification (lazily loaded from repository) */
+  hydratedPrechecks?: WorkSpec;
+  /** Hydrated postchecks specification (lazily loaded from repository) */
+  hydratedPostchecks?: WorkSpec;
 }
 
 // ============================================================================

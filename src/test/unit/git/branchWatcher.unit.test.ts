@@ -3,11 +3,13 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { BranchChangeWatcher } from '../../../git/branchWatcher';
-import * as gitignore from '../../../git/core/gitignore';
 
 /**
  * Comprehensive unit tests for git branchWatcher module.
- * Tests VS Code extension integration and .gitignore maintenance.
+ * Tests VS Code extension integration and branch change detection.
+ * 
+ * Note: BranchChangeWatcher no longer modifies .gitignore on branch change
+ * to avoid creating uncommitted changes that block git checkout operations.
  */
 
 suite('Git BranchWatcher Unit Tests', () => {
@@ -16,9 +18,6 @@ suite('Git BranchWatcher Unit Tests', () => {
   let mockGitAPI: any;
   let mockRepository: any;
   let mockVscodeExtensions: sinon.SinonStub;
-  let mockVscodeWindow: sinon.SinonStub;
-  let mockVscodeWindowWarning: sinon.SinonStub;
-  let ensureOrchestratorGitIgnoreStub: sinon.SinonStub;
   let watcher: BranchChangeWatcher;
 
   setup(() => {
@@ -29,10 +28,6 @@ suite('Git BranchWatcher Unit Tests', () => {
       info: sinon.stub(),
       error: sinon.stub()
     };
-
-    // Create mock VS Code window
-    mockVscodeWindow = sinon.stub(vscode.window, 'showInformationMessage');
-    mockVscodeWindowWarning = sinon.stub(vscode.window, 'showWarningMessage');
 
     // Create mock repository
     mockRepository = {
@@ -65,9 +60,6 @@ suite('Git BranchWatcher Unit Tests', () => {
 
     // Mock vscode.extensions.getExtension
     mockVscodeExtensions = sinon.stub(vscode.extensions, 'getExtension');
-
-    // Mock gitignore function
-    ensureOrchestratorGitIgnoreStub = sinon.stub(gitignore, 'ensureOrchestratorGitIgnore');
 
     watcher = new BranchChangeWatcher(mockLogger);
   });
@@ -166,6 +158,29 @@ suite('Git BranchWatcher Unit Tests', () => {
         initialBranch: undefined
       }));
     });
+
+    test('should skip watching when onDidChangeState is not available', async () => {
+      // Repository without onDidChangeState (older VS Code Git API version)
+      const repoWithoutChangeState = {
+        rootUri: {
+          fsPath: '/test/old-repo',
+          toString: sinon.stub().returns('file:///test/old-repo')
+        },
+        state: { HEAD: { name: 'main' } },
+        onDidChangeState: undefined // Not a function
+      };
+
+      mockGitAPI.repositories = [repoWithoutChangeState];
+      mockVscodeExtensions.withArgs('vscode.git').returns(mockGitExtension);
+      mockGitAPI.onDidOpenRepository.returns({ dispose: sinon.stub() });
+
+      await watcher.initialize();
+
+      assert.ok(mockLogger.warn.calledWith(
+        'Repository does not support onDidChangeState — skipping watch',
+        { path: '/test/old-repo' }
+      ));
+    });
   });
 
   suite('Branch change detection', () => {
@@ -183,9 +198,7 @@ suite('Git BranchWatcher Unit Tests', () => {
       await watcher.initialize();
     });
 
-    test('should detect branch change and update gitignore', async () => {
-      ensureOrchestratorGitIgnoreStub.resolves(true); // gitignore was modified
-
+    test('should detect branch change and log without modifying gitignore', async () => {
       // Simulate branch change from 'main' to 'feature'
       const newState = {
         HEAD: {
@@ -196,25 +209,18 @@ suite('Git BranchWatcher Unit Tests', () => {
 
       await stateChangeCallback(newState);
 
+      // Branch change should be detected and logged
       assert.ok(mockLogger.info.calledWith('Branch change detected', {
         repository: '/test/repo',
         from: 'main',
         to: 'feature'
       }));
 
-      assert.ok(ensureOrchestratorGitIgnoreStub.calledWith('/test/repo'));
-      
-      assert.ok(mockLogger.info.calledWith('Updated .gitignore with orchestrator entries after branch change', {
-        repository: '/test/repo'
-      }));
-
-      assert.ok(mockVscodeWindow.calledWith(
-        'Copilot Orchestrator: Updated .gitignore for the new branch',
-        { modal: false }
-      ));
+      // No error should occur - gitignore is NOT touched on branch change
+      assert.ok(mockLogger.error.notCalled);
     });
 
-    test('should not update when branch has not changed', async () => {
+    test('should not log branch change when branch has not changed', async () => {
       // Same branch, different commit
       const newState = {
         HEAD: {
@@ -225,33 +231,8 @@ suite('Git BranchWatcher Unit Tests', () => {
 
       await stateChangeCallback(newState);
 
+      // Branch change should NOT be logged (only commit changed)
       assert.ok(mockLogger.info.neverCalledWith(sinon.match('Branch change detected')));
-      assert.ok(ensureOrchestratorGitIgnoreStub.notCalled);
-    });
-
-    test('should handle branch change when gitignore is already up to date', async () => {
-      ensureOrchestratorGitIgnoreStub.resolves(false); // gitignore was not modified
-
-      const newState = {
-        HEAD: {
-          name: 'feature',
-          commit: 'def456'
-        }
-      };
-
-      await stateChangeCallback(newState);
-
-      assert.ok(mockLogger.info.calledWith('Branch change detected', {
-        repository: '/test/repo',
-        from: 'main',
-        to: 'feature'
-      }));
-
-      assert.ok(mockLogger.debug.calledWith('No .gitignore update needed - orchestrator entries already present', {
-        repository: '/test/repo'
-      }));
-
-      assert.ok(mockVscodeWindow.notCalled);
     });
 
     test('should handle branch change from unknown to known branch', async () => {
@@ -276,8 +257,6 @@ suite('Git BranchWatcher Unit Tests', () => {
       mockGitAPI.repositories = [repo];
       await watcher.initialize();
 
-      ensureOrchestratorGitIgnoreStub.resolves(true);
-
       // Change to a known branch
       const newState = {
         HEAD: {
@@ -296,8 +275,6 @@ suite('Git BranchWatcher Unit Tests', () => {
     });
 
     test('should handle branch change to detached HEAD', async () => {
-      ensureOrchestratorGitIgnoreStub.resolves(false);
-
       // Change to detached HEAD (no branch name)
       const newState = {
         HEAD: {
@@ -313,55 +290,6 @@ suite('Git BranchWatcher Unit Tests', () => {
         from: 'main',
         to: '(unknown)'
       }));
-    });
-
-    test('should handle gitignore update error', async () => {
-      const error = new Error('Permission denied');
-      ensureOrchestratorGitIgnoreStub.rejects(error);
-
-      const newState = {
-        HEAD: {
-          name: 'feature',
-          commit: 'def456'
-        }
-      };
-
-      await stateChangeCallback(newState);
-
-      assert.ok(mockLogger.error.calledWith('Failed to update .gitignore on branch change', {
-        repository: '/test/repo',
-        error: 'Permission denied'
-      }));
-
-      assert.ok(mockVscodeWindowWarning.calledWith(
-        'Copilot Orchestrator: Could not update .gitignore after branch change: Permission denied'
-      ));
-    });
-
-    test('should handle non-Error objects in gitignore update failure', async () => {
-      // Instead of rejecting with a string, simulate a string error properly
-      ensureOrchestratorGitIgnoreStub.callsFake(() => {
-        return Promise.reject('String error');
-      });
-
-      const newState = {
-        HEAD: {
-          name: 'feature',
-          commit: 'def456'
-        }
-      };
-
-      await stateChangeCallback(newState);
-
-      assert.ok(mockLogger.error.calledOnce);
-      const errorCall = mockLogger.error.getCall(0);
-      assert.strictEqual(errorCall.args[0], 'Failed to update .gitignore on branch change');
-      assert.strictEqual(errorCall.args[1].repository, '/test/repo');
-      assert.strictEqual(errorCall.args[1].error, 'String error');
-
-      assert.ok(mockVscodeWindowWarning.calledWith(
-        'Copilot Orchestrator: Could not update .gitignore after branch change: String error'
-      ));
     });
 
     test('should track branch state separately for multiple repositories', async () => {
@@ -388,8 +316,6 @@ suite('Git BranchWatcher Unit Tests', () => {
       watcher = new BranchChangeWatcher(mockLogger);
       await watcher.initialize();
 
-      ensureOrchestratorGitIgnoreStub.resolves(false);
-
       // Change branch in first repo
       await stateChangeCallback({ HEAD: { name: 'feature1' } });
       
@@ -407,13 +333,9 @@ suite('Git BranchWatcher Unit Tests', () => {
         from: 'develop',
         to: 'feature2'
       }));
-
-      assert.strictEqual(ensureOrchestratorGitIgnoreStub.callCount, 2);
     });
 
     test('should handle HEAD with no name property', async () => {
-      ensureOrchestratorGitIgnoreStub.resolves(false);
-
       // HEAD exists but has no name (edge case)
       const newState = {
         HEAD: {

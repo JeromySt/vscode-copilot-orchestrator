@@ -80,7 +80,7 @@ function createTestPlan(nodeCount = 3): PlanInstance {
   return {
     id: 'test-plan-123',
     spec: planSpec,
-    nodes,
+    jobs: nodes,
     nodeStates,
     producerIdToNodeId: new Map(),
     groups: new Map(),

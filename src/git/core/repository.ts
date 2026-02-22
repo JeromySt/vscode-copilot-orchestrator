@@ -396,6 +396,22 @@ export async function resetHard(cwd: string, ref: string, log?: GitLogger): Prom
 }
 
 /**
+ * Mixed reset — updates the index to match ref but leaves the working tree unchanged.
+ * Useful for syncing the index after an updateRef without destroying uncommitted work.
+ */
+export async function resetMixed(cwd: string, ref: string, log?: GitLogger): Promise<void> {
+  log?.(`[git] Resetting index to ${ref} (mixed)`);
+
+  const result = await execAsync(['reset', ref], { cwd });
+  if (result.success) {
+    log?.(`[git] ✓ Index reset to ${ref}`);
+    return;
+  }
+
+  throw new Error(`Failed to reset index to ${ref}: ${result.stderr}`);
+}
+
+/**
  * Update a branch reference to point to a specific commit without checkout.
  */
 export async function updateRef(cwd: string, refName: string, commit: string, log?: GitLogger): Promise<void> {

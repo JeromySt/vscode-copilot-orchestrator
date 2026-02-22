@@ -71,7 +71,7 @@ function makePlan(overrides: Partial<PlanInstance> = {}): PlanInstance {
   return {
     id: 'plan-001',
     spec: { name: 'Test Plan', jobs: [], baseBranch: 'main' },
-    nodes,
+    jobs: nodes,
     producerIdToNodeId,
     roots: [nodeId],
     leaves: [nodeId],
@@ -133,8 +133,8 @@ suite('PlanPersistence', () => {
       persistence.save(plan);
       const loaded = persistence.load(plan.id)!;
 
-      assert.strictEqual(loaded.nodes.size, 1);
-      const node = loaded.nodes.get('node-1') as JobNode;
+      assert.strictEqual(loaded.jobs.size, 1);
+      const node = loaded.jobs.get('node-1') as JobNode;
       assert.ok(node);
       assert.strictEqual(node.type, 'job');
       assert.strictEqual(node.task, 'npm run build');
@@ -512,7 +512,7 @@ suite('PlanPersistence', () => {
           dependencies: i > 0 ? [`node-${i + 99}`] : [],
           dependents: i < 99 ? [`node-${i + 101}`] : [],
         };
-        plan.nodes.set(nodeId, node);
+        plan.jobs.set(nodeId, node);
         plan.producerIdToNodeId.set(`task-${i}`, nodeId);
         plan.nodeStates.set(nodeId, { status: 'pending', version: 0, attempts: 0 });
       }
@@ -522,8 +522,8 @@ suite('PlanPersistence', () => {
 
       assert.ok(loaded);
       // 1 original + 100 added
-      assert.strictEqual(loaded.nodes.size, 101);
-      const node50 = loaded.nodes.get('node-150') as JobNode;
+      assert.strictEqual(loaded.jobs.size, 101);
+      const node50 = loaded.jobs.get('node-150') as JobNode;
       assert.ok(node50);
       assert.strictEqual(node50.task, 'Do thing 50');
     });
@@ -593,7 +593,7 @@ suite('PlanPersistence', () => {
       const loaded = persistence.load(plan.id)!;
 
       // Verify the Maps are real Map instances (not plain objects)
-      assert.ok(loaded.nodes instanceof Map, 'nodes should be a Map');
+      assert.ok(loaded.jobs instanceof Map, 'jobs should be a Map');
       assert.ok(loaded.nodeStates instanceof Map, 'nodeStates should be a Map');
       assert.ok(loaded.producerIdToNodeId instanceof Map, 'producerIdToNodeId should be a Map');
     });
@@ -757,13 +757,13 @@ suite('PlanPersistence', () => {
         dependencies: ['node-1'],
         dependents: []
       };
-      plan.nodes.set(nodeId, fullNode);
+      plan.jobs.set(nodeId, fullNode);
       plan.nodeStates.set(nodeId, { status: 'pending', version: 0, attempts: 0 });
       
       persistence.save(plan);
       const loaded = persistence.load(plan.id)!;
       
-      const loadedNode = loaded.nodes.get(nodeId) as JobNode;
+      const loadedNode = loaded.jobs.get(nodeId) as JobNode;
       assert.ok(loadedNode);
       assert.strictEqual(loadedNode.work, 'npm run build');
       assert.strictEqual(loadedNode.prechecks, 'npm test');

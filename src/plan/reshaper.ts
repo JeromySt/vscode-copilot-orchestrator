@@ -32,7 +32,7 @@ export interface MutationResult {
 export function recomputeRootsAndLeaves(plan: PlanInstance): void {
   const roots: string[] = [];
   const leaves: string[] = [];
-  for (const node of plan.nodes.values()) {
+  for (const node of plan.jobs.values()) {
     if (node.dependencies.length === 0) { roots.push(node.id); }
     if (node.dependents.length === 0) { leaves.push(node.id); }
   }
@@ -53,12 +53,12 @@ function syncSnapshotValidationDeps(plan: PlanInstance): void {
   const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
   if (!svNodeId) { return; } // no SV node in this plan
 
-  const svNode = plan.nodes.get(svNodeId);
+  const svNode = plan.jobs.get(svNodeId);
   if (!svNode) { return; }
 
   // Desired deps = every node with no dependents, except the SV node itself.
   const desiredDeps = new Set<string>();
-  for (const node of plan.nodes.values()) {
+  for (const node of plan.jobs.values()) {
     if (node.id !== svNodeId && node.dependents.length === 0) {
       desiredDeps.add(node.id);
     }
@@ -68,7 +68,7 @@ function syncSnapshotValidationDeps(plan: PlanInstance): void {
   // After this function wires them, they'll have svNodeId in dependents.
   // So we need: every node whose dependents are empty OR contain only svNodeId.
   desiredDeps.clear();
-  for (const node of plan.nodes.values()) {
+  for (const node of plan.jobs.values()) {
     if (node.id === svNodeId) { continue; }
     const nonSvDependents = node.dependents.filter(d => d !== svNodeId);
     if (nonSvDependents.length === 0) {
@@ -82,7 +82,7 @@ function syncSnapshotValidationDeps(plan: PlanInstance): void {
   // Remove SV from old deps' dependents
   for (const oldDep of svNode.dependencies) {
     if (!desiredDeps.has(oldDep)) {
-      const depNode = plan.nodes.get(oldDep);
+      const depNode = plan.jobs.get(oldDep);
       if (depNode) {
         depNode.dependents = depNode.dependents.filter(d => d !== svNodeId);
       }
@@ -92,7 +92,7 @@ function syncSnapshotValidationDeps(plan: PlanInstance): void {
   // Add SV to new deps' dependents
   for (const newDep of desiredDeps) {
     if (!currentDeps.has(newDep)) {
-      const depNode = plan.nodes.get(newDep);
+      const depNode = plan.jobs.get(newDep);
       if (depNode && !depNode.dependents.includes(svNodeId)) {
         depNode.dependents.push(svNodeId);
       }
@@ -131,7 +131,7 @@ export function hasCycle(plan: PlanInstance, fromId: string, toId: string): bool
     if (current === fromId) { return true; }
     if (visited.has(current)) { continue; }
     visited.add(current);
-    const node = plan.nodes.get(current);
+    const node = plan.jobs.get(current);
     if (node) {
       for (const dep of node.dependencies) {
         if (!visited.has(dep)) { queue.push(dep); }
@@ -206,7 +206,7 @@ function makeInitialState(resolvedDeps: string[], plan: PlanInstance): NodeExecu
 function recomputeNodeStatus(plan: PlanInstance, nodeId: string): void {
   const state = plan.nodeStates.get(nodeId);
   if (!state || !MODIFIABLE_STATES.has(state.status)) {return;}
-  const node = plan.nodes.get(nodeId);
+  const node = plan.jobs.get(nodeId);
   if (!node) {return;}
   const allDepsSatisfied = node.dependencies.length === 0 || node.dependencies.every(depId => {
     const s = plan.nodeStates.get(depId);
@@ -224,7 +224,7 @@ export function addNode(plan: PlanInstance, spec: JobNodeSpec): AddNodeResult {
     return { success: false, error: 'Plan is not in a modifiable state (must be running or paused)' };
   }
 
-  // Validate producer_id uniqueness
+  // Validate producerId uniqueness
   if (plan.producerIdToNodeId.has(spec.producerId)) {
     return { success: false, error: `Producer ID '${spec.producerId}' already exists in plan` };
   }
@@ -246,13 +246,13 @@ export function addNode(plan: PlanInstance, spec: JobNodeSpec): AddNodeResult {
   const node = buildNodeFromSpec(spec, nodeId, resolvedDeps);
 
   // Wire into plan
-  plan.nodes.set(nodeId, node);
+  plan.jobs.set(nodeId, node);
   plan.producerIdToNodeId.set(spec.producerId, nodeId);
   plan.nodeStates.set(nodeId, makeInitialState(resolvedDeps, plan));
 
   // Update dependents on upstream nodes
   for (const depId of resolvedDeps) {
-    const depNode = plan.nodes.get(depId);
+    const depNode = plan.jobs.get(depId);
     if (depNode) { depNode.dependents.push(nodeId); }
   }
 
@@ -272,7 +272,7 @@ export function addNode(plan: PlanInstance, spec: JobNodeSpec): AddNodeResult {
  * Fails if any non-pending node depends on it.
  */
 export function removeNode(plan: PlanInstance, nodeId: string): MutationResult {
-  const node = plan.nodes.get(nodeId);
+  const node = plan.jobs.get(nodeId);
   if (!node) {
     return { success: false, error: `Node '${nodeId}' not found` };
   }
@@ -292,7 +292,7 @@ export function removeNode(plan: PlanInstance, nodeId: string): MutationResult {
 
   // Remove from dependents lists of upstream nodes, adding downstream nodes to bridge the gap
   for (const depId of node.dependencies) {
-    const depNode = plan.nodes.get(depId);
+    const depNode = plan.jobs.get(depId);
     if (depNode) {
       depNode.dependents = depNode.dependents.filter(id => id !== nodeId);
       for (const downId of node.dependents) {
@@ -305,7 +305,7 @@ export function removeNode(plan: PlanInstance, nodeId: string): MutationResult {
 
   // Remove from dependencies lists of downstream nodes, inheriting upstream deps to bridge
   for (const depId of node.dependents) {
-    const depNode = plan.nodes.get(depId);
+    const depNode = plan.jobs.get(depId);
     if (depNode) {
       depNode.dependencies = depNode.dependencies.filter(id => id !== nodeId);
       for (const upId of node.dependencies) {
@@ -318,7 +318,7 @@ export function removeNode(plan: PlanInstance, nodeId: string): MutationResult {
   }
 
   // Remove from maps
-  plan.nodes.delete(nodeId);
+  plan.jobs.delete(nodeId);
   plan.nodeStates.delete(nodeId);
   if (node.producerId) {
     plan.producerIdToNodeId.delete(node.producerId);
@@ -344,7 +344,7 @@ export function updateNodeDependencies(
   nodeId: string,
   newDeps: string[],
 ): MutationResult {
-  const node = plan.nodes.get(nodeId);
+  const node = plan.jobs.get(nodeId);
   if (!node) {
     return { success: false, error: `Node '${nodeId}' not found` };
   }
@@ -356,7 +356,7 @@ export function updateNodeDependencies(
 
   // Validate new deps exist, are available, and don't create cycles
   for (const depId of newDeps) {
-    if (!plan.nodes.has(depId)) {
+    if (!plan.jobs.has(depId)) {
       return { success: false, error: `Dependency node '${depId}' not found` };
     }
     if (!isDependencyAvailable(plan, depId)) {
@@ -370,7 +370,7 @@ export function updateNodeDependencies(
 
   // Remove nodeId from old upstream dependents lists
   for (const oldDepId of node.dependencies) {
-    const oldDepNode = plan.nodes.get(oldDepId);
+    const oldDepNode = plan.jobs.get(oldDepId);
     if (oldDepNode) {
       oldDepNode.dependents = oldDepNode.dependents.filter(id => id !== nodeId);
     }
@@ -381,7 +381,7 @@ export function updateNodeDependencies(
 
   // Add nodeId to new upstream dependents lists
   for (const depId of newDeps) {
-    const depNode = plan.nodes.get(depId);
+    const depNode = plan.jobs.get(depId);
     if (depNode && !depNode.dependents.includes(nodeId)) {
       depNode.dependents.push(nodeId);
     }
@@ -418,7 +418,7 @@ function isReachableViaUpstream(
     if (current === target) { return true; }
     if (visited.has(current)) { continue; }
     visited.add(current);
-    const node = plan.nodes.get(current);
+    const node = plan.jobs.get(current);
     if (node) {
       for (const dep of node.dependencies) {
         if (!visited.has(dep) && !excluded.has(dep)) { queue.push(dep); }
@@ -443,7 +443,7 @@ export function addNodeBefore(
   existingNodeId: string,
   spec: JobNodeSpec,
 ): AddNodeResult {
-  const existingNode = plan.nodes.get(existingNodeId);
+  const existingNode = plan.jobs.get(existingNodeId);
   if (!existingNode) {
     return { success: false, error: `Node '${existingNodeId}' not found` };
   }
@@ -495,13 +495,13 @@ export function addNodeBefore(
   newNode.dependents = [existingNodeId];
 
   // Register in plan
-  plan.nodes.set(nodeId, newNode);
+  plan.jobs.set(nodeId, newNode);
   plan.producerIdToNodeId.set(spec.producerId, nodeId);
   plan.nodeStates.set(nodeId, makeInitialState(resolvedSpecDeps, plan));
 
   // Update upstream dependents for new node's dependencies
   for (const depId of resolvedSpecDeps) {
-    const depNode = plan.nodes.get(depId);
+    const depNode = plan.jobs.get(depId);
     if (depNode && !depNode.dependents.includes(nodeId)) {
       depNode.dependents.push(nodeId);
     }
@@ -509,7 +509,7 @@ export function addNodeBefore(
 
   // Remove existingNode from ALL old upstream nodes' dependents (it now depends only on newNode)
   for (const oldDepId of existingNode.dependencies) {
-    const oldDepNode = plan.nodes.get(oldDepId);
+    const oldDepNode = plan.jobs.get(oldDepId);
     if (oldDepNode) {
       oldDepNode.dependents = oldDepNode.dependents.filter(id => id !== existingNodeId);
     }
@@ -540,7 +540,7 @@ export function addNodeAfter(
   existingNodeId: string,
   spec: JobNodeSpec,
 ): AddNodeResult {
-  const existingNode = plan.nodes.get(existingNodeId);
+  const existingNode = plan.jobs.get(existingNodeId);
   if (!existingNode) {
     return { success: false, error: `Node '${existingNodeId}' not found` };
   }
@@ -588,7 +588,7 @@ export function addNodeAfter(
   const newNode = buildNodeFromSpec(spec, nodeId, resolvedSpecDeps);
 
   // Register in plan
-  plan.nodes.set(nodeId, newNode);
+  plan.jobs.set(nodeId, newNode);
   plan.producerIdToNodeId.set(spec.producerId, nodeId);
   plan.nodeStates.set(nodeId, makeInitialState(resolvedSpecDeps, plan));
 
@@ -597,7 +597,7 @@ export function addNodeAfter(
   for (const depId of existingNode.dependents) {
     const depState = plan.nodeStates.get(depId);
     if (depState && MODIFIABLE_STATES.has(depState.status)) {
-      const depNode = plan.nodes.get(depId);
+      const depNode = plan.jobs.get(depId);
       if (depNode) {
         // Replace existingNodeId with nodeId in the dependent's dependencies
         depNode.dependencies = depNode.dependencies.map(d => d === existingNodeId ? nodeId : d);
@@ -617,7 +617,7 @@ export function addNodeAfter(
   // Update dependents lists for other upstream nodes
   for (const depId of resolvedSpecDeps) {
     if (depId !== existingNodeId) {
-      const depNode = plan.nodes.get(depId);
+      const depNode = plan.jobs.get(depId);
       if (depNode && !depNode.dependents.includes(nodeId)) {
         depNode.dependents.push(nodeId);
       }

@@ -75,7 +75,7 @@ suite('PlanListCard', () => {
     assert.ok(el.innerHTML.includes('running'));
     assert.ok(el.innerHTML.includes('▶'));
     assert.ok(el.innerHTML.includes('60%'));
-    assert.ok(el.innerHTML.includes('8 nodes'));
+    assert.ok(el.innerHTML.includes('8 jobs'));
     assert.ok(el.innerHTML.includes('✓4'));
     assert.ok(el.innerHTML.includes('✗1'));
     assert.ok(el.innerHTML.includes('▶2'));

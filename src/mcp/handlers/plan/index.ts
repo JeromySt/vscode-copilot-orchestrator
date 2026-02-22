@@ -9,6 +9,11 @@
 // Plan creation handlers
 export * from './createPlanHandler';
 
+// Plan scaffolding handlers  
+export * from './scaffoldPlanHandler';
+export * from './addJobHandler';
+export * from './finalizePlanHandler';
+
 // Plan status and listing handlers  
 export * from './getPlanHandler';
 
@@ -18,13 +23,16 @@ export * from './cancelDeleteHandler';
 
 // Plan retry handlers
 export * from './retryPlanHandler';
-export * from './retryNodeHandler';
+export * from './retryJobHandler';
 
-// Node update handlers
-export * from './updateNodeHandler';
+// Job update handlers
+export * from './updateJobHandler';
+
+// Plan update handlers
+export * from './updatePlanHandler';
 
 // Plan reshape handlers
 export * from './reshapePlanHandler';
 
-// Node detail handlers
-export * from './nodeDetailsHandler';
+// Job detail handlers
+export * from './jobDetailsHandler';

@@ -75,7 +75,7 @@ function createTestPlan(nodeCount: number = 3): PlanInstance {
   return {
     id: 'test-plan',
     spec: { name: 'Test Plan', jobs: [], baseBranch: 'main' },
-    nodes,
+    jobs: nodes,
     nodeStates,
     producerIdToNodeId,
     groups: new Map(),

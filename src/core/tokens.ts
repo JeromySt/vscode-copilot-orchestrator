@@ -136,3 +136,15 @@ export const IGlobalCapacity = Symbol('IGlobalCapacity');
  * Provides plan configuration management.
  */
 export const IPlanConfigManager = Symbol('IPlanConfigManager');
+
+/**
+ * Token for IPlanRepository service.
+ * Provides plan lifecycle management.
+ */
+export const IPlanRepository = Symbol('IPlanRepository');
+
+/**
+ * Token for IPlanRepositoryStore service.
+ * Provides storage backend for plan persistence.
+ */
+export const IPlanRepositoryStore = Symbol('IPlanRepositoryStore');

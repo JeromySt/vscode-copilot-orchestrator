@@ -811,7 +811,7 @@ export function renderPlanScripts(data: PlanScriptsData): string {
         var value = stat.querySelector('.stat-value');
         if (!label || !value) return;
         var labelText = label.textContent.trim();
-        if (labelText === 'Total Nodes') value.textContent = total;
+        if (labelText === 'Total Jobs') value.textContent = total;
         else if (labelText === 'Succeeded') value.textContent = counts.succeeded || 0;
         else if (labelText === 'Failed') value.textContent = counts.failed || 0;
         else if (labelText === 'Running') value.textContent = (counts.running || 0) + (counts.scheduled || 0);
@@ -892,12 +892,24 @@ export function renderPlanScripts(data: PlanScriptsData): string {
           var currentText = textSpan.textContent || '';
           if (currentText.length > 0 && ['✓', '✗', '▶', '⊘', '○'].includes(currentText[0])) {
             var updatedText = newIcon + currentText.substring(1);
-            // For non-running nodes, strip the duration suffix
-            var isRunning = data.status === 'running' || data.status === 'scheduled';
-            if (!isRunning) {
+            // Strip duration only for non-terminal, non-running statuses
+            var showDuration = data.status === 'running' || data.status === 'scheduled' || data.status === 'succeeded' || data.status === 'failed';
+            if (!showDuration) {
               var pipeIdx = updatedText.lastIndexOf(' | ');
               if (pipeIdx > 0) {
                 updatedText = updatedText.substring(0, pipeIdx);
+              }
+            }
+            // For completed nodes, set final duration from startedAt/endedAt
+            if ((data.status === 'succeeded' || data.status === 'failed') && data.startedAt) {
+              var endTime = data.endedAt || Date.now();
+              var dur = endTime - data.startedAt;
+              var durStr = formatDurationLive(dur);
+              var pi = updatedText.lastIndexOf(' | ');
+              if (pi > 0) {
+                updatedText = updatedText.substring(0, pi) + ' | ' + durStr;
+              } else {
+                updatedText = updatedText + ' | ' + durStr;
               }
             }
             var nodeElId = nodeEl.getAttribute('id') || '';
@@ -988,12 +1000,24 @@ export function renderPlanScripts(data: PlanScriptsData): string {
             var firstChar = currentText[0];
             if (['✓', '✗', '▶', '⊘', '○', '📦'].includes(firstChar)) {
               var updatedText = newIcon + currentText.substring(1);
-              // For non-running groups, strip the duration suffix
-              var isRunning = data.status === 'running' || data.status === 'scheduled';
-              if (!isRunning) {
+              // Strip duration only for non-terminal, non-running statuses
+              var showDuration = data.status === 'running' || data.status === 'scheduled' || data.status === 'succeeded' || data.status === 'failed';
+              if (!showDuration) {
                 var pipeIdx = updatedText.lastIndexOf(' | ');
                 if (pipeIdx > 0) {
                   updatedText = updatedText.substring(0, pipeIdx);
+                }
+              }
+              // For completed groups, set final duration from startedAt/endedAt
+              if ((data.status === 'succeeded' || data.status === 'failed') && data.startedAt) {
+                var endTime = data.endedAt || Date.now();
+                var dur = endTime - data.startedAt;
+                var durStr = formatDurationLive(dur);
+                var pi = updatedText.lastIndexOf(' | ');
+                if (pi > 0) {
+                  updatedText = updatedText.substring(0, pi) + ' | ' + durStr;
+                } else {
+                  updatedText = updatedText + ' | ' + durStr;
                 }
               }
               var clusterGId = cluster.getAttribute('id') || '';
@@ -1170,13 +1194,17 @@ export function renderPlanScripts(data: PlanScriptsData): string {
               }
             }
           }
-          // Restore viewport state
+          // Restore viewport state: zoom THEN scroll (updateZoom changes
+          // container dimensions which can reset scrollParent scroll position)
           currentZoom = savedZoom;
           updateZoom();
-          if (scrollParent) {
-            scrollParent.scrollTop = savedScrollTop;
-            scrollParent.scrollLeft = savedScrollLeft;
-          }
+          // Defer scroll restoration to after the browser reflows from updateZoom
+          requestAnimationFrame(function() {
+            if (scrollParent) {
+              scrollParent.scrollTop = savedScrollTop;
+              scrollParent.scrollLeft = savedScrollLeft;
+            }
+          });
           // Re-apply node colours
           var replayMsg = { nodeStatuses: {}, counts: {}, planStatus: '', progress: 0, total: 0, completed: 0 };
           for (var sid in nodeData) { replayMsg.nodeStatuses[sid] = nodeData[sid]; }

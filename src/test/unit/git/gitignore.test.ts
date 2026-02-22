@@ -55,7 +55,7 @@ suite('ensureGitignoreEntries', () => {
   test('returns false if entries already exist', async () => {
     await fs.promises.writeFile(
       path.join(tempDir, '.gitignore'),
-      'node_modules\n.worktrees/\n.orchestrator/\n.github/instructions/orchestrator-*.instructions.md\n'
+      'node_modules\n.worktrees/\n.orchestrator/\n.copilot-cli/\n.github/instructions/orchestrator-*.instructions.md\n'
     );
     
     const result = await ensureGitignoreEntries(tempDir);

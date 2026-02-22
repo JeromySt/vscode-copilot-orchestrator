@@ -47,6 +47,11 @@ export interface PhaseContext {
   baseCommitAtStart?: string;
   /** Completed commit from work phase */
   completedCommit?: string;
+  /** Override config directory for Copilot CLI session isolation (plan-level) */
+  configDir?: string;
+
+  /** Merged environment variables (plan-level + work-spec-level) to inject into spawned processes */
+  env?: Record<string, string>;
 
   // --- Callbacks ---
   /** Log an info message */

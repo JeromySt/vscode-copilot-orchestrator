@@ -86,6 +86,7 @@ function mockGitOperations(): IGitOperations {
       getCommitCount: sinon.stub().resolves(0),
       checkoutFile: sinon.stub().resolves(),
       resetHard: sinon.stub().resolves(),
+      resetMixed: sinon.stub().resolves(),
       clean: sinon.stub().resolves(),
       updateRef: sinon.stub().resolves(),
       stashPush: sinon.stub().resolves(true),
@@ -120,6 +121,7 @@ function mockGitOperations(): IGitOperations {
       list: sinon.stub().resolves(['main']),
       getCommit: sinon.stub().resolves('abc123'),
       getMergeBase: sinon.stub().resolves('abc123'),
+      isAncestor: sinon.stub().resolves(false),
       remove: sinon.stub().resolves(),
       deleteLocal: sinon.stub().resolves(true),
       deleteRemote: sinon.stub().resolves(true),
@@ -590,7 +592,7 @@ suite('MergeRiPhaseExecutor', () => {
   test('updateBranchRef resets working tree when branch checked out and clean', async () => {
     const git = mockGitOperations();
     (git.branches.currentOrNull as sinon.SinonStub).resolves('main');
-    (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
+    (git.repository.getDirtyFiles as sinon.SinonStub).resolves([]);
 
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
     const context = createMockContext();
@@ -607,10 +609,13 @@ suite('MergeRiPhaseExecutor', () => {
     assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/Synced main worktree/)));
   });
 
-  test('updateBranchRef logs hint when branch checked out but dirty', async () => {
+  test('updateBranchRef does mixed reset + selective checkout when dirty', async () => {
     const git = mockGitOperations();
     (git.branches.currentOrNull as sinon.SinonStub).resolves('main');
-    (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(true);
+    // User has Cargo.lock dirty before the merge
+    (git.repository.getDirtyFiles as sinon.SinonStub).onFirstCall().resolves(['Cargo.lock']);
+    // After mixed reset: Cargo.lock still dirty + plan-changed files appear
+    (git.repository.getDirtyFiles as sinon.SinonStub).onSecondCall().resolves(['Cargo.lock', 'src/lib.rs', 'README.md']);
 
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
     const context = createMockContext();
@@ -618,10 +623,36 @@ suite('MergeRiPhaseExecutor', () => {
     const result = await method.call(executor, context, '/repo', 'main', 'abc123');
 
     assert.strictEqual(result, true);
-    // Dirty before ref move → do NOT touch working tree
+    // Dirty before ref move → do NOT hard reset (would destroy user changes)
     assert.ok(!(git.repository.resetHard as sinon.SinonStub).called);
+    // MUST do a mixed reset so the index matches the new HEAD
+    assert.ok((git.repository.resetMixed as sinon.SinonStub).calledOnce);
+    assert.strictEqual((git.repository.resetMixed as sinon.SinonStub).firstCall.args[1], 'abc123');
+    // Plan-changed files (src/lib.rs, README.md) should be checked out from index
+    // User's dirty file (Cargo.lock) should NOT be touched
+    const checkedOutFiles = (git.repository.checkoutFile as sinon.SinonStub).args.map((a: any[]) => a[1]);
+    assert.ok(checkedOutFiles.includes('src/lib.rs'));
+    assert.ok(checkedOutFiles.includes('README.md'));
+    assert.ok(!checkedOutFiles.includes('Cargo.lock'));
     assert.ok(!(git.repository.stashPush as sinon.SinonStub).called);
-    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/uncommitted changes/)));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/Synced index/)));
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/Preserved 1 pre-existing/)));
+  });
+
+  test('updateBranchRef tolerates resetMixed failure when dirty', async () => {
+    const git = mockGitOperations();
+    (git.branches.currentOrNull as sinon.SinonStub).resolves('main');
+    (git.repository.getDirtyFiles as sinon.SinonStub).resolves(['Cargo.lock']);
+    (git.repository.resetMixed as sinon.SinonStub).rejects(new Error('index locked'));
+
+    const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
+    const context = createMockContext();
+    const method = (executor as any).updateBranchRef;
+    const result = await method.call(executor, context, '/repo', 'main', 'abc123');
+
+    // Still succeeds — resetMixed failure is non-fatal
+    assert.strictEqual(result, true);
+    assert.ok((context.logInfo as sinon.SinonStub).calledWith(sinon.match(/Could not sync working tree/)));
   });
 
   test('updateBranchRef does not reset when different branch checked out', async () => {
@@ -640,7 +671,7 @@ suite('MergeRiPhaseExecutor', () => {
   test('updateBranchRef never uses stash/pop cycle', async () => {
     const git = mockGitOperations();
     (git.branches.currentOrNull as sinon.SinonStub).resolves('main');
-    (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
+    (git.repository.getDirtyFiles as sinon.SinonStub).resolves([]);
 
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
     const context = createMockContext();
@@ -660,9 +691,10 @@ suite('MergeRiPhaseExecutor', () => {
     const method = (executor as any).updateBranchRef;
     const result = await method.call(executor, context, '/repo', 'main', 'abc123');
 
-    // Still succeeds — dirty check failure is non-fatal (defaults to dirty=true, no reset)
+    // Still succeeds — dirty check failure is non-fatal (defaults to branchCheckedOut=false, no reset)
     assert.strictEqual(result, true);
     assert.ok(!(git.repository.resetHard as sinon.SinonStub).called);
+    assert.ok(!(git.repository.resetMixed as sinon.SinonStub).called);
   });
 
   test('resolveConflictFilesWithCopilot runs copilot and returns metrics', async () => {
@@ -835,7 +867,7 @@ suite('MergeRiPhaseExecutor', () => {
   test('updateBranchRef resets cleanly and never stashes', async () => {
     const git = mockGitOperations();
     (git.branches.currentOrNull as sinon.SinonStub).resolves('main');
-    (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
+    (git.repository.getDirtyFiles as sinon.SinonStub).resolves([]);
 
     const executor = new MergeRiPhaseExecutor({ git, copilotRunner: mockCopilotRunner });
     const context = createMockContext();

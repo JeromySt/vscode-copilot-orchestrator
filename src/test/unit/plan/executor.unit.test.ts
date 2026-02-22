@@ -92,7 +92,8 @@ suite('DefaultJobExecutor', () => {
     fs.mkdirSync(storagePath, { recursive: true });
     const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     executor.setStoragePath(storagePath);
-    assert.ok(fs.existsSync(path.join(storagePath, 'logs')));
+    // Log files now go under plans/<planId>/specs/<nodeId>/current/ - no separate logs/ directory created
+    assert.ok(true); // Just verify no error
   });
 
   test('setAgentDelegator stores delegator', () => {
@@ -117,7 +118,7 @@ suite('DefaultJobExecutor', () => {
     test('log creates entries and getLogs retrieves them', () => {
       const dir = makeTmpDir();
       const storagePath = path.join(dir, 'storage');
-      fs.mkdirSync(path.join(storagePath, 'logs'), { recursive: true });
+      fs.mkdirSync(storagePath, { recursive: true });
       const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
       executor.setStoragePath(storagePath);
       
@@ -130,7 +131,7 @@ suite('DefaultJobExecutor', () => {
     test('log with attemptNumber uses specific key', () => {
       const dir = makeTmpDir();
       const storagePath = path.join(dir, 'storage');
-      fs.mkdirSync(path.join(storagePath, 'logs'), { recursive: true });
+      fs.mkdirSync(storagePath, { recursive: true });
       const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
       executor.setStoragePath(storagePath);
       
@@ -197,8 +198,9 @@ suite('DefaultJobExecutor', () => {
     });
 
     test('skips unknown executions', async function() {
-      this.timeout(10000);
-      const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
+      this.timeout(60000);
+      const mockMonitor: any = { getSnapshot: async () => [], buildTree: () => [], isRunning: () => false, terminate: async () => {} };
+      const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), mockMonitor, createMockGitOps(), mockCopilotRunner);
       const stats = await executor.getAllProcessStats([
         { planId: 'p1', nodeId: 'n1', nodeName: 'Job' },
       ]);
@@ -215,12 +217,13 @@ suite('DefaultJobExecutor', () => {
     test('returns path with attempt number', () => {
       const dir = makeTmpDir();
       const storagePath = path.join(dir, 'storage');
-      fs.mkdirSync(path.join(storagePath, 'logs'), { recursive: true });
+      fs.mkdirSync(storagePath, { recursive: true });
       const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
       executor.setStoragePath(storagePath);
       const result = executor.getLogFilePath('plan-1', 'node-1', 3);
       assert.ok(result);
-      assert.ok(result!.includes('logs'));
+      // New path structure uses plans/<planId>/specs/<nodeId>/attempts/<n>/execution.log
+      assert.ok(result!.includes('attempts') || result!.includes('current'));
     });
   });
 

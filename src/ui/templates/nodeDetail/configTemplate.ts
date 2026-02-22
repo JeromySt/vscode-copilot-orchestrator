@@ -314,7 +314,7 @@ export function dependenciesSectionHtml(dependencies: Array<{ name: string; stat
         `<span class="dep-badge ${dep.status}">${escapeHtml(dep.name)}</span>`
       ).join('')}
     </div>
-    ` : '<div class="config-value">No dependencies (root node)</div>'}
+    ` : '<div class="config-value">No dependencies (root job)</div>'}
   </div>`;
 }
 

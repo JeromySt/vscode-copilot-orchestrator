@@ -45,14 +45,14 @@ function makePlanInstance(overrides?: Partial<PlanInstance>): PlanInstance {
   return {
     id: uuidv4(),
     name: 'Test Plan',
-    spec: { nodes: [] },
+    spec: { jobs: [] },
     status: 'running',
-    nodes: new Map(),
+    jobs: new Map(),
     nodeStates: new Map(),
     groups: new Map(),
     groupStates: new Map(),
     groupPathToId: new Map(),
-    dependencyGraph: { nodes: new Map(), edges: new Map() },
+    dependencyGraph: { jobs: new Map(), edges: new Map() },
     createdAt: Date.now(),
     version: 1,
     repoPath: '/test/repo',
@@ -188,7 +188,7 @@ suite('planDetailPanel - Group Name Display', () => {
       const node1Id = node1.id;
       
       const plan = makePlanInstance({
-        nodes: new Map([[node1Id, node1]]),
+        jobs: new Map([[node1Id, node1]]),
         nodeStates: new Map([[node1Id, makeNodeState()]]),
         groups: new Map([[groupId, makeGroupInstance(groupId, 'Frontend', 'Frontend')]]),
         groupStates: new Map([[groupId, makeGroupState()]]),
@@ -215,7 +215,7 @@ suite('planDetailPanel - Group Name Display', () => {
       const node2Id = node2.id;
       
       const plan = makePlanInstance({
-        nodes: new Map([[node1Id, node1], [node2Id, node2]]),
+        jobs: new Map([[node1Id, node1], [node2Id, node2]]),
         nodeStates: new Map([[node1Id, makeNodeState()], [node2Id, makeNodeState()]]),
         groups: new Map([
           [groupId1, makeGroupInstance(groupId1, 'Frontend', 'Frontend')],
@@ -256,7 +256,7 @@ suite('planDetailPanel - Group Name Display', () => {
       const node1Id = node1.id;
       
       const plan = makePlanInstance({
-        nodes: new Map([[node1Id, node1]]),
+        jobs: new Map([[node1Id, node1]]),
         nodeStates: new Map([[node1Id, makeNodeState()]]),
         groups: new Map([
           [parentGroupId, makeGroupInstance(parentGroupId, 'Frontend', 'Frontend')],
@@ -298,7 +298,7 @@ suite('planDetailPanel - Group Name Display', () => {
       const node1Id = node1.id;
       
       const plan = makePlanInstance({
-        nodes: new Map([[node1Id, node1]]),
+        jobs: new Map([[node1Id, node1]]),
         nodeStates: new Map([[node1Id, makeNodeState()]]),
         groups: new Map([
           [groupId1, makeGroupInstance(groupId1, 'Frontend', 'Frontend')],
@@ -355,7 +355,7 @@ suite('planDetailPanel - Group Name Display', () => {
       const node2Id = node2.id;
       
       const plan = makePlanInstance({
-        nodes: new Map([[node1Id, node1], [node2Id, node2]]),
+        jobs: new Map([[node1Id, node1], [node2Id, node2]]),
         nodeStates: new Map([[node1Id, makeNodeState()], [node2Id, makeNodeState()]]),
         groups: new Map([
           [parentGroupId, makeGroupInstance(parentGroupId, 'Frontend', 'Frontend')],
@@ -408,7 +408,7 @@ suite('planDetailPanel - Group Name Display', () => {
       const node1Id = node1.id;
       
       const plan = makePlanInstance({
-        nodes: new Map([[node1Id, node1]]),
+        jobs: new Map([[node1Id, node1]]),
         nodeStates: new Map([[node1Id, makeNodeState()]]),
         groups: new Map([
           [parentGroupId, makeGroupInstance(parentGroupId, 'Frontend', 'Frontend')],
@@ -449,7 +449,7 @@ suite('planDetailPanel - Group Name Display', () => {
       const node1Id = node1.id;
       
       const plan = makePlanInstance({
-        nodes: new Map([[node1Id, node1]]),
+        jobs: new Map([[node1Id, node1]]),
         nodeStates: new Map([[node1Id, makeNodeState()]]),
         groups: new Map([
           [groupId1, makeGroupInstance(groupId1, 'Frontend', 'Frontend')],
@@ -492,7 +492,7 @@ suite('planDetailPanel - Group Name Display', () => {
       const node1Id = node1.id;
       
       const plan = makePlanInstance({
-        nodes: new Map([[node1Id, node1]]),
+        jobs: new Map([[node1Id, node1]]),
         nodeStates: new Map([[node1Id, makeNodeState()]]),
         groups: new Map([[groupId, makeGroupInstance(groupId, 'Frontend', 'Frontend')]]),
         groupStates: new Map([[groupId, makeGroupState()]]),
@@ -528,7 +528,7 @@ suite('planDetailPanel - Group Name Display', () => {
       const node1Id = node1.id;
       
       const plan = makePlanInstance({
-        nodes: new Map([[node1Id, node1]]),
+        jobs: new Map([[node1Id, node1]]),
         nodeStates: new Map([[node1Id, makeNodeState()]]),
         groups: new Map([[groupId, makeGroupInstance(groupId, 'Front-end & "UI"', 'Front-end & "UI"')]]),
         groupStates: new Map([[groupId, makeGroupState()]]),
@@ -555,7 +555,7 @@ suite('planDetailPanel - Group Name Display', () => {
       const node1Id = node1.id;
       
       const plan = makePlanInstance({
-        nodes: new Map([[node1Id, node1]]),
+        jobs: new Map([[node1Id, node1]]),
         nodeStates: new Map([[node1Id, makeNodeState()]]),
         groups: new Map([
           [parentGroupId, makeGroupInstance(parentGroupId, 'API', 'API')],
@@ -591,7 +591,7 @@ suite('planDetailPanel - Group Name Display', () => {
       const node1Id = node1.id;
       
       const plan = makePlanInstance({
-        nodes: new Map([[node1Id, node1]]),
+        jobs: new Map([[node1Id, node1]]),
         nodeStates: new Map([[node1Id, makeNodeState()]]),
         groups: new Map([[groupId, makeGroupInstance(groupId, '', 'Parent/')]]),
         groupStates: new Map([[groupId, makeGroupState()]]),

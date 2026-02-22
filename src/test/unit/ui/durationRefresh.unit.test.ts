@@ -28,7 +28,7 @@ class MockPlanRunner {
   getAll() {
     return this.mockPlans.map(plan => ({
       id: plan.id,
-      nodes: new Map(),
+      jobs: new Map(),
       spec: { name: `Plan ${plan.id}` },
       startedAt: plan.startedAt
     }));

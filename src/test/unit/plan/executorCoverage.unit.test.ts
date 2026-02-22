@@ -12,6 +12,7 @@ import { DefaultEvidenceValidator } from '../../../plan/evidenceValidator';
 import { ProcessMonitor } from '../../../process';
 import { WorkPhaseExecutor } from '../../../plan/phases/workPhase';
 import { PostcheckPhaseExecutor } from '../../../plan/phases/postcheckPhase';
+import { CommitPhaseExecutor } from '../../../plan/phases/commitPhase';
 import { Logger } from '../../../core/logger';
 import * as processHelpers from '../../../process/processHelpers';
 import type { JobNode, ExecutionContext, JobExecutionResult } from '../../../plan/types';
@@ -97,6 +98,60 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
     tmpDirs = [];
   });
 
+  test('execute wires getLogFilePath to CommitPhaseContext', async () => {
+    const dir = makeTmpDir();
+    const storagePath = makeTmpDir();
+    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
+    executor.setStoragePath(storagePath);
+
+    // Capture the context passed to CommitPhaseExecutor
+    let capturedGetLogFilePath: (() => string | undefined) | undefined;
+    const commitPhaseStub = sandbox.stub(require('../../../plan/phases').CommitPhaseExecutor.prototype, 'execute').callsFake(async function(this: any, ctx: any) {
+      capturedGetLogFilePath = ctx.getLogFilePath;
+      return { success: true, commit: 'abc123' };
+    });
+
+    const mockPlan = { id: 'test-plan', nodes: [] } as any;
+    const mockNode: JobNode = {
+      id: 'test-node',
+      producerId: 'test-producer',
+      name: 'Test Node',
+      type: 'job',
+      task: 'Test task',
+      work: 'echo test',
+      postchecks: undefined,
+      dependencies: [],
+      dependents: []
+    };
+
+    const mockContext: ExecutionContext = {
+      plan: mockPlan,
+      node: mockNode,
+      baseCommit: 'abc123',
+      worktreePath: dir,
+      attemptNumber: 1,
+      onProgress: () => {},
+      onStepStatusChange: () => {}
+    };
+
+    // Mock work phase to succeed
+    sandbox.stub(WorkPhaseExecutor.prototype, 'execute').resolves({ success: true });
+
+    await executor.execute(mockContext);
+    
+    // Verify getLogFilePath was wired into context
+    assert.ok(capturedGetLogFilePath, 'getLogFilePath should be wired into CommitPhaseContext');
+    assert.strictEqual(typeof capturedGetLogFilePath, 'function');
+    
+    // Call it and verify it returns a path based on storage path
+    const logPath = capturedGetLogFilePath();
+    // The path should be under the storage path/plans/planId/specs/nodeId/current/execution.log
+    if (logPath) {
+      assert.ok(logPath.includes('test-plan'), 'Log path should include plan ID');
+      assert.ok(logPath.includes('test-node'), 'Log path should include node ID');
+    }
+  });
+
   test('execute handles work phase failure (line 140)', async () => {
     const dir = makeTmpDir();
     const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
@@ -150,6 +205,11 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
       success: true
     } as JobExecutionResult);
 
+    // Mock commit phase to succeed
+    sandbox.stub(CommitPhaseExecutor.prototype, 'execute').resolves({
+      success: true, commit: 'abc123'
+    } as JobExecutionResult);
+
     // Mock postchecks phase to fail
     sandbox.stub(PostcheckPhaseExecutor.prototype, 'execute').resolves({
       success: false,
@@ -166,6 +226,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
       task: 'Test task with postchecks',
       work: 'echo test',
       postchecks: 'echo postcheck',
+      expectsNoChanges: true,
       dependencies: [],
       dependents: []
     };

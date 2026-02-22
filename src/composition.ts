@@ -30,6 +30,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { ServiceContainer } from './core/container';
 import * as Tokens from './core/tokens';
 import { VsCodeConfigProvider, VsCodeDialogService, VsCodeClipboardService } from './vscode/adapters';
@@ -46,6 +47,9 @@ import { PlanConfigManager } from './plan/configManager';
 import { PlanPersistence } from './plan/persistence';
 import { StdioMcpServerManager } from './mcp/mcpServerManager';
 import { DefaultGitOperations } from './git/DefaultGitOperations';
+import { FileSystemPlanStore } from './plan/store/FileSystemPlanStore';
+import { DefaultPlanRepository } from './plan/repository/DefaultPlanRepository';
+import { DefaultFileSystem } from './core/defaultFileSystem';
 
 /**
  * Create and wire the production DI container.
@@ -168,6 +172,12 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     () => new DefaultEvidenceValidator(),
   );
 
+  // ─── File System ────────────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IFileSystem').IFileSystem>(
+    Tokens.IFileSystem,
+    () => new DefaultFileSystem(),
+  );
+
   // ─── MCP Request Router ─────────────────────────────────────────────
   // McpHandler requires a PlanRunner and workspacePath at construction time.
   // Scoped containers override this registration with a configured instance.
@@ -194,6 +204,30 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     (c) => {
       const configProvider = c.resolve<import('./interfaces').IConfigProvider>(Tokens.IConfigProvider);
       return new PlanConfigManager(configProvider);
+    },
+  );
+
+  // ─── Plan Repository Store ──────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IPlanRepositoryStore').IPlanRepositoryStore>(
+    Tokens.IPlanRepositoryStore,
+    (c) => {
+      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+      const plansDir = workspacePath
+        ? path.join(workspacePath, '.orchestrator', 'plans')
+        : path.join(context.globalStorageUri.fsPath, 'plans');
+      const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+      return new FileSystemPlanStore(plansDir, workspacePath, fileSystem);
+    },
+  );
+
+  // ─── Plan Repository ────────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IPlanRepository').IPlanRepository>(
+    Tokens.IPlanRepository,
+    (c) => {
+      const store = c.resolve<import('./interfaces/IPlanRepositoryStore').IPlanRepositoryStore>(Tokens.IPlanRepositoryStore);
+      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+      const worktreeRoot = workspacePath ? path.join(workspacePath, '.worktrees') : '';
+      return new DefaultPlanRepository(store, workspacePath, worktreeRoot);
     },
   );
 

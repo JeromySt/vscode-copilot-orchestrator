@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { LogEntry } from './types';
-import { ensureOrchestratorDirs } from '../core';
+
 
 const ensuredDirs = new Set<string>();
 
@@ -22,12 +22,47 @@ export function getLogFilePathByKey(
   if (!storagePath) {return undefined;}
   let logFile = logFiles.get(executionKey);
   if (!logFile) {
-    const logsDir = path.join(storagePath, 'logs');
-    const safeKey = executionKey.replace(/[^a-zA-Z0-9-_]/g, '_');
-    logFile = path.join(logsDir, `${safeKey}.log`);
+    // Parse execution key: "planId:nodeId:attemptNumber"
+    const keyParts = executionKey.split(':');
+    const planId = keyParts[0];
+    const nodeId = keyParts[1];
+    if (!planId || !nodeId) {return undefined;}
+    // Validate planId/nodeId to prevent path traversal
+    const safePattern = /^[A-Za-z0-9_-]+$/;
+    if (!safePattern.test(planId) || !safePattern.test(nodeId)) {return undefined;}
+    // Write to specs/<nodeId>/current/execution.log (resolves through symlink to attempts/<n>/)
+    logFile = path.join(storagePath, 'plans', planId, 'specs', nodeId, 'current', 'execution.log');
     logFiles.set(executionKey, logFile);
   }
   return logFile;
+}
+
+/**
+ * Get the log file path for a specific attempt (reads from attempts/<n>/ directly).
+ */
+export function getLogFilePathForAttempt(
+  planId: string,
+  nodeId: string,
+  attemptNumber: number,
+  storagePath: string | undefined,
+): string | undefined {
+  if (!storagePath) {return undefined;}
+  const safePattern = /^[A-Za-z0-9_-]+$/;
+  if (!safePattern.test(planId) || !safePattern.test(nodeId)) {return undefined;}
+  return path.join(storagePath, 'plans', planId, 'specs', nodeId, 'attempts', String(attemptNumber), 'execution.log');
+}
+
+/**
+ * Get legacy log file path (for migration and fallback reads).
+ */
+export function getLegacyLogFilePath(
+  planId: string,
+  nodeId: string,
+  attemptNumber: number,
+  storagePath: string,
+): string {
+  const safeKey = `${planId}_${nodeId}_${attemptNumber}`;
+  return path.join(storagePath, 'logs', `${safeKey}.log`);
 }
 
 /**
@@ -52,23 +87,29 @@ function ensureLogFile(logFile: string, executionKey: string): void {
  */
 function buildLogFileHeader(executionKey: string): string {
   const now = new Date().toISOString();
+  
+  // Use build-time constants (injected by esbuild) for reliable version info
   let version = 'unknown';
   let commit = 'unknown';
-  
-  // Read version from package.json (two levels up from out/plan/)
+  let buildTimestamp = '';
   try {
-    const pkgPath = path.resolve(__dirname, '..', '..', 'package.json');
-    if (fs.existsSync(pkgPath)) {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      version = pkg.version || 'unknown';
-    }
-  } catch { /* ignore */ }
-  
-  // Try to get git commit from the workspace
-  try {
-    const { execSync } = require('child_process'); // eslint-disable-line no-restricted-syntax -- one-shot git metadata read
-    commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000 }).trim();
-  } catch { /* ignore - not in a git repo or git not available */ }
+    const { BUILD_VERSION, BUILD_COMMIT, BUILD_TIMESTAMP } = require('../core/buildInfo');
+    version = BUILD_VERSION || 'unknown';
+    commit = BUILD_COMMIT || 'unknown';
+    buildTimestamp = BUILD_TIMESTAMP || '';
+  } catch {
+    // Fallback for dev/test: read from package.json + runtime git
+    try {
+      const pkgPath = path.resolve(__dirname, '..', '..', 'package.json');
+      if (fs.existsSync(pkgPath)) {
+        version = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).version || 'unknown';
+      }
+    } catch { /* ignore */ }
+    try {
+      const { execSync } = require('child_process'); // eslint-disable-line no-restricted-syntax
+      commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000 }).trim();
+    } catch { /* ignore */ }
+  }
   
   // Parse execution key to extract plan/node/attempt info
   // Key format: planId:nodeId:attemptNumber
@@ -76,13 +117,14 @@ function buildLogFileHeader(executionKey: string): string {
   const planId = keyParts[0] || 'unknown';
   const nodeId = keyParts[1] || 'unknown';
   const attempt = keyParts[2] || '1';
-  
+
   const lines = [
     `================================================================================`,
     `  Copilot Orchestrator - Node Execution Log`,
     `================================================================================`,
     `  Version:    ${version}`,
     `  Commit:     ${commit}`,
+    `  Built:      ${buildTimestamp}`,
     `  Platform:   ${process.platform} ${process.arch}`,
     `  Node.js:    ${process.version}`,
     `  Created:    ${now}`,
@@ -105,14 +147,6 @@ export function appendToLogFile(
   if (!logFile) {return;}
   try {
     ensureLogFile(logFile, executionKey);
-    if (storagePath) {
-      const workspacePath = path.resolve(storagePath, '..');
-      const logsDirPath = path.join(workspacePath, '.orchestrator', 'logs');
-      if (!ensuredDirs.has(workspacePath) || !fs.existsSync(logsDirPath)) {
-        ensureOrchestratorDirs(workspacePath);
-        ensuredDirs.add(workspacePath);
-      }
-    }
     const time = new Date(entry.timestamp).toISOString();
     const prefix = entry.type === 'stderr' ? '[ERR]' :
                    entry.type === 'error' ? '[ERROR]' :

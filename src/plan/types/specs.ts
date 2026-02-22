@@ -166,6 +166,12 @@ export interface AgentSpec {
    */
   instructions: string;
   
+  /** Workspace-relative path to .md file for file-backed agent instructions */
+  instructionsFile?: string;
+  
+  /** Relative path (within plan directory) to the instructions file on disk. Set by migration/store. */
+  instructionsRef?: string;
+  
   /** Optional model preference */
   model?: string;
   
@@ -238,6 +244,9 @@ export interface AgentSpec {
    * ```
    */
   allowedUrls?: string[];
+
+  /** Additional environment variables */
+  env?: Record<string, string>;
 
   /** Failure behavior for this phase */
   onFailure?: OnFailureConfig;
@@ -354,6 +363,21 @@ export function normalizeWorkSpec(spec: WorkSpec | undefined): ProcessSpec | She
   }
   
   if (typeof spec === 'string') {
+    // Try parsing JSON object strings (e.g. '{"type":"agent","instructions":"..."}')
+    if (spec.trimStart().startsWith('{')) {
+      try {
+        // Strip trailing non-JSON content (LLMs sometimes append XML tags like </invoke>)
+        let jsonCandidate = spec.trim();
+        const lastBrace = jsonCandidate.lastIndexOf('}');
+        if (lastBrace > 0 && lastBrace < jsonCandidate.length - 1) {
+          jsonCandidate = jsonCandidate.substring(0, lastBrace + 1);
+        }
+        const parsed = JSON.parse(jsonCandidate);
+        if (parsed && typeof parsed === 'object' && parsed.type) {
+          return normalizeWorkSpec(parsed);
+        }
+      } catch { /* not valid JSON, treat as shell command */ }
+    }
     // Legacy string format
     if (spec.startsWith('@agent')) {
       const instructions = spec.replace(/^@agent\s*/i, '').trim();

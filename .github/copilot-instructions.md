@@ -143,20 +143,25 @@ src/
 └── test/         # unit/ (headless), suite/ (VS Code host)
 ```
 
-## Agent Skills
+## Copilot Instructions
 
-This repository includes specialized skills in `.github/skills/` for detailed task-specific guidance.
-Load the relevant skill when performing these tasks:
+This repository uses `.github/instructions/*.instructions.md` files with `applyTo` frontmatter
+for context-specific guidance. These are automatically loaded when editing matching files:
 
-| Task | Skill |
+| Instruction File | Applies To |
 |---|---|
-| Writing or fixing tests | `.github/skills/test-writer/SKILL.md` |
-| Adding services, interfaces, or DI wiring | `.github/skills/di-refactor/SKILL.md` |
-| Security review, path validation, sandboxing | `.github/skills/security-hardener/SKILL.md` |
-| Fixing failed build/test/phase errors | `.github/skills/auto-heal/SKILL.md` |
-| Writing or updating documentation | `.github/skills/documentation-writer/SKILL.md` |
-| PR merging, release, or version tagging | `.github/skills/pr-release-gatekeeper/SKILL.md` |
-| Committing code, creating branches | `.github/skills/branch-workflow/SKILL.md` |
+| `auto-heal.instructions.md` | Plan phases, execution engine |
+| `branch-workflow.instructions.md` | All files (git workflow) |
+| `code-review.instructions.md` | All files (review standards) |
+| `di-refactor.instructions.md` | Interfaces, composition root, DI tokens |
+| `documentation-writer.instructions.md` | Markdown files, docs/ |
+| `local-build.instructions.md` | All files (local build & test workflow) |
+| `pr-release-gatekeeper.instructions.md` | All files (PR & release process) |
+| `security-hardener.instructions.md` | Agent, MCP, git, phase files |
+| `software-architect.instructions.md` | Architecture-critical files |
+| `source-code.instructions.md` | Source files (excluding tests) |
+| `test-writer.instructions.md` | Test files |
+| `testing.instructions.md` | Test files |
 
 ## Branch Workflow (MANDATORY)
 
@@ -172,4 +177,4 @@ Before merging ANY pull request, you **MUST** query the GitHub API for all revie
 4. Verify all CI checks are passing (including CodeQL)
 5. Only after ALL feedback is addressed and all checks pass, merge with `--squash`
 
-**Never merge a PR without completing this checklist.** See the `pr-release-gatekeeper` skill for the full process.
+**Never merge a PR without completing this checklist.** See the `pr-release-gatekeeper.instructions.md` instructions for the full process.

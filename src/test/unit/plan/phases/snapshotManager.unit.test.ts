@@ -14,6 +14,7 @@ function mockGitOperations(): IGitOperations {
       hasChangesBetween: sinon.stub().resolves(true),
       hasUncommittedChanges: sinon.stub().resolves(false),
       resetHard: sinon.stub().resolves(),
+      resetMixed: sinon.stub().resolves(),
       updateRef: sinon.stub().resolves(),
       stageAll: sinon.stub().resolves(),
       commit: sinon.stub().resolves(true),

@@ -84,6 +84,10 @@ class DefaultGitBranches implements IGitBranches {
     return branches.getMergeBase(branch1, branch2, repoPath);
   }
 
+  async isAncestor(ancestor: string, descendant: string, repoPath: string): Promise<boolean> {
+    return branches.isAncestor(ancestor, descendant, repoPath);
+  }
+
   async remove(branchName: string, repoPath: string, options?: { force?: boolean; log?: GitLogger }): Promise<void> {
     return branches.remove(branchName, repoPath, options);
   }
@@ -281,6 +285,10 @@ class DefaultGitRepository implements IGitRepository {
 
   async resetHard(cwd: string, ref: string, log?: GitLogger): Promise<void> {
     return repository.resetHard(cwd, ref, log);
+  }
+
+  async resetMixed(cwd: string, ref: string, log?: GitLogger): Promise<void> {
+    return repository.resetMixed(cwd, ref, log);
   }
 
   async clean(cwd: string, log?: GitLogger): Promise<void> {

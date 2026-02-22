@@ -41,3 +41,22 @@ export function registerCopilotCliCheck(context: vscode.ExtensionContext) {
     vscode.window.showInformationMessage(ok? 'Copilot CLI detected.' : 'Copilot CLI not detected (prompt shown).');
   }));
 }
+
+/**
+ * Check CLI availability at startup and offer setup if needed.
+ * Runs after extension activation to provide helpful guidance.
+ */
+export async function checkCopilotCliOnStartup(): Promise<void> {
+  const cliAvailable = isCliCachePopulated() ? isCopilotCliAvailable() : await checkCopilotCliAsync();
+  
+  if (!cliAvailable) {
+    const action = await vscode.window.showWarningMessage(
+      'Copilot CLI not detected. The orchestrator requires it for agent work.',
+      'Setup Now',
+      'Dismiss'
+    );
+    if (action === 'Setup Now') {
+      vscode.commands.executeCommand('copilotOrchestrator.setupCopilotCli');
+    }
+  }
+}

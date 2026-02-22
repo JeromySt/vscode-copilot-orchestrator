@@ -14,7 +14,7 @@ import { formatDurationMs } from '../../../ui/templates/helpers';
 // Mock PlanRunner for testing
 class MockPlanRunner {
   private listeners: { [event: string]: Function[] } = {};
-  private mockPlans: Array<{ id: string; status: string; startedAt?: number; nodes?: Map<string, any> }> = [];
+  private mockPlans: Array<{ id: string; status: string; startedAt?: number; jobs?: Map<string, any> }> = [];
 
   on(event: string, listener: Function) {
     if (!this.listeners[event]) {this.listeners[event] = [];}
@@ -28,7 +28,7 @@ class MockPlanRunner {
   getAll() {
     return this.mockPlans.map(plan => ({
       id: plan.id,
-      nodes: plan.nodes || new Map(),
+      jobs: plan.jobs || new Map(),
       spec: { name: `Plan ${plan.id}` },
       startedAt: plan.startedAt
     }));
@@ -48,7 +48,7 @@ class MockPlanRunner {
     } : undefined;
   }
 
-  setMockPlans(plans: Array<{ id: string; status: string; startedAt?: number; nodes?: Map<string, any> }>) {
+  setMockPlans(plans: Array<{ id: string; status: string; startedAt?: number; jobs?: Map<string, any> }>) {
     this.mockPlans = plans;
   }
 }
@@ -139,7 +139,7 @@ suite('Duration Timer Updates', () => {
         id: '1',
         status: 'running',
         startedAt: Date.now(),
-        nodes: new Map([['node1', { state: { status: 'running' } }]])
+        jobs: new Map([['node1', { state: { status: 'running' } }]])
       }]);
       
       // Create tree view which starts the timer
@@ -165,7 +165,7 @@ suite('Duration Timer Updates', () => {
       mockRunner.setMockPlans([{
         id: '1',
         status: 'completed',
-        nodes: new Map([['node1', { state: { status: 'completed' } }]])
+        jobs: new Map([['node1', { state: { status: 'completed' } }]])
       }]);
       
       const mockContext = { subscriptions: [] };
@@ -187,7 +187,7 @@ suite('Duration Timer Updates', () => {
         id: 'test-plan',
         startedAt: Date.now() - 65000,  // 65 seconds ago
         spec: { name: 'Test Plan' },
-        nodes: new Map()
+        jobs: new Map()
       };
       
       // Mock the plan runner to return our test plan

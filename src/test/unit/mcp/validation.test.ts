@@ -80,7 +80,12 @@ suite('MCP Schema Validation', () => {
     test('accepts valid minimal plan', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
-        jobs: []
+        jobs: [{
+          producerId: 'task1',
+          task: 'Do work',
+          work: 'npm run build',
+          dependencies: []
+        }]
       });
       assert.ok(result.valid, `Expected valid, got: ${result.error}`);
     });
@@ -89,7 +94,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'build',
+          producerId: 'build',
           task: 'Build the project',
           dependencies: [],
           work: 'npm run build'
@@ -129,7 +134,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'INVALID_UPPERCASE',
+          producerId: 'INVALID_UPPERCASE',
           task: 'Test',
           dependencies: []
         }]
@@ -142,7 +147,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'ab',
+          producerId: 'ab',
           task: 'Test',
           dependencies: []
         }]
@@ -154,7 +159,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'test-job',
+          producerId: 'test-job',
           task: 'Test',
           dependencies: [],
           unknownProp: 'bad'
@@ -168,7 +173,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'tier1',
+          producerId: 'tier1',
           task: 'Tier 1',
           dependencies: [],
           type: 'group'
@@ -182,44 +187,51 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'tier1',
+          producerId: 'tier1',
           task: 'Tier 1',
           dependencies: [],
-          jobs: [{ producer_id: 'inner', task: 'Inner', dependencies: [] }]
+          jobs: [{ producerId: 'inner', task: 'Inner', dependencies: [] }]
         }]
       });
       assert.strictEqual(result.valid, false);
       assert.ok(result.error?.includes('jobs'), `Error should mention nested 'jobs': ${result.error}`);
     });
 
-    test('accepts valid groups structure', () => {
+    test('rejects groups property (no longer supported at schema level)', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
-        jobs: [],
+        jobs: [{
+          producerId: 'build',
+          task: 'Build',
+          work: 'npm run build',
+          dependencies: []
+        }],
         groups: [{
           name: 'phase1',
           jobs: [{
-            producer_id: 'build',
-            task: 'Build',
+            producerId: 'build2',
+            task: 'Build2',
             dependencies: []
           }]
         }]
       });
-      assert.ok(result.valid, `Expected valid, got: ${result.error}`);
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error?.includes('groups'), `Error should mention 'groups': ${result.error}`);
     });
 
-    test('rejects unknown properties on groups', () => {
+    test('rejects unknown top-level properties', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
-        jobs: [],
-        groups: [{
-          name: 'phase1',
-          jobs: [],
-          dependencies: ['something']
-        }]
+        jobs: [{
+          producerId: 'build',
+          task: 'Build',
+          work: 'npm run build',
+          dependencies: []
+        }],
+        invalidProp: 'test'
       });
       assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes('dependencies'), `Error should mention 'dependencies': ${result.error}`);
+      assert.ok(result.error?.includes('invalidProp'), `Error should mention 'invalidProp': ${result.error}`);
     });
 
     // -----------------------------------------------------------------------
@@ -229,7 +241,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'build',
+          producerId: 'build',
           task: 'Build the project',
           dependencies: [],
           work: '@agent Do something',
@@ -244,7 +256,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'build',
+          producerId: 'build',
           task: 'Build the project',
           dependencies: [],
           work: {
@@ -261,7 +273,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'build',
+          producerId: 'build',
           task: 'Build the project',
           dependencies: [],
           model: 'claude-haiku-4.5',
@@ -279,7 +291,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'retry-job',
+          producerId: 'retry-job',
           task: 'Retry with session',
           dependencies: [],
           work: {
@@ -296,7 +308,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'lint',
+          producerId: 'lint',
           task: 'Lint the code',
           dependencies: [],
           work: 'npm run lint',
@@ -312,13 +324,13 @@ suite('MCP Schema Validation', () => {
         name: 'Multi-model Plan',
         jobs: [
           {
-            producer_id: 'fast-task',
+            producerId: 'fast-task',
             task: 'Quick lint check',
             dependencies: [],
             work: { type: 'agent', instructions: '# Run lint', model: 'claude-haiku-4.5' }
           },
           {
-            producer_id: 'complex-task',
+            producerId: 'complex-task',
             task: 'Complex refactoring',
             dependencies: ['fast-task'],
             work: { type: 'agent', instructions: '# Refactor auth', model: 'claude-opus-4.6' }
@@ -334,14 +346,14 @@ suite('MCP Schema Validation', () => {
   // =========================================================================
   suite('status/query tool validation', () => {
     test('get_copilot_plan_status accepts valid input', () => {
-      const result = validateInput('get_copilot_plan_status', { id: 'plan-123' });
+      const result = validateInput('get_copilot_plan_status', { planId: 'plan-123' });
       assert.ok(result.valid, `Expected valid, got: ${result.error}`);
     });
 
     test('get_copilot_plan_status rejects missing id', () => {
       const result = validateInput('get_copilot_plan_status', {});
       assert.strictEqual(result.valid, false);
-      assert.ok(result.error?.includes('id'), `Error should mention 'id': ${result.error}`);
+      assert.ok(result.error?.includes('planId'), `Error should mention 'planId': ${result.error}`);
     });
 
     test('list_copilot_plans accepts empty input', () => {
@@ -388,12 +400,12 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test',
         jobs: [
-          { producer_id: 'INVALID1', task: 'T', dependencies: [], extra1: 1 },
-          { producer_id: 'INVALID2', task: 'T', dependencies: [], extra2: 2 },
-          { producer_id: 'INVALID3', task: 'T', dependencies: [], extra3: 3 },
-          { producer_id: 'INVALID4', task: 'T', dependencies: [], extra4: 4 },
-          { producer_id: 'INVALID5', task: 'T', dependencies: [], extra5: 5 },
-          { producer_id: 'INVALID6', task: 'T', dependencies: [], extra6: 6 }
+          { producerId: 'INVALID1', task: 'T', dependencies: [], extra1: 1 },
+          { producerId: 'INVALID2', task: 'T', dependencies: [], extra2: 2 },
+          { producerId: 'INVALID3', task: 'T', dependencies: [], extra3: 3 },
+          { producerId: 'INVALID4', task: 'T', dependencies: [], extra4: 4 },
+          { producerId: 'INVALID5', task: 'T', dependencies: [], extra5: 5 },
+          { producerId: 'INVALID6', task: 'T', dependencies: [], extra6: 6 }
         ]
       });
       assert.strictEqual(result.valid, false);
@@ -445,7 +457,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test',
         jobs: [],
-        maxParallel: 100
+        maxParallel: 1025
       });
       assert.strictEqual(result.valid, false);
       assert.ok(result.error?.includes('too large'), `Error should mention 'too large': ${result.error}`);
@@ -471,7 +483,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'test-plan',
         jobs: [{
-          producer_id: 'test-job',
+          producerId: 'test-job',
           task: 'Do something',
           work: {
             type: 'agent',
@@ -488,7 +500,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'test-plan',
         jobs: [{
-          producer_id: 'test-job',
+          producerId: 'test-job',
           task: 'Do something',
           work: {
             type: 'agent',
@@ -506,7 +518,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'test-plan',
         jobs: [{
-          producer_id: 'test-job',
+          producerId: 'test-job',
           task: 'Do something',
           work: {
             type: 'agent',
@@ -523,7 +535,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'test-plan',
         jobs: [{
-          producer_id: 'test-job',
+          producerId: 'test-job',
           task: 'Do something',
           work: {
             type: 'agent',
@@ -541,7 +553,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'test-plan',
         jobs: [{
-          producer_id: 'test-job',
+          producerId: 'test-job',
           task: 'Do something',
           work: {
             type: 'agent',
@@ -559,7 +571,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'test-plan',
         jobs: [{
-          producer_id: 'shell-job',
+          producerId: 'shell-job',
           task: 'Run shell command',
           work: {
             type: 'shell',
@@ -579,7 +591,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'test-plan',
         jobs: [{
-          producer_id: 'test-job',
+          producerId: 'test-job',
           task: 'Do something',
           work: {
             type: 'agent',
@@ -596,7 +608,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'test-plan',
         jobs: [{
-          producer_id: 'test-job',
+          producerId: 'test-job',
           task: 'Do something',
           work: {
             type: 'agent',
@@ -612,7 +624,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'test-plan',
         jobs: [{
-          producer_id: 'test-job',
+          producerId: 'test-job',
           task: 'Do something',
           work: {
             type: 'agent',
@@ -629,7 +641,7 @@ suite('MCP Schema Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'test-plan',
         jobs: [{
-          producer_id: 'test-job',
+          producerId: 'test-job',
           task: 'Do something',
           work: {
             type: 'agent',

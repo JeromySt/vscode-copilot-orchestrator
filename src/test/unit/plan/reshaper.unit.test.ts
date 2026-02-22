@@ -72,7 +72,7 @@ function makePlan(
   return {
     id: 'plan-1',
     spec: {} as any,
-    nodes: nodesMap,
+    jobs: nodesMap,
     producerIdToNodeId: producerMap,
     roots: [],
     leaves: [],
@@ -197,10 +197,10 @@ suite('reshaper', () => {
 
       assert.strictEqual(result.success, true);
       assert.ok(result.nodeId);
-      assert.strictEqual(plan.nodes.size, 1);
+      assert.strictEqual(plan.jobs.size, 1);
       assert.ok(plan.producerIdToNodeId.has('new-node'));
 
-      const node = plan.nodes.get(result.nodeId!);
+      const node = plan.jobs.get(result.nodeId!);
       assert.ok(node);
       assert.deepStrictEqual(node!.dependencies, []);
       assert.strictEqual(node!.task, 'task for new-node');
@@ -220,7 +220,7 @@ suite('reshaper', () => {
       assert.strictEqual(result.success, true);
       assert.ok(result.nodeId);
 
-      const node = plan.nodes.get(result.nodeId!);
+      const node = plan.jobs.get(result.nodeId!);
       assert.deepStrictEqual(node!.dependencies, ['a-id']);
 
       // a should have the new node as dependent
@@ -350,7 +350,7 @@ suite('reshaper', () => {
       const result = removeNode(plan, 'a-id');
 
       assert.strictEqual(result.success, true);
-      assert.strictEqual(plan.nodes.size, 0);
+      assert.strictEqual(plan.jobs.size, 0);
       assert.strictEqual(plan.nodeStates.size, 0);
       assert.strictEqual(plan.producerIdToNodeId.has('a'), false);
     });
@@ -364,7 +364,7 @@ suite('reshaper', () => {
       const result = removeNode(plan, 'a-id');
 
       assert.strictEqual(result.success, true);
-      assert.strictEqual(plan.nodes.size, 0);
+      assert.strictEqual(plan.jobs.size, 0);
     });
 
     test('fails when node not found', () => {
@@ -618,7 +618,7 @@ suite('reshaper', () => {
       assert.deepStrictEqual(b.dependencies, [result.nodeId]);
 
       // new node should have b as dependent
-      const newNode = plan.nodes.get(result.nodeId!)!;
+      const newNode = plan.jobs.get(result.nodeId!)!;
       assert.ok(newNode.dependents.includes('b-id'));
     });
 
@@ -633,7 +633,7 @@ suite('reshaper', () => {
       const result = addNodeBefore(plan, 'b-id', makeSpec('new-before', ['a']));
 
       assert.strictEqual(result.success, true);
-      const newNode = plan.nodes.get(result.nodeId!)!;
+      const newNode = plan.jobs.get(result.nodeId!)!;
       assert.ok(newNode.dependencies.includes('a-id'));
     });
 
@@ -732,7 +732,7 @@ suite('reshaper', () => {
       assert.ok(result.nodeId);
 
       // new node should depend on a
-      const newNode = plan.nodes.get(result.nodeId!)!;
+      const newNode = plan.jobs.get(result.nodeId!)!;
       assert.ok(newNode.dependencies.includes('a-id'));
 
       // b (modifiable dependent) should now depend on new node instead of a
@@ -757,7 +757,7 @@ suite('reshaper', () => {
 
       assert.strictEqual(result.success, true);
       // Only b (pending) should be transferred, not c (running)
-      const newNode = plan.nodes.get(result.nodeId!)!;
+      const newNode = plan.jobs.get(result.nodeId!)!;
       assert.deepStrictEqual(newNode.dependents, ['b-id']);
       // c should still depend on a
       assert.ok(c.dependencies.includes('a-id'));
@@ -844,7 +844,7 @@ suite('reshaper', () => {
       const result = addNodeAfter(plan, 'a-id', makeSpec('new', ['b']));
 
       assert.strictEqual(result.success, true);
-      const newNode = plan.nodes.get(result.nodeId!)!;
+      const newNode = plan.jobs.get(result.nodeId!)!;
       // New node depends on both a (existingNode) and b (spec dep)
       assert.ok(newNode.dependencies.includes('a-id'));
       assert.ok(newNode.dependencies.includes('b-id'));
@@ -858,11 +858,11 @@ suite('reshaper', () => {
 
       const addResult = addNode(plan, makeSpec('x'));
       assert.strictEqual(addResult.success, true);
-      assert.strictEqual(plan.nodes.size, 1);
+      assert.strictEqual(plan.jobs.size, 1);
 
       const removeResult = removeNode(plan, addResult.nodeId!);
       assert.strictEqual(removeResult.success, true);
-      assert.strictEqual(plan.nodes.size, 0);
+      assert.strictEqual(plan.jobs.size, 0);
     });
 
     test('add two nodes then update deps', () => {
@@ -878,7 +878,7 @@ suite('reshaper', () => {
       const updateResult = updateNodeDependencies(plan, r2.nodeId!, [r1.nodeId!]);
       assert.strictEqual(updateResult.success, true);
 
-      const secondNode = plan.nodes.get(r2.nodeId!)!;
+      const secondNode = plan.jobs.get(r2.nodeId!)!;
       assert.deepStrictEqual(secondNode.dependencies, [r1.nodeId!]);
     });
 
@@ -893,7 +893,7 @@ suite('reshaper', () => {
       assert.strictEqual(rb.success, true);
       assert.strictEqual(rc.success, true);
 
-      assert.strictEqual(plan.nodes.size, 3);
+      assert.strictEqual(plan.jobs.size, 3);
       recomputeRootsAndLeaves(plan);
       assert.strictEqual(plan.roots.length, 1);
       assert.strictEqual(plan.leaves.length, 1);
@@ -909,11 +909,11 @@ suite('reshaper', () => {
 
       const r = addNode(plan, makeSpec('solo'));
       assert.strictEqual(r.success, true);
-      assert.strictEqual(plan.nodes.size, 1);
+      assert.strictEqual(plan.jobs.size, 1);
 
       const rm = removeNode(plan, r.nodeId!);
       assert.strictEqual(rm.success, true);
-      assert.strictEqual(plan.nodes.size, 0);
+      assert.strictEqual(plan.jobs.size, 0);
       assert.deepStrictEqual(plan.roots, []);
       assert.deepStrictEqual(plan.leaves, []);
     });

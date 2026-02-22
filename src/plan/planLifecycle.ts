@@ -23,7 +23,6 @@ import { OrchestratorFileWatcher } from '../core';
 import { computeProgress } from './helpers';
 import type { IGitOperations } from '../interfaces/IGitOperations';
 import type { JobExecutor, PlanRunnerConfig } from './runner';
-import { FinalMergeExecutor } from './phases/finalMergePhase';
 import type { GlobalCapacityManager, GlobalCapacityStats } from '../core/globalCapacity';
 import type { PowerManager } from '../core/powerManager';
 
@@ -48,6 +47,7 @@ export interface PlanRunnerState {
   stateMachineFactory: (plan: PlanInstance) => PlanStateMachine;
   copilotRunner?: import('../interfaces/ICopilotRunner').ICopilotRunner;
   powerManager?: PowerManager;
+  planRepository?: import('../interfaces/IPlanRepository').IPlanRepository;
 }
 
   /** Manages Plan CRUD operations and lifecycle transitions. */
@@ -77,6 +77,28 @@ export class PlanLifecycleManager {
 
     const loadedPlans = this.state.persistence.loadAll();
     for (const plan of loadedPlans) {
+      // Legacy migration: if repository store is available, migrate legacy plan-{id}.json to new directory format
+      if (this.state.planRepository) {
+        try {
+          const legacyFile = path.join(this.state.persistence.getStoragePath(), `plan-${plan.id}.json`);
+          const newPlanDir = path.join(this.state.persistence.getStoragePath(), plan.id);
+          const newPlanFile = path.join(newPlanDir, 'plan.json');
+          
+          // Check if legacy file exists but new structure doesn't
+          if (fs.existsSync(legacyFile) && !fs.existsSync(newPlanFile)) {
+            this.log.info(`Migrating legacy plan format for ${plan.id}`);
+            await this.state.planRepository.migrateLegacy(plan.id);
+          }
+          // Remove legacy file if new format now exists (migration succeeded or was already done)
+          if (fs.existsSync(legacyFile) && fs.existsSync(newPlanFile)) {
+            fs.unlinkSync(legacyFile);
+            this.log.info(`Removed legacy plan file for ${plan.id}`);
+          }
+        } catch (err) {
+          this.log.warn(`Failed to migrate legacy format for plan ${plan.id}, continuing with existing format`, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      
       await this.recoverRunningNodes(plan);
       this.state.plans.set(plan.id, plan);
       const sm = this.state.stateMachineFactory(plan);
@@ -84,10 +106,52 @@ export class PlanLifecycleManager {
       this.state.stateMachines.set(plan.id, sm);
     }
 
-    this.log.info(`Loaded ${loadedPlans.length} Plans from persistence`);
+    this.log.info(`Loaded ${loadedPlans.length} Plans from legacy persistence`);
 
+    // Load plans from new directory format (<planId>/plan.json) that aren't already loaded
+    if (this.state.planRepository) {
+      try {
+        const repoPlans = await this.state.planRepository.list();
+        for (const summary of repoPlans) {
+          if (this.state.plans.has(summary.id)) { continue; } // Already loaded from legacy
+          try {
+            const plan = await this.state.planRepository.loadState(summary.id);
+            if (plan) {
+              await this.recoverRunningNodes(plan);
+              this.state.plans.set(plan.id, plan);
+              const sm = this.state.stateMachineFactory(plan);
+              this.setupStateMachineListeners(sm);
+              this.state.stateMachines.set(plan.id, sm);
+              this.log.info(`Loaded plan from repository: ${plan.id} (${plan.spec.name})`);
+            }
+          } catch (err) {
+            this.log.warn(`Failed to load plan ${summary.id} from repository`, { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+      } catch (err) {
+        this.log.warn('Failed to list plans from repository', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    this.log.info(`Total plans loaded: ${this.state.plans.size}`);
+
+    // Disable legacy persistence saves now that migration is complete
+    if (this.state.planRepository) {
+      this.state.persistence.disableSaves();
+    }
+
+    // Re-persist plans after recovery (use new repository format if available, skip legacy)
     for (const plan of this.state.plans.values()) {
-      this.state.persistence.save(plan);
+      if (this.state.planRepository) {
+        try {
+          this.state.planRepository.saveStateSync(plan);
+        } catch {
+          // Fallback to legacy persistence if repository save fails
+          this.state.persistence.save(plan);
+        }
+      } else {
+        this.state.persistence.save(plan);
+      }
     }
   }
 
@@ -133,13 +197,42 @@ export class PlanLifecycleManager {
 
     this.log.info(`Plan created: ${plan.id}`, {
       name: spec.name,
-      nodes: plan.nodes.size,
+      nodes: plan.jobs.size,
       roots: plan.roots.length,
       leaves: plan.leaves.length,
       paused: shouldPause,
     });
 
     return plan;
+  }
+
+  /** Register an already-built PlanInstance (from IPlanRepository) with the runner. */
+  registerPlan(plan: PlanInstance): void {
+    this.log.info(`Registering existing plan: ${plan.id}`, { name: plan.spec.name });
+
+    // Scaffolding plans must always be paused — they're not ready to execute
+    if ((plan.spec as any)?.status === 'scaffolding') {
+      plan.isPaused = true;
+    }
+
+    this.state.plans.set(plan.id, plan);
+
+    const sm = this.state.stateMachineFactory(plan);
+    this.setupStateMachineListeners(sm);
+    this.state.stateMachines.set(plan.id, sm);
+
+    // Save via repository (not legacy persistence)
+    if (this.state.planRepository) {
+      try { this.state.planRepository.saveStateSync(plan); } catch { /* ignore */ }
+    }
+
+    this.state.events.emitPlanCreated(plan);
+
+    this.log.info(`Plan registered: ${plan.id}`, {
+      name: plan.spec.name,
+      nodes: plan.jobs.size,
+      paused: plan.isPaused,
+    });
   }
 
   /** Create a simple single-job plan. */
@@ -206,7 +299,7 @@ export class PlanLifecycleManager {
     if (!plan || !sm) {return undefined;}
 
     const counts = sm.getStatusCounts();
-    const progress = computeProgress(counts, plan.nodes.size);
+    const progress = computeProgress(counts, plan.jobs.size);
 
     return { plan, status: sm.computePlanStatus(), counts, progress };
   }
@@ -219,7 +312,7 @@ export class PlanLifecycleManager {
       const sm = this.state.stateMachines.get(planId);
       if (!sm) {continue;}
       for (const [nodeId, state] of plan.nodeStates) {
-        const node = plan.nodes.get(nodeId);
+        const node = plan.jobs.get(nodeId);
         if (!node) {continue;}
         if (nodePerformsWork(node)) {
           if (state.status === 'running' || state.status === 'scheduled') {running++;}
@@ -292,6 +385,9 @@ export class PlanLifecycleManager {
 
     this.log.info(`Canceling Plan: ${planId}`);
 
+    // Unblock any plans chained on this one
+    this.notifyDependentPlansOfTermination(planId, 'canceled');
+
     for (const [nodeId, state] of plan.nodeStates) {
       if (state.status === 'running' || state.status === 'scheduled') {
         this.log.info(`Canceling node via executor`, { planId, nodeId, status: state.status });
@@ -306,6 +402,10 @@ export class PlanLifecycleManager {
     });
 
     if (!options?.skipPersist) {
+      // Persist via plan repository (the authoritative store)
+      if (this.state.planRepository) {
+        try { this.state.planRepository.saveStateSync(plan); } catch { /* ignore */ }
+      }
       this.state.persistence.save(plan);
     }
 
@@ -320,16 +420,34 @@ export class PlanLifecycleManager {
     const plan = this.state.plans.get(planId)!;
     this.log.info(`Deleting Plan: ${planId}`);
 
+    // Unblock any plans chained on this one before removing it
+    this.notifyDependentPlansOfTermination(planId, 'deleted');
+
     this.cancel(planId);
 
     this.state.plans.delete(planId);
     this.state.stateMachines.delete(planId);
     this.state.events.emitPlanDeleted(planId);
 
+    // Delete plan data — use new repository (handles plans/<uuid>/ directory + index)
+    if (this.state.planRepository) {
+      // Write tombstone SYNCHRONOUSLY so the plan won't be rehydrated even if
+      // the extension reloads before the async physical cleanup finishes.
+      try {
+        this.state.planRepository.markDeletedSync(planId);
+      } catch (err) {
+        this.log.warn(`Failed to write sync delete tombstone: ${err}`);
+      }
+      // Physical cleanup is async (directory removal, index update).
+      this.state.planRepository.delete(planId).catch(err => {
+        this.log.warn(`Failed to delete plan via repository: ${err}`);
+      });
+    }
+    // Also try legacy persistence for old-format files
     try {
       this.state.persistence.delete(planId);
     } catch (err) {
-      this.log.warn(`Failed to delete plan file: ${err}`);
+      this.log.warn(`Failed to delete legacy plan file: ${err}`);
     }
 
     this.cleanupPlanResources(plan).catch(err => {
@@ -342,6 +460,12 @@ export class PlanLifecycleManager {
   async resume(planId: string, startPump: () => void): Promise<boolean> {
     const plan = this.state.plans.get(planId);
     if (!plan) {return false;}
+
+    // Scaffolding plans cannot be resumed — they must be finalized first
+    if ((plan.spec as any)?.status === 'scaffolding') {
+      this.log.warn(`Cannot resume scaffolding plan ${planId} — use finalize_copilot_plan first`);
+      return false;
+    }
 
     this.log.info(`Resuming Plan: ${planId}`);
 
@@ -436,7 +560,32 @@ export class PlanLifecycleManager {
     }
   }
 
-  setupStateMachineListeners(sm: PlanStateMachine): void {
+  /**
+   * Unblock any plans that were waiting on the given plan via `resumeAfterPlan`.
+   * Called when a plan is canceled or deleted — the dependency can never succeed,
+   * so clear the chain link and keep the waiting plan paused for the user to decide.
+   */
+  private notifyDependentPlansOfTermination(terminatedPlanId: string, reason: 'canceled' | 'deleted'): void {
+    for (const [, waitingPlan] of this.state.plans) {
+      if (waitingPlan.resumeAfterPlan === terminatedPlanId) {
+        const terminatedPlan = this.state.plans.get(terminatedPlanId);
+        const terminatedName = terminatedPlan?.spec.name || terminatedPlanId;
+        this.log.warn(
+          `Dependency plan '${terminatedName}' was ${reason} — unblocking chained plan '${waitingPlan.spec.name}' (remains paused)`,
+          { waitingPlanId: waitingPlan.id, terminatedPlanId }
+        );
+        // Clear the chain link so the UI no longer shows "waiting for..."
+        // and the Resume button becomes available again.
+        waitingPlan.resumeAfterPlan = undefined;
+        // Persist the change
+        if (this.state.planRepository) {
+          try { this.state.planRepository.saveStateSync(waitingPlan); } catch { /* best-effort */ }
+        }
+      }
+    }
+  }
+
+  setupStateMachineListeners(sm: PlanStateMachine, startPump?: () => void): void {
     sm.on('transition', (event: NodeTransitionEvent) => {
       this.state.events.emitNodeTransition(event);
     });
@@ -445,38 +594,47 @@ export class PlanLifecycleManager {
       const plan = this.state.plans.get(event.planId);
       if (!plan) { return; }
 
-      // If the plan succeeded and has a snapshot, run the final merge
-      // before declaring completion.
-      if (event.status === 'succeeded' && plan.snapshot && plan.targetBranch) {
-        this.log.info(`All nodes succeeded — running final merge: snapshot → ${plan.targetBranch}`);
-        const finalMerge = new FinalMergeExecutor({
-          git: this.git,
-          log: s => this.log.info(s),
-        });
-
-        const result = await finalMerge.execute(plan);
-        if (result.success) {
-          this.log.info(`Final merge succeeded (${result.attempts} attempt(s))`);
-          // Cleanup snapshot now that the merge is complete
-          try {
-            const { SnapshotManager } = await import('./phases/snapshotManager');
-            const snapshotMgr = new SnapshotManager(this.git);
-            await snapshotMgr.cleanupSnapshot(plan.snapshot, plan.repoPath, s => this.log.debug(s));
-            plan.snapshot = undefined;
-            this.state.persistence.save(plan);
-          } catch (e: any) {
-            this.log.warn(`Snapshot cleanup failed: ${e.message}`);
-          }
-        } else {
-          this.log.warn(`Final merge failed: ${result.error}`);
-          plan.awaitingFinalMerge = true;
-          this.state.persistence.save(plan);
-          // Don't emit planCompleted yet — plan is waiting for user action.
-          return;
+      // On success, clean up the snapshot branch + worktree.
+      // The SV node already handled the actual merge-RI to targetBranch —
+      // FinalMergeExecutor was a redundant second merge that served no purpose.
+      if (event.status === 'succeeded' && plan.snapshot) {
+        this.log.info(`Plan succeeded — cleaning up snapshot branch and worktree`);
+        try {
+          const { SnapshotManager } = await import('./phases/snapshotManager');
+          const snapshotMgr = new SnapshotManager(this.git);
+          await snapshotMgr.cleanupSnapshot(plan.snapshot, plan.repoPath, s => this.log.debug(s));
+          plan.snapshot = undefined;
+          this.log.info('Snapshot cleanup complete');
+        } catch (e: any) {
+          this.log.warn(`Snapshot cleanup failed (non-fatal): ${e.message}`);
         }
+        // Save state regardless of cleanup success
+        this.state.persistence.save(plan);
       }
 
       this.state.events.emitPlanCompleted(plan, event.status);
+
+      // Plan chaining: auto-resume any plans waiting on this one
+      if (event.status === 'succeeded') {
+        for (const [, waitingPlan] of this.state.plans) {
+          if (waitingPlan.resumeAfterPlan === event.planId && waitingPlan.isPaused) {
+            this.log.info(`Auto-resuming chained plan '${waitingPlan.spec.name}' (was waiting on '${plan.spec.name}')`, {
+              resumedPlanId: waitingPlan.id,
+              completedPlanId: event.planId,
+            });
+            // Clear the dependency now that it's satisfied
+            waitingPlan.resumeAfterPlan = undefined;
+            const pump = startPump || (() => {});
+            this.resume(waitingPlan.id, pump).catch(e => {
+              this.log.error(`Failed to auto-resume chained plan ${waitingPlan.id}: ${e.message}`);
+            });
+          }
+        }
+      } else if (event.status === 'canceled') {
+        // Only canceled plans unblock dependents — failed/partial plans can be retried,
+        // so dependent plans should keep waiting until the user cancels or retries to success.
+        this.notifyDependentPlansOfTermination(event.planId, 'canceled');
+      }
     });
   }
 
@@ -553,6 +711,9 @@ export class PlanLifecycleManager {
       }
     }
 
+    // Note: Log files are now stored under plans/<planId>/specs/<nodeId>/attempts/<n>/execution.log
+    // and are deleted when the plan directory is removed by planRepository.delete().
+    // Legacy log file cleanup (from .orchestrator/logs/) is handled below for backward compat.
     if (this.state.executor) {
       try {
         const storagePath = (this.state.executor as any).storagePath;
@@ -564,17 +725,13 @@ export class PlanLifecycleManager {
             let removedCount = 0;
             for (const file of files) {
               if (file.startsWith(safePlanId + '_') && file.endsWith('.log')) {
-                try { fs.unlinkSync(path.join(logsDir, file)); removedCount++; } catch (e: any) {
-                  cleanupErrors.push(`log file ${file}: ${e.message}`);
-                }
+                try { fs.unlinkSync(path.join(logsDir, file)); removedCount++; } catch { /* ignore */ }
               }
             }
-            if (removedCount > 0) {this.log.debug(`Removed ${removedCount} log files for plan ${plan.id}`);}
+            if (removedCount > 0) {this.log.debug(`Removed ${removedCount} legacy log files for plan ${plan.id}`);}
           }
         }
-      } catch (error: any) {
-        cleanupErrors.push(`logs: ${error.message}`);
-      }
+      } catch { /* ignore legacy log cleanup errors */ }
     }
 
     if (cleanupErrors.length > 0) {

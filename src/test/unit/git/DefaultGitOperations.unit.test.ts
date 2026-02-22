@@ -317,6 +317,12 @@ suite('DefaultGitOperations', () => {
       assert.ok(stub.calledWith('/repo', 'abc123'));
     });
 
+    test('resetMixed delegates to repository module', async () => {
+      const stub = sandbox.stub(repository, 'resetMixed').resolves();
+      await gitOps.repository.resetMixed('/repo', 'abc123');
+      assert.ok(stub.calledWith('/repo', 'abc123'));
+    });
+
     test('clean delegates to repository module', async () => {
       const stub = sandbox.stub(repository, 'clean').resolves();
       await gitOps.repository.clean('/repo');

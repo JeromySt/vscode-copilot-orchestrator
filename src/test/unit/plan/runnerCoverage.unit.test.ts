@@ -139,7 +139,7 @@ suite('PlanRunner delegation coverage', () => {
     const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
     const plan = runner.enqueueJob({ name: 'Job', task: 'x' });
     assert.ok(plan.id);
-    assert.strictEqual(plan.nodes.size, 2); // 1 job + snapshot-validation
+    assert.strictEqual(plan.jobs.size, 2); // 1 job + snapshot-validation
   });
 
   test('initialize, persistSync, shutdown lifecycle', async () => {
@@ -240,76 +240,6 @@ suite('PlanRunner delegation coverage', () => {
     assert.strictEqual(runner.savePlan(plan.id), true);
   });
 
-  test('completeFinalMerge returns error for unknown plan', async () => {
-    const dir = makeTmpDir();
-    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
-    const r = await runner.completeFinalMerge('unknown');
-    assert.strictEqual(r.success, false);
-    assert.ok(r.error?.includes('not found'));
-  });
-
-  test('completeFinalMerge returns error when not awaiting', async () => {
-    const dir = makeTmpDir();
-    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
-    const plan = runner.enqueue({
-      name: 'P', baseBranch: 'main',
-      jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
-    });
-    const r = await runner.completeFinalMerge(plan.id);
-    assert.strictEqual(r.success, false);
-    assert.ok(r.error?.includes('not awaiting'));
-  });
-
-  test('completeFinalMerge returns error when no snapshot', async () => {
-    const dir = makeTmpDir();
-    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
-    const plan = runner.enqueue({
-      name: 'P', baseBranch: 'main',
-      jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
-    });
-    (plan as any).awaitingFinalMerge = true;
-    const r = await runner.completeFinalMerge(plan.id);
-    assert.strictEqual(r.success, false);
-    assert.ok(r.error?.includes('snapshot'));
-  });
-
-  test('completeFinalMerge succeeds with valid snapshot', async () => {
-    const dir = makeTmpDir();
-    const deps = createRunnerDeps(path.join(dir, 'plans'));
-    const resolvedRef = 'abc1234def5678901234567890abcdef12345678';
-    // Add merge and repository stubs needed by FinalMergeExecutor
-    deps.git.repository = {
-      ...deps.git.repository,
-      resolveRef: async () => resolvedRef,
-      updateRef: async () => {},
-      hasUncommittedChanges: async () => false,
-      resetHard: async () => {},
-    };
-    deps.git.branches = {
-      ...deps.git.branches,
-      currentOrNull: async () => null,
-    };
-    deps.git.merge = {
-      mergeWithoutCheckout: async () => ({ success: true, treeSha: 'tree123' }),
-      commitTree: async () => 'commit12345678901234567890abcdef1234567890',
-    };
-    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, deps);
-    const plan = runner.enqueue({
-      name: 'P', baseBranch: 'main', targetBranch: 'main',
-      jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
-    });
-    (plan as any).awaitingFinalMerge = true;
-    (plan as any).snapshot = {
-      branch: 'orchestrator/snapshot/test',
-      worktreePath: '/tmp/snap',
-      baseCommit: resolvedRef, // same as resolveRef returns → rebase is a no-op
-    };
-    (plan as any).repoPath = dir;
-    const r = await runner.completeFinalMerge(plan.id);
-    assert.strictEqual(r.success, true);
-    assert.strictEqual(plan.awaitingFinalMerge, undefined);
-  });
-
   test('setPowerManager stores the power manager', () => {
     const dir = makeTmpDir();
     const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
@@ -318,38 +248,59 @@ suite('PlanRunner delegation coverage', () => {
     assert.strictEqual((runner as any)._state.powerManager, mockPm);
   });
 
-  test('completeFinalMerge returns failure when merge fails', async () => {
+  test('setPlanRepository stores the repository', () => {
     const dir = makeTmpDir();
-    const deps = createRunnerDeps(path.join(dir, 'plans'));
-    const resolvedRef = 'abc1234def5678901234567890abcdef12345678';
-    deps.git.repository = {
-      ...deps.git.repository,
-      resolveRef: async () => resolvedRef,
-      updateRef: async () => {},
-      hasUncommittedChanges: async () => false,
-      resetHard: async () => {},
-    };
-    deps.git.branches = {
-      ...deps.git.branches,
-      currentOrNull: async () => null,
-    };
-    deps.git.merge = {
-      mergeWithoutCheckout: async () => ({ success: false, conflicts: ['file.txt'] }),
-    };
-    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, deps);
-    const plan = runner.enqueue({
-      name: 'P', baseBranch: 'main', targetBranch: 'main',
-      jobs: [{ producerId: 'a', task: 'X', dependencies: [] }],
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    const mockRepo = { delete: async () => {}, saveStateSync: () => {} } as any;
+    runner.setPlanRepository(mockRepo);
+    assert.strictEqual((runner as any)._state.planRepository, mockRepo);
+  });
+
+  test('planUpdated event is forwarded', () => {
+    const dir = makeTmpDir();
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    
+    const spy = { called: false, args: null as any };
+    runner.on('planUpdated', (...args: any[]) => {
+      spy.called = true;
+      spy.args = args;
     });
-    (plan as any).awaitingFinalMerge = true;
-    (plan as any).snapshot = {
-      branch: 'orchestrator/snapshot/test',
-      worktreePath: '/tmp/snap',
-      baseCommit: resolvedRef,
-    };
-    (plan as any).repoPath = dir;
-    const r = await runner.completeFinalMerge(plan.id);
-    assert.strictEqual(r.success, false);
-    assert.ok(r.error);
+
+    // Emit planUpdated through internal events
+    (runner as any)._events.emitPlanUpdated('test-plan-id');
+
+    assert.strictEqual(spy.called, true);
+    assert.strictEqual(spy.args[0], 'test-plan-id');
+  });
+
+  test('registerPlan delegates to lifecycle manager', () => {
+    const dir = makeTmpDir();
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    
+    // Create a plan-like object
+    const mockPlan = {
+      id: 'test-plan-123',
+      spec: { name: 'Test', baseBranch: 'main', jobs: [] },
+      jobs: new Map(),
+      producerIdToNodeId: new Map(),
+      roots: [],
+      leaves: [],
+      nodeStates: new Map(),
+      groups: new Map(),
+      groupStates: new Map(),
+      groupPathToId: new Map(),
+      repoPath: '/repo',
+      baseBranch: 'main',
+      worktreeRoot: '/worktrees',
+      createdAt: Date.now(),
+      stateVersion: 0,
+      cleanUpSuccessfulWork: true,
+      maxParallel: 4,
+    } as any;
+
+    runner.registerPlan(mockPlan);
+
+    // Verify plan is registered
+    assert.ok(runner.get('test-plan-123'));
   });
 });

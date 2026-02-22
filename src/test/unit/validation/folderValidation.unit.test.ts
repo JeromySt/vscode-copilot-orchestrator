@@ -77,7 +77,7 @@ suite('validateAllowedFolders', () => {
   test('should pass when all folders exist and are directories', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: {
           type: 'agent',
@@ -94,7 +94,7 @@ suite('validateAllowedFolders', () => {
   test('should fail when folder does not exist', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: {
           type: 'agent',
@@ -114,7 +114,7 @@ suite('validateAllowedFolders', () => {
   test('should fail when path is a file, not a directory', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: {
           type: 'agent',
@@ -136,7 +136,7 @@ suite('validateAllowedFolders', () => {
       groups: [{
         name: 'backend',
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: {
             type: 'agent',
@@ -155,7 +155,7 @@ suite('validateAllowedFolders', () => {
   test('should skip validation for non-agent work types', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: {
           type: 'shell',
@@ -172,7 +172,7 @@ suite('validateAllowedFolders', () => {
   test('should pass when agent has no allowedFolders', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: { type: 'agent', instructions: 'Do something' }
       }]
@@ -185,7 +185,7 @@ suite('validateAllowedFolders', () => {
   test('should fail when path is not absolute', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: {
           type: 'agent',

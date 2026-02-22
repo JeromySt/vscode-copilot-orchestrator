@@ -97,6 +97,17 @@ function getShellDisplayName(shell: string | undefined): { name: string; lang: s
   return { name: shell, lang: 'shell' };
 }
 
+/**
+ * Render env vars as an HTML details section (collapsed by default).
+ */
+function formatEnvHtml(env: Record<string, string> | undefined, escapeHtml: (s: string) => string): string {
+  if (!env || Object.keys(env).length === 0) { return ''; }
+  const rows = Object.entries(env)
+    .map(([k, v]) => `<tr><td class="env-key">${escapeHtml(k)}</td><td class="env-val">${escapeHtml(v)}</td></tr>`)
+    .join('');
+  return `<details class="env-section"><summary>Environment Variables (${Object.keys(env).length})</summary><table class="env-table">${rows}</table></details>`;
+}
+
 function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) => string): string {
   if (!spec) {return '';}
   
@@ -107,6 +118,8 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
     </div>`;
   }
   
+  const envHtml = formatEnvHtml((spec as any).env, escapeHtml);
+  
   switch (spec.type) {
     case 'process': {
       const args = spec.args?.join(' ') || '';
@@ -114,31 +127,33 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
       return `<div class="work-code-block">
         <div class="work-code-header"><span class="work-lang-badge process">Process</span></div>
         <pre class="work-code"><code>${escapeHtml(cmd)}</code></pre>
+        ${envHtml}
       </div>`;
     }
     case 'shell': {
       const { name } = getShellDisplayName(spec.shell);
-      // Format long commands with line breaks for readability
       const formattedCmd = formatShellCommand(spec.command);
       return `<div class="work-code-block">
         <div class="work-code-header"><span class="work-lang-badge shell">${escapeHtml(name)}</span></div>
         <pre class="work-code"><code>${escapeHtml(formattedCmd)}</code></pre>
+        ${envHtml}
       </div>`;
     }
     case 'agent': {
-      // Render agent instructions as Markdown
       const instructions = spec.instructions || '';
       const rendered = renderMarkdown(instructions, escapeHtml);
       const modelLabel = spec.model ? escapeHtml(spec.model) : 'unspecified';
       return `<div class="work-code-block agent-block">
         <div class="work-code-header"><span class="work-lang-badge agent">Agent</span><span class="agent-model">${modelLabel}</span></div>
         <div class="work-instructions">${rendered}</div>
+        ${envHtml}
       </div>`;
     }
     default:
       return `<div class="work-code-block">
         <div class="work-code-header"><span class="work-lang-badge">Config</span></div>
         <pre class="work-code"><code>${escapeHtml(JSON.stringify(spec, null, 2))}</code></pre>
+        ${envHtml}
       </div>`;
   }
 }
@@ -536,8 +551,8 @@ export class NodeDetailPanel {
     }
     
     const plan = planRunner.get(planId);
-    const node = plan?.nodes.get(nodeId);
-    const title = node ? `Node: ${node.name}` : `Node: ${nodeId.slice(0, 8)}`;
+    const node = plan?.jobs.get(nodeId);
+    const title = node ? `Job: ${node.name}` : `Job: ${nodeId.slice(0, 8)}`;
     
     const panel = vscode.window.createWebviewPanel(
       'nodeDetail',
@@ -614,7 +629,7 @@ export class NodeDetailPanel {
       await this._planRunner.forceFailNode(planId, nodeId);
       // Refresh panel after successful force fail
       this._update();
-      vscode.window.showInformationMessage(`Node force failed. You can now retry.`);
+      vscode.window.showInformationMessage(`Job force failed. You can now retry.`);
     } catch (error) {
       console.debug('forceFailNode failed:', error);
       vscode.window.showErrorMessage(`Failed to force fail: ${error}`);
@@ -639,7 +654,7 @@ export class NodeDetailPanel {
     });
     
     if (result.success) {
-      vscode.window.showInformationMessage(`Node retry initiated${resumeSession ? ' (resuming session)' : ' (fresh session)'}`);
+      vscode.window.showInformationMessage(`Job retry initiated${resumeSession ? ' (resuming session)' : ' (fresh session)'}`);
       this._update();
     } else {
       vscode.window.showErrorMessage(`Retry failed: ${result.error}`);
@@ -663,7 +678,7 @@ export class NodeDetailPanel {
    */
   private async _sendLog(phase: string) {
     const plan = this._planRunner.get(this._planId);
-    const node = plan?.nodes.get(this._nodeId);
+    const node = plan?.jobs.get(this._nodeId);
     const state = plan?.nodeStates.get(this._nodeId);
     
     // Always send a response - never leave webview hanging
@@ -671,7 +686,7 @@ export class NodeDetailPanel {
       this._panel.webview.postMessage({
         type: 'logContent',
         phase,
-        content: 'Plan or node not found.',
+        content: 'Plan or job not found.',
         logFilePath: undefined,
       });
       return;
@@ -693,29 +708,32 @@ export class NodeDetailPanel {
   }
 
   /** Send config update to webview for live config display updates. */
-  private _sendConfigUpdate() {
+  private async _sendConfigUpdate() {
     const plan = this._planRunner.get(this._planId);
-    const node = plan?.nodes.get(this._nodeId);
+    const node = plan?.jobs.get(this._nodeId);
     const state = plan?.nodeStates.get(this._nodeId);
     
     if (!node || node.type !== 'job') {return;}
     
-    const normalizedWork = node.work ? normalizeWorkSpec(node.work) : undefined;
+    // Hydrate specs from disk if not inline (finalized plans store specs on disk)
+    const work = node.work || await plan?.definition?.getWorkSpec(this._nodeId);
+    const prechecks = node.prechecks || await plan?.definition?.getPrechecksSpec(this._nodeId);
+    const postchecks = node.postchecks || await plan?.definition?.getPostchecksSpec(this._nodeId);
     
     // Pre-render spec HTML server-side so the webview gets formatted HTML
     this._panel.webview.postMessage({
       type: 'configUpdate',
       data: {
-        work: node.work ? renderSpecContent(node.work) : undefined,
-        workType: node.work ? getSpecTypeInfo(node.work) : undefined,
-        workSkipped: !node.work,
-        workOnFailure: extractOnFailure(node.work),
-        prechecks: node.prechecks ? renderSpecContent(node.prechecks) : undefined,
-        prechecksType: node.prechecks ? getSpecTypeInfo(node.prechecks) : undefined,
-        prechecksOnFailure: extractOnFailure(node.prechecks),
-        postchecks: node.postchecks ? renderSpecContent(node.postchecks) : undefined,
-        postchecksType: node.postchecks ? getSpecTypeInfo(node.postchecks) : undefined,
-        postchecksOnFailure: extractOnFailure(node.postchecks),
+        work: work ? renderSpecContent(work) : undefined,
+        workType: work ? getSpecTypeInfo(work) : undefined,
+        workSkipped: !work,
+        workOnFailure: extractOnFailure(work),
+        prechecks: prechecks ? renderSpecContent(prechecks) : undefined,
+        prechecksType: prechecks ? getSpecTypeInfo(prechecks) : undefined,
+        prechecksOnFailure: extractOnFailure(prechecks),
+        postchecks: postchecks ? renderSpecContent(postchecks) : undefined,
+        postchecksType: postchecks ? getSpecTypeInfo(postchecks) : undefined,
+        postchecksOnFailure: extractOnFailure(postchecks),
         task: node.task,
         currentPhase: getCurrentExecutionPhase(state),
         expectsNoChanges: node.expectsNoChanges,
@@ -725,22 +743,86 @@ export class NodeDetailPanel {
   
   /**
    * Push attempt history updates to the webview for dynamic rendering.
+   * 
+   * Builds full attempt card data (logs from disk, work spec resolution, metrics)
+   * so the webview renders complete attempt cards without requiring panel close/reopen.
    *
    * @param state - The current node execution state.
    */
   private _sendAttemptUpdate(state: NodeExecutionState): void {
     if (!state.attemptHistory || state.attemptHistory.length === 0) {return;}
+    
+    const plan = this._planRunner.get(this._planId);
+    if (!plan) { return; }
+    
+    const attempts = state.attemptHistory.map(attempt => {
+      // Resolve log file path (same logic as full rebuild)
+      let resolvedLogPath = attempt.logFilePath;
+      if (attempt.logsRef && !attempt.logFilePath?.includes(':')) {
+        const storagePath = this._planRunner.getStoragePath?.() || '';
+        if (storagePath) {
+          resolvedLogPath = require('path').join(storagePath, plan.id, attempt.logsRef);
+        }
+      }
+      if (resolvedLogPath && !resolvedLogPath.includes(':') && !resolvedLogPath.startsWith('/')) {
+        const storagePath = this._planRunner.getStoragePath?.() || '';
+        if (storagePath) {
+          resolvedLogPath = require('path').join(storagePath, plan.id, resolvedLogPath);
+        }
+      }
+
+      // Read logs from attempt-specific file
+      let attemptLogs = attempt.logs || '';
+      if (!attemptLogs && resolvedLogPath) {
+        try {
+          attemptLogs = require('fs').readFileSync(resolvedLogPath, 'utf-8');
+        } catch { /* file may not exist yet */ }
+      }
+
+      // Resolve work spec
+      let workUsedHtml: string | undefined;
+      if (attempt.workUsed) {
+        workUsedHtml = formatWorkSpecHtml(attempt.workUsed, escapeHtml);
+      } else if (attempt.workRef) {
+        try {
+          const storagePath = this._planRunner.getStoragePath?.() || '';
+          const workPath = require('path').join(storagePath, plan.id, attempt.workRef);
+          const rawSpec = require('fs').readFileSync(workPath, 'utf-8');
+          const spec = JSON.parse(rawSpec);
+          if (spec.instructionsFile) {
+            try {
+              const mdPath = require('path').join(require('path').dirname(workPath), spec.instructionsFile);
+              spec.instructions = require('fs').readFileSync(mdPath, 'utf-8');
+              delete spec.instructionsFile;
+            } catch { /* md not found */ }
+          }
+          workUsedHtml = formatWorkSpecHtml(spec, escapeHtml);
+        } catch { /* file may not exist */ }
+      }
+
+      return {
+        attemptNumber: attempt.attemptNumber,
+        status: attempt.status,
+        triggerType: attempt.triggerType,
+        startedAt: attempt.startedAt,
+        endedAt: attempt.endedAt,
+        error: attempt.error,
+        failedPhase: attempt.failedPhase,
+        exitCode: attempt.exitCode,
+        copilotSessionId: attempt.copilotSessionId,
+        stepStatuses: attempt.stepStatuses,
+        worktreePath: attempt.worktreePath,
+        baseCommit: attempt.baseCommit,
+        logFilePath: resolvedLogPath,
+        workUsedHtml,
+        logs: attemptLogs,
+        metricsHtml: attempt.metrics ? attemptMetricsTemplateHtml(attempt.metrics, attempt.phaseMetrics) : '',
+      };
+    });
+
     this._panel.webview.postMessage({
       type: 'attemptUpdate',
-      attempts: state.attemptHistory.map(a => ({
-        attemptNumber: a.attemptNumber,
-        status: a.status,
-        triggerType: a.triggerType,
-        startedAt: a.startedAt,
-        endedAt: a.endedAt,
-        error: a.error,
-        failedPhase: a.failedPhase,
-      })),
+      attempts,
     });
   }
 
@@ -787,11 +869,11 @@ export class NodeDetailPanel {
       return;
     }
     
-    const node = plan.nodes.get(this._nodeId);
+    const node = plan.jobs.get(this._nodeId);
     const state = plan.nodeStates.get(this._nodeId);
     
     if (!node || !state) {
-      this._panel.webview.html = this._getErrorHtml('Node not found');
+      this._panel.webview.html = this._getErrorHtml('Job not found');
       return;
     }
     
@@ -802,6 +884,26 @@ export class NodeDetailPanel {
     
     // Send config update after rendering
     this._sendConfigUpdate();
+
+    // After HTML rebuild, send stateChange to re-initialize DurationCounterControl
+    const phaseStatus = this._getPhaseStatus(state);
+    const currentPhase = getCurrentExecutionPhase(state);
+    // Give webview time to initialize before sending state
+    setTimeout(() => {
+      this._panel.webview.postMessage({
+        type: 'stateChange',
+        status: state.status,
+        phaseStatus,
+        currentPhase,
+        startedAt: state.startedAt,
+        endedAt: state.endedAt,
+      });
+    }, 100);
+
+    // Send an immediate pulse so DurationCounterControl gets a tick right away
+    setTimeout(() => {
+      this._panel.webview.postMessage({ type: 'pulse' });
+    }, 150);
   }
   
   /**
@@ -810,7 +912,7 @@ export class NodeDetailPanel {
    * @returns Full HTML document string with a loading animation.
    */
   private _getLoadingHtml(): string {
-    return loadingPageHtml('Loading node details...');
+    return loadingPageHtml('Loading job details...');
   }
   
   /**
@@ -864,6 +966,54 @@ export class NodeDetailPanel {
     const attemptCards: AttemptCardData[] = [];
     if (state.attemptHistory && state.attemptHistory.length > 0) {
       for (const attempt of state.attemptHistory) {
+        // Resolve log file path: prefer logsRef (relative), fall back to logFilePath
+        // Convert relative refs to absolute paths via the plan storage directory
+        let resolvedLogPath = attempt.logFilePath;
+        if (attempt.logsRef && !attempt.logFilePath?.includes(':')) {
+          // logsRef is relative to .orchestrator/plans/<planId>/
+          const storagePath = this._planRunner.getStoragePath?.() || '';
+          if (storagePath) {
+            resolvedLogPath = require('path').join(storagePath, plan.id, attempt.logsRef);
+          }
+        }
+        if (resolvedLogPath && !resolvedLogPath.includes(':') && !resolvedLogPath.startsWith('/')) {
+          // Still relative — prefix with storage path
+          const storagePath = this._planRunner.getStoragePath?.() || '';
+          if (storagePath) {
+            resolvedLogPath = require('path').join(storagePath, plan.id, resolvedLogPath);
+          }
+        }
+
+        // Read logs from the attempt-specific log file (not /current/)
+        let attemptLogs = attempt.logs || '';
+        if (!attemptLogs && resolvedLogPath) {
+          try {
+            attemptLogs = require('fs').readFileSync(resolvedLogPath, 'utf-8');
+          } catch { /* file may not exist yet */ }
+        }
+
+        // Resolve work spec: inline workUsed or read from workRef
+        let workUsedHtml: string | undefined;
+        if (attempt.workUsed) {
+          workUsedHtml = formatWorkSpecHtml(attempt.workUsed, escapeHtml);
+        } else if (attempt.workRef) {
+          try {
+            const storagePath = this._planRunner.getStoragePath?.() || '';
+            const workPath = require('path').join(storagePath, plan.id, attempt.workRef);
+            const rawSpec = require('fs').readFileSync(workPath, 'utf-8');
+            const spec = JSON.parse(rawSpec);
+            // If agent spec with instructionsFile, read the companion .md
+            if (spec.instructionsFile) {
+              try {
+                const mdPath = require('path').join(require('path').dirname(workPath), spec.instructionsFile);
+                spec.instructions = require('fs').readFileSync(mdPath, 'utf-8');
+                delete spec.instructionsFile;
+              } catch { /* md not found */ }
+            }
+            workUsedHtml = formatWorkSpecHtml(spec, escapeHtml);
+          } catch { /* file may not exist */ }
+        }
+
         const card: AttemptCardData = {
           attemptNumber: attempt.attemptNumber,
           status: attempt.status,
@@ -877,9 +1027,9 @@ export class NodeDetailPanel {
           stepStatuses: attempt.stepStatuses as any,
           worktreePath: attempt.worktreePath,
           baseCommit: attempt.baseCommit,
-          logFilePath: attempt.logFilePath,
-          workUsedHtml: attempt.workUsed ? formatWorkSpecHtml(attempt.workUsed, escapeHtml) : undefined,
-          logs: attempt.logs || '',
+          logFilePath: resolvedLogPath,
+          workUsedHtml,
+          logs: attemptLogs,
           metricsHtml: attempt.metrics ? attemptMetricsTemplateHtml(attempt.metrics, attempt.phaseMetrics) : '',
         };
         attemptCards.push(card);
@@ -893,7 +1043,7 @@ export class NodeDetailPanel {
 
     // Build dependencies data
     const dependencies = node.dependencies.map(depId => {
-      const depNode = plan.nodes.get(depId);
+      const depNode = plan.jobs.get(depId);
       const depState = plan.nodeStates.get(depId);
       return { name: depNode?.name || depId, status: depState?.status || 'pending' };
     });
@@ -1533,6 +1683,39 @@ export class NodeDetailPanel {
       font-style: italic;
     }
     
+    /* Environment variables section */
+    .env-section {
+      margin: 6px 0 2px;
+      font-size: 12px;
+    }
+    .env-section summary {
+      cursor: pointer;
+      color: var(--vscode-descriptionForeground);
+      font-size: 11px;
+      padding: 2px 0;
+    }
+    .env-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 4px 0;
+      font-size: 12px;
+    }
+    .env-table td {
+      padding: 2px 8px 2px 0;
+      vertical-align: top;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .env-key {
+      font-family: var(--vscode-editor-font-family);
+      font-weight: bold;
+      white-space: nowrap;
+      color: var(--vscode-symbolIcon-variableForeground, #75beff);
+    }
+    .env-val {
+      font-family: var(--vscode-editor-font-family);
+      word-break: break-all;
+    }
+    
     /* Agent instructions markdown rendering */
     .agent-instructions {
       padding: 8px 12px;
@@ -1551,6 +1734,10 @@ export class NodeDetailPanel {
       border-radius: 4px;
       padding: 8px 12px;
       margin: 6px 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      max-width: 100%;
       overflow-x: auto;
       font-size: 12px;
     }
@@ -1561,6 +1748,16 @@ export class NodeDetailPanel {
       font-size: 12px;
     }
     .agent-instructions strong { color: var(--vscode-foreground); }
+    
+    /* General spec-code styling with wrapping */
+    pre.spec-code {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      max-width: 100%;
+      overflow-x: auto;
+    }
+    
     .spec-meta { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
     .spec-meta .spec-field { font-size: 11px; margin: 2px 0; }
     .spec-meta .spec-label { color: var(--vscode-descriptionForeground); }

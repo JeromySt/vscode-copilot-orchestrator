@@ -55,7 +55,7 @@ function createTestPlan(): PlanInstance {
   const plan: PlanInstance = {
     id: 'test-plan',
     spec: { name: 'Test Plan', jobs: [], baseBranch: 'main' },
-    nodes: new Map([['test-node', node]]),
+    jobs: new Map([['test-node', node]]),
     producerIdToNodeId: new Map([['test-node', 'test-node']]),
     roots: ['test-node'],
     leaves: ['test-node'],
@@ -103,7 +103,7 @@ function createMockRunner(): MockRunner {
     const plan = this.plans.get(planId);
     if (!plan) {throw new Error(`Plan ${planId} not found`);}
     
-    const node = plan.nodes.get(nodeId);
+    const node = plan.jobs.get(nodeId);
     if (!node) {throw new Error(`Node ${nodeId} not found`);}
     
     const nodeState = plan.nodeStates.get(nodeId);
@@ -225,7 +225,7 @@ suite('Node Update with Stage Reset', () => {
     consoleSilencer = silenceConsole();
     runner = createMockRunner();
     plan = createTestPlan();
-    node = plan.nodes.get('test-node') as JobNode;
+    node = plan.jobs.get('test-node') as JobNode;
     nodeState = plan.nodeStates.get('test-node') as NodeExecutionState;
     runner.plans.set('test-plan', plan);
   });

@@ -51,7 +51,7 @@ function buildPlan(
   }
 
   return {
-    id: 'plan-1', spec: { name: 'Test Plan', jobs: [] }, nodes, producerIdToNodeId,
+    id: 'plan-1', spec: { name: 'Test Plan', jobs: [] }, jobs: nodes, producerIdToNodeId,
     roots, leaves, nodeStates, groups: new Map(), groupStates: new Map(), groupPathToId: new Map(),
     repoPath: '/repo', baseBranch: 'main', worktreeRoot: '/worktrees',
     createdAt: 1000, stateVersion: 0, cleanUpSuccessfulWork: true, maxParallel: 4,

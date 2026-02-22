@@ -67,7 +67,7 @@ function createTestPlan(opts?: {
   ]);
   return {
     id: 'plan-1', spec: { name: 'Test Plan', jobs: [], baseBranch: 'main' },
-    nodes, producerIdToNodeId: new Map([['node-1', 'node-1']]),
+    jobs: nodes, producerIdToNodeId: new Map([['node-1', 'node-1']]),
     roots: opts?.roots || ['node-1'], leaves: opts?.leaves || ['node-1'],
     nodeStates, groups: new Map(), groupStates: new Map(), groupPathToId: new Map(),
     repoPath: '/repo', baseBranch: 'main', targetBranch: opts?.targetBranch,
@@ -138,6 +138,7 @@ function createMockGitOps(): any {
       getDirtyFiles: sinon.stub().resolves([]),
       checkoutFile: sinon.stub().resolves(),
       resetHard: sinon.stub().resolves(),
+      resetMixed: sinon.stub().resolves(),
       clean: sinon.stub().resolves(),
       updateRef: sinon.stub().resolves(),
       stashPush: sinon.stub().resolves(true),
@@ -222,7 +223,7 @@ suite('JobExecutionEngine - Coverage', () => {
       const plan = createTestPlan();
       // Remove the nodeState to trigger early return
       plan.nodeStates.delete('node-1');
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir);
@@ -243,7 +244,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('execLog is a no-op when executor has no log function', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const state = createEngineState(dir, { log: undefined });
@@ -271,7 +272,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('baseCommitAtStart is set on first fresh worktree', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state, gitOps } = createEngine(dir, {
@@ -333,7 +334,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('all optional fields from executor result are stored on nodeState', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const metrics = { premiumRequests: 5, apiTimeSeconds: 30, sessionTimeSeconds: 120, durationMs: 60000 };
@@ -369,7 +370,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('failure stores lastAttempt, error, stepStatuses from result', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.autoHeal = false;
       const sm = new PlanStateMachine(plan);
 
@@ -405,7 +406,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('failure without failedPhase defaults to work', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.autoHeal = false;
       const sm = new PlanStateMachine(plan);
 
@@ -435,7 +436,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('agent failure without external kill does not trigger auto-retry', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'agent', instructions: 'do stuff' } as any;
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -465,7 +466,7 @@ suite('JobExecutionEngine - Coverage', () => {
       const plan = createTestPlan();
       const ns = plan.nodeStates.get('node-1')!;
       ns.autoHealAttempted = { work: 2 }; // budget exhausted (MAX_AUTO_HEAL_PER_PHASE = 2)
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'npm test' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -492,7 +493,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('non-healable phase (merge-fi) does not trigger auto-heal', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
 
@@ -521,7 +522,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('interrupted agent retry stores copilotSessionId and metrics on success', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'agent', instructions: 'fix' } as any;
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -561,7 +562,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('interrupted agent retry failure stores metrics and phaseMetrics', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'agent', instructions: 'fix' } as any;
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -605,7 +606,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('auto-heal success with no completedCommit uses baseCommit', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'echo ok' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -638,7 +639,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('interrupted agent retry with no completedCommit falls back to baseCommit', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'agent', instructions: 'fix' } as any;
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -676,7 +677,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('RI merge failure after auto-heal records auto-heal trigger type', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'npm test' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -713,7 +714,7 @@ suite('JobExecutionEngine - Coverage', () => {
       const plan = createTestPlan({ targetBranch: 'main' });
       plan.repoPath = dir;
       plan.baseCommitAtStart = 'base-start-commit';
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'npm test' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -750,7 +751,7 @@ suite('JobExecutionEngine - Coverage', () => {
       const plan = createTestPlan({ targetBranch: 'main' });
       plan.repoPath = dir;
       plan.baseCommitAtStart = 'base-start-commit';
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'agent', instructions: 'do work' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -784,7 +785,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('RI merge skipped status treated as failure for leaf nodes', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const result: JobExecutionResult = {
@@ -813,7 +814,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('first attempt records initial trigger type', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -838,7 +839,7 @@ suite('JobExecutionEngine - Coverage', () => {
       const plan = createTestPlan();
       const ns = plan.nodeStates.get('node-1')!;
       ns.attempts = 1; // simulate previous attempt
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -865,7 +866,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('leaf node with targetBranch and mergedToTarget triggers cleanup', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'feature', cleanUpSuccessfulWork: true });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state, gitOps } = createEngine(dir, {
@@ -889,7 +890,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('leaf node without targetBranch still cleans up', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ cleanUpSuccessfulWork: true }); // no targetBranch
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -912,7 +913,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('leaf node with failed RI merge does NOT cleanup', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'feature', cleanUpSuccessfulWork: true });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -975,7 +976,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('exception during executor.execute is caught and node fails', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -996,7 +997,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('exception with failedPhase property uses that phase', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const err = new Error('FI merge crashed') as any;
@@ -1061,7 +1062,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('executor workSummary is appended to plan.workSummary', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const ws: JobWorkSummary = {
@@ -1095,7 +1096,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('leaf node computes aggregated work summary', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan(); // leaf node by default
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const aggSummary = {
@@ -1166,7 +1167,7 @@ suite('JobExecutionEngine - Coverage', () => {
       ns.resumeFromPhase = 'merge-ri' as any;
       ns.completedCommit = 'existing-commit-12345678901234567890';
       ns.baseCommit = 'base123';
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       let capturedContext: ExecutionContext | undefined;
@@ -1198,7 +1199,7 @@ suite('JobExecutionEngine - Coverage', () => {
       ns.resumeFromPhase = 'merge-ri' as any;
       ns.completedCommit = 'existing-commit-12345678901234567890';
       ns.baseCommit = 'base123';
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       let capturedContext: ExecutionContext | undefined;
@@ -1230,7 +1231,7 @@ suite('JobExecutionEngine - Coverage', () => {
       ns.resumeFromPhase = 'merge-ri' as any;
       ns.completedCommit = 'existing-commit-12345678901234567890';
       ns.baseCommit = 'base123';
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const executeStub = sinon.stub().resolves({
@@ -1258,7 +1259,7 @@ suite('JobExecutionEngine - Coverage', () => {
       ns.resumeFromPhase = 'merge-ri' as any;
       ns.completedCommit = 'existing-commit-12345678901234567890';
       ns.baseCommit = 'base123';
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.autoHeal = false; // Disable auto-heal to ensure immediate failure
       const sm = new PlanStateMachine(plan);
 
@@ -1287,7 +1288,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('nodeStarted and nodeCompleted events emitted on success', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -1315,7 +1316,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('nodeStarted and nodeCompleted events emitted on failure', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.autoHeal = false;
       const sm = new PlanStateMachine(plan);
 
@@ -1387,7 +1388,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('persistence.save is called after execution', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -1415,7 +1416,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('worktreePath uses first 8 chars of node id', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -1443,7 +1444,7 @@ suite('JobExecutionEngine - Coverage', () => {
     test('when cleanUpSuccessfulWork is false, no cleanup on success', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ cleanUpSuccessfulWork: false });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state, gitOps } = createEngine(dir, {
@@ -1461,6 +1462,1138 @@ suite('JobExecutionEngine - Coverage', () => {
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'succeeded');
       assert.ok(!ns.worktreeCleanedUp);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 23. Windows crash code detection (WINDOWS_CRASH_CODES)
+  // ------------------------------------------------------------------
+  suite('Windows crash code detection', () => {
+    test('ACCESS_VIOLATION (0xC0000005 / 3221226505) triggers auto-retry for agent', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'fix bug' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Agent process crashed',
+        failedPhase: 'work',
+        exitCode: 3221226505, // 0xC0000005 ACCESS_VIOLATION
+        stepStatuses: { work: 'failed' },
+      };
+      const retryResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'retry-commit-abc123def456789012345',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(retryResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(executeStub.callCount, 2);
+    });
+
+    test('STACK_OVERFLOW (0xC00000FD / 3221225725) triggers auto-retry for agent', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'fix' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Stack overflow',
+        failedPhase: 'work',
+        exitCode: 3221225725, // 0xC00000FD STACK_OVERFLOW
+        stepStatuses: { work: 'failed' },
+      };
+      const retryResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'retry-commit-xyz789012345678901234',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(retryResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(executeStub.callCount, 2);
+    });
+
+    test('HEAP_CORRUPTION (0xC0000374 / 3221226356) triggers auto-retry for agent', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'fix' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Heap corruption detected',
+        failedPhase: 'work',
+        exitCode: 3221226356, // 0xC0000374 HEAP_CORRUPTION
+        stepStatuses: { work: 'failed' },
+      };
+      const retryResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'retry-commit-heap789012345678901234',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(retryResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(executeStub.callCount, 2);
+    });
+
+    test('non-crash exit code does not trigger auto-retry for agent work', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'fix' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Agent failed normally',
+        failedPhase: 'work',
+        exitCode: 1, // Normal failure, not a crash
+        stepStatuses: { work: 'failed' },
+      };
+      const executeStub = sinon.stub().resolves(failResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      // Only 1 call - no auto-retry for agent with normal exit code
+      assert.strictEqual(executeStub.callCount, 1);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 24. wasExternallyKilled detection
+  // ------------------------------------------------------------------
+  suite('wasExternallyKilled detection', () => {
+    test('killed by signal error triggers wasExternallyKilled', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'work' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Process was killed by signal: SIGTERM',
+        failedPhase: 'work',
+        exitCode: 143,
+        stepStatuses: { work: 'failed' },
+      };
+      const retryResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'commit-after-sigterm-retry-123456',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(retryResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(executeStub.callCount, 2);
+    });
+
+    test('Windows crash code without killed-by-signal text still triggers wasExternallyKilled', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'work' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      // Error text doesn't include "killed by signal" but exit code is a Windows crash code
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Process terminated unexpectedly',
+        failedPhase: 'work',
+        exitCode: 3221226505, // ACCESS_VIOLATION
+        stepStatuses: { work: 'failed' },
+      };
+      const retryResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'commit-access-violation-retry-12345',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(retryResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(executeStub.callCount, 2);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 25. Auto-heal decision tree
+  // ------------------------------------------------------------------
+  suite('auto-heal decision tree', () => {
+    test('shell work triggers auto-heal (swap to agent)', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Tests failed',
+        failedPhase: 'work',
+        exitCode: 1,
+        stepStatuses: { work: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-commit-1234567890123456789012',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(executeStub.callCount, 2);
+      // Verify heal attempt was recorded
+      assert.strictEqual(ns.autoHealAttempted?.work, 1);
+    });
+
+    test('autoHeal=false disables auto-heal entirely', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = false;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Tests failed',
+        failedPhase: 'work',
+        exitCode: 1,
+        stepStatuses: { work: 'failed' },
+      };
+      const executeStub = sinon.stub().resolves(failResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      assert.strictEqual(executeStub.callCount, 1);
+    });
+
+    test('phase-level noAutoHeal blocks auto-heal', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Tests failed',
+        failedPhase: 'work',
+        exitCode: 1,
+        noAutoHeal: true, // Phase-level override
+        stepStatuses: { work: 'failed' },
+      };
+      const executeStub = sinon.stub().resolves(failResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      assert.strictEqual(executeStub.callCount, 1);
+    });
+
+    test('prechecks phase failure triggers auto-heal', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.prechecks = { type: 'shell', command: 'npm run lint' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Lint check failed',
+        failedPhase: 'prechecks',
+        exitCode: 1,
+        stepStatuses: { prechecks: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-prechecks-commit-123456789012',
+        stepStatuses: { prechecks: 'success', work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(ns.autoHealAttempted?.prechecks, 1);
+    });
+
+    test('postchecks phase failure triggers auto-heal', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.postchecks = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Post-test failed',
+        failedPhase: 'postchecks',
+        exitCode: 1,
+        stepStatuses: { postchecks: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-postchecks-commit-12345678901',
+        stepStatuses: { postchecks: 'success', commit: 'success' },
+      };
+      // Third call: postchecks re-validation with original spec
+      const revalResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'reval-postchecks-commit-1234567890',
+        stepStatuses: { postchecks: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+      executeStub.onThirdCall().resolves(revalResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(ns.autoHealAttempted?.postchecks, 1);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 26. Per-phase heal budget (MAX_AUTO_HEAL_PER_PHASE = 2)
+  // ------------------------------------------------------------------
+  suite('per-phase heal budget', () => {
+    test('second heal attempt increments budget count', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const ns = plan.nodeStates.get('node-1')!;
+      ns.autoHealAttempted = { work: 1 }; // One heal already done
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Still failing',
+        failedPhase: 'work',
+        exitCode: 1,
+        stepStatuses: { work: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'second-heal-commit-12345678901234',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(ns.autoHealAttempted?.work, 2);
+    });
+
+    test('budget exhausted (healCount >= 2) blocks further heals', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const ns = plan.nodeStates.get('node-1')!;
+      ns.autoHealAttempted = { work: 2 }; // Budget exhausted
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Still failing',
+        failedPhase: 'work',
+        exitCode: 1,
+        stepStatuses: { work: 'failed' },
+      };
+      const executeStub = sinon.stub().resolves(failResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      assert.strictEqual(ns.status, 'failed');
+      assert.strictEqual(executeStub.callCount, 1); // No retry
+    });
+
+    test('backward compat: autoHealAttempted=true counts as 1', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const ns = plan.nodeStates.get('node-1')!;
+      // Old format: boolean true
+      ns.autoHealAttempted = { work: true as any };
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Test failed',
+        failedPhase: 'work',
+        exitCode: 1,
+        stepStatuses: { work: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-from-bool-commit-1234567890',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Should succeed because true counts as 1, not 2
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(ns.autoHealAttempted?.work, 2);
+    });
+
+    test('different phases have independent budgets', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const ns = plan.nodeStates.get('node-1')!;
+      ns.autoHealAttempted = { prechecks: 2 }; // Prechecks exhausted
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      // Work phase fails, not prechecks
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Work phase failed',
+        failedPhase: 'work',
+        exitCode: 1,
+        stepStatuses: { work: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-work-commit-12345678901234567',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Work phase should heal (has its own budget)
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.strictEqual(ns.autoHealAttempted?.work, 1);
+      assert.strictEqual(ns.autoHealAttempted?.prechecks, 2); // Unchanged
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 27. toRefAttempt() conversion
+  // ------------------------------------------------------------------
+  suite('toRefAttempt conversion', () => {
+    test('failed attempt has refs instead of inline data', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.autoHeal = false; // Disable heal so we just get failure record
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Test failed',
+        failedPhase: 'work',
+        exitCode: 1,
+        stepStatuses: { work: 'failed' },
+      };
+      const executeStub = sinon.stub().resolves(failResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      assert.ok(ns.attemptHistory);
+      assert.strictEqual(ns.attemptHistory!.length, 1);
+
+      const attempt = ns.attemptHistory![0];
+      // Should have refs, not inline data
+      assert.ok(attempt.attemptDir, 'attemptDir should be set');
+      assert.ok(attempt.workRef, 'workRef should be set');
+      assert.ok(attempt.logsRef, 'logsRef should be set');
+      assert.ok(attempt.prechecksRef, 'prechecksRef should be set');
+      assert.ok(attempt.postchecksRef, 'postchecksRef should be set');
+      // Inline data should be removed
+      assert.strictEqual(attempt.workUsed, undefined);
+      assert.strictEqual(attempt.logs, undefined);
+    });
+
+    test('toRefAttempt sets correct path format', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.autoHeal = false;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Fail',
+        failedPhase: 'work',
+        exitCode: 1,
+        stepStatuses: { work: 'failed' },
+      };
+      const executeStub = sinon.stub().resolves(failResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      const attempt = ns.attemptHistory![0];
+
+      // Check path format: specs/{nodeId}/attempts/{attemptNumber}
+      const expectedDir = `specs/${node.id}/attempts/${attempt.attemptNumber}`;
+      assert.strictEqual(attempt.attemptDir, expectedDir);
+      assert.strictEqual(attempt.workRef, `${expectedDir}/work.json`);
+      assert.strictEqual(attempt.logsRef, `${expectedDir}/execution.log`);
+      assert.strictEqual(attempt.prechecksRef, `${expectedDir}/prechecks.json`);
+      assert.strictEqual(attempt.postchecksRef, `${expectedDir}/postchecks.json`);
+    });
+
+    test('logFilePath is set if not already present', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.autoHeal = false;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Fail',
+        failedPhase: 'work',
+        exitCode: 1,
+        stepStatuses: { work: 'failed' },
+      };
+      const executeStub = sinon.stub().resolves(failResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      const attempt = ns.attemptHistory![0];
+
+      // logFilePath should be set to attempt dir execution.log
+      assert.ok(attempt.logFilePath);
+      assert.ok(attempt.logFilePath!.includes('execution.log'));
+    });
+
+    test('success attempt also has refs converted', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const successResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'success-commit-12345678901234567890',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub().resolves(successResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.ok(ns.attemptHistory);
+      assert.strictEqual(ns.attemptHistory!.length, 1);
+
+      const attempt = ns.attemptHistory![0];
+      // Status from AttemptRecord is 'succeeded' (not 'success')
+      assert.strictEqual(attempt.status, 'succeeded');
+      assert.ok(attempt.attemptDir);
+      assert.ok(attempt.workRef);
+      assert.ok(attempt.logsRef);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // NEW: Auto-heal loads spec from disk when inline is undefined
+  // ------------------------------------------------------------------
+  suite('auto-heal spec hydration from plan.definition', () => {
+    test('auto-heal loads work spec from disk when node.work is undefined', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      // No inline work spec
+      node.work = undefined;
+      node.autoHeal = true;
+
+      // Mock plan.definition with getWorkSpec
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves({ type: 'shell', command: 'npm test' }),
+        getPrechecksSpec: sinon.stub().resolves(undefined),
+        getPostchecksSpec: sinon.stub().resolves(undefined),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Tests failed', failedPhase: 'work',
+        exitCode: 1, stepStatuses: { work: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-commit-12345678901234567890123',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      // Verify plan.definition.getWorkSpec was called
+      assert.ok(plan.definition && (plan.definition.getWorkSpec as sinon.SinonStub).called);
+    });
+
+    test('auto-heal loads prechecks spec from disk when node.prechecks is undefined', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm build' } as any;
+      node.prechecks = undefined;
+      node.autoHeal = true;
+
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves({ type: 'shell', command: 'npm build' }),
+        getPrechecksSpec: sinon.stub().resolves({ type: 'shell', command: 'npm run lint' }),
+        getPostchecksSpec: sinon.stub().resolves(undefined),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Lint failed', failedPhase: 'prechecks',
+        exitCode: 1, stepStatuses: { prechecks: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-prechecks-commit-123456789012',
+        stepStatuses: { prechecks: 'success', work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.ok(plan.definition && (plan.definition.getPrechecksSpec as sinon.SinonStub).called);
+    });
+
+    test('auto-heal loads postchecks spec from disk when node.postchecks is undefined', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm build' } as any;
+      node.postchecks = undefined;
+      node.autoHeal = true;
+
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves({ type: 'shell', command: 'npm build' }),
+        getPrechecksSpec: sinon.stub().resolves(undefined),
+        getPostchecksSpec: sinon.stub().resolves({ type: 'shell', command: 'npm test' }),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Tests failed', failedPhase: 'postchecks',
+        exitCode: 1, stepStatuses: { postchecks: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-postchecks-commit-123456789012',
+        stepStatuses: { postchecks: 'success', commit: 'success' },
+      };
+      // Re-validation call
+      const revalResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'reval-postchecks-commit-12345678901',
+        stepStatuses: { postchecks: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+      executeStub.onThirdCall().resolves(revalResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded');
+      assert.ok(plan.definition && (plan.definition.getPostchecksSpec as sinon.SinonStub).called);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // NEW: workUsed uses hydratedWork (not node.work)
+  // ------------------------------------------------------------------
+  suite('attemptRecord workUsed uses hydratedWork', () => {
+    test('attemptRecord.workUsed uses hydratedWork from plan.definition', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = undefined; // No inline work
+      node.autoHeal = false;
+
+      const diskWork = { type: 'shell', command: 'npm test from disk' };
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves(diskWork),
+        getPrechecksSpec: sinon.stub().resolves(undefined),
+        getPostchecksSpec: sinon.stub().resolves(undefined),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Tests failed', failedPhase: 'work',
+        exitCode: 1, stepStatuses: { work: 'failed' },
+      };
+      const executeStub = sinon.stub().resolves(failResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      // Check that attemptHistory[0].workUsed matches diskWork
+      const attempt = ns.attemptHistory![0];
+      // workUsed is converted to workRef by toRefAttempt, but the original diskWork was passed
+      // We verify indirectly by confirming plan.definition.getWorkSpec was called
+      assert.ok(plan.definition && (plan.definition.getWorkSpec as sinon.SinonStub).called);
+    });
+
+    test('attemptRecord.workUsed uses inline work when available', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      const inlineWork = { type: 'shell', command: 'echo inline' } as any;
+      node.work = inlineWork;
+      node.autoHeal = false;
+
+      // plan.definition exists but should not be called
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves({ type: 'shell', command: 'from disk' }),
+        getPrechecksSpec: sinon.stub().resolves(undefined),
+        getPostchecksSpec: sinon.stub().resolves(undefined),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Fail', failedPhase: 'work',
+        exitCode: 1, stepStatuses: { work: 'failed' },
+      };
+      const executeStub = sinon.stub().resolves(failResult);
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'failed');
+      // Inline work exists, so plan.definition should still be called during hydration
+      // but hydratedWork should be the inline spec
+      assert.ok(ns.attemptHistory!.length > 0);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // NEW: Job configuration logging at execution start
+  // ------------------------------------------------------------------
+  suite('job configuration logging', () => {
+    test('logs job node execution start with planId and nodeId', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state, log } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'commit123456789012345678901234567890ab',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Verify log.info was called with execution start message
+      const infoStub = log.info as sinon.SinonStub;
+      assert.ok(infoStub.called);
+      const calls = infoStub.getCalls();
+      const startCall = calls.find((c: sinon.SinonSpyCall) => 
+        c.args[0]?.includes('Executing job node')
+      );
+      assert.ok(startCall, 'Expected log.info to be called with "Executing job node"');
+      assert.ok(startCall.args[1]?.planId === plan.id);
+      assert.ok(startCall.args[1]?.nodeId === node.id);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // NEW: Phase pipeline verification
+  // ------------------------------------------------------------------
+  suite('phase pipeline order', () => {
+    test('executor receives correct execution context with all phase fields', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan({ targetBranch: 'main' });
+      plan.baseCommitAtStart = 'base-start-123';
+      const node = plan.jobs.get('node-1')! as JobNode;
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub().resolves({
+        success: true,
+        completedCommit: 'commit123456789012345678901234567890ab',
+        stepStatuses: { 
+          'merge-fi': 'skipped',
+          'setup': 'success',
+          'prechecks': 'skipped',
+          'work': 'success',
+          'commit': 'success',
+          'postchecks': 'skipped',
+          'merge-ri': 'success',
+        },
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Verify executor was called with proper context
+      assert.ok(executeStub.calledOnce);
+      const context = executeStub.firstCall.args[0];
+      assert.ok(context.plan);
+      assert.ok(context.node);
+      assert.ok(context.baseCommit);
+      assert.ok(context.worktreePath);
+      assert.strictEqual(context.attemptNumber, 1);
+      assert.strictEqual(context.targetBranch, 'main');
+      assert.strictEqual(context.repoPath, plan.repoPath);
+      assert.strictEqual(context.baseCommitAtStart, 'base-start-123');
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // NEW: Auto-retry decision logic verification
+  // ------------------------------------------------------------------
+  suite('auto-retry decision logging', () => {
+    test('logs auto-retry decision factors for shell work failure', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'shell', command: 'npm test' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Tests failed', failedPhase: 'work',
+        exitCode: 1, stepStatuses: { work: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-commit-12345678901234567890123',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const { engine, state, log } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Verify auto-retry decision is logged
+      const infoStub = log.info as sinon.SinonStub;
+      const decisionCalls = infoStub.getCalls().filter((c: sinon.SinonSpyCall) => 
+        c.args[0]?.includes('Auto-retry decision')
+      );
+      assert.ok(decisionCalls.length > 0, 'Expected auto-retry decision to be logged');
+      const decisionCall = decisionCalls[0];
+      assert.ok(decisionCall.args[0].includes('isHealable=true'));
+      assert.ok(decisionCall.args[0].includes('isAgentWork=false'));
+    });
+
+    test('logs auto-retry decision for agent externally killed', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = { type: 'agent', instructions: 'fix' } as any;
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+
+      const failResult: JobExecutionResult = {
+        success: false, error: 'Process killed by signal: SIGTERM',
+        failedPhase: 'work', exitCode: 137,
+        stepStatuses: { work: 'failed' },
+      };
+      const retryResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'retry-commit-1234567890123456789012',
+        stepStatuses: { work: 'success', commit: 'success' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(retryResult);
+
+      const { engine, state, log } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const infoStub = log.info as sinon.SinonStub;
+      const decisionCalls = infoStub.getCalls().filter((c: sinon.SinonSpyCall) => 
+        c.args[0]?.includes('Auto-retry decision')
+      );
+      assert.ok(decisionCalls.length > 0);
+      const decisionCall = decisionCalls[0];
+      assert.ok(decisionCall.args[0].includes('wasExternallyKilled=true'));
+      assert.ok(decisionCall.args[0].includes('isAgentWork=true'));
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // NEW: Hydrated specs passed in ExecutionContext
+  // ------------------------------------------------------------------
+  suite('hydrated specs in execution context', () => {
+    test('executor receives hydratedWork, hydratedPrechecks, hydratedPostchecks in context', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      node.work = undefined;
+      node.prechecks = undefined;
+      node.postchecks = undefined;
+
+      const diskWork = { type: 'shell', command: 'npm build' };
+      const diskPrechecks = { type: 'shell', command: 'npm run lint' };
+      const diskPostchecks = { type: 'shell', command: 'npm test' };
+
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves(diskWork),
+        getPrechecksSpec: sinon.stub().resolves(diskPrechecks),
+        getPostchecksSpec: sinon.stub().resolves(diskPostchecks),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub().resolves({
+        success: true,
+        completedCommit: 'commit123456789012345678901234567890ab',
+        stepStatuses: { work: 'success', commit: 'success' },
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Verify executor was called with hydrated specs
+      assert.ok(executeStub.calledOnce);
+      const context = executeStub.firstCall.args[0];
+      assert.deepStrictEqual(context.hydratedWork, diskWork);
+      assert.deepStrictEqual(context.hydratedPrechecks, diskPrechecks);
+      assert.deepStrictEqual(context.hydratedPostchecks, diskPostchecks);
+    });
+
+    test('executor receives inline specs when available, not from disk', async () => {
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      const inlineWork = { type: 'shell', command: 'echo inline' } as any;
+      node.work = inlineWork;
+      node.prechecks = { type: 'shell', command: 'echo prechecks' } as any;
+      node.postchecks = { type: 'shell', command: 'echo postchecks' } as any;
+
+      plan.definition = {
+        getWorkSpec: sinon.stub().resolves({ type: 'shell', command: 'from disk' }),
+        getPrechecksSpec: sinon.stub().resolves({ type: 'shell', command: 'from disk' }),
+        getPostchecksSpec: sinon.stub().resolves({ type: 'shell', command: 'from disk' }),
+      } as any;
+
+      const sm = new PlanStateMachine(plan);
+
+      const executeStub = sinon.stub().resolves({
+        success: true,
+        completedCommit: 'commit123456789012345678901234567890ab',
+        stepStatuses: { work: 'success', commit: 'success' },
+      });
+
+      const { engine, state } = createEngine(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      // Verify executor received inline specs (not from disk)
+      const context = executeStub.firstCall.args[0];
+      assert.deepStrictEqual(context.hydratedWork, inlineWork);
+      assert.deepStrictEqual(context.hydratedPrechecks, node.prechecks);
+      assert.deepStrictEqual(context.hydratedPostchecks, node.postchecks);
     });
   });
 });

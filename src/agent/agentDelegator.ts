@@ -100,6 +100,10 @@ export interface DelegateOptions {
    * - **Clean Shutdown**: When the worktree is cleaned up, all session files are automatically
    *   removed with it
    */
+  /** Override the Copilot CLI --config-dir. If set, used instead of the worktree-derived default. */
+  configDir?: string;
+  /** Additional environment variables to inject into the spawned agent process */
+  env?: Record<string, string>;
 }
 
 /**
@@ -362,6 +366,8 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       jobId,
       allowedFolders: finalAllowedFolders,  // Pass through allowed folders with worktree included
       allowedUrls,     // NEW: pass through to CLI runner
+      configDir: options.configDir, // Plan-level config dir isolation
+      env: options.env, // Plan/spec-level environment variables
       timeout: 0, // No timeout — agent work can run for a long time
       onProcess: (proc) => {
         if (proc.pid) {

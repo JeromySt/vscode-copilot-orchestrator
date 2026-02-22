@@ -170,7 +170,7 @@ export class ExecutionPump {
         for (const [nodeId, state] of plan.nodeStates) {
           if (state.status === 'running' && state.pid) {
             if (!this.state.processMonitor.isRunning(state.pid)) {
-              const node = plan.nodes.get(nodeId);
+              const node = plan.jobs.get(nodeId);
               this.log.warn(`Watchdog: PID ${state.pid} for node "${node?.name || nodeId}" is no longer running — marking as failed (possible hibernate/crash)`);
               state.error = `Process ${state.pid} died unexpectedly (system hibernate or crash). Retry to resume.`;
               state.pid = undefined;
@@ -206,7 +206,7 @@ export class ExecutionPump {
 
       for (const [nodeId, state] of plan.nodeStates) {
         if (state.status === 'running' || state.status === 'scheduled') {
-          const node = plan.nodes.get(nodeId);
+          const node = plan.jobs.get(nodeId);
           if (node && nodePerformsWork(node)) {localRunning++;}
         }
       }
@@ -258,7 +258,7 @@ export class ExecutionPump {
       // Promote stuck pending nodes
       for (const [nodeId, state] of plan.nodeStates) {
         if (state.status === 'pending') {
-          const node = plan.nodes.get(nodeId);
+          const node = plan.jobs.get(nodeId);
           if (node && sm.areDependenciesMet(nodeId)) {
             this.log.info(`Pump: promoting stuck pending node to ready: ${node.name}`);
             sm.resetNodeToPending(nodeId);
@@ -282,7 +282,7 @@ export class ExecutionPump {
 
       // Schedule and execute each node
       for (const nodeId of nodesToSchedule) {
-        const node = plan.nodes.get(nodeId);
+        const node = plan.jobs.get(nodeId);
         if (!node) {continue;}
         sm.transition(nodeId, 'scheduled');
         this.executeNode(plan, sm, node as JobNode);

@@ -4,7 +4,7 @@ applyTo: "src/test/**/*.ts"
 
 # Testing Patterns
 
-> **Detailed guide**: See `.github/skills/test-writer/SKILL.md` for full examples, mock patterns, and verification steps.
+> **Detailed guide**: See `test-writer.instructions.md` for full examples, mock patterns, and verification steps.
 
 ## Framework & Style
 

@@ -145,7 +145,7 @@ suite('MCP Handler Unit Tests', () => {
         baseBranch: 'main',
         targetBranch: 'feature/test',
         isPaused: false,
-        nodes: new Map([['node-1', {}]]),
+        jobs: new Map([['node-1', {}]]),
         producerIdToNodeId: new Map([['build', 'node-1']]),
         roots: ['node-1'],
         leaves: ['node-1']

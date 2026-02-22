@@ -4,7 +4,7 @@
 
 ## Overview
 
-Copilot Orchestrator uses a multi-layered testing approach combining unit tests, integration tests, and coverage analysis. The testing architecture supports dependency injection, mock adapters, and isolated worktree operations for reliable test execution.
+Copilot Orchestrator uses a comprehensive unit testing approach with Mocha, Sinon, and coverage analysis via c8. All tests run headless using a complete VS Code API mock layer - no Electron or VS Code runtime required. The testing architecture supports dependency injection, mock adapters, and isolated worktree operations for reliable test execution.
 
 ---
 
@@ -27,14 +27,15 @@ Copilot Orchestrator uses a multi-layered testing approach combining unit tests,
 
 | Component | Purpose | Notes |
 |-----------|---------|-------|
-| **Mocha** | Test runner | TDD interface (`suite`, `test`) |
+| **Mocha** | Test runner | TDD interface (`suite`, `test`), runs headless |
 | **Sinon** | Mocking/stubbing | For external dependencies |
-| **C8** | Coverage analysis | Istanbul-based with V8 hooks |
+| **C8** | Coverage analysis | Istanbul-based with V8 hooks, 95% threshold |
 | **TypeScript** | Test compilation | Uses `tsconfig.json` for `out/` |
+| **VS Code Mock** | API simulation | Complete mock in `src/test/unit/mocks/vscode.ts` |
 
 ### VS Code Mock Layer
 
-The extension includes a comprehensive VS Code API mock in `src/test/unit/mocks/vscode.ts`:
+The extension includes a comprehensive VS Code API mock in `src/test/unit/mocks/vscode.ts` that eliminates the need for VS Code Electron:
 
 ```typescript
 // Register mock before importing tested modules
@@ -43,10 +44,12 @@ import { MyExtensionClass } from '../../../src/myModule';
 ```
 
 **Key mock features:**
+- Complete API coverage (Uri, workspace, window, commands, etc.)
 - Event emitters for configuration changes
 - Webview and panel lifecycle simulation
 - Command registration/execution tracking
 - File watcher simulation with controlled events
+- No Electron or VS Code runtime dependencies
 
 ---
 
@@ -55,17 +58,16 @@ import { MyExtensionClass } from '../../../src/myModule';
 ### Quick Commands
 
 ```bash
-# Run all unit tests
+# Run all unit tests (headless - no VS Code required)
+npm test
+# or
 npm run test:unit
 
-# Run with coverage
+# Run with coverage (95% threshold enforced)
 npm run test:coverage
 
 # Compile only (no tests)
 npm run compile:tsc
-
-# Watch mode for development
-npm run test:watch
 ```
 
 ### Detailed Commands
@@ -135,13 +137,11 @@ src/test/
 │   ├── vscode/                     # VS Code adapter tests
 │   │   └── testAdapters.unit.test.ts # Mock adapter tests
 │   └── process/                    # Process monitoring tests
-└── integration/                    # Future integration tests
 ```
 
 ### Test File Naming
 
 - **Unit tests**: `*.unit.test.ts` - Test individual classes/functions in isolation
-- **Integration tests**: `*.integration.test.ts` - Test component interactions
 - **Mock files**: `*.mock.ts` - Reusable mock implementations
 
 ---
@@ -315,8 +315,8 @@ npx c8 --reporter=text npm run test:unit
 # Generate HTML coverage report  
 npx c8 --reporter=html npm run test:unit
 
-# Check coverage thresholds
-npx c8 --check-coverage --lines 40 npm run test:unit
+# Check coverage thresholds (95% line coverage required)
+npx c8 --check-coverage --lines 95 npm run test:unit
 
 # Coverage for specific module
 npx c8 --include=out/plan/**/*.js --exclude=out/test/** \
@@ -330,7 +330,7 @@ C8 configuration in `package.json`:
 ```json
 {
   "scripts": {
-    "test:coverage": "npm run compile:tsc && c8 --reporter=text --reporter=lcov --check-coverage --lines 40 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js mocha --ui tdd --exit \"out/test/unit/**/*.unit.test.js\" --require src/test/unit/register-vscode-mock.js"
+    "test:coverage": "npm run compile:tsc && c8 --reporter=text --reporter=lcov --check-coverage --lines 95 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js --exclude=out/vscode/adapters.js --exclude=out/core/planInitialization.js mocha --ui tdd --exit \"out/test/unit/**/*.test.js\" --require src/test/unit/register-vscode-mock.js --timeout 60000"
   }
 }
 ```
@@ -340,6 +340,8 @@ C8 configuration in `package.json`:
 - `out/test/**` - Test files themselves
 - `out/ui/**` - UI template code (HTML generation)
 - `out/extension.js` - VS Code activation entry point
+- `out/vscode/adapters.js` - Thin VS Code API wrappers
+- `out/core/planInitialization.js` - Extension initialization
 - Non-configurable Node.js APIs (when mocking fails)
 
 ---

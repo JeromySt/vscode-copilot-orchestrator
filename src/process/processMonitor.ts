@@ -60,8 +60,9 @@ export class ProcessMonitor implements IProcessMonitor {
   async getSnapshot(): Promise<ProcessInfo[]> {
     const now = Date.now();
     
-    // Return cached snapshot if still valid
-    if (now - this.lastSnapshotTime < this.cacheTtlMs && this.snapshotCache.length > 0) {
+    // Return cached snapshot if still valid (including empty snapshots — reduces error spam
+    // from consecutive failures; new processes detected after short TTL expires)
+    if (this.lastSnapshotTime > 0 && now - this.lastSnapshotTime < this.cacheTtlMs) {
       return this.snapshotCache;
     }
     

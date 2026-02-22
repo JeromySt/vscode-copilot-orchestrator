@@ -17,6 +17,7 @@ import { execAsync } from './executor';
 export const ORCHESTRATOR_GITIGNORE_ENTRIES = [
   '.worktrees/',
   '.orchestrator/',
+  '.copilot-cli/',
   '.github/instructions/orchestrator-*.instructions.md',
 ] as const;
 
@@ -31,6 +32,8 @@ const ORCHESTRATOR_DIFF_PATTERNS: RegExp[] = [
   /^[+-]\/?\.orchestrator\/?$/,
   /^[+-]\.worktrees\/?$/,
   /^[+-]\/?\.worktrees\/?$/,
+  /^[+-]\.copilot-cli\/?$/,
+  /^[+-]\/?\.copilot-cli\/?$/,
   // Instruction file glob
   /^[+-]\.github\/instructions\/orchestrator-.*\.instructions\.md$/,
   // Comment header

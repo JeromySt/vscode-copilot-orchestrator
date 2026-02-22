@@ -16,6 +16,7 @@ import type { IPulseEmitter, Disposable } from '../interfaces/IPulseEmitter';
 
 const PULSE_INTERVAL_MS = 1000;
 const PULSE_EVENT = 'pulse';
+const DRIFT_THRESHOLD_MS = PULSE_INTERVAL_MS * 3;
 
 /**
  * Single-interval pulse emitter.
@@ -31,6 +32,7 @@ const PULSE_EVENT = 'pulse';
 export class PulseEmitter extends EventEmitter implements IPulseEmitter {
   private _timer: ReturnType<typeof setInterval> | undefined;
   private _subscriberCount = 0;
+  private _lastTick = 0;
 
   /** Whether the internal interval is currently ticking. */
   get isRunning(): boolean {
@@ -69,7 +71,24 @@ export class PulseEmitter extends EventEmitter implements IPulseEmitter {
   /** Manually start the interval (idempotent). */
   start(): void {
     if (this._timer !== undefined) {return;}
-    this._timer = setInterval(() => this.emit(PULSE_EVENT), PULSE_INTERVAL_MS);
+    this._lastTick = Date.now();
+    this._timer = setInterval(() => this.tick(), PULSE_INTERVAL_MS);
+  }
+
+  /** Internal tick handler with drift detection. */
+  private tick(): void {
+    const now = Date.now();
+    const elapsed = now - this._lastTick;
+    this._lastTick = now;
+
+    // Detect sleep/resume drift — restart interval to re-sync
+    if (elapsed > DRIFT_THRESHOLD_MS) {
+      clearInterval(this._timer!);
+      this._lastTick = Date.now();
+      this._timer = setInterval(() => this.tick(), PULSE_INTERVAL_MS);
+    }
+
+    this.emit(PULSE_EVENT);
   }
 
   /** Manually stop the interval (idempotent). */

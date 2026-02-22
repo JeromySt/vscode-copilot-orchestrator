@@ -63,7 +63,7 @@ function createTestPlan(opts?: {
   ]);
   return {
     id: 'plan-1', spec: { name: 'Test Plan', jobs: [], baseBranch: 'main' },
-    nodes, producerIdToNodeId: new Map([['node-1', 'node-1']]),
+    jobs: nodes, producerIdToNodeId: new Map([['node-1', 'node-1']]),
     roots: opts?.roots || ['node-1'], leaves: opts?.leaves || ['node-1'],
     nodeStates, groups: new Map(), groupStates: new Map(), groupPathToId: new Map(),
     repoPath: '/repo', baseBranch: 'main', targetBranch: opts?.targetBranch,
@@ -134,6 +134,7 @@ function createMockGitOps(): import('../../../interfaces/IGitOperations').IGitOp
       getDirtyFiles: sinon.stub().resolves([]),
       checkoutFile: sinon.stub().resolves(),
       resetHard: sinon.stub().resolves(),
+      resetMixed: sinon.stub().resolves(),
       clean: sinon.stub().resolves(),
       updateRef: sinon.stub().resolves(),
       stashPush: sinon.stub().resolves(true),
@@ -209,7 +210,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('fast path: merge-tree success with update-ref (not on target branch)', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'feature' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -232,7 +233,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('fast path: user on target branch, clean - uses reset --hard', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -255,7 +256,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('fast path: user on target branch, dirty - uses stash + reset', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -278,7 +279,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('stash failure returns false but merge commit exists', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -316,7 +317,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('merge-tree returns no treeSha and no conflicts - fails', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -340,7 +341,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('merge-tree throws an exception - node fails', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -362,7 +363,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('no targetBranch means merge not needed', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan(); // no targetBranch
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -390,7 +391,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('leaf with targetBranch but no completedCommit marks merged', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -558,7 +559,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('per-worktree gitignore is not called (managed at repo level)', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state, gitOps } = createEngine(dir, {
@@ -587,7 +588,7 @@ suite('JobExecutionEngine - helper methods', () => {
       const ns = plan.nodeStates.get('node-1')!;
       ns.attempts = 1;
       // No baseCommit set
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state, gitOps } = createEngine(dir, {
@@ -614,7 +615,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('agent killed externally retries same spec', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'agent', instructions: 'fix bugs' } as any;
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -653,7 +654,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('agent interrupted retry also fails', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'agent', instructions: 'fix bugs' } as any;
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -687,7 +688,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('RI merge failure records attempt with completedCommit', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -714,7 +715,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('push after RI merge when configured', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'feature' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -742,7 +743,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('push failure does not fail the merge', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'feature' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -786,7 +787,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('only-orchestrator gitignore is discarded and reset', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -829,7 +830,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('index.lock error retries up to 3 times', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       // Simulate executor handling index.lock retry internally and succeeding
@@ -856,7 +857,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('stash pop failure drops orchestrator-only stash', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -918,7 +919,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('computeAggregatedWorkSummary failure is caught', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: undefined });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state, log } = createEngine(dir, {
@@ -952,7 +953,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('executor metrics and phaseMetrics are stored', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const metrics = { premiumRequests: 1, apiTimeSeconds: 10, sessionTimeSeconds: 30, durationMs: 5000 };
@@ -989,7 +990,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('onProgress and onStepStatusChange are called by executor', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       // Create executor that calls the callbacks
@@ -1068,7 +1069,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('shell failure triggers agent auto-heal swap', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'npm test' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -1119,7 +1120,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('shell failure auto-heal also fails', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'npm test' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -1158,7 +1159,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('process type work failure also triggers auto-heal', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'process', executable: 'node', args: ['test.js'] } as any;
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -1195,7 +1196,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('prechecks failure triggers auto-heal for prechecks phase', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.prechecks = { type: 'shell', command: 'echo pre' };
       node.work = { type: 'shell', command: 'echo work' };
       node.autoHeal = true;
@@ -1233,7 +1234,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('postchecks failure triggers auto-heal for postchecks phase', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.postchecks = { type: 'shell', command: 'echo check' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -1279,7 +1280,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('postchecks heal triggers re-validation with original spec', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.postchecks = { type: 'shell', command: 'echo gate-check' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -1315,7 +1316,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('postchecks re-validation failure exhausts budget then fails node', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.postchecks = { type: 'shell', command: 'echo gate-check' };
       node.autoHeal = true;
       const sm = new PlanStateMachine(plan);
@@ -1352,7 +1353,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('work-phase heal runs original postchecks naturally (no extra re-validation)', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'npm test' };
       node.postchecks = { type: 'shell', command: 'echo gate-check' };
       node.autoHeal = true;
@@ -1382,7 +1383,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('no postchecks defined skips re-validation entirely', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       node.work = { type: 'shell', command: 'npm test' };
       node.postchecks = undefined;
       node.autoHeal = true;
@@ -1411,7 +1412,7 @@ suite('JobExecutionEngine - helper methods', () => {
     test('sequential RI merges both succeed', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan({ targetBranch: 'main' });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state } = createEngine(dir, {
@@ -1449,7 +1450,7 @@ suite('JobExecutionEngine - helper methods', () => {
       const dir = makeTmpDir();
       // cleanUpSuccessfulWork must be true for cleanup to run
       const plan = createTestPlan({ cleanUpSuccessfulWork: true });
-      const node = plan.nodes.get('node-1')! as JobNode;
+      const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
       const { engine, state, log, gitOps } = createEngine(dir, {

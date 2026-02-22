@@ -43,7 +43,7 @@ function makePlan(
   return {
     id: 'plan-1',
     spec: {} as any,
-    nodes: nodesMap,
+    jobs: nodesMap,
     producerIdToNodeId: producerMap,
     roots: [],
     leaves: [],
@@ -117,7 +117,7 @@ suite('reshapePlanHandler', () => {
       const ctx = makeCtx(undefined);
       const result = await handleReshapePlan({
         planId: 'nonexistent',
-        operations: [{ type: 'add_node', spec: { producer_id: 'x', task: 'test', dependencies: [] } }],
+        operations: [{ type: 'add_node', spec: { producerId: 'x', task: 'test', dependencies: [] } }],
       }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.error.includes('not found'));
@@ -136,7 +136,7 @@ suite('reshapePlanHandler', () => {
         planId: 'plan-1',
         operations: [{
           type: 'add_node',
-          spec: { producer_id: 'new-node', task: 'do work', dependencies: [] },
+          spec: { producerId: 'new-node', task: 'do work', dependencies: [] },
         }],
       }, ctx);
 
@@ -191,7 +191,7 @@ suite('reshapePlanHandler', () => {
 
       const result = await handleReshapePlan({
         planId: 'plan-1',
-        operations: [{ type: 'remove_node', producer_id: 'my-producer' }],
+        operations: [{ type: 'remove_node', producerId: 'my-producer' }],
       }, ctx);
 
       assert.strictEqual(result.results[0].success, true);
@@ -203,7 +203,7 @@ suite('reshapePlanHandler', () => {
 
       const result = await handleReshapePlan({
         planId: 'plan-1',
-        operations: [{ type: 'remove_node', nodeId: 'no-such-node' }],
+        operations: [{ type: 'remove_node', producerId: 'no-such-node' }],
       }, ctx);
 
       assert.strictEqual(result.results[0].success, false);
@@ -295,7 +295,7 @@ suite('reshapePlanHandler', () => {
         operations: [{
           type: 'add_before',
           existingNodeId: 'a-id',
-          spec: { producer_id: 'before-a', task: 'pre-work', dependencies: [] },
+          spec: { producerId: 'before-a', task: 'pre-work', dependencies: [] },
         }],
       }, ctx);
 
@@ -311,7 +311,7 @@ suite('reshapePlanHandler', () => {
         planId: 'plan-1',
         operations: [{
           type: 'add_before',
-          spec: { producer_id: 'x', task: 'test', dependencies: [] },
+          spec: { producerId: 'x', task: 'test', dependencies: [] },
         }],
       }, ctx);
 
@@ -328,7 +328,7 @@ suite('reshapePlanHandler', () => {
         operations: [{
           type: 'add_before',
           existingNodeId: 'nonexistent',
-          spec: { producer_id: 'x', task: 'test', dependencies: [] },
+          spec: { producerId: 'x', task: 'test', dependencies: [] },
         }],
       }, ctx);
 
@@ -388,7 +388,7 @@ suite('reshapePlanHandler', () => {
         operations: [{
           type: 'add_after',
           existingNodeId: 'a-id',
-          spec: { producer_id: 'after-a', task: 'post-work', dependencies: [] },
+          spec: { producerId: 'after-a', task: 'post-work', dependencies: [] },
         }],
       }, ctx);
 
@@ -404,7 +404,7 @@ suite('reshapePlanHandler', () => {
         planId: 'plan-1',
         operations: [{
           type: 'add_after',
-          spec: { producer_id: 'x', task: 'test', dependencies: [] },
+          spec: { producerId: 'x', task: 'test', dependencies: [] },
         }],
       }, ctx);
 
@@ -446,11 +446,11 @@ suite('reshapePlanHandler', () => {
         planId: 'plan-1',
         operations: [
           // This should succeed
-          { type: 'add_node', spec: { producer_id: 'new-1', task: 'work', dependencies: [] } },
+          { type: 'add_node', spec: { producerId: 'new-1', task: 'work', dependencies: [] } },
           // This should fail — nonexistent node
-          { type: 'remove_node', nodeId: 'nonexistent' },
+          { type: 'remove_node', producerId: 'nonexistent' },
           // This should succeed
-          { type: 'add_node', spec: { producer_id: 'new-2', task: 'more work', dependencies: [] } },
+          { type: 'add_node', spec: { producerId: 'new-2', task: 'more work', dependencies: [] } },
         ],
       }, ctx);
 
@@ -468,8 +468,8 @@ suite('reshapePlanHandler', () => {
       const result = await handleReshapePlan({
         planId: 'plan-1',
         operations: [
-          { type: 'add_node', spec: { producer_id: 'a', task: 'work', dependencies: [] } },
-          { type: 'add_node', spec: { producer_id: 'b', task: 'work', dependencies: ['a'] } },
+          { type: 'add_node', spec: { producerId: 'a', task: 'work', dependencies: [] } },
+          { type: 'add_node', spec: { producerId: 'b', task: 'work', dependencies: ['a'] } },
         ],
       }, ctx);
 
@@ -493,7 +493,7 @@ suite('reshapePlanHandler', () => {
       const result = await handleReshapePlan({
         planId: 'plan-1',
         operations: [
-          { type: 'add_node', spec: { producer_id: 'x', task: 'test', dependencies: [] } },
+          { type: 'add_node', spec: { producerId: 'x', task: 'test', dependencies: [] } },
         ],
       }, ctx);
 
@@ -517,7 +517,7 @@ suite('reshapePlanHandler', () => {
       const result = await handleReshapePlan({
         planId: 'plan-1',
         operations: [
-          { type: 'add_node', spec: { producer_id: 'b', task: 'test', dependencies: [] } },
+          { type: 'add_node', spec: { producerId: 'b', task: 'test', dependencies: [] } },
         ],
       }, ctx);
 

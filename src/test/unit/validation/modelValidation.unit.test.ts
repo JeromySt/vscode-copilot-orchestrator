@@ -68,7 +68,7 @@ suite('validateAgentModels', () => {
   test('should pass when model is valid', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: { type: 'agent', instructions: 'Do something', model: 'gpt-5' }
       }]
@@ -80,7 +80,7 @@ suite('validateAgentModels', () => {
   test('should fail when model is invalid', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: { type: 'agent', instructions: 'Do something', model: 'invalid-model' }
       }]
@@ -99,7 +99,7 @@ suite('validateAgentModels', () => {
       groups: [{
         name: 'backend',
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           task: 'Test',
           work: { type: 'agent', instructions: 'X', model: 'bad-model' }
         }]
@@ -114,7 +114,7 @@ suite('validateAgentModels', () => {
   test('should validate models in prechecks and postchecks', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: 'echo hello',
         prechecks: { type: 'agent', instructions: 'Check', model: 'fake-model' }
@@ -129,7 +129,7 @@ suite('validateAgentModels', () => {
   test('should skip validation when agent spec has no model', async () => {
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: { type: 'agent', instructions: 'Do something' } // no model = use default
       }]
@@ -148,7 +148,7 @@ suite('validateAgentModels', () => {
 
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: { type: 'agent', instructions: 'X', model: 'anything' }
       }]
@@ -163,7 +163,7 @@ suite('validateAgentModels', () => {
 
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: { type: 'agent', instructions: 'X', model: 'anything' }
       }]
@@ -179,7 +179,7 @@ suite('validateAgentModels', () => {
 
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: { type: 'agent', instructions: 'X', model: 'nonexistent-model' }
       }]
@@ -197,7 +197,7 @@ suite('validateAgentModels', () => {
 
     const input = {
       jobs: [{
-        producer_id: 'test',
+        producerId: 'test',
         task: 'Test',
         work: { type: 'agent', instructions: 'X', model: 'nonexistent-model' }
       }]

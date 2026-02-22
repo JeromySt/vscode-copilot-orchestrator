@@ -10,12 +10,17 @@ import * as executor from '../../../git/core/executor';
  * Uses a real temporary git repository to avoid child_process stubbing issues.
  */
 
-suite('Git Core Executor Unit Tests', function() {
-  this.timeout(10000); // Increase timeout for git operations on Windows
+suite('Git Core Executor Unit Tests', function () {
+  // Increase timeout for suite setup (git operations can be slow on Windows VFS)
+  this.timeout(30000);
+  this.slow(5000); // Mark tests as slow if > 5s
+
   let tempDir: string;
   let nonGitDir: string;
 
-  suiteSetup(() => {
+  suiteSetup(function () {
+    // Increase timeout for git init operations (CI can be slow)
+    this.timeout(30000);
     // Create a temp directory with a real git repo for testing
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'executor-test-'));
     const { spawnSync } = require('child_process');

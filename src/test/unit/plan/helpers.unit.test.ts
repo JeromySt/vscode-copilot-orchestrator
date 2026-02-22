@@ -8,6 +8,9 @@ import {
   computeStatusCounts,
   computeProgress,
   computePlanStatus,
+  getNodeOverallStartedAt,
+  getNodeOverallEndedAt,
+  computeEffectiveStartedAt,
   computeEffectiveEndedAt,
   createEmptyWorkSummary,
   appendWorkSummary,
@@ -136,6 +139,139 @@ suite('Plan Helpers (extended coverage)', () => {
     });
   });
 
+  suite('getNodeOverallStartedAt', () => {
+    test('returns startedAt when no attemptHistory', () => {
+      const state: NodeExecutionState = { status: 'running', version: 0, attempts: 1, startedAt: 1000 };
+      assert.strictEqual(getNodeOverallStartedAt(state), 1000);
+    });
+
+    test('returns undefined when no startedAt and no attemptHistory', () => {
+      const state: NodeExecutionState = { status: 'pending', version: 0, attempts: 0 };
+      assert.strictEqual(getNodeOverallStartedAt(state), undefined);
+    });
+
+    test('returns earliest startedAt from attemptHistory', () => {
+      const state: NodeExecutionState = {
+        status: 'running', version: 0, attempts: 3, startedAt: 3000,
+        attemptHistory: [
+          { attemptNumber: 1, startedAt: 1000, endedAt: 1500, status: 'failed' },
+          { attemptNumber: 2, startedAt: 2000, endedAt: 2500, status: 'failed' },
+          { attemptNumber: 3, startedAt: 3000, endedAt: 3500, status: 'succeeded' },
+        ],
+      };
+      assert.strictEqual(getNodeOverallStartedAt(state), 1000);
+    });
+
+    test('returns startedAt when attemptHistory is empty', () => {
+      const state: NodeExecutionState = { status: 'running', version: 0, attempts: 1, startedAt: 500, attemptHistory: [] };
+      assert.strictEqual(getNodeOverallStartedAt(state), 500);
+    });
+
+    test('prefers attemptHistory over state.startedAt', () => {
+      const state: NodeExecutionState = {
+        status: 'succeeded', version: 0, attempts: 2, startedAt: 4000,
+        attemptHistory: [
+          { attemptNumber: 1, startedAt: 1000, endedAt: 1500, status: 'failed' },
+        ],
+      };
+      assert.strictEqual(getNodeOverallStartedAt(state), 1000);
+    });
+
+    test('handles single attempt in history', () => {
+      const state: NodeExecutionState = {
+        status: 'succeeded', version: 0, attempts: 1, startedAt: 5000,
+        attemptHistory: [
+          { attemptNumber: 1, startedAt: 5000, endedAt: 5500, status: 'succeeded' },
+        ],
+      };
+      assert.strictEqual(getNodeOverallStartedAt(state), 5000);
+    });
+  });
+
+  suite('getNodeOverallEndedAt', () => {
+    test('returns endedAt when no attemptHistory', () => {
+      const state: NodeExecutionState = { status: 'succeeded', version: 0, attempts: 1, endedAt: 2000 };
+      assert.strictEqual(getNodeOverallEndedAt(state), 2000);
+    });
+
+    test('returns undefined when no endedAt and no attemptHistory', () => {
+      const state: NodeExecutionState = { status: 'running', version: 0, attempts: 0 };
+      assert.strictEqual(getNodeOverallEndedAt(state), undefined);
+    });
+
+    test('returns latest endedAt from attemptHistory', () => {
+      const state: NodeExecutionState = {
+        status: 'succeeded', version: 0, attempts: 3, endedAt: 3500,
+        attemptHistory: [
+          { attemptNumber: 1, startedAt: 1000, endedAt: 1500, status: 'failed' },
+          { attemptNumber: 2, startedAt: 2000, endedAt: 2500, status: 'failed' },
+          { attemptNumber: 3, startedAt: 3000, endedAt: 3500, status: 'succeeded' },
+        ],
+      };
+      assert.strictEqual(getNodeOverallEndedAt(state), 3500);
+    });
+
+    test('falls back to endedAt when attemptHistory has no endedAt', () => {
+      const state: NodeExecutionState = {
+        status: 'running', version: 0, attempts: 1, endedAt: 999,
+        attemptHistory: [
+          { attemptNumber: 1, startedAt: 1000, endedAt: 0, status: 'failed' },
+        ],
+      };
+      // endedAt: 0 is falsy, so filter removes it, falls back to state.endedAt
+      assert.strictEqual(getNodeOverallEndedAt(state), 999);
+    });
+
+    test('returns endedAt when attemptHistory is empty', () => {
+      const state: NodeExecutionState = { status: 'succeeded', version: 0, attempts: 1, endedAt: 700, attemptHistory: [] };
+      assert.strictEqual(getNodeOverallEndedAt(state), 700);
+    });
+
+    test('prefers attemptHistory over state.endedAt', () => {
+      const state: NodeExecutionState = {
+        status: 'succeeded', version: 0, attempts: 2, endedAt: 3000,
+        attemptHistory: [
+          { attemptNumber: 1, startedAt: 1000, endedAt: 5000, status: 'succeeded' },
+        ],
+      };
+      assert.strictEqual(getNodeOverallEndedAt(state), 5000);
+    });
+  });
+
+  suite('computeEffectiveStartedAt', () => {
+    test('returns undefined for empty states', () => {
+      assert.strictEqual(computeEffectiveStartedAt([]), undefined);
+    });
+
+    test('returns undefined when no startedAt', () => {
+      const states: NodeExecutionState[] = [{ status: 'pending', version: 0, attempts: 0 }];
+      assert.strictEqual(computeEffectiveStartedAt(states), undefined);
+    });
+
+    test('returns min startedAt across nodes', () => {
+      const states: NodeExecutionState[] = [
+        { status: 'succeeded', version: 0, attempts: 1, startedAt: 300 },
+        { status: 'succeeded', version: 0, attempts: 1, startedAt: 100 },
+        { status: 'succeeded', version: 0, attempts: 1, startedAt: 200 },
+      ];
+      assert.strictEqual(computeEffectiveStartedAt(states), 100);
+    });
+
+    test('uses attemptHistory for earliest start', () => {
+      const states: NodeExecutionState[] = [
+        {
+          status: 'succeeded', version: 0, attempts: 2, startedAt: 2000,
+          attemptHistory: [
+            { attemptNumber: 1, startedAt: 500, endedAt: 800, status: 'failed' },
+            { attemptNumber: 2, startedAt: 2000, endedAt: 2500, status: 'succeeded' },
+          ],
+        },
+        { status: 'succeeded', version: 0, attempts: 1, startedAt: 1000 },
+      ];
+      assert.strictEqual(computeEffectiveStartedAt(states), 500);
+    });
+  });
+
   suite('computeEffectiveEndedAt', () => {
     test('returns undefined for no ended nodes', () => {
       const states: NodeExecutionState[] = [{ status: 'running', version: 0, attempts: 0 }];
@@ -148,6 +284,20 @@ suite('Plan Helpers (extended coverage)', () => {
         { status: 'succeeded', version: 0, attempts: 0, endedAt: 200 },
       ];
       assert.strictEqual(computeEffectiveEndedAt(states), 200);
+    });
+
+    test('uses attemptHistory for latest end', () => {
+      const states: NodeExecutionState[] = [
+        {
+          status: 'succeeded', version: 0, attempts: 2, endedAt: 2500,
+          attemptHistory: [
+            { attemptNumber: 1, startedAt: 1000, endedAt: 1500, status: 'failed' },
+            { attemptNumber: 2, startedAt: 2000, endedAt: 2500, status: 'succeeded' },
+          ],
+        },
+        { status: 'succeeded', version: 0, attempts: 1, endedAt: 1800 },
+      ];
+      assert.strictEqual(computeEffectiveEndedAt(states), 2500);
     });
   });
 
