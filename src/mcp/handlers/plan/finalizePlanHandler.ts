@@ -54,6 +54,8 @@ export async function handleFinalizePlan(args: any, ctx: PlanHandlerContext): Pr
       existingPlan.groupPathToId = finalizedPlan.groupPathToId || new Map();
       existingPlan.targetBranch = finalizedPlan.targetBranch;
       existingPlan.stateVersion = (existingPlan.stateVersion || 0) + 1;
+      // Attach the lazy spec loader so the execution engine can hydrate work/prechecks/postchecks
+      existingPlan.definition = finalizedPlan.definition;
       
       // Respect startPaused — default to paused so user can review before running
       const shouldPause = startPaused !== false; // Default true

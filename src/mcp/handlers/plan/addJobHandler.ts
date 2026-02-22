@@ -89,6 +89,8 @@ export async function handleAddPlanJob(args: any, ctx: PlanHandlerContext): Prom
       existingPlan.groupStates = rebuiltPlan.groupStates || new Map();
       existingPlan.groupPathToId = rebuiltPlan.groupPathToId || new Map();
       existingPlan.stateVersion = (existingPlan.stateVersion || 0) + 1;
+      // Keep definition in sync so hydration works if the plan is finalized later
+      existingPlan.definition = rebuiltPlan.definition;
     }
 
     // Emit planUpdated — triggers sidebar/detail panel refresh

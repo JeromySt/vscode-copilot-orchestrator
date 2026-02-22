@@ -119,6 +119,21 @@ suite('finalizePlanHandler', () => {
       assert.deepStrictEqual(plan.roots, ['node-1', 'node-2']);
     });
 
+    test('should copy definition from finalized plan for work spec hydration', async () => {
+      const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
+      const plan = makeMockPlan();
+      assert.strictEqual(plan.definition, undefined);
+
+      const mockDefinition = { getWorkSpec: sinon.stub(), getPrechecksSpec: sinon.stub(), getPostchecksSpec: sinon.stub() };
+      const finalizedPlan = makeMockPlan({ definition: mockDefinition });
+
+      const ctx = makeCtx({ get: sinon.stub().returns(plan) });
+      ctx.PlanRepository.finalize.resolves(finalizedPlan);
+
+      await handleFinalizePlan({ planId: 'plan-1' }, ctx);
+      assert.strictEqual(plan.definition, mockDefinition, 'definition must be copied from finalizedPlan to existingPlan');
+    });
+
     test('should return jobMapping', async () => {
       const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
       const ctx = makeCtx();
