@@ -132,14 +132,14 @@ suite('Node-centric Handlers', () => {
 
     test('returns error when group not found', async () => {
       const ctx = createContext();
-      const result = await handleGetGroupStatus({ group_id: 'x' }, ctx);
+      const result = await handleGetGroupStatus({ groupId: 'x' }, ctx);
       assert.strictEqual(result.success, false);
     });
 
     test('returns status when group found', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleGetGroupStatus({ group_id: plan.id }, ctx);
+      const result = await handleGetGroupStatus({ groupId: plan.id }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.groupId, plan.id);
       assert.ok(result.nodes.length > 0);
@@ -172,14 +172,14 @@ suite('Node-centric Handlers', () => {
 
     test('returns error when group not found', async () => {
       const ctx = createContext();
-      const result = await handleCancelGroup({ group_id: 'x' }, ctx);
+      const result = await handleCancelGroup({ groupId: 'x' }, ctx);
       assert.strictEqual(result.success, false);
     });
 
     test('cancels group', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleCancelGroup({ group_id: plan.id }, ctx);
+      const result = await handleCancelGroup({ groupId: plan.id }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -194,7 +194,7 @@ suite('Node-centric Handlers', () => {
     test('deletes group', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleDeleteGroup({ group_id: plan.id }, ctx);
+      const result = await handleDeleteGroup({ groupId: plan.id }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -208,7 +208,7 @@ suite('Node-centric Handlers', () => {
 
     test('returns error when group not found', async () => {
       const ctx = createContext();
-      const result = await handleRetryGroup({ group_id: 'x' }, ctx);
+      const result = await handleRetryGroup({ groupId: 'x' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -222,14 +222,14 @@ suite('Node-centric Handlers', () => {
 
     test('returns error when node not found', async () => {
       const ctx = createContext();
-      const result = await handleGetJob({ job_id: 'nonexistent' }, ctx);
+      const result = await handleGetJob({ planId: 'plan-1', jobId: 'nonexistent' }, ctx);
       assert.strictEqual(result.success, false);
     });
 
     test('returns node details when found', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleGetJob({ job_id: 'node-1' }, ctx);
+      const result = await handleGetJob({ planId: 'plan-1', jobId: 'node-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.node.id, 'node-1');
     });
@@ -239,7 +239,7 @@ suite('Node-centric Handlers', () => {
     test('returns all nodes', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleListJobs({}, ctx);
+      const result = await handleListJobs({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.count > 0);
     });
@@ -247,14 +247,14 @@ suite('Node-centric Handlers', () => {
     test('filters by status', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleListJobs({ status: 'running' }, ctx);
+      const result = await handleListJobs({ planId: 'plan-1', status: 'running' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('filters by group_id', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleListJobs({ group_id: plan.id }, ctx);
+      const result = await handleListJobs({ planId: 'plan-1', groupId: plan.id }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -268,14 +268,14 @@ suite('Node-centric Handlers', () => {
 
     test('returns error when node not found', async () => {
       const ctx = createContext();
-      const result = await handleRetryJob({ job_id: 'nonexistent' }, ctx);
+      const result = await handleRetryJob({ planId: 'plan-1', jobId: 'nonexistent' }, ctx);
       assert.strictEqual(result.success, false);
     });
 
     test('retries node when found', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleRetryJob({ job_id: 'node-1' }, ctx);
+      const result = await handleRetryJob({ planId: 'plan-1', jobId: 'node-1' }, ctx);
       assert.ok(result);
     });
   });
@@ -290,7 +290,7 @@ suite('Node-centric Handlers', () => {
     test('force fails node when found', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleForceFailJob({ job_id: 'node-1' }, ctx);
+      const result = await handleForceFailJob({ planId: 'plan-1', jobId: 'node-1' }, ctx);
       assert.ok(result);
     });
   });
@@ -308,7 +308,7 @@ suite('Node-centric Handlers', () => {
       plan.nodeStates.get('node-1')!.status = 'failed';
       plan.nodeStates.get('node-1')!.error = 'test error';
       const ctx = createContext([plan]);
-      const result = await handleJobFailureContext({ job_id: 'node-1' }, ctx);
+      const result = await handleJobFailureContext({ planId: 'plan-1', jobId: 'node-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.nodeId, 'node-1');
     });
@@ -316,7 +316,7 @@ suite('Node-centric Handlers', () => {
     test('returns error when node not in failed state', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleJobFailureContext({ job_id: 'node-1' }, ctx);
+      const result = await handleJobFailureContext({ planId: 'plan-1', jobId: 'node-1' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -384,7 +384,7 @@ suite('Legacy Adapters', () => {
   test('adaptGetPlanStatus maps to handleGetGroupStatus', async () => {
     const plan = createTestPlan();
     const ctx = createAdapterContext([plan]);
-    const result = await adaptGetPlanStatus({ id: plan.id }, ctx);
+    const result = await adaptGetPlanStatus({ planId: plan.id }, ctx);
     assert.strictEqual(result.success, true);
     assert.ok(result.planId);
   });
@@ -400,21 +400,21 @@ suite('Legacy Adapters', () => {
   test('adaptCancelPlan maps to handleCancelGroup', async () => {
     const plan = createTestPlan();
     const ctx = createAdapterContext([plan]);
-    const result = await adaptCancelPlan({ id: plan.id }, ctx);
+    const result = await adaptCancelPlan({ planId: plan.id }, ctx);
     assert.strictEqual(result.success, true);
   });
 
   test('adaptDeletePlan maps to handleDeleteGroup', async () => {
     const plan = createTestPlan();
     const ctx = createAdapterContext([plan]);
-    const result = await adaptDeletePlan({ id: plan.id }, ctx);
+    const result = await adaptDeletePlan({ planId: plan.id }, ctx);
     assert.strictEqual(result.success, true);
   });
 
   test('adaptRetryPlan maps to handleRetryGroup', async () => {
     const plan = createTestPlan();
     const ctx = createAdapterContext([plan]);
-    const result = await adaptRetryPlan({ id: plan.id }, ctx);
+    const result = await adaptRetryPlan({ planId: plan.id }, ctx);
     // May return error since retry logic is complex
     assert.ok(result);
   });
@@ -454,7 +454,7 @@ suite('Node Handler Coverage Tests', () => {
       const plan = createTestPlan();
       plan.nodeStates.get('node-1')!.status = 'failed';
       const ctx = createContext([plan]);
-      const result = await handleRetryGroup({ group_id: plan.id }, ctx);
+      const result = await handleRetryGroup({ groupId: plan.id }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.retriedNodes);
     });
@@ -463,7 +463,7 @@ suite('Node Handler Coverage Tests', () => {
       const plan = createTestPlan();
       // node-1 is running, not failed
       const ctx = createContext([plan]);
-      const result = await handleRetryGroup({ group_id: plan.id }, ctx);
+      const result = await handleRetryGroup({ groupId: plan.id }, ctx);
       assert.strictEqual(result.success, false);
     });
 
@@ -471,7 +471,7 @@ suite('Node Handler Coverage Tests', () => {
       const plan = createTestPlan();
       plan.nodeStates.get('node-1')!.status = 'failed';
       const ctx = createContext([plan]);
-      const result = await handleRetryGroup({ group_id: plan.id, node_ids: ['node-1'] }, ctx);
+      const result = await handleRetryGroup({ groupId: plan.id, jobIds: ['node-1'] }, ctx);
       assert.strictEqual(result.success, true);
     });
 
@@ -480,7 +480,7 @@ suite('Node Handler Coverage Tests', () => {
       plan.nodeStates.get('node-1')!.status = 'failed';
       const ctx = createContext([plan]);
       (ctx.PlanRunner as any).retryNode = sinon.stub().returns({ success: false, error: 'retry failed' });
-      const result = await handleRetryGroup({ group_id: plan.id }, ctx);
+      const result = await handleRetryGroup({ groupId: plan.id }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -488,14 +488,14 @@ suite('Node Handler Coverage Tests', () => {
   suite('handleForceFailNode extended', () => {
     test('returns error when node not found', async () => {
       const ctx = createContext();
-      const result = await handleForceFailJob({ job_id: 'ghost' }, ctx);
+      const result = await handleForceFailJob({ planId: 'plan-1', jobId: 'ghost' }, ctx);
       assert.strictEqual(result.success, false);
     });
 
     test('force fail success returns groupId', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleForceFailJob({ job_id: 'node-1' }, ctx);
+      const result = await handleForceFailJob({ planId: 'plan-1', jobId: 'node-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.groupId);
     });
@@ -504,7 +504,7 @@ suite('Node Handler Coverage Tests', () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
       (ctx.PlanRunner as any).forceFailNode = sinon.stub().throws(new Error('cannot force fail'));
-      const result = await handleForceFailJob({ job_id: 'node-1' }, ctx);
+      const result = await handleForceFailJob({ planId: 'plan-1', jobId: 'node-1' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -513,7 +513,7 @@ suite('Node Handler Coverage Tests', () => {
     test('retries via producerId lookup', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleRetryJob({ job_id: 'job-1' }, ctx);
+      const result = await handleRetryJob({ planId: 'plan-1', jobId: 'job-1' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
@@ -521,7 +521,7 @@ suite('Node Handler Coverage Tests', () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
       (ctx.PlanRunner as any).retryNode = sinon.stub().returns({ success: false, error: 'not retriable' });
-      const result = await handleRetryJob({ job_id: 'node-1' }, ctx);
+      const result = await handleRetryJob({ planId: 'plan-1', jobId: 'node-1' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -539,7 +539,7 @@ suite('Node Handler Coverage Tests', () => {
           { timestamp: Date.now(), phase: 'work', type: 'error', message: 'failed' },
         ]),
       };
-      const result = await handleJobFailureContext({ job_id: 'node-1' }, ctx);
+      const result = await handleJobFailureContext({ planId: 'plan-1', jobId: 'node-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.error, 'test error');
       assert.ok(result.logs);
@@ -550,13 +550,13 @@ suite('Node Handler Coverage Tests', () => {
       const plan = createTestPlan();
       plan.nodeStates.get('node-1')!.status = 'failed';
       const ctx = createContext([plan]);
-      const result = await handleJobFailureContext({ job_id: 'job-1' }, ctx);
+      const result = await handleJobFailureContext({ planId: 'plan-1', jobId: 'job-1' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('returns error when node not found globally', async () => {
       const ctx = createContext();
-      const result = await handleJobFailureContext({ job_id: 'ghost' }, ctx);
+      const result = await handleJobFailureContext({ planId: 'plan-1', jobId: 'ghost' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -565,7 +565,7 @@ suite('Node Handler Coverage Tests', () => {
     test('finds node via producerId', async () => {
       const plan = createTestPlan();
       const ctx = createContext([plan]);
-      const result = await handleGetJob({ job_id: 'job-1' }, ctx);
+      const result = await handleGetJob({ planId: 'plan-1', jobId: 'job-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.node.producerId, 'job-1');
     });

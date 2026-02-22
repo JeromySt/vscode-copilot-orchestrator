@@ -44,10 +44,13 @@ suite('addJobHandler', () => {
 
   setup(() => {
     sandbox = sinon.createSandbox();
-    validateStub = sandbox.stub(validation, 'validateInput').returns({ valid: true });
-    validateFoldersStub = sandbox.stub(validation, 'validateAllowedFolders').resolves({ valid: true });
-    validateUrlsStub = sandbox.stub(validation, 'validateAllowedUrls').resolves({ valid: true });
-    validateModelsStub = sandbox.stub(validation, 'validateAgentModels').resolves({ valid: true });
+    // Stub the validator sub-module directly (not the barrel's getter-based re-exports)
+    // so the handler picks up stubs through the barrel's getter delegation
+    const validator = require('../../../mcp/validation/validator');
+    validateStub = sandbox.stub(validator, 'validateInput').returns({ valid: true });
+    validateFoldersStub = sandbox.stub(validator, 'validateAllowedFolders').resolves({ valid: true });
+    validateUrlsStub = sandbox.stub(validator, 'validateAllowedUrls').resolves({ valid: true });
+    validateModelsStub = sandbox.stub(validator, 'validateAgentModels').resolves({ valid: true });
   });
 
   teardown(() => {

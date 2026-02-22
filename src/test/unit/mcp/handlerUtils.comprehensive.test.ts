@@ -315,7 +315,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
       assert.ok(isError(result));
       if (isError(result)) {
         assert.strictEqual(result.success, false);
-        assert.strictEqual(result.error, 'Node not found: nonexistent');
+        assert.strictEqual(result.error, 'Job not found: nonexistent');
       }
     });
     

@@ -63,7 +63,7 @@ const KITCHEN_SINK_PLAN = {
         type: 'agent',
         instructions: '# Build feature',
         model: 'claude-sonnet-4',
-        model_tier: 'standard',
+        modelTier: 'standard',
         maxTurns: 15,
         resumeSession: true,
         allowedFolders: ['/shared/libs'],
@@ -119,36 +119,6 @@ const KITCHEN_SINK_PLAN = {
     },
   ],
 
-  // -- Groups (recursive) --
-  groups: [
-    {
-      name: 'build',
-      jobs: [
-        {
-          producerId: 'grouped-job',
-          task: 'Grouped task',
-          dependencies: [],
-          work: {
-            type: 'agent',
-            instructions: '# Grouped agent work',
-            onFailure: { message: 'Grouped agent failed' },
-          },
-        },
-      ],
-      groups: [
-        {
-          name: 'sub-build',
-          jobs: [
-            {
-              producerId: 'sub-grouped-job',
-              task: 'Sub-grouped task',
-              dependencies: [],
-            },
-          ],
-        },
-      ],
-    },
-  ],
 };
 
 /**
@@ -156,12 +126,12 @@ const KITCHEN_SINK_PLAN = {
  */
 const KITCHEN_SINK_RETRY_NODE = {
   planId: 'plan-123',
-  nodeId: 'node-456',
+  jobId: 'node-456',
   newWork: {
     type: 'agent',
     instructions: '# Fix the issue',
     model: 'claude-sonnet-4',
-    model_tier: 'fast',
+    modelTier: 'fast',
     maxTurns: 10,
     resumeSession: false,
     allowedFolders: ['/tmp/shared'],
@@ -186,7 +156,7 @@ const KITCHEN_SINK_RETRY_NODE = {
  */
 const KITCHEN_SINK_UPDATE_NODE = {
   planId: 'plan-123',
-  nodeId: 'node-456',
+  jobId: 'node-456',
   work: {
     type: 'shell',
     command: 'npm test',
@@ -248,6 +218,7 @@ const KITCHEN_SINK_RESHAPE = {
  * Kitchen-sink retry_copilot_job (job-centric, no planId) input.
  */
 const KITCHEN_SINK_RETRY_NODE_CENTRIC = {
+  planId: 'plan-123',
   jobId: 'job-789',
   newWork: {
     type: 'shell',
@@ -309,7 +280,7 @@ suite('MCP Schema Completeness', () => {
   suite('Plan-level fields accepted individually', () => {
     const minimalPlan = (overrides: Record<string, unknown>) => ({
       name: 'Test',
-      jobs: [{ producerId: 'job-one', task: 'X', dependencies: [] }],
+      jobs: [{ producerId: 'job-one', task: 'X', dependencies: [], work: 'echo ok' }],
       ...overrides,
     });
 
@@ -366,11 +337,11 @@ suite('MCP Schema Completeness', () => {
       assert.strictEqual(r.valid, true, r.error);
     });
 
-    test('groups', () => {
+    test('groups is rejected (no longer supported at plan level)', () => {
       const r = validateInput('create_copilot_plan', minimalPlan({
-        groups: [{ name: 'g1', jobs: [{ producerId: 'g-job', task: 'T', dependencies: [] }] }],
+        groups: [{ name: 'g1', jobs: [{ producerId: 'g-job', task: 'T', dependencies: [], work: 'echo ok' }] }],
       }));
-      assert.strictEqual(r.valid, true, r.error);
+      assert.strictEqual(r.valid, false);
     });
   });
 
@@ -385,6 +356,7 @@ suite('MCP Schema Completeness', () => {
         producerId: 'job-one',
         task: 'X',
         dependencies: [],
+        work: 'echo ok',
         ...jobOverrides,
       }],
     });
@@ -536,7 +508,7 @@ suite('MCP Schema Completeness', () => {
       const r = validateInput('create_copilot_plan', {
         name: 'Test',
         jobs: [{
-          producerId: 'job-one', task: 'X', dependencies: [],
+          producerId: 'job-one', task: 'X', dependencies: [], work: 'echo ok',
           prechecks: {
             type: 'shell', command: 'npm run lint',
             onFailure: { noAutoHeal: true, message: 'Lint failed' },
@@ -550,7 +522,7 @@ suite('MCP Schema Completeness', () => {
       const r = validateInput('create_copilot_plan', {
         name: 'Test',
         jobs: [{
-          producerId: 'job-one', task: 'X', dependencies: [],
+          producerId: 'job-one', task: 'X', dependencies: [], work: 'echo ok',
           postchecks: {
             type: 'shell', command: 'npm test',
             onFailure: { noAutoHeal: false },
@@ -570,16 +542,16 @@ suite('MCP Schema Completeness', () => {
       }
     });
 
-    test('type: agent with model_tier is accepted', () => {
+    test('type: agent with modelTier is accepted', () => {
       const r = validateInput('create_copilot_plan', planWithWork({
-        type: 'agent', instructions: '# Task', model_tier: 'fast',
+        type: 'agent', instructions: '# Task', modelTier: 'fast',
       }));
       assert.strictEqual(r.valid, true, r.error);
     });
 
-    test('model_tier rejects invalid value', () => {
+    test('modelTier rejects invalid value', () => {
       const r = validateInput('create_copilot_plan', planWithWork({
-        type: 'agent', instructions: '# Task', model_tier: 'ultra',
+        type: 'agent', instructions: '# Task', modelTier: 'ultra',
       }));
       assert.strictEqual(r.valid, false);
     });
@@ -603,7 +575,7 @@ suite('MCP Schema Completeness', () => {
     test('unknown job-level property', () => {
       const r = validateInput('create_copilot_plan', {
         name: 'Test',
-        jobs: [{ producerId: 'job-one', task: 'X', dependencies: [], foo: 'bar' }],
+        jobs: [{ producerId: 'job-one', task: 'X', dependencies: [], work: 'echo ok', foo: 'bar' }],
       });
       assert.strictEqual(r.valid, false);
       assert.ok(r.error!.includes('foo'));
@@ -662,7 +634,7 @@ suite('MCP Schema Completeness', () => {
 
     test('retry_copilot_plan — newWork', () => {
       const r = validateInput('retry_copilot_plan', {
-        id: 'plan-1',
+        planId: 'plan-1',
         newWork: workWithOnFailure,
       });
       assert.strictEqual(r.valid, true, r.error);
@@ -670,7 +642,7 @@ suite('MCP Schema Completeness', () => {
 
     test('retry_copilot_plan — newPrechecks', () => {
       const r = validateInput('retry_copilot_plan', {
-        id: 'plan-1',
+        planId: 'plan-1',
         newPrechecks: workWithOnFailure,
       });
       assert.strictEqual(r.valid, true, r.error);
@@ -678,7 +650,7 @@ suite('MCP Schema Completeness', () => {
 
     test('retry_copilot_plan — newPostchecks', () => {
       const r = validateInput('retry_copilot_plan', {
-        id: 'plan-1',
+        planId: 'plan-1',
         newPostchecks: workWithOnFailure,
       });
       assert.strictEqual(r.valid, true, r.error);
@@ -686,7 +658,7 @@ suite('MCP Schema Completeness', () => {
 
     test('retry_copilot_plan_job — newWork', () => {
       const r = validateInput('retry_copilot_plan_job', {
-        planId: 'p', nodeId: 'n',
+        planId: 'p', jobId: 'n',
         newWork: workWithOnFailure,
       });
       assert.strictEqual(r.valid, true, r.error);
@@ -694,7 +666,7 @@ suite('MCP Schema Completeness', () => {
 
     test('retry_copilot_job (job-centric) — newWork', () => {
       const r = validateInput('retry_copilot_job', {
-        jobId: 'n',
+        planId: 'p', jobId: 'n',
         newWork: workWithOnFailure,
       });
       assert.strictEqual(r.valid, true, r.error);
@@ -702,7 +674,7 @@ suite('MCP Schema Completeness', () => {
 
     test('update_copilot_plan_job — work', () => {
       const r = validateInput('update_copilot_plan_job', {
-        planId: 'p', nodeId: 'n',
+        planId: 'p', jobId: 'n',
         work: workWithOnFailure,
       });
       assert.strictEqual(r.valid, true, r.error);
@@ -724,7 +696,7 @@ suite('MCP Schema Completeness', () => {
 
     test('add_copilot_job — work', () => {
       const r = validateInput('add_copilot_job', {
-        plan_id: 'p',
+        planId: 'p',
         nodes: [{
           producerId: 'new-job', task: 'T', dependencies: [],
           work: workWithOnFailure,

@@ -6,14 +6,14 @@
 import { suite, test, setup, teardown } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import * as validation from '../../../mcp/validation';
+import * as validation from '../../../mcp/validation/validator';
 
 function makeMockPlan(overrides?: Record<string, any>): any {
   const jobs = new Map();
   const nodeStates = new Map();
   
-  jobs.set('node-1', {
-    id: 'node-1',
+  jobs.set('job-1', {
+    id: 'job-1',
     producerId: 'job-1',
     name: 'Job 1',
     type: 'job',
@@ -22,7 +22,7 @@ function makeMockPlan(overrides?: Record<string, any>): any {
     work: { agent: { instructions: 'old' } },
   });
   
-  nodeStates.set('node-1', { 
+  nodeStates.set('job-1', { 
     status: 'failed',
     attempts: 1,
     stepStatuses: {},
@@ -96,7 +96,7 @@ suite('updateJobHandler', () => {
     test('should accept nodeId as alias for jobId', async () => {
       const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const ctx = makeCtx();
-      const result = await handleUpdatePlanJob({ planId: 'plan-1', nodeId: 'node-1', work: {} }, ctx);
+      const result = await handleUpdatePlanJob({ planId: 'plan-1', nodeId: 'job-1', work: {} }, ctx);
       assert.strictEqual(result.success, true);
     });
 
@@ -174,7 +174,7 @@ suite('updateJobHandler', () => {
     test('should return error for non-job nodes', async () => {
       const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
-      plan.jobs.get('node-1').type = 'group';
+      plan.jobs.get('job-1').type = 'group';
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
       const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'job-1', work: {} }, ctx);
       assert.strictEqual(result.success, false);
@@ -184,7 +184,7 @@ suite('updateJobHandler', () => {
     test('should prevent updating snapshot validation job', async () => {
       const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
-      plan.jobs.get('node-1').producerId = '__snapshot-validation__';
+      plan.jobs.get('job-1').producerId = '__snapshot-validation__';
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
       const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'job-1', work: {} }, ctx);
       assert.strictEqual(result.success, false);
@@ -195,7 +195,7 @@ suite('updateJobHandler', () => {
     test('should prevent updating running jobs', async () => {
       const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
-      plan.nodeStates.get('node-1').status = 'running';
+      plan.nodeStates.get('job-1').status = 'running';
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
       const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'job-1', work: {} }, ctx);
       assert.strictEqual(result.success, false);
@@ -205,7 +205,7 @@ suite('updateJobHandler', () => {
     test('should prevent updating scheduled jobs', async () => {
       const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
-      plan.nodeStates.get('node-1').status = 'scheduled';
+      plan.nodeStates.get('job-1').status = 'scheduled';
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
       const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'job-1', work: {} }, ctx);
       assert.strictEqual(result.success, false);
@@ -215,7 +215,7 @@ suite('updateJobHandler', () => {
     test('should prevent updating succeeded jobs', async () => {
       const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
-      plan.nodeStates.get('node-1').status = 'succeeded';
+      plan.nodeStates.get('job-1').status = 'succeeded';
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
       const result = await handleUpdatePlanJob({ planId: 'plan-1', jobId: 'job-1', work: {} }, ctx);
       assert.strictEqual(result.success, false);
@@ -232,7 +232,7 @@ suite('updateJobHandler', () => {
         work: { agent: { instructions: 'new' } },
       }, ctx);
       assert.strictEqual(result.success, true);
-      assert.ok(plan.jobs.get('node-1').work);
+      assert.ok(plan.jobs.get('job-1').work);
       assert.ok(result.hasNewWork);
     });
 
@@ -246,7 +246,7 @@ suite('updateJobHandler', () => {
         prechecks: { command: 'check' },
       }, ctx);
       assert.strictEqual(result.success, true);
-      assert.ok(plan.jobs.get('node-1').prechecks);
+      assert.ok(plan.jobs.get('job-1').prechecks);
       assert.ok(result.hasNewPrechecks);
     });
 
@@ -260,7 +260,7 @@ suite('updateJobHandler', () => {
         postchecks: { command: 'verify' },
       }, ctx);
       assert.strictEqual(result.success, true);
-      assert.ok(plan.jobs.get('node-1').postchecks);
+      assert.ok(plan.jobs.get('job-1').postchecks);
       assert.ok(result.hasNewPostchecks);
     });
 
@@ -296,7 +296,7 @@ suite('updateJobHandler', () => {
     test('should clear step statuses from resetToStage onward', async () => {
       const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
-      const nodeState = plan.nodeStates.get('node-1');
+      const nodeState = plan.nodeStates.get('job-1');
       nodeState.stepStatuses = {
         prechecks: 'completed',
         work: 'completed',
@@ -320,7 +320,7 @@ suite('updateJobHandler', () => {
     test('should set resumeFromPhase for nodes that have executed', async () => {
       const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
-      const nodeState = plan.nodeStates.get('node-1');
+      const nodeState = plan.nodeStates.get('job-1');
       nodeState.status = 'failed';
       nodeState.attempts = 1;
       
@@ -337,7 +337,7 @@ suite('updateJobHandler', () => {
     test('should NOT set resumeFromPhase for never-executed nodes', async () => {
       const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
-      const nodeState = plan.nodeStates.get('node-1');
+      const nodeState = plan.nodeStates.get('job-1');
       nodeState.status = 'pending';
       nodeState.attempts = 0;
       
@@ -354,7 +354,7 @@ suite('updateJobHandler', () => {
     test('should respect explicit resetToStage parameter', async () => {
       const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
-      const nodeState = plan.nodeStates.get('node-1');
+      const nodeState = plan.nodeStates.get('job-1');
       nodeState.attempts = 1;
       
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
@@ -411,7 +411,7 @@ suite('updateJobHandler', () => {
     test('should allow null to clear specs', async () => {
       const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
       const plan = makeMockPlan();
-      plan.jobs.get('node-1').prechecks = { command: 'old' };
+      plan.jobs.get('job-1').prechecks = { command: 'old' };
       
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
       await handleUpdatePlanJob({ 
@@ -420,7 +420,7 @@ suite('updateJobHandler', () => {
         prechecks: null,
       }, ctx);
       
-      assert.strictEqual(plan.jobs.get('node-1').prechecks, undefined);
+      assert.strictEqual(plan.jobs.get('job-1').prechecks, undefined);
     });
 
     test('should handle repository write errors gracefully', async () => {

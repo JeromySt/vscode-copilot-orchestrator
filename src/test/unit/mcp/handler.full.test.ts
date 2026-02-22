@@ -138,8 +138,8 @@ suite('McpHandler Full Coverage', () => {
       assert.ok(res.result);
     });
 
-    test('get_copilot_job_details routes correctly', async () => {
-      const res = await handler.handleRequest(toolCall('get_copilot_job_details', { planId: 'p', nodeId: 'n' }));
+    test('get_copilot_job routes correctly', async () => {
+      const res = await handler.handleRequest(toolCall('get_copilot_job', { planId: 'p', nodeId: 'n' }));
       assert.ok(res.result);
     });
 

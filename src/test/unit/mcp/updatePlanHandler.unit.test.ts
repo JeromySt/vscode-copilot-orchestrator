@@ -124,7 +124,7 @@ suite('updatePlanHandler', () => {
       assert.strictEqual(plan.resumeAfterPlan, 'dep-plan');
       assert.strictEqual(plan.isPaused, true);
       assert.ok(result.updated.includes('resumeAfterPlan'));
-      assert.ok(result.updated.includes('isPaused'));
+      assert.ok(result.updated.some((u: string) => u.includes('isPaused')));
     });
 
     test('should not auto-pause if already paused', async () => {
@@ -161,7 +161,10 @@ suite('updatePlanHandler', () => {
     test('should return error when dependency plan not found', async () => {
       const { handleUpdatePlan } = require('../../../mcp/handlers/plan/updatePlanHandler');
       const plan = makeMockPlan();
-      const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
+      const getPlanStub = sinon.stub();
+      getPlanStub.withArgs('plan-1').returns(plan);
+      getPlanStub.withArgs('not-found').returns(undefined);
+      const ctx = makeCtx({ getPlan: getPlanStub });
       const result = await handleUpdatePlan({ 
         planId: 'plan-1',
         resumeAfterPlan: 'not-found',

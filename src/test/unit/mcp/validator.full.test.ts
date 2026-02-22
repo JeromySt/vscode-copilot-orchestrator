@@ -29,7 +29,7 @@ suite('MCP Validator', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
       const result = validateInput('create_copilot_plan', {
         name: 'Test Plan',
-        jobs: [{ producer_id: 'build', task: 'Build', dependencies: [] }],
+        jobs: [{ producerId: 'build', task: 'Build', work: 'npm run build', dependencies: [] }],
       });
       assert.strictEqual(result.valid, true);
     });
@@ -51,7 +51,7 @@ suite('MCP Validator', () => {
     test('should detect additional properties', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
       const result = validateInput('get_copilot_plan_status', {
-        id: 'test',
+        planId: 'test',
         unknownField: 'value',
       });
       assert.strictEqual(result.valid, false);
@@ -61,7 +61,7 @@ suite('MCP Validator', () => {
     test('should detect type errors', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
       const result = validateInput('get_copilot_plan_status', {
-        id: 123,
+        planId: 123,
       });
       assert.strictEqual(result.valid, false);
       assert.ok(result.error!.includes('Expected'));
@@ -71,7 +71,7 @@ suite('MCP Validator', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
       const result = validateInput('create_copilot_plan', {
         name: 'Test',
-        jobs: [{ producer_id: 'INVALID', task: 'T', dependencies: [] }],
+        jobs: [{ producerId: 'INVALID', task: 'T', work: 'npm test', dependencies: [] }],
       });
       assert.strictEqual(result.valid, false);
       assert.ok(result.error!.includes('pattern') || result.error!.includes('format'));
@@ -88,40 +88,43 @@ suite('MCP Validator', () => {
 
     test('should validate cancel_copilot_plan', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
-      assert.strictEqual(validateInput('cancel_copilot_plan', { id: 'test' }).valid, true);
+      assert.strictEqual(validateInput('cancel_copilot_plan', { planId: 'test' }).valid, true);
       assert.strictEqual(validateInput('cancel_copilot_plan', {}).valid, false);
     });
 
     test('should validate delete_copilot_plan', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
-      assert.strictEqual(validateInput('delete_copilot_plan', { id: 'test' }).valid, true);
+      assert.strictEqual(validateInput('delete_copilot_plan', { planId: 'test' }).valid, true);
     });
 
     test('should validate retry_copilot_plan', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
-      assert.strictEqual(validateInput('retry_copilot_plan', { id: 'test' }).valid, true);
-      assert.strictEqual(validateInput('retry_copilot_plan', { id: 'test', clearWorktree: true }).valid, true);
+      assert.strictEqual(validateInput('retry_copilot_plan', { planId: 'test' }).valid, true);
+      assert.strictEqual(validateInput('retry_copilot_plan', { planId: 'test', clearWorktree: true }).valid, true);
     });
 
-    test('should validate get_copilot_job_details', () => {
+    test('should validate get_copilot_job', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
-      assert.strictEqual(validateInput('get_copilot_job_details', { planId: 'p', nodeId: 'n' }).valid, true);
+      assert.strictEqual(validateInput('get_copilot_job', { planId: 'p', jobId: 'n' }).valid, true);
     });
 
     test('should validate node-centric tools', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
-      assert.strictEqual(validateInput('get_copilot_job', { job_id: 'n1' }).valid, true);
-      assert.strictEqual(validateInput('list_copilot_jobs', {}).valid, true);
-      assert.strictEqual(validateInput('list_copilot_jobs', { status: 'failed' }).valid, true);
-      assert.strictEqual(validateInput('retry_copilot_job', { job_id: 'n1' }).valid, true);
-      assert.strictEqual(validateInput('force_fail_copilot_job', { job_id: 'n1' }).valid, true);
+      assert.strictEqual(validateInput('get_copilot_job', { planId: 'test', jobId: 'n1' }).valid, true);
+      assert.strictEqual(validateInput('list_copilot_jobs', { planId: 'test' }).valid, true);
+      assert.strictEqual(validateInput('list_copilot_jobs', { planId: 'test', status: 'failed' }).valid, true);
+      assert.strictEqual(validateInput('retry_copilot_job', { planId: 'test', jobId: 'n1' }).valid, true);
+      assert.strictEqual(validateInput('force_fail_copilot_job', { planId: 'test', jobId: 'n1' }).valid, true);
+      // Invalid: missing required planId
+      assert.strictEqual(validateInput('list_copilot_jobs', {}).valid, false);
+      assert.strictEqual(validateInput('list_copilot_jobs', { status: 'failed' }).valid, false);
     });
 
     test('should validate update_copilot_plan_job', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
-      assert.strictEqual(validateInput('update_copilot_plan_job', { planId: 'p', nodeId: 'n' }).valid, true);
+      assert.strictEqual(validateInput('update_copilot_plan_job', { planId: 'p', jobId: 'n' }).valid, true);
       assert.strictEqual(validateInput('update_copilot_plan_job', {
-        planId: 'p', nodeId: 'n', work: 'npm build', resetToStage: 'work',
+        planId: 'p', jobId: 'n', work: 'npm build', resetToStage: 'work',
       }).valid, true);
     });
 
@@ -130,8 +133,9 @@ suite('MCP Validator', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test',
         jobs: Array.from({ length: 10 }, (_, i) => ({
-          producer_id: `INVALID_${i}`,
+          producerId: `INVALID_${i}`,
           task: '',
+          work: '',
           dependencies: 'not-array',
         })),
       });
@@ -144,7 +148,7 @@ suite('MCP Validator', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Test',
         jobs: [{
-          producer_id: 'build',
+          producerId: 'build',
           task: 'Build',
           dependencies: [],
           work: { type: 'process', executable: 'node', args: ['build.js'] },
@@ -153,17 +157,18 @@ suite('MCP Validator', () => {
       assert.strictEqual(result.valid, true);
     });
 
-    test('should validate groups in create_copilot_plan', () => {
+    test('should reject groups in create_copilot_plan', () => {
       const { validateInput } = require('../../../mcp/validation/validator');
       const result = validateInput('create_copilot_plan', {
         name: 'Test',
-        jobs: [],
+        jobs: [{ producerId: 'api', task: 'Build API', work: 'npm run api', dependencies: [] }],
         groups: [{
           name: 'backend',
-          jobs: [{ producer_id: 'api', task: 'Build API', dependencies: [] }],
+          jobs: [{ producerId: 'api2', task: 'Build API', work: 'npm run api', dependencies: [] }],
         }],
       });
-      assert.strictEqual(result.valid, true);
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error!.includes('Unknown property'));
     });
   });
 
@@ -468,13 +473,13 @@ suite('MCP Validator', () => {
       assert.ok(schemas.create_copilot_plan);
       assert.ok(schemas.get_copilot_plan_status);
       assert.ok(schemas.list_copilot_plans);
-      assert.ok(schemas.get_copilot_job_details);
+      assert.ok(schemas.get_copilot_job);
       assert.ok(schemas.get_copilot_job_logs);
       assert.ok(schemas.get_copilot_job_attempts);
       assert.ok(schemas.cancel_copilot_plan);
       assert.ok(schemas.delete_copilot_plan);
       assert.ok(schemas.retry_copilot_plan);
-      assert.ok(schemas.retry_copilot_plan_job);
+      assert.ok(schemas.retry_copilot_plan);
       assert.ok(schemas.get_copilot_job);
       assert.ok(schemas.list_copilot_jobs);
       assert.ok(schemas.retry_copilot_job);

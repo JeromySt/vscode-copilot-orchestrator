@@ -245,8 +245,8 @@ suite('McpHandler', () => {
       assert.ok(response.result);
     });
 
-    test('routes get_copilot_job_details', async () => {
-      const response = await handler.handleRequest(makeToolCall('get_copilot_job_details', { planId: 'a', nodeId: 'b' }));
+    test('routes get_copilot_job', async () => {
+      const response = await handler.handleRequest(makeToolCall('get_copilot_job', { planId: 'a', nodeId: 'b' }));
       assert.ok(response.result);
     });
 

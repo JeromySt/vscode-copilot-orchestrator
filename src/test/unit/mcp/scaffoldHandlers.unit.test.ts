@@ -311,7 +311,7 @@ suite('MCP Scaffold Handlers', () => {
       const result = await handleAddPlanJob(args, mockContext);
 
       assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes("Missing required field 'producer_id'"));
+      assert.ok(result.error.includes("Missing required field 'producerId'"));
     });
   });
 
@@ -790,7 +790,7 @@ suite('MCP Scaffold Handlers', () => {
     test('handlePausePlan should pause a running plan', async () => {
       mockPlanRunner.pause.returns(true);
 
-      const args = { id: 'test-plan' };
+      const args = { planId: 'test-plan' };
       const result = await handlePausePlan(args, mockContext);
 
       assert.strictEqual(result.success, true);
@@ -801,7 +801,7 @@ suite('MCP Scaffold Handlers', () => {
     test('handlePausePlan should return failure when pause fails', async () => {
       mockPlanRunner.pause.returns(false);
 
-      const args = { id: 'test-plan' };
+      const args = { planId: 'test-plan' };
       const result = await handlePausePlan(args, mockContext);
 
       assert.strictEqual(result.success, false);
@@ -814,7 +814,7 @@ suite('MCP Scaffold Handlers', () => {
       const result = await handlePausePlan(args, mockContext);
 
       assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('id is required'));
+      assert.ok(result.error.includes('planId is required'));
     });
 
     test('handleResumePlan should resume a paused plan', async () => {
@@ -824,7 +824,7 @@ suite('MCP Scaffold Handlers', () => {
       });
       mockPlanRunner.resume.resolves(true);
 
-      const args = { id: 'test-plan' };
+      const args = { planId: 'test-plan' };
       const result = await handleResumePlan(args, mockContext);
 
       assert.strictEqual(result.success, true);
@@ -839,7 +839,7 @@ suite('MCP Scaffold Handlers', () => {
       });
       mockPlanRunner.resume.resolves(false);
 
-      const args = { id: 'test-plan' };
+      const args = { planId: 'test-plan' };
       const result = await handleResumePlan(args, mockContext);
 
       assert.strictEqual(result.success, false);
@@ -852,7 +852,7 @@ suite('MCP Scaffold Handlers', () => {
       const result = await handleResumePlan(args, mockContext);
 
       assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('id is required'));
+      assert.ok(result.error.includes('planId is required'));
     });
 
     test('handleResumePlan should block scaffolding plans', async () => {
@@ -862,7 +862,7 @@ suite('MCP Scaffold Handlers', () => {
         spec: { status: 'scaffolding' },
       });
 
-      const args = { id: 'test-plan' };
+      const args = { planId: 'test-plan' };
       const result = await handleResumePlan(args, mockContext);
 
       assert.strictEqual(result.success, false);
@@ -877,7 +877,7 @@ suite('MCP Scaffold Handlers', () => {
       mockPlanRunner.get.returns(undefined);
       mockPlanRunner.resume.resolves(true);
 
-      const args = { id: 'test-plan' };
+      const args = { planId: 'test-plan' };
       const result = await handleResumePlan(args, mockContext);
 
       // Should proceed to resume (let PlanRunner handle missing plan)

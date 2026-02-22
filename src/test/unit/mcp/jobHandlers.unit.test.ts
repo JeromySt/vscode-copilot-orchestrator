@@ -95,12 +95,13 @@ suite('jobHandlers', () => {
 
   setup(() => {
     sandbox = sinon.createSandbox();
-    // Mock all validation functions to pass by default
-    validateStub = sandbox.stub(validation, 'validateInput').returns({ valid: true });
-    validateFoldersStub = sandbox.stub(validation, 'validateAllowedFolders').resolves({ valid: true });
-    validateUrlsStub = sandbox.stub(validation, 'validateAllowedUrls').resolves({ valid: true });
-    validateModelsStub = sandbox.stub(validation, 'validateAgentModels').resolves({ valid: true });
-    validatePsStub = sandbox.stub(validation, 'validatePowerShellCommands').returns({ valid: true });
+    // Stub the validator sub-module directly (barrel re-exports use getters)
+    const validator = require('../../../mcp/validation/validator');
+    validateStub = sandbox.stub(validator, 'validateInput').returns({ valid: true });
+    validateFoldersStub = sandbox.stub(validator, 'validateAllowedFolders').resolves({ valid: true });
+    validateUrlsStub = sandbox.stub(validator, 'validateAllowedUrls').resolves({ valid: true });
+    validateModelsStub = sandbox.stub(validator, 'validateAgentModels').resolves({ valid: true });
+    validatePsStub = sandbox.stub(validator, 'validatePowerShellCommands').returns({ valid: true });
   });
 
   teardown(() => {

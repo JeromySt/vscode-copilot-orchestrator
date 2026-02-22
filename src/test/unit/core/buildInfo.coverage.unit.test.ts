@@ -63,15 +63,22 @@ suite('buildInfo', () => {
   test('getBuildVersion handles read error', () => {
     const fs = require('fs');
     const origReadFile = fs.readFileSync;
+    const origExists = fs.existsSync;
+    
+    // Load the module first with original fs
+    delete require.cache[require.resolve('../../../core/buildInfo')];
+    const mod = require('../../../core/buildInfo');
+    
+    // Now stub fs to simulate read error
+    fs.existsSync = () => true;
     fs.readFileSync = () => { throw new Error('Read error'); };
     
     try {
-      delete require.cache[require.resolve('../../../core/buildInfo')];
-      const { getBuildVersion } = require('../../../core/buildInfo');
-      const result = getBuildVersion();
+      const result = mod.getBuildVersion();
       assert.ok(result.includes('unknown'));
     } finally {
       fs.readFileSync = origReadFile;
+      fs.existsSync = origExists;
     }
   });
 });

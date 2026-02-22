@@ -422,6 +422,7 @@ suite('DefaultJobExecutor', () => {
           id: 'n9', name: 'FailPost', type: 'job' as const,
           work: 'echo ok',
           postchecks: 'exit 1',
+          expectsNoChanges: true,
           dependencies: [], dependents: [],
         } as any,
         worktreePath: tmp,

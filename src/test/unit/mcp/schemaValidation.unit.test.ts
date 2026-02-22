@@ -113,7 +113,7 @@ suite('MCP Schema Validation', () => {
     test('rejects maxParallel below minimum', () => {
       const result = validateInput('scaffold_copilot_plan', {
         name: 'Test',
-        maxParallel: 0,
+        maxParallel: -1,
       });
       assert.strictEqual(result.valid, false);
     });
@@ -121,7 +121,7 @@ suite('MCP Schema Validation', () => {
     test('rejects maxParallel above maximum', () => {
       const result = validateInput('scaffold_copilot_plan', {
         name: 'Test',
-        maxParallel: 100,
+        maxParallel: 1025,
       });
       assert.strictEqual(result.valid, false);
     });
@@ -129,13 +129,13 @@ suite('MCP Schema Validation', () => {
     test('accepts maxParallel at boundaries', () => {
       const min = validateInput('scaffold_copilot_plan', {
         name: 'Test',
-        maxParallel: 1,
+        maxParallel: 0,
       });
       assert.strictEqual(min.valid, true, min.error);
 
       const max = validateInput('scaffold_copilot_plan', {
         name: 'Test',
-        maxParallel: 64,
+        maxParallel: 1024,
       });
       assert.strictEqual(max.valid, true, max.error);
     });
@@ -200,13 +200,13 @@ suite('MCP Schema Validation', () => {
       assert.ok(result.error!.includes('planId'));
     });
 
-    test('rejects missing producer_id', () => {
+    test('rejects missing producerId', () => {
       const result = validateInput('add_copilot_plan_job', {
         planId: 'plan-123',
         task: 'Build the application',
       });
       assert.strictEqual(result.valid, false);
-      assert.ok(result.error!.includes('producer_id'));
+      assert.ok(result.error!.includes('producerId'));
     });
 
     test('rejects missing task', () => {

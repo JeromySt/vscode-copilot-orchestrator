@@ -47,7 +47,7 @@ suite('planDetail nodeCardTemplate', () => {
     test('renders total nodes', () => {
       const html = renderPlanNodeCard(makeData({ total: 42 }));
       assert.ok(html.includes('>42<'));
-      assert.ok(html.includes('Total Nodes'));
+      assert.ok(html.includes('Total Jobs'));
     });
 
     test('renders succeeded count', () => {

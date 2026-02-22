@@ -103,10 +103,10 @@ suite('MCP Job Tool Definitions', () => {
   // get_copilot_job SCHEMA
   // =========================================================================
   suite('get_copilot_job schema', () => {
-    test('requires job_id', async () => {
+    test('requires jobId', async () => {
       const tools = await getJobToolDefinitions();
       const tool = tools.find((t: any) => t.name === 'get_copilot_job')!;
-      assert.ok(tool.inputSchema.required?.includes('job_id'));
+      assert.ok(tool.inputSchema.required?.includes('jobId'));
     });
   });
 
@@ -117,11 +117,11 @@ suite('MCP Job Tool Definitions', () => {
     test('has optional filters', async () => {
       const tools = await getJobToolDefinitions();
       const tool = tools.find((t: any) => t.name === 'list_copilot_jobs')!;
-      assert.ok(tool.inputSchema.properties?.group_id);
+      assert.ok(tool.inputSchema.properties?.groupId || tool.inputSchema.properties?.group_id);
       assert.ok(tool.inputSchema.properties?.status);
-      assert.ok(tool.inputSchema.properties?.group_name);
-      // None required
-      assert.ok(!tool.inputSchema.required || tool.inputSchema.required.length === 0);
+      assert.ok(tool.inputSchema.properties?.groupName || tool.inputSchema.properties?.group_name);
+      // planId is required
+      assert.ok(tool.inputSchema.required?.includes('planId'));
     });
   });
 

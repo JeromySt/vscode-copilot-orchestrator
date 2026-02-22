@@ -91,13 +91,13 @@ suite('Plan Handlers', () => {
       const { handleCancelPlan } = require('../../../mcp/handlers/plan/cancelDeleteHandler');
       const result = await handleCancelPlan({}, makeCtx());
       assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('id is required'));
+      assert.ok(result.error.includes('planId is required'));
     });
 
     test('should cancel plan successfully', async () => {
       const { handleCancelPlan } = require('../../../mcp/handlers/plan/cancelDeleteHandler');
       const ctx = makeCtx();
-      const result = await handleCancelPlan({ id: 'plan-1' }, ctx);
+      const result = await handleCancelPlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.message.includes('canceled'));
     });
@@ -105,7 +105,7 @@ suite('Plan Handlers', () => {
     test('should handle cancel failure', async () => {
       const { handleCancelPlan } = require('../../../mcp/handlers/plan/cancelDeleteHandler');
       const ctx = makeCtx({ cancel: sinon.stub().returns(false) });
-      const result = await handleCancelPlan({ id: 'plan-1' }, ctx);
+      const result = await handleCancelPlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.message.includes('Failed'));
     });
@@ -121,7 +121,7 @@ suite('Plan Handlers', () => {
     test('should delete plan successfully', async () => {
       const { handleDeletePlan } = require('../../../mcp/handlers/plan/cancelDeleteHandler');
       const ctx = makeCtx();
-      const result = await handleDeletePlan({ id: 'plan-1' }, ctx);
+      const result = await handleDeletePlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.message.includes('deleted'));
     });
@@ -129,7 +129,7 @@ suite('Plan Handlers', () => {
     test('should handle delete failure', async () => {
       const { handleDeletePlan } = require('../../../mcp/handlers/plan/cancelDeleteHandler');
       const ctx = makeCtx({ delete: sinon.stub().returns(false) });
-      const result = await handleDeletePlan({ id: 'plan-1' }, ctx);
+      const result = await handleDeletePlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -145,7 +145,7 @@ suite('Plan Handlers', () => {
     test('should pause plan successfully', async () => {
       const { handlePausePlan } = require('../../../mcp/handlers/plan/pauseResumeHandler');
       const ctx = makeCtx();
-      const result = await handlePausePlan({ id: 'plan-1' }, ctx);
+      const result = await handlePausePlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.message.includes('paused'));
     });
@@ -153,7 +153,7 @@ suite('Plan Handlers', () => {
     test('should handle pause failure', async () => {
       const { handlePausePlan } = require('../../../mcp/handlers/plan/pauseResumeHandler');
       const ctx = makeCtx({ pause: sinon.stub().returns(false) });
-      const result = await handlePausePlan({ id: 'plan-1' }, ctx);
+      const result = await handlePausePlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -168,7 +168,7 @@ suite('Plan Handlers', () => {
     test('should resume plan successfully', async () => {
       const { handleResumePlan } = require('../../../mcp/handlers/plan/pauseResumeHandler');
       const ctx = makeCtx();
-      const result = await handleResumePlan({ id: 'plan-1' }, ctx);
+      const result = await handleResumePlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.message.includes('resumed'));
     });
@@ -176,7 +176,7 @@ suite('Plan Handlers', () => {
     test('should handle resume failure', async () => {
       const { handleResumePlan } = require('../../../mcp/handlers/plan/pauseResumeHandler');
       const ctx = makeCtx({ resume: sinon.stub().resolves(false) });
-      const result = await handleResumePlan({ id: 'plan-1' }, ctx);
+      const result = await handleResumePlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -192,7 +192,7 @@ suite('Plan Handlers', () => {
     test('should return error when plan not found', async () => {
       const { handleGetPlanStatus } = require('../../../mcp/handlers/plan/getPlanHandler');
       const ctx = makeCtx();
-      const result = await handleGetPlanStatus({ id: 'not-found' }, ctx);
+      const result = await handleGetPlanStatus({ planId: 'not-found' }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.error.includes('Plan not found'));
     });
@@ -224,7 +224,7 @@ suite('Plan Handlers', () => {
         getEffectiveEndedAt: sinon.stub().returns(Date.now()),
       });
 
-      const result = await handleGetPlanStatus({ id: 'plan-1' }, ctx);
+      const result = await handleGetPlanStatus({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.status, 'succeeded');
       assert.strictEqual(result.progress, 100);
@@ -251,7 +251,7 @@ suite('Plan Handlers', () => {
           progress: 0.5,
         }),
       });
-      const result = await handleGetPlanStatus({ id: 'plan-1' }, ctx);
+      const result = await handleGetPlanStatus({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.groups);
     });
@@ -500,7 +500,7 @@ suite('Plan Handlers', () => {
       const ctx = makeCtx({ enqueue: sinon.stub().returns(plan) });
       const result = await handleCreatePlan({
         name: 'Test Plan',
-        jobs: [{ producer_id: 'build', task: 'Build it', dependencies: [] }],
+        jobs: [{ producerId: 'build', task: 'Build it', dependencies: [] }],
       }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.planId);
@@ -517,7 +517,7 @@ suite('Plan Handlers', () => {
       const result = await handleCreatePlan({
         name: 'Test Plan',
         startPaused: true,
-        jobs: [{ producer_id: 'build', task: 'Build', dependencies: [] }],
+        jobs: [{ producerId: 'build', task: 'Build', dependencies: [] }],
       }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.paused, true);
@@ -528,8 +528,8 @@ suite('Plan Handlers', () => {
       const result = await handleCreatePlan({
         name: 'Test',
         jobs: [
-          { producer_id: 'build', task: 'Build', dependencies: [] },
-          { producer_id: 'build', task: 'Build2', dependencies: [] },
+          { producerId: 'build', task: 'Build', dependencies: [] },
+          { producerId: 'build', task: 'Build2', dependencies: [] },
         ],
       }, makeCtx());
       assert.strictEqual(result.success, false);
@@ -541,7 +541,7 @@ suite('Plan Handlers', () => {
       const result = await handleCreatePlan({
         name: 'Test',
         jobs: [
-          { producer_id: 'build', task: 'Build', dependencies: ['nonexistent'] },
+          { producerId: 'build', task: 'Build', dependencies: ['nonexistent'] },
         ],
       }, makeCtx());
       assert.strictEqual(result.success, false);
@@ -553,7 +553,7 @@ suite('Plan Handlers', () => {
       const result = await handleCreatePlan({
         name: 'Test',
         jobs: [
-          { producer_id: 'build', task: 'Build', dependencies: ['build'] },
+          { producerId: 'build', task: 'Build', dependencies: ['build'] },
         ],
       }, makeCtx());
       assert.strictEqual(result.success, false);
@@ -573,8 +573,8 @@ suite('Plan Handlers', () => {
         groups: [{
           name: 'grp',
           jobs: [
-            { producer_id: 'build', task: 'Build', dependencies: [] },
-            { producer_id: 'test', task: 'Test', dependencies: ['build'] },
+            { producerId: 'build', task: 'Build', dependencies: [] },
+            { producerId: 'test', task: 'Test', dependencies: ['build'] },
           ],
         }],
       }, ctx);
@@ -595,7 +595,7 @@ suite('Plan Handlers', () => {
           name: 'phase1',
           groups: [{
             name: 'sub',
-            jobs: [{ producer_id: 'build', task: 'Build', dependencies: [] }],
+            jobs: [{ producerId: 'build', task: 'Build', dependencies: [] }],
           }],
         }],
       }, ctx);
@@ -607,7 +607,7 @@ suite('Plan Handlers', () => {
       const ctx = makeCtx({ enqueue: sinon.stub().throws(new Error('Enqueue failed')) });
       const result = await handleCreatePlan({
         name: 'Test',
-        jobs: [{ producer_id: 'build', task: 'Build', dependencies: [] }],
+        jobs: [{ producerId: 'build', task: 'Build', dependencies: [] }],
       }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.error.includes('Enqueue failed'));
@@ -620,10 +620,10 @@ suite('Plan Handlers', () => {
         jobs: [],
         groups: [{
           name: 'grp1',
-          jobs: [{ producer_id: 'build', task: 'Build', dependencies: [] }],
+          jobs: [{ producerId: 'build', task: 'Build', dependencies: [] }],
         }, {
           name: 'grp2',
-          jobs: [{ producer_id: 'test', task: 'Test', dependencies: ['grp1/build'] }],
+          jobs: [{ producerId: 'test', task: 'Test', dependencies: ['grp1/build'] }],
         }],
       }, makeCtx({ enqueue: sinon.stub().returns(makeMockPlan({
         jobs: new Map([['n1', {}], ['n2', {}]]),
@@ -643,7 +643,7 @@ suite('Plan Handlers', () => {
 
     test('should return error when plan not found', async () => {
       const { handleRetryPlan } = require('../../../mcp/handlers/plan/retryPlanHandler');
-      const result = await handleRetryPlan({ id: 'not-found' }, makeCtx());
+      const result = await handleRetryPlan({ planId: 'not-found' }, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
@@ -657,7 +657,7 @@ suite('Plan Handlers', () => {
         retryNode: sinon.stub().resolves({ success: true }),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleRetryPlan({ id: 'plan-1' }, ctx);
+      const result = await handleRetryPlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.retriedNodes.length, 1);
     });
@@ -672,7 +672,7 @@ suite('Plan Handlers', () => {
         retryNode: sinon.stub().resolves({ success: true }),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleRetryPlan({ id: 'plan-1', nodeIds: ['n1'] }, ctx);
+      const result = await handleRetryPlan({ planId: 'plan-1', nodeIds: ['n1'] }, ctx);
       assert.strictEqual(result.success, true);
     });
 
@@ -681,9 +681,9 @@ suite('Plan Handlers', () => {
       const plan = makeMockPlan();
       plan.nodeStates.set('n1', { status: 'succeeded' });
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
-      const result = await handleRetryPlan({ id: 'plan-1' }, ctx);
+      const result = await handleRetryPlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('No failed nodes'));
+      assert.ok(result.error.includes('No failed jobs'));
     });
 
     test('should handle retry errors', async () => {
@@ -696,7 +696,7 @@ suite('Plan Handlers', () => {
         retryNode: sinon.stub().resolves({ success: false, error: 'Retry failed' }),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleRetryPlan({ id: 'plan-1' }, ctx);
+      const result = await handleRetryPlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.errors);
     });
@@ -881,7 +881,7 @@ suite('Plan Handlers', () => {
     test('should return error when allowedFolders invalid', async () => {
       const { handleRetryPlan } = require('../../../mcp/handlers/plan/retryPlanHandler');
       const result = await handleRetryPlan({
-        id: 'plan-1',
+        planId: 'plan-1',
         work: { type: 'agent', allowedFolders: ['/nonexistent/path/abc123'] },
       }, makeCtx());
       assert.strictEqual(result.success, false);
@@ -890,7 +890,7 @@ suite('Plan Handlers', () => {
     test('should return error when allowedUrls invalid', async () => {
       const { handleRetryPlan } = require('../../../mcp/handlers/plan/retryPlanHandler');
       const result = await handleRetryPlan({
-        id: 'plan-1',
+        planId: 'plan-1',
         work: { type: 'agent', allowedUrls: ['ftp://evil.com'] },
       }, makeCtx());
       assert.strictEqual(result.success, false);
@@ -904,7 +904,7 @@ suite('Plan Handlers', () => {
         discoveredAt: Date.now(),
       });
       const result = await handleRetryPlan({
-        id: 'plan-1',
+        planId: 'plan-1',
         newWork: { type: 'agent', agentModel: 'nonexistent-model-xyz' },
       }, makeCtx());
       assert.strictEqual(result.success, false);

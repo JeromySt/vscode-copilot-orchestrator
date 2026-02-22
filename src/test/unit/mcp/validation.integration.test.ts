@@ -58,8 +58,9 @@ suite('MCP Validation', () => {
         name: 'My Plan',
         jobs: [
           {
-            producer_id: 'job-one',
+            producerId: 'job-one',
             task: 'Do something',
+            work: 'npm test',
             dependencies: [],
           },
         ],
@@ -69,7 +70,7 @@ suite('MCP Validation', () => {
 
     test('missing name fails', () => {
       const result = validateInput('create_copilot_plan', {
-        jobs: [{ producer_id: 'a', task: 'b', dependencies: [] }],
+        jobs: [{ producerId: 'abc', task: 'b', work: 'npm test', dependencies: [] }],
       });
       assert.strictEqual(result.valid, false);
       assert.ok(result.error?.includes('name'));
@@ -83,13 +84,14 @@ suite('MCP Validation', () => {
       assert.ok(result.error?.includes('jobs'));
     });
 
-    test('invalid producer_id pattern fails', () => {
+    test('invalid producerId pattern fails', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Plan',
         jobs: [
           {
-            producer_id: 'A', // too short and uppercase
+            producerId: 'A', // too short and uppercase
             task: 'do',
+            work: 'npm test',
             dependencies: [],
           },
         ],
@@ -100,7 +102,7 @@ suite('MCP Validation', () => {
     test('additional properties fails', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Plan',
-        jobs: [{ producer_id: 'abc', task: 'x', dependencies: [] }],
+        jobs: [{ producerId: 'abc', task: 'x', work: 'npm test', dependencies: [] }],
         unknownField: 'bad',
       });
       assert.strictEqual(result.valid, false);
@@ -115,10 +117,10 @@ suite('MCP Validation', () => {
         cleanUpSuccessfulWork: true,
         jobs: [
           {
-            producer_id: 'job-one',
+            producerId: 'job-one',
             task: 'something',
-            dependencies: [],
             work: 'npm test',
+            dependencies: [],
           },
         ],
       });
@@ -128,8 +130,8 @@ suite('MCP Validation', () => {
     test('maxParallel out of range fails', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Plan',
-        maxParallel: 100, // max is 32
-        jobs: [{ producer_id: 'abc', task: 'x', dependencies: [] }],
+        maxParallel: 1025, // max is 1024
+        jobs: [{ producerId: 'abc', task: 'x', work: 'npm test', dependencies: [] }],
       });
       assert.strictEqual(result.valid, false);
     });
@@ -140,14 +142,14 @@ suite('MCP Validation', () => {
   // =========================================================================
 
   suite('validateInput - get_copilot_plan_status', () => {
-    test('valid id passes', () => {
+    test('valid planId passes', () => {
       const result = validateInput('get_copilot_plan_status', {
-        id: 'plan-123',
+        planId: 'plan-123',
       });
       assert.strictEqual(result.valid, true);
     });
 
-    test('missing id fails', () => {
+    test('missing planId fails', () => {
       const result = validateInput('get_copilot_plan_status', {});
       assert.strictEqual(result.valid, false);
     });
@@ -183,19 +185,19 @@ suite('MCP Validation', () => {
   // =========================================================================
 
   suite('validateInput - plan action schemas', () => {
-    test('cancel_copilot_plan requires id', () => {
+    test('cancel_copilot_plan requires planId', () => {
       assert.strictEqual(validateInput('cancel_copilot_plan', {}).valid, false);
-      assert.strictEqual(validateInput('cancel_copilot_plan', { id: 'x' }).valid, true);
+      assert.strictEqual(validateInput('cancel_copilot_plan', { planId: 'x' }).valid, true);
     });
 
-    test('delete_copilot_plan requires id', () => {
+    test('delete_copilot_plan requires planId', () => {
       assert.strictEqual(validateInput('delete_copilot_plan', {}).valid, false);
-      assert.strictEqual(validateInput('delete_copilot_plan', { id: 'x' }).valid, true);
+      assert.strictEqual(validateInput('delete_copilot_plan', { planId: 'x' }).valid, true);
     });
 
-    test('retry_copilot_plan requires id', () => {
+    test('retry_copilot_plan requires planId', () => {
       assert.strictEqual(validateInput('retry_copilot_plan', {}).valid, false);
-      assert.strictEqual(validateInput('retry_copilot_plan', { id: 'x' }).valid, true);
+      assert.strictEqual(validateInput('retry_copilot_plan', { planId: 'x' }).valid, true);
     });
   });
 
@@ -204,18 +206,18 @@ suite('MCP Validation', () => {
   // =========================================================================
 
   suite('validateInput - node schemas', () => {
-    test('get_copilot_job_details requires planId and nodeId', () => {
-      assert.strictEqual(validateInput('get_copilot_job_details', {}).valid, false);
+    test('get_copilot_job requires planId and jobId', () => {
+      assert.strictEqual(validateInput('get_copilot_job', {}).valid, false);
       assert.strictEqual(
-        validateInput('get_copilot_job_details', { planId: 'a', nodeId: 'b' }).valid,
+        validateInput('get_copilot_job', { planId: 'a', jobId: 'b' }).valid,
         true
       );
     });
 
-    test('get_copilot_job_logs requires planId and nodeId', () => {
+    test('get_copilot_job_logs requires planId and jobId', () => {
       assert.strictEqual(validateInput('get_copilot_job_logs', {}).valid, false);
       assert.strictEqual(
-        validateInput('get_copilot_job_logs', { planId: 'a', nodeId: 'b' }).valid,
+        validateInput('get_copilot_job_logs', { planId: 'a', jobId: 'b' }).valid,
         true
       );
     });
@@ -223,16 +225,16 @@ suite('MCP Validation', () => {
     test('get_copilot_job_logs accepts optional tail', () => {
       const result = validateInput('get_copilot_job_logs', {
         planId: 'a',
-        nodeId: 'b',
+        jobId: 'b',
         tail: 100,
       });
       assert.strictEqual(result.valid, true);
     });
 
-    test('retry_copilot_plan_job requires planId and nodeId', () => {
-      assert.strictEqual(validateInput('retry_copilot_plan_job', {}).valid, false);
+    test('retry_copilot_job requires planId and jobId', () => {
+      assert.strictEqual(validateInput('retry_copilot_job', {}).valid, false);
       assert.strictEqual(
-        validateInput('retry_copilot_plan_job', { planId: 'a', nodeId: 'b' }).valid,
+        validateInput('retry_copilot_job', { planId: 'a', jobId: 'b' }).valid,
         true
       );
     });
@@ -257,25 +259,34 @@ suite('MCP Validation', () => {
     test('minLength error for short name', () => {
       const result = validateInput('create_copilot_plan', {
         name: '',
-        jobs: [{ producer_id: 'abc', task: 'x', dependencies: [] }],
+        jobs: [{ producerId: 'abc', task: 'x', work: 'npm test', dependencies: [] }],
       });
       assert.strictEqual(result.valid, false);
     });
 
-    test('minimum error for maxParallel below 1', () => {
+    test('minimum error for maxParallel below 0', () => {
+      const result = validateInput('create_copilot_plan', {
+        name: 'Plan',
+        maxParallel: -1,
+        jobs: [{ producerId: 'abc', task: 'x', work: 'npm test', dependencies: [] }],
+      });
+      assert.strictEqual(result.valid, false);
+    });
+
+    test('maxParallel 0 is valid (unlimited)', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Plan',
         maxParallel: 0,
-        jobs: [{ producer_id: 'abc', task: 'x', dependencies: [] }],
+        jobs: [{ producerId: 'abc', task: 'x', work: 'npm test', dependencies: [] }],
       });
-      assert.strictEqual(result.valid, false);
+      assert.strictEqual(result.valid, true);
     });
 
     test('maximum error for maxParallel above limit', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Plan',
-        maxParallel: 99,
-        jobs: [{ producer_id: 'abc', task: 'x', dependencies: [] }],
+        maxParallel: 1025,
+        jobs: [{ producerId: 'abc', task: 'x', work: 'npm test', dependencies: [] }],
       });
       assert.strictEqual(result.valid, false);
     });
@@ -288,10 +299,10 @@ suite('MCP Validation', () => {
       assert.strictEqual(result.valid, false);
     });
 
-    test('pattern error for invalid producer_id', () => {
+    test('pattern error for invalid producerId', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Plan',
-        jobs: [{ producer_id: 'UPPERCASE!!!', task: 'x', dependencies: [] }],
+        jobs: [{ producerId: 'UPPERCASE!!!', task: 'x', work: 'npm test', dependencies: [] }],
       });
       assert.strictEqual(result.valid, false);
     });
@@ -306,16 +317,26 @@ suite('MCP Validation', () => {
     test('get_copilot_job_logs with negative tail fails', () => {
       const result = validateInput('get_copilot_job_logs', {
         planId: 'a',
-        nodeId: 'b',
+        jobId: 'b',
         tail: -5,
       });
       assert.strictEqual(result.valid, false);
     });
 
-    test('minItems error for empty nodes array (add_copilot_job)', () => {
-      const result = validateInput('add_copilot_job', {
-        plan_id: 'test-plan',
-        jobs: [],
+    test('minItems error for empty nodes array (add_copilot_plan_job)', () => {
+      const result = validateInput('add_copilot_plan_job', {
+        planId: 'test-plan',
+        producerId: 'abc',
+        task: 'do stuff',
+        work: 'npm test',
+      });
+      // add_copilot_plan_job is a single-node schema, not an array — this should pass
+      assert.strictEqual(result.valid, true);
+    });
+
+    test('add_copilot_plan_job missing required fields fails', () => {
+      const result = validateInput('add_copilot_plan_job', {
+        planId: 'test-plan',
       });
       assert.strictEqual(result.valid, false);
     });
@@ -324,7 +345,7 @@ suite('MCP Validation', () => {
       // name has maxLength constraint. Create overly long name
       const result = validateInput('create_copilot_plan', {
         name: 'A'.repeat(300),
-        jobs: [{ producer_id: 'abc', task: 'x', dependencies: [] }],
+        jobs: [{ producerId: 'abc', task: 'x', work: 'npm test', dependencies: [] }],
       });
       // May or may not fail depending on schema, but exercises the path
       assert.ok(result);
@@ -333,8 +354,9 @@ suite('MCP Validation', () => {
     test('creates many validation errors to test capping', () => {
       // Many invalid jobs to generate > 5 errors
       const badJobs = Array.from({ length: 8 }, (_, i) => ({
-        producer_id: 'X', // invalid pattern - uppercase
+        producerId: 'X', // invalid pattern - uppercase
         task: '',
+        work: 'npm test',
         dependencies: 'not-array',
       }));
       const result = validateInput('create_copilot_plan', {
@@ -348,8 +370,9 @@ suite('MCP Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Plan',
         jobs: [{
-          producer_id: 'job-a',
+          producerId: 'job-a',
           task: 'x',
+          work: 'npm test',
           dependencies: Array.from({ length: 101 }, (_, i) => `dep-${i}`),
         }],
       });
@@ -361,7 +384,7 @@ suite('MCP Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Plan',
         jobs: [{
-          producer_id: 'job-b',
+          producerId: 'job-b',
           task: 'x',
           dependencies: [],
           work: 42,
@@ -377,8 +400,9 @@ suite('MCP Validation', () => {
       const result = validateInput('create_copilot_plan', {
         name: 'Plan',
         jobs: [{
-          producer_id: 'job-c',
+          producerId: 'job-c',
           task: 'x',
+          work: 'npm test',
           dependencies: [],
           prechecks: 42, // not string and not valid object → oneOf error
         }],

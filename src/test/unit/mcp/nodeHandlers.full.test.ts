@@ -97,8 +97,8 @@ suite('Node Handlers', () => {
         completedCommit: 'def', worktreePath: '/wt', mergedToTarget: true,
       });
       plan.producerIdToNodeId.set('build', 'n1');
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await handleGetJob({ job_id: 'n1' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
+      const result = await handleGetJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.node.id, 'n1');
       assert.strictEqual(result.state.status, 'succeeded');
@@ -111,15 +111,15 @@ suite('Node Handlers', () => {
       plan.jobs.set('n1', node);
       plan.nodeStates.set('n1', { status: 'pending', attempts: 0 });
       plan.producerIdToNodeId.set('build', 'n1');
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await handleGetJob({ job_id: 'build' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
+      const result = await handleGetJob({ planId: 'plan-1', jobId: 'build' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('should return error when node not found', async () => {
       const { handleGetJob } = require('../../../mcp/handlers/jobHandlers');
-      const ctx = makeCtx({ getAll: sinon.stub().returns([]) });
-      const result = await handleGetJob({ job_id: 'missing' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(makeMockPlan()) });
+      const result = await handleGetJob({ planId: 'plan-1', jobId: 'missing' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -192,7 +192,7 @@ suite('Node Handlers', () => {
 
     test('should return error when group not found', async () => {
       const { handleGetGroupStatus } = require('../../../mcp/handlers/jobHandlers');
-      const result = await handleGetGroupStatus({ group_id: 'x' }, makeCtx());
+      const result = await handleGetGroupStatus({ groupId: 'x' }, makeCtx());
       assert.strictEqual(result.success, false);
     });
 
@@ -209,7 +209,7 @@ suite('Node Handlers', () => {
           progress: 1.0,
         }),
       });
-      const result = await handleGetGroupStatus({ group_id: 'plan-1' }, ctx);
+      const result = await handleGetGroupStatus({ groupId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.progress, 100);
     });
@@ -260,13 +260,13 @@ suite('Node Handlers', () => {
       const { handleCancelGroup } = require('../../../mcp/handlers/jobHandlers');
       const plan = makeMockPlan();
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
-      const result = await handleCancelGroup({ group_id: 'plan-1' }, ctx);
+      const result = await handleCancelGroup({ groupId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('should return error when group not found', async () => {
       const { handleCancelGroup } = require('../../../mcp/handlers/jobHandlers');
-      const result = await handleCancelGroup({ group_id: 'x' }, makeCtx());
+      const result = await handleCancelGroup({ groupId: 'x' }, makeCtx());
       assert.strictEqual(result.success, false);
     });
   });
@@ -276,13 +276,13 @@ suite('Node Handlers', () => {
       const { handleDeleteGroup } = require('../../../mcp/handlers/jobHandlers');
       const plan = makeMockPlan();
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan), delete: sinon.stub().resolves(true) });
-      const result = await handleDeleteGroup({ group_id: 'plan-1' }, ctx);
+      const result = await handleDeleteGroup({ groupId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('should return error when group not found', async () => {
       const { handleDeleteGroup } = require('../../../mcp/handlers/jobHandlers');
-      const result = await handleDeleteGroup({ group_id: 'x' }, makeCtx());
+      const result = await handleDeleteGroup({ groupId: 'x' }, makeCtx());
       assert.strictEqual(result.success, false);
     });
   });
@@ -304,7 +304,7 @@ suite('Node Handlers', () => {
         retryNode: sinon.stub().resolves({ success: true }),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleRetryGroup({ group_id: 'plan-1' }, ctx);
+      const result = await handleRetryGroup({ groupId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
@@ -313,7 +313,7 @@ suite('Node Handlers', () => {
       const plan = makeMockPlan();
       plan.nodeStates.set('n1', { status: 'succeeded' });
       const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
-      const result = await handleRetryGroup({ group_id: 'plan-1' }, ctx);
+      const result = await handleRetryGroup({ groupId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, false);
     });
 
@@ -327,7 +327,7 @@ suite('Node Handlers', () => {
         retryNode: sinon.stub().resolves({ success: false, error: 'fail' }),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleRetryGroup({ group_id: 'plan-1' }, ctx);
+      const result = await handleRetryGroup({ groupId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, false);
     });
 
@@ -340,7 +340,7 @@ suite('Node Handlers', () => {
         getPlan: sinon.stub().returns(plan),
         retryNode: sinon.stub().rejects(new Error('boom')),
       });
-      const result = await handleRetryGroup({ group_id: 'plan-1' }, ctx);
+      const result = await handleRetryGroup({ groupId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -357,11 +357,11 @@ suite('Node Handlers', () => {
       const plan = makeMockPlan();
       plan.jobs.set('n1', { id: 'n1' });
       const ctx = makeCtx({
-        getAll: sinon.stub().returns([plan]),
+        getPlan: sinon.stub().returns(plan),
         retryNode: sinon.stub().resolves({ success: true }),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleRetryJob({ job_id: 'n1' }, ctx);
+      const result = await handleRetryJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
@@ -371,18 +371,18 @@ suite('Node Handlers', () => {
       plan.jobs.set('n1', { id: 'n1' });
       plan.producerIdToNodeId.set('build', 'n1');
       const ctx = makeCtx({
-        getAll: sinon.stub().returns([plan]),
+        getPlan: sinon.stub().returns(plan),
         retryNode: sinon.stub().resolves({ success: true }),
         resume: sinon.stub().resolves(true),
       });
-      const result = await handleRetryJob({ job_id: 'build' }, ctx);
+      const result = await handleRetryJob({ planId: 'plan-1', jobId: 'build' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('should return error when node not found', async () => {
       const { handleRetryJob } = require('../../../mcp/handlers/jobHandlers');
-      const ctx = makeCtx({ getAll: sinon.stub().returns([]) });
-      const result = await handleRetryJob({ job_id: 'missing' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(makeMockPlan()) });
+      const result = await handleRetryJob({ planId: 'plan-1', jobId: 'missing' }, ctx);
       assert.strictEqual(result.success, false);
     });
 
@@ -391,10 +391,10 @@ suite('Node Handlers', () => {
       const plan = makeMockPlan();
       plan.jobs.set('n1', { id: 'n1' });
       const ctx = makeCtx({
-        getAll: sinon.stub().returns([plan]),
+        getPlan: sinon.stub().returns(plan),
         retryNode: sinon.stub().resolves({ success: false, error: 'cannot retry' }),
       });
-      const result = await handleRetryJob({ job_id: 'n1' }, ctx);
+      const result = await handleRetryJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -411,17 +411,17 @@ suite('Node Handlers', () => {
       const plan = makeMockPlan();
       plan.jobs.set('n1', { id: 'n1' });
       const ctx = makeCtx({
-        getAll: sinon.stub().returns([plan]),
+        getPlan: sinon.stub().returns(plan),
         forceFailNode: sinon.stub().resolves(),
       });
-      const result = await handleForceFailJob({ job_id: 'n1' }, ctx);
+      const result = await handleForceFailJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
     });
 
     test('should return error when node not found', async () => {
       const { handleForceFailJob } = require('../../../mcp/handlers/jobHandlers');
-      const ctx = makeCtx({ getAll: sinon.stub().returns([]) });
-      const result = await handleForceFailJob({ job_id: 'missing' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(makeMockPlan()) });
+      const result = await handleForceFailJob({ planId: 'plan-1', jobId: 'missing' }, ctx);
       assert.strictEqual(result.success, false);
     });
 
@@ -430,10 +430,10 @@ suite('Node Handlers', () => {
       const plan = makeMockPlan();
       plan.jobs.set('n1', { id: 'n1' });
       const ctx = makeCtx({
-        getAll: sinon.stub().returns([plan]),
+        getPlan: sinon.stub().returns(plan),
         forceFailNode: sinon.stub().rejects(new Error('Cannot force fail')),
       });
-      const result = await handleForceFailJob({ job_id: 'n1' }, ctx);
+      const result = await handleForceFailJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, false);
     });
   });
@@ -455,8 +455,8 @@ suite('Node Handlers', () => {
         attempts: 2, worktreePath: '/wt', copilotSessionId: 'sess-1',
         lastAttempt: { phase: 'work' },
       });
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await handleJobFailureContext({ job_id: 'n1' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
+      const result = await handleJobFailureContext({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.error, 'Build error');
     });
@@ -466,16 +466,16 @@ suite('Node Handlers', () => {
       const plan = makeMockPlan();
       plan.jobs.set('n1', { id: 'n1', producerId: 'build', name: 'Build' });
       plan.nodeStates.set('n1', { status: 'running' });
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await handleJobFailureContext({ job_id: 'n1' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
+      const result = await handleJobFailureContext({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, false);
       assert.ok(result.error.includes('not in failed state'));
     });
 
     test('should return error when node not found', async () => {
       const { handleJobFailureContext } = require('../../../mcp/handlers/jobHandlers');
-      const ctx = makeCtx({ getAll: sinon.stub().returns([]) });
-      const result = await handleJobFailureContext({ job_id: 'missing' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(makeMockPlan()) });
+      const result = await handleJobFailureContext({ planId: 'plan-1', jobId: 'missing' }, ctx);
       assert.strictEqual(result.success, false);
     });
 
@@ -484,10 +484,10 @@ suite('Node Handlers', () => {
       const plan = makeMockPlan();
       plan.jobs.set('n1', { id: 'n1', producerId: 'build', name: 'Build' });
       plan.nodeStates.set('n1', { status: 'failed', error: 'err', lastAttempt: {} });
-      const mockRunner = makeMockPlanRunner({ getAll: sinon.stub().returns([plan]) });
+      const mockRunner = makeMockPlanRunner({ getPlan: sinon.stub().returns(plan) });
       mockRunner.executor = { getLogs: sinon.stub().returns([{ timestamp: 1, phase: 'work', type: 'error', message: 'fail' }]) };
       const ctx = { PlanRunner: mockRunner, workspacePath: '/ws', runner: null, plans: null };
-      const result = await handleJobFailureContext({ job_id: 'n1' }, ctx);
+      const result = await handleJobFailureContext({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.logs.length, 1);
     });
@@ -497,7 +497,7 @@ suite('Node Handlers', () => {
     test('should return error when allowedFolders invalid', async () => {
       const { handleRetryJob } = require('../../../mcp/handlers/jobHandlers');
       const result = await handleRetryJob({
-        job_id: 'n1',
+        planId: 'plan-1', jobId: 'n1',
         work: { type: 'agent', allowedFolders: ['/nonexistent/path/xyz123'] },
       }, makeCtx());
       assert.strictEqual(result.success, false);
@@ -506,7 +506,7 @@ suite('Node Handlers', () => {
     test('should return error when allowedUrls invalid', async () => {
       const { handleRetryJob } = require('../../../mcp/handlers/jobHandlers');
       const result = await handleRetryJob({
-        job_id: 'n1',
+        planId: 'plan-1', jobId: 'n1',
         work: { type: 'agent', allowedUrls: ['ftp://evil.com'] },
       }, makeCtx());
       assert.strictEqual(result.success, false);
@@ -520,7 +520,7 @@ suite('Node Handlers', () => {
         discoveredAt: Date.now(),
       });
       const result = await handleRetryJob({
-        job_id: 'n1',
+        planId: 'plan-1', jobId: 'n1',
         newWork: { type: 'agent', agentModel: 'nonexistent-model-xyz' },
       }, makeCtx());
       assert.strictEqual(result.success, false);
@@ -534,10 +534,10 @@ suite('Node Handlers', () => {
       plan.jobs.set('n1', { id: 'n1' });
       plan.producerIdToNodeId.set('build', 'n1');
       const ctx = makeCtx({
-        getAll: sinon.stub().returns([plan]),
+        getPlan: sinon.stub().returns(plan),
         forceFailNode: sinon.stub().resolves(),
       });
-      const result = await handleForceFailJob({ job_id: 'build' }, ctx);
+      const result = await handleForceFailJob({ planId: 'plan-1', jobId: 'build' }, ctx);
       assert.strictEqual(result.success, true);
     });
   });
@@ -552,8 +552,8 @@ suite('Node Handlers', () => {
         status: 'failed', error: 'err', lastAttempt: { phase: 'work' },
         attempts: 1, worktreePath: '/wt', copilotSessionId: 'sess-1',
       });
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
-      const result = await handleJobFailureContext({ job_id: 'build' }, ctx);
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
+      const result = await handleJobFailureContext({ planId: 'plan-1', jobId: 'build' }, ctx);
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.nodeId, 'n1');
     });

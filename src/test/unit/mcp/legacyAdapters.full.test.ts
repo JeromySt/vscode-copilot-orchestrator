@@ -150,41 +150,43 @@ suite('Legacy Adapters', () => {
 
   suite('adaptGetJobDetails', () => {
     test('should delegate to handleGetJob with mapped args', async () => {
+      const jobHandlers = require('../../../mcp/handlers/jobHandlers');
+      const stub = sinon.stub(jobHandlers, 'handleGetJob').resolves({ success: true, node: { id: 'n1' }, state: {} });
       const { adaptGetJobDetails } = require('../../../mcp/handlers/legacyAdapters');
-      const plan = makeMockPlan();
-      const node = { id: 'n1', producerId: 'build', name: 'Build', type: 'job', dependencies: [], dependents: [] };
-      plan.jobs.set('n1', node);
-      plan.nodeStates.set('n1', { status: 'running', attempts: 1 });
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
+      const ctx = makeCtx();
       const result = await adaptGetJobDetails({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
+      assert.ok(stub.calledOnce);
+      assert.strictEqual(stub.firstCall.args[0].jobId, 'n1');
+      stub.restore();
     });
   });
 
   suite('adaptRetryPlanJob', () => {
     test('should delegate to handleRetryJob', async () => {
+      const jobHandlers = require('../../../mcp/handlers/jobHandlers');
+      const stub = sinon.stub(jobHandlers, 'handleRetryJob').resolves({ success: true });
       const { adaptRetryPlanJob } = require('../../../mcp/handlers/legacyAdapters');
-      const plan = makeMockPlan();
-      plan.jobs.set('n1', { id: 'n1' });
-      const ctx = makeCtx({
-        getAll: sinon.stub().returns([plan]),
-        retryNode: sinon.stub().resolves({ success: true }),
-        resume: sinon.stub().resolves(true),
-      });
+      const ctx = makeCtx();
       const result = await adaptRetryPlanJob({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
+      assert.ok(stub.calledOnce);
+      assert.strictEqual(stub.firstCall.args[0].jobId, 'n1');
+      stub.restore();
     });
   });
 
   suite('adaptGetJobFailureContext', () => {
     test('should delegate to handleJobFailureContext', async () => {
+      const jobHandlers = require('../../../mcp/handlers/jobHandlers');
+      const stub = sinon.stub(jobHandlers, 'handleJobFailureContext').resolves({ success: true });
       const { adaptGetJobFailureContext } = require('../../../mcp/handlers/legacyAdapters');
-      const plan = makeMockPlan();
-      plan.jobs.set('n1', { id: 'n1', producerId: 'build', name: 'Build' });
-      plan.nodeStates.set('n1', { status: 'failed', error: 'err', lastAttempt: {} });
-      const ctx = makeCtx({ getAll: sinon.stub().returns([plan]) });
+      const ctx = makeCtx();
       const result = await adaptGetJobFailureContext({ planId: 'plan-1', jobId: 'n1' }, ctx);
       assert.strictEqual(result.success, true);
+      assert.ok(stub.calledOnce);
+      assert.strictEqual(stub.firstCall.args[0].jobId, 'n1');
+      stub.restore();
     });
   });
 });

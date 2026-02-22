@@ -258,7 +258,7 @@ suite('validateAllowedUrls', () => {
           allowedUrls: ['javascript:void(0)']
         }
       };
-      const result = await validateAllowedUrls(input, 'retry_copilot_plan_node');
+      const result = await validateAllowedUrls(input, 'retry_copilot_job');
       assert.strictEqual(result.valid, false);
       assert.ok(result.error?.includes('/newWork/allowedUrls[0]'));
     });

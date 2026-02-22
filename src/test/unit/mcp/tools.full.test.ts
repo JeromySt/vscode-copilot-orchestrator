@@ -34,7 +34,6 @@ suite('MCP Tool Definitions', () => {
       assert.ok(names.includes('create_copilot_plan'));
       assert.ok(names.includes('get_copilot_plan_status'));
       assert.ok(names.includes('list_copilot_plans'));
-      assert.ok(names.includes('get_copilot_job_details'));
       assert.ok(names.includes('get_copilot_job_logs'));
       assert.ok(names.includes('get_copilot_job_attempts'));
       assert.ok(names.includes('cancel_copilot_plan'));
@@ -42,8 +41,6 @@ suite('MCP Tool Definitions', () => {
       assert.ok(names.includes('resume_copilot_plan'));
       assert.ok(names.includes('delete_copilot_plan'));
       assert.ok(names.includes('retry_copilot_plan'));
-      assert.ok(names.includes('get_copilot_plan_job_failure_context'));
-      assert.ok(names.includes('retry_copilot_plan_job'));
     });
 
     test('each tool has required fields', async () => {

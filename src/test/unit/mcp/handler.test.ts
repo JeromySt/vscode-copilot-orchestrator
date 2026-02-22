@@ -374,6 +374,7 @@ suite('McpHandler', () => {
       });
       const mockRunner = makeMockPlanRunner({
         get: (id: string) => id === 'plan-1' ? mockPlan : undefined,
+        getPlan: (id: string) => id === 'plan-1' ? mockPlan : undefined,
       });
       const h = new McpHandler(mockRunner, '/workspace', {} as any);
 

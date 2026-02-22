@@ -100,7 +100,7 @@ suite('MCP Validation Unit Tests', () => {
       const validInput = {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'build',
+          producerId: 'build',
           name: 'Build Job', 
           task: 'Build the application',
           work: 'npm run build',
@@ -117,7 +117,7 @@ suite('MCP Validation Unit Tests', () => {
     test('should reject input missing required name', () => {
       const invalidInput = {
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           name: 'Test',
           task: 'Test task',
           work: 'echo test'
@@ -151,14 +151,16 @@ suite('MCP Validation Unit Tests', () => {
       const validInput = {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'test1',
+          producerId: 'test1',
           name: 'Test 1',
           task: 'First task',
+          work: 'npm run build',
           dependencies: []
         }, {
-          producer_id: 'test2', 
+          producerId: 'test2', 
           name: 'Test 2',
           task: 'Second task',
+          work: 'npm run test',
           dependencies: ['test1']
         }]
       };
@@ -172,7 +174,7 @@ suite('MCP Validation Unit Tests', () => {
       const invalidInput = {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           name: 'Test',
           task: 'Test task',
           dependencies: 'not-an-array' // Should be array
@@ -249,7 +251,7 @@ suite('MCP Validation Unit Tests', () => {
       const inputWithExtra = {
         name: 'Test Plan',
         jobs: [{
-          producer_id: 'test',
+          producerId: 'test',
           name: 'Test', 
           task: 'Test task',
           dependencies: []

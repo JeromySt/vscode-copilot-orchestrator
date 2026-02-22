@@ -12,6 +12,7 @@ import { DefaultEvidenceValidator } from '../../../plan/evidenceValidator';
 import { ProcessMonitor } from '../../../process';
 import { WorkPhaseExecutor } from '../../../plan/phases/workPhase';
 import { PostcheckPhaseExecutor } from '../../../plan/phases/postcheckPhase';
+import { CommitPhaseExecutor } from '../../../plan/phases/commitPhase';
 import { Logger } from '../../../core/logger';
 import * as processHelpers from '../../../process/processHelpers';
 import type { JobNode, ExecutionContext, JobExecutionResult } from '../../../plan/types';
@@ -204,6 +205,11 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
       success: true
     } as JobExecutionResult);
 
+    // Mock commit phase to succeed
+    sandbox.stub(CommitPhaseExecutor.prototype, 'execute').resolves({
+      success: true, commit: 'abc123'
+    } as JobExecutionResult);
+
     // Mock postchecks phase to fail
     sandbox.stub(PostcheckPhaseExecutor.prototype, 'execute').resolves({
       success: false,
@@ -220,6 +226,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
       task: 'Test task with postchecks',
       work: 'echo test',
       postchecks: 'echo postcheck',
+      expectsNoChanges: true,
       dependencies: [],
       dependents: []
     };

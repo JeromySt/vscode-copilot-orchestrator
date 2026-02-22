@@ -34,7 +34,8 @@ suite('scaffoldPlanHandler', () => {
 
   setup(() => {
     sandbox = sinon.createSandbox();
-    validateStub = sandbox.stub(validation, 'validateInput').returns({ valid: true });
+    const validator = require('../../../mcp/validation/validator');
+    validateStub = sandbox.stub(validator, 'validateInput').returns({ valid: true });
   });
 
   teardown(() => {

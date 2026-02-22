@@ -134,7 +134,6 @@ suite('MCP Plan Tool Definitions', () => {
       const names = tools.map(t => t.name);
       assert.ok(names.includes('get_copilot_plan_status'));
       assert.ok(names.includes('list_copilot_plans'));
-      assert.ok(names.includes('get_copilot_job_details'));
       assert.ok(names.includes('get_copilot_job_logs'));
       assert.ok(names.includes('get_copilot_job_attempts'));
     });
@@ -145,8 +144,6 @@ suite('MCP Plan Tool Definitions', () => {
       assert.ok(names.includes('cancel_copilot_plan'));
       assert.ok(names.includes('delete_copilot_plan'));
       assert.ok(names.includes('retry_copilot_plan'));
-      assert.ok(names.includes('retry_copilot_plan_job'));
-      assert.ok(names.includes('get_copilot_plan_job_failure_context'));
     });
 
     test('create_copilot_plan requires name and jobs', async () => {
@@ -157,11 +154,11 @@ suite('MCP Plan Tool Definitions', () => {
       assert.ok(createPlan.inputSchema.required.includes('jobs'));
     });
 
-    test('get_copilot_plan_status requires id', async () => {
+    test('get_copilot_plan_status requires planId', async () => {
       const tools = await getPlanToolDefinitions();
       const tool = tools.find(t => t.name === 'get_copilot_plan_status')!;
       assert.ok(tool.inputSchema.required);
-      assert.ok(tool.inputSchema.required.includes('id'));
+      assert.ok(tool.inputSchema.required.includes('planId'));
     });
   });
 

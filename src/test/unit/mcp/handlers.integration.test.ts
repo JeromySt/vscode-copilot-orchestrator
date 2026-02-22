@@ -195,7 +195,7 @@ suite('MCP Handlers', () => {
       const ctx = createContext();
       const result = await handleListPlans({}, ctx);
       assert.strictEqual(result.success, true);
-      assert.ok(Array.isArray(result.plans));
+      assert.ok(Array.isArray(result.Plans));
     });
 
     test('returns plans when they exist', async () => {
@@ -601,8 +601,8 @@ suite('MCP Handlers', () => {
       const result = await handleCreatePlan({
         name: 'Plan',
         jobs: [
-          { producer_id: 'job-a', task: 'test', dependencies: [] },
-          { producer_id: 'job-a', task: 'test2', dependencies: [] },
+          { producerId: 'job-a', task: 'test', dependencies: [] },
+          { producerId: 'job-a', task: 'test2', dependencies: [] },
         ],
       }, ctx);
       assert.strictEqual(result.success, false);
@@ -613,7 +613,7 @@ suite('MCP Handlers', () => {
       const result = await handleCreatePlan({
         name: 'Plan',
         jobs: [
-          { producer_id: 'job-a', task: 'test', dependencies: ['job-a'] },
+          { producerId: 'job-a', task: 'test', dependencies: ['job-a'] },
         ],
       }, ctx);
       assert.strictEqual(result.success, false);
@@ -624,7 +624,7 @@ suite('MCP Handlers', () => {
       const result = await handleCreatePlan({
         name: 'Plan',
         jobs: [
-          { producer_id: 'job-a', task: 'test', dependencies: ['nonexistent'] },
+          { producerId: 'job-a', task: 'test', dependencies: ['nonexistent'] },
         ],
       }, ctx);
       assert.strictEqual(result.success, false);
@@ -642,8 +642,8 @@ suite('MCP Handlers', () => {
       const result = await handleCreatePlan({
         name: 'My Plan',
         jobs: [
-          { producer_id: 'job-a', task: 'Task A', dependencies: [] },
-          { producer_id: 'job-b', task: 'Task B', dependencies: ['job-a'] },
+          { producerId: 'job-a', task: 'Task A', dependencies: [] },
+          { producerId: 'job-b', task: 'Task B', dependencies: ['job-a'] },
         ],
       }, ctx);
       assert.strictEqual(result.success, true);
@@ -667,7 +667,7 @@ suite('MCP Handlers', () => {
           {
             name: 'backend',
             jobs: [
-              { producer_id: 'api', task: 'Build API', dependencies: [] },
+              { producerId: 'api', task: 'Build API', dependencies: [] },
             ],
           },
         ],
@@ -679,14 +679,8 @@ suite('MCP Handlers', () => {
       const ctx = createContext();
       const result = await handleCreatePlan({
         name: 'Bad Deps',
-        jobs: [],
-        groups: [
-          {
-            name: 'g1',
-            jobs: [
-              { producer_id: 'job-a', task: 'test', dependencies: ['nonexistent'] },
-            ],
-          },
+        jobs: [
+          { producerId: 'job-a', task: 'test', work: 'npm test', dependencies: ['nonexistent'] },
         ],
       }, ctx);
       assert.strictEqual(result.success, false);
@@ -702,7 +696,7 @@ suite('MCP Handlers', () => {
       sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: (key: string, def: any) => def });
       const result = await handleCreatePlan({
         name: 'Plan',
-        jobs: [{ producer_id: 'job-a', task: 'test', work: 'npm test', dependencies: [] }],
+        jobs: [{ producerId: 'job-a', task: 'test', work: 'npm test', dependencies: [] }],
       }, ctx);
       assert.strictEqual(result.success, false);
     });
