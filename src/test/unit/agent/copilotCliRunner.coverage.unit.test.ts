@@ -3,8 +3,10 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { buildCommand, sanitizeUrl, CopilotCliRunner } from '../../../agent/copilotCliRunner';
 import type { CopilotCliLogger } from '../../../agent/copilotCliRunner';
+import * as path from 'path';
 
 suite('copilotCliRunner', () => {
+  const isWin = process.platform === 'win32';
   let sandbox: sinon.SinonSandbox;
 
   setup(() => {
@@ -178,6 +180,17 @@ suite('copilotCliRunner', () => {
   });
 
   suite('buildCommand', () => {
+    const testCwd = isWin ? 'C:\\worktree' : '/tmp/worktree';
+    const testFallback = isWin ? 'C:\\fallback' : '/tmp/fallback';
+    const testFolder1 = isWin ? 'C:\\folder1' : '/tmp/folder1';
+    const testFolder2 = isWin ? 'C:\\folder2' : '/tmp/folder2';
+    const testDoesNotExist = isWin ? 'C:\\does-not-exist' : '/tmp/does-not-exist';
+    const testNonexistent = isWin ? 'C:\\nonexistent' : '/tmp/nonexistent';
+    const testCustomConfig = isWin ? 'C:\\custom-config' : '/tmp/custom-config';
+    const testConfig = isWin ? 'C:\\config' : '/tmp/config';
+    const testLogDir = isWin ? 'C:\\logs' : '/tmp/logs';
+    const testSharePath = isWin ? 'C:\\share.json' : '/tmp/share.json';
+
     let mockLogger: CopilotCliLogger;
     let existsStub: sinon.SinonStub;
 
@@ -193,13 +206,13 @@ suite('copilotCliRunner', () => {
 
     test('should build basic command with task and cwd', () => {
       const cmd = buildCommand(
-        { task: 'test task', cwd: 'C:\\worktree' },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { task: 'test task', cwd: testCwd },
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
       assert.ok(cmd.includes('copilot'));
       assert.ok(cmd.includes('-p "test task"'));
-      assert.ok(cmd.includes('--add-dir "C:\\\\worktree"'));
+      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testCwd))}`));
       assert.ok(cmd.includes('--stream off'));
       assert.ok(cmd.includes('--allow-all-tools'));
       assert.ok(cmd.includes('--no-auto-update'));
@@ -207,50 +220,50 @@ suite('copilotCliRunner', () => {
 
     test('should derive configDir from cwd by default', () => {
       const cmd = buildCommand(
-        { task: 'test', cwd: 'C:\\worktree' },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { task: 'test', cwd: testCwd },
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes('--config-dir "C:\\\\worktree\\\\.orchestrator\\\\.copilot-cli"'));
+      assert.ok(cmd.includes(`--config-dir ${JSON.stringify(path.join(testCwd, '.orchestrator', '.copilot-cli'))}`));
     });
 
     test('should NOT add configDir to --add-dir (inside worktree)', () => {
       const cmd = buildCommand(
-        { task: 'test', cwd: 'C:\\worktree' },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { task: 'test', cwd: testCwd },
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
       // Should only have one --add-dir for cwd
       const addDirMatches = cmd.match(/--add-dir/g);
       assert.strictEqual(addDirMatches?.length, 1);
-      assert.ok(cmd.includes('--add-dir "C:\\\\worktree"'));
+      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testCwd))}`));
     });
 
     test('should use explicit configDir if provided', () => {
       const cmd = buildCommand(
-        { task: 'test', cwd: 'C:\\worktree', configDir: 'C:\\custom-config' },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { task: 'test', cwd: testCwd, configDir: testCustomConfig },
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes('--config-dir "C:\\\\custom-config"'));
+      assert.ok(cmd.includes(`--config-dir ${JSON.stringify(testCustomConfig)}`));
       assert.ok(!cmd.includes('.orchestrator'));
     });
 
     test('should warn and skip non-existent allowedFolders', () => {
-      existsStub.callsFake((p: string) => p === 'C:\\worktree');
+      existsStub.callsFake((p: string) => p === path.resolve(testCwd));
 
       const cmd = buildCommand(
         {
           task: 'test',
-          cwd: 'C:\\worktree',
-          allowedFolders: ['C:\\does-not-exist'],
+          cwd: testCwd,
+          allowedFolders: [testDoesNotExist],
         },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
       assert.ok((mockLogger.warn as sinon.SinonStub).calledWithMatch(/does not exist.*does-not-exist/));
       // Should only have cwd in --add-dir
-      assert.ok(cmd.includes('--add-dir "C:\\\\worktree"'));
+      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testCwd))}`));
       assert.ok(!cmd.includes('does-not-exist'));
     });
 
@@ -258,10 +271,10 @@ suite('copilotCliRunner', () => {
       const cmd = buildCommand(
         {
           task: 'test',
-          cwd: 'C:\\worktree',
+          cwd: testCwd,
           allowedFolders: ['../relative/path'],
         },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
       assert.ok((mockLogger.warn as sinon.SinonStub).calledWithMatch(/relative.*must be absolute/));
@@ -274,15 +287,15 @@ suite('copilotCliRunner', () => {
       const cmd = buildCommand(
         {
           task: 'test',
-          cwd: 'C:\\worktree',
-          allowedFolders: ['C:\\folder1', 'C:\\folder2'],
+          cwd: testCwd,
+          allowedFolders: [testFolder1, testFolder2],
         },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes('--add-dir "C:\\\\worktree"'));
-      assert.ok(cmd.includes('--add-dir "C:\\\\folder1"'));
-      assert.ok(cmd.includes('--add-dir "C:\\\\folder2"'));
+      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testCwd))}`));
+      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testFolder1))}`));
+      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testFolder2))}`));
     });
 
     test('should sanitize and add allowedUrls', () => {
@@ -294,10 +307,10 @@ suite('copilotCliRunner', () => {
       const cmd = buildCommand(
         {
           task: 'test',
-          cwd: 'C:\\worktree',
+          cwd: testCwd,
           allowedUrls: ['https://example.com', '*.github.com', 'bad-url$(cmd)'],
         },
-        { logger: mockLogger, existsSync: existsStub, urlSanitizer: sanitizerStub, fallbackCwd: 'C:\\fallback' }
+        { logger: mockLogger, existsSync: existsStub, urlSanitizer: sanitizerStub, fallbackCwd: testFallback }
       );
 
       assert.ok(cmd.includes('--allow-url "https://example.com"'));
@@ -312,10 +325,10 @@ suite('copilotCliRunner', () => {
       const cmd = buildCommand(
         {
           task: 'test',
-          cwd: 'C:\\worktree',
+          cwd: testCwd,
           allowedUrls: ['bad1', 'bad2'],
         },
-        { logger: mockLogger, existsSync: existsStub, urlSanitizer: sanitizerStub, fallbackCwd: 'C:\\fallback' }
+        { logger: mockLogger, existsSync: existsStub, urlSanitizer: sanitizerStub, fallbackCwd: testFallback }
       );
 
       assert.ok(!cmd.includes('--allow-url'));
@@ -324,8 +337,8 @@ suite('copilotCliRunner', () => {
 
     test('should add model flag', () => {
       const cmd = buildCommand(
-        { task: 'test', cwd: 'C:\\worktree', model: 'claude-sonnet-4.5' },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { task: 'test', cwd: testCwd, model: 'claude-sonnet-4.5' },
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
       assert.ok(cmd.includes('--model claude-sonnet-4.5'));
@@ -333,27 +346,27 @@ suite('copilotCliRunner', () => {
 
     test('should add logDir flag', () => {
       const cmd = buildCommand(
-        { task: 'test', cwd: 'C:\\worktree', logDir: 'C:\\logs' },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { task: 'test', cwd: testCwd, logDir: testLogDir },
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes('--log-dir "C:\\\\logs"'));
+      assert.ok(cmd.includes(`--log-dir ${JSON.stringify(testLogDir)}`));
       assert.ok(cmd.includes('--log-level debug'));
     });
 
     test('should add sharePath flag', () => {
       const cmd = buildCommand(
-        { task: 'test', cwd: 'C:\\worktree', sharePath: 'C:\\share.json' },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { task: 'test', cwd: testCwd, sharePath: testSharePath },
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes('--share "C:\\\\share.json"'));
+      assert.ok(cmd.includes(`--share ${JSON.stringify(testSharePath)}`));
     });
 
     test('should add sessionId flag', () => {
       const cmd = buildCommand(
-        { task: 'test', cwd: 'C:\\worktree', sessionId: 'abc-123' },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { task: 'test', cwd: testCwd, sessionId: 'abc-123' },
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
       assert.ok(cmd.includes('--resume abc-123'));
@@ -361,8 +374,8 @@ suite('copilotCliRunner', () => {
 
     test('should add maxTurns flag', () => {
       const cmd = buildCommand(
-        { task: 'test', cwd: 'C:\\worktree', maxTurns: 5 },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { task: 'test', cwd: testCwd, maxTurns: 5 },
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
       assert.ok(cmd.includes('--max-turns 5'));
@@ -370,8 +383,8 @@ suite('copilotCliRunner', () => {
 
     test('should not add maxTurns if zero', () => {
       const cmd = buildCommand(
-        { task: 'test', cwd: 'C:\\worktree', maxTurns: 0 },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { task: 'test', cwd: testCwd, maxTurns: 0 },
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
       assert.ok(!cmd.includes('--max-turns'));
@@ -380,10 +393,10 @@ suite('copilotCliRunner', () => {
     test('should use fallback cwd when no cwd or allowedPaths', () => {
       const cmd = buildCommand(
         { task: 'test' },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes('--add-dir "C:\\\\fallback"'));
+      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(testFallback)}`));
       assert.ok((mockLogger.warn as sinon.SinonStub).calledWithMatch(/No allowed paths.*explicit cwd.*fallback/));
     });
 
@@ -393,13 +406,13 @@ suite('copilotCliRunner', () => {
       const cmd = buildCommand(
         {
           task: 'complex task',
-          cwd: 'C:\\worktree',
-          configDir: 'C:\\config',
+          cwd: testCwd,
+          configDir: testConfig,
           sessionId: 'session-123',
           model: 'gpt-5',
-          logDir: 'C:\\logs',
-          sharePath: 'C:\\share.json',
-          allowedFolders: ['C:\\folder1'],
+          logDir: testLogDir,
+          sharePath: testSharePath,
+          allowedFolders: [testFolder1],
           allowedUrls: ['https://api.example.com'],
           maxTurns: 10,
         },
@@ -407,19 +420,19 @@ suite('copilotCliRunner', () => {
           logger: mockLogger,
           existsSync: existsStub,
           urlSanitizer: () => 'https://api.example.com',
-          fallbackCwd: 'C:\\fallback',
+          fallbackCwd: testFallback,
         }
       );
 
       assert.ok(cmd.includes('copilot'));
       assert.ok(cmd.includes('-p "complex task"'));
-      assert.ok(cmd.includes('--add-dir "C:\\\\worktree"'));
-      assert.ok(cmd.includes('--add-dir "C:\\\\folder1"'));
+      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testCwd))}`));
+      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testFolder1))}`));
       assert.ok(cmd.includes('--allow-url "https://api.example.com"'));
-      assert.ok(cmd.includes('--config-dir "C:\\\\config"'));
+      assert.ok(cmd.includes(`--config-dir ${JSON.stringify(testConfig)}`));
       assert.ok(cmd.includes('--model gpt-5'));
-      assert.ok(cmd.includes('--log-dir "C:\\\\logs"'));
-      assert.ok(cmd.includes('--share "C:\\\\share.json"'));
+      assert.ok(cmd.includes(`--log-dir ${JSON.stringify(testLogDir)}`));
+      assert.ok(cmd.includes(`--share ${JSON.stringify(testSharePath)}`));
       assert.ok(cmd.includes('--resume session-123'));
       assert.ok(cmd.includes('--max-turns 10'));
     });
@@ -428,13 +441,13 @@ suite('copilotCliRunner', () => {
       existsStub.returns(false);
 
       const cmd = buildCommand(
-        { task: 'test', cwd: 'C:\\nonexistent' },
-        { logger: mockLogger, existsSync: existsStub, fallbackCwd: 'C:\\fallback' }
+        { task: 'test', cwd: testNonexistent },
+        { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
       assert.ok((mockLogger.error as sinon.SinonStub).calledWithMatch(/does not exist.*nonexistent/));
       // Still add it to the command
-      assert.ok(cmd.includes('--add-dir "C:\\\\nonexistent"'));
+      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testNonexistent))}`));
     });
   });
 
@@ -585,6 +598,7 @@ suite('copilotCliRunner', () => {
     });
 
     suite('writeInstructionsFile', () => {
+      const testWorktreeCwd = isWin ? 'C:\\worktrees\\abc123' : '/tmp/worktrees/abc123';
       let mkdirStub: sinon.SinonStub;
       let writeFileStub: sinon.SinonStub;
       const fsModule = require('fs');
@@ -595,24 +609,26 @@ suite('copilotCliRunner', () => {
       });
 
       test('should write instructions file with frontmatter', () => {
+        const expectedDir = path.join(testWorktreeCwd, '.github', 'instructions');
+        const expectedFile = path.join(expectedDir, 'orchestrator-job.instructions.md');
+
         const result = runner.writeInstructionsFile(
-          'C:\\worktrees\\abc123',
+          testWorktreeCwd,
           'Test task',
           'Extra instructions',
           'test-label'
         );
 
-        assert.strictEqual(result.filePath, 'C:\\worktrees\\abc123\\.github\\instructions\\orchestrator-job.instructions.md');
-        assert.strictEqual(result.dirPath, 'C:\\worktrees\\abc123\\.github\\instructions');
+        assert.strictEqual(result.filePath, expectedFile);
+        assert.strictEqual(result.dirPath, expectedDir);
 
         assert.ok(mkdirStub.calledOnce);
-        assert.ok(mkdirStub.calledWith('C:\\worktrees\\abc123\\.github\\instructions', { recursive: true }));
+        assert.ok(mkdirStub.calledWith(expectedDir, { recursive: true }));
 
         assert.ok(writeFileStub.calledOnce);
         const writtenContent = writeFileStub.firstCall.args[1] as string;
 
         // The applyTo scope is constructed from path.basename(cwd) and path.basename(path.dirname(cwd))
-        // For 'C:\\worktrees\\abc123', parent is 'worktrees' and folder is 'abc123'
         assert.ok(writtenContent.includes("applyTo: 'worktrees/abc123/**'"));
         assert.ok(writtenContent.includes('# Current Task'));
         assert.ok(writtenContent.includes('Test task'));
@@ -623,7 +639,7 @@ suite('copilotCliRunner', () => {
 
       test('should include jobId in filename when provided', () => {
         const result = runner.writeInstructionsFile(
-          'C:\\worktrees\\abc123',
+          testWorktreeCwd,
           'Test task',
           undefined,
           'test-label',
@@ -635,7 +651,7 @@ suite('copilotCliRunner', () => {
 
       test('should omit Additional Context section when no instructions', () => {
         const result = runner.writeInstructionsFile(
-          'C:\\worktrees\\abc123',
+          testWorktreeCwd,
           'Test task',
           undefined,
           'test-label'
@@ -652,15 +668,16 @@ suite('copilotCliRunner', () => {
       test('should handle write errors gracefully', () => {
         writeFileStub.throws(new Error('Write failed'));
 
+        const expectedFile = path.join(testWorktreeCwd, '.github', 'instructions', 'orchestrator-job.instructions.md');
         const result = runner.writeInstructionsFile(
-          'C:\\worktrees\\abc123',
+          testWorktreeCwd,
           'Test task',
           'Extra instructions',
           'test-label'
         );
 
         assert.ok((mockLogger.warn as sinon.SinonStub).calledWithMatch(/Failed to write instructions file/));
-        assert.strictEqual(result.filePath, 'C:\\worktrees\\abc123\\.github\\instructions\\orchestrator-job.instructions.md');
+        assert.strictEqual(result.filePath, expectedFile);
       });
     });
 
