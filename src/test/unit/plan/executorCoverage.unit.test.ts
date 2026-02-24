@@ -13,7 +13,6 @@ import { ProcessMonitor } from '../../../process';
 import { WorkPhaseExecutor } from '../../../plan/phases/workPhase';
 import { PostcheckPhaseExecutor } from '../../../plan/phases/postcheckPhase';
 import { CommitPhaseExecutor } from '../../../plan/phases/commitPhase';
-import { Logger } from '../../../core/logger';
 import * as processHelpers from '../../../process/processHelpers';
 import type { JobNode, ExecutionContext, JobExecutionResult } from '../../../plan/types';
 import type { ICopilotRunner } from '../../../interfaces/ICopilotRunner';
@@ -68,18 +67,6 @@ function silenceConsole(): { restore: () => void } {
   return { restore() { Object.assign(console, orig); } };
 }
 
-// Mock logger that captures calls
-function createMockLogger(): Logger & { messages: string[] } {
-  const messages: string[] = [];
-  return {
-    messages,
-    info: (msg: string) => messages.push(`INFO: ${msg}`),
-    warn: (msg: string) => messages.push(`WARN: ${msg}`),
-    error: (msg: string) => messages.push(`ERROR: ${msg}`),
-    debug: (msg: string) => messages.push(`DEBUG: ${msg}`)
-  } as any;
-}
-
 suite('DefaultJobExecutor Coverage - Error Paths', () => {
   let quiet: { restore: () => void };
   let sandbox: sinon.SinonSandbox;
@@ -106,7 +93,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
 
     // Capture the context passed to CommitPhaseExecutor
     let capturedGetLogFilePath: (() => string | undefined) | undefined;
-    const commitPhaseStub = sandbox.stub(require('../../../plan/phases').CommitPhaseExecutor.prototype, 'execute').callsFake(async function(this: any, ctx: any) {
+    sandbox.stub(require('../../../plan/phases').CommitPhaseExecutor.prototype, 'execute').callsFake(async function(this: any, ctx: any) {
       capturedGetLogFilePath = ctx.getLogFilePath;
       return { success: true, commit: 'abc123' };
     });

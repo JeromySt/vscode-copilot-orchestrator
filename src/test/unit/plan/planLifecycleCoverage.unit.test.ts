@@ -12,7 +12,6 @@ import { PlanEventEmitter } from '../../../plan/planEvents';
 import { PlanConfigManager } from '../../../plan/configManager';
 import type { PlanInstance, NodeExecutionState, PlanNode, JobNode } from '../../../plan/types';
 import type { ILogger } from '../../../interfaces/ILogger';
-import { PlanStateMachine } from '../../../plan/stateMachine';
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };

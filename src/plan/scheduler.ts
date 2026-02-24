@@ -11,7 +11,7 @@
  * @module plan/scheduler
  */
 
-import { PlanInstance, PlanNode, nodePerformsWork } from './types';
+import { PlanInstance, nodePerformsWork } from './types';
 import { PlanStateMachine } from './stateMachine';
 
 /**

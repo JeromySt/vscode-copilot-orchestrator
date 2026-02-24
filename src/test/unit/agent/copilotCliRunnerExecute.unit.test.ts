@@ -246,8 +246,6 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
         });
 
         // After run, instructions file should be cleaned up
-        const instrDir = path.join(tmpDir, '.github', 'instructions');
-        const instrFile = path.join(instrDir, 'orchestrator-job-testjob1.instructions.md');
         // File may or may not exist depending on cleanup timing, but should not throw
         assert.ok(true, 'Run with instructions completed');
       } finally {
@@ -413,7 +411,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
       testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c echo test' : 'echo test');
 
       let receivedPid = false;
-      const result = await testRunner.run({
+      await testRunner.run({
         cwd: os.tmpdir(),
         task: 'test',
         skipInstructionsFile: true,

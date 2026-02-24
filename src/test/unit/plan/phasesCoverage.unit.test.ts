@@ -2,8 +2,6 @@
  * @fileoverview Unit tests for workPhase and executionPump edge cases
  */
 import * as assert from 'assert';
-import * as sinon from 'sinon';
-import * as path from 'path';
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };

@@ -8,7 +8,7 @@
  */
 
 import * as vscode from 'vscode';
-import { PlanRunner, PlanInstance, PlanStatus, NodeStatus } from '\.\./plan';
+import { PlanRunner, PlanInstance, NodeStatus } from '\.\./plan';
 import { planDetailPanel } from './panels/planDetailPanel';
 import { NodeDetailPanel } from './panels/nodeDetailPanel';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../interfaces/IPulseEmitter';

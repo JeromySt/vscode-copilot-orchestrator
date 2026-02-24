@@ -205,7 +205,7 @@ export class AgentDelegator {
    * @returns Promise resolving to delegation result
    */
   async delegate(options: DelegateOptions): Promise<DelegateResult> {
-    const { jobId, taskDescription, label, worktreePath, baseBranch, targetBranch, instructions, sessionId } = options;
+    const { jobId, taskDescription, label, worktreePath } = options;
 
     this.logger.log(`[${label}] AI Agent Delegation: ${taskDescription}`);
     this.logger.log(`[${label}] Worktree: ${worktreePath}`);

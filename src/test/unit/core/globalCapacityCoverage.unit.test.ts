@@ -154,7 +154,7 @@ suite('GlobalCapacityManager Coverage - Error Paths', () => {
       // Success on third attempt
     });
 
-    const writeFileStub = sandbox.stub(fs.promises, 'writeFile').resolves();
+    sandbox.stub(fs.promises, 'writeFile').resolves();
     
     await (manager as any).writeRegistry(testRegistry);
     

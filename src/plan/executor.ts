@@ -4,15 +4,14 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import { ProcessNode } from '../types';
 import type { IProcessSpawner, ChildProcessLike } from '../interfaces/IProcessSpawner';
 import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
 import { killProcessTree } from '../process/processHelpers';
 import {
   JobNode, ExecutionContext, JobExecutionResult,
-  JobWorkSummary, CommitDetail, ExecutionPhase, LogEntry, CopilotUsageMetrics,
-  OnFailureConfig, WorkSpec, normalizeWorkSpec,
+  JobWorkSummary, ExecutionPhase, LogEntry, CopilotUsageMetrics,
+  WorkSpec, normalizeWorkSpec,
 } from './types';
 import { JobExecutor } from './runner';
 import { Logger } from '../core/logger';
@@ -21,7 +20,6 @@ import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
 import { aggregateMetrics } from './metricsAggregator';
 import type { IEvidenceValidator } from '../interfaces';
 import type { PhaseContext } from '../interfaces/IPhaseExecutor';
-import { ensureOrchestratorDirs } from '../core';
 import {
   SetupPhaseExecutor,
   PrecheckPhaseExecutor, WorkPhaseExecutor,

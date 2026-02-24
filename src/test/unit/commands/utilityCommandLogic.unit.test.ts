@@ -196,9 +196,6 @@ suite('Utility Command Logic Unit Tests', () => {
     });
 
     test('should handle non-Error exceptions', async () => {
-      // Mock the dynamic import by overriding the import function itself
-      const originalImportFunction = (global as any).__webpack_require__ || require;
-      
       // Store original require for restoration
       const originalModuleRequire = Module.prototype.require;
       

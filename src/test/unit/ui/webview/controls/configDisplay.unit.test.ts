@@ -6,7 +6,7 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { EventBus } from '../../../../../ui/webview/eventBus';
 import { Topics } from '../../../../../ui/webview/topics';
-import { ConfigDisplay, ConfigDisplayData, JobSpec } from '../../../../../ui/webview/controls/configDisplay';
+import { ConfigDisplay, JobSpec } from '../../../../../ui/webview/controls/configDisplay';
 
 function mockDocument(elements: Record<string, any> = {}): () => void {
   const prev = (globalThis as any).document;

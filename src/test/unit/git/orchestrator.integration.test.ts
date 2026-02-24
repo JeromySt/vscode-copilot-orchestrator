@@ -4,9 +4,7 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import * as path from 'path';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as orchestrator from '../../../git/orchestrator';
 import * as worktrees from '../../../git/core/worktrees';
 import * as branches from '../../../git/core/branches';
@@ -105,8 +103,8 @@ suite('Git Orchestrator', () => {
       sinon.stub(branches, 'exists').resolves(true);
 
       // Stub .gitignore reading/writing
-      const readStub = sinon.stub(fs.promises, 'readFile').resolves('');
-      const writeStub = sinon.stub(fs.promises, 'writeFile').resolves();
+      sinon.stub(fs.promises, 'readFile').resolves('');
+      sinon.stub(fs.promises, 'writeFile').resolves();
 
       const result = await orchestrator.createJobWorktree({
         repoPath: '/repo',

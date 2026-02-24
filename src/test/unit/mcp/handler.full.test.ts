@@ -246,7 +246,6 @@ suite('McpHandler Full Coverage', () => {
       const badHandler = new McpHandler(badRunner, '/workspace', {} as any);
       
       // Stub the internal method to throw
-      const origHandleRequest = badHandler.handleRequest.bind(badHandler);
       const throwingHandler = new McpHandler(badRunner, '/workspace', {} as any);
       // Force an error by making a handler throw
       sinon.stub(throwingHandler as any, 'handleToolsList').throws(new Error('Internal failure'));

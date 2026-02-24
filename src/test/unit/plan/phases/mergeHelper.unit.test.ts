@@ -4,7 +4,6 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import * as path from 'path';
 import { resolveMergeConflictWithCopilot } from '../../../../plan/phases/mergeHelper';
 import type { PhaseContext } from '../../../../interfaces/IPhaseExecutor';
 import type { ICopilotRunner } from '../../../../interfaces/ICopilotRunner';

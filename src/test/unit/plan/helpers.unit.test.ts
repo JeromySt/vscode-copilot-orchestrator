@@ -5,7 +5,6 @@ import * as assert from 'assert';
 import {
   formatLogEntry,
   formatLogEntries,
-  computeStatusCounts,
   computeProgress,
   computePlanStatus,
   getNodeOverallStartedAt,

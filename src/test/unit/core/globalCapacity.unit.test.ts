@@ -493,7 +493,7 @@ suite('GlobalCapacityManager', () => {
 
     // Stub process.kill to throw EPERM for a specific PID
     const origKill = process.kill;
-    const killStub = (process as any).kill = function(pid: number, signal?: string | number) {
+    (process as any).kill = function(pid: number, signal?: string | number) {
       if (pid === 88888 && (signal === 0 || signal === undefined)) {
         const err = new Error('Operation not permitted') as NodeJS.ErrnoException;
         err.code = 'EPERM';

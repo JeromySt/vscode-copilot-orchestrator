@@ -18,7 +18,6 @@ import {
   NodeExecutionState,
   GroupInstance,
   GroupExecutionState,
-  GroupInfo,
 } from '../../../plan/types';
 
 // ---------------------------------------------------------------------------

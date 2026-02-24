@@ -1478,7 +1478,7 @@ suite('JobExecutionEngine - helper methods', () => {
   suite('allConsumersConsumed leaf path', () => {
     test('leaf node with no targetBranch and cleanUpSuccessfulWork', async () => {
       const dir = makeTmpDir();
-      const worktreeDir = makeTmpDir();
+      makeTmpDir();
       const node = createJobNode('leaf-1', [], []);
       const nodes = new Map<string, PlanNode>([['leaf-1', node]]);
       const nodeStates = new Map<string, NodeExecutionState>([
@@ -1492,7 +1492,7 @@ suite('JobExecutionEngine - helper methods', () => {
       });
       const sm = new PlanStateMachine(plan);
 
-      const removeStub = sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      sandbox.stub(git.worktrees, 'removeSafe').resolves();
       const { engine, state } = createEngine(dir, {
         execute: sinon.stub().resolves({
           success: true,

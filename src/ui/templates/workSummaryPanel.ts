@@ -81,7 +81,7 @@ export interface WorkSummaryPanelData {
 function renderFileLink(path: string, status: 'added' | 'modified' | 'deleted'): string {
   const prefix = status === 'added' ? '+' : status === 'modified' ? '~' : '-';
   const cssClass = `file-${status}`;
-  return `<a class="file-link ${cssClass}" href="#" onclick="openFile('${escapeHtml(path.replace(/'/g, "\\'"))}')">${prefix} ${escapeHtml(path)}</a>`;
+  return `<a class="file-link ${cssClass}" href="#" onclick="openFile('${escapeHtml(path.replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')">${prefix} ${escapeHtml(path)}</a>`;
 }
 
 /**
