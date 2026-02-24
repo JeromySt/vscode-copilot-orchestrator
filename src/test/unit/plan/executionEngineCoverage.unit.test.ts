@@ -9,7 +9,6 @@ import * as sinon from 'sinon';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import * as git from '../../../git';
 import { JobExecutionEngine, ExecutionEngineState } from '../../../plan/executionEngine';
 import { NodeManager } from '../../../plan/nodeManager';
 import { PlanStateMachine } from '../../../plan/stateMachine';
@@ -869,7 +868,7 @@ suite('JobExecutionEngine - Coverage', () => {
       const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
-      const { engine, state, gitOps } = createEngine(dir, {
+      const { engine, state } = createEngine(dir, {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
@@ -1447,7 +1446,7 @@ suite('JobExecutionEngine - Coverage', () => {
       const node = plan.jobs.get('node-1')! as JobNode;
       const sm = new PlanStateMachine(plan);
 
-      const { engine, state, gitOps } = createEngine(dir, {
+      const { engine, state } = createEngine(dir, {
         execute: sinon.stub().resolves({
           success: true,
           completedCommit: 'commit123456789012345678901234567890ab',
@@ -2311,8 +2310,6 @@ suite('JobExecutionEngine - Coverage', () => {
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'failed');
-      // Check that attemptHistory[0].workUsed matches diskWork
-      const attempt = ns.attemptHistory![0];
       // workUsed is converted to workRef by toRefAttempt, but the original diskWork was passed
       // We verify indirectly by confirming plan.definition.getWorkSpec was called
       assert.ok(plan.definition && (plan.definition.getWorkSpec as sinon.SinonStub).called);

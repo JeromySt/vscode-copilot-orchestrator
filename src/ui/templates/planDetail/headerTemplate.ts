@@ -59,7 +59,7 @@ export function formatPlanDuration(startedAt?: number, endedAt?: number): string
  * @returns HTML fragment string.
  */
 export function renderPlanHeader(data: PlanHeaderData): string {
-  const { planName, status, startedAt, effectiveEndedAt, baseBranch, targetBranch, showBranchFlow, globalCapacityStats } = data;
+  const { planName, status, startedAt, effectiveEndedAt, baseBranch, targetBranch, showBranchFlow } = data;
   const durationText = status === 'scaffolding' ? '--' : formatPlanDuration(startedAt, effectiveEndedAt);
   const targetBranchName = targetBranch || baseBranch;
 

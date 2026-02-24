@@ -183,7 +183,7 @@ suite('AgentDelegator DI', () => {
       const call = runner.calls[0];
       assert.strictEqual(call.model, 'gpt-5');
       assert.strictEqual(call.sessionId, 'existing-session');
-      assert.ok(call.allowedUrls?.includes('https://api.example.com'));
+      assert.ok(call.allowedUrls?.some(u => u === 'https://api.example.com'));
     });
 
     test('handles runner failure', async () => {

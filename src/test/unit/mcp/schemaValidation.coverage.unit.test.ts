@@ -20,8 +20,6 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { validateInput, hasSchema } from '../../../mcp/validation';
 import {
-  createPlanSchema,
-  scaffoldPlanSchema,
   updatePlanSchema,
   pausePlanSchema,
   resumePlanSchema,

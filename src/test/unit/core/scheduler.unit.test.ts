@@ -21,7 +21,6 @@ import {
   JobNode,
   NodeExecutionState,
   NodeStatus,
-  PlanSpec,
 } from '../../../plan/types';
 
 // ---------------------------------------------------------------------------

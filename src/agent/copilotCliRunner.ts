@@ -239,7 +239,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     
     try {
       fs.mkdirSync(instructionsDir, { recursive: true });
-      fs.writeFileSync(instructionsFile, content, 'utf8');
+      fs.writeFileSync(instructionsFile, content, { encoding: 'utf8', mode: 0o600 });
       this.logger.info(`[${label}] Wrote instructions to: ${instructionsFile}`);
     } catch (e) {
       this.logger.warn(`[${label}] Failed to write instructions file: ${e}`);

@@ -23,8 +23,6 @@ import {
   PlanCompletionEvent,
   isValidTransition,
   isTerminal,
-  TERMINAL_STATES,
-  GroupExecutionState,
 } from './types';
 import { Logger } from '../core/logger';
 import {
@@ -117,7 +115,6 @@ export class PlanStateMachine extends EventEmitter {
     }
     
     // Apply the transition
-    const oldState = { ...state };
     state.status = newStatus;
     state.version = (state.version || 0) + 1;
     

@@ -764,7 +764,7 @@ suite('initializeMcpServer', () => {
     });
 
     try {
-      const result = await initializeMcpServer(mockContext, mockPlanRunner, { enabled: true });
+      await initializeMcpServer(mockContext, mockPlanRunner, { enabled: true });
       await new Promise(resolve => setTimeout(resolve, 100));
     } catch {
       // Expected in test env

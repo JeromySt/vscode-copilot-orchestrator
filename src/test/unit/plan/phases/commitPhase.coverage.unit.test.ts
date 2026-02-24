@@ -14,8 +14,6 @@
 import { suite, test, setup, teardown } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import * as fs from 'fs';
-import * as path from 'path';
 import { CommitPhaseExecutor } from '../../../../plan/phases/commitPhase';
 import type { CommitPhaseContext } from '../../../../plan/phases/commitPhase';
 import type { IEvidenceValidator } from '../../../../interfaces/IEvidenceValidator';

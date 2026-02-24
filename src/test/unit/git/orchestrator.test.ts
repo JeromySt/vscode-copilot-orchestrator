@@ -30,7 +30,7 @@ function ok(stdout = '', stderr = ''): CommandResult {
 }
 
 /** Build a failed CommandResult. */
-function fail(stderr = '', stdout = '', exitCode = 1): CommandResult {
+function _fail(stderr = '', stdout = '', exitCode = 1): CommandResult {
   return { success: false, stdout, stderr, exitCode };
 }
 

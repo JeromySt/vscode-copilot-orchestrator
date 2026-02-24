@@ -15,7 +15,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec, normalizeWorkSpec } from '../../plan';
+import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec } from '../../plan';
 import { escapeHtml, formatDuration, errorPageHtml, loadingPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 import { getNodeMetrics } from '../../plan/metricsAggregator';
 import {
@@ -43,33 +43,6 @@ function extractOnFailure(spec: WorkSpec | undefined): { noAutoHeal?: boolean; m
     message: onFailure.message,
     resumeFromPhase: onFailure.resumeFromPhase,
   };
-}
-
-/**
- * Format a {@link WorkSpec} as a plain-text summary string.
- *
- * @param spec - The work specification to format.
- * @returns A human-readable text representation of the work spec, or empty string if undefined.
- */
-function formatWorkSpec(spec: WorkSpec | undefined): string {
-  if (!spec) {return '';}
-  
-  if (typeof spec === 'string') {
-    return spec;
-  }
-  
-  switch (spec.type) {
-    case 'process':
-      const args = spec.args?.join(' ') || '';
-      return `[process] ${spec.executable} ${args}`.trim();
-    case 'shell':
-      const shell = spec.shell ? `[${spec.shell}] ` : '';
-      return `${shell}${spec.command}`;
-    case 'agent':
-      return `[agent] ${spec.instructions}`;
-    default:
-      return JSON.stringify(spec);
-  }
 }
 
 /**
@@ -941,10 +914,6 @@ export class NodeDetailPanel {
     node: JobNode,
     state: NodeExecutionState
   ): string {
-    
-    const duration = state.startedAt 
-      ? formatDuration(Math.round(((state.endedAt || Date.now()) - state.startedAt) / 1000))
-      : null;
     
     // Build phase status indicators
     const phaseStatus = this._getPhaseStatus(state);

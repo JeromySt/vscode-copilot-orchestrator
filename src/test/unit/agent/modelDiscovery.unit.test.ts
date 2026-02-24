@@ -14,8 +14,6 @@
 import * as assert from 'assert';
 import { EventEmitter } from 'events';
 import {
-  classifyModel,
-  parseModelChoices,
   resetModelCache,
   discoverAvailableModels,
   getCachedModels,
@@ -92,7 +90,7 @@ suite('Model Discovery - Async Functions', () => {
     test('failure cache prevents rapid re-discovery', async function () {
       this.timeout(20000);
       // First call triggers discovery
-      const result1 = await discoverAvailableModels(deps);
+      await discoverAvailableModels(deps);
 
       // If first call failed, second call should hit failure cache and return quickly
       const start = Date.now();

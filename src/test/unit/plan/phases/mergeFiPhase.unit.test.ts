@@ -8,7 +8,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { MergeFiPhaseExecutor } from '../../../../plan/phases/mergeFiPhase';
-import { EventEmitter } from 'events';
 import type { PhaseContext } from '../../../../interfaces/IPhaseExecutor';
 import type { IGitOperations } from '../../../../interfaces/IGitOperations';
 import type { JobNode } from '../../../../plan/types';

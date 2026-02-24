@@ -11,11 +11,11 @@
  */
 
 import * as vscode from 'vscode';
-import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState, computeMergedLeafWorkSummary, normalizeWorkSpec } from '../../plan';
-import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
+import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState, computeMergedLeafWorkSummary } from '../../plan';
+import { escapeHtml, formatDurationMs, errorPageHtml } from '../templates';
 import { renderWorkSummaryPanelHtml } from '../templates/workSummaryPanel';
 import type { WorkSummaryPanelData, WsPanelJob, WsJourneyNode } from '../templates/workSummaryPanel';
-import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges, formatTokenCount } from '../../plan/metricsAggregator';
+import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges } from '../../plan/metricsAggregator';
 import { renderPlanHeader, renderPlanControls, renderPlanDag, renderPlanNodeCard, renderPlanSummary, renderMetricsBar, renderPlanScripts } from '../templates/planDetail';
 import type { PlanSummaryData, PlanMetricsBarData } from '../templates/planDetail';
 import { PlanDetailController } from './planDetailController';
@@ -1688,7 +1688,7 @@ export class planDetailPanel {
       
       // First pass: determine which nodes are roots and leaves in this Plan
       const nodeHasDependents = new Set<string>();
-      for (const [nodeId, node] of d.jobs) {
+      for (const [_nodeId, node] of d.jobs) {
         for (const depId of node.dependencies) {
           nodeHasDependents.add(depId);
         }
@@ -1832,7 +1832,6 @@ export class planDetailPanel {
         if (truncatedGroupName !== escapedName || groupPath.includes('/')) {
           nodeTooltips[sanitizedGroupId] = groupPath.includes('/') ? groupPath : displayName;
         }
-        const emSp = '\u2003'; // em space — proportional-font-safe padding
         const padding = ''; // no extra padding — sizing template handles width
         
         lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedGroupName}${groupDurationLabel}${padding}"]`);

@@ -40,6 +40,15 @@ try {
 import { IConfigProvider } from '../interfaces/IConfigProvider';
 
 /**
+ * Sanitize a log message to prevent log injection attacks.
+ * Strips newlines and control characters that could forge log entries.
+ */
+function sanitizeLogMessage(msg: string): string {
+  // eslint-disable-next-line no-control-regex
+  return msg.replace(/[\r\n\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ');
+}
+
+/**
  * Log levels supported by the logger
  */
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -287,16 +296,18 @@ export class Logger {
     // Also log to console for development or standalone mode
     // In standalone mode (stdio server), ALL output must go to stderr
     // since stdout is reserved for JSON-RPC messages
+    const safeMsg = sanitizeLogMessage(message);
     if (!this.outputChannel) {
       // Standalone mode: always use stderr
-      console.error(`[Orchestrator:${component}] ${message}`, data ?? '');
+      // Pass user data as separate args to avoid format string injection
+      console.error('[Orchestrator:%s] %s', component, safeMsg, ...(data != null ? [data] : []));
     } else {
       // VS Code mode: use appropriate console method
       const consoleFn = level === 'error' ? console.error :
                         level === 'warn' ? console.warn :
                         level === 'debug' ? console.debug :
                         console.log;
-      consoleFn(`[Orchestrator:${component}] ${message}`, data ?? '');
+      consoleFn('[Orchestrator:%s] %s', component, safeMsg, ...(data != null ? [data] : []));
     }
   }
 
@@ -363,7 +374,7 @@ export class ComponentLogger {
     if (instance) {
       instance.debug(this.component, message, data);
     } else {
-      console.debug(`[Orchestrator:${this.component}] ${message}`, data ?? '');
+      console.debug('[Orchestrator:%s] %s', this.component, sanitizeLogMessage(message), ...(data != null ? [data] : []));
     }
   }
 
@@ -375,7 +386,7 @@ export class ComponentLogger {
     if (instance) {
       instance.info(this.component, message, data);
     } else {
-      console.log(`[Orchestrator:${this.component}] ${message}`, data ?? '');
+      console.log('[Orchestrator:%s] %s', this.component, sanitizeLogMessage(message), ...(data != null ? [data] : []));
     }
   }
 
@@ -387,7 +398,7 @@ export class ComponentLogger {
     if (instance) {
       instance.warn(this.component, message, data);
     } else {
-      console.warn(`[Orchestrator:${this.component}] ${message}`, data ?? '');
+      console.warn('[Orchestrator:%s] %s', this.component, sanitizeLogMessage(message), ...(data != null ? [data] : []));
     }
   }
 
@@ -399,7 +410,7 @@ export class ComponentLogger {
     if (instance) {
       instance.error(this.component, message, data);
     } else {
-      console.error(`[Orchestrator:${this.component}] ${message}`, data ?? '');
+      console.error('[Orchestrator:%s] %s', this.component, sanitizeLogMessage(message), ...(data != null ? [data] : []));
     }
   }
 

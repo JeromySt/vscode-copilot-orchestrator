@@ -519,7 +519,10 @@ export class PlanPersistence {
       } else {
         this.ensureStorageDir();
       }
-      fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
+      // Write to temp file then rename for atomicity (avoids TOCTOU race)
+      const tmpPath = indexPath + '.tmp';
+      fs.writeFileSync(tmpPath, JSON.stringify(index, null, 2));
+      fs.renameSync(tmpPath, indexPath);
     } catch {
       // Ignore errors
     }

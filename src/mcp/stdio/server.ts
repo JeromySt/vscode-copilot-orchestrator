@@ -19,7 +19,6 @@
 // CRITICAL: Redirect console.log to stderr BEFORE any imports
 // that might log during module initialization.
 // stdout is reserved for JSON-RPC messages only.
-const origLog = console.log;
 console.log = (...args: any[]) => console.error('[mcp-stdio]', ...args);
 console.debug = (...args: any[]) => console.error('[mcp-stdio:debug]', ...args);
 console.info = (...args: any[]) => console.error('[mcp-stdio:info]', ...args);
