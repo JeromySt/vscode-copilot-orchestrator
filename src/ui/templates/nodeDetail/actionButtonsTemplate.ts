@@ -7,6 +7,8 @@
  * @module ui/templates/nodeDetail/actionButtonsTemplate
  */
 
+import { escapeHtml } from '../helpers';
+
 /**
  * Input data for the action buttons template.
  */

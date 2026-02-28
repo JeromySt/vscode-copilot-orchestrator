@@ -30,14 +30,21 @@ export interface PlanControlsData {
 export function renderPlanControls(data: PlanControlsData): string {
   const { status } = data;
 
-  const isActive = status === 'running' || status === 'pending';
+  const isActive = status === 'running' || status === 'pending' || status === 'resumed';
   const isPaused = status === 'paused';
-  const canControl = isActive || isPaused;
+  const isPausing = status === 'pausing';
+  const isPendingStart = status === 'pending-start';
+  const canControl = isActive || isPaused || isPausing || isPendingStart;
   const isScaffolding = status === 'scaffolding';
 
   const pauseBtn = isActive
     ? '<button id="pauseBtn" class="action-btn secondary" onclick="pausePlan()">Pause</button>'
     : '<button id="pauseBtn" class="action-btn secondary" onclick="pausePlan()" style="display:none">Pause</button>';
+
+  // "Start" button for pending-start plans that have never run
+  const startBtn = isPendingStart
+    ? '<button id="startBtn" class="action-btn primary" onclick="resumePlan()">Start</button>'
+    : '<button id="startBtn" class="action-btn primary" onclick="resumePlan()" style="display:none">Start</button>';
 
   const resumeBtn = isPaused && !data.isChainedPause
     ? '<button id="resumeBtn" class="action-btn primary" onclick="resumePlan()">Resume</button>'
@@ -55,6 +62,7 @@ export function renderPlanControls(data: PlanControlsData): string {
   <div class="plan-toolbar">
     <div class="actions">
       ${isScaffolding ? '' : pauseBtn}
+      ${isScaffolding ? '' : startBtn}
       ${isScaffolding ? '' : resumeBtn}
       ${isScaffolding ? '' : cancelBtn}
       <button class="action-btn secondary" onclick="refresh()">Refresh</button>

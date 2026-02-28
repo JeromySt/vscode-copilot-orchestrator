@@ -8,9 +8,9 @@
  * @module compositionTest
  */
 
-import { ServiceContainer } from './core/container';
-import * as Tokens from './core/tokens';
-import { MockConfigProvider, MockDialogService, MockClipboardService } from './vscode/testAdapters';
+import { ServiceContainer } from '../../core/container';
+import * as Tokens from '../../core/tokens';
+import { MockConfigProvider, MockDialogService, MockClipboardService } from './testAdapters';
 
 /**
  * Map of token → factory overrides accepted by {@link createTestContainer}.
@@ -19,16 +19,16 @@ import { MockConfigProvider, MockDialogService, MockClipboardService } from './v
  * mock defaults.
  */
 export interface TestContainerOverrides {
-  [Tokens.IConfigProvider]?: () => import('./interfaces').IConfigProvider;
-  [Tokens.IDialogService]?: () => import('./interfaces').IDialogService;
-  [Tokens.IClipboardService]?: () => import('./interfaces').IClipboardService;
-  [Tokens.IProcessSpawner]?: () => import('./interfaces').IProcessSpawner;
-  [Tokens.IProcessMonitor]?: () => import('./interfaces').IProcessMonitor;
-  [Tokens.ILogger]?: () => import('./interfaces').ILogger;
+  [Tokens.IConfigProvider]?: () => import('../../interfaces').IConfigProvider;
+  [Tokens.IDialogService]?: () => import('../../interfaces').IDialogService;
+  [Tokens.IClipboardService]?: () => import('../../interfaces').IClipboardService;
+  [Tokens.IProcessSpawner]?: () => import('../../interfaces').IProcessSpawner;
+  [Tokens.IProcessMonitor]?: () => import('../../interfaces').IProcessMonitor;
+  [Tokens.ILogger]?: () => import('../../interfaces').ILogger;
 }
 
 /** Stub logger that satisfies ILogger without side-effects. */
-function createStubLogger(): import('./interfaces').ILogger {
+function createStubLogger(): import('../../interfaces').ILogger {
   const noop = () => {};
   return {
     debug: noop,
@@ -42,7 +42,7 @@ function createStubLogger(): import('./interfaces').ILogger {
 }
 
 /** Stub process monitor that satisfies IProcessMonitor without OS calls. */
-function createStubProcessMonitor(): import('./interfaces').IProcessMonitor {
+function createStubProcessMonitor(): import('../../interfaces').IProcessMonitor {
   return {
     getSnapshot: async () => [],
     buildTree: () => [],
@@ -52,7 +52,7 @@ function createStubProcessMonitor(): import('./interfaces').IProcessMonitor {
 }
 
 /** Stub process spawner that satisfies IProcessSpawner without real processes. */
-function createStubProcessSpawner(): import('./interfaces').IProcessSpawner {
+function createStubProcessSpawner(): import('../../interfaces').IProcessSpawner {
   return {
     spawn: () => ({
       pid: 12345,

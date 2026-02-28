@@ -44,6 +44,20 @@ export function isCopilotCliAvailable(): boolean {
 }
 
 /**
+ * Await any in-progress CLI detection check.
+ * Returns the cached result if available, otherwise awaits the background check.
+ * Unlike isCopilotCliAvailable(), this never returns a stale false.
+ */
+export async function ensureCopilotCliChecked(): Promise<boolean> {
+  // If cache has a positive result, return immediately
+  if (cachedCliAvailable === true) { return true; }
+  // If a check is in progress, await it
+  if (checkInProgress) { return checkInProgress; }
+  // If cache is null or expired negative, run a fresh check
+  return checkCopilotCliAsync();
+}
+
+/**
  * Force a fresh check of Copilot CLI availability (async).
  * Updates the cache and returns the result.
  */

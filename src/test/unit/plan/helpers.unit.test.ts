@@ -5,6 +5,7 @@ import * as assert from 'assert';
 import {
   formatLogEntry,
   formatLogEntries,
+  computeStatusCounts,
   computeProgress,
   computePlanStatus,
   getNodeOverallStartedAt,
@@ -114,7 +115,7 @@ suite('Plan Helpers (extended coverage)', () => {
     });
 
     test('returns partial when mixed success/failure', () => {
-      assert.strictEqual(computePlanStatus(makeStates(['succeeded', 'failed']), true), 'partial');
+      assert.strictEqual(computePlanStatus(makeStates(['succeeded', 'failed']), true), 'failed');
     });
 
     test('returns canceled when any canceled', () => {
@@ -125,8 +126,16 @@ suite('Plan Helpers (extended coverage)', () => {
       assert.strictEqual(computePlanStatus(makeStates(['blocked']), true), 'failed');
     });
 
-    test('returns paused when isPaused and non-terminal nodes exist', () => {
+    test('returns paused when isPaused and only non-running non-terminal nodes exist', () => {
       assert.strictEqual(computePlanStatus(makeStates(['pending', 'succeeded']), true, true), 'paused');
+    });
+
+    test('returns pausing when isPaused and running nodes exist', () => {
+      assert.strictEqual(computePlanStatus(makeStates(['running', 'succeeded']), true, true), 'pausing');
+    });
+
+    test('returns pending-start when isPaused, not started, and non-terminal nodes exist', () => {
+      assert.strictEqual(computePlanStatus(makeStates(['pending', 'succeeded']), false, true), 'pending-start');
     });
 
     test('returns final status when paused but all terminal', () => {

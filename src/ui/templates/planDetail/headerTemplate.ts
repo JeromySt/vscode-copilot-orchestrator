@@ -59,13 +59,19 @@ export function formatPlanDuration(startedAt?: number, endedAt?: number): string
  * @returns HTML fragment string.
  */
 export function renderPlanHeader(data: PlanHeaderData): string {
-  const { planName, status, startedAt, effectiveEndedAt, baseBranch, targetBranch, showBranchFlow } = data;
-  const durationText = status === 'scaffolding' ? '--' : formatPlanDuration(startedAt, effectiveEndedAt);
+  const { planName, status, startedAt, effectiveEndedAt, baseBranch, targetBranch, showBranchFlow, globalCapacityStats } = data;
+  const durationText = (status === 'scaffolding' || status === 'pending-start') ? '--' : formatPlanDuration(startedAt, effectiveEndedAt);
   const targetBranchName = targetBranch || baseBranch;
 
+  const statusLabel = status === 'scaffolding' ? '🚧 Under Construction'
+    : status === 'pending-start' ? 'Pending Start'
+    : status === 'pausing' ? '⏸ Pausing…'
+    : status === 'resumed' ? '▶ Resuming…'
+    : status;
+
   let html = `  <div class="header">
-    <span class="status-badge ${status}" id="statusBadge"><span id="currentPhaseIndicator">${status === 'scaffolding' ? '🚧 Under Construction' : status}</span></span>
-    <h2>${escapeHtml(planName)}</h2>
+    <span class="status-badge ${status}" id="statusBadge"><span id="currentPhaseIndicator">${statusLabel}</span></span>
+    <h2 title="${escapeHtml(planName)}">${escapeHtml(planName)}</h2>
     <div class="header-duration">
       <span class="duration-icon">⏱</span>
       <span class="duration-value ${status}" id="planDuration" data-started="${startedAt || 0}" data-ended="${effectiveEndedAt || 0}" data-status="${status}">${durationText}</span>

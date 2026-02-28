@@ -320,6 +320,7 @@ suite('AgentDelegator - Private Methods & Flow', () => {
     let savedCliRunnerCache: any;
     let savedCliCheckCache: any;
     let savedModelDiscoveryCache: any;
+    let savedGitCache: any;
 
     const cliRunnerPath = require.resolve('../../../agent/copilotCliRunner');
     const cliCheckPath = require.resolve('../../../agent/cliCheckCore');

@@ -15,6 +15,7 @@
 import * as assert from 'assert';
 import {
   PlanInstance,
+  PlanNode,
   JobNode,
   NodeExecutionState,
 } from '../../../plan/types';

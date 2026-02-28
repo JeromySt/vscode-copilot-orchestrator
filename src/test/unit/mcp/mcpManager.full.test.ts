@@ -212,7 +212,7 @@ suite('MCP Definition Provider', () => {
     assert.ok(Array.isArray(servers));
     assert.strictEqual(servers.length, 1);
     assert.strictEqual(servers[0].label, 'Copilot Orchestrator');
-    assert.strictEqual(servers[0].command, 'node');
+    assert.strictEqual(servers[0].command, process.execPath);
     assert.strictEqual(servers[0].env.MCP_IPC_PATH, '/ipc/path');
     assert.strictEqual(servers[0].env.MCP_AUTH_NONCE, 'nonce123');
 

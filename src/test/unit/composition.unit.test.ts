@@ -19,8 +19,8 @@ import type { IConfigProvider, IDialogService, IClipboardService, IProcessMonito
 import { createContainer } from '../../composition';
 
 // ── Test composition ──────────────────────────────────────────────────────
-import { createTestContainer } from '../../compositionTest';
-import { MockConfigProvider, MockDialogService, MockClipboardService } from '../../vscode/testAdapters';
+import { createTestContainer } from '../helpers/compositionTest';
+import { MockConfigProvider, MockDialogService, MockClipboardService } from '../helpers/testAdapters';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

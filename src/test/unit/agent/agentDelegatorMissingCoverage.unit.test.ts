@@ -298,7 +298,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       const delegator = new AgentDelegator(logger, gitOps, callbacks, runner);
 
       const options = defaultOptions(tmpDir);
-      await delegator.delegate(options);
+      const result = await delegator.delegate(options);
 
       // Log the messages to debug
       console.log('Logger messages:', logger.messages);

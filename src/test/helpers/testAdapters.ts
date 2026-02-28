@@ -8,7 +8,7 @@
  * @module vscode/testAdapters
  */
 
-import type { IConfigProvider, IDialogService, IClipboardService } from '../interfaces';
+import type { IConfigProvider, IDialogService, IClipboardService } from '../../interfaces';
 
 /**
  * Configuration value storage for mock config provider.

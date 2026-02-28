@@ -11,7 +11,7 @@
  * @module git/core/executor
  */
 
-import { spawnSync, spawn } from 'child_process';
+import { spawnSync, spawn, SpawnSyncReturns } from 'child_process';
 
 /**
  * Logger function type for git operations.

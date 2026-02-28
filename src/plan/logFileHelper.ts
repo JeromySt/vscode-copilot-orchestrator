@@ -70,13 +70,15 @@ export function getLegacyLogFilePath(
  * Called only when we are about to *write* a log entry.
  */
 function ensureLogFile(logFile: string, executionKey: string): void {
+  if (fs.existsSync(logFile)) {return;}
   try {
     const logsDir = path.dirname(logFile);
-    fs.mkdirSync(logsDir, { recursive: true });
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
     const header = buildLogFileHeader(executionKey);
-    // Use wx flag (exclusive create) — throws EEXIST if file already exists, no TOCTOU race
-    fs.writeFileSync(logFile, header, { encoding: 'utf8', flag: 'wx' });
-  } catch { /* ignore errors (including EEXIST when file already exists) */ }
+    fs.writeFileSync(logFile, header, 'utf8');
+  } catch { /* ignore header write errors */ }
 }
 
 /**

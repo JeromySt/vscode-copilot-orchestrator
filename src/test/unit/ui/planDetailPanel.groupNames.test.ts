@@ -10,7 +10,7 @@
  */
 
 import * as assert from 'assert';
-import { planDetailPanel } from '../../../ui/panels/planDetailPanel';
+import { buildMermaidDiagram } from '../../../ui/templates/planDetail/mermaidBuilder';
 import type { PlanInstance, JobNode, NodeExecutionState, GroupInstance, GroupExecutionState } from '../../../plan/types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -194,11 +194,7 @@ suite('planDetailPanel - Group Name Display', () => {
         groupStates: new Map([[groupId, makeGroupState()]]),
         groupPathToId: new Map([['Frontend', groupId]]),
       });
-
-      // Access private method via prototype
-      const panel = Object.create(planDetailPanel.prototype);
-      initializePanelHelpers(panel);
-      const result = panel._buildMermaidDiagram(plan);
+      const result = buildMermaidDiagram(plan);
 
       const subgraphs = extractGroupSubgraphs(result.diagram);
       assert.strictEqual(subgraphs.length, 1, 'Should have one subgraph');
@@ -231,9 +227,7 @@ suite('planDetailPanel - Group Name Display', () => {
         ]),
       });
 
-      const panel = Object.create(planDetailPanel.prototype);
-      initializePanelHelpers(panel);
-      const result = panel._buildMermaidDiagram(plan);
+      const result = buildMermaidDiagram(plan);
 
       const subgraphs = extractGroupSubgraphs(result.diagram);
       assert.strictEqual(subgraphs.length, 2, 'Should have two subgraphs');
@@ -272,9 +266,7 @@ suite('planDetailPanel - Group Name Display', () => {
         ]),
       });
 
-      const panel = Object.create(planDetailPanel.prototype);
-      initializePanelHelpers(panel);
-      const result = panel._buildMermaidDiagram(plan);
+      const result = buildMermaidDiagram(plan);
 
       const subgraphs = extractGroupSubgraphs(result.diagram);
       assert.strictEqual(subgraphs.length, 2, 'Should have two subgraphs');
@@ -320,9 +312,7 @@ suite('planDetailPanel - Group Name Display', () => {
         ]),
       });
 
-      const panel = Object.create(planDetailPanel.prototype);
-      initializePanelHelpers(panel);
-      const result = panel._buildMermaidDiagram(plan);
+      const result = buildMermaidDiagram(plan);
 
       const subgraphs = extractGroupSubgraphs(result.diagram);
       assert.strictEqual(subgraphs.length, 4, 'Should have four subgraphs');
@@ -374,9 +364,7 @@ suite('planDetailPanel - Group Name Display', () => {
         ]),
       });
 
-      const panel = Object.create(planDetailPanel.prototype);
-      initializePanelHelpers(panel);
-      const result = panel._buildMermaidDiagram(plan);
+      const result = buildMermaidDiagram(plan);
 
       const subgraphs = extractGroupSubgraphs(result.diagram);
       assert.strictEqual(subgraphs.length, 3, 'Should have three subgraphs');
@@ -424,12 +412,10 @@ suite('planDetailPanel - Group Name Display', () => {
         ]),
       });
 
-      const panel = Object.create(planDetailPanel.prototype);
-      initializePanelHelpers(panel);
       
-      const result = panel._buildMermaidDiagram(plan);
+      const result = buildMermaidDiagram(plan);
 
-      const childSanitizedId = panel._sanitizeId(childGroupId);
+      const childSanitizedId = 'n' + childGroupId.replace(/-/g, '');
       
       assert.ok(result.nodeTooltips[childSanitizedId], 'Nested group should have a tooltip');
       // Tooltip should show either full path or full local name (if truncated)
@@ -468,15 +454,10 @@ suite('planDetailPanel - Group Name Display', () => {
         ]),
       });
 
-      const panel = Object.create(planDetailPanel.prototype);
-      panel._sanitizeId = (id: string) => 'n' + id.replace(/-/g, '');
-      panel._escapeForMermaid = (str: string) => str.replace(/"/g, "'").replace(/[<>{}|:#]/g, '');
-      panel._getStatusIcon = () => '⏸';
-      panel._truncateLabel = (name: string) => name;
       
-      const result = panel._buildMermaidDiagram(plan);
+      const result = buildMermaidDiagram(plan);
 
-      const leafSanitizedId = panel._sanitizeId(groupId3);
+      const leafSanitizedId = 'n' + groupId3.replace(/-/g, '');
       
       assert.ok(result.nodeTooltips[leafSanitizedId], 'Deeply nested group should have a tooltip');
       assert.strictEqual(
@@ -499,15 +480,10 @@ suite('planDetailPanel - Group Name Display', () => {
         groupPathToId: new Map([['Frontend', groupId]]),
       });
 
-      const panel = Object.create(planDetailPanel.prototype);
-      panel._sanitizeId = (id: string) => 'n' + id.replace(/-/g, '');
-      panel._escapeForMermaid = (str: string) => str.replace(/"/g, "'").replace(/[<>{}|:#]/g, '');
-      panel._getStatusIcon = () => '⏸';
-      panel._truncateLabel = (name: string) => name;
       
-      const result = panel._buildMermaidDiagram(plan);
+      const result = buildMermaidDiagram(plan);
 
-      const sanitizedId = panel._sanitizeId(groupId);
+      const sanitizedId = 'n' + groupId.replace(/-/g, '');
       
       // Top-level group without '/' should not have tooltip (unless truncated)
       assert.strictEqual(
@@ -535,14 +511,9 @@ suite('planDetailPanel - Group Name Display', () => {
         groupPathToId: new Map([['Front-end & "UI"', groupId]]),
       });
 
-      const panel = Object.create(planDetailPanel.prototype);
-      panel._sanitizeId = (id: string) => 'n' + id.replace(/-/g, '');
-      panel._escapeForMermaid = (str: string) => str.replace(/"/g, "'").replace(/[<>{}|:#]/g, '');
-      panel._getStatusIcon = () => '⏸';
-      panel._truncateLabel = (name: string) => name;
       
       // Should not throw
-      const result = panel._buildMermaidDiagram(plan);
+      const result = buildMermaidDiagram(plan);
       
       const subgraphs = extractGroupSubgraphs(result.diagram);
       assert.strictEqual(subgraphs.length, 1, 'Should handle special characters without error');
@@ -571,13 +542,8 @@ suite('planDetailPanel - Group Name Display', () => {
         ]),
       });
 
-      const panel = Object.create(planDetailPanel.prototype);
-      panel._sanitizeId = (id: string) => 'n' + id.replace(/-/g, '');
-      panel._escapeForMermaid = (str: string) => str.replace(/"/g, "'").replace(/[<>{}|:#]/g, '');
-      panel._getStatusIcon = () => '⏸';
-      panel._truncateLabel = (name: string) => name;
       
-      const result = panel._buildMermaidDiagram(plan);
+      const result = buildMermaidDiagram(plan);
 
       const subgraphs = extractGroupSubgraphs(result.diagram);
       // Should display 'v1' not 'API/v1'
@@ -598,15 +564,12 @@ suite('planDetailPanel - Group Name Display', () => {
         groupPathToId: new Map([['Parent/', groupId]]),
       });
 
-      const panel = Object.create(planDetailPanel.prototype);
-      panel._sanitizeId = (id: string) => 'n' + id.replace(/-/g, '');
-      panel._escapeForMermaid = (str: string) => str.replace(/"/g, "'").replace(/[<>{}|:#]/g, '');
-      panel._getStatusIcon = () => '⏸';
-      panel._truncateLabel = (name: string) => name;
       
       // Should not throw
-      const result = panel._buildMermaidDiagram(plan);
+      const result = buildMermaidDiagram(plan);
       assert.ok(result.diagram, 'Should handle empty group names without error');
     });
   });
 });
+
+

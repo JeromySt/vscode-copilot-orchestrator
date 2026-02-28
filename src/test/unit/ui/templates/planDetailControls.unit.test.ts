@@ -19,7 +19,7 @@ suite('planDetail controlsTemplate', () => {
   // Always-visible buttons
   // -----------------------------------------------------------------------
   test('always renders Refresh button', () => {
-    for (const s of ['running', 'pending', 'paused', 'succeeded', 'failed', 'canceled']) {
+    for (const s of ['running', 'pending', 'pending-start', 'paused', 'succeeded', 'failed', 'canceled']) {
       const html = renderPlanControls(makeData(s));
       assert.ok(html.includes('onclick="refresh()"'), `Refresh button missing for status=${s}`);
       // Refresh never has display:none
@@ -28,7 +28,7 @@ suite('planDetail controlsTemplate', () => {
   });
 
   test('always renders Delete button', () => {
-    for (const s of ['running', 'pending', 'paused', 'succeeded', 'failed', 'canceled']) {
+    for (const s of ['running', 'pending', 'pending-start', 'paused', 'succeeded', 'failed', 'canceled']) {
       const html = renderPlanControls(makeData(s));
       assert.ok(html.includes('onclick="deletePlan()"'), `Delete button missing for status=${s}`);
     }
@@ -69,6 +69,35 @@ suite('planDetail controlsTemplate', () => {
     test('hidden when canceled', () => {
       const html = renderPlanControls(makeData('canceled'));
       assert.ok(html.includes('pausePlan()" style="display:none"'));
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Start button (pending-start)
+  // -----------------------------------------------------------------------
+  suite('Start button visibility', () => {
+    test('visible when pending-start', () => {
+      const html = renderPlanControls(makeData('pending-start'));
+      assert.ok(html.includes('id="startBtn"'));
+      const btnMatch = html.match(/id="startBtn"[^>]*/);
+      assert.ok(btnMatch && !btnMatch[0].includes('display:none'), 'Start should be visible for pending-start');
+    });
+
+    test('calls resumePlan onclick', () => {
+      const html = renderPlanControls(makeData('pending-start'));
+      assert.ok(html.includes('id="startBtn" class="action-btn primary" onclick="resumePlan()"'));
+    });
+
+    test('hidden when running', () => {
+      const html = renderPlanControls(makeData('running'));
+      const btnMatch = html.match(/id="startBtn"[^"]*"[^>]*style="display:none"/);
+      assert.ok(btnMatch, 'Start button should be hidden for running');
+    });
+
+    test('hidden when paused', () => {
+      const html = renderPlanControls(makeData('paused'));
+      const btnMatch = html.match(/id="startBtn"[^"]*"[^>]*style="display:none"/);
+      assert.ok(btnMatch, 'Start button should be hidden for paused');
     });
   });
 
@@ -125,6 +154,12 @@ suite('planDetail controlsTemplate', () => {
       const html = renderPlanControls(makeData('paused'));
       const cancelMatch = html.match(/id="cancelBtn"[^>]*/);
       assert.ok(cancelMatch && !cancelMatch[0].includes('display:none'), 'Cancel should be visible for paused');
+    });
+
+    test('visible when pending-start', () => {
+      const html = renderPlanControls(makeData('pending-start'));
+      const cancelMatch = html.match(/id="cancelBtn"[^>]*/);
+      assert.ok(cancelMatch && !cancelMatch[0].includes('display:none'), 'Cancel should be visible for pending-start');
     });
 
     test('hidden when succeeded', () => {

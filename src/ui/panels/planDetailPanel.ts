@@ -11,17 +11,18 @@
  */
 
 import * as vscode from 'vscode';
-import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState, computeMergedLeafWorkSummary } from '../../plan';
-import { escapeHtml, formatDurationMs, errorPageHtml } from '../templates';
+import { PlanRunner, PlanInstance, PlanNode, JobNode, NodeStatus, NodeExecutionState, computeMergedLeafWorkSummary, normalizeWorkSpec } from '../../plan';
+import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 import { renderWorkSummaryPanelHtml } from '../templates/workSummaryPanel';
 import type { WorkSummaryPanelData, WsPanelJob, WsJourneyNode } from '../templates/workSummaryPanel';
-import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges } from '../../plan/metricsAggregator';
-import { renderPlanHeader, renderPlanControls, renderPlanDag, renderPlanNodeCard, renderPlanSummary, renderMetricsBar, renderPlanScripts } from '../templates/planDetail';
+import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges, formatTokenCount } from '../../plan/metricsAggregator';
+import { renderPlanHeader, renderPlanControls, renderPlanDag, renderPlanNodeCard, renderPlanSummary, renderMetricsBar, renderPlanScripts, renderPlanDetailStyles, buildMermaidDiagram, renderViewTabBar, renderPlanTimeline, renderTabBarStyles, renderTimelineStyles } from '../templates/planDetail';
 import type { PlanSummaryData, PlanMetricsBarData } from '../templates/planDetail';
 import { PlanDetailController } from './planDetailController';
 import type { PlanDetailDelegate } from './planDetailController';
 import type { IDialogService } from '../../interfaces/IDialogService';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
+import { webviewScriptTag } from '../webviewUri';
 
 /**
  * Webview panel that shows a detailed view of a single Plan's execution.
@@ -69,13 +70,15 @@ export class planDetailPanel {
    * @param _planRunner - The {@link PlanRunner} instance for querying Plan/node state.
    * @param dialogService - Abstraction over VS Code dialog APIs.
    * @param _pulse - Pulse emitter for periodic updates.
+   * @param _extensionUri - The extension's root URI (used for local resource roots).
    */
   private constructor(
     panel: vscode.WebviewPanel,
     planId: string,
     private _planRunner: PlanRunner,
     dialogService: IDialogService,
-    private _pulse: IPulseEmitter
+    private _pulse: IPulseEmitter,
+    private _extensionUri: vscode.Uri
   ) {
     this._panel = panel;
     this._planId = planId;
@@ -217,7 +220,7 @@ export class planDetailPanel {
     // Default pulse emitter (no-op) if not provided
     const effectivePulse: IPulseEmitter = pulse ?? { onPulse: () => ({ dispose: () => {} }), isRunning: false };
     
-    const planPanel = new planDetailPanel(panel, planId, planRunner, effectiveDialogService, effectivePulse);
+    const planPanel = new planDetailPanel(panel, planId, planRunner, effectiveDialogService, effectivePulse, extensionUri);
     planDetailPanel.panels.set(planId, planPanel);
   }
   
@@ -447,11 +450,11 @@ export class planDetailPanel {
     // Get global capacity stats
     const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
     
-    // Build node status mapfor incremental updates (includes version for efficient updates)
-    const nodeStatuses: Record<string, { status: string; version: number; startedAt?: number; endedAt?: number; currentPhase?: string }> = {};
+    // Build node status map for incremental updates (includes version, attempts, stepStatuses for timeline)
+    const nodeStatuses: Record<string, any> = {};
     for (const [nodeId, state] of plan.nodeStates) {
       const sanitizedId = this._sanitizeId(nodeId);
-      const entry: typeof nodeStatuses[string] = {
+      const entry: Record<string, any> = {
         status: state.status,
         version: state.version || 0,
         startedAt: state.startedAt,
@@ -462,6 +465,22 @@ export class planDetailPanel {
           if (phaseStatus === 'running') { entry.currentPhase = phase; break; }
         }
       }
+      // Include attempt history so timeline can render new attempt bars
+      if (state.attemptHistory && state.attemptHistory.length > 0) {
+        entry.attempts = state.attemptHistory.map((a: any) => ({
+          attemptNumber: a.attemptNumber, status: a.status,
+          startedAt: a.startedAt, endedAt: a.endedAt,
+          failedPhase: a.failedPhase, triggerType: a.triggerType || 'initial',
+          stepStatuses: a.stepStatuses || {},
+          phaseDurations: a.phaseMetrics ? Object.entries(a.phaseMetrics).map(([phase, metrics]: [string, any]) => ({
+            phase, durationMs: metrics?.durationMs || 0,
+            status: (a.stepStatuses as any)?.[phase] || 'succeeded',
+          })).filter((pd: any) => pd.durationMs > 0) : [],
+          phaseTiming: a.phaseTiming || [],
+        }));
+      }
+      if (state.stepStatuses) { entry.stepStatuses = state.stepStatuses; }
+      if (state.scheduledAt) { entry.scheduledAt = state.scheduledAt; }
       nodeStatuses[sanitizedId] = entry;
     }
     
@@ -520,6 +539,7 @@ export class planDetailPanel {
       completed,
       startedAt: plan.startedAt,
       endedAt: effectiveEndedAt,
+      planEndedAt: effectiveEndedAt,
       planMetrics: this._serializeMetrics(plan),
       globalCapacity: globalCapacityStats ? {
         activeInstances: globalCapacityStats.activeInstances,
@@ -560,7 +580,7 @@ export class planDetailPanel {
       this._cachedCapacity = { data: globalCapacityStats, fetchedAt: now };
     }
     
-    // Build node statuses
+    // Build node statuses (with attempt data for timeline)
     const nodeStatuses: Record<string, any> = {};
     for (const [nodeId, state] of plan.nodeStates) {
       const entry: Record<string, any> = {
@@ -571,6 +591,31 @@ export class planDetailPanel {
         for (const [phase, phaseStatus] of Object.entries(state.stepStatuses)) {
           if (phaseStatus === 'running') { entry.currentPhase = phase; break; }
         }
+      }
+      // Include attempt history for timeline rendering (stepStatuses + phaseTiming)
+      if (state.attemptHistory && state.attemptHistory.length > 0) {
+        entry.attempts = state.attemptHistory.map((a: any) => ({
+          attemptNumber: a.attemptNumber,
+          status: a.status,
+          startedAt: a.startedAt,
+          endedAt: a.endedAt,
+          failedPhase: a.failedPhase,
+          triggerType: a.triggerType || 'initial',
+          stepStatuses: a.stepStatuses || {},
+          phaseDurations: a.phaseMetrics ? Object.entries(a.phaseMetrics).map(([phase, metrics]: [string, any]) => ({
+            phase,
+            durationMs: metrics?.durationMs || 0,
+            status: (a.stepStatuses as any)?.[phase] || 'succeeded',
+          })).filter((pd: any) => pd.durationMs > 0) : [],
+          phaseTiming: a.phaseTiming || [],
+        }));
+      }
+      // Include current stepStatuses for running nodes (live phase display)
+      if (state.stepStatuses) {
+        entry.stepStatuses = state.stepStatuses;
+      }
+      if (state.scheduledAt) {
+        entry.scheduledAt = state.scheduledAt;
       }
       nodeStatuses[this._sanitizeId(nodeId)] = entry;
     }
@@ -588,6 +633,7 @@ export class planDetailPanel {
       counts, progress, total, completed,
       startedAt: plan.startedAt,
       endedAt: effectiveEndedAt,
+      planEndedAt: effectiveEndedAt,
       globalCapacity: globalCapacityStats ? {
         activeInstances: globalCapacityStats.activeInstances,
         totalGlobalJobs: globalCapacityStats.totalGlobalJobs,
@@ -634,7 +680,7 @@ export class planDetailPanel {
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
     // Build Mermaid diagram
-    const { diagram: mermaidDef, nodeTooltips, edgeData } = this._buildMermaidDiagram(plan);
+    const { diagram: mermaidDef, nodeTooltips, edgeData } = buildMermaidDiagram(plan);
     
     // Build node data for click handling
     const nodeData: Record<string, { nodeId: string; planId: string; type: string; name: string; startedAt?: number; endedAt?: number; status: string; version: number }> = {};
@@ -672,6 +718,74 @@ export class planDetailPanel {
       };
     }
     
+    // Build timeline data for the timeline chart
+    const timelineNodes: Array<{
+      nodeId: string;
+      name: string;
+      group?: string;
+      status: string;
+      scheduledAt?: number;
+      startedAt?: number;
+      endedAt?: number;
+      dependencies?: string[];
+      stepStatuses?: Record<string, string>;
+      attempts?: Array<{
+        attemptNumber: number;
+        status: string;
+        startedAt?: number;
+        endedAt?: number;
+        failedPhase?: string;
+        stepStatuses?: Record<string, string>;
+        phaseTiming?: Array<{ phase: string; startedAt: number; endedAt?: number }>;
+      }>;
+    }> = [];
+    for (const [nodeId, node] of plan.jobs) {
+      const state = plan.nodeStates.get(nodeId);
+      if (!state) { continue; }
+      // Get attempt history
+      const attempts = (state.attemptHistory || []).map(a => ({
+        attemptNumber: a.attemptNumber,
+        status: a.status,
+        startedAt: a.startedAt,
+        endedAt: a.endedAt,
+        failedPhase: a.failedPhase,
+        triggerType: a.triggerType || 'initial',
+        stepStatuses: a.stepStatuses || {},
+        phaseDurations: a.phaseMetrics ? Object.entries(a.phaseMetrics).map(([phase, metrics]: [string, any]) => ({
+          phase,
+          durationMs: metrics?.durationMs || 0,
+          status: (a.stepStatuses as any)?.[phase] || 'succeeded',
+        })).filter((pd: any) => pd.durationMs > 0) : [],
+        phaseTiming: a.phaseTiming || [],
+      }));
+      // nodeState.startedAt is set-once (first attempt start) and never overwritten.
+      // For backward compat with old plans where it WAS overwritten, fall back to earliest attempt.
+      const earliestAttemptStart = state.attemptHistory && state.attemptHistory.length > 0
+        ? Math.min(...state.attemptHistory.map((a: any) => a.startedAt).filter(Boolean))
+        : undefined;
+      const effectiveStart = state.startedAt || (isFinite(earliestAttemptStart as number) ? earliestAttemptStart : undefined);
+      timelineNodes.push({
+        nodeId,
+        name: node.name,
+        group: (node as JobNode).group,
+        status: state.status,
+        scheduledAt: state.scheduledAt,
+        startedAt: effectiveStart,
+        endedAt: state.endedAt,
+        dependencies: (node as JobNode).dependencies || [],
+        stepStatuses: state.stepStatuses || {},
+        attempts,
+      });
+    }
+    const timelineData = {
+      planStartedAt: plan.startedAt,
+      planEndedAt: effectiveEndedAt || plan.endedAt,
+      planCreatedAt: plan.createdAt,
+      stateHistory: plan.stateHistory || [],
+      pauseHistory: plan.pauseHistory || [],
+      nodes: timelineNodes,
+    };
+    
     // Get branch info
     const baseBranch = plan.spec.baseBranch || 'main';
     const targetBranch = plan.targetBranch || baseBranch;
@@ -681,709 +795,20 @@ export class planDetailPanel {
     const workSummaryHtml = this._buildWorkSummaryHtml(plan);
     const metricsBarHtml = this._buildMetricsBarHtml(plan);
     
+    // Generate webview bundle script tag
+    const bundleScriptTag = webviewScriptTag(this._panel.webview, this._extensionUri, 'planDetail');
+    
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' https://cdn.jsdelivr.net;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' ${this._panel.webview.cspSource} https://cdn.jsdelivr.net;">
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  ${bundleScriptTag}
   <style>
-    body {
-      font: 13px var(--vscode-font-family);
-      padding: 0;
-      color: var(--vscode-foreground);
-      background: var(--vscode-editor-background);
-      overflow-x: auto;
-      overflow-y: auto;
-    }
-    .plan-content-wrapper {
-      display: inline-flex;
-      flex-direction: column;
-      min-width: 100%;
-      box-sizing: border-box;
-    }
-    .plan-content-wrapper > * {
-      min-width: fit-content;
-      box-sizing: border-box;
-    }
-    /* Sticky header */
-    .sticky-header {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: var(--vscode-editor-background);
-      padding: 12px 16px 8px 16px;
-      border-bottom: 1px solid var(--vscode-panel-border);
-    }
-    .sticky-header + * {
-      padding-top: 8px;
-    }
-    .plan-content-wrapper > * {
-      padding-left: 16px;
-      padding-right: 16px;
-    }
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 4px;
-    }
-    .header h2 { margin: 0; flex: 1; margin-left: 12px; }
-    .status-badge {
-      padding: 4px 12px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-    .status-badge.running { background: rgba(0, 122, 204, 0.2); color: #3794ff; }
-    .status-badge.succeeded { background: rgba(78, 201, 176, 0.2); color: #4ec9b0; }
-    .status-badge.failed { background: rgba(244, 135, 113, 0.2); color: #f48771; }
-    .status-badge.partial { background: rgba(255, 204, 0, 0.2); color: #cca700; }
-    .status-badge.pending { background: rgba(133, 133, 133, 0.2); color: #858585; }
-    .status-badge.paused { background: rgba(255, 165, 0, 0.2); color: #ffa500; }
-    .status-badge.canceled { background: rgba(133, 133, 133, 0.2); color: #858585; }
-    .status-badge.scaffolding {
-      background: repeating-linear-gradient(
-        -45deg,
-        rgba(245, 197, 24, 0.2) 0px, rgba(245, 197, 24, 0.2) 6px,
-        rgba(26, 26, 26, 0.3) 6px, rgba(26, 26, 26, 0.3) 12px
-      );
-      color: #f5c518;
-      border: 1px solid rgba(245, 197, 24, 0.5);
-    }
-    
-    /* Duration display in header */
-    .header-duration {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      color: var(--vscode-descriptionForeground);
-    }
-    .duration-icon {
-      font-size: 16px;
-    }
-    .duration-value {
-      font-family: var(--vscode-editor-font-family);
-      font-weight: 600;
-      color: var(--vscode-foreground);
-    }
-    .duration-value.running {
-      color: #3794ff;
-    }
-    .duration-value.succeeded {
-      color: #4ec9b0;
-    }
-    .duration-value.failed {
-      color: #f48771;
-    }
-    
-    /* Branch flow */
-    .branch-flow {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 16px;
-      padding: 10px 14px;
-      background: var(--vscode-sideBar-background);
-      border-radius: 6px;
-      font-size: 12px;
-      overflow: hidden;
-      max-width: 100%;
-    }
-    .branch-name {
-      padding: 3px 8px;
-      background: var(--vscode-badge-background);
-      color: var(--vscode-badge-foreground);
-      border-radius: 4px;
-      font-family: monospace;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      min-width: 0;
-      max-width: 40%;
-    }
-    .branch-arrow {
-      color: var(--vscode-descriptionForeground);
-      flex-shrink: 0;
-    }
-    .branch-label {
-      color: var(--vscode-descriptionForeground);
-      font-size: 11px;
-      flex-shrink: 0;
-    }
-    
-    .capacity-info.capacity-badge {
-      display: inline-flex;
-      padding: 4px 10px;
-      margin-bottom: 12px;
-      background: var(--vscode-editor-inactiveSelectionBackground);
-      border-radius: 12px;
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-    }
-    
-    .stats {
-      display: flex;
-      gap: 16px;
-      margin-bottom: 16px;
-      padding: 12px;
-      background: var(--vscode-sideBar-background);
-      border-radius: 8px;
-    }
-    .stat {
-      text-align: center;
-    }
-    .stat-value {
-      font-size: 24px;
-      font-weight: 600;
-    }
-    .stat-label {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-    }
-    .stat-value.succeeded { color: #4ec9b0; }
-    .stat-value.failed { color: #f48771; }
-    .stat-value.running { color: #3794ff; }
-    
-    .progress-container {
-      margin-bottom: 16px;
-    }
-    .progress-bar {
-      height: 6px;
-      background: var(--vscode-progressBar-background);
-      opacity: 0.3;
-      border-radius: 3px;
-    }
-    .progress-fill {
-      height: 100%;
-      background: var(--vscode-progressBar-background);
-      border-radius: 3px;
-      transition: width 0.3s ease;
-    }
-    .progress-fill.succeeded { background: #4ec9b0; }
-    .progress-fill.failed { background: #f48771; }
-    
-    #mermaid-diagram {
-      background: var(--vscode-sideBar-background);
-      padding: 16px;
-      border-radius: 8px;
-      overflow: auto;
-      margin-bottom: 16px;
-      position: relative;
-    }
-    
-    /* Zoom controls */
-    .zoom-controls {
-      position: sticky;
-      top: 0;
-      left: 0;
-      z-index: 10;
-      display: flex;
-      gap: 4px;
-      margin-bottom: 12px;
-      background: rgba(30, 30, 30, 0.95);
-      padding: 6px 10px;
-      border-radius: 6px;
-      border: 1px solid var(--vscode-widget-border);
-      width: fit-content;
-    }
-    .zoom-btn {
-      background: var(--vscode-button-secondaryBackground);
-      color: var(--vscode-button-secondaryForeground);
-      border: none;
-      padding: 4px 10px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 600;
-      min-width: 32px;
-    }
-    .zoom-btn:hover {
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
-    .zoom-level {
-      display: flex;
-      align-items: center;
-      padding: 0 8px;
-      font-size: 12px;
-      color: var(--vscode-descriptionForeground);
-      min-width: 50px;
-      justify-content: center;
-    }
-    .mermaid-container {
-      transform-origin: top left;
-      transition: transform 0.2s ease;
-    }
-    #mermaid-diagram {
-      cursor: grab;
-    }
-    #mermaid-diagram.panning {
-      cursor: grabbing;
-      user-select: none;
-    }
-    #mermaid-diagram.panning .mermaid-container {
-      transition: none;
-    }
-    
-    /* Mermaid node styling */
-    .mermaid .node rect { rx: 8px; ry: 8px; }
-    .mermaid .node.pending rect { fill: #3c3c3c; stroke: #858585; }
-    .mermaid .node.ready rect { fill: #2d4a6e; stroke: #3794ff; }
-    .mermaid .node.running rect { fill: #2d4a6e; stroke: #3794ff; stroke-width: 2px; }
-    .mermaid .node.succeeded rect { fill: #1e4d40; stroke: #4ec9b0; }
-    .mermaid .node.failed rect { fill: #4d2929; stroke: #f48771; }
-    .mermaid .node.blocked rect { fill: #3c3c3c; stroke: #858585; stroke-dasharray: 5,5; }
-    
-    .mermaid .node { cursor: pointer; }
-    .mermaid .node.branchNode,
-    .mermaid .node.baseBranchNode,
-    .mermaid g[id*="BASE_BRANCH"] .node,
-    .mermaid g[id*="TARGET_SOURCE"] .node,
-    .mermaid g[id*="TARGET_MERGED"] .node { cursor: default; }  /* Branch nodes are not clickable */
-    
-    /* Node labels — override Mermaid's inline max-width so text renders
-       at its natural width.  Labels are pre-truncated server-side so they
-       won't grow unbounded.  overflow:visible ensures nothing clips. */
-    .mermaid .node .nodeLabel {
-      white-space: nowrap !important;
-      display: block !important;
-      overflow: visible !important;
-      max-width: none !important;
-    }
-    .mermaid .node foreignObject {
-      overflow: visible !important;
-    }
-    .mermaid .node foreignObject div {
-      white-space: nowrap !important;
-      overflow: visible !important;
-      max-width: none !important;
-    }
-    
-    /* Subgraph/cluster styling */
-    .mermaid .cluster rect { 
-      rx: 8px; 
-      ry: 8px;
-    }
-    .mermaid .cluster,
-    .mermaid .cluster-label,
-    .mermaid g.cluster,
-    .mermaid g.cluster foreignObject,
-    .mermaid g.cluster foreignObject div {
-      overflow: visible !important;
-      clip-path: none !important;
-    }
-    .mermaid .cluster-label,
-    .mermaid .cluster-label span,
-    .mermaid g.cluster text { 
-      cursor: pointer !important;
-      font-weight: bold;
-      pointer-events: all !important;
-    }
-    /* Disable any clipping on cluster labels */
-    .mermaid .cluster .label-container {
-      overflow: visible !important;
-    }
-    .mermaid .cluster-label:hover,
-    .mermaid g.cluster text:hover {
-      text-decoration: underline;
-      fill: #7DD3FC;
-    }
-    /* Subgraph titles are pre-truncated server-side; let Mermaid size the box */
-    .mermaid .cluster .nodeLabel {
-      white-space: nowrap !important;
-    }
-    .mermaid svg {
-      overflow: visible;
-    }
-    
-    /* Legend */
-    .legend {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      padding: 8px 12px;
-      background: rgba(30, 30, 30, 0.9);
-      border-radius: 6px;
-      border: 1px solid var(--vscode-panel-border);
-      align-items: center;
-      margin-bottom: 12px;
-      font-size: 11px;
-    }
-    .legend-toggle {
-      cursor: pointer;
-      user-select: none;
-    }
-    .legend-toggle:hover {
-      color: var(--vscode-foreground);
-    }
-    .legend.collapsed .legend-items {
-      display: none;
-    }
-    .legend.collapsed .legend-toggle::after {
-      content: ' ▸';
-    }
-    .legend:not(.collapsed) .legend-toggle::after {
-      content: ' ▾';
-    }
-    .legend-items {
-      display: contents;
-    }
-    .legend-title {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--vscode-descriptionForeground);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-    }
-    .legend-icon {
-      width: 20px;
-      height: 20px;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      font-weight: bold;
-    }
-    .legend-icon.pending { background: #3c3c3c; border: 1px solid #858585; color: #858585; }
-    .legend-icon.running { background: #2d4a6e; border: 1px solid #3794ff; color: #3794ff; }
-    .legend-icon.succeeded { background: #1e4d40; border: 1px solid #4ec9b0; color: #4ec9b0; }
-    .legend-icon.failed { background: #4d2929; border: 1px solid #f48771; color: #f48771; }
-    .legend-icon.blocked { background: #3c3c3c; border: 1px dashed #858585; color: #858585; }
-    
-    /* Processes Section */
-    .processes-section {
-      background: var(--vscode-sideBar-background);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 16px;
-      border-left: 3px solid #3794ff;
-    }
-    .processes-section h3 {
-      margin: 0 0 12px 0;
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--vscode-descriptionForeground);
-    }
-    .processes-loading {
-      color: var(--vscode-descriptionForeground);
-      font-style: italic;
-      padding: 8px 0;
-    }
-    .node-processes {
-      margin-bottom: 8px;
-      background: var(--vscode-editor-background);
-      border-radius: 6px;
-      overflow: hidden;
-      border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
-    }
-    .node-processes.collapsed .node-processes-tree { display: none; }
-    .node-processes.collapsed .node-chevron { content: '▶'; }
-    .node-processes-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      cursor: pointer;
-      font-weight: 500;
-    }
-    .node-processes-header:hover {
-      background: var(--vscode-list-hoverBackground);
-    }
-    .node-chevron {
-      font-size: 10px;
-      transition: transform 0.2s;
-    }
-    .node-icon { font-size: 14px; }
-    .node-name { flex: 1; }
-    .node-stats {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      font-weight: normal;
-    }
-    .node-name-container {
-      display: flex;
-      flex-direction: column;
-      flex: 1;
-      gap: 1px;
-    }
-    .node-plan-path {
-      font-size: 10px;
-      color: var(--vscode-descriptionForeground);
-      font-weight: normal;
-      opacity: 0.8;
-    }
-    .node-processes-tree {
-      padding: 4px 12px 8px;
-      border-top: 1px solid var(--vscode-widget-border);
-      max-height: 140px; /* ~5 process rows */
-      overflow-y: auto;
-      position: relative;
-    }
-    /* Scroll fade indicator at the bottom */
-    .node-processes-tree.has-overflow::after {
-      content: '';
-      position: sticky;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      display: block;
-      height: 24px;
-      background: linear-gradient(transparent, var(--vscode-editor-background));
-      pointer-events: none;
-    }
-    .process-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 3px 0;
-      font-size: 12px;
-    }
-    .proc-icon { font-size: 12px; }
-    .proc-name { flex: 1; font-family: var(--vscode-editor-font-family); }
-    .proc-pid { color: var(--vscode-descriptionForeground); font-size: 11px; }
-    .proc-stats { color: var(--vscode-descriptionForeground); font-size: 11px; }
-    
-    /* Process Aggregation Summary */
-    .processes-summary {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      padding: 10px 14px;
-      margin-bottom: 12px;
-      background: rgba(55, 148, 255, 0.08);
-      border: 1px solid rgba(55, 148, 255, 0.25);
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .processes-summary-label {
-      color: var(--vscode-foreground);
-    }
-    .processes-summary-stat {
-      color: var(--vscode-descriptionForeground);
-      font-weight: 500;
-      font-size: 12px;
-    }
-
-    /* Job status indicators */
-    .job-scheduled .node-stats.job-scheduled {
-      color: var(--vscode-charts-yellow);
-      font-style: italic;
-    }
-    .job-running .node-stats.job-starting {
-      color: var(--vscode-charts-blue);
-      font-style: italic;
-    }
-    
-    /* Work Summary */
-    .work-summary {
-      background: var(--vscode-sideBar-background);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-    .work-summary h3 {
-      margin: 0 0 12px 0;
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--vscode-descriptionForeground);
-    }
-    .work-summary-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-    .work-stat {
-      text-align: center;
-      padding: 12px;
-      background: var(--vscode-editor-background);
-      border-radius: 6px;
-    }
-    .work-stat-value {
-      font-size: 20px;
-      font-weight: 600;
-    }
-    .work-stat-value.added { color: #4ec9b0; }
-    .work-stat-value.modified { color: #dcdcaa; }
-    .work-stat-value.deleted { color: #f48771; }
-    .work-stat-label {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      margin-top: 4px;
-    }
-    
-    .job-summaries {
-      border-top: 1px solid var(--vscode-widget-border);
-      padding-top: 12px;
-    }
-    .job-summary {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 0;
-      border-bottom: 1px solid var(--vscode-widget-border);
-      cursor: pointer;
-    }
-    .job-summary:hover {
-      background: var(--vscode-list-hoverBackground);
-      margin: 0 -8px;
-      padding: 8px;
-    }
-    .job-summary:last-child { border-bottom: none; }
-    .job-name {
-      font-weight: 500;
-    }
-    .job-stats {
-      display: flex;
-      gap: 12px;
-      font-size: 12px;
-    }
-    .job-stats .stat-commits { color: var(--vscode-descriptionForeground); }
-    .job-stats .stat-added { color: #4ec9b0; }
-    .job-stats .stat-modified { color: #dcdcaa; }
-    .job-stats .stat-deleted { color: #f48771; }
-    
-    .plan-metrics-bar {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 16px;
-      padding: 12px 16px;
-      background: var(--vscode-sideBar-background);
-      border-radius: 8px;
-      margin-bottom: 16px;
-      border-left: 3px solid var(--vscode-progressBar-background);
-    }
-    .plan-metrics-bar .metrics-label {
-      font-weight: 600;
-      font-size: 13px;
-    }
-    .plan-metrics-bar .metric-item {
-      font-size: 13px;
-      white-space: nowrap;
-    }
-    .plan-metrics-bar .metric-value {
-      font-family: var(--vscode-editor-font-family);
-      font-weight: 600;
-    }
-    .plan-metrics-bar .models-line {
-      width: 100%;
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      padding-left: 2px;
-    }
-    .plan-metrics-bar .model-breakdown {
-      width: 100%;
-      margin-top: 8px;
-    }
-    .plan-metrics-bar .model-breakdown-label {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      margin-bottom: 6px;
-    }
-    .plan-metrics-bar .model-breakdown-list {
-      background: var(--vscode-editor-background);
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 4px;
-      padding: 8px 10px;
-    }
-    .plan-metrics-bar .model-row {
-      display: flex;
-      gap: 12px;
-      align-items: baseline;
-      padding: 2px 0;
-      font-size: 11px;
-      font-family: var(--vscode-editor-font-family), monospace;
-    }
-    .plan-metrics-bar .model-name {
-      font-weight: 600;
-      min-width: 140px;
-    }
-    .plan-metrics-bar .model-tokens {
-      color: var(--vscode-descriptionForeground);
-    }
-    
-    .plan-toolbar {
-      padding: 4px 0 0 0;
-    }
-    .actions {
-      display: flex;
-      gap: 8px;
-    }
-    .action-btn {
-      padding: 6px 12px;
-      border: 1px solid var(--vscode-button-border, transparent);
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      transition: background 0.15s, opacity 0.15s;
-    }
-    .action-btn:hover {
-      opacity: 0.9;
-    }
-    .action-btn.primary {
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-    }
-    .action-btn.secondary {
-      background: var(--vscode-button-secondaryBackground);
-      color: var(--vscode-button-secondaryForeground);
-      border: 1px solid var(--vscode-button-secondaryBackground);
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
-    }
-    .action-btn.secondary:hover {
-      background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground));
-    }
-    .action-btn.danger {
-      background: #cc3333;
-      color: white;
-    }
-    .action-btn.danger:hover {
-      background: #aa2222;
-    }
-    .action-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    
-    /* Phase indicator in status badge */
-    .phase-indicator {
-      font-size: 11px;
-      font-weight: 500;
-    }
-    
-    /* Work summary clickable stats */
-    .work-summary-clickable {
-      cursor: pointer;
-      transition: background 0.15s;
-      border-radius: 8px;
-      padding: 4px;
-    }
-    .work-summary-clickable:hover {
-      background: var(--vscode-list-hoverBackground);
-    }
-    
-    .scaffolding-message {
-      padding: 8px 12px;
-      background: rgba(55, 148, 255, 0.1);
-      border-left: 3px solid #3794ff;
-      margin-bottom: 12px;
-      font-style: italic;
-      color: var(--vscode-descriptionForeground);
-    }
-    
+    ${renderPlanDetailStyles()}
+    ${renderTabBarStyles()}
+    ${renderTimelineStyles()}
   </style>
 </head>
 <body>
@@ -1398,25 +823,91 @@ export class planDetailPanel {
     showBranchFlow: !!showBranchFlow,
     globalCapacityStats,
   })}
-  </div>
   ${renderPlanControls({ status, isChainedPause: !!(plan.resumeAfterPlan && plan.isPaused) })}
+  </div>
   ${status === 'scaffolding' ? '<div class="scaffolding-message">Plan is being built. Jobs appear as they are added via MCP.</div>' : ''}
-  ${status === 'paused' && plan.resumeAfterPlan ? (() => {
+  ${status === 'pending-start' ? '<div class="scaffolding-message">⏳ Pending Start — review the plan and click <strong>Start</strong> when ready.</div>' : ''}
+  ${(status === 'paused' || status === 'pending-start') && plan.resumeAfterPlan ? (() => {
     const depPlan = this._planRunner.getPlan(plan.resumeAfterPlan!);
     const depName = depPlan ? depPlan.spec.name : plan.resumeAfterPlan;
-    return `<div class="scaffolding-message">⏸ Paused — waiting for plan "${escapeHtml(depName!)}" to succeed before auto-resuming.</div>`;
+    const icon = status === 'pending-start' ? '⏳' : '⏸';
+    return `<div class="scaffolding-message">${icon} Waiting for plan "${escapeHtml(depName!)}" to succeed before auto-starting.</div>`;
   })() : ''}
-  </div>
   ${renderPlanNodeCard({ total, counts, progress, status })}
   ${metricsBarHtml}
+  ${this._buildPlanConfigHtml(plan)}
   ${renderPlanDag({ mermaidDef, status })}
-  ${workSummaryHtml}
+  ${renderPlanTimeline({ status })}
+  <!-- Running Processes (below both DAG and Timeline) -->
+  <div class="processes-section" id="processesSection" style="${status === 'running' ? '' : 'display:none;'}">
+    <h3>Running Processes</h3>
+    <div id="processesContainer">
+      <div class="processes-loading">Loading processes...</div>
+    </div>
   </div>
-  ${renderPlanScripts({ nodeData, nodeTooltips, mermaidDef, edgeData, globalCapacityStats: globalCapacityStats || null })}
+  ${workSummaryHtml}
+  ${renderPlanScripts({ nodeData, nodeTooltips, mermaidDef, edgeData, globalCapacityStats: globalCapacityStats || null, timelineData })}
 </body>
 </html>`;
   }
   
+  /**
+   * Build plan configuration section HTML showing global settings.
+   */
+  private _buildPlanConfigHtml(plan: PlanInstance): string {
+    const rows: string[] = [];
+
+    // Environment variables
+    if (plan.env && Object.keys(plan.env).length > 0) {
+      const envRows = Object.entries(plan.env).map(([k, v]) => {
+        // Redact sensitive-looking values
+        const display = /token|key|secret|password|auth/i.test(k)
+          ? '***'
+          : escapeHtml(String(v));
+        return `<div class="plan-config-env-row"><code class="plan-config-env-key">${escapeHtml(k)}</code><span class="plan-config-env-eq">=</span><code class="plan-config-env-val">${display}</code></div>`;
+      }).join('');
+      rows.push(`<div class="plan-config-item"><div class="plan-config-label">🔑 Environment Variables</div><div class="plan-config-value">${envRows}</div></div>`);
+    }
+
+    // Parallelism
+    const maxP = plan.maxParallel || (plan.spec as any)?.maxParallel || 0;
+    rows.push(`<div class="plan-config-item"><div class="plan-config-label">⚡ Max Parallel</div><div class="plan-config-value">${maxP === 0 ? 'Unlimited' : maxP}</div></div>`);
+
+    // Cleanup behavior
+    rows.push(`<div class="plan-config-item"><div class="plan-config-label">🧹 Auto-Cleanup</div><div class="plan-config-value">${plan.cleanUpSuccessfulWork ? 'Yes — worktrees removed after success' : 'No — worktrees kept'}</div></div>`);
+
+    // Repository path
+    if (plan.repoPath) {
+      rows.push(`<div class="plan-config-item"><div class="plan-config-label">📁 Repository</div><div class="plan-config-value"><code>${escapeHtml(plan.repoPath)}</code></div></div>`);
+    }
+
+    // Worktree root
+    if (plan.worktreeRoot) {
+      rows.push(`<div class="plan-config-item"><div class="plan-config-label">🌲 Worktree Root</div><div class="plan-config-value"><code>${escapeHtml(plan.worktreeRoot)}</code></div></div>`);
+    }
+
+    // Snapshot branch
+    if (plan.snapshot?.branch) {
+      rows.push(`<div class="plan-config-item"><div class="plan-config-label">📸 Snapshot Branch</div><div class="plan-config-value"><code>${escapeHtml(plan.snapshot.branch)}</code>${plan.snapshot.baseCommit ? ` <span class="plan-config-hint">(from ${plan.snapshot.baseCommit.slice(0, 8)})</span>` : ''}</div></div>`);
+    }
+
+    // Plan ID
+    rows.push(`<div class="plan-config-item"><div class="plan-config-label">🆔 Plan ID</div><div class="plan-config-value"><code style="font-size:10px;opacity:0.7;">${plan.id}</code></div></div>`);
+
+    if (rows.length === 0) { return ''; }
+
+    return `
+  <div class="plan-config-section">
+    <div class="plan-config-header" id="plan-config-header">
+      <span class="plan-config-chevron">▶</span>
+      <h3>Plan Configuration</h3>
+    </div>
+    <div class="plan-config-body" id="plan-config-body" style="display:none;">
+      ${rows.join('')}
+    </div>
+  </div>`;
+  }
+
   /**
    * Build work summary HTML from node execution states.
    *
@@ -1530,520 +1021,6 @@ export class planDetailPanel {
   }
   
   /**
-   * Build a Mermaid flowchart definition for the Plan's node DAG.
-   *
-   * Recursively expands sub-plan nodes into subgraphs. Applies status-based
-   * styling (green for succeeded, red for failed, blue for running) and tracks
-   * edge indices for `linkStyle` coloring.
-   *
-   * @param plan - The Plan instance whose nodes form the DAG.
-   * @returns An object containing the Mermaid diagram string and node tooltips.
-   */
-  private _buildMermaidDiagram(plan: PlanInstance): { diagram: string; nodeTooltips: Record<string, string>; edgeData: Array<{ index: number; from: string; to: string; isLeafToTarget?: boolean }> } {
-    const lines: string[] = ['flowchart LR'];
-    
-    // Maximum total character width for a node label (icon + name + duration).
-    // Labels exceeding this are truncated with '...' and a hover tooltip.
-    const MAX_NODE_LABEL_CHARS = 45;
-    
-    // Track full names for tooltip display when labels are truncated
-    const nodeTooltips: Record<string, string> = {};
-    
-    // Check if this is a scaffolding plan
-    const isScaffolding = (plan.spec as any).status === 'scaffolding';
-    
-    // Get branch names
-    const baseBranchName = plan.baseBranch || 'main';
-    const targetBranchName = plan.targetBranch || baseBranchName;
-    const showBaseBranch = baseBranchName !== targetBranchName;
-    const showTargetBranch = !!plan.targetBranch;
-    
-    // Add style definitions
-    lines.push('  classDef pending fill:#3c3c3c,stroke:#858585');
-    lines.push('  classDef ready fill:#2d4a6e,stroke:#3794ff');
-    lines.push('  classDef running fill:#2d4a6e,stroke:#3794ff,stroke-width:2px');
-    lines.push('  classDef succeeded fill:#1e4d40,stroke:#4ec9b0');
-    lines.push('  classDef failed fill:#4d2929,stroke:#f48771');
-    lines.push('  classDef blocked fill:#3c3c3c,stroke:#858585,stroke-dasharray:5');
-    lines.push('  classDef draft fill:#2d3748,stroke:#4a5568,stroke-dasharray:5,opacity:0.8');
-    lines.push('  classDef branchNode fill:#0e639c,stroke:#0e639c,color:#ffffff');
-    lines.push('  classDef baseBranchNode fill:#6e6e6e,stroke:#888888,color:#ffffff');
-    lines.push('');
-    
-    // Track edge indices for linkStyle
-    let edgeIndex = 0;
-    const successEdges: number[] = [];
-    const failedEdges: number[] = [];
-    // Edge data for client-side incremental edge coloring
-    const edgeData: Array<{ index: number; from: string; to: string; isLeafToTarget?: boolean }> = [];
-    
-    // Truncate branch names for display (they can be very long)
-    const truncBranch = (name: string, maxLen: number) => {
-      if (name.length <= maxLen) {return name;}
-      // Show the last segment after / for readability
-      const lastSlash = name.lastIndexOf('/');
-      if (lastSlash > 0 && name.length - lastSlash < maxLen) {
-        return '...' + name.substring(lastSlash);
-      }
-      return name.substring(0, maxLen - 3) + '...';
-    };
-    
-    // Add base branch node if different from target
-    if (showBaseBranch) {
-      const truncBase = truncBranch(baseBranchName, MAX_NODE_LABEL_CHARS);
-      lines.push(`  BASE_BRANCH["🔀 ${this._escapeForMermaid(truncBase)}"]`);
-      lines.push('  class BASE_BRANCH baseBranchNode');
-      if (truncBase !== baseBranchName) {nodeTooltips['BASE_BRANCH'] = baseBranchName;}
-    }
-    
-    // Add source target branch node
-    if (showTargetBranch) {
-      const truncTarget = truncBranch(targetBranchName, MAX_NODE_LABEL_CHARS);
-      lines.push(`  TARGET_SOURCE["📍 ${this._escapeForMermaid(truncTarget)}"]`);
-      lines.push('  class TARGET_SOURCE branchNode');
-      if (truncTarget !== targetBranchName) {nodeTooltips['TARGET_SOURCE'] = targetBranchName;}
-      
-      if (showBaseBranch) {
-        lines.push('  BASE_BRANCH --> TARGET_SOURCE');
-        successEdges.push(edgeIndex++);
-      }
-    }
-    
-    lines.push('');
-    
-    // Track node entry/exit points for edge connections
-    const nodeEntryExitMap = new Map<string, { entryIds: string[], exitIds: string[] }>();
-    
-    // Track leaf node states for mergedToTarget status
-    const leafnodeStates = new Map<string, NodeExecutionState | undefined>();
-    
-    // Counter for unique group subgraph IDs
-    let groupSubgraphCounter = 0;
-    
-    // Track all edges to add at the end
-    const edgesToAdd: Array<{ from: string; to: string; status?: string }> = [];
-    
-    // Helper function to render a single job node
-    const renderJobNode = (
-      node: JobNode,
-      nodeId: string,
-      d: PlanInstance,
-      prefix: string,
-      indent: string,
-      nodeHasDependents: Set<string>,
-      localRoots: string[],
-      localLeaves: string[]
-    ) => {
-      const state = d.nodeStates.get(nodeId);
-      const status = state?.status || 'pending';
-      const sanitizedId = prefix + this._sanitizeId(nodeId);
-      
-      const isRoot = node.dependencies.length === 0;
-      const isLeaf = !nodeHasDependents.has(nodeId);
-      
-      const label = this._escapeForMermaid(node.name);
-      const icon = this._getStatusIcon(status);
-      
-      // Calculate duration for completed or running nodes.
-      // ALL nodes get rendered with ' | 00h 00s ' sizing template so Mermaid
-      // allocates consistent rect widths. Client-side strips the suffix from
-      // non-started nodes after render.
-      const DURATION_TEMPLATE = ' | 00h 00s '; // fixed-width sizing template (hours format with trailing space)
-      let durationLabel = DURATION_TEMPLATE;
-      if (!isScaffolding && state?.startedAt) {
-        const endTime = state.endedAt || Date.now();
-        const duration = endTime - state.startedAt;
-        durationLabel = ' | ' + formatDurationMs(duration);
-      }
-      
-      // Truncate long node labels using the sizing template width.
-      const displayLabel = this._truncateLabel(label, DURATION_TEMPLATE, MAX_NODE_LABEL_CHARS);
-      if (displayLabel !== label) {
-        nodeTooltips[sanitizedId] = node.name;
-      }
-      
-      lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);
-      lines.push(`${indent}class ${sanitizedId} ${isScaffolding ? 'draft' : status}`);
-      
-      nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
-      
-      if (isRoot) {localRoots.push(sanitizedId);}
-      if (isLeaf) {
-        localLeaves.push(sanitizedId);
-        leafnodeStates.set(sanitizedId, state);
-      }
-      
-      // Add edges from dependencies
-      for (const depId of node.dependencies) {
-        const depSanitizedId = prefix + this._sanitizeId(depId);
-        edgesToAdd.push({ from: depSanitizedId, to: sanitizedId, status: d.nodeStates.get(depId)?.status });
-      }
-    };
-    
-    // Recursive function to render Plan structure
-    const renderPlanInstance = (d: PlanInstance, prefix: string, depth: number): { roots: string[], leaves: string[] } => {
-      const indent = '  '.repeat(depth + 1);
-      const localRoots: string[] = [];
-      const localLeaves: string[] = [];
-      
-      // First pass: determine which nodes are roots and leaves in this Plan
-      const nodeHasDependents = new Set<string>();
-      for (const [_nodeId, node] of d.jobs) {
-        for (const depId of node.dependencies) {
-          nodeHasDependents.add(depId);
-        }
-      }
-      
-      // Organize nodes by group tag
-      const groupedNodes = new Map<string, { nodeId: string; node: PlanNode }[]>();
-      const ungroupedNodes: { nodeId: string; node: PlanNode }[] = [];
-      
-      for (const [nodeId, node] of d.jobs) {
-        const groupTag = node.group;
-        if (groupTag) {
-          if (!groupedNodes.has(groupTag)) {
-            groupedNodes.set(groupTag, []);
-          }
-          groupedNodes.get(groupTag)!.push({ nodeId, node });
-        } else {
-          ungroupedNodes.push({ nodeId, node });
-        }
-      }
-      
-      // Build a tree structure from group paths
-      interface GroupTreeNode {
-        name: string;
-        children: Map<string, GroupTreeNode>;
-        nodes: { nodeId: string; node: PlanNode }[];
-      }
-      
-      const groupTree: GroupTreeNode = { name: '', children: new Map(), nodes: [] };
-      
-      for (const [groupPath, nodes] of groupedNodes) {
-        const parts = groupPath.split('/');
-        let current = groupTree;
-        
-        for (const part of parts) {
-          if (!current.children.has(part)) {
-            current.children.set(part, { name: part, children: new Map(), nodes: [] });
-          }
-          current = current.children.get(part)!;
-        }
-        
-        // Nodes belong to the leaf group
-        current.nodes = nodes;
-      }
-      
-      // Pre-compute rendered label width for each node (icon + name + duration)
-      // so that group labels can be truncated to the widest descendant node.
-      const nodeLabelWidths = new Map<string, number>();
-      for (const [nodeId, node] of d.jobs) {
-        const escapedName = this._escapeForMermaid(node.name);
-        const st = d.nodeStates.get(nodeId);
-        let dur = ' | --';
-        if (st?.startedAt) {
-          const endTime = st.endedAt || Date.now();
-          dur = ' | ' + formatDurationMs(endTime - st.startedAt);
-        }
-        // Total = icon(2) + name + duration (matches the formula in _truncateLabel)
-        // Cap to MAX_NODE_LABEL_CHARS so group widths reflect truncated nodes.
-        const rawWidth = 2 + escapedName.length + dur.length;
-        nodeLabelWidths.set(nodeId, Math.min(rawWidth, MAX_NODE_LABEL_CHARS));
-      }
-
-      // Recursively compute the max descendant-node label width for each group
-      const computeMaxGroupWidth = (treeNode: GroupTreeNode): number => {
-        let maxW = 0;
-        for (const { nodeId } of treeNode.nodes) {
-          const w = nodeLabelWidths.get(nodeId) || 0;
-          if (w > maxW) {maxW = w;}
-        }
-        for (const child of treeNode.children.values()) {
-          const w = computeMaxGroupWidth(child);
-          if (w > maxW) {maxW = w;}
-        }
-        return maxW;
-      };
-
-      const groupMaxWidths = new Map<string, number>();
-      const precomputeGroupWidths = (treeNode: GroupTreeNode, path: string) => {
-        groupMaxWidths.set(path, computeMaxGroupWidth(treeNode));
-        for (const [childName, child] of treeNode.children) {
-          const childPath = path ? `${path}/${childName}` : childName;
-          precomputeGroupWidths(child, childPath);
-        }
-      };
-      for (const [name, child] of groupTree.children) {
-        precomputeGroupWidths(child, name);
-      }
-
-      // Recursively render group tree as nested subgraphs
-      const renderGroupTree = (
-        treeNode: GroupTreeNode,
-        groupPath: string,
-        currentIndent: string
-      ): void => {
-        // Look up the group UUID from the path
-        const groupUuid = d.groupPathToId.get(groupPath);
-        const groupState = groupUuid ? d.groupStates.get(groupUuid) : undefined;
-        const groupStatus = groupState?.status || 'pending';
-        
-        // Use sanitized group UUID as the subgraph ID (same pattern as nodes)
-        const sanitizedGroupId = groupUuid ? this._sanitizeId(groupUuid) : `grp${groupSubgraphCounter++}`;
-        
-        // Get icon for group status (same as nodes)
-        const icon = this._getStatusIcon(groupStatus);
-        
-        // Calculate duration for groups
-        // Always include a duration placeholder to maintain consistent sizing
-        const GROUP_DURATION_TEMPLATE = ' | 00h 00s ';
-        let groupDurationLabel = GROUP_DURATION_TEMPLATE;
-        if (groupState?.startedAt) {
-          const endTime = groupState.endedAt || Date.now();
-          const duration = endTime - groupState.startedAt;
-          groupDurationLabel = ' | ' + formatDurationMs(duration);
-        }
-        
-        // Status-specific styling for groups (same colors as nodes)
-        const groupColors: Record<string, { fill: string; stroke: string }> = {
-          pending: { fill: '#1a1a2e', stroke: '#6a6a8a' },
-          ready: { fill: '#1a2a4e', stroke: '#3794ff' },
-          running: { fill: '#1a2a4e', stroke: '#3794ff' },
-          succeeded: { fill: '#1a3a2e', stroke: '#4ec9b0' },
-          failed: { fill: '#3a1a1e', stroke: '#f48771' },
-          blocked: { fill: '#3a1a1e', stroke: '#f48771' },
-          canceled: { fill: '#1a1a2e', stroke: '#6a6a8a' },
-        };
-        const colors = groupColors[groupStatus] || groupColors.pending;
-        
-        // Truncate group names based on the widest descendant node's rendered
-        // label width, so the group title never overflows its content box.
-        // However, ensure group names are never truncated below their natural
-        // length — mermaid subgraphs expand to fit their title.
-        const displayName = treeNode.name;
-        const escapedName = this._escapeForMermaid(displayName);
-        const maxWidth = groupMaxWidths.get(groupPath) || 0;
-        const groupNameTotal = 3 + escapedName.length + GROUP_DURATION_TEMPLATE.length; // ICON_WIDTH + name + duration
-        const effectiveMaxWidth = Math.max(maxWidth, groupNameTotal);
-        const truncatedGroupName = effectiveMaxWidth > 0
-          ? this._truncateLabel(escapedName, GROUP_DURATION_TEMPLATE, effectiveMaxWidth)
-          : escapedName;
-        // Show full path in tooltip for nested groups or when truncated
-        if (truncatedGroupName !== escapedName || groupPath.includes('/')) {
-          nodeTooltips[sanitizedGroupId] = groupPath.includes('/') ? groupPath : displayName;
-        }
-        const padding = ''; // no extra padding — sizing template handles width
-        
-        lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedGroupName}${groupDurationLabel}${padding}"]`);
-        
-        const childIndent = currentIndent + '  ';
-        
-        // Render child groups first (nested subgraphs)
-        for (const childGroup of treeNode.children.values()) {
-          const childPath = groupPath ? `${groupPath}/${childGroup.name}` : childGroup.name;
-          renderGroupTree(childGroup, childPath, childIndent);
-        }
-        
-        // Render nodes directly in this group
-        for (const { nodeId, node } of treeNode.nodes) {
-          renderJobNode(node as JobNode, nodeId, d, prefix, childIndent, nodeHasDependents, localRoots, localLeaves);
-        }
-        
-        lines.push(`${currentIndent}end`);
-        lines.push(`${currentIndent}style ${sanitizedGroupId} fill:${colors.fill},stroke:${colors.stroke},stroke-width:2px,stroke-dasharray:5`);
-      };
-      
-      // Render ungrouped nodes first
-      for (const { nodeId, node } of ungroupedNodes) {
-        renderJobNode(node as JobNode, nodeId, d, prefix, indent, nodeHasDependents, localRoots, localLeaves);
-      }
-      
-      // Render group tree (top-level groups)
-      for (const topGroup of groupTree.children.values()) {
-        renderGroupTree(topGroup, topGroup.name, indent);
-      }
-      
-      return { roots: localRoots, leaves: localLeaves };
-    };
-    
-    // Render the main Plan
-    const mainResult = renderPlanInstance(plan, '', 0);
-    
-    lines.push('');
-    
-    // Add edges from target branch to root nodes
-    if (showTargetBranch) {
-      for (const rootId of mainResult.roots) {
-        const mapping = nodeEntryExitMap.get(rootId);
-        const entryIds = mapping ? mapping.entryIds : [rootId];
-        for (const entryId of entryIds) {
-          const edgeStyle = isScaffolding ? '-.->' : '-->';
-          lines.push(`  TARGET_SOURCE ${edgeStyle} ${entryId}`);
-          edgeData.push({ index: edgeIndex, from: 'TARGET_SOURCE', to: entryId });
-          successEdges.push(edgeIndex++);
-        }
-      }
-    }
-    
-    // Add all collected edges
-    for (const edge of edgesToAdd) {
-      const fromMapping = nodeEntryExitMap.get(edge.from);
-      const toMapping = nodeEntryExitMap.get(edge.to);
-      
-      const fromExits = fromMapping ? fromMapping.exitIds : [edge.from];
-      const toEntries = toMapping ? toMapping.entryIds : [edge.to];
-      
-      for (const exit of fromExits) {
-        for (const entry of toEntries) {
-          // Dashed edge while source is pending/ready; solid once scheduled+
-          // For scaffolding plans, all edges are dashed
-          const edgeStyle = isScaffolding || (!edge.status || edge.status === 'pending' || edge.status === 'ready') ? '-.->' : '-->';
-          lines.push(`  ${exit} ${edgeStyle} ${entry}`);
-          edgeData.push({ index: edgeIndex, from: exit, to: entry });
-          if (edge.status === 'succeeded') {
-            successEdges.push(edgeIndex);
-          } else if (edge.status === 'failed') {
-            failedEdges.push(edgeIndex);
-          }
-          edgeIndex++;
-        }
-      }
-    }
-    
-    // Add edges to target branch from leaf nodes
-    if (showTargetBranch) {
-      lines.push('');
-      lines.push(`  TARGET_DEST["🎯 ${this._escapeForMermaid(truncBranch(targetBranchName, MAX_NODE_LABEL_CHARS))}"]`);
-      lines.push('  class TARGET_DEST branchNode');
-      if (targetBranchName.length > MAX_NODE_LABEL_CHARS) {nodeTooltips['TARGET_DEST'] = targetBranchName;}
-
-      // The snapshot-validation JobNode is a real node in the plan and renders
-      // naturally through the standard node loop above. Connect its exit to
-      // TARGET_DEST so the diagram shows the merge-ri → targetBranch flow.
-      const svNodeId = plan.producerIdToNodeId.get('__snapshot-validation__');
-      if (svNodeId) {
-        const svSanitizedId = this._sanitizeId(svNodeId);
-        const mapping = nodeEntryExitMap.get(svSanitizedId);
-        const exitIds = mapping ? mapping.exitIds : [svSanitizedId];
-        const svState = leafnodeStates.get(svSanitizedId);
-        const svSucceeded = svState?.status === 'succeeded';
-        for (const exitId of exitIds) {
-          if (isScaffolding) {
-            lines.push(`  ${exitId} -.-> TARGET_DEST`);
-          } else if (svSucceeded) {
-            lines.push(`  ${exitId} --> TARGET_DEST`);
-            successEdges.push(edgeIndex);
-          } else {
-            lines.push(`  ${exitId} -.-> TARGET_DEST`);
-          }
-          edgeData.push({ index: edgeIndex, from: exitId, to: 'TARGET_DEST' });
-          edgeIndex++;
-        }
-      } else {
-        // Legacy plans without snapshot-validation: connect leaf nodes directly
-        // to TARGET_DEST based on their merge-ri / succeeded status.
-        for (const leafId of mainResult.leaves) {
-          const mapping = nodeEntryExitMap.get(leafId);
-          const exitIds = mapping ? mapping.exitIds : [leafId];
-          for (const exitId of exitIds) {
-            const leafState = leafnodeStates.get(exitId);
-            const isMerged = leafState?.mergedToTarget === true
-              || leafState?.status === 'succeeded';
-            if (isScaffolding) {
-              lines.push(`  ${exitId} -.-> TARGET_DEST`);
-            } else if (isMerged) {
-              lines.push(`  ${exitId} --> TARGET_DEST`);
-              successEdges.push(edgeIndex);
-            } else {
-              lines.push(`  ${exitId} -.-> TARGET_DEST`);
-            }
-            edgeData.push({ index: edgeIndex, from: exitId, to: 'TARGET_DEST' });
-            edgeIndex++;
-          }
-        }
-      }
-    }
-    
-    // Add linkStyle for colored edges
-    if (successEdges.length > 0) {
-      lines.push(`  linkStyle ${successEdges.join(',')} stroke:#4ec9b0,stroke-width:2px`);
-    }
-    if (failedEdges.length > 0) {
-      lines.push(`  linkStyle ${failedEdges.join(',')} stroke:#f48771,stroke-width:2px`);
-    }
-    
-    return { diagram: lines.join('\n'), nodeTooltips, edgeData };
-  }
-  
-  /**
-   * Map a node status string to a single-character icon.
-   *
-   * @param status - The node status (e.g., `'succeeded'`, `'failed'`, `'running'`).
-   * @returns A Unicode status icon character.
-   */
-  private _getStatusIcon(status: string): string {
-    switch (status) {
-      case 'succeeded': return '✓';
-      case 'failed': return '✗';
-      case 'running': return '▶';
-      case 'blocked': return '⊘';
-      default: return '○';
-    }
-  }
-  
-  /**
-   * Convert a node ID (UUID) to a Mermaid-safe identifier.
-   * Simply prefixes with 'n' and strips hyphens from UUID.
-   * 
-   * @param id - The raw node ID (UUID like "abc12345-6789-...").
-   * @returns Mermaid-safe ID like "nabc123456789..."
-   */
-  private _sanitizeId(id: string): string {
-    // UUIDs have hyphens; just remove them and prefix with 'n'
-    return 'n' + id.replace(/-/g, '');
-  }
-  
-  /**
-   * Escape a string for safe inclusion in a Mermaid node label.
-   *
-   * @param str - The raw label text.
-   * @returns The escaped string with Mermaid-special characters removed or replaced.
-   */
-  private _escapeForMermaid(str: string): string {
-    return str
-      .replace(/"/g, "'")
-      .replace(/[<>{}|:#]/g, '')
-      .replace(/\[/g, '(')
-      .replace(/\]/g, ')');
-  }
-
-  /**
-   * Truncate a label name so that the combined label (icon + name + duration)
-   * stays within the given `maxLen` characters. When truncation occurs the
-   * name is trimmed and an ellipsis ('...') is appended.
-   *
-   * @param name - The escaped display name.
-   * @param durationLabel - The duration suffix (e.g., ' | 2m 34s'), may be empty.
-   * @param maxLen - Maximum total character count (icon(2) + name + duration).
-   * @returns The (possibly truncated) name.
-   */
-  private _truncateLabel(name: string, durationLabel: string, maxLen: number): string {
-    // +3 accounts for the status icon + space prefix ("✓ " renders ~3 chars wide
-    // in proportional fonts due to Unicode symbol width)
-    const ICON_WIDTH = 3;
-    const totalLen = ICON_WIDTH + name.length + durationLabel.length;
-    if (totalLen <= maxLen) {
-      return name;
-    }
-    // Reserve space for icon, duration, and ellipsis
-    const available = maxLen - ICON_WIDTH - durationLabel.length - 3; // 3 = '...'
-    if (available <= 0) {
-      return name; // duration alone exceeds limit – don't truncate name to nothing
-    }
-    return name.slice(0, available).trimEnd() + '...';
-  }
-  
-  /**
    * Format a Plan's duration from start/end timestamps.
    *
    * @param startedAt - Epoch millisecond timestamp when the Plan started.
@@ -2054,5 +1031,16 @@ export class planDetailPanel {
     if (!startedAt) {return '--';}
     const duration = (endedAt || Date.now()) - startedAt;
     return formatDurationMs(duration);
+  }
+
+  /**
+   * Convert a node ID (UUID) to a Mermaid-safe identifier.
+   * Simply prefixes with 'n' and strips hyphens from UUID.
+   * 
+   * @param id - The raw node ID (UUID like "abc12345-6789-...").
+   * @returns Mermaid-safe ID like "nabc123456789..."
+   */
+  private _sanitizeId(id: string): string {
+    return 'n' + id.replace(/-/g, '');
   }
 }

@@ -19,6 +19,7 @@ import {
   PlanInstance,
   PlanNode,
   JobNode,
+  JobNodeSpec,
   NodeExecutionState,
   GroupSpec,
   GroupInstance,

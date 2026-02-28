@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.13.73",
+  "version": "0.13.74",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -175,13 +175,20 @@
           "type": "number",
           "default": 16,
           "minimum": 1,
-          "maximum": 32,
+          "maximum": 1024,
           "description": "Maximum concurrent jobs across all VS Code instances on the same machine. Uses a shared capacity registry to coordinate job scheduling when multiple instances are running. Prevents system overload from multiple orchestrators."
         },
         "copilotOrchestrator.copilotCli.required": {
           "type": "boolean",
           "default": true,
           "description": "Warn/guide install if GitHub Copilot CLI is missing on activation"
+        },
+        "copilotOrchestrator.autoHeal.maxAttempts": {
+          "type": "number",
+          "default": 4,
+          "minimum": 0,
+          "maximum": 1024,
+          "description": "Maximum number of auto-heal attempts per failed phase before giving up. Each attempt spawns an AI agent to diagnose and fix the failure, resuming the previous agent's session context. Set to 0 to disable auto-heal entirely."
         },
         "copilotOrchestrator.copilotCli.preferredInstall": {
           "type": "string",
@@ -316,8 +323,9 @@
     "test:unit": "npm run compile:tsc && mocha --ui tdd --exit \"out/test/unit/**/*.test.js\" --require src/test/unit/register-vscode-mock.js --timeout 60000",
     "test:coverage": "npm run compile:tsc && c8 --reporter=text --reporter=lcov --check-coverage --lines 95 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js --exclude=out/vscode/adapters.js --exclude=out/core/planInitialization.js mocha --ui tdd --exit \"out/test/unit/**/*.test.js\" --require src/test/unit/register-vscode-mock.js --timeout 60000",
     "lint": "eslint src --ext ts || echo 'Linting complete'",
+    "clean:dist": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "package:vsix": "npx @vscode/vsce package --no-dependencies",
-    "local-install": "npm version patch --no-git-tag-version && npm run package:vsix && node -e \"const fs=require('fs');const v=require('./package.json').version;require('child_process').execSync('code --install-extension vscode-copilot-orchestrator-'+v+'.vsix --force',{stdio:'inherit'})\""
+    "local-install": "npm run clean:dist && npm version patch --no-git-tag-version && npm run package:vsix && node -e \"const fs=require('fs');const v=require('./package.json').version;require('child_process').execSync('code --install-extension vscode-copilot-orchestrator-'+v+'.vsix --force',{stdio:'inherit'})\""
   },
   "devDependencies": {
     "@types/glob": "^9.0.0",

@@ -415,7 +415,7 @@ export function registerPlanCommands(
   
   // Show node details
   context.subscriptions.push(
-    vscode.commands.registerCommand('orchestrator.showNodeDetails', async (planId?: string, nodeId?: string) => {
+    vscode.commands.registerCommand('orchestrator.showNodeDetails', async (planId?: string, nodeId?: string, attemptNumber?: number) => {
       // If no planId provided, prompt user to select
       if (!planId) {
         const plans = planRunner.getAll();
@@ -475,7 +475,7 @@ export function registerPlanCommands(
       }
       
       const { NodeDetailPanel } = require('../ui/panels/nodeDetailPanel');
-      NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, planRunner, pulse);
+      NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, planRunner, pulse, attemptNumber);
     })
   );
   
@@ -577,7 +577,7 @@ export function registerPlanCommands(
         const plans = planRunner.getAll().filter(p => p.isPaused);
         
         if (plans.length === 0) {
-          vscode.window.showInformationMessage('No paused plans to resume');
+          vscode.window.showInformationMessage('No plans available to resume');
           return;
         }
         

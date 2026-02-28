@@ -3,7 +3,7 @@
  */
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { ExecutionPump, ExecutionPumpState } from '../../../plan/executionPump';
+import { ExecutionPump, ExecutionPumpState, ExecuteNodeCallback } from '../../../plan/executionPump';
 import { PlanEventEmitter } from '../../../plan/planEvents';
 import type { PlanInstance, JobNode, NodeExecutionState } from '../../../plan/types';
 import type { ILogger } from '../../../interfaces/ILogger';

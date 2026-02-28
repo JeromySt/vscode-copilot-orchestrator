@@ -180,7 +180,7 @@ suite('Plan Helpers', () => {
         { status: 'succeeded', version: 0, attempts: 0 },
         { status: 'failed', version: 0, attempts: 0 },
       ];
-      assert.strictEqual(computePlanStatus(states, true), 'partial');
+      assert.strictEqual(computePlanStatus(states, true), 'failed');
     });
 
     test('returns canceled when any canceled', () => {
@@ -203,6 +203,14 @@ suite('Plan Helpers', () => {
         { status: 'succeeded', version: 0, attempts: 0 },
       ];
       assert.strictEqual(computePlanStatus(states, true, true), 'paused');
+    });
+
+    test('returns pending-start when isPaused, not started, and has non-terminal nodes', () => {
+      const states: NodeExecutionState[] = [
+        { status: 'pending', version: 0, attempts: 0 },
+        { status: 'succeeded', version: 0, attempts: 0 },
+      ];
+      assert.strictEqual(computePlanStatus(states, false, true), 'pending-start');
     });
 
     test('returns final status when paused but all nodes terminal', () => {
