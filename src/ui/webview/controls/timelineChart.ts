@@ -390,7 +390,7 @@ export class TimelineChart extends SubscribableControl {
     const x = this.px(att.startedAt);
     const w = Math.max(2, this.px(end) - x);
     const bar = d.createElement('div');
-    bar.style.cssText = `position:absolute;left:${x}px;width:${w}px;top:${BAR_Y}px;height:${BAR_H}px;border-radius:3px;cursor:pointer;display:flex;overflow:hidden;z-index:3;box-shadow:0 1px 3px rgba(0,0,0,0.3);`;
+    bar.style.cssText = `position:absolute;left:${x}px;width:${w}px;top:${BAR_Y}px;height:${BAR_H}px;border-radius:3px;cursor:pointer;overflow:hidden;z-index:3;box-shadow:0 1px 3px rgba(0,0,0,0.3);`;
 
     // Store position for plan row markers and dependency lines
     this.barPositions.push({ nodeId: node.nodeId, name: node.name, status: att.status, leftPx: x, rightPx: x + w, rowIndex, startedAt: att.startedAt, endedAt: end });
@@ -421,33 +421,35 @@ export class TimelineChart extends SubscribableControl {
 
     // Phase segments
     if (att.phaseTiming && att.phaseTiming.length > 0) {
-      const dur = end - att.startedAt;
-      if (dur > 0) for (const pt of att.phaseTiming) {
+      for (const pt of att.phaseTiming) {
         const pe = pt.endedAt || Date.now();
-        const p = ((pe - pt.startedAt) / dur) * 100;
-        if (p < 0.3) continue;
+        const segStartPx = this.px(pt.startedAt) - x; // Relative to bar start
+        const segEndPx = this.px(pe) - x;
+        const segWidthPx = Math.max(1, segEndPx - segStartPx);
         const seg = d.createElement('div');
-        seg.style.cssText = `flex:0 0 ${p}%;height:100%;background:${PHASE_COLORS[pt.phase] || '#888'};pointer-events:none;`;
+        seg.style.cssText = `position:absolute;left:${segStartPx}px;width:${segWidthPx}px;height:100%;background:${PHASE_COLORS[pt.phase] || '#888'};pointer-events:none;`;
         bar.appendChild(seg);
       }
     } else if (att.phaseDurations && att.phaseDurations.length > 0) {
       const active = att.phaseDurations.filter((pd: any) => pd.status !== 'skipped');
-      const tot = active.reduce((s: number, p: any) => s + p.durationMs, 0);
-      if (tot > 0) for (const pd of active) {
-        const p = (pd.durationMs / tot) * 100;
-        if (p < 0.3) continue;
+      let cumulativeOffsetPx = 0;
+      for (const pd of active) {
+        const segWidthPx = Math.max(1, this.px(att.startedAt + pd.durationMs) - this.px(att.startedAt));
         const seg = d.createElement('div');
-        seg.style.cssText = `flex:0 0 ${p}%;height:100%;background:${PHASE_COLORS[pd.phase] || '#888'};pointer-events:none;`;
+        seg.style.cssText = `position:absolute;left:${cumulativeOffsetPx}px;width:${segWidthPx}px;height:100%;background:${PHASE_COLORS[pd.phase] || '#888'};pointer-events:none;`;
         bar.appendChild(seg);
+        cumulativeOffsetPx += segWidthPx;
       }
     } else if (att.stepStatuses && Object.keys(att.stepStatuses).length > 0) {
       const exec = PHASES.filter(p => att.stepStatuses![p] && att.stepStatuses![p] !== 'skipped');
-      const w2 = exec.length > 0 ? 100 / exec.length : 0;
+      const segWidthPx = exec.length > 0 ? w / exec.length : 0;
+      let cumulativeOffsetPx = 0;
       for (const ph of exec) {
         const seg = d.createElement('div');
         const st = att.stepStatuses![ph];
-        seg.style.cssText = `flex:0 0 ${w2}%;height:100%;background:${PHASE_COLORS[ph] || '#888'};opacity:${st === 'succeeded' || st === 'success' ? '1' : '0.6'};pointer-events:none;`;
+        seg.style.cssText = `position:absolute;left:${cumulativeOffsetPx}px;width:${segWidthPx}px;height:100%;background:${PHASE_COLORS[ph] || '#888'};opacity:${st === 'succeeded' || st === 'success' ? '1' : '0.6'};pointer-events:none;`;
         bar.appendChild(seg);
+        cumulativeOffsetPx += segWidthPx;
       }
     } else {
       bar.style.background = att.status === 'succeeded' ? 'var(--vscode-testing-iconPassed)' : att.status === 'failed' ? 'var(--vscode-testing-iconFailed)' : 'var(--vscode-progressBar-background)';

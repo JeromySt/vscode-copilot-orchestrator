@@ -648,7 +648,7 @@ export function buildCommand(
     cmd += ` --log-dir ${JSON.stringify(logDir)} --log-level debug`;
   } else if (resolvedConfigDir) {
     // Fallback: use config dir + /logs as log dir
-    const fallbackLogDir = resolvedConfigDir + '/logs';
+    const fallbackLogDir = path.join(resolvedConfigDir, 'logs');
     cmd += ` --log-dir ${JSON.stringify(fallbackLogDir)} --log-level debug`;
     log.info(`[cli] No explicit logDir — using fallback: ${fallbackLogDir}`);
   }

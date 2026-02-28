@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.13.74",
+  "version": "0.14.0",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -304,6 +304,11 @@
           "type": "boolean",
           "default": true,
           "description": "When enabled, the setup phase projects a context skill file into each worktree that includes the node's task, dependencies, and worktree path information for the Copilot CLI agent."
+        },
+        "copilotOrchestrator.experimental.showTimeline": {
+          "type": "boolean",
+          "default": false,
+          "description": "[EXPERIMENTAL] Show the timeline view in plan detail panels. This feature is under active development and hidden by default. Enable to preview and provide feedback on the interactive execution timeline visualization."
         }
       }
     }

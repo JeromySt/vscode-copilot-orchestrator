@@ -594,7 +594,8 @@ export class JobExecutionEngine {
             return typeof v === 'number' ? v : 0;
           })();
           const MAX_AUTO_HEAL_PER_PHASE = this.state.configManager.getConfig<number>('copilotOrchestrator.autoHeal', 'maxAttempts', 4);
-          const phaseAlreadyHealed = healCount >= MAX_AUTO_HEAL_PER_PHASE;
+          let currentHealCount = healCount;
+          const phaseAlreadyHealed = currentHealCount >= MAX_AUTO_HEAL_PER_PHASE;
           
           // Auto-retry is allowed if:
           // 1. Non-agent work (existing behavior - swap to agent)
@@ -613,8 +614,11 @@ export class JobExecutionEngine {
           await this.savePlanState(plan);
           
           if (shouldAttemptAutoRetry) {
-            if (!nodeState.autoHealAttempted) {nodeState.autoHealAttempted = {};}
-            nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = healCount + 1;
+            // Loop to allow multiple auto-heal attempts up to MAX_AUTO_HEAL_PER_PHASE
+            while (currentHealCount < MAX_AUTO_HEAL_PER_PHASE) {
+              currentHealCount++;
+              if (!nodeState.autoHealAttempted) {nodeState.autoHealAttempted = {};}
+              nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = currentHealCount;
             
             if (isAgentWork && wasExternallyKilled) {
               // Agent was interrupted - retry with same spec (don't swap to different agent spec)
@@ -756,17 +760,29 @@ export class JobExecutionEngine {
                 // Clear process ID since execution is complete
                 nodeState.pid = undefined;
                 
-                sm.transition(node.id, 'failed');
-                this.state.events.emit('nodeCompleted', plan.id, node.id, false);
-                
-                this.log.error(`Job failed (after auto-retry): ${node.name}`, {
-                  planId: plan.id,
-                  nodeId: node.id,
-                  error: retryResult.error,
-                });
-                await this.savePlanState(plan);
-                return;
+                // Check if we've exhausted heal attempts
+                if (currentHealCount >= MAX_AUTO_HEAL_PER_PHASE) {
+                  this.log.error(`Job failed after ${currentHealCount} auto-heal attempts: ${node.name}`, {
+                    planId: plan.id,
+                    nodeId: node.id,
+                    error: retryResult.error,
+                  });
+                  sm.transition(node.id, 'failed');
+                  this.state.events.emit('nodeCompleted', plan.id, node.id, false);
+                  await this.savePlanState(plan);
+                  return;
+                } else {
+                  // Continue to next heal attempt
+                  this.log.info(`Auto-heal attempt ${currentHealCount} failed, will retry (${MAX_AUTO_HEAL_PER_PHASE - currentHealCount} attempts remaining)`, {
+                    planId: plan.id,
+                    nodeId: node.id,
+                  });
+                  await this.savePlanState(plan);
+                  continue;
+                }
               }
+              // Auto-retry succeeded - break out of heal loop
+              break;
             } else {
             // Non-agent work failed — existing auto-heal logic (swap to agent)
             this.log.info(`Auto-heal: attempting AI-assisted fix for ${node.name} (phase: ${failedPhase})`, {
@@ -816,53 +832,46 @@ export class JobExecutionEngine {
               }
               
               // Write heal instructions file
-              const isPostchecksHeal = failedPhase === 'postchecks';
-              const healInstructions = isPostchecksHeal
-                ? [
-                    `# Auto-Heal: Diagnose Failed postchecks Phase`,
-                    '',
-                    `## IMPORTANT: Do NOT fix anything. Diagnosis ONLY.`,
-                    '',
-                    `The postchecks phase failed. Your job is to DIAGNOSE why, NOT to fix it.`,
-                    `Postchecks validate that previous phases produced correct results.`,
-                    `If the check command itself is wrong (wrong path, wrong logic, etc.),`,
-                    `you MUST exit with failure — this is unrecoverable and needs human attention.`,
-                    '',
-                    `## Log File`,
-                    failedLogFilePath
-                      ? `Read: \`${failedLogFilePath}\``
-                      : 'No log file available.',
-                    '',
-                    `## Postchecks Command That Failed`,
-                    '```',
-                    originalCommand,
-                    '```',
-                    '',
-                    `## What To Do`,
-                    `1. Read the log file to understand what the postchecks command checked`,
-                    `2. Determine if the failure is because:`,
-                    `   a) The work phase didn't produce expected output → try to fix the work output, then re-run the command`,
-                    `   b) The postchecks command itself is wrong (wrong path, wrong assertion) → EXIT WITH FAILURE`,
-                    `3. If (a): fix the work output and re-run the command to verify`,
-                    `4. If (b): do NOT attempt to fix the command. Just exit with failure.`,
-                  ].join('\n')
-                : [
-                    `# Auto-Heal: Fix Failed ${failedPhase} Phase`,
-                    '',
-                    `Do NOT re-execute the original task. Your only job is to fix the error.`,
-                    '',
-                    `## Log File`,
-                    failedLogFilePath
-                      ? `Read: \`${failedLogFilePath}\``
-                      : 'No log file available.',
-                    '',
-                    `## Command to Fix and Re-run`,
-                    '```',
-                    originalCommand,
-                    '```',
-                    '',
-                    `Read the log file, find the error, fix it, then re-run the command above.`,
-                  ].join('\n');
+              // The heal agent runs as the WORK phase — it must do whatever is necessary
+              // to resolve the failure and satisfy the original intent of the failed phase.
+              const healInstructions = [
+                `# Auto-Heal: Resolve Failed \`${failedPhase}\` Phase (Attempt ${nodeState.attempts})`,
+                '',
+                `## Your Mission`,
+                `The \`${failedPhase}\` phase of this job failed. You are the AUTO-HEAL agent.`,
+                `Your job is to **do whatever work is necessary** to resolve the failure so that`,
+                `when the pipeline continues (commit → postchecks), everything passes.`,
+                '',
+                `This is NOT just a diagnosis task — you must **actively fix the problem**.`,
+                `Write code, modify files, add tests, fix configurations — whatever it takes.`,
+                `You have full access to the worktree and can make any changes needed.`,
+                '',
+                `## Previous Failure Log`,
+                failedLogFilePath
+                  ? `Read this file to understand what went wrong:\n\`${failedLogFilePath}\``
+                  : 'No log file available.',
+                '',
+                `## Command That Failed`,
+                '```',
+                originalCommand,
+                '```',
+                '',
+                `## What You Must Do`,
+                `1. Read the failure log to understand the root cause`,
+                `2. Analyze the error — is it a code issue, test issue, configuration issue, or coverage gap?`,
+                `3. **Fix the root cause** by making the necessary code/test/config changes`,
+                `4. Re-run the failed command to verify your fix works`,
+                `5. If the command passes, commit your changes and you're done`,
+                `6. If it still fails, continue diagnosing and fixing until it passes`,
+                '',
+                `## Important Notes`,
+                `- You may need to write substantial code (new tests, fix implementations, etc.)`,
+                `- Do NOT just diagnose and report — you must actually fix the problem`,
+                `- The pipeline will automatically run postchecks after your work phase completes`,
+                `- If the postchecks command itself is fundamentally wrong (impossible threshold,`,
+                `  wrong package name, etc.), exit with failure so a human can fix the spec`,
+                `- Previous auto-heal agents may have already made partial progress — build on their work`,
+              ].join('\n');
               
               const healFile = path.join(instrDir, `orchestrator-heal-${node.id.slice(0, 8)}.instructions.md`);
               fs.writeFileSync(healFile, healInstructions, 'utf8');
@@ -901,7 +910,7 @@ export class JobExecutionEngine {
             }
             const healSpec: WorkSpec = {
               type: 'agent',
-              instructions: 'Fix the error described in the heal instructions file. Read the log file, diagnose the failure, fix it, and re-run the command.',
+              instructions: `Read the heal instructions file in .github/instructions/. The ${failedPhase} phase failed. Diagnose the root cause from the execution log, then do whatever work is needed to fix it — write code, add tests, fix configs. Re-run the failed command to verify your fix. Do NOT just diagnose; actively resolve the problem.`,
               allowedFolders: healAllowedFolders,
               allowedUrls: healAllowedUrls.length > 0 ? healAllowedUrls : undefined,
             };
@@ -915,12 +924,7 @@ export class JobExecutionEngine {
             nodeState.error = undefined;
             attemptStartedAt = Date.now();
             this.recordRunningAttempt(nodeState, attemptStartedAt, 'auto-heal');
-            
-            // Capture HEAD before heal so we can detect if the agent made changes
-            let preHealHead: string | undefined;
-            try {
-              preHealHead = (await this.git.repository.getHead(worktreePath)) || undefined;
-            } catch { /* best-effort */ }
+            this.state.events.emitPlanUpdated(plan.id);
             
             // Capture log offsets for the auto-heal attempt
             const healLogMemoryOffset = this.state.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
@@ -977,35 +981,6 @@ export class JobExecutionEngine {
             }
             
             if (healResult.success) {
-              // Verify the heal agent actually made changes.
-              // The Copilot CLI exits 0 even when the agent diagnoses a problem
-              // without fixing it. If HEAD hasn't moved AND there are no uncommitted
-              // changes, the agent didn't produce a real fix — treat as failure.
-              let healMadeChanges = true;
-              if (preHealHead) {
-                try {
-                  const postHealHead = (await this.git.repository.getHead(worktreePath)) || undefined;
-                  const hasUncommitted = await this.git.repository.hasUncommittedChanges(worktreePath);
-                  if (postHealHead === preHealHead && !hasUncommitted) {
-                    healMadeChanges = false;
-                    this.log.warn(`Auto-heal agent made no code changes for ${node.name}`, { planId: plan.id, nodeId: node.id });
-                    this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info',
-                      '========== AUTO-HEAL: NO CHANGES DETECTED ==========', nodeState.attempts);
-                    this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info',
-                      'The heal agent completed without making any code changes. This typically means the agent diagnosed the issue but could not fix it.', nodeState.attempts);
-                  }
-                } catch { /* best-effort — if git check fails, assume changes were made */ }
-              }
-              
-              if (!healMadeChanges) {
-                // Treat as failure — the agent didn't actually fix anything
-                healResult.success = false;
-                healResult.error = 'Auto-heal agent completed without making code changes (diagnosis only, no fix applied)';
-                healResult.noAutoHeal = true; // Don't re-heal a no-op heal
-              }
-            }
-            
-            if (healResult.success) {
               this.log.info(`Auto-heal succeeded for ${node.name}!`, {
                 planId: plan.id,
                 nodeId: node.id,
@@ -1033,11 +1008,9 @@ export class JobExecutionEngine {
                 nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...healResult.phaseMetrics };
               }
               
-              // In the new auto-heal model, no separate re-validation is needed.
-              // The heal agent runs as WORK, then the pipeline naturally runs commit
-              // and the original postchecks. If postchecks fail again, a new auto-heal
-              // cycle starts (up to MAX_AUTO_HEAL_PER_PHASE budget).
-              
+              // Update log offsets so the success record captures only heal logs
+              logMemoryOffset = healLogMemoryOffset;
+              logFileOffset = healLogFileOffset;
               // Fall through to RI merge handling below
             } else {
               // Auto-heal also failed — record it and transition to failed
@@ -1085,18 +1058,31 @@ export class JobExecutionEngine {
               // Clear process ID since execution is complete
               nodeState.pid = undefined;
               
-              sm.transition(node.id, 'failed');
-              this.state.events.emit('nodeCompleted', plan.id, node.id, false);
-              
-              this.log.error(`Job failed (after auto-heal): ${node.name}`, {
-                planId: plan.id,
-                nodeId: node.id,
-                error: healResult.error,
-              });
-              await this.savePlanState(plan);
-              return;
+              // Check if we've exhausted heal attempts
+              if (currentHealCount >= MAX_AUTO_HEAL_PER_PHASE) {
+                this.log.error(`Job failed after ${currentHealCount} auto-heal attempts: ${node.name}`, {
+                  planId: plan.id,
+                  nodeId: node.id,
+                  error: healResult.error,
+                });
+                sm.transition(node.id, 'failed');
+                this.state.events.emit('nodeCompleted', plan.id, node.id, false);
+                await this.savePlanState(plan);
+                return;
+              } else {
+                // Continue to next heal attempt
+                this.log.info(`Auto-heal attempt ${currentHealCount} failed, will retry (${MAX_AUTO_HEAL_PER_PHASE - currentHealCount} attempts remaining)`, {
+                  planId: plan.id,
+                  nodeId: node.id,
+                });
+                await this.savePlanState(plan);
+                continue;
+              }
             }
+            // Auto-heal succeeded - break out of heal loop
+            break;
             }
+            }  // End while loop for iterative auto-heal attempts
           } else {
             // No AI auto-heal — check if the failure has a resumeFromPhase directive
             // (e.g., SV postchecks wants to retry from prechecks to rebase the snapshot)
@@ -1120,6 +1106,7 @@ export class JobExecutionEngine {
               await this.incrementAttempt(plan, node.id, nodeState);
               attemptStartedAt = Date.now();
               this.recordRunningAttempt(nodeState, attemptStartedAt, 'auto-heal');
+              this.state.events.emitPlanUpdated(plan.id);
               nodeState.resumeFromPhase = result.overrideResumeFromPhase;
 
               // Capture log offsets for the retry

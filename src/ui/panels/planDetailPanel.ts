@@ -718,73 +718,77 @@ export class planDetailPanel {
       };
     }
     
-    // Build timeline data for the timeline chart
-    const timelineNodes: Array<{
-      nodeId: string;
-      name: string;
-      group?: string;
-      status: string;
-      scheduledAt?: number;
-      startedAt?: number;
-      endedAt?: number;
-      dependencies?: string[];
-      stepStatuses?: Record<string, string>;
-      attempts?: Array<{
-        attemptNumber: number;
+    // Build timeline data for the timeline chart (only if timeline is enabled)
+    const showTimeline = this._shouldShowTimeline();
+    let timelineData: any = null;
+    if (showTimeline) {
+      const timelineNodes: Array<{
+        nodeId: string;
+        name: string;
+        group?: string;
         status: string;
+        scheduledAt?: number;
         startedAt?: number;
         endedAt?: number;
-        failedPhase?: string;
+        dependencies?: string[];
         stepStatuses?: Record<string, string>;
-        phaseTiming?: Array<{ phase: string; startedAt: number; endedAt?: number }>;
-      }>;
-    }> = [];
-    for (const [nodeId, node] of plan.jobs) {
-      const state = plan.nodeStates.get(nodeId);
-      if (!state) { continue; }
-      // Get attempt history
-      const attempts = (state.attemptHistory || []).map(a => ({
-        attemptNumber: a.attemptNumber,
-        status: a.status,
-        startedAt: a.startedAt,
-        endedAt: a.endedAt,
-        failedPhase: a.failedPhase,
-        triggerType: a.triggerType || 'initial',
-        stepStatuses: a.stepStatuses || {},
-        phaseDurations: a.phaseMetrics ? Object.entries(a.phaseMetrics).map(([phase, metrics]: [string, any]) => ({
-          phase,
-          durationMs: metrics?.durationMs || 0,
-          status: (a.stepStatuses as any)?.[phase] || 'succeeded',
-        })).filter((pd: any) => pd.durationMs > 0) : [],
-        phaseTiming: a.phaseTiming || [],
-      }));
-      // nodeState.startedAt is set-once (first attempt start) and never overwritten.
-      // For backward compat with old plans where it WAS overwritten, fall back to earliest attempt.
-      const earliestAttemptStart = state.attemptHistory && state.attemptHistory.length > 0
-        ? Math.min(...state.attemptHistory.map((a: any) => a.startedAt).filter(Boolean))
-        : undefined;
-      const effectiveStart = state.startedAt || (isFinite(earliestAttemptStart as number) ? earliestAttemptStart : undefined);
-      timelineNodes.push({
-        nodeId,
-        name: node.name,
-        group: (node as JobNode).group,
-        status: state.status,
-        scheduledAt: state.scheduledAt,
-        startedAt: effectiveStart,
-        endedAt: state.endedAt,
-        dependencies: (node as JobNode).dependencies || [],
-        stepStatuses: state.stepStatuses || {},
-        attempts,
-      });
+        attempts?: Array<{
+          attemptNumber: number;
+          status: string;
+          startedAt?: number;
+          endedAt?: number;
+          failedPhase?: string;
+          stepStatuses?: Record<string, string>;
+          phaseTiming?: Array<{ phase: string; startedAt: number; endedAt?: number }>;
+        }>;
+      }> = [];
+      for (const [nodeId, node] of plan.jobs) {
+        const state = plan.nodeStates.get(nodeId);
+        if (!state) { continue; }
+        // Get attempt history
+        const attempts = (state.attemptHistory || []).map(a => ({
+          attemptNumber: a.attemptNumber,
+          status: a.status,
+          startedAt: a.startedAt,
+          endedAt: a.endedAt,
+          failedPhase: a.failedPhase,
+          triggerType: a.triggerType || 'initial',
+          stepStatuses: a.stepStatuses || {},
+          phaseDurations: a.phaseMetrics ? Object.entries(a.phaseMetrics).map(([phase, metrics]: [string, any]) => ({
+            phase,
+            durationMs: metrics?.durationMs || 0,
+            status: (a.stepStatuses as any)?.[phase] || 'succeeded',
+          })).filter((pd: any) => pd.durationMs > 0) : [],
+          phaseTiming: a.phaseTiming || [],
+        }));
+        // nodeState.startedAt is set-once (first attempt start) and never overwritten.
+        // For backward compat with old plans where it WAS overwritten, fall back to earliest attempt.
+        const earliestAttemptStart = state.attemptHistory && state.attemptHistory.length > 0
+          ? Math.min(...state.attemptHistory.map((a: any) => a.startedAt).filter(Boolean))
+          : undefined;
+        const effectiveStart = state.startedAt || (isFinite(earliestAttemptStart as number) ? earliestAttemptStart : undefined);
+        timelineNodes.push({
+          nodeId,
+          name: node.name,
+          group: (node as JobNode).group,
+          status: state.status,
+          scheduledAt: state.scheduledAt,
+          startedAt: effectiveStart,
+          endedAt: state.endedAt,
+          dependencies: (node as JobNode).dependencies || [],
+          stepStatuses: state.stepStatuses || {},
+          attempts,
+        });
+      }
+      timelineData = {
+        planStartedAt: plan.startedAt,
+        planEndedAt: effectiveEndedAt || plan.endedAt,
+        planCreatedAt: plan.createdAt,
+        stateHistory: plan.stateHistory || [],
+        pauseHistory: plan.pauseHistory || [],
+        nodes: timelineNodes,
+      };
     }
-    const timelineData = {
-      planStartedAt: plan.startedAt,
-      planEndedAt: effectiveEndedAt || plan.endedAt,
-      planCreatedAt: plan.createdAt,
-      stateHistory: plan.stateHistory || [],
-      pauseHistory: plan.pauseHistory || [],
-      nodes: timelineNodes,
-    };
     
     // Get branch info
     const baseBranch = plan.spec.baseBranch || 'main';
@@ -808,7 +812,7 @@ export class planDetailPanel {
   <style>
     ${renderPlanDetailStyles()}
     ${renderTabBarStyles()}
-    ${renderTimelineStyles()}
+    ${showTimeline ? renderTimelineStyles() : ''}
   </style>
 </head>
 <body>
@@ -837,7 +841,7 @@ export class planDetailPanel {
   ${metricsBarHtml}
   ${this._buildPlanConfigHtml(plan)}
   ${renderPlanDag({ mermaidDef, status })}
-  ${renderPlanTimeline({ status })}
+  ${showTimeline ? renderPlanTimeline({ status }) : ''}
   <!-- Running Processes (below both DAG and Timeline) -->
   <div class="processes-section" id="processesSection" style="${status === 'running' ? '' : 'display:none;'}">
     <h3>Running Processes</h3>
@@ -849,6 +853,14 @@ export class planDetailPanel {
   ${renderPlanScripts({ nodeData, nodeTooltips, mermaidDef, edgeData, globalCapacityStats: globalCapacityStats || null, timelineData })}
 </body>
 </html>`;
+  }
+  
+  /**
+   * Check if timeline view should be shown based on experimental feature flag.
+   */
+  private _shouldShowTimeline(): boolean {
+    const config = vscode.workspace.getConfiguration('copilotOrchestrator');
+    return config.get<boolean>('experimental.showTimeline', false);
   }
   
   /**

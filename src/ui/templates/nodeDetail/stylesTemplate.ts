@@ -1438,6 +1438,11 @@ function bridgeStyles(): string {
     /* ── Dependencies extras ── */
     .deps-list { display: flex; flex-wrap: wrap; gap: 6px; }
     .dep-badge { padding: 3px 8px; border-radius: 4px; font-size: 11px; background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); display: flex; align-items: center; gap: 4px; }
+    .dep-badge.succeeded { background: rgba(78, 201, 176, 0.15); border-color: rgba(78, 201, 176, 0.4); color: #4ec9b0; }
+    .dep-badge.running { background: rgba(0, 122, 204, 0.15); border-color: rgba(0, 122, 204, 0.4); color: #3794ff; }
+    .dep-badge.failed { background: rgba(244, 135, 113, 0.15); border-color: rgba(244, 135, 113, 0.4); color: #f48771; }
+    .dep-badge.pending, .dep-badge.ready, .dep-badge.blocked { background: rgba(133, 133, 133, 0.1); border-color: rgba(133, 133, 133, 0.3); color: #858585; }
+    .dep-badge.scheduled { background: rgba(0, 122, 204, 0.1); border-color: rgba(0, 122, 204, 0.3); color: #3794ff; }
 
     /* ── Git info ── */
     .git-info-row { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 12px; }
