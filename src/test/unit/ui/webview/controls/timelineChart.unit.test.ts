@@ -55,6 +55,10 @@ function makeContainer(): any {
   return container;
 }
 
+// Realistic timestamps — small epoch values (e.g. 1000) cause OOM when
+// Date.now() is used as the running-plan end, creating billions of loop iterations.
+const NOW = Date.now();
+
 suite('TimelineChart', () => {
   let bus: EventBus;
   let restoreDoc: () => void;
@@ -100,8 +104,8 @@ suite('TimelineChart', () => {
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
         nodes: [
-          { nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: 1000, endedAt: 2000 },
-          { nodeId: 'n2', name: 'Job2', status: 'succeeded', startedAt: 2100, endedAt: 3000, dependencies: ['n1'] },
+          { nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 },
+          { nodeId: 'n2', name: 'Job2', status: 'succeeded', startedAt: NOW - 3900, endedAt: NOW - 3000, dependencies: ['n1'] },
         ],
       };
       
@@ -122,13 +126,13 @@ suite('TimelineChart', () => {
           nodeId: 'n1',
           name: 'Job1',
           status: 'succeeded',
-          startedAt: 1000,
-          endedAt: 2000,
+          startedAt: NOW - 5000,
+          endedAt: NOW - 4000,
           attempts: [{
             attemptNumber: 1,
             status: 'succeeded',
-            startedAt: 1000,
-            endedAt: 2000,
+            startedAt: NOW - 5000,
+            endedAt: NOW - 4000,
             stepStatuses: {
               'merge-fi': 'succeeded',
               'prechecks': 'succeeded',
@@ -153,9 +157,9 @@ suite('TimelineChart', () => {
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
         nodes: [
-          { nodeId: 'n1', name: 'Job1', group: 'group-a', status: 'succeeded', startedAt: 1000, endedAt: 2000 },
-          { nodeId: 'n2', name: 'Job2', group: 'group-a', status: 'succeeded', startedAt: 2100, endedAt: 3000 },
-          { nodeId: 'n3', name: 'Job3', group: 'group-b', status: 'succeeded', startedAt: 1500, endedAt: 2500 },
+          { nodeId: 'n1', name: 'Job1', group: 'group-a', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 },
+          { nodeId: 'n2', name: 'Job2', group: 'group-a', status: 'succeeded', startedAt: NOW - 3900, endedAt: NOW - 3000 },
+          { nodeId: 'n3', name: 'Job3', group: 'group-b', status: 'succeeded', startedAt: NOW - 4500, endedAt: NOW - 3500 },
         ],
       };
       
@@ -174,7 +178,7 @@ suite('TimelineChart', () => {
       
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
-        nodes: [{ nodeId: 'n1', name: 'Job', status: 'running', startedAt: 1000 }],
+        nodes: [{ nodeId: 'n1', name: 'Job', status: 'running', startedAt: NOW - 5000 }],
       };
       
       chart.update(data);
@@ -209,15 +213,15 @@ suite('TimelineChart', () => {
       
       // First update with running node
       const runningData: TimelineData = {
-        nodes: [{ nodeId: 'n1', name: 'Job', status: 'running', startedAt: 1000 }],
+        nodes: [{ nodeId: 'n1', name: 'Job', status: 'running', startedAt: NOW - 5000 }],
       };
       chart.update(runningData);
       assert.strictEqual(bus.count(Topics.PULSE), 1, 'Should subscribe to PULSE');
       
       // Then update with completed node
       const completedData: TimelineData = {
-        planEndedAt: 2000,
-        nodes: [{ nodeId: 'n1', name: 'Job', status: 'succeeded', startedAt: 1000, endedAt: 2000 }],
+        planEndedAt: NOW - 4000,
+        nodes: [{ nodeId: 'n1', name: 'Job', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 }],
       };
       chart.update(completedData);
       
@@ -237,13 +241,13 @@ suite('TimelineChart', () => {
           nodeId: 'n1',
           name: 'Job1',
           status: 'succeeded',
-          startedAt: 1000,
-          endedAt: 2000,
+          startedAt: NOW - 5000,
+          endedAt: NOW - 4000,
           attempts: [{
             attemptNumber: 1,
             status: 'succeeded',
-            startedAt: 1000,
-            endedAt: 2000,
+            startedAt: NOW - 5000,
+            endedAt: NOW - 4000,
             stepStatuses: {
               'merge-fi': 'succeeded',
               'work': 'succeeded',
@@ -269,13 +273,13 @@ suite('TimelineChart', () => {
           nodeId: 'n1',
           name: 'Job1',
           status: 'succeeded',
-          startedAt: 1000,
-          endedAt: 2000,
+          startedAt: NOW - 5000,
+          endedAt: NOW - 4000,
           attempts: [{
             attemptNumber: 1,
             status: 'succeeded',
-            startedAt: 1000,
-            endedAt: 2000,
+            startedAt: NOW - 5000,
+            endedAt: NOW - 4000,
           }],
         }],
       };
@@ -295,8 +299,8 @@ suite('TimelineChart', () => {
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
         nodes: [
-          { nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: 1000, endedAt: 2000 },
-          { nodeId: 'n2', name: 'Job2', status: 'succeeded', startedAt: 2100, endedAt: 3000, dependencies: ['n1'] },
+          { nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 },
+          { nodeId: 'n2', name: 'Job2', status: 'succeeded', startedAt: NOW - 3900, endedAt: NOW - 3000, dependencies: ['n1'] },
         ],
       };
       
@@ -313,8 +317,8 @@ suite('TimelineChart', () => {
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
         nodes: [
-          { nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: 1000, endedAt: 2000 },
-          { nodeId: 'n2', name: 'Job2', status: 'succeeded', startedAt: 2100, endedAt: 3000 },
+          { nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 },
+          { nodeId: 'n2', name: 'Job2', status: 'succeeded', startedAt: NOW - 3900, endedAt: NOW - 3000 },
         ],
       };
       
@@ -333,8 +337,8 @@ suite('TimelineChart', () => {
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
         nodes: [
-          { nodeId: 'n1', name: 'Job1', group: 'group-a', status: 'succeeded', startedAt: 1000, endedAt: 2000 },
-          { nodeId: 'n2', name: 'Job2', group: 'group-a', status: 'succeeded', startedAt: 2100, endedAt: 3000 },
+          { nodeId: 'n1', name: 'Job1', group: 'group-a', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 },
+          { nodeId: 'n2', name: 'Job2', group: 'group-a', status: 'succeeded', startedAt: NOW - 3900, endedAt: NOW - 3000 },
         ],
       };
       
@@ -351,8 +355,8 @@ suite('TimelineChart', () => {
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
         nodes: [
-          { nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: 1000, endedAt: 2000 },
-          { nodeId: 'n2', name: 'Job2', status: 'succeeded', startedAt: 2100, endedAt: 3000 },
+          { nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 },
+          { nodeId: 'n2', name: 'Job2', status: 'succeeded', startedAt: NOW - 3900, endedAt: NOW - 3000 },
         ],
       };
       
@@ -369,9 +373,9 @@ suite('TimelineChart', () => {
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
         nodes: [
-          { nodeId: 'n1', name: 'Job1', group: 'group-a', status: 'succeeded', startedAt: 1000, endedAt: 2000 },
-          { nodeId: 'n2', name: 'Job2', group: 'group-b', status: 'succeeded', startedAt: 2100, endedAt: 3000 },
-          { nodeId: 'n3', name: 'Job3', status: 'succeeded', startedAt: 1500, endedAt: 2500 },
+          { nodeId: 'n1', name: 'Job1', group: 'group-a', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 },
+          { nodeId: 'n2', name: 'Job2', group: 'group-b', status: 'succeeded', startedAt: NOW - 3900, endedAt: NOW - 3000 },
+          { nodeId: 'n3', name: 'Job3', status: 'succeeded', startedAt: NOW - 4500, endedAt: NOW - 3500 },
         ],
       };
       
@@ -389,7 +393,7 @@ suite('TimelineChart', () => {
       
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
-        nodes: [{ nodeId: 'n1', name: 'Job', status: 'running', startedAt: 1000 }],
+        nodes: [{ nodeId: 'n1', name: 'Job', status: 'running', startedAt: NOW - 5000 }],
       };
       
       chart.update(data);
@@ -408,15 +412,15 @@ suite('TimelineChart', () => {
       
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
-        planStartedAt: 1000,
-        planEndedAt: 5000,
-        planCreatedAt: 900,
+        planStartedAt: NOW - 5000,
+        planEndedAt: NOW - 1000,
+        planCreatedAt: NOW - 5100,
         stateHistory: [
-          { status: 'created', timestamp: 900 },
-          { status: 'started', timestamp: 1000 },
-          { status: 'completed', timestamp: 5000 },
+          { status: 'created', timestamp: NOW - 5100 },
+          { status: 'started', timestamp: NOW - 5000 },
+          { status: 'completed', timestamp: NOW - 1000 },
         ],
-        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: 1000, endedAt: 2000 }],
+        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 }],
       };
       
       chart.update(data);
@@ -431,9 +435,9 @@ suite('TimelineChart', () => {
       
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
-        planStartedAt: 1000,
-        planEndedAt: 5000,
-        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: 1000, endedAt: 2000 }],
+        planStartedAt: NOW - 5000,
+        planEndedAt: NOW - 1000,
+        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 }],
       };
       
       chart.update(data);
@@ -448,18 +452,18 @@ suite('TimelineChart', () => {
       
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
-        planStartedAt: 1000,
-        planEndedAt: 5000,
+        planStartedAt: NOW - 5000,
+        planEndedAt: NOW - 1000,
         stateHistory: [
-          { status: 'started', timestamp: 1000 },
-          { status: 'paused', timestamp: 2000 },
-          { status: 'resumed', timestamp: 3000 },
-          { status: 'completed', timestamp: 5000 },
+          { status: 'started', timestamp: NOW - 5000 },
+          { status: 'paused', timestamp: NOW - 4000 },
+          { status: 'resumed', timestamp: NOW - 3000 },
+          { status: 'completed', timestamp: NOW - 1000 },
         ],
         pauseHistory: [
-          { pausedAt: 2000, resumedAt: 3000, reason: 'Manual pause' },
+          { pausedAt: NOW - 4000, resumedAt: NOW - 3000, reason: 'Manual pause' },
         ],
-        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: 1000, endedAt: 2000 }],
+        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 }],
       };
       
       chart.update(data);
@@ -474,15 +478,15 @@ suite('TimelineChart', () => {
       
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
-        planStartedAt: 1000,
-        planEndedAt: 5000,
+        planStartedAt: NOW - 5000,
+        planEndedAt: NOW - 1000,
         stateHistory: [
-          { status: 'started', timestamp: 1000 },
-          { status: 'paused', timestamp: 2000 },
-          { status: 'resumed', timestamp: 3000 },
-          { status: 'completed', timestamp: 5000 },
+          { status: 'started', timestamp: NOW - 5000 },
+          { status: 'paused', timestamp: NOW - 4000 },
+          { status: 'resumed', timestamp: NOW - 3000 },
+          { status: 'completed', timestamp: NOW - 1000 },
         ],
-        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: 1000, endedAt: 2000 }],
+        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 }],
       };
       
       chart.update(data);
@@ -503,17 +507,17 @@ suite('TimelineChart', () => {
           nodeId: 'n1',
           name: 'Job1',
           status: 'succeeded',
-          startedAt: 1000,
-          endedAt: 5000,
+          startedAt: NOW - 5000,
+          endedAt: NOW - 1000,
           attempts: [{
             attemptNumber: 1,
             status: 'succeeded',
-            startedAt: 1000,
-            endedAt: 5000,
+            startedAt: NOW - 5000,
+            endedAt: NOW - 1000,
             phaseTiming: [
-              { phase: 'merge-fi', startedAt: 1000, endedAt: 1500 },
-              { phase: 'work', startedAt: 1500, endedAt: 4000 },
-              { phase: 'commit', startedAt: 4000, endedAt: 5000 },
+              { phase: 'merge-fi', startedAt: NOW - 5000, endedAt: NOW - 4500 },
+              { phase: 'work', startedAt: NOW - 4500, endedAt: NOW - 2000 },
+              { phase: 'commit', startedAt: NOW - 2000, endedAt: NOW - 1000 },
             ],
           }],
         }],
@@ -535,13 +539,13 @@ suite('TimelineChart', () => {
           nodeId: 'n1',
           name: 'Job1',
           status: 'succeeded',
-          startedAt: 1000,
-          endedAt: 5000,
+          startedAt: NOW - 5000,
+          endedAt: NOW - 1000,
           attempts: [{
             attemptNumber: 1,
             status: 'succeeded',
-            startedAt: 1000,
-            endedAt: 5000,
+            startedAt: NOW - 5000,
+            endedAt: NOW - 1000,
             phaseDurations: [
               { phase: 'merge-fi', durationMs: 500, status: 'succeeded' },
               { phase: 'work', durationMs: 2500, status: 'succeeded' },
@@ -565,9 +569,9 @@ suite('TimelineChart', () => {
       
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
-        planStartedAt: 1000,
-        planEndedAt: 5000,
-        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: 1000, endedAt: 2000 }],
+        planStartedAt: NOW - 5000,
+        planEndedAt: NOW - 1000,
+        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 }],
       };
       
       chart.update(data);
@@ -582,8 +586,8 @@ suite('TimelineChart', () => {
       
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
-        planStartedAt: 1000,
-        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'running', startedAt: 1000 }],
+        planStartedAt: NOW - 5000,
+        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'running', startedAt: NOW - 5000 }],
       };
       
       chart.update(data);
@@ -598,7 +602,7 @@ suite('TimelineChart', () => {
       
       const chart = new TimelineChart(bus, 'timeline', 'timeline-container');
       const data: TimelineData = {
-        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: 1000, endedAt: 2000 }],
+        nodes: [{ nodeId: 'n1', name: 'Job1', status: 'succeeded', startedAt: NOW - 5000, endedAt: NOW - 4000 }],
       };
       
       chart.update(data);

@@ -255,7 +255,7 @@ export class TimelineChart extends SubscribableControl {
     startGl.style.cssText = 'position:absolute;left:0;top:0;bottom:0;width:1px;background:var(--vscode-testing-iconPassed,#4caf50);opacity:0.4;';
     ax.appendChild(startGl);
 
-    for (let t = first; t <= end; t += iv) {
+    for (let t = first, tc = 0; t <= end && tc < 200; t += iv, tc++) {
       const x = this.px(t);
       if (x < 40) continue; // skip ticks too close to the start label
       // Gridline
@@ -350,7 +350,7 @@ export class TimelineChart extends SubscribableControl {
     const iv = this.tickInterval();
     const first = Math.ceil(this.t0 / iv) * iv;
     const end = this.isRunning() ? Date.now() : (this.data?.planEndedAt || Date.now());
-    for (let t = first; t <= end; t += iv) {
+    for (let t = first, tc = 0; t <= end && tc < 200; t += iv, tc++) {
       const gl = d.createElement('div');
       gl.style.cssText = `position:absolute;left:${this.px(t)}px;top:0;bottom:0;width:1px;background:var(--vscode-panel-border);opacity:0.08;pointer-events:none;`;
       area.appendChild(gl);
