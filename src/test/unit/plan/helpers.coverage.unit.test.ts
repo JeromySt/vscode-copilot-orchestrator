@@ -63,6 +63,13 @@ suite('helpers - coverage', () => {
       assert.strictEqual(computePlanStatus(states, true, true), 'paused');
     });
 
+    test('returns pending-start when isPaused is true, not started, and has non-terminal nodes', () => {
+      const states: NodeExecutionState[] = [
+        { id: '1', nodeId: '1', status: 'pending', attempts: 0, version: 0 } as any,
+      ];
+      assert.strictEqual(computePlanStatus(states, false, true), 'pending-start');
+    });
+
     test('returns final status when paused but all terminal', () => {
       const states: NodeExecutionState[] = [
         { id: '1', nodeId: '1', status: 'succeeded', attempts: 1, version: 0 } as any,
@@ -89,7 +96,7 @@ suite('helpers - coverage', () => {
         { id: '1', nodeId: '1', status: 'failed', attempts: 1, version: 0 } as any,
         { id: '2', nodeId: '2', status: 'succeeded', attempts: 1, version: 0 } as any,
       ];
-      assert.strictEqual(computePlanStatus(states, true, false), 'partial');
+      assert.strictEqual(computePlanStatus(states, true, false), 'failed');
     });
 
     test('returns failed when only failed nodes', () => {

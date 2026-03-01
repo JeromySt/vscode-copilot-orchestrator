@@ -23,6 +23,8 @@ import {
   PlanCompletionEvent,
   isValidTransition,
   isTerminal,
+  TERMINAL_STATES,
+  GroupExecutionState,
 } from './types';
 import { Logger } from '../core/logger';
 import {
@@ -115,6 +117,7 @@ export class PlanStateMachine extends EventEmitter {
     }
     
     // Apply the transition
+    const oldState = { ...state };
     state.status = newStatus;
     state.version = (state.version || 0) + 1;
     
@@ -126,7 +129,7 @@ export class PlanStateMachine extends EventEmitter {
       Object.assign(state, updates);
     }
     
-    // Set timestamps based on status
+    // Set timestamps based on status — derived from stateHistory
     const now = Date.now();
     if (newStatus === 'scheduled' && !state.scheduledAt) {
       state.scheduledAt = now;
@@ -137,6 +140,18 @@ export class PlanStateMachine extends EventEmitter {
     if (isTerminal(newStatus) && !state.endedAt) {
       state.endedAt = now;
     }
+    
+    // Record transition in node's state history (canonical source of truth)
+    if (!state.stateHistory) {
+      state.stateHistory = [];
+    }
+    state.stateHistory.push({ from: currentStatus, to: newStatus, timestamp: now });
+    
+    // Also write to legacy transitionLog for backward compat
+    if (!state.transitionLog) {
+      state.transitionLog = [];
+    }
+    state.transitionLog.push({ from: currentStatus, to: newStatus, timestamp: now });
     
     log.debug(`Node transition: ${nodeId} ${currentStatus} -> ${newStatus}`, {
       planId: this.plan.id,
@@ -438,6 +453,12 @@ export class PlanStateMachine extends EventEmitter {
         this.plan.endedAt = this.computeEffectiveEndedAt() || Date.now();
       }
       
+      // Record completion in state history
+      if (!this.plan.stateHistory) {
+        this.plan.stateHistory = [];
+      }
+      this.plan.stateHistory.push({ from: 'running', to: status, timestamp: Date.now(), reason: 'completed' });
+      
       const event: PlanCompletionEvent = {
         planId: this.plan.id,
         status,
@@ -521,6 +542,18 @@ export class PlanStateMachine extends EventEmitter {
     
     state.status = newStatus;
     
+    // Clear endedAt so it can be set again on next terminal transition.
+    // startedAt is NEVER cleared — it's the first-ever execution start.
+    state.endedAt = undefined;
+    
+    // Record transition in stateHistory (canonical)
+    const now = Date.now();
+    if (!state.stateHistory) { state.stateHistory = []; }
+    state.stateHistory.push({ from: oldStatus, to: newStatus, timestamp: now, reason: 'retry' });
+    // Legacy compat
+    if (!state.transitionLog) { state.transitionLog = []; }
+    state.transitionLog.push({ from: oldStatus, to: newStatus, timestamp: now });
+    
     log.info(`Node reset for retry: ${nodeId} ${oldStatus} -> ${newStatus}`, {
       planId: this.plan.id,
       nodeName: this.plan.jobs.get(nodeId)?.name,
@@ -563,9 +596,18 @@ export class PlanStateMachine extends EventEmitter {
       if (dependentState?.status === 'blocked') {
         // Check if this is the only failed/blocked dependency
         if (!this.hasDependencyFailed(dependentId)) {
+          const oldStatus = dependentState.status;
           // Reset to pending (it will become ready when this node succeeds)
           dependentState.status = 'pending';
           dependentState.error = undefined;
+          
+          // Record in stateHistory
+          const now = Date.now();
+          if (!dependentState.stateHistory) { dependentState.stateHistory = []; }
+          dependentState.stateHistory.push({ from: oldStatus, to: 'pending', timestamp: now, reason: 'unblocked' });
+          // Legacy compat
+          if (!dependentState.transitionLog) { dependentState.transitionLog = []; }
+          dependentState.transitionLog.push({ from: oldStatus, to: 'pending', timestamp: now });
           
           log.debug(`Unblocked downstream node: ${dependentId}`, {
             planId: this.plan.id,

@@ -11,7 +11,7 @@
  * @module plan/scheduler
  */
 
-import { PlanInstance, nodePerformsWork } from './types';
+import { PlanInstance, PlanNode, nodePerformsWork } from './types';
 import { PlanStateMachine } from './stateMachine';
 
 /**
@@ -135,7 +135,17 @@ export class PlanScheduler {
       
       if (!nodeA || !nodeB) {return 0;}
       
-      // Primary sort: More dependents = higher priority
+      // Priority 1: Retries (nodes with previous attempts) go first.
+      // Failed nodes that are being retried should not wait behind fresh work.
+      const stateA = plan.nodeStates.get(a);
+      const stateB = plan.nodeStates.get(b);
+      const attemptsA = stateA?.attempts ?? 0;
+      const attemptsB = stateB?.attempts ?? 0;
+      const isRetryA = attemptsA > 0 ? 1 : 0;
+      const isRetryB = attemptsB > 0 ? 1 : 0;
+      if (isRetryA !== isRetryB) {return isRetryB - isRetryA;} // retries first
+      
+      // Priority 2: More dependents = higher priority
       // Nodes with more dependents appear first in the returned array
       const dependentDiff = nodeB.dependents.length - nodeA.dependents.length;
       
@@ -143,7 +153,7 @@ export class PlanScheduler {
         return dependentDiff;
       }
       
-      // Secondary sort (tie-breaker): Alphabetical by name for deterministic ordering
+      // Tie-breaker: Alphabetical by name for deterministic ordering
       // This ensures consistent scheduling behavior across runs
       return (nodeA.name || nodeA.id).localeCompare(nodeB.name || nodeB.id);
     });

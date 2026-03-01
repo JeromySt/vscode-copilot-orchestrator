@@ -149,7 +149,7 @@ suite('finalizePlanHandler', () => {
       const result = await handleFinalizePlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
       assert.ok(result.status);
-      assert.strictEqual(result.status.status, 'paused');
+      assert.strictEqual(result.status.status, 'pending-start');
       assert.strictEqual(result.status.nodes, 1);
     });
 

@@ -12,7 +12,7 @@ import { suite, test, setup, teardown } from 'mocha';
 import * as sinon from 'sinon';
 import { Module } from 'module';
 import { handleRefreshModels, handleSetupCopilotCli, type ModelRefreshResult, type CliSetupDeps } from '../../../commands/utilityCommandLogic';
-import { MockDialogService } from '../../../vscode/testAdapters';
+import { MockDialogService } from '../../helpers/testAdapters';
 
 // Mock types matching the real modelDiscovery module
 interface MockModelInfo {
@@ -196,6 +196,9 @@ suite('Utility Command Logic Unit Tests', () => {
     });
 
     test('should handle non-Error exceptions', async () => {
+      // Mock the dynamic import by overriding the import function itself
+      const originalImportFunction = (global as any).__webpack_require__ || require;
+      
       // Store original require for restoration
       const originalModuleRequire = Module.prototype.require;
       

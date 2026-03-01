@@ -99,6 +99,10 @@ export class PlanLifecycleManager {
         }
       }
       
+      // Scaffolding plans must always be paused — they're not ready to execute
+      if ((plan.spec as any)?.status === 'scaffolding') {
+        plan.isPaused = true;
+      }
       await this.recoverRunningNodes(plan);
       this.state.plans.set(plan.id, plan);
       const sm = this.state.stateMachineFactory(plan);
@@ -117,6 +121,10 @@ export class PlanLifecycleManager {
           try {
             const plan = await this.state.planRepository.loadState(summary.id);
             if (plan) {
+              // Scaffolding plans must always be paused — they're not ready to execute
+              if ((plan.spec as any)?.status === 'scaffolding') {
+                plan.isPaused = true;
+              }
               await this.recoverRunningNodes(plan);
               this.state.plans.set(plan.id, plan);
               const sm = this.state.stateMachineFactory(plan);
@@ -181,11 +189,23 @@ export class PlanLifecycleManager {
       repoPath: spec.repoPath || this.state.config.defaultRepoPath,
     });
 
+    // Initialize state tracking arrays
+    if (!plan.stateHistory) {
+      plan.stateHistory = [];
+    }
+    if (!plan.pauseHistory) {
+      plan.pauseHistory = [];
+    }
+
     this.state.plans.set(plan.id, plan);
 
     const shouldPause = spec.startPaused !== undefined ? spec.startPaused : true;
     if (shouldPause) {
       plan.isPaused = true;
+      // Record initial pending-start state (never ran, awaiting user start)
+      const now = Date.now();
+      plan.stateHistory.push({ from: 'pending', to: 'pending-start', timestamp: now, reason: 'startPaused' });
+      plan.pauseHistory.push({ pausedAt: now, reason: 'startPaused' });
     }
 
     const sm = this.state.stateMachineFactory(plan);
@@ -209,6 +229,14 @@ export class PlanLifecycleManager {
   /** Register an already-built PlanInstance (from IPlanRepository) with the runner. */
   registerPlan(plan: PlanInstance): void {
     this.log.info(`Registering existing plan: ${plan.id}`, { name: plan.spec.name });
+
+    // Initialize state tracking arrays if not present
+    if (!plan.stateHistory) {
+      plan.stateHistory = [];
+    }
+    if (!plan.pauseHistory) {
+      plan.pauseHistory = [];
+    }
 
     // Scaffolding plans must always be paused — they're not ready to execute
     if ((plan.spec as any)?.status === 'scaffolding') {
@@ -253,8 +281,20 @@ export class PlanLifecycleManager {
       repoPath: this.state.config.defaultRepoPath,
     });
 
+    // Initialize state tracking arrays
+    if (!plan.stateHistory) {
+      plan.stateHistory = [];
+    }
+    if (!plan.pauseHistory) {
+      plan.pauseHistory = [];
+    }
+
     if (jobSpec.startPaused === true) {
       plan.isPaused = true;
+      // Record initial pending-start state (never ran, awaiting user start)
+      const now = Date.now();
+      plan.stateHistory.push({ from: 'pending', to: 'pending-start', timestamp: now, reason: 'startPaused' });
+      plan.pauseHistory.push({ pausedAt: now, reason: 'startPaused' });
     }
 
     this.state.plans.set(plan.id, plan);
@@ -372,6 +412,18 @@ export class PlanLifecycleManager {
     }
     this.log.info(`Pausing Plan: ${planId}`);
     plan.isPaused = true;
+    
+    // Record pause in state history and pause history
+    const now = Date.now();
+    if (!plan.stateHistory) {
+      plan.stateHistory = [];
+    }
+    if (!plan.pauseHistory) {
+      plan.pauseHistory = [];
+    }
+    plan.stateHistory.push({ from: 'running', to: 'paused', timestamp: now, reason: 'user-paused' });
+    plan.pauseHistory.push({ pausedAt: now, reason: 'user' });
+    
     this.state.persistence.save(plan);
     this.state.events.emitPlanUpdated(planId);
     updateWakeLock().catch(err => this.log.warn('Failed to update wake lock', { error: err }));
@@ -384,6 +436,13 @@ export class PlanLifecycleManager {
     if (!plan || !sm) {return false;}
 
     this.log.info(`Canceling Plan: ${planId}`);
+
+    // Record canceled state
+    const now = Date.now();
+    if (!plan.stateHistory) {
+      plan.stateHistory = [];
+    }
+    plan.stateHistory.push({ from: 'running', to: 'canceled', timestamp: now, reason: 'user-canceled' });
 
     // Unblock any plans chained on this one
     this.notifyDependentPlansOfTermination(planId, 'canceled');
@@ -476,8 +535,31 @@ export class PlanLifecycleManager {
       this.log.warn(`Git fetch failed before resume (continuing anyway): ${e.message}`);
     }
 
+    const wasPaused = plan.isPaused;
+    const wasNeverStarted = !plan.startedAt;
     if (plan.isPaused) {
       plan.isPaused = false;
+      
+      // Record resume/start in state history and complete pause interval
+      const now = Date.now();
+      if (!plan.stateHistory) {
+        plan.stateHistory = [];
+      }
+      if (!plan.pauseHistory) {
+        plan.pauseHistory = [];
+      }
+      const reason = wasNeverStarted ? 'user-started' : 'user-resumed';
+      const prevStatus = wasNeverStarted ? 'pending-start' : 'paused';
+      plan.stateHistory.push({ from: prevStatus, to: 'running', timestamp: now, reason });
+      
+      // Find the last open pause interval and set resumedAt
+      if (plan.pauseHistory.length > 0) {
+        const lastPause = plan.pauseHistory[plan.pauseHistory.length - 1];
+        if (!lastPause.resumedAt) {
+          lastPause.resumedAt = now;
+        }
+      }
+      
       this.state.events.emitPlanUpdated(planId);
     }
 
@@ -539,13 +621,23 @@ export class PlanLifecycleManager {
 
   // ── Internal ───────────────────────────────────────────────────────
   private async recoverRunningNodes(plan: PlanInstance): Promise<void> {
+    const sm = this.state.stateMachines.get(plan.id);
+    
     const markCrashed = (nodeId: string, nodeState: any, error: string) => {
-      nodeState.status = 'failed';
       nodeState.error = error;
       nodeState.failureReason = 'crashed';
-      nodeState.endedAt = Date.now();
       nodeState.pid = undefined;
-      nodeState.version++;
+      
+      // Use the state machine to transition — this records in stateHistory,
+      // blocks downstream nodes, and triggers checkPlanCompletion().
+      if (sm) {
+        sm.transition(nodeId, 'failed');
+      } else {
+        // Fallback: direct write if no state machine (shouldn't happen)
+        nodeState.status = 'failed';
+        nodeState.endedAt = Date.now();
+        nodeState.version++;
+      }
       this.state.events.emitNodeCompleted(plan.id, nodeId, false);
     };
     for (const [nodeId, nodeState] of plan.nodeStates.entries()) {

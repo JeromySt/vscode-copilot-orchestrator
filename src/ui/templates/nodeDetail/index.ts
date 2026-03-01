@@ -30,3 +30,5 @@ export type { MetricsData, PhaseMetricsData, ModelBreakdownData, CodeChangesData
 
 export { webviewScripts } from './scriptsTemplate';
 export type { ScriptsConfig } from './scriptsTemplate';
+
+export { renderNodeDetailStyles } from './stylesTemplate';

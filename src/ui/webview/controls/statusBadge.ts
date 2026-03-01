@@ -14,16 +14,19 @@ import { Topics } from '../topics';
 /** Known status → icon mapping. */
 const STATUS_ICONS: Record<string, string> = {
   pending: '○',
+  'pending-start': '◎',
   ready: '○',
   scheduled: '◉',
   running: '▶',
+  pausing: '⏸',
+  paused: '⏸',
+  resumed: '▶',
   succeeded: '✓',
   failed: '✗',
-  paused: '⏸',
 };
 
 /** Known status → CSS class mapping. */
-const STATUS_CLASSES = ['pending', 'ready', 'scheduled', 'running', 'succeeded', 'failed', 'paused'];
+const STATUS_CLASSES = ['pending', 'pending-start', 'ready', 'scheduled', 'running', 'pausing', 'paused', 'resumed', 'succeeded', 'failed'];
 
 /** Data delivered with each update. */
 export interface StatusBadgeData {

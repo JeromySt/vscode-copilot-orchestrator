@@ -150,7 +150,7 @@ src/test/
 
 ### Test Adapter Architecture
 
-The extension provides production-ready mock implementations in `src/vscode/testAdapters.ts`:
+The extension provides test mock implementations in `src/test/helpers/testAdapters.ts`:
 
 #### MockConfigProvider
 
@@ -193,7 +193,7 @@ assert.deepEqual(mockClipboard.getCalls(), [
 Use the test composition root for dependency injection in tests:
 
 ```typescript
-import { createTestContainer } from '../../../src/compositionTest';
+import { createTestContainer } from '../../test/helpers/compositionTest';
 
 suite('MyService Tests', () => {
   let container: ServiceContainer;
@@ -485,4 +485,4 @@ test('complex operation with logging', () => {
 
 ---
 
-This testing guide provides comprehensive coverage of testing strategies, tools, and patterns used throughout Copilot Orchestrator. For specific test implementations, refer to the examples in `src/test/unit/` and the mock adapters in `src/vscode/testAdapters.ts`.
+This testing guide provides comprehensive coverage of testing strategies, tools, and patterns used throughout Copilot Orchestrator. For specific test implementations, refer to the examples in `src/test/unit/` and the mock adapters in `src/test/helpers/testAdapters.ts`.

@@ -232,8 +232,10 @@ export class ExecutionPump {
       if (!sm) {continue;}
 
       const status = sm.computePlanStatus();
-      if (status !== 'pending' && status !== 'running' && status !== 'paused') {continue;}
+      if (status !== 'pending' && status !== 'running' && status !== 'paused' && status !== 'pausing' && status !== 'pending-start' && status !== 'resumed') {continue;}
       if (plan.isPaused) {continue;}
+      // Scaffolding plans must never execute — they haven't been finalized yet
+      if ((plan.spec as any)?.status === 'scaffolding') {continue;}
 
       // Ensure target branch is created before any nodes execute.
       // This is a one-time setup per plan — once branchReady is set, it's skipped.
@@ -248,9 +250,20 @@ export class ExecutionPump {
         }
       }
 
-      // Mark plan as started
+      // Mark plan as started — use earliest node startedAt to avoid plan.startedAt > node.startedAt
       if (!plan.startedAt && status === 'running') {
-        plan.startedAt = Date.now();
+        let earliest = Date.now();
+        for (const [, state] of plan.nodeStates) {
+          if (state.startedAt && state.startedAt < earliest) earliest = state.startedAt;
+        }
+        plan.startedAt = earliest;
+        
+        // Record started state in state history
+        if (!plan.stateHistory) {
+          plan.stateHistory = [];
+        }
+        plan.stateHistory.push({ from: 'pending', to: 'running', timestamp: plan.startedAt, reason: 'started' });
+        
         this.state.events.emitPlanStarted(plan);
         this.updateWakeLock().catch(err => this.log.warn('Failed to update wake lock', { error: err }));
       }

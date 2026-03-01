@@ -26,10 +26,13 @@ export interface PlanListCardData {
 
 const STATUS_ICONS: Record<string, string> = {
   pending: '○',
+  'pending-start': '◎',
   running: '▶',
+  pausing: '⏸',
+  paused: '⏸',
+  resumed: '▶',
   succeeded: '✓',
   failed: '✗',
-  paused: '⏸',
 };
 
 

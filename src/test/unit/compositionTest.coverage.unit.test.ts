@@ -4,7 +4,7 @@
 import * as assert from 'assert';
 import { suite, test } from 'mocha';
 import * as Tokens from '../../core/tokens';
-import { createTestContainer } from '../../compositionTest';
+import { createTestContainer } from '../helpers/compositionTest';
 import type { IProcessSpawner } from '../../interfaces';
 
 suite('compositionTest - stubProcessSpawner coverage', () => {

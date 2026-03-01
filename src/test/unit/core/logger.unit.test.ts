@@ -160,7 +160,7 @@ suite('Logger Unit Tests', () => {
       // Only mcp debug should have been logged
       const debugCalls = consoleStubs.debug.getCalls();
       assert.strictEqual(debugCalls.length, 1);
-      assert.ok(debugCalls[0].args[1] === 'mcp');
+      assert.ok(debugCalls[0].args[0].includes('mcp'));
     });
   });
 
@@ -179,8 +179,8 @@ suite('Logger Unit Tests', () => {
       
       assert.strictEqual(consoleStubs.debug.callCount, 1);
       const call = consoleStubs.debug.getCall(0);
-      assert.ok(call.args[1] === 'mcp');
-      assert.ok(call.args[2].includes('debug message'));
+      assert.ok(call.args[0].includes('mcp'));
+      assert.ok(call.args[0].includes('debug message'));
     });
 
     test('should output info messages', () => {
@@ -188,8 +188,8 @@ suite('Logger Unit Tests', () => {
       
       assert.strictEqual(consoleStubs.log.callCount, 1);
       const call = consoleStubs.log.getCall(0);
-      assert.ok(call.args[1] === 'mcp');
-      assert.ok(call.args[2].includes('info message'));
+      assert.ok(call.args[0].includes('mcp'));
+      assert.ok(call.args[0].includes('info message'));
     });
 
     test('should output warn messages', () => {
@@ -197,8 +197,8 @@ suite('Logger Unit Tests', () => {
       
       assert.strictEqual(consoleStubs.warn.callCount, 1);
       const call = consoleStubs.warn.getCall(0);
-      assert.ok(call.args[1] === 'mcp');
-      assert.ok(call.args[2].includes('warn message'));
+      assert.ok(call.args[0].includes('mcp'));
+      assert.ok(call.args[0].includes('warn message'));
     });
 
     test('should output error messages', () => {
@@ -207,8 +207,8 @@ suite('Logger Unit Tests', () => {
       
       assert.strictEqual(consoleStubs.error.callCount, 1);
       const call = consoleStubs.error.getCall(0);
-      assert.ok(call.args[1] === 'mcp');
-      assert.ok(call.args[2].includes('error message'));
+      assert.ok(call.args[0].includes('mcp'));
+      assert.ok(call.args[0].includes('error message'));
     });
 
     test('should format timestamps and log levels', () => {
@@ -217,10 +217,9 @@ suite('Logger Unit Tests', () => {
       const call = consoleStubs.log.getCall(0);
       const message = call.args[0];
       
-      // Console format uses %s substitution: [Orchestrator:%s] %s
-      assert.ok(message.includes('[Orchestrator:%s]'));
-      assert.strictEqual(call.args[1], 'mcp');
-      assert.ok(call.args[2].includes('test message'));
+      // Console format is simpler: [Orchestrator:component] message
+      assert.ok(message.includes('[Orchestrator:mcp]'));
+      assert.ok(message.includes('test message'));
     });
 
     test('should format error objects in data', () => {
@@ -231,12 +230,11 @@ suite('Logger Unit Tests', () => {
       
       const call = consoleStubs.log.getCall(0);
       const message = call.args[0];
-      assert.ok(message.includes('[Orchestrator:%s]'));
-      assert.strictEqual(call.args[1], 'mcp');
-      assert.ok(call.args[2].includes('message with error'));
+      assert.ok(message.includes('[Orchestrator:mcp]'));
+      assert.ok(message.includes('message with error'));
       
-      // Error object is passed as fourth argument (after format, component, message)
-      const errorArg = call.args[3];
+      // Error object is passed as second argument
+      const errorArg = call.args[1];
       assert.strictEqual(errorArg, error);
     });
 
@@ -246,12 +244,11 @@ suite('Logger Unit Tests', () => {
       
       const call = consoleStubs.log.getCall(0);
       const message = call.args[0];
-      assert.ok(message.includes('[Orchestrator:%s]'));
-      assert.strictEqual(call.args[1], 'mcp');
-      assert.ok(call.args[2].includes('message with data'));
+      assert.ok(message.includes('[Orchestrator:mcp]'));
+      assert.ok(message.includes('message with data'));
       
-      // Data object is passed as fourth argument (after format, component, message)
-      const dataArg = call.args[3];
+      // Data object is passed as second argument
+      const dataArg = call.args[1];
       assert.deepStrictEqual(dataArg, data);
     });
   });
@@ -269,8 +266,8 @@ suite('Logger Unit Tests', () => {
       // Should fallback to console.log
       assert.strictEqual(consoleStubs.log.callCount, 1);
       const call = consoleStubs.log.getCall(0);
-      assert.ok(call.args[1] === 'mcp');
-      assert.ok(call.args[2].includes('test message'));
+      assert.ok(call.args[0].includes('mcp'));
+      assert.ok(call.args[0].includes('test message'));
     });
 
     test('should use singleton instance when available', () => {
@@ -389,14 +386,13 @@ suite('Logger Unit Tests', () => {
       
       const call = consoleStubs.log.getCall(0);
       const message = call.args[0];
-      const dataArg = call.args[3];
+      const dataArg = call.args[1];
       
-      // Console message uses format string substitution
-      assert.ok(message.includes('[Orchestrator:%s]'));
-      assert.strictEqual(call.args[1], 'mcp');
-      assert.ok(call.args[2].includes('message with circular data'));
+      // Console message contains the basic message
+      assert.ok(message.includes('[Orchestrator:mcp]'));
+      assert.ok(message.includes('message with circular data'));
       
-      // Data is passed as fourth argument (even if unserializable)
+      // Data is passed as second argument (even if unserializable)
       assert.strictEqual(dataArg, circular);
     });
 

@@ -70,7 +70,7 @@ export function verifyDIContainer(): void {
   logger.info('DI Container is working!');
   
   const config = container.resolve<IConfigProvider>(tokens.IConfigProvider);
-  config.getConfig('test', 'timeout', 5000);
+  const timeoutValue = config.getConfig('test', 'timeout', 5000);
   
   const dialogs = container.resolve<IDialogService>(tokens.IDialogService);
   dialogs.showInfo('Test info message');

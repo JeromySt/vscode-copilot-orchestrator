@@ -511,7 +511,7 @@ suite('registerPlanCommands', () => {
       mockPlanRunner.getAll.returns([]);
 
       await executeCommand('orchestrator.resumePlan');
-      assert.ok(spy.calledWith('No paused plans to resume'));
+      assert.ok(spy.calledWith('No plans available to resume'));
     });
 
     test('shows error when plan not found', async () => {
@@ -764,7 +764,7 @@ suite('initializeMcpServer', () => {
     });
 
     try {
-      await initializeMcpServer(mockContext, mockPlanRunner, { enabled: true });
+      const result = await initializeMcpServer(mockContext, mockPlanRunner, { enabled: true });
       await new Promise(resolve => setTimeout(resolve, 100));
     } catch {
       // Expected in test env

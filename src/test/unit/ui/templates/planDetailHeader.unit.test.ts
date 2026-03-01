@@ -94,6 +94,17 @@ suite('planDetail headerTemplate', () => {
       assert.ok(html.includes('class="status-badge paused"'));
     });
 
+    test('renders pending-start status badge', () => {
+      const html = renderPlanHeader(makeHeaderData({ status: 'pending-start' }));
+      assert.ok(html.includes('class="status-badge pending-start"'));
+      assert.ok(html.includes('Pending Start'), 'Should show human-friendly "Pending Start" label');
+    });
+
+    test('renders -- duration for pending-start', () => {
+      const html = renderPlanHeader(makeHeaderData({ status: 'pending-start', startedAt: undefined }));
+      assert.ok(html.includes('>--</span>'));
+    });
+
     test('renders canceled status badge', () => {
       const html = renderPlanHeader(makeHeaderData({ status: 'canceled' }));
       assert.ok(html.includes('class="status-badge canceled"'));

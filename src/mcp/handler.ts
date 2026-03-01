@@ -31,6 +31,7 @@ import {
   handleResumePlan,
   handleDeletePlan,
   handleRetryPlan,
+  handleGetJobFailureContext,
   handleUpdatePlanJob,
   handleUpdatePlan,
   handleGetJob,

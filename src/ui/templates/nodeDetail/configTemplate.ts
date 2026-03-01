@@ -40,6 +40,15 @@ export interface ConfigData {
   currentPhase?: string;
   /** Whether the node expects no file changes (commit phase skipped) */
   expectsNoChanges?: boolean;
+  // ── Job metadata ──
+  /** Auto-heal setting (default true for shell/process) */
+  autoHeal?: boolean;
+  /** Visual group path */
+  group?: string;
+  /** Producer ID (stable identifier from plan spec) */
+  producerId?: string;
+  /** Plan-level environment variables */
+  planEnv?: Record<string, string>;
 }
 
 /**
@@ -99,21 +108,26 @@ export function renderSpecContent(spec: WorkSpec | undefined): string {
 function renderAgentSpec(spec: any): string {
   let html = '<div class="spec-content spec-agent">';
   
-  if (spec.instructions) {
-    // Render instructions as formatted content with basic markdown support
-    html += `<div class="agent-instructions">${renderMarkdown(spec.instructions)}</div>`;
-  }
-  
-  // Show metadata below instructions
+  // Show metadata above instructions (model, allowed folders/urls)
   const meta: string[] = [];
+  if (spec.model) {
+    meta.push(`<span class="spec-label">Model:</span> <span class="spec-value">${escapeHtml(spec.model)}</span>`);
+  }
   if (spec.allowedFolders && spec.allowedFolders.length > 0) {
-    meta.push(`<span class="spec-label">Allowed Folders:</span> ${escapeHtml(spec.allowedFolders.join(', '))}`);
+    meta.push(`<span class="spec-label">Allowed Folders:</span> <span class="spec-value">${escapeHtml(spec.allowedFolders.join(', '))}</span>`);
   }
   if (spec.allowedUrls && spec.allowedUrls.length > 0) {
-    meta.push(`<span class="spec-label">Allowed URLs:</span> ${escapeHtml(spec.allowedUrls.join(', '))}`);
+    meta.push(`<span class="spec-label">Allowed URLs:</span> <span class="spec-value">${escapeHtml(spec.allowedUrls.join(', '))}</span>`);
   }
   if (meta.length > 0) {
     html += `<div class="spec-meta">${meta.map(m => `<div class="spec-field">${m}</div>`).join('')}</div>`;
+  }
+
+  html += renderSpecEnv(spec);
+
+  if (spec.instructions) {
+    // Render instructions as formatted content with basic markdown support
+    html += `<div class="agent-instructions">${renderMarkdown(spec.instructions)}</div>`;
   }
   
   html += '</div>';
@@ -138,6 +152,7 @@ function renderProcessSpec(spec: any): string {
   
   return `<div class="spec-content">
     <div class="spec-field"><span class="spec-label">Command:</span> <pre class="spec-code"><code>${escapeHtml(command)}</code></pre></div>
+    ${renderSpecEnv(spec)}
   </div>`;
 }
 
@@ -146,7 +161,59 @@ function renderShellSpec(spec: any): string {
   
   return `<div class="spec-content">
     <div class="spec-field"><span class="spec-label">Command${shellLabel}:</span> <pre class="spec-code"><code>${escapeHtml(spec.command || '')}</code></pre></div>
+    ${renderSpecEnv(spec)}
   </div>`;
+}
+
+/**
+ * Render spec-level env vars as a compact env block.
+ */
+function renderSpecEnv(spec: any): string {
+  if (!spec.env || typeof spec.env !== 'object' || Object.keys(spec.env).length === 0) { return ''; }
+  const rows = Object.entries(spec.env).map(([k, v]) => {
+    const display = /token|key|secret|password|auth/i.test(k) ? '***' : escapeHtml(String(v));
+    return `<div style="display:flex;gap:4px;align-items:baseline;padding:1px 0;"><code style="color:var(--vscode-symbolIcon-variableForeground,#75beff);background:var(--vscode-textCodeBlock-background);padding:1px 4px;border-radius:3px;font-size:11px;">${escapeHtml(k)}</code><span style="color:var(--vscode-descriptionForeground);">=</span><code style="background:var(--vscode-textCodeBlock-background);padding:1px 4px;border-radius:3px;font-size:11px;word-break:break-all;">${display}</code></div>`;
+  }).join('');
+  return `<div class="spec-field" style="margin-top:6px;"><span class="spec-label">🔑 Spec ENV:</span><div>${rows}</div></div>`;
+}
+
+/**
+ * Render job metadata section (auto-heal, group, env vars, etc.).
+ */
+function renderJobMetadata(data: ConfigData): string {
+  const items: string[] = [];
+
+  // Auto-heal
+  const healEnabled = data.autoHeal !== false;
+  items.push(`<div class="config-item"><div class="config-label">Auto-Heal</div><div class="config-value">${healEnabled ? '✅ Enabled' : '❌ Disabled'}</div></div>`);
+
+  // Expects no changes
+  if (data.expectsNoChanges) {
+    items.push(`<div class="config-item"><div class="config-label">Commit</div><div class="config-value"><span class="phase-type-badge skipped">📋 Expects No Changes</span></div></div>`);
+  }
+
+  // Group
+  if (data.group) {
+    items.push(`<div class="config-item"><div class="config-label">Group</div><div class="config-value"><code>${escapeHtml(data.group)}</code></div></div>`);
+  }
+
+  // Producer ID
+  if (data.producerId) {
+    items.push(`<div class="config-item"><div class="config-label">Producer ID</div><div class="config-value"><code style="font-size:11px;opacity:0.7;">${escapeHtml(data.producerId)}</code></div></div>`);
+  }
+
+  // Plan-level environment variables
+  if (data.planEnv && Object.keys(data.planEnv).length > 0) {
+    const envRows = Object.entries(data.planEnv).map(([k, v]) => {
+      const display = /token|key|secret|password|auth/i.test(k) ? '***' : escapeHtml(String(v));
+      return `<div style="display:flex;gap:4px;align-items:baseline;padding:1px 0;"><code style="color:var(--vscode-symbolIcon-variableForeground,#75beff);background:var(--vscode-textCodeBlock-background);padding:1px 4px;border-radius:3px;font-size:11px;">${escapeHtml(k)}</code><span style="color:var(--vscode-descriptionForeground);">=</span><code style="background:var(--vscode-textCodeBlock-background);padding:1px 4px;border-radius:3px;font-size:11px;word-break:break-all;">${display}</code></div>`;
+    }).join('');
+    items.push(`<div class="config-item"><div class="config-label">🔑 Plan ENV</div><div class="config-value">${envRows}</div></div>`);
+  }
+
+  if (items.length === 0) { return ''; }
+
+  return `<div class="job-metadata-section" style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--vscode-panel-border);">${items.join('')}</div>`;
 }
 
 /**
@@ -183,12 +250,12 @@ function renderPhase(phaseKey: string, phaseLabel: string, spec: WorkSpec | unde
   if (collapsible) {
     return `
       <div class="config-phase">
-        <div class="config-phase-header collapsed" data-phase="${phaseKey}">
+        <div class="config-phase-header collapsed" id="config-phase-${phaseKey}-header" data-phase="${phaseKey}">
           <span class="chevron">▶</span>
           <span class="phase-label">${phaseLabel}</span>
           <span class="phase-type-badge ${typeInfo.type.toLowerCase()}">${typeInfo.label}</span>
         </div>
-        <div class="config-phase-body" style="display:none">
+        <div class="config-phase-body" id="config-phase-${phaseKey}-body" style="display:none">
           ${specHtml}
           ${failureHtml}
         </div>
@@ -270,17 +337,6 @@ export function configSectionHtml(data: ConfigData): string {
 
   configContent += '</div>';
 
-  // expectsNoChanges indicator
-  if (data.expectsNoChanges) {
-    configContent += `
-      <div class="config-item">
-        <div class="config-label">Commit Behavior</div>
-        <div class="config-value"><span class="phase-type-badge skipped">📋 Expects No Changes</span>
-        <span class="config-hint">Commit phase will be skipped automatically</span></div>
-      </div>
-    `;
-  }
-
   // Instructions (if provided)
   if (data.instructions) {
     configContent += `
@@ -294,6 +350,7 @@ export function configSectionHtml(data: ConfigData): string {
   return `<!-- Job Configuration -->
   <div class="section">
     <h3>Job Configuration</h3>
+    ${renderJobMetadata(data)}
     ${configContent}
   </div>`;
 }

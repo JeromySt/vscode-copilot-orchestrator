@@ -30,6 +30,10 @@ export function renderPlanDag(data: PlanDagData): string {
   const { mermaidDef, status } = data;
 
   let html = `
+  <h3 style="display:flex;align-items:center;gap:6px;margin:16px 0 8px 0;font-size:14px;color:var(--vscode-foreground);">
+    <svg width="16" height="16" viewBox="0 0 16 16" style="vertical-align:middle;"><circle cx="4" cy="8" r="2.5" fill="currentColor"/><circle cx="12" cy="4" r="2.5" fill="currentColor"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><line x1="6.5" y1="7" x2="9.5" y2="5" stroke="currentColor" stroke-width="1.2"/><line x1="6.5" y1="9" x2="9.5" y2="11" stroke="currentColor" stroke-width="1.2"/></svg>
+    DAG
+  </h3>
   <div id="mermaid-diagram">
     <div class="zoom-controls">
       <button class="zoom-btn" onclick="zoomOut()" title="Zoom Out">−</button>
@@ -70,28 +74,6 @@ ${mermaidDef}
     </div>
   </div>
   `;
-
-  if (status === 'running') {
-    html += `
-  <!-- Running Processes -->
-  <div class="processes-section" id="processesSection">
-    <h3>Running Processes</h3>
-    <div id="processesContainer">
-      <div class="processes-loading">Loading processes...</div>
-    </div>
-  </div>
-  `;
-  } else {
-    // Render hidden — the script layer will show it once the plan transitions to running
-    html += `
-  <div class="processes-section" id="processesSection" style="display:none;">
-    <h3>Running Processes</h3>
-    <div id="processesContainer">
-      <div class="processes-loading">Loading processes...</div>
-    </div>
-  </div>
-  `;
-  }
 
   return html;
 }

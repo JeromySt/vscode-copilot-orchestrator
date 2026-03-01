@@ -101,7 +101,7 @@ export async function handleFinalizePlan(args: any, ctx: PlanHandlerContext): Pr
                `Use planId '${plan.id}' to monitor progress.`,
       jobMapping,
       status: {
-        status: isPaused ? 'paused' : 'pending',
+        status: isPaused ? 'pending-start' : 'pending',
         nodes: plan.jobs.size,
         roots: plan.roots.length,
         leaves: plan.leaves.length,

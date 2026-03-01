@@ -134,7 +134,59 @@ export class JobExecutionEngine {
     // Set prechecks/postchecks refs (they're in the attempt dir too)
     attempt.prechecksRef = `${dir}/prechecks.json`;
     attempt.postchecksRef = `${dir}/postchecks.json`;
+    // Add stateHistory if not already present (skip for running placeholders)
+    if (!attempt.stateHistory && attempt.startedAt && attempt.endedAt && attempt.status !== 'running') {
+      attempt.stateHistory = this.buildAttemptStateHistory(
+        attempt.startedAt, attempt.endedAt, attempt.status, attempt.triggerType
+      );
+    }
     return attempt;
+  }
+
+  /**
+   * Build stateHistory for an AttemptRecord from its timing and status.
+   * Tracks: scheduled → running → succeeded/failed
+   */
+  private buildAttemptStateHistory(startedAt: number, endedAt: number, status: 'succeeded' | 'failed' | 'canceled', triggerType?: string): import('../plan/types').StateTransition[] {
+    const history: import('../plan/types').StateTransition[] = [];
+    history.push({ from: '', to: 'scheduled', timestamp: startedAt, reason: triggerType || 'initial' });
+    history.push({ from: 'scheduled', to: 'running', timestamp: startedAt });
+    history.push({ from: 'running', to: status, timestamp: endedAt });
+    return history;
+  }
+
+  /**
+   * Record a completed attempt — replaces the "running" placeholder that was
+   * inserted at attempt start. If no placeholder exists, appends normally.
+   */
+  private recordCompletedAttempt(nodeState: NodeExecutionState, attempt: AttemptRecord, nodeId: string): void {
+    const ref = this.toRefAttempt(attempt, nodeId);
+    const history = nodeState.attemptHistory || [];
+    // Replace the last entry if it matches this attempt number (the running placeholder)
+    if (history.length > 0 && history[history.length - 1].attemptNumber === attempt.attemptNumber) {
+      history[history.length - 1] = ref;
+    } else {
+      history.push(ref);
+    }
+    nodeState.attemptHistory = history;
+  }
+
+  /**
+   * Record a running attempt placeholder in attemptHistory.
+   * Called after incrementAttempt() so attemptHistory[last] always reflects the current attempt.
+   */
+  private recordRunningAttempt(nodeState: NodeExecutionState, attemptStartedAt: number, triggerType?: string): void {
+    const placeholder: AttemptRecord = {
+      attemptNumber: nodeState.attempts,
+      triggerType: (triggerType || (nodeState.attempts === 1 ? 'initial' : 'retry')) as any,
+      status: 'running',
+      startedAt: attemptStartedAt,
+      endedAt: 0, // not ended yet
+      copilotSessionId: nodeState.copilotSessionId,
+      worktreePath: nodeState.worktreePath,
+      baseCommit: nodeState.baseCommit,
+    };
+    nodeState.attemptHistory = [...(nodeState.attemptHistory || []), placeholder];
   }
 
   /**
@@ -181,10 +233,25 @@ export class JobExecutionEngine {
     let logMemoryOffset = this.state.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
     let logFileOffset = this.state.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
     
+    // Track when the current attempt started (updated on each incrementAttempt).
+    // Used for AttemptRecord.startedAt — each attempt has its own start time,
+    // independent of nodeState.startedAt (which is the first-ever start).
+    let attemptStartedAt = Date.now();
+    
     try {
       // Transition to running
       sm.transition(node.id, 'running');
       await this.incrementAttempt(plan, node.id, nodeState);
+      attemptStartedAt = Date.now();
+      
+      // Record a "running" attempt in history immediately.
+      // attemptHistory[last] always reflects the current attempt for timeline rendering.
+      this.recordRunningAttempt(nodeState, attemptStartedAt);
+      
+      // Notify UI that plan state changed (timeline needs the new attempt entry
+      // which was added AFTER the running transition that triggered _update).
+      this.state.events.emitPlanUpdated(plan.id);
+      
       this.state.events.emit('nodeStarted', plan.id, node.id);
       
       // Determine base commits from dependencies (RI/FI model)
@@ -302,10 +369,16 @@ export class JobExecutionEngine {
           };
         });
         
-        // Hydrate work spec from repository if needed
-        const hydratedWork = node.work || await plan.definition?.getWorkSpec(node.id);
-        const hydratedPrechecks = node.prechecks || await plan.definition?.getPrechecksSpec(node.id);
-        const hydratedPostchecks = node.postchecks || await plan.definition?.getPostchecksSpec(node.id);
+        // Helper to read a phase spec from disk at point of use.
+        // Specs are always stored on disk; never cached in memory.
+        const resolveSpec = async (phase: 'work' | 'prechecks' | 'postchecks'): Promise<WorkSpec | undefined> => {
+          const inline = phase === 'work' ? node.work : phase === 'prechecks' ? node.prechecks : node.postchecks;
+          if (inline) { return inline; }
+          if (!plan.definition) { return undefined; }
+          if (phase === 'work') { return plan.definition.getWorkSpec(node.id); }
+          if (phase === 'prechecks') { return plan.definition.getPrechecksSpec(node.id); }
+          return plan.definition.getPostchecksSpec(node.id);
+        };
         
         const context: ExecutionContext = {
           plan,
@@ -328,16 +401,19 @@ export class JobExecutionEngine {
           // redirect — its merge-ri targets plan.targetBranch directly.
           snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
           snapshotWorktreePath: plan.snapshot?.worktreePath,
-          // Hydrated specs from repository
-          hydratedWork,
-          hydratedPrechecks,
-          hydratedPostchecks,
           onProgress: (step) => {
             this.log.debug(`Job progress: ${node.name} - ${step}`);
           },
           onStepStatusChange: (phase, status) => {
             if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};}
             (nodeState.stepStatuses as any)[phase] = status;
+            // Sync to running attempt in attemptHistory so timeline renders phase colors live
+            if (nodeState.attemptHistory && nodeState.attemptHistory.length > 0) {
+              const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1];
+              if (last.status === 'running') {
+                last.stepStatuses = { ...nodeState.stepStatuses };
+              }
+            }
           },
         };
         
@@ -422,7 +498,7 @@ export class JobExecutionEngine {
           // Store lastAttempt for retry context
           nodeState.lastAttempt = {
             phase: result.failedPhase || 'work',
-            startTime: nodeState.startedAt || Date.now(),
+            startTime: attemptStartedAt,
             endTime: Date.now(),
             error: result.error,
             exitCode: result.exitCode,
@@ -438,22 +514,23 @@ export class JobExecutionEngine {
             attemptNumber: nodeState.attempts,
             triggerType: nodeState.attempts === 1 ? 'initial' : 'retry',
             status: 'failed',
-            startedAt: nodeState.startedAt || Date.now(),
+            startedAt: attemptStartedAt,
             endedAt: Date.now(),
             failedPhase: result.failedPhase,
             error: result.error,
             exitCode: result.exitCode,
             copilotSessionId: nodeState.copilotSessionId,
             stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
+            phaseTiming: result.phaseTiming,
             worktreePath: nodeState.worktreePath,
             baseCommit: nodeState.baseCommit,
             logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
             logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-            workUsed: hydratedWork,
+            workUsed: await resolveSpec('work'),
             metrics: nodeState.metrics,
             phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
           };
-          nodeState.attemptHistory = [...(nodeState.attemptHistory || []), this.toRefAttempt(failedAttempt, node.id)];
+          this.recordCompletedAttempt(nodeState, failedAttempt, node.id);
           
           // ============================================================
           // AUTO-HEAL: Automatic AI-assisted retry for process/shell failures
@@ -516,8 +593,9 @@ export class JobExecutionEngine {
             if (v === true) {return 1;} // backward compat
             return typeof v === 'number' ? v : 0;
           })();
-          const MAX_AUTO_HEAL_PER_PHASE = 2;
-          const phaseAlreadyHealed = healCount >= MAX_AUTO_HEAL_PER_PHASE;
+          const MAX_AUTO_HEAL_PER_PHASE = this.state.configManager.getConfig<number>('copilotOrchestrator.autoHeal', 'maxAttempts', 4);
+          let currentHealCount = healCount;
+          const phaseAlreadyHealed = currentHealCount >= MAX_AUTO_HEAL_PER_PHASE;
           
           // Auto-retry is allowed if:
           // 1. Non-agent work (existing behavior - swap to agent)
@@ -536,8 +614,11 @@ export class JobExecutionEngine {
           await this.savePlanState(plan);
           
           if (shouldAttemptAutoRetry) {
-            if (!nodeState.autoHealAttempted) {nodeState.autoHealAttempted = {};}
-            nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = healCount + 1;
+            // Loop to allow multiple auto-heal attempts up to MAX_AUTO_HEAL_PER_PHASE
+            while (currentHealCount < MAX_AUTO_HEAL_PER_PHASE) {
+              currentHealCount++;
+              if (!nodeState.autoHealAttempted) {nodeState.autoHealAttempted = {};}
+              nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = currentHealCount;
             
             if (isAgentWork && wasExternallyKilled) {
               // Agent was interrupted - retry with same spec (don't swap to different agent spec)
@@ -554,7 +635,7 @@ export class JobExecutionEngine {
               // Reset state for the retry attempt (do NOT increment attempts — auto-retries
               // are sub-attempts of the current attempt, not new user-visible attempts)
               nodeState.error = undefined;
-              nodeState.startedAt = Date.now();
+              // nodeState.startedAt is set-once — each attempt tracks its own startedAt in AttemptRecord
 
               // Capture log offsets for the retry attempt so its logs are isolated
               const retryLogMemoryOffset = this.state.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
@@ -571,6 +652,7 @@ export class JobExecutionEngine {
                 copilotSessionId: nodeState.copilotSessionId,
                 resumeFromPhase: failedPhase as ExecutionContext['resumeFromPhase'],
                 previousStepStatuses: nodeState.stepStatuses,
+                phaseTiming: [], // Fresh phaseTiming for this sub-attempt
                 // Merge-specific fields (must match original context)
                 dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
                 repoPath: plan.repoPath,
@@ -584,6 +666,10 @@ export class JobExecutionEngine {
                 onStepStatusChange: (phase, status) => {
                   if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};}
                   (nodeState.stepStatuses as any)[phase] = status;
+                  if (nodeState.attemptHistory && nodeState.attemptHistory.length > 0) {
+                    const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1];
+                    if (last.status === 'running') { last.stepStatuses = { ...nodeState.stepStatuses }; }
+                  }
                 },
               };
               
@@ -653,37 +739,50 @@ export class JobExecutionEngine {
                   attemptNumber: nodeState.attempts,
                   triggerType: 'auto-heal',
                   status: 'failed',
-                  startedAt: nodeState.startedAt || Date.now(),
+                  startedAt: attemptStartedAt,
                   endedAt: Date.now(),
                   failedPhase: retryResult.failedPhase,
                   error: retryResult.error,
                   exitCode: retryResult.exitCode,
                   copilotSessionId: nodeState.copilotSessionId,
                   stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
+                  phaseTiming: retryResult.phaseTiming,
                   worktreePath: nodeState.worktreePath,
                   baseCommit: nodeState.baseCommit,
                   logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, retryLogMemoryOffset, retryLogFileOffset, nodeState.attempts),
                   logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-                  workUsed: hydratedWork,
+                  workUsed: await resolveSpec('work'),
                   metrics: nodeState.metrics,
                   phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
                 };
-                nodeState.attemptHistory = [...(nodeState.attemptHistory || []), this.toRefAttempt(retryAttempt, node.id)];
+                this.recordCompletedAttempt(nodeState, retryAttempt, node.id);
                 
                 // Clear process ID since execution is complete
                 nodeState.pid = undefined;
                 
-                sm.transition(node.id, 'failed');
-                this.state.events.emit('nodeCompleted', plan.id, node.id, false);
-                
-                this.log.error(`Job failed (after auto-retry): ${node.name}`, {
-                  planId: plan.id,
-                  nodeId: node.id,
-                  error: retryResult.error,
-                });
-                await this.savePlanState(plan);
-                return;
+                // Check if we've exhausted heal attempts
+                if (currentHealCount >= MAX_AUTO_HEAL_PER_PHASE) {
+                  this.log.error(`Job failed after ${currentHealCount} auto-heal attempts: ${node.name}`, {
+                    planId: plan.id,
+                    nodeId: node.id,
+                    error: retryResult.error,
+                  });
+                  sm.transition(node.id, 'failed');
+                  this.state.events.emit('nodeCompleted', plan.id, node.id, false);
+                  await this.savePlanState(plan);
+                  return;
+                } else {
+                  // Continue to next heal attempt
+                  this.log.info(`Auto-heal attempt ${currentHealCount} failed, will retry (${MAX_AUTO_HEAL_PER_PHASE - currentHealCount} attempts remaining)`, {
+                    planId: plan.id,
+                    nodeId: node.id,
+                  });
+                  await this.savePlanState(plan);
+                  continue;
+                }
               }
+              // Auto-retry succeeded - break out of heal loop
+              break;
             } else {
             // Non-agent work failed — existing auto-heal logic (swap to agent)
             this.log.info(`Auto-heal: attempting AI-assisted fix for ${node.name} (phase: ${failedPhase})`, {
@@ -711,9 +810,6 @@ export class JobExecutionEngine {
             // Get the execution logs for the failed phase — these contain
             // the full stdout/stderr streams plus timing info
             // Truncate to last ~200 lines to avoid overwhelming the agent
-            // Get security settings from the original failed spec
-            const originalAgentSpec = normalizedFailedSpec?.type === 'agent' ? normalizedFailedSpec : null;
-
             // Get the log file path so the agent can read it directly
             const failedLogFilePath = this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts);
 
@@ -736,53 +832,46 @@ export class JobExecutionEngine {
               }
               
               // Write heal instructions file
-              const isPostchecksHeal = failedPhase === 'postchecks';
-              const healInstructions = isPostchecksHeal
-                ? [
-                    `# Auto-Heal: Diagnose Failed postchecks Phase`,
-                    '',
-                    `## IMPORTANT: Do NOT fix anything. Diagnosis ONLY.`,
-                    '',
-                    `The postchecks phase failed. Your job is to DIAGNOSE why, NOT to fix it.`,
-                    `Postchecks validate that previous phases produced correct results.`,
-                    `If the check command itself is wrong (wrong path, wrong logic, etc.),`,
-                    `you MUST exit with failure — this is unrecoverable and needs human attention.`,
-                    '',
-                    `## Log File`,
-                    failedLogFilePath
-                      ? `Read: \`${failedLogFilePath}\``
-                      : 'No log file available.',
-                    '',
-                    `## Postchecks Command That Failed`,
-                    '```',
-                    originalCommand,
-                    '```',
-                    '',
-                    `## What To Do`,
-                    `1. Read the log file to understand what the postchecks command checked`,
-                    `2. Determine if the failure is because:`,
-                    `   a) The work phase didn't produce expected output → try to fix the work output, then re-run the command`,
-                    `   b) The postchecks command itself is wrong (wrong path, wrong assertion) → EXIT WITH FAILURE`,
-                    `3. If (a): fix the work output and re-run the command to verify`,
-                    `4. If (b): do NOT attempt to fix the command. Just exit with failure.`,
-                  ].join('\n')
-                : [
-                    `# Auto-Heal: Fix Failed ${failedPhase} Phase`,
-                    '',
-                    `Do NOT re-execute the original task. Your only job is to fix the error.`,
-                    '',
-                    `## Log File`,
-                    failedLogFilePath
-                      ? `Read: \`${failedLogFilePath}\``
-                      : 'No log file available.',
-                    '',
-                    `## Command to Fix and Re-run`,
-                    '```',
-                    originalCommand,
-                    '```',
-                    '',
-                    `Read the log file, find the error, fix it, then re-run the command above.`,
-                  ].join('\n');
+              // The heal agent runs as the WORK phase — it must do whatever is necessary
+              // to resolve the failure and satisfy the original intent of the failed phase.
+              const healInstructions = [
+                `# Auto-Heal: Resolve Failed \`${failedPhase}\` Phase (Attempt ${nodeState.attempts})`,
+                '',
+                `## Your Mission`,
+                `The \`${failedPhase}\` phase of this job failed. You are the AUTO-HEAL agent.`,
+                `Your job is to **do whatever work is necessary** to resolve the failure so that`,
+                `when the pipeline continues (commit → postchecks), everything passes.`,
+                '',
+                `This is NOT just a diagnosis task — you must **actively fix the problem**.`,
+                `Write code, modify files, add tests, fix configurations — whatever it takes.`,
+                `You have full access to the worktree and can make any changes needed.`,
+                '',
+                `## Previous Failure Log`,
+                failedLogFilePath
+                  ? `Read this file to understand what went wrong:\n\`${failedLogFilePath}\``
+                  : 'No log file available.',
+                '',
+                `## Command That Failed`,
+                '```',
+                originalCommand,
+                '```',
+                '',
+                `## What You Must Do`,
+                `1. Read the failure log to understand the root cause`,
+                `2. Analyze the error — is it a code issue, test issue, configuration issue, or coverage gap?`,
+                `3. **Fix the root cause** by making the necessary code/test/config changes`,
+                `4. Re-run the failed command to verify your fix works`,
+                `5. If the command passes, commit your changes and you're done`,
+                `6. If it still fails, continue diagnosing and fixing until it passes`,
+                '',
+                `## Important Notes`,
+                `- You may need to write substantial code (new tests, fix implementations, etc.)`,
+                `- Do NOT just diagnose and report — you must actually fix the problem`,
+                `- The pipeline will automatically run postchecks after your work phase completes`,
+                `- If the postchecks command itself is fundamentally wrong (impossible threshold,`,
+                `  wrong package name, etc.), exit with failure so a human can fix the spec`,
+                `- Previous auto-heal agents may have already made partial progress — build on their work`,
+              ].join('\n');
               
               const healFile = path.join(instrDir, `orchestrator-heal-${node.id.slice(0, 8)}.instructions.md`);
               fs.writeFileSync(healFile, healInstructions, 'utf8');
@@ -791,37 +880,51 @@ export class JobExecutionEngine {
               this.log.debug(`Could not write heal instructions file: ${e.message}`);
             }
 
-            // Allow access to the specific attempt's log directory (not the entire .orchestrator/)
-            const logAttemptDir = failedLogFilePath ? path.dirname(failedLogFilePath) : undefined;
-            const healAllowedFolders = [
-              ...(originalAgentSpec?.allowedFolders || []),
-              ...(logAttemptDir ? [logAttemptDir] : []),
-            ];
+            // Build comprehensive allowedFolders for the heal agent:
+            // 1. Always include the worktree (required for file access and shell commands)
+            // 2. Collect allowedFolders from ALL agent phase specs (prechecks, work, postchecks)
+            //    so the heal agent can access the same directories as any agent phase
+            // 3. Include the entire specs directory so the agent can read ANY attempt's logs
+            const specsDir = path.join(this.state.persistence.getStoragePath(), plan.id, 'specs', node.id);
+            const healAllowedFolders: string[] = [worktreePath];
+            if (!healAllowedFolders.includes(specsDir)) { healAllowedFolders.push(specsDir); }
+            // Collect from failed spec and from all agent phase specs (read from disk)
+            const allPhaseSpecs = await Promise.all([resolveSpec('prechecks'), resolveSpec('work'), resolveSpec('postchecks')]);
+            for (const phaseSpec of [...allPhaseSpecs, failedWorkSpec]) {
+              const normalized = normalizeWorkSpec(phaseSpec);
+              if (normalized?.type === 'agent' && normalized.allowedFolders) {
+                for (const f of normalized.allowedFolders) {
+                  if (!healAllowedFolders.includes(f)) { healAllowedFolders.push(f); }
+                }
+              }
+            }
+            // Collect allowedUrls from all agent phase specs
+            const healAllowedUrls: string[] = [];
+            for (const phaseSpec of [...allPhaseSpecs, failedWorkSpec]) {
+              const normalized = normalizeWorkSpec(phaseSpec);
+              if (normalized?.type === 'agent' && normalized.allowedUrls) {
+                for (const u of normalized.allowedUrls) {
+                  if (!healAllowedUrls.includes(u)) { healAllowedUrls.push(u); }
+                }
+              }
+            }
             const healSpec: WorkSpec = {
               type: 'agent',
-              instructions: 'Fix the error described in the heal instructions file. Read the log file, diagnose the failure, fix it, and re-run the command.',
-              allowedFolders: healAllowedFolders.length > 0 ? healAllowedFolders : undefined,
-              allowedUrls: originalAgentSpec?.allowedUrls,
+              instructions: `Read the heal instructions file in .github/instructions/. The ${failedPhase} phase failed. Diagnose the root cause from the execution log, then do whatever work is needed to fix it — write code, add tests, fix configs. Re-run the failed command to verify your fix. Do NOT just diagnose; actively resolve the problem.`,
+              allowedFolders: healAllowedFolders,
+              allowedUrls: healAllowedUrls.length > 0 ? healAllowedUrls : undefined,
             };
             
-            // Swap ONLY the failed phase to the agent, preserve the rest
-            const originalPrechecks = node.prechecks;
-            const originalWork = node.work;
-            const originalPostchecks = node.postchecks;
-            
-            if (failedPhase === 'prechecks') {
-              node.prechecks = healSpec;
-            } else if (failedPhase === 'work') {
-              node.work = healSpec;
-            } else if (failedPhase === 'postchecks') {
-              node.postchecks = healSpec;
-            }
+            // Place heal agent as work, preserve original prechecks/postchecks
+            node.work = healSpec;
             
             // Increment attempts for auto-heal — swapping from shell/process to agent
             // is a distinct execution attempt visible in attempt history
             await this.incrementAttempt(plan, node.id, nodeState);
             nodeState.error = undefined;
-            nodeState.startedAt = Date.now();
+            attemptStartedAt = Date.now();
+            this.recordRunningAttempt(nodeState, attemptStartedAt, 'auto-heal');
+            this.state.events.emitPlanUpdated(plan.id);
             
             // Capture log offsets for the auto-heal attempt
             const healLogMemoryOffset = this.state.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
@@ -836,8 +939,9 @@ export class JobExecutionEngine {
               worktreePath,
               attemptNumber: nodeState.attempts,
               copilotSessionId: nodeState.copilotSessionId,
-              resumeFromPhase: failedPhase as ExecutionContext['resumeFromPhase'],
+              resumeFromPhase: 'work', // Always resume from work — heal agent IS the work phase
               previousStepStatuses: nodeState.stepStatuses,
+              phaseTiming: [], // Fresh phaseTiming for this attempt — must not inherit from prior attempt
               // Merge-specific fields (must match original context)
               dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
               repoPath: plan.repoPath,
@@ -851,15 +955,20 @@ export class JobExecutionEngine {
               onStepStatusChange: (phase, status) => {
                 if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};}
                 (nodeState.stepStatuses as any)[phase] = status;
+                if (nodeState.attemptHistory && nodeState.attemptHistory.length > 0) {
+                  const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1];
+                  if (last.status === 'running') { last.stepStatuses = { ...nodeState.stepStatuses }; }
+                }
               },
             };
             
             const healResult = await this.state.executor!.execute(healContext);
             
-            // Restore original specs regardless of outcome
-            node.prechecks = originalPrechecks;
-            node.work = originalWork;
-            node.postchecks = originalPostchecks;
+            // NOTE: No spec restore — in the new auto-heal model, each heal builds
+            // on the last. node.work stays as healSpec. If the heal succeeds and the
+            // pipeline runs postchecks (which pass), the node succeeds. If postchecks
+            // fail again, the next auto-heal cycle will create a new healSpec referencing
+            // the latest failure log.
             
             // Store step statuses from heal attempt
             if (healResult.stepStatuses) {
@@ -899,163 +1008,9 @@ export class JobExecutionEngine {
                 nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...healResult.phaseMetrics };
               }
               
-              // ---- POSTCHECKS RE-VALIDATION LOOP ----
-              // When auto-heal healed the postchecks phase, the agent replaced the
-              // original postchecks spec.  Re-run the caller's original postchecks
-              // as a new attempt so the caller's exit-criteria gate is honoured.
-              // For other failed phases (work, prechecks) the heal execution already
-              // ran the original postchecks in its pipeline, so no extra pass needed.
-              // Loops within MAX_AUTO_HEAL_PER_PHASE budget: heal → reval → heal → reval → fail.
-              if (failedPhase === 'postchecks' && originalPostchecks) {
-                let revalPassed = false;
-                
-                for (let revalCycle = 0; ; revalCycle++) {
-                  const cycleLogMemory = this.state.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
-                  const cycleLogFile = this.state.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
-                  
-                  if (revalCycle > 0) {
-                    // Budget check for re-heal
-                    const curCount = (() => {
-                      const v = nodeState.autoHealAttempted?.['postchecks'];
-                      return v === true ? 1 : (typeof v === 'number' ? v : 0);
-                    })();
-                    if (curCount >= MAX_AUTO_HEAL_PER_PHASE) {
-                      this.log.warn(`Auto-heal budget exhausted for postchecks on ${node.name} (${curCount}/${MAX_AUTO_HEAL_PER_PHASE})`, { planId: plan.id, nodeId: node.id });
-                      break;
-                    }
-                    if (!nodeState.autoHealAttempted) {nodeState.autoHealAttempted = {};}
-                    nodeState.autoHealAttempted['postchecks'] = curCount + 1;
-                    
-                    // Re-heal the postchecks phase
-                    await this.incrementAttempt(plan, node.id, nodeState);
-                    nodeState.startedAt = Date.now();
-                    this.execLog(plan.id, node.id, 'postchecks', 'info', '', nodeState.attempts);
-                    this.execLog(plan.id, node.id, 'postchecks', 'info', `========== AUTO-HEAL: RE-HEALING POSTCHECKS (cycle ${revalCycle + 1}) ==========`, nodeState.attempts);
-                    
-                    node.postchecks = healSpec;
-                    const rhCtx: ExecutionContext = {
-                      plan, node, baseCommit: nodeState.baseCommit!, worktreePath,
-                      attemptNumber: nodeState.attempts, copilotSessionId: nodeState.copilotSessionId,
-                      resumeFromPhase: 'postchecks', previousStepStatuses: nodeState.stepStatuses,
-                      dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
-                      repoPath: plan.repoPath,
-                      targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
-                      baseCommitAtStart: plan.baseCommitAtStart,
-                      snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
-                      snapshotWorktreePath: plan.snapshot?.worktreePath,
-                      onProgress: (s) => { this.log.debug(`Re-heal progress: ${node.name} - ${s}`); },
-                      onStepStatusChange: (p, s) => { if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};} (nodeState.stepStatuses as any)[p] = s; },
-                    };
-                    const rhResult = await this.state.executor!.execute(rhCtx);
-                    node.postchecks = originalPostchecks;
-                    
-                    if (rhResult.stepStatuses) { nodeState.stepStatuses = rhResult.stepStatuses; }
-                    if (rhResult.copilotSessionId) { nodeState.copilotSessionId = rhResult.copilotSessionId; }
-                    
-                    if (!rhResult.success) {
-                      this.execLog(plan.id, node.id, 'postchecks', 'info', '========== AUTO-HEAL: FAILED ==========', nodeState.attempts);
-                      const rhRec: AttemptRecord = {
-                        attemptNumber: nodeState.attempts, triggerType: 'auto-heal', status: 'failed',
-                        startedAt: nodeState.startedAt || Date.now(), endedAt: Date.now(),
-                        failedPhase: 'postchecks', error: rhResult.error, exitCode: rhResult.exitCode,
-                        copilotSessionId: nodeState.copilotSessionId,
-                        stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
-                        worktreePath: nodeState.worktreePath, baseCommit: nodeState.baseCommit,
-                        logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, cycleLogMemory, cycleLogFile, nodeState.attempts),
-                        logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-                        workUsed: healSpec, metrics: rhResult.metrics,
-                        phaseMetrics: rhResult.phaseMetrics ? { ...rhResult.phaseMetrics } : undefined,
-                      };
-                      nodeState.attemptHistory = [...(nodeState.attemptHistory || []), this.toRefAttempt(rhRec, node.id)];
-                      nodeState.error = `Auto-heal failed (cycle ${revalCycle + 1}): ${rhResult.error}`;
-                      break;
-                    }
-                    this.execLog(plan.id, node.id, 'postchecks', 'info', '========== AUTO-HEAL: SUCCESS ==========', nodeState.attempts);
-                    if (rhResult.completedCommit) { nodeState.completedCommit = rhResult.completedCommit; }
-                    if (rhResult.metrics) { nodeState.metrics = rhResult.metrics; }
-                    if (rhResult.phaseMetrics) { nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...rhResult.phaseMetrics }; }
-                  }
-                  
-                  // Record the heal attempt as succeeded
-                  const hlm = revalCycle === 0 ? healLogMemoryOffset : cycleLogMemory;
-                  const hlf = revalCycle === 0 ? healLogFileOffset : cycleLogFile;
-                  const healRec: AttemptRecord = {
-                    attemptNumber: nodeState.attempts, triggerType: 'auto-heal', status: 'succeeded',
-                    startedAt: nodeState.startedAt || Date.now(), endedAt: Date.now(),
-                    copilotSessionId: nodeState.copilotSessionId,
-                    stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
-                    worktreePath: nodeState.worktreePath, baseCommit: nodeState.baseCommit,
-                    completedCommit: nodeState.completedCommit,
-                    logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, hlm, hlf, nodeState.attempts),
-                    logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-                    workUsed: healSpec, metrics: nodeState.metrics,
-                    phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
-                  };
-                  nodeState.attemptHistory = [...(nodeState.attemptHistory || []), this.toRefAttempt(healRec, node.id)];
-                  
-                  // New attempt: postchecks re-validation with original spec
-                  await this.incrementAttempt(plan, node.id, nodeState);
-                  nodeState.startedAt = Date.now();
-                  this.execLog(plan.id, node.id, 'postchecks', 'info', '', nodeState.attempts);
-                  this.execLog(plan.id, node.id, 'postchecks', 'info', '========== POSTCHECKS RE-VALIDATION: RUNNING ORIGINAL POSTCHECKS ==========', nodeState.attempts);
-                  
-                  const rvlm = this.state.executor?.getLogs?.(plan.id, node.id)?.length ?? 0;
-                  const rvlf = this.state.executor?.getLogFileSize?.(plan.id, node.id) ?? 0;
-                  
-                  const rvCtx: ExecutionContext = {
-                    plan, node, baseCommit: nodeState.baseCommit!, worktreePath,
-                    attemptNumber: nodeState.attempts, copilotSessionId: nodeState.copilotSessionId,
-                    resumeFromPhase: 'postchecks', previousStepStatuses: nodeState.stepStatuses,
-                    dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
-                    repoPath: plan.repoPath,
-                    targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
-                    baseCommitAtStart: plan.baseCommitAtStart,
-                    snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
-                    snapshotWorktreePath: plan.snapshot?.worktreePath,
-                    onProgress: (s) => { this.log.debug(`Postchecks re-validation: ${node.name} - ${s}`); },
-                    onStepStatusChange: (p, s) => { if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};} (nodeState.stepStatuses as any)[p] = s; },
-                  };
-                  const rvResult = await this.state.executor!.execute(rvCtx);
-                  if (rvResult.stepStatuses) { nodeState.stepStatuses = rvResult.stepStatuses; }
-                  if (rvResult.copilotSessionId) { nodeState.copilotSessionId = rvResult.copilotSessionId; }
-                  
-                  if (rvResult.success) {
-                    this.log.info(`Postchecks re-validation passed for ${node.name}`, { planId: plan.id, nodeId: node.id });
-                    this.execLog(plan.id, node.id, 'postchecks', 'info', '========== POSTCHECKS RE-VALIDATION: PASSED ==========', nodeState.attempts);
-                    if (rvResult.completedCommit) { nodeState.completedCommit = rvResult.completedCommit; }
-                    if (rvResult.metrics) { nodeState.metrics = rvResult.metrics; }
-                    if (rvResult.phaseMetrics) { nodeState.phaseMetrics = { ...nodeState.phaseMetrics, ...rvResult.phaseMetrics }; }
-                    revalPassed = true;
-                    break;
-                  }
-                  
-                  // Re-validation failed — record and loop
-                  this.log.warn(`Postchecks re-validation failed (cycle ${revalCycle + 1}) for ${node.name}`, { planId: plan.id, nodeId: node.id, error: rvResult.error });
-                  this.execLog(plan.id, node.id, 'postchecks', 'info', '========== POSTCHECKS RE-VALIDATION: FAILED ==========', nodeState.attempts);
-                  this.execLog(plan.id, node.id, 'postchecks', 'error', `Original postchecks still failing after auto-heal: ${rvResult.error}`, nodeState.attempts);
-                  const rvRec: AttemptRecord = {
-                    attemptNumber: nodeState.attempts, triggerType: 'postchecks-revalidation', status: 'failed',
-                    startedAt: nodeState.startedAt || Date.now(), endedAt: Date.now(),
-                    failedPhase: 'postchecks', error: rvResult.error, exitCode: rvResult.exitCode,
-                    copilotSessionId: nodeState.copilotSessionId,
-                    stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
-                    worktreePath: nodeState.worktreePath, baseCommit: nodeState.baseCommit,
-                    logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, rvlm, rvlf, nodeState.attempts),
-                    logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-                    metrics: rvResult.metrics, phaseMetrics: rvResult.phaseMetrics ? { ...rvResult.phaseMetrics } : undefined,
-                  };
-                  nodeState.attemptHistory = [...(nodeState.attemptHistory || []), this.toRefAttempt(rvRec, node.id)];
-                }
-                
-                if (!revalPassed) {
-                  nodeState.error = nodeState.error || 'Postchecks re-validation exhausted auto-heal budget';
-                  nodeState.pid = undefined;
-                  sm.transition(node.id, 'failed');
-                  this.state.events.emit('nodeCompleted', plan.id, node.id, false);
-                  await this.savePlanState(plan);
-                  return;
-                }
-              }
+              // Update log offsets so the success record captures only heal logs
+              logMemoryOffset = healLogMemoryOffset;
+              logFileOffset = healLogFileOffset;
               // Fall through to RI merge handling below
             } else {
               // Auto-heal also failed — record it and transition to failed
@@ -1082,13 +1037,14 @@ export class JobExecutionEngine {
                 attemptNumber: nodeState.attempts,
                 triggerType: 'auto-heal',
                 status: 'failed',
-                startedAt: nodeState.startedAt || Date.now(),
+                startedAt: attemptStartedAt,
                 endedAt: Date.now(),
                 failedPhase: healResult.failedPhase,
                 error: healResult.error,
                 exitCode: healResult.exitCode,
                 copilotSessionId: nodeState.copilotSessionId,
                 stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
+                phaseTiming: healResult.phaseTiming,
                 worktreePath: nodeState.worktreePath,
                 baseCommit: nodeState.baseCommit,
                 logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, healLogMemoryOffset, healLogFileOffset, nodeState.attempts),
@@ -1097,23 +1053,36 @@ export class JobExecutionEngine {
                 metrics: nodeState.metrics,
                 phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
               };
-              nodeState.attemptHistory = [...(nodeState.attemptHistory || []), this.toRefAttempt(healAttempt, node.id)];
+              this.recordCompletedAttempt(nodeState, healAttempt, node.id);
               
               // Clear process ID since execution is complete
               nodeState.pid = undefined;
               
-              sm.transition(node.id, 'failed');
-              this.state.events.emit('nodeCompleted', plan.id, node.id, false);
-              
-              this.log.error(`Job failed (after auto-heal): ${node.name}`, {
-                planId: plan.id,
-                nodeId: node.id,
-                error: healResult.error,
-              });
-              await this.savePlanState(plan);
-              return;
+              // Check if we've exhausted heal attempts
+              if (currentHealCount >= MAX_AUTO_HEAL_PER_PHASE) {
+                this.log.error(`Job failed after ${currentHealCount} auto-heal attempts: ${node.name}`, {
+                  planId: plan.id,
+                  nodeId: node.id,
+                  error: healResult.error,
+                });
+                sm.transition(node.id, 'failed');
+                this.state.events.emit('nodeCompleted', plan.id, node.id, false);
+                await this.savePlanState(plan);
+                return;
+              } else {
+                // Continue to next heal attempt
+                this.log.info(`Auto-heal attempt ${currentHealCount} failed, will retry (${MAX_AUTO_HEAL_PER_PHASE - currentHealCount} attempts remaining)`, {
+                  planId: plan.id,
+                  nodeId: node.id,
+                });
+                await this.savePlanState(plan);
+                continue;
+              }
             }
+            // Auto-heal succeeded - break out of heal loop
+            break;
             }
+            }  // End while loop for iterative auto-heal attempts
           } else {
             // No AI auto-heal — check if the failure has a resumeFromPhase directive
             // (e.g., SV postchecks wants to retry from prechecks to rebase the snapshot)
@@ -1135,7 +1104,9 @@ export class JobExecutionEngine {
               // Reset state for retry
               nodeState.error = undefined;
               await this.incrementAttempt(plan, node.id, nodeState);
-              nodeState.startedAt = Date.now();
+              attemptStartedAt = Date.now();
+              this.recordRunningAttempt(nodeState, attemptStartedAt, 'auto-heal');
+              this.state.events.emitPlanUpdated(plan.id);
               nodeState.resumeFromPhase = result.overrideResumeFromPhase;
 
               // Capture log offsets for the retry
@@ -1149,6 +1120,7 @@ export class JobExecutionEngine {
                 copilotSessionId: nodeState.copilotSessionId,
                 resumeFromPhase: result.overrideResumeFromPhase as ExecutionContext['resumeFromPhase'],
                 previousStepStatuses: nodeState.stepStatuses,
+                phaseTiming: [], // Fresh phaseTiming for this retry attempt
                 dependencyCommits: dependencyCommits.length > 0 ? dependencyCommits : undefined,
                 repoPath: plan.repoPath,
                 targetBranch: plan.leaves.includes(node.id) ? plan.targetBranch : undefined,
@@ -1156,7 +1128,11 @@ export class JobExecutionEngine {
                 snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
                 snapshotWorktreePath: plan.snapshot?.worktreePath,
                 onProgress: (s) => { this.log.debug(`Auto-retry: ${node.name} - ${s}`); },
-                onStepStatusChange: (p, s) => { if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};} (nodeState.stepStatuses as any)[p] = s; },
+                onStepStatusChange: (p, s) => {
+                  if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};}
+                  (nodeState.stepStatuses as any)[p] = s;
+                  if (nodeState.attemptHistory?.length) { const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1]; if (last.status === 'running') { last.stepStatuses = { ...nodeState.stepStatuses }; } }
+                },
               };
 
               const retryResult = await this.state.executor!.execute(retryCtx);
@@ -1188,22 +1164,23 @@ export class JobExecutionEngine {
                   attemptNumber: nodeState.attempts,
                   triggerType: 'retry',
                   status: 'failed',
-                  startedAt: nodeState.startedAt || Date.now(),
+                  startedAt: attemptStartedAt,
                   endedAt: Date.now(),
                   failedPhase: retryResult.failedPhase || failedPhase,
                   error: retryResult.error,
                   exitCode: retryResult.exitCode,
                   copilotSessionId: nodeState.copilotSessionId,
                   stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
+                  phaseTiming: retryResult.phaseTiming,
                   worktreePath: nodeState.worktreePath,
                   baseCommit: nodeState.baseCommit,
                   logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, retryLogMemoryOffset, retryLogFileOffset, nodeState.attempts),
                   logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-                  workUsed: hydratedWork,
+                  workUsed: await resolveSpec('work'),
                   metrics: retryResult.metrics,
                   phaseMetrics: retryResult.phaseMetrics ? { ...retryResult.phaseMetrics } : undefined,
                 };
-                nodeState.attemptHistory = [...(nodeState.attemptHistory || []), this.toRefAttempt(retryFailedAttempt, node.id)];
+                this.recordCompletedAttempt(nodeState, retryFailedAttempt, node.id);
 
                 nodeState.error = retryResult.error;
                 nodeState.pid = undefined;
@@ -1261,7 +1238,7 @@ export class JobExecutionEngine {
         // Store lastAttempt for retry context
         nodeState.lastAttempt = {
           phase: 'merge-ri',
-          startTime: nodeState.startedAt || Date.now(),
+          startTime: attemptStartedAt,
           endTime: Date.now(),
           error: nodeState.error,
         };
@@ -1271,22 +1248,23 @@ export class JobExecutionEngine {
           attemptNumber: nodeState.attempts,
           triggerType: autoHealSucceeded ? 'auto-heal' : (nodeState.attempts === 1 ? 'initial' : 'retry'),
           status: 'failed',
-          startedAt: nodeState.startedAt || Date.now(),
+          startedAt: attemptStartedAt,
           endedAt: Date.now(),
           failedPhase: 'merge-ri',
           error: nodeState.error,
           copilotSessionId: nodeState.copilotSessionId,
           stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
+          phaseTiming: result.phaseTiming,
           worktreePath: nodeState.worktreePath,
           baseCommit: nodeState.baseCommit,
           completedCommit: nodeState.completedCommit, // Work was successful, so we have the commit
           logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
           logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-          workUsed: hydratedWork,
+          workUsed: await resolveSpec('work'),
           metrics: nodeState.metrics,
           phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
         };
-        nodeState.attemptHistory = [...(nodeState.attemptHistory || []), this.toRefAttempt(riFailedAttempt, node.id)];
+        this.recordCompletedAttempt(nodeState, riFailedAttempt, node.id);
         
         // Clear process ID since execution is complete
         nodeState.pid = undefined;
@@ -1306,19 +1284,20 @@ export class JobExecutionEngine {
           attemptNumber: nodeState.attempts,
           triggerType: autoHealSucceeded ? 'auto-heal' : (nodeState.attempts === 1 ? 'initial' : 'retry'),
           status: 'succeeded',
-          startedAt: nodeState.startedAt || Date.now(),
+          startedAt: attemptStartedAt,
           endedAt: Date.now(),
           copilotSessionId: nodeState.copilotSessionId,
           stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
+          phaseTiming: result.phaseTiming,
           worktreePath: nodeState.worktreePath,
           baseCommit: nodeState.baseCommit,
           logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
           logFilePath: this.nodeManager.getNodeLogFilePath(plan.id, node.id, nodeState.attempts),
-          workUsed: hydratedWork,
+          workUsed: await resolveSpec('work'),
           metrics: nodeState.metrics,
           phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
         };
-        nodeState.attemptHistory = [...(nodeState.attemptHistory || []), this.toRefAttempt(successAttempt, node.id)];
+        this.recordCompletedAttempt(nodeState, successAttempt, node.id);
         
         // Clear process ID since execution is complete
         nodeState.pid = undefined;
@@ -1357,7 +1336,7 @@ export class JobExecutionEngine {
       // Store lastAttempt for retry context
       nodeState.lastAttempt = {
         phase: failedPhase,
-        startTime: nodeState.startedAt || Date.now(),
+        startTime: attemptStartedAt,
         endTime: Date.now(),
         error: error.message,
       };
@@ -1367,12 +1346,13 @@ export class JobExecutionEngine {
         attemptNumber: nodeState.attempts,
         triggerType: nodeState.attempts === 1 ? 'initial' : 'retry',
         status: 'failed',
-        startedAt: nodeState.startedAt || Date.now(),
+        startedAt: attemptStartedAt,
         endedAt: Date.now(),
         failedPhase: failedPhase,
         error: error.message,
         copilotSessionId: nodeState.copilotSessionId,
         stepStatuses: nodeState.stepStatuses,
+        phaseTiming: undefined, // Error path - no result.phaseTiming available
         worktreePath: nodeState.worktreePath,
         baseCommit: nodeState.baseCommit,
         logs: this.nodeManager.getNodeLogsFromOffset(plan.id, node.id, logMemoryOffset, logFileOffset, nodeState.attempts),
@@ -1381,7 +1361,7 @@ export class JobExecutionEngine {
         metrics: nodeState.metrics,
         phaseMetrics: nodeState.phaseMetrics,
       };
-      nodeState.attemptHistory = [...(nodeState.attemptHistory || []), this.toRefAttempt(errorAttempt, node.id)];
+      this.recordCompletedAttempt(nodeState, errorAttempt, node.id);
       
       // Clear process ID since execution is complete
       nodeState.pid = undefined;

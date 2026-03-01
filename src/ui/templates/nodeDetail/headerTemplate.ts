@@ -50,7 +50,7 @@ export interface HeaderData {
  * @returns HTML fragment string.
  */
 export function breadcrumbHtml(planId: string, planName: string, nodeName: string): string {
-  return `<div class="breadcrumb">
+  return `<div class="breadcrumb" title="${escapeHtml(planName)} / ${escapeHtml(nodeName)}">
     <a onclick="openPlan('${planId}')">${escapeHtml(planName)}</a> / ${escapeHtml(nodeName)}
   </div>`;
 }
@@ -73,7 +73,7 @@ export function headerRowHtml(nodeName: string, status: string, startedAt?: numb
   }
   return `<div class="header">
     <span class="status-badge ${status}" id="node-status-badge">${status.toUpperCase()}</span>
-    <h2>${escapeHtml(nodeName)}</h2>
+    <h2 title="${escapeHtml(nodeName)}">${escapeHtml(nodeName)}</h2>
     <div class="header-phase" id="header-phase-indicator" style="display:none;"></div>
     <div class="header-duration">
       <span class="duration-icon">⏱</span>

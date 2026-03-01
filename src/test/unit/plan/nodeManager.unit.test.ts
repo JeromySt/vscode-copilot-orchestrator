@@ -330,11 +330,47 @@ suite('NodeManager', () => {
     assert.deepStrictEqual(jobNode.work, newWork);
   });
 
+  test('retryNode resets autoHealAttempted for phases with new specs', async () => {
+    const plan = state.plans.get('plan-1')!;
+    const nodeState = plan.nodeStates.get('node-1')!;
+    nodeState.autoHealAttempted = { work: 2, prechecks: 2, postchecks: 1 } as any;
+    const newWork = { type: 'shell' as const, command: 'echo fixed' };
+    const result = await mgr.retryNode('plan-1', 'node-1', { newWork });
+    assert.strictEqual(result.success, true);
+    assert.strictEqual((nodeState.autoHealAttempted as any).work, undefined, 'work budget should be reset');
+    assert.strictEqual((nodeState.autoHealAttempted as any).prechecks, 2, 'prechecks should be untouched');
+    assert.strictEqual((nodeState.autoHealAttempted as any).postchecks, 1, 'postchecks should be untouched');
+  });
+
   test('retryNode emits nodeRetry event', async () => {
     const spy = sinon.spy();
     state.events.on('nodeRetry', spy);
     await mgr.retryNode('plan-1', 'node-1');
     assert.ok(spy.called);
+  });
+
+  test('retryNode preserves earlier resumeFromPhase set by update handler', async () => {
+    const plan = state.plans.get('plan-1')!;
+    const nodeState = plan.nodeStates.get('node-1')!;
+    // Simulate: update_copilot_plan_job set resumeFromPhase='work', then retry without newWork
+    nodeState.resumeFromPhase = 'work' as any;
+    (nodeState as any).lastAttempt = { phase: 'postchecks' };
+    const result = await mgr.retryNode('plan-1', 'node-1');
+    assert.strictEqual(result.success, true);
+    // Should keep 'work' since it's earlier than 'postchecks'
+    assert.strictEqual(nodeState.resumeFromPhase, 'work', 'should preserve earlier resumeFromPhase');
+  });
+
+  test('retryNode overwrites resumeFromPhase when failedPhase is earlier', async () => {
+    const plan = state.plans.get('plan-1')!;
+    const nodeState = plan.nodeStates.get('node-1')!;
+    // Simulate: resumeFromPhase set to postchecks but failedPhase is work (earlier)
+    nodeState.resumeFromPhase = 'postchecks' as any;
+    (nodeState as any).lastAttempt = { phase: 'work' };
+    const result = await mgr.retryNode('plan-1', 'node-1');
+    assert.strictEqual(result.success, true);
+    // Should overwrite to 'work' since it's earlier than 'postchecks'
+    assert.strictEqual(nodeState.resumeFromPhase, 'work', 'should set to earlier failedPhase');
   });
 
   test('retryNode with clearWorktree rejects when upstream has commits', async () => {
