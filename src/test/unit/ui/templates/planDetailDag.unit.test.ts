@@ -123,45 +123,37 @@ suite('planDetail dagTemplate', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Processes section
+  // Processes section (removed from template — no longer rendered)
   // -----------------------------------------------------------------------
   suite('Processes section', () => {
-    test('renders processes section when status is running', () => {
+    test('does not render processes section (removed from template)', () => {
       const html = renderPlanDag(makeData({ status: 'running' }));
-      assert.ok(html.includes('id="processesSection"'));
-      assert.ok(html.includes('id="processesContainer"'));
-      assert.ok(html.includes('Running Processes'));
-      assert.ok(html.includes('Loading processes...'));
+      assert.ok(!html.includes('id="processesSection"'), 'Processes section should not be rendered');
     });
 
-    test('hides processes section when succeeded', () => {
+    test('does not include processesContainer', () => {
+      const html = renderPlanDag(makeData({ status: 'running' }));
+      assert.ok(!html.includes('id="processesContainer"'), 'Processes container should not be rendered');
+    });
+
+    test('does not include Running Processes heading', () => {
+      const html = renderPlanDag(makeData({ status: 'running' }));
+      assert.ok(!html.includes('Running Processes'), 'Running Processes heading should not be rendered');
+    });
+
+    test('no processes section for succeeded status', () => {
       const html = renderPlanDag(makeData({ status: 'succeeded' }));
-      assert.ok(html.includes('id="processesSection"'));
-      assert.ok(html.includes('style="display:none;"'));
+      assert.ok(!html.includes('id="processesSection"'));
     });
 
-    test('hides processes section when failed', () => {
+    test('no processes section for failed status', () => {
       const html = renderPlanDag(makeData({ status: 'failed' }));
-      assert.ok(html.includes('id="processesSection"'));
-      assert.ok(html.includes('style="display:none;"'));
+      assert.ok(!html.includes('id="processesSection"'));
     });
 
-    test('hides processes section when pending', () => {
+    test('no processes section for pending status', () => {
       const html = renderPlanDag(makeData({ status: 'pending' }));
-      assert.ok(html.includes('id="processesSection"'));
-      assert.ok(html.includes('style="display:none;"'));
-    });
-
-    test('hides processes section when paused', () => {
-      const html = renderPlanDag(makeData({ status: 'paused' }));
-      assert.ok(html.includes('id="processesSection"'));
-      assert.ok(html.includes('style="display:none;"'));
-    });
-
-    test('hides processes section when canceled', () => {
-      const html = renderPlanDag(makeData({ status: 'canceled' }));
-      assert.ok(html.includes('id="processesSection"'));
-      assert.ok(html.includes('style="display:none;"'));
+      assert.ok(!html.includes('id="processesSection"'));
     });
   });
 

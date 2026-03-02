@@ -584,8 +584,8 @@ suite('JobExecutionEngine - Coverage', () => {
         phaseMetrics: { work: retryMetrics },
       };
       const executeStub = sinon.stub();
-      executeStub.onFirstCall().resolves(failResult);
-      executeStub.onSecondCall().resolves(retryFail);
+      executeStub.resolves(retryFail); // default: all retries fail
+      executeStub.onFirstCall().resolves(failResult); // initial: killed by signal
 
       const { engine, state } = createEngine(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
@@ -595,10 +595,10 @@ suite('JobExecutionEngine - Coverage', () => {
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'failed');
-      assert.ok(ns.error!.includes('Auto-retry failed'));
+      assert.ok(ns.error!.includes('Auto-retry failed') || ns.error!.includes('auto-heal attempts'));
       assert.deepStrictEqual(ns.metrics, retryMetrics);
-      // Auto-retries for agent-killed-by-signal are sub-attempts (no incrementAttempt),
-      // so attemptHistory has 1 entry (the running placeholder replaced with failure).
+      // Auto-retries for agent-killed-by-signal are sub-attempts,
+      // with MAX_AUTO_HEAL_PER_PHASE=4 the engine retries up to 4 times.
       assert.ok(ns.attemptHistory!.length >= 1);
     });
   });

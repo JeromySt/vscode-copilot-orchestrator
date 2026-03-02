@@ -148,6 +148,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
         exports: {
           isCopilotCliAvailable: () => false,
           checkCopilotCliAsync: async () => false,
+          ensureCopilotCliChecked: async () => false,
           resetCliCache: () => {},
           isCliCachePopulated: () => true,
         },

@@ -264,7 +264,7 @@ suite('ConfigDisplay', () => {
     cd.dispose();
   });
 
-  test('truncates long agent instructions', () => {
+  test('renders long agent instructions without truncation', () => {
     const el = makeEl();
     restoreDoc = mockDocument({ config: el });
 
@@ -280,8 +280,8 @@ suite('ConfigDisplay', () => {
       work: agentSpec 
     });
 
-    assert.ok(el.innerHTML.includes('...'));
-    assert.ok(!el.innerHTML.includes(longInstructions));
+    // Source now renders full instructions without truncation
+    assert.ok(el.innerHTML.includes(longInstructions), 'Should render full instructions');
     cd.dispose();
   });
 

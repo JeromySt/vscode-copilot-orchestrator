@@ -21,23 +21,21 @@ suite('plansView scriptsTemplate', () => {
       assert.ok(result.includes('acquireVsCodeApi()'), 'Should acquire VS Code API');
     });
 
-    test('includes EventBus definition', () => {
+    test('includes EventBus from window.Orca', () => {
       const result = renderPlansViewScripts();
-      assert.ok(result.includes('const EventBus'), 'Should define EventBus');
-      assert.ok(result.includes('EB.prototype.on'), 'Should include on method');
-      assert.ok(result.includes('EB.prototype.emit'), 'Should include emit method');
+      assert.ok(result.includes('EventBus'), 'Should reference EventBus');
+      assert.ok(result.includes('window.Orca'), 'Should destructure from window.Orca');
+      assert.ok(result.includes('var bus = new EventBus()'), 'Should create bus instance');
     });
 
-    test('includes SubscribableControl definition', () => {
+    test('includes SubscribableControl as base class', () => {
       const result = renderPlansViewScripts();
-      assert.ok(result.includes('function SubscribableControl'), 'Should define SubscribableControl');
-      assert.ok(result.includes('.prototype.subscribe'), 'Should include subscribe method');
-      assert.ok(result.includes('.prototype.dispose'), 'Should include dispose method');
+      assert.ok(result.includes('extends SubscribableControl'), 'Should extend SubscribableControl');
     });
 
     test('includes Topics definition', () => {
       const result = renderPlansViewScripts();
-      assert.ok(result.includes('var Topics'), 'Should define Topics');
+      assert.ok(result.includes('PlansTopics'), 'Should define PlansTopics');
       assert.ok(result.includes('PLAN_STATE_CHANGE'), 'Should include PLAN_STATE_CHANGE topic');
       assert.ok(result.includes('PLANS_UPDATE'), 'Should include PLANS_UPDATE topic');
       assert.ok(result.includes('CAPACITY_UPDATE'), 'Should include CAPACITY_UPDATE topic');
@@ -46,22 +44,21 @@ suite('plansView scriptsTemplate', () => {
 
     test('includes PlanListCardControl definition', () => {
       const result = renderPlansViewScripts();
-      assert.ok(result.includes('function PlanListCardControl'), 'Should define PlanListCardControl');
-      assert.ok(result.includes('PlanListCardControl.prototype.update'), 'Should include update method');
+      assert.ok(result.includes('class PlanListCardControl'), 'Should define PlanListCardControl as a class');
+      assert.ok(result.includes('update(data)'), 'Should include update method');
     });
 
     test('includes PlanListContainerControl definition', () => {
       const result = renderPlansViewScripts();
-      assert.ok(result.includes('function PlanListContainerControl'), 'Should define PlanListContainerControl');
-      assert.ok(result.includes('PlanListContainerControl.prototype.updatePlans'), 'Should include updatePlans method');
-      assert.ok(result.includes('PlanListContainerControl.prototype.addPlan'), 'Should include addPlan method');
-      assert.ok(result.includes('PlanListContainerControl.prototype.removePlan'), 'Should include removePlan method');
+      assert.ok(result.includes('class PlanListContainerControl'), 'Should define PlanListContainerControl as a class');
+      assert.ok(result.includes('updatePlans('), 'Should include updatePlans method');
+      assert.ok(result.includes('addPlan('), 'Should include addPlan method');
+      assert.ok(result.includes('removePlan('), 'Should include removePlan method');
     });
 
     test('includes CapacityBarControl definition', () => {
       const result = renderPlansViewScripts();
-      assert.ok(result.includes('function CapacityBarControl'), 'Should define CapacityBarControl');
-      assert.ok(result.includes('CapacityBarControl.prototype.update'), 'Should include update method');
+      assert.ok(result.includes('class CapacityBarControl'), 'Should define CapacityBarControl as a class');
     });
 
     test('includes control instantiation', () => {
@@ -103,7 +100,7 @@ suite('plansView scriptsTemplate', () => {
     test('includes utility functions', () => {
       const result = renderPlansViewScripts();
       assert.ok(result.includes('function formatDuration'), 'Should define formatDuration');
-      assert.ok(result.includes('function escapeHtml'), 'Should define escapeHtml');
+      assert.ok(result.includes('escapeHtml'), 'Should reference escapeHtml (destructured from window.Orca)');
     });
   });
 });

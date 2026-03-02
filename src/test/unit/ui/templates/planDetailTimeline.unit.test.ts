@@ -23,21 +23,17 @@ suite('Timeline Templates', () => {
       assert.ok(html.includes('class="timeline-container"'), 'Should have timeline-container class');
     });
 
-    test('should include zoom controls', () => {
+    test('should not include zoom controls (removed from template)', () => {
       const html = renderPlanTimeline({ status: 'running' });
-      assert.ok(html.includes('class="timeline-controls"'), 'Should have timeline-controls');
-      assert.ok(html.includes('id="timelineZoomIn"'), 'Should have zoom in button');
-      assert.ok(html.includes('id="timelineZoomOut"'), 'Should have zoom out button');
-      assert.ok(html.includes('id="timelineResetZoom"'), 'Should have reset zoom button');
-      assert.ok(html.includes('Zoom In'), 'Should have zoom in title');
-      assert.ok(html.includes('Zoom Out'), 'Should have zoom out title');
-      assert.ok(html.includes('Reset'), 'Should have reset title');
+      assert.ok(!html.includes('class="timeline-controls"'), 'Timeline controls should not be rendered');
+      assert.ok(!html.includes('id="timelineZoomIn"'), 'Zoom buttons should not be rendered');
     });
 
-    test('should start hidden (display: none)', () => {
+    test('should not start hidden (visibility managed by tab bar scripts)', () => {
       const html = renderPlanTimeline({ status: 'running' });
-      assert.ok(html.includes('style="display: none;"') || html.includes('style="display:none;"'), 
-        'Timeline section should start hidden');
+      // Timeline section no longer has inline display:none — tab bar scripts manage visibility
+      assert.ok(!html.includes('style="display: none;"') && !html.includes('style="display:none;"'), 
+        'Timeline section should not have inline hidden style');
     });
 
     test('should include timeline-chart div', () => {
@@ -98,9 +94,9 @@ suite('Timeline Templates', () => {
       assert.ok(tabRoleMatches && tabRoleMatches.length === 2, 'Should have two tab roles');
     });
 
-    test('should include tab icons', () => {
+    test('should include tab icons (inline SVG)', () => {
       const html = renderViewTabBar({ activeTab: 'dag' });
-      assert.ok(html.includes('class="tab-icon"'), 'Should include tab icons');
+      assert.ok(html.includes('<svg'), 'Should include inline SVG icons');
     });
 
     test('should have view-tab-bar container', () => {

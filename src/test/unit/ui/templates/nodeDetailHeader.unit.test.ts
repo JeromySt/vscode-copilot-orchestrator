@@ -47,7 +47,7 @@ suite('Node Detail Header Templates', () => {
   suite('headerRowHtml', () => {
     test('renders node name as h2', () => {
       const html = headerRowHtml('Test Node', 'running');
-      assert.ok(html.includes('<h2>Test Node</h2>'));
+      assert.ok(html.includes('<h2 title="Test Node">Test Node</h2>'));
     });
 
     test('renders status badge with correct class', () => {

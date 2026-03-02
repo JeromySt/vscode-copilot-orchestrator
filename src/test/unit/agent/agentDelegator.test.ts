@@ -74,16 +74,45 @@ function makeOpts(tmpDir: string) {
 suite('AgentDelegator', () => {
   let quiet: { restore: () => void };
   let sandbox: sinon.SinonSandbox;
-  let spawnStub: sinon.SinonStub;
   let cliCheck: typeof import('../../../agent/cliCheckCore');
   let gitExec: typeof import('../../../git/core/executor');
   let gitRepo: typeof import('../../../git/core/repository');
   let AgentDelegator: typeof import('../../../agent/agentDelegator').AgentDelegator;
 
+  /** Create a mock ICopilotRunner that calls onProcess/onOutput and returns the given result. */
+  function makeMockRunner(result: {
+    success: boolean;
+    exitCode?: number;
+    sessionId?: string;
+    error?: string;
+  }, options?: {
+    pid?: number;
+    outputLines?: string[];
+  }) {
+    return {
+      isAvailable: () => true,
+      buildCommand: () => 'mock-cmd',
+      writeInstructionsFile: () => ({ filePath: '/tmp/instr.md', dirPath: '/tmp' }),
+      cleanupInstructionsFile: () => {},
+      run: sinon.stub().callsFake(async (opts: any) => {
+        // Simulate process spawn callback
+        if (opts.onProcess) {
+          opts.onProcess({ pid: options?.pid ?? 12345 });
+        }
+        // Simulate output callback (for session ID extraction via onOutput)
+        if (opts.onOutput && options?.outputLines) {
+          for (const line of options.outputLines) {
+            opts.onOutput(line);
+          }
+        }
+        return result;
+      }),
+    };
+  }
+
   setup(() => {
     quiet = silenceConsole();
     sandbox = sinon.createSandbox();
-    spawnStub = sandbox.stub(cp, 'spawn');
     delete require.cache[require.resolve('../../../agent/cliCheckCore')];
     delete require.cache[require.resolve('../../../agent/copilotCliRunner')];
     delete require.cache[require.resolve('../../../agent/agentDelegator')];
@@ -120,12 +149,15 @@ suite('AgentDelegator', () => {
       const tmpDir = makeTmpDir();
       sandbox.stub(cliCheck, 'isCopilotCliAvailable').returns(true);
       const sid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
-      spawnStub.returns(makeFakeProc(0, `Session ID: ${sid}\nDone.`));
+      const mockRunner = makeMockRunner(
+        { success: true, exitCode: 0, sessionId: sid },
+        { outputLines: [`Session ID: ${sid}`, 'Done.'] }
+      );
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const cbs = { onProcessSpawned: sandbox.stub(), onSessionCaptured: sandbox.stub(), onProcessExited: sandbox.stub() };
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger, mockGitOps, cbs);
+      const delegator = new AgentDelegator(logger, mockGitOps, cbs, mockRunner as any);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.sessionId, sid);
@@ -137,11 +169,14 @@ suite('AgentDelegator', () => {
       const tmpDir = makeTmpDir();
       sandbox.stub(cliCheck, 'isCopilotCliAvailable').returns(true);
       const sid = 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
-      spawnStub.returns(makeFakeProc(0, '', `session: ${sid}`));
+      const mockRunner = makeMockRunner(
+        { success: true, exitCode: 0, sessionId: sid },
+        { outputLines: [`session: ${sid}`] }
+      );
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger, mockGitOps);
+      const delegator = new AgentDelegator(logger, mockGitOps, {}, mockRunner as any);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.sessionId, sid);
     });
@@ -149,11 +184,11 @@ suite('AgentDelegator', () => {
     test('handles non-zero exit code', async () => {
       const tmpDir = makeTmpDir();
       sandbox.stub(cliCheck, 'isCopilotCliAvailable').returns(true);
-      spawnStub.returns(makeFakeProc(1, '', 'error'));
+      const mockRunner = makeMockRunner({ success: false, exitCode: 1, error: 'Process exited with code 1' });
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger, mockGitOps);
+      const delegator = new AgentDelegator(logger, mockGitOps, {}, mockRunner as any);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.success, false);
       assert.ok(result.error?.includes('exited with code 1'));
@@ -162,11 +197,11 @@ suite('AgentDelegator', () => {
     test('handles process error event', async () => {
       const tmpDir = makeTmpDir();
       sandbox.stub(cliCheck, 'isCopilotCliAvailable').returns(true);
-      spawnStub.returns(makeFakeErrorProc(new Error('spawn failed')));
+      const mockRunner = makeMockRunner({ success: false, error: 'spawn failed' });
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger, mockGitOps);
+      const delegator = new AgentDelegator(logger, mockGitOps, {}, mockRunner as any);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.success, false);
       assert.ok(result.error?.includes('spawn failed'));
@@ -176,11 +211,11 @@ suite('AgentDelegator', () => {
       const tmpDir = makeTmpDir();
       sandbox.stub(cliCheck, 'isCopilotCliAvailable').returns(true);
       const sid = 'c3d4e5f6-a7b8-9012-cdef-123456789012';
-      spawnStub.returns(makeFakeProc(0, 'done'));
+      const mockRunner = makeMockRunner({ success: true, exitCode: 0, sessionId: sid });
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger, mockGitOps);
+      const delegator = new AgentDelegator(logger, mockGitOps, {}, mockRunner as any);
       const result = await delegator.delegate({ ...makeOpts(tmpDir), sessionId: sid });
       assert.strictEqual(result.sessionId, sid);
     });
@@ -189,14 +224,14 @@ suite('AgentDelegator', () => {
       const tmpDir = makeTmpDir();
       sandbox.stub(cliCheck, 'isCopilotCliAvailable').returns(true);
       const sid = 'd4e5f6a7-b8c9-0123-defa-234567890123';
-      spawnStub.returns(makeFakeProc(0, 'no session'));
-      const copilotDir = path.join(tmpDir, '.copilot-orchestrator');
+      const mockRunner = makeMockRunner({ success: true, exitCode: 0 });
+      const copilotDir = path.join(tmpDir, '.orchestrator', '.copilot-cli');
       fs.mkdirSync(path.join(copilotDir, 'logs'), { recursive: true });
-      fs.writeFileSync(path.join(copilotDir, 'session-work.md'), `Session ID: ${sid}\nContent`);
+      fs.writeFileSync(path.join(copilotDir, `session-work.md`), `Session ID: ${sid}\nContent`);
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger, mockGitOps);
+      const delegator = new AgentDelegator(logger, mockGitOps, {}, mockRunner as any);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.sessionId, sid);
     });
@@ -205,14 +240,14 @@ suite('AgentDelegator', () => {
       const tmpDir = makeTmpDir();
       sandbox.stub(cliCheck, 'isCopilotCliAvailable').returns(true);
       const sid = 'e5f6a7b8-c9d0-1234-efab-345678901234';
-      spawnStub.returns(makeFakeProc(0, 'no session'));
-      const logDir = path.join(tmpDir, '.copilot-orchestrator', 'logs');
+      const mockRunner = makeMockRunner({ success: true, exitCode: 0 });
+      const logDir = path.join(tmpDir, '.orchestrator', '.copilot-cli', 'logs');
       fs.mkdirSync(logDir, { recursive: true });
       fs.writeFileSync(path.join(logDir, `copilot-2024-01-01-${sid}.log`), 'log');
       sandbox.stub(gitExec, 'execAsync').resolves({ success: true, stdout: '', stderr: '', exitCode: 0 });
       sandbox.stub(gitRepo, 'commit').resolves(true);
       const logger = makeLogger();
-      const delegator = new AgentDelegator(logger, mockGitOps);
+      const delegator = new AgentDelegator(logger, mockGitOps, {}, mockRunner as any);
       const result = await delegator.delegate(makeOpts(tmpDir));
       assert.strictEqual(result.sessionId, sid);
     });

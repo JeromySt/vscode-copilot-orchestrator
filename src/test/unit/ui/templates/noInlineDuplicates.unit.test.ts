@@ -60,7 +60,7 @@ suite('Template No Inline Duplicates', () => {
       );
     });
 
-    test('should reference TimelineChart and ViewTabBar from window.Orca', () => {
+    test('should reference TimelineChart from window.Orca', () => {
       const output = renderPlanScripts({
         nodeData: {},
         nodeTooltips: {},
@@ -70,14 +70,14 @@ suite('Template No Inline Duplicates', () => {
         timelineData: { nodes: [] },
       });
 
-      // Should destructure timeline controls from window.Orca
+      // Should destructure TimelineChart from window.Orca
       assert.ok(
-        output.includes('TimelineChart') && output.includes('ViewTabBar'),
-        'Should reference TimelineChart and ViewTabBar from window.Orca'
+        output.includes('TimelineChart'),
+        'Should reference TimelineChart from window.Orca'
       );
       assert.ok(
-        !output.includes('function TimelineChart') && !output.includes('function ViewTabBar'),
-        'Should not define TimelineChart or ViewTabBar inline'
+        !output.includes('function TimelineChart'),
+        'Should not define TimelineChart inline'
       );
     });
   });

@@ -190,8 +190,9 @@ suite('CopilotCliRunner', () => {
 
   suite('run() - CLI Availability', () => {
     test('should return failure when CLI is not available', async () => {
-      // Stub isCopilotCliAvailable to return false
+      // Stub ensureCopilotCliChecked (called by runner.ensureAvailable) to resolve false
       sandbox.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
+      sandbox.stub(cliCheckCore, 'ensureCopilotCliChecked').resolves(false);
 
       const runner = new CopilotCliRunner();
       const result = await runner.run({
@@ -207,8 +208,9 @@ suite('CopilotCliRunner', () => {
     });
 
     test('should not write instructions file when CLI is unavailable', async () => {
-      // Stub isCopilotCliAvailable to return false
+      // Stub ensureCopilotCliChecked to resolve false
       sandbox.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
+      sandbox.stub(cliCheckCore, 'ensureCopilotCliChecked').resolves(false);
 
       const runner = new CopilotCliRunner();
       
@@ -225,8 +227,9 @@ suite('CopilotCliRunner', () => {
     });
 
     test('should skip instructions file entirely when CLI unavailable', async () => {
-      // Stub isCopilotCliAvailable to return false
+      // Stub ensureCopilotCliChecked to resolve false
       sandbox.stub(cliCheckCore, 'isCopilotCliAvailable').returns(false);
+      sandbox.stub(cliCheckCore, 'ensureCopilotCliChecked').resolves(false);
 
       const runner = new CopilotCliRunner();
       

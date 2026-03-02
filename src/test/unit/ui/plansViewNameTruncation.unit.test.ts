@@ -34,14 +34,21 @@ suite('PlansView Plan Name Truncation', () => {
     };
     const mockContext: any = {
       subscriptions: [],
+      extensionUri: { scheme: 'file', authority: '', path: '/mock/extension', query: '', fragment: '', fsPath: '/mock/extension', toString: () => 'file:///mock/extension' },
     };
 
     // Import and instantiate to extract HTML
     const { plansViewProvider } = require('../../../ui/plansViewProvider');
     const provider = new plansViewProvider(mockContext, mockPlanRunner, mockPulse);
 
-    // Access private _getHtml
-    html = (provider as any)._getHtml();
+    // Create a mock webview that _getHtml needs
+    const mockWebview: any = {
+      asWebviewUri: (uri: any) => uri,
+      cspSource: '',
+    };
+
+    // Access private _getHtml (now requires webview argument)
+    html = (provider as any)._getHtml(mockWebview);
   });
 
   teardown(() => {

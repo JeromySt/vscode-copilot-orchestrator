@@ -478,6 +478,7 @@ suite('copilotCliRunner', () => {
     suite('run', () => {
       test('should return error if CLI not available', async () => {
         sandbox.stub(runner, 'isAvailable').returns(false);
+        sandbox.stub(runner, 'ensureAvailable').resolves(false);
 
         const result = await runner.run({
           cwd: 'C:\\worktree',
@@ -491,6 +492,7 @@ suite('copilotCliRunner', () => {
 
       test('should write instructions file by default', async () => {
         sandbox.stub(runner, 'isAvailable').returns(true);
+        sandbox.stub(runner, 'ensureAvailable').resolves(true);
         const writeStub = sandbox.stub(runner, 'writeInstructionsFile').returns({
           filePath: 'C:\\worktree\\.github\\instructions\\orchestrator-job.instructions.md',
           dirPath: 'C:\\worktree\\.github\\instructions',
@@ -520,6 +522,7 @@ suite('copilotCliRunner', () => {
 
       test('should skip instructions file when skipInstructionsFile is true', async () => {
         sandbox.stub(runner, 'isAvailable').returns(true);
+        sandbox.stub(runner, 'ensureAvailable').resolves(true);
         const writeStub = sandbox.stub(runner, 'writeInstructionsFile');
         sandbox.stub(runner, 'buildCommand').returns('copilot -p "test"');
 
@@ -543,6 +546,7 @@ suite('copilotCliRunner', () => {
 
       test('should cleanup instructions file on success', async () => {
         sandbox.stub(runner, 'isAvailable').returns(true);
+        sandbox.stub(runner, 'ensureAvailable').resolves(true);
         const instructionsPath = 'C:\\worktree\\.github\\instructions\\orchestrator-job.instructions.md';
         sandbox.stub(runner, 'writeInstructionsFile').returns({
           filePath: instructionsPath,
@@ -571,6 +575,7 @@ suite('copilotCliRunner', () => {
 
       test('should cleanup instructions file on error', async () => {
         sandbox.stub(runner, 'isAvailable').returns(true);
+        sandbox.stub(runner, 'ensureAvailable').resolves(true);
         const instructionsPath = 'C:\\worktree\\.github\\instructions\\orchestrator-job.instructions.md';
         sandbox.stub(runner, 'writeInstructionsFile').returns({
           filePath: instructionsPath,
@@ -622,7 +627,7 @@ suite('copilotCliRunner', () => {
         assert.strictEqual(result.filePath, expectedFile);
         assert.strictEqual(result.dirPath, expectedDir);
 
-        assert.ok(mkdirStub.calledOnce);
+        assert.ok(mkdirStub.calledTwice);
         assert.ok(mkdirStub.calledWith(expectedDir, { recursive: true }));
 
         assert.ok(writeFileStub.calledOnce);
