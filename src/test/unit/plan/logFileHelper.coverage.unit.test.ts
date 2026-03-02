@@ -3,6 +3,7 @@
  */
 import * as assert from 'assert';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { suite, test, teardown } from 'mocha';
 import {
@@ -12,6 +13,12 @@ import {
 } from '../../../plan/logFileHelper';
 
 let tmpDirs: string[] = [];
+
+function makeTmpDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'logcov-'));
+  tmpDirs.push(dir);
+  return dir;
+}
 
 suite('logFileHelper coverage', () => {
   teardown(() => {

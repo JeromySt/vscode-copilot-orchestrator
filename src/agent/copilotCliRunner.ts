@@ -5,7 +5,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { isCopilotCliAvailable } from './cliCheckCore';
+import { isCopilotCliAvailable, ensureCopilotCliChecked } from './cliCheckCore';
 import { CopilotStatsParser } from './copilotStatsParser';
 import type { CopilotUsageMetrics } from '../plan/types';
 import type { IProcessSpawner, ChildProcessLike } from '../interfaces/IProcessSpawner';
@@ -112,10 +112,18 @@ export class CopilotCliRunner {
   }
   
   /**
-   * Check if Copilot CLI is available.
+   * Check if Copilot CLI is available (sync, cached).
    */
   isAvailable(): boolean {
     return isCopilotCliAvailable();
+  }
+
+  /**
+   * Await any pending CLI detection and return definitive result.
+   * Unlike isAvailable(), this never returns a stale false.
+   */
+  async ensureAvailable(): Promise<boolean> {
+    return ensureCopilotCliChecked();
   }
   
   /**
@@ -137,8 +145,9 @@ export class CopilotCliRunner {
       skipInstructionsFile = false,
     } = options;
     
-    // Check if Copilot CLI is available
-    if (!this.isAvailable()) {
+    // Check if Copilot CLI is available — await any pending detection
+    const cliAvailable = await this.ensureAvailable();
+    if (!cliAvailable) {
       this.logger.warn(`[${label}] Copilot CLI not available`);
       return {
         success: false,
@@ -152,7 +161,7 @@ export class CopilotCliRunner {
     let instructionsDir: string | undefined;
     
     if (!skipInstructionsFile) {
-      const instructionsSetup = this.writeInstructionsFile(cwd, task, instructions, label, options.jobId);
+      const instructionsSetup = this.writeInstructionsFile(cwd, task, instructions, label, options.jobId, options.allowedFolders);
       instructionsFile = instructionsSetup.filePath;
       instructionsDir = instructionsSetup.dirPath;
     }
@@ -207,7 +216,8 @@ export class CopilotCliRunner {
     task: string,
     instructions: string | undefined,
     label: string,
-    jobId?: string
+    jobId?: string,
+    allowedFolders?: string[]
   ): { filePath: string; dirPath: string } {
     const instructionsDir = path.join(cwd, '.github', 'instructions');
     const suffix = jobId ? `-${jobId.slice(0, 8)}` : '';
@@ -218,6 +228,21 @@ export class CopilotCliRunner {
     const worktreeParent = path.basename(path.dirname(cwd));
     const applyToScope = `${worktreeParent}/${worktreeName}/**`;
     
+    // Build sandbox/environment section
+    const tmpDir = path.join(cwd, '.orchestrator', 'tmp');
+    let sandboxSection = `## Environment
+
+- **Working directory**: \`${cwd}\`
+- **Temp directory**: Use \`${tmpDir}\` for any temporary files (do NOT use \\$env:TEMP, %TMP%, or /tmp — you don't have access)
+`;
+    if (allowedFolders && allowedFolders.length > 0) {
+      sandboxSection += `- **Allowed directories** (you can read/write/execute in these paths):\n`;
+      for (const f of allowedFolders) {
+        sandboxSection += `  - \`${f}\`\n`;
+      }
+      sandboxSection += `- Do NOT attempt to access directories outside this list — commands will fail with "Permission denied"\n`;
+    }
+
     // Build instructions content with frontmatter
     const content = `---
 applyTo: '${applyToScope}'
@@ -227,6 +252,7 @@ applyTo: '${applyToScope}'
 
 ${task}
 
+${sandboxSection}
 ${instructions ? `## Additional Context\n\n${instructions}` : ''}
 
 ## Guidelines
@@ -239,7 +265,9 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
     
     try {
       fs.mkdirSync(instructionsDir, { recursive: true });
-      fs.writeFileSync(instructionsFile, content, { encoding: 'utf8', mode: 0o600 });
+      // Also ensure the orchestrator tmp dir exists for the agent to use
+      fs.mkdirSync(tmpDir, { recursive: true });
+      fs.writeFileSync(instructionsFile, content, 'utf8');
       this.logger.info(`[${label}] Wrote instructions to: ${instructionsFile}`);
     } catch (e) {
       this.logger.warn(`[${label}] Failed to write instructions file: ${e}`);
@@ -611,11 +639,19 @@ export function buildCommand(
     log.info(`[SECURITY] Copilot CLI allowed URLs: none (network access disabled)`);
   }
 
-  let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-tools --no-auto-update`;
+  let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-tools --no-auto-update --no-ask-user`;
   if (urlsArg) { cmd += ` ${urlsArg}`; }
   if (resolvedConfigDir) { cmd += ` --config-dir ${JSON.stringify(resolvedConfigDir)}`; }
   if (model) { cmd += ` --model ${model}`; }
-  if (logDir) { cmd += ` --log-dir ${JSON.stringify(logDir)} --log-level debug`; }
+  // Always include --log-dir if available (enables detailed tool call logging)
+  if (logDir) {
+    cmd += ` --log-dir ${JSON.stringify(logDir)} --log-level debug`;
+  } else if (resolvedConfigDir) {
+    // Fallback: use config dir + /logs as log dir
+    const fallbackLogDir = path.join(resolvedConfigDir, 'logs');
+    cmd += ` --log-dir ${JSON.stringify(fallbackLogDir)} --log-level debug`;
+    log.info(`[cli] No explicit logDir — using fallback: ${fallbackLogDir}`);
+  }
   if (sharePath) { cmd += ` --share ${JSON.stringify(sharePath)}`; }
   if (sessionId) { cmd += ` --resume ${sessionId}`; }
   if (maxTurns && maxTurns > 0) { cmd += ` --max-turns ${maxTurns}`; }

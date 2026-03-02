@@ -156,6 +156,13 @@ export async function handleUpdatePlanJob(args: any, ctx: PlanHandlerContext): P
       delete nodeState.stepStatuses['merge-ri'];
     }
     
+    // Reset auto-heal budget for updated phases so new work gets fresh heal attempts
+    if (nodeState.autoHealAttempted) {
+      if (args.work !== undefined) delete nodeState.autoHealAttempted['work'];
+      if (args.prechecks !== undefined) delete nodeState.autoHealAttempted['prechecks'];
+      if (args.postchecks !== undefined) delete nodeState.autoHealAttempted['postchecks'];
+    }
+    
     // Only set resumeFromPhase for nodes that have previously executed.
     // For nodes that have never run (attempts === 0 and status is pending/ready),
     // we must NOT set resumeFromPhase because there's nothing to resume from.
@@ -167,6 +174,15 @@ export async function handleUpdatePlanJob(args: any, ctx: PlanHandlerContext): P
     }
   }
   
+  // Record workSpec update event in state history for timeline rendering
+  if (!plan.stateHistory) plan.stateHistory = [];
+  const updateParts: string[] = [];
+  if (args.work !== undefined) updateParts.push('work');
+  if (args.prechecks !== undefined) updateParts.push('prechecks');
+  if (args.postchecks !== undefined) updateParts.push('postchecks');
+  const lastPlanStatus = plan.stateHistory?.length ? plan.stateHistory[plan.stateHistory.length - 1].to : 'running';
+  plan.stateHistory.push({ from: lastPlanStatus || 'running', to: 'job-updated', timestamp: Date.now(), reason: `${jobNode.name}: updated ${updateParts.join(', ')}` });
+
   // Persist the updated plan, notify UI, then resume execution if not paused.
   ctx.PlanRunner.savePlan(args.planId);
   ctx.PlanRunner.emit('planUpdated', args.planId);

@@ -23,3 +23,18 @@ export type { PlanSummaryData, PlanMetricsBarData, JobSummaryItem, ModelBreakdow
 
 export { renderPlanScripts } from './scriptsTemplate';
 export type { PlanScriptsData } from './scriptsTemplate';
+
+export { renderPlanTimeline } from './timelineTemplate';
+export type { PlanTimelineData } from './timelineTemplate';
+
+export { renderTimelineStyles } from './timelineStyles';
+
+export { renderPlanDetailStyles } from './stylesTemplate';
+
+export { buildMermaidDiagram } from './mermaidBuilder';
+export type { MermaidDiagramResult } from './mermaidBuilder';
+
+export { renderViewTabBar } from './tabBarTemplate';
+export type { TabBarData, PlanViewTab } from './tabBarTemplate';
+
+export { renderTabBarStyles } from './tabBarStyles';

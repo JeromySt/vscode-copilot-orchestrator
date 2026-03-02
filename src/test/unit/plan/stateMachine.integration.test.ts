@@ -370,7 +370,7 @@ suite('PlanStateMachine', () => {
       assert.strictEqual(sm.computePlanStatus(), 'failed');
     });
 
-    test('returns partial when some succeeded and some failed', () => {
+    test('returns failed when some succeeded and some failed', () => {
       const plan = createPlan(2);
       plan.startedAt = Date.now();
       const sm = new PlanStateMachine(plan);
@@ -385,7 +385,7 @@ suite('PlanStateMachine', () => {
       sm.transition('node-1', 'running');
       sm.transition('node-1', 'failed');
 
-      assert.strictEqual(sm.computePlanStatus(), 'partial');
+      assert.strictEqual(sm.computePlanStatus(), 'failed');
     });
   });
 

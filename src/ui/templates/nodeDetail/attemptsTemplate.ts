@@ -34,7 +34,7 @@ export interface WorkSpecData {
  */
 export interface AttemptCardData {
   attemptNumber: number;
-  status: 'succeeded' | 'failed' | 'canceled';
+  status: 'running' | 'succeeded' | 'failed' | 'canceled';
   triggerType?: 'initial' | 'auto-heal' | 'retry' | 'postchecks-revalidation';
   startedAt: number;
   endedAt: number;
@@ -48,6 +48,10 @@ export interface AttemptCardData {
   logFilePath?: string;
   /** Formatted work spec HTML (pre-rendered) */
   workUsedHtml?: string;
+  /** Formatted prechecks spec HTML (pre-rendered) */
+  prechecksUsedHtml?: string;
+  /** Formatted postchecks spec HTML (pre-rendered) */
+  postchecksUsedHtml?: string;
   /** Combined logs for this attempt */
   logs?: string;
   /** Pre-rendered metrics HTML */
@@ -198,8 +202,29 @@ export function attemptPhaseTabsHtml(attempt: AttemptCardData): string {
  * @returns HTML fragment string for the attempt card.
  */
 export function attemptCardHtml(attempt: AttemptCardData): string {
-  const duration = formatDuration(Math.round((attempt.endedAt - attempt.startedAt) / 1000));
+  const isRunning = attempt.status === 'running';
+  const duration = isRunning 
+    ? formatDuration(Math.round((Date.now() - attempt.startedAt) / 1000)) + '…'
+    : formatDuration(Math.round((attempt.endedAt - attempt.startedAt) / 1000));
   const timestamp = new Date(attempt.startedAt).toLocaleString();
+
+  const statusColor = attempt.status === 'succeeded' ? '#4ec9b0'
+    : attempt.status === 'failed' ? '#f48771'
+    : attempt.status === 'running' ? '#3794ff'
+    : '#858585';
+
+  const statusIcon = attempt.status === 'succeeded' ? '✓'
+    : attempt.status === 'failed' ? '✗'
+    : attempt.status === 'running' ? '▶'
+    : '⊘';
+
+  const triggerLabel = attempt.triggerType === 'auto-heal' ? '🔧 Auto-Heal'
+    : attempt.triggerType === 'retry' ? '🔄 Retry'
+    : attempt.triggerType === 'postchecks-revalidation' ? '🔍 Re-validation'
+    : '';
+  const triggerBadge = triggerLabel
+    ? `<span class="attempt-trigger-badge">${triggerLabel}</span>`
+    : '';
 
   const stepIndicators = `
         ${stepIconHtml(attempt.stepStatuses?.['merge-fi'])}
@@ -210,62 +235,92 @@ export function attemptCardHtml(attempt: AttemptCardData): string {
         ${stepIconHtml(attempt.stepStatuses?.['merge-ri'])}
       `;
 
-  const sessionHtml = attempt.copilotSessionId
-    ? `<div class="attempt-meta-row"><strong>Session:</strong> <span class="session-id" data-session="${attempt.copilotSessionId}" title="Click to copy">${attempt.copilotSessionId.substring(0, 12)}... 📋</span></div>`
-    : '';
+  // ── Expanded body sections ──
 
   const errorHtml = attempt.error
-    ? `<div class="attempt-error">
-            <strong>Error:</strong> <span class="error-message">${escapeHtml(attempt.error)}</span>
-            ${attempt.failedPhase ? `<div style="margin-top: 4px;">Failed in phase: <strong>${attempt.failedPhase}</strong></div>` : ''}
-            ${attempt.exitCode !== undefined ? `<div>Exit code: <strong>${attempt.exitCode}</strong></div>` : ''}
-           </div>`
+    ? `<div class="attempt-section attempt-error-section">
+        <div class="attempt-section-title">❌ Error</div>
+        <div class="attempt-error-body">
+          <div class="attempt-error-msg">${escapeHtml(attempt.error)}</div>
+          ${attempt.failedPhase ? `<div class="attempt-error-detail">Failed in phase: <strong>${attempt.failedPhase}</strong></div>` : ''}
+          ${attempt.exitCode !== undefined ? `<div class="attempt-error-detail">Exit code: <strong>${attempt.exitCode}</strong></div>` : ''}
+        </div>
+      </div>`
     : '';
 
-  const attemptLogFileHtml = attempt.logFilePath
-    ? `<div class="attempt-meta-row"><strong>Log:</strong> <span class="log-file-path" data-path="${escapeHtml(attempt.logFilePath)}" title="${escapeHtml(attempt.logFilePath)}">📄 ${escapeHtml(truncateLogPath(attempt.logFilePath))}</span></div>`
+  const metricsHtml = attempt.metricsHtml
+    ? `<div class="attempt-section">
+        <div class="attempt-section-title">📊 AI Usage</div>
+        ${attempt.metricsHtml}
+      </div>`
     : '';
 
-  const contextHtml = (attempt.worktreePath || attempt.baseCommit || attempt.workUsedHtml || attempt.logFilePath)
-    ? `<div class="attempt-context">
-            ${attempt.baseCommit ? `<div class="attempt-meta-row"><strong>Base:</strong> <code>${attempt.baseCommit.slice(0, 8)}</code></div>` : ''}
-            ${attempt.worktreePath ? `<div class="attempt-meta-row"><strong>Worktree:</strong> <code>${escapeHtml(attempt.worktreePath)}</code></div>` : ''}
-            ${attemptLogFileHtml}
-            ${attempt.workUsedHtml ? `<div class="attempt-meta-row attempt-work-row"><strong>Work:</strong> <div class="attempt-work-content">${attempt.workUsedHtml}</div></div>` : ''}
-           </div>`
+  const contextItems: string[] = [];
+  if (attempt.baseCommit) {
+    contextItems.push(`<div class="attempt-ctx-row"><span class="attempt-ctx-label">Base</span><code class="attempt-ctx-value">${attempt.baseCommit.slice(0, 8)}</code></div>`);
+  }
+  if (attempt.worktreePath) {
+    contextItems.push(`<div class="attempt-ctx-row"><span class="attempt-ctx-label">Worktree</span><code class="attempt-ctx-value">${escapeHtml(attempt.worktreePath)}</code></div>`);
+  }
+  if (attempt.logFilePath) {
+    contextItems.push(`<div class="attempt-ctx-row"><span class="attempt-ctx-label">Log</span><span class="log-file-path attempt-ctx-value" data-path="${escapeHtml(attempt.logFilePath)}" title="${escapeHtml(attempt.logFilePath)}">📄 ${escapeHtml(truncateLogPath(attempt.logFilePath))}</span></div>`);
+  }
+  if (attempt.copilotSessionId) {
+    contextItems.push(`<div class="attempt-ctx-row"><span class="attempt-ctx-label">Session</span><span class="session-id attempt-ctx-value" data-session="${attempt.copilotSessionId}" title="Click to copy">${attempt.copilotSessionId.substring(0, 12)}… 📋</span></div>`);
+  }
+  const contextHtml = contextItems.length > 0
+    ? `<div class="attempt-section"><div class="attempt-section-title">🔗 Context</div><div class="attempt-ctx-grid">${contextItems.join('')}</div></div>`
     : '';
 
-  const triggerBadge = attempt.triggerType === 'auto-heal'
-    ? '<span class="trigger-badge auto-heal">🔧 Auto-Heal</span>'
-    : attempt.triggerType === 'retry'
-      ? '<span class="trigger-badge retry">🔄 Retry</span>'
-      : attempt.triggerType === 'postchecks-revalidation'
-        ? '<span class="trigger-badge retry">🔍 Postchecks Re-validation</span>'
-        : '';
+  const prechecksHtml = attempt.prechecksUsedHtml
+    ? `<div class="attempt-section"><div class="attempt-section-title">🔍 Prechecks</div>${attempt.prechecksUsedHtml}</div>`
+    : '';
+
+  const workHtml = attempt.workUsedHtml
+    ? `<div class="attempt-section"><div class="attempt-section-title">📝 Work Spec</div>${attempt.workUsedHtml}</div>`
+    : '';
+
+  const postchecksHtml = attempt.postchecksUsedHtml
+    ? `<div class="attempt-section"><div class="attempt-section-title">✅ Postchecks</div>${attempt.postchecksUsedHtml}</div>`
+    : '';
 
   const phaseTabsHtml = attempt.logs ? attemptPhaseTabsHtml(attempt) : '';
+  const logsHtml = phaseTabsHtml
+    ? `<div class="attempt-section"><div class="attempt-section-title">📋 Logs</div>${phaseTabsHtml}</div>`
+    : '';
+
+  // For running attempts with no content sections, show a status indicator
+  // so the expanded body isn't completely empty
+  const hasBodyContent = errorHtml || metricsHtml || contextItems.length > 0 || 
+    prechecksHtml || workHtml || postchecksHtml || logsHtml;
+  const runningPlaceholder = (!hasBodyContent && isRunning)
+    ? `<div class="attempt-section"><div class="attempt-running-indicator">⟳ Executing… see live log viewer above for current output.</div></div>`
+    : '';
 
   return `
-        <div class="attempt-card" data-attempt="${attempt.attemptNumber}">
+        <div class="attempt-card" data-attempt="${attempt.attemptNumber}" style="border-left: 3px solid ${statusColor};">
           <div class="attempt-header" data-expanded="false">
             <div class="attempt-header-left">
+              <span class="attempt-status-icon" style="color:${statusColor};">${statusIcon}</span>
               <span class="attempt-badge">#${attempt.attemptNumber}</span>
               ${triggerBadge}
               <span class="step-indicators">${stepIndicators}</span>
-              <span class="attempt-time">${timestamp}</span>
-              <span class="attempt-duration">(${duration})</span>
             </div>
-            <span class="chevron">▶</span>
+            <div class="attempt-header-right">
+              <span class="attempt-time">${timestamp}</span>
+              <span class="attempt-duration">${duration}</span>
+              <span class="attempt-chevron">›</span>
+            </div>
           </div>
           <div class="attempt-body" style="display: none;">
-            <div class="attempt-meta">
-              <div class="attempt-meta-row"><strong>Status:</strong> <span class="status-${attempt.status}">${attempt.status}</span></div>
-              ${sessionHtml}
-            </div>
-            ${attempt.metricsHtml || ''}
-            ${contextHtml}
+            ${runningPlaceholder}
             ${errorHtml}
-            ${phaseTabsHtml}
+            ${metricsHtml}
+            ${contextHtml}
+            ${prechecksHtml}
+            ${workHtml}
+            ${postchecksHtml}
+            ${logsHtml}
           </div>
         </div>
       `;

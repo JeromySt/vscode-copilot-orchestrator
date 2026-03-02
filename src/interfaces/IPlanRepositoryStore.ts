@@ -90,6 +90,12 @@ export interface StoredPlanMetadata {
   /** Whether plan is paused */
   isPaused?: boolean;
   
+  /** Historical log of plan-level state changes for timeline rendering. */
+  stateHistory?: Array<{ status: string; timestamp: number; reason?: string }>;
+  
+  /** Historical log of pause/resume intervals for timeline rendering. */
+  pauseHistory?: Array<{ pausedAt: number; resumedAt?: number; reason?: string }>;
+  
   /** Environment variables applied to all jobs */
   env?: Record<string, string>;
   

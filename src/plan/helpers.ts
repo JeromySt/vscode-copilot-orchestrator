@@ -115,19 +115,25 @@ export function computePlanStatus(
   // Convert to array so we can iterate multiple times
   const states = Array.from(nodeStates);
   
-  // If paused, return paused status (overrides running/pending)
-  // Note: isPaused can be set before or after the plan starts
+  // If paused, return paused/pausing/pending-start status (overrides running/pending)
   if (isPaused) {
     // Check if there are still non-terminal nodes (paused only makes sense if there's work to do)
     let hasNonTerminal = false;
+    let hasRunningOrScheduled = false;
     for (const state of states) {
       if (!['succeeded', 'failed', 'canceled', 'blocked'].includes(state.status)) {
         hasNonTerminal = true;
-        break;
+        if (state.status === 'running' || state.status === 'scheduled') {
+          hasRunningOrScheduled = true;
+        }
       }
     }
     if (hasNonTerminal) {
-      return 'paused';
+      // Plans that have never started are 'pending-start' (awaiting user start);
+      // plans with running jobs are 'pausing' (waiting for active work to finish);
+      // plans with no running jobs are fully 'paused'.
+      if (!hasStarted) { return 'pending-start'; }
+      return hasRunningOrScheduled ? 'pausing' : 'paused';
     }
     // All nodes are terminal - fall through to compute final status
   }
@@ -193,7 +199,7 @@ export function computePlanStatus(
   }
 
   if (hasFailed && hasSucceeded) {
-    return 'partial';
+    return 'failed'; // Previously 'partial' — all terminal mixtures are now 'failed'
   }
 
   if (hasFailed) {

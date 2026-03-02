@@ -47,11 +47,30 @@ async function main() {
     define: buildDefines,
     plugins: [esbuildProblemMatcherPlugin]
   });
+
+  // Webview bundles - browser-safe IIFE bundles for webview panels
+  const webviewCtx = await esbuild.context({
+    entryPoints: [
+      'src/ui/webview/entries/planDetail.ts',
+      'src/ui/webview/entries/nodeDetail.ts',
+      'src/ui/webview/entries/plansList.ts',
+    ],
+    bundle: true,
+    format: 'iife',
+    minify: production,
+    sourcemap: !production,
+    platform: 'browser',
+    outdir: 'dist/webview',
+    logLevel: 'warning',
+    define: buildDefines,
+    plugins: [esbuildProblemMatcherPlugin]
+  });
+
   if (watch) {
-    await Promise.all([ctx.watch(), stdioCtx.watch()]);
+    await Promise.all([ctx.watch(), stdioCtx.watch(), webviewCtx.watch()]);
   } else {
-    await Promise.all([ctx.rebuild(), stdioCtx.rebuild()]);
-    await Promise.all([ctx.dispose(), stdioCtx.dispose()]);
+    await Promise.all([ctx.rebuild(), stdioCtx.rebuild(), webviewCtx.rebuild()]);
+    await Promise.all([ctx.dispose(), stdioCtx.dispose(), webviewCtx.dispose()]);
   }
 }
 

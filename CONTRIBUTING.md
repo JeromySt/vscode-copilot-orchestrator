@@ -1,329 +1,57 @@
 # Contributing to Copilot Orchestrator
 
-Thank you for your interest in contributing to Copilot Orchestrator! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing! This document gets you started quickly. For the full contributor guide with architecture details, DI conventions, and PR requirements, see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
-## Development Setup
+## Quick Start
 
-### Prerequisites
+```bash
+git clone https://github.com/JeromySt/vscode-copilot-orchestrator.git
+cd vscode-copilot-orchestrator
+npm install
+npm run compile
+npm run test:unit
+code .          # Then press F5 to launch Extension Dev Host
+```
 
-- Node.js 18.x or later
-- VS Code 1.85.0 or later
-- Git 2.20+
-
-### Getting Started
-
-1. **Fork and clone the repository**
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/vscode-copilot-orchestrator.git
-   cd vscode-copilot-orchestrator
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Compile the extension**
-   ```bash
-   npm run compile
-   ```
-
-4. **Open in VS Code**
-   ```bash
-   code .
-   ```
-
-5. **Launch the Extension Development Host**
-   - Press `F5` to start debugging
-   - A new VS Code window will open with the extension loaded
-
-### Development Commands
+## Build Commands
 
 | Command | Description |
 |---------|-------------|
-| `npm run compile` | Compile TypeScript + esbuild bundle |
-| `npm run compile:tsc` | Compile TypeScript only (for tests) |
+| `npm run compile` | Type-check + esbuild bundle |
+| `npm run test:unit` | Run all unit tests (headless) |
+| `npm run test:coverage` | Tests + 95% line coverage enforcement |
 | `npm run watch` | Compile in watch mode |
-| `npm run lint` | Run ESLint |
-| `npm test` | Run unit tests (headless - no VS Code required) |
-| `npm run test:unit` | Run unit tests (same as `npm test`) |
-| `npm run test:coverage` | Run tests with 95% coverage enforcement |
-| `npm run package` | Create VSIX package |
-| `npm run deploy:local` | Build, package, and install locally (see below) |
+| `npm run lint` | ESLint |
+| `npm run local-install` | Package VSIX + install locally |
 
-### Local Deployment
+## Key Rules
 
-To quickly test changes in your local VS Code instance without the F5 Extension Development Host:
+1. **Never `new ConcreteClass()` outside `src/composition.ts`** — use dependency injection
+2. **Never `import * as vscode` in business logic** — only allowed in `src/vscode/`, `src/extension.ts`, `src/composition.ts`, `src/ui/`
+3. **Use Mocha TDD style** — `suite()` / `test()`, never `describe()` / `it()`
+4. **95% line coverage** — enforced via c8
+5. **Branch workflow** — always create a feature branch, never commit to `main` directly
 
-```bash
-npm run deploy:local
-```
+## Making a PR
 
-This single command:
-1. **Bumps the patch version** (`npm version patch --no-git-tag-version`) — avoids version conflicts with the marketplace
-2. **Packages a VSIX** (`npx @vscode/vsce package --no-dependencies`) — creates `vscode-copilot-orchestrator-<version>.vsix`
-3. **Installs the VSIX** (`code --install-extension ... --force`) — installs into your running VS Code
+1. `git checkout -b feat/my-feature` (from main)
+2. Make changes + write tests
+3. `npm run compile && npm run test:unit`
+4. `git push -u origin feat/my-feature`
+5. Create PR via `gh pr create --base main`
 
-After running, **reload VS Code** (Developer: Reload Window) to activate the new version.
+## Documentation
 
-> **Note:** The version bump is intentionally `--no-git-tag-version` so it doesn't create a git tag or commit. Remember to set the version appropriately before committing.
-
-## Project Structure
-
-```
-src/
-├── extension.ts            # Extension entry point (activation/deactivation)
-├── composition.ts          # Production DI composition root
-├── compositionTest.ts      # Test DI composition root
-├── core/                   # Core infrastructure
-│   ├── container.ts        # Symbol-based DI container
-│   ├── tokens.ts           # Service registration tokens (30+)
-│   ├── logger.ts           # Per-component logging with debug flags
-│   ├── pulse.ts            # Single heartbeat emitter for UI subscriptions
-│   ├── globalCapacity.ts   # Cross-instance job coordination (file-based)
-│   ├── powerManager.ts     # Sleep prevention (platform-specific)
-│   └── planInitialization.ts # Extension activation and wiring
-├── interfaces/             # DI interface contracts
-│   ├── IConfigProvider.ts  # Configuration abstraction
-│   ├── ICopilotRunner.ts   # Copilot CLI abstraction
-│   ├── IDialogService.ts   # Dialog abstraction
-│   ├── IGitOperations.ts   # Git operations abstraction
-│   ├── ILogger.ts          # Logger interface
-│   ├── IPhaseExecutor.ts   # Phase execution interface
-│   ├── IProcessSpawner.ts  # Process spawning abstraction
-│   └── IPulseEmitter.ts    # UI heartbeat interface
-├── vscode/                 # VS Code adapter layer
-│   ├── adapters.ts         # Production VS Code API wrappers
-│   └── testAdapters.ts     # Test doubles with call tracking
-├── agent/                  # AI agent integration
-│   ├── agentDelegator.ts   # Copilot CLI delegation
-│   ├── copilotCliRunner.ts # CLI runner with security (--add-dir, --allow-url)
-│   └── modelDiscovery.ts   # Model availability discovery
-├── plan/                   # Plan execution engine
-│   ├── executionEngine.ts  # Node-centric job execution engine
-│   ├── executionPump.ts    # Async execution pump for scheduling
-│   ├── executor.ts         # 8-phase executor pipeline
-│   ├── nodeManager.ts      # Centralized node state management
-│   ├── planEvents.ts       # Event pub/sub for plan lifecycle
-│   ├── planLifecycle.ts    # Plan CRUD operations
-│   ├── phases/             # Decomposed phase executors
-│   │   ├── mergeFiPhase.ts #   Forward integration merge
-│   │   ├── precheckPhase.ts#   Pre-execution checks
-│   │   ├── workPhase.ts    #   AI/shell work execution
-│   │   ├── commitPhase.ts  #   Evidence-based commit
-│   │   ├── postcheckPhase.ts#  Post-execution checks
-│   │   └── mergeRiPhase.ts #   Reverse integration merge
-│   ├── runner.ts           # Legacy plan runner (delegating)
-│   └── persistence.ts      # Plan file persistence
-├── mcp/                    # Model Context Protocol (stdio IPC)
-│   ├── handlers/           # MCP tool handlers
-│   ├── validation/         # Input validation (Ajv schemas)
-│   └── stdio/              # stdio JSON-RPC server
-├── git/                    # Git operations
-│   ├── DefaultGitOperations.ts # IGitOperations implementation
-│   └── core/               # Low-level git commands
-├── ui/                     # User interface
-│   ├── panels/             # Webview panels (plan detail, node detail)
-│   ├── templates/          # HTML template modules
-│   ├── webview/            # Reusable webview controls
-│   │   ├── controls/       # 15+ UI components
-│   │   ├── eventBus.ts     # Pub/sub for webview messaging
-│   │   └── subscribableControl.ts # Reactive base class
-│   ├── planTreeProvider.ts # Sidebar tree view
-│   └── plansViewProvider.ts# Plans management view
-├── process/                # Process monitoring
-│   └── processMonitor.ts   # Child process tracking
-└── test/
-    └── unit/               # Unit tests (mocha + c8, headless)
-        ├── register-vscode-mock.js # VS Code API mock registration
-        └── ...             # Mirrors src/ structure
-```
-
-## Coding Standards
-
-### TypeScript Guidelines
-
-- Use TypeScript strict mode
-- Prefer `async/await` over callbacks
-- Use explicit return types for public functions
-- Avoid `any` type when possible
-
-### Code Style
-
-- Use 2-space indentation
-- Use single quotes for strings
-- Add JSDoc comments for public APIs
-- Keep functions focused and small
-
-### Example
-
-```typescript
-/**
- * Creates a new orchestrator job.
- * @param spec - The job specification
- * @returns The created job ID
- */
-export async function createJob(spec: JobSpec): Promise<string> {
-  // Validate input
-  if (!spec.task) {
-    throw new Error('Job task is required');
-  }
-
-  // Create and return job
-  const job = await jobRunner.create(spec);
-  return job.id;
-}
-```
-
-## Pull Request Process
-
-### Before Submitting
-
-1. **Create a feature branch**
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-
-2. **Make your changes**
-   - Write clear, focused commits
-   - Add tests for new functionality
-   - Update documentation as needed
-
-3. **Run quality checks**
-   ```bash
-   npm run lint
-   npm test
-   npm run compile
-   ```
-
-4. **Test manually**
-   - Press `F5` to launch the extension
-   - Verify your changes work as expected
-
-### Submitting
-
-1. Push your branch to your fork
-2. Open a Pull Request against the `main` branch
-3. Fill out the PR template completely
-4. Wait for review and address any feedback
-
-### PR Guidelines
-
-- **Title**: Use a clear, descriptive title
-- **Description**: Explain what changes you made and why
-- **Size**: Keep PRs focused; split large changes into multiple PRs
-- **Tests**: Include tests for new functionality
-- **Documentation**: Update README/docs if adding features
-
-## Issue Reporting
-
-### Bug Reports
-
-When reporting bugs, please include:
-
-1. **VS Code version** (`Help > About`)
-2. **Extension version**
-3. **Operating system**
-4. **Steps to reproduce**
-5. **Expected behavior**
-6. **Actual behavior**
-7. **Relevant logs** (from Output > Copilot Orchestrator)
-
-### Feature Requests
-
-For feature requests, please describe:
-
-1. **The problem** you're trying to solve
-2. **Your proposed solution**
-3. **Alternative solutions** you've considered
-4. **Additional context** (screenshots, examples)
-
-## Testing
-
-### Running Tests
-
-```bash
-# Unit tests (headless - no VS Code required)
-npm test
-# or
-npm run test:unit
-
-# Coverage report (95% line threshold enforced)
-npm run test:coverage
-```
-
-### Writing Tests
-
-- Place unit tests in `src/test/unit/` mirroring the `src/` structure
-- Use Mocha TDD interface (`suite`, `test`, `setup`, `teardown`)
-- Use Sinon for mocking/stubbing
-- Tests run headless via `register-vscode-mock.js` — no VS Code or Electron required
-- The comprehensive VS Code API mock in `src/test/unit/mocks/vscode.ts` provides full API coverage
-- **Use DI interfaces**: Inject mock services instead of stubbing modules
-
-```typescript
-// ✅ Good: Use mock via DI
-const mockGit = createMockGitOperations();
-const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
-
-// ❌ Avoid: Stub module internals
-sinon.stub(git.worktrees, 'createOrReuseDetached');
-```
-
-### Coverage Requirements
-
-All PRs must maintain **95% line coverage**. Coverage is enforced by c8:
-```bash
-c8 --check-coverage --lines 95 --all \
-   --include "out/**/*.js" \
-   --exclude "out/test/**" --exclude "out/ui/**" \
-   --exclude "out/extension.js" --exclude "out/vscode/adapters.js" \
-   --exclude "out/core/planInitialization.js" \
-   mocha --ui tdd --exit "out/test/unit/**/*.test.js" \
-   --require src/test/unit/register-vscode-mock.js
-```
-
-## Dependency Injection
-
-New services should use the DI container:
-
-1. **Define an interface** in `src/interfaces/`
-2. **Create a token** in `src/core/tokens.ts`
-3. **Register in composition root** (`src/composition.ts` for production, `src/compositionTest.ts` for tests)
-4. **Inject via constructor** — avoid importing concrete implementations
-
-See `docs/DI_GUIDE.md` for comprehensive patterns and examples.
-
-## Agent Instructions & Plan Creation
-
-For complex tasks requiring detailed agent instructions:
-
-- **Large Instructions**: Use `instructionsFile` parameter instead of inline `instructions` to keep MCP payloads manageable and improve readability.
-- **Complex Plans**: For plans with 5+ nodes, use the scaffold workflow:
-  1. Create plan structure with `scaffold()`
-  2. Add individual work specs with `addNode()`  
-  3. Mark complete with `finalize()`
-
-This approach provides better memory efficiency and enables lazy-loading of work specifications during execution.
-
-## Release Process
-
-Releases are automated via GitHub Actions:
-
-1. Update version in `package.json`
-2. Update `CHANGELOG.md`
-3. Create a git tag: `git tag v0.x.x`
-4. Push the tag: `git push origin v0.x.x`
-5. GitHub Actions will build and publish
+| Guide | Focus |
+|-------|-------|
+| [Architecture](docs/ARCHITECTURE.md) | System design, class diagrams, sequence diagrams |
+| [Contributing (full)](docs/CONTRIBUTING.md) | Workflow, common tasks, PR checklist |
+| [DI Guide](docs/DI_GUIDE.md) | Adding services, tokens, mocking |
+| [Testing](docs/TESTING.md) | Test framework, patterns, coverage |
+| [Copilot Integration](docs/COPILOT_INTEGRATION.md) | MCP tools and agent delegation |
+| [Worktrees & Merging](docs/WORKTREES_AND_MERGING.md) | Git isolation strategies |
+| [Groups](docs/GROUPS.md) | Visual hierarchy and namespacing |
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
-
-## Questions?
-
-- Open an issue for questions
-- Check existing issues for answers
-- Read the documentation in `README.md`
-
-Thank you for contributing! 🎉
+By contributing, you agree that your contributions will be licensed under the [GPL-3.0 License](LICENSE).

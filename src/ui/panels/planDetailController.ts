@@ -78,7 +78,7 @@ export class PlanDetailController {
         break;
       case 'openNode': {
         const planIdForNode = message.planId || this._planId;
-        this._delegate.executeCommand('orchestrator.showNodeDetails', planIdForNode, message.nodeId);
+        this._delegate.executeCommand('orchestrator.showNodeDetails', planIdForNode, message.nodeId, message.attemptNumber);
         break;
       }
       case 'refresh':

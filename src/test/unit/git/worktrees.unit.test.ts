@@ -2,6 +2,7 @@ import { suite, test } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as worktrees from '../../../git/core/worktrees';
 import * as executor from '../../../git/core/executor';
 import * as branches from '../../../git/core/branches';
@@ -785,7 +786,7 @@ suite('Git Core Worktrees Unit Tests', () => {
       };
 
       // Start both operations simultaneously
-      await Promise.all([
+      const [result1, result2] = await Promise.all([
         worktrees.create(options1),
         worktrees.create(options2)
       ]);

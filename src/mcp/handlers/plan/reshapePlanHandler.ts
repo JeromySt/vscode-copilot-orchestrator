@@ -193,6 +193,12 @@ export async function handleReshapePlan(args: any, ctx: PlanHandlerContext): Pro
 
   log.info('Plan reshaped', { planId: args.planId, opCount: results.length });
 
+  // Record reshape event in state history for timeline rendering
+  if (!plan.stateHistory) plan.stateHistory = [];
+  const opSummary = results.map(r => `${r.operation}:${r.success ? 'ok' : 'fail'}`).join(', ');
+  const lastStatus = plan.stateHistory?.length ? plan.stateHistory[plan.stateHistory.length - 1].to : 'running';
+  plan.stateHistory.push({ from: lastStatus || 'running', to: 'reshaped', timestamp: Date.now(), reason: `reshape: ${opSummary}` });
+
   return {
     success: results.every(r => r.success),
     planId: args.planId,

@@ -78,6 +78,11 @@ export async function handleUpdatePlan(args: any, ctx: PlanHandlerContext): Prom
     return { success: true, planId: args.planId, message: 'No changes specified' };
   }
 
+  // Record plan update event in state history for timeline rendering
+  if (!plan.stateHistory) plan.stateHistory = [];
+  const lastStatus = plan.stateHistory?.length ? plan.stateHistory[plan.stateHistory.length - 1].to : 'running';
+  plan.stateHistory.push({ from: lastStatus || 'running', to: 'plan-updated', timestamp: Date.now(), reason: `settings: ${updated.join(', ')}` });
+
   // Persist the updated plan
   ctx.PlanRunner.savePlan(args.planId);
 

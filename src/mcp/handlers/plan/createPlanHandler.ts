@@ -251,7 +251,7 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
                `Use planId '${plan.id}' to monitor progress.`,
       jobMapping,
       status: {
-        status: isPaused ? 'paused' : 'pending',
+        status: isPaused ? 'pending-start' : 'pending',
         nodes: plan.jobs.size,
         roots: plan.roots.length,
         leaves: plan.leaves.length,

@@ -438,5 +438,39 @@ suite('updateJobHandler', () => {
       
       assert.strictEqual(result.success, true);
     });
+
+    test('should reset autoHealAttempted for updated work phase', async () => {
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
+      const plan = makeMockPlan();
+      const nodeState = plan.nodeStates.get('job-1');
+      nodeState.autoHealAttempted = { work: 2, prechecks: 1 };
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
+
+      await handleUpdatePlanJob({
+        planId: 'plan-1', jobId: 'job-1',
+        work: { agent: { instructions: 'new work' } },
+      }, ctx);
+
+      assert.strictEqual(nodeState.autoHealAttempted.work, undefined, 'work budget should be reset');
+      assert.strictEqual(nodeState.autoHealAttempted.prechecks, 1, 'prechecks budget should be untouched');
+    });
+
+    test('should reset autoHealAttempted for updated prechecks and postchecks', async () => {
+      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
+      const plan = makeMockPlan();
+      const nodeState = plan.nodeStates.get('job-1');
+      nodeState.autoHealAttempted = { work: 2, prechecks: 2, postchecks: 2 };
+      const ctx = makeCtx({ getPlan: sinon.stub().returns(plan) });
+
+      await handleUpdatePlanJob({
+        planId: 'plan-1', jobId: 'job-1',
+        prechecks: 'echo check',
+        postchecks: 'echo post',
+      }, ctx);
+
+      assert.strictEqual(nodeState.autoHealAttempted.work, 2, 'work budget should be untouched');
+      assert.strictEqual(nodeState.autoHealAttempted.prechecks, undefined, 'prechecks should be reset');
+      assert.strictEqual(nodeState.autoHealAttempted.postchecks, undefined, 'postchecks should be reset');
+    });
   });
 });

@@ -10,6 +10,7 @@
 
 import { randomUUID } from 'crypto';
 import * as path from 'path';
+import * as fs from 'fs';
 import { Logger } from '../core/logger';
 import * as branches from './core/branches';
 import * as worktrees from './core/worktrees';

@@ -15,7 +15,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec } from '../../plan';
+import { PlanRunner, PlanInstance, JobNode, NodeExecutionState, JobWorkSummary, WorkSpec, normalizeWorkSpec } from '../../plan';
 import { escapeHtml, formatDuration, errorPageHtml, loadingPageHtml, commitDetailsHtml, workSummaryStatsHtml } from '../templates';
 import { getNodeMetrics } from '../../plan/metricsAggregator';
 import {
@@ -23,13 +23,16 @@ import {
   retryButtonsHtml, forceFailButtonHtml, bottomActionsHtml,
   processTreeSectionHtml, logViewerSectionHtml,
   dependenciesSectionHtml, gitInfoSectionHtml,
+  configSectionHtml,
   metricsSummaryHtml, attemptMetricsHtml as attemptMetricsTemplateHtml,
   attemptHistoryHtml, webviewScripts,
   renderSpecContent, getSpecTypeInfo,
+  renderNodeDetailStyles,
 } from '../templates/nodeDetail';
 import type { AttemptCardData } from '../templates/nodeDetail';
 import { NodeDetailController, NodeDetailCommands } from './nodeDetailController';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
+import { webviewScriptTag } from '../webviewUri';
 
 /**
  * Extract onFailure config from a WorkSpec (if present).
@@ -43,6 +46,33 @@ function extractOnFailure(spec: WorkSpec | undefined): { noAutoHeal?: boolean; m
     message: onFailure.message,
     resumeFromPhase: onFailure.resumeFromPhase,
   };
+}
+
+/**
+ * Format a {@link WorkSpec} as a plain-text summary string.
+ *
+ * @param spec - The work specification to format.
+ * @returns A human-readable text representation of the work spec, or empty string if undefined.
+ */
+function formatWorkSpec(spec: WorkSpec | undefined): string {
+  if (!spec) {return '';}
+  
+  if (typeof spec === 'string') {
+    return spec;
+  }
+  
+  switch (spec.type) {
+    case 'process':
+      const args = spec.args?.join(' ') || '';
+      return `[process] ${spec.executable} ${args}`.trim();
+    case 'shell':
+      const shell = spec.shell ? `[${spec.shell}] ` : '';
+      return `${shell}${spec.command}`;
+    case 'agent':
+      return `[agent] ${spec.instructions}`;
+    default:
+      return JSON.stringify(spec);
+  }
 }
 
 /**
@@ -79,6 +109,28 @@ function formatEnvHtml(env: Record<string, string> | undefined, escapeHtml: (s: 
     .map(([k, v]) => `<tr><td class="env-key">${escapeHtml(k)}</td><td class="env-val">${escapeHtml(v)}</td></tr>`)
     .join('');
   return `<details class="env-section"><summary>Environment Variables (${Object.keys(env).length})</summary><table class="env-table">${rows}</table></details>`;
+}
+
+/**
+ * Resolve a work spec from a ref path (e.g., specs/nodeId/attempts/1/work.json).
+ * Reads the JSON file, hydrates agent instructionsFile if present.
+ * Returns formatted HTML or undefined if file doesn't exist.
+ */
+function resolveSpecFromRef(ref: string | undefined, storagePath: string, planId: string, escapeHtml: (s: string) => string): string | undefined {
+  if (!ref || !storagePath) {return undefined;}
+  try {
+    const specPath = require('path').join(storagePath, planId, ref);
+    const rawSpec = require('fs').readFileSync(specPath, 'utf-8');
+    const spec = JSON.parse(rawSpec);
+    if (spec.instructionsFile) {
+      try {
+        const mdPath = require('path').join(require('path').dirname(specPath), spec.instructionsFile);
+        spec.instructions = require('fs').readFileSync(mdPath, 'utf-8');
+        delete spec.instructionsFile;
+      } catch { /* md not found */ }
+    }
+    return formatWorkSpecHtml(spec, escapeHtml);
+  } catch { return undefined; }
 }
 
 function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) => string): string {
@@ -351,6 +403,7 @@ export class NodeDetailPanel {
   private static panels = new Map<string, NodeDetailPanel>();
   
   private readonly _panel: vscode.WebviewPanel;
+  private readonly _extensionUri: vscode.Uri;
   private _planId: string;
   private _nodeId: string;
   private _disposables: vscode.Disposable[] = [];
@@ -359,10 +412,13 @@ export class NodeDetailPanel {
   private _lastStatus: string | null = null;
   private _lastWorktreeCleanedUp: boolean | undefined = undefined;
   private _lastAttemptCount = 0;
+  private _lastAttemptStatus = '';
+  private _configSentOnce = false;
   private _controller: NodeDetailController;
   
   /**
    * @param panel - The VS Code webview panel instance.
+   * @param extensionUri - The extension URI for loading webview resources.
    * @param planId - The Plan ID that contains this node.
    * @param nodeId - The unique identifier of the node to display.
    * @param _planRunner - The {@link PlanRunner} instance for querying state and logs.
@@ -370,12 +426,14 @@ export class NodeDetailPanel {
    */
   private constructor(
     panel: vscode.WebviewPanel,
+    extensionUri: vscode.Uri,
     planId: string,
     nodeId: string,
     private _planRunner: PlanRunner,
     private _pulse: IPulseEmitter
   ) {
     this._panel = panel;
+    this._extensionUri = extensionUri;
     this._planId = planId;
     this._nodeId = nodeId;
     
@@ -436,6 +494,13 @@ export class NodeDetailPanel {
       const plan = this._planRunner.get(this._planId);
       const state = plan?.nodeStates.get(this._nodeId);
 
+      // Resend config on the next pulse if it wasn't delivered yet.
+      // This handles the race where _sendConfigUpdate fires before the
+      // webview scripts have finished initializing.
+      if (!this._configSentOnce) {
+        this._sendConfigUpdate();
+      }
+
       // Always send incremental state change so header phase indicator updates
       if (state) {
         const phaseStatus = this._getPhaseStatus(state);
@@ -450,9 +515,17 @@ export class NodeDetailPanel {
         });
 
         // Push incremental attempt history when new attempts are recorded
-        if (state.attemptHistory && state.attemptHistory.length > this._lastAttemptCount) {
-          this._lastAttemptCount = state.attemptHistory.length;
-          this._sendAttemptUpdate(state);
+        // or when a running placeholder is replaced with a completed record
+        if (state.attemptHistory && state.attemptHistory.length > 0) {
+          const lastAttempt = state.attemptHistory[state.attemptHistory.length - 1];
+          const lastStatus = lastAttempt.status;
+          const changed = state.attemptHistory.length > this._lastAttemptCount
+            || (lastStatus !== 'running' && this._lastAttemptStatus === 'running');
+          if (changed) {
+            this._lastAttemptCount = state.attemptHistory.length;
+            this._lastAttemptStatus = lastStatus;
+            this._sendAttemptUpdate(state);
+          }
         }
       }
 
@@ -512,7 +585,8 @@ export class NodeDetailPanel {
     planId: string,
     nodeId: string,
     planRunner: PlanRunner,
-    pulse?: IPulseEmitter
+    pulse?: IPulseEmitter,
+    focusAttemptNumber?: number
   ) {
     const key = `${planId}:${nodeId}`;
     
@@ -520,6 +594,9 @@ export class NodeDetailPanel {
     if (existing) {
       existing._panel.reveal();
       existing._update();
+      if (focusAttemptNumber) {
+        setTimeout(() => existing._focusAttempt(focusAttemptNumber), 200);
+      }
       return;
     }
     
@@ -540,8 +617,11 @@ export class NodeDetailPanel {
     // Default pulse emitter (no-op) if not provided
     const effectivePulse: IPulseEmitter = pulse ?? { onPulse: () => ({ dispose: () => {} }), isRunning: false };
     
-    const nodePanel = new NodeDetailPanel(panel, planId, nodeId, planRunner, effectivePulse);
+    const nodePanel = new NodeDetailPanel(panel, extensionUri, planId, nodeId, planRunner, effectivePulse);
     NodeDetailPanel.panels.set(key, nodePanel);
+    if (focusAttemptNumber) {
+      setTimeout(() => nodePanel._focusAttempt(focusAttemptNumber), 300);
+    }
   }
   
   /**
@@ -693,25 +773,32 @@ export class NodeDetailPanel {
     const prechecks = node.prechecks || await plan?.definition?.getPrechecksSpec(this._nodeId);
     const postchecks = node.postchecks || await plan?.definition?.getPostchecksSpec(this._nodeId);
     
-    // Pre-render spec HTML server-side so the webview gets formatted HTML
+    // Send raw spec objects to the webview — ConfigDisplay handles rendering.
+    // For agent specs, also send pre-rendered markdown HTML since the webview
+    // doesn't have a markdown renderer.
+    const renderAgentHtml = (spec: any) => {
+      if (!spec) return undefined;
+      const normalized = normalizeWorkSpec(spec);
+      if (normalized && typeof normalized === 'object' && normalized.type === 'agent' && normalized.instructions) {
+        return renderMarkdown(normalized.instructions, escapeHtml);
+      }
+      return undefined;
+    };
     this._panel.webview.postMessage({
       type: 'configUpdate',
       data: {
-        work: work ? renderSpecContent(work) : undefined,
-        workType: work ? getSpecTypeInfo(work) : undefined,
-        workSkipped: !work,
-        workOnFailure: extractOnFailure(work),
-        prechecks: prechecks ? renderSpecContent(prechecks) : undefined,
-        prechecksType: prechecks ? getSpecTypeInfo(prechecks) : undefined,
-        prechecksOnFailure: extractOnFailure(prechecks),
-        postchecks: postchecks ? renderSpecContent(postchecks) : undefined,
-        postchecksType: postchecks ? getSpecTypeInfo(postchecks) : undefined,
-        postchecksOnFailure: extractOnFailure(postchecks),
+        work: work || undefined,
+        workInstructionsHtml: renderAgentHtml(work),
+        prechecks: prechecks || undefined,
+        prechecksInstructionsHtml: renderAgentHtml(prechecks),
+        postchecks: postchecks || undefined,
+        postchecksInstructionsHtml: renderAgentHtml(postchecks),
         task: node.task,
         currentPhase: getCurrentExecutionPhase(state),
         expectsNoChanges: node.expectsNoChanges,
       }
     });
+    this._configSentOnce = true;
   }
   
   /**
@@ -752,26 +839,19 @@ export class NodeDetailPanel {
         } catch { /* file may not exist yet */ }
       }
 
-      // Resolve work spec
+      // Resolve work/prechecks/postchecks specs
+      const storagePath = this._planRunner.getStoragePath?.() || '';
       let workUsedHtml: string | undefined;
       if (attempt.workUsed) {
         workUsedHtml = formatWorkSpecHtml(attempt.workUsed, escapeHtml);
-      } else if (attempt.workRef) {
-        try {
-          const storagePath = this._planRunner.getStoragePath?.() || '';
-          const workPath = require('path').join(storagePath, plan.id, attempt.workRef);
-          const rawSpec = require('fs').readFileSync(workPath, 'utf-8');
-          const spec = JSON.parse(rawSpec);
-          if (spec.instructionsFile) {
-            try {
-              const mdPath = require('path').join(require('path').dirname(workPath), spec.instructionsFile);
-              spec.instructions = require('fs').readFileSync(mdPath, 'utf-8');
-              delete spec.instructionsFile;
-            } catch { /* md not found */ }
-          }
-          workUsedHtml = formatWorkSpecHtml(spec, escapeHtml);
-        } catch { /* file may not exist */ }
+      } else {
+        workUsedHtml = resolveSpecFromRef(attempt.workRef, storagePath, plan.id, escapeHtml);
       }
+      const prechecksUsedHtml = resolveSpecFromRef(attempt.prechecksRef, storagePath, plan.id, escapeHtml);
+      const postchecksUsedHtml = resolveSpecFromRef(attempt.postchecksRef, storagePath, plan.id, escapeHtml);
+
+      // Get current log file path for running attempts
+      const currentLogFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, state.attempts || 1);
 
       return {
         attemptNumber: attempt.attemptNumber,
@@ -782,12 +862,15 @@ export class NodeDetailPanel {
         error: attempt.error,
         failedPhase: attempt.failedPhase,
         exitCode: attempt.exitCode,
-        copilotSessionId: attempt.copilotSessionId,
-        stepStatuses: attempt.stepStatuses,
-        worktreePath: attempt.worktreePath,
-        baseCommit: attempt.baseCommit,
-        logFilePath: resolvedLogPath,
+        copilotSessionId: attempt.copilotSessionId || (attempt.status === 'running' ? state.copilotSessionId : undefined),
+        stepStatuses: attempt.stepStatuses || (attempt.status === 'running' ? state.stepStatuses : undefined),
+        // Running attempts may not have context yet — fall back to current nodeState
+        worktreePath: attempt.worktreePath || (attempt.status === 'running' ? state.worktreePath : undefined),
+        baseCommit: attempt.baseCommit || (attempt.status === 'running' ? state.baseCommit : undefined),
+        logFilePath: resolvedLogPath || (attempt.status === 'running' ? currentLogFilePath : undefined),
         workUsedHtml,
+        prechecksUsedHtml,
+        postchecksUsedHtml,
         logs: attemptLogs,
         metricsHtml: attempt.metrics ? attemptMetricsTemplateHtml(attempt.metrics, attempt.phaseMetrics) : '',
       };
@@ -804,6 +887,16 @@ export class NodeDetailPanel {
    *
    * @param state - The current node execution state.
    */
+  /**
+   * Send a message to the webview to expand and scroll to a specific attempt.
+   */
+  private _focusAttempt(attemptNumber: number): void {
+    this._panel.webview.postMessage({
+      type: 'focusAttempt',
+      attemptNumber,
+    });
+  }
+
   private _sendAiUsageUpdate(state: NodeExecutionState): void {
     const metrics = getNodeMetrics(state);
     if (!metrics) {return;}
@@ -835,7 +928,7 @@ export class NodeDetailPanel {
   }
   
   /** Re-render the panel HTML with current node state. */
-  private _update() {
+  private async _update() {
     const plan = this._planRunner.get(this._planId);
     if (!plan) {
       this._panel.webview.html = this._getErrorHtml('Plan not found');
@@ -850,13 +943,22 @@ export class NodeDetailPanel {
       return;
     }
     
-    this._panel.webview.html = this._getHtml(plan, node, state);
+    // Resolve specs from disk for finalized plans (node.work etc. may be undefined)
+    const resolvedWork = node.work || await plan.definition?.getWorkSpec(this._nodeId);
+    const resolvedPrechecks = node.prechecks || await plan.definition?.getPrechecksSpec(this._nodeId);
+    const resolvedPostchecks = node.postchecks || await plan.definition?.getPostchecksSpec(this._nodeId);
+    
+    this._panel.webview.html = this._getHtml(plan, node, state, resolvedWork, resolvedPrechecks, resolvedPostchecks);
 
     // Sync attempt count so incremental updates don't duplicate pre-rendered cards
     this._lastAttemptCount = state.attemptHistory?.length || 0;
+    this._configSentOnce = false; // Reset — webview was rebuilt, config needs resending
     
-    // Send config update after rendering
-    this._sendConfigUpdate();
+    // After HTML rebuild, send messages with delays so the webview scripts
+    // have time to initialize the EventBus and subscribe controls.
+    // Config update must be deferred like stateChange — it's async and the
+    // webview needs its controls wired before it can process the message.
+    setTimeout(() => { this._sendConfigUpdate(); }, 50);
 
     // After HTML rebuild, send stateChange to re-initialize DurationCounterControl
     const phaseStatus = this._getPhaseStatus(state);
@@ -912,8 +1014,15 @@ export class NodeDetailPanel {
   private _getHtml(
     plan: PlanInstance,
     node: JobNode,
-    state: NodeExecutionState
+    state: NodeExecutionState,
+    resolvedWork?: any,
+    resolvedPrechecks?: any,
+    resolvedPostchecks?: any,
   ): string {
+    
+    const duration = state.startedAt 
+      ? formatDuration(Math.round(((state.endedAt || Date.now()) - state.startedAt) / 1000))
+      : null;
     
     // Build phase status indicators
     const phaseStatus = this._getPhaseStatus(state);
@@ -961,27 +1070,16 @@ export class NodeDetailPanel {
           } catch { /* file may not exist yet */ }
         }
 
-        // Resolve work spec: inline workUsed or read from workRef
+        // Resolve work/prechecks/postchecks specs: inline or read from ref
+        const storagePath = this._planRunner.getStoragePath?.() || '';
         let workUsedHtml: string | undefined;
         if (attempt.workUsed) {
           workUsedHtml = formatWorkSpecHtml(attempt.workUsed, escapeHtml);
-        } else if (attempt.workRef) {
-          try {
-            const storagePath = this._planRunner.getStoragePath?.() || '';
-            const workPath = require('path').join(storagePath, plan.id, attempt.workRef);
-            const rawSpec = require('fs').readFileSync(workPath, 'utf-8');
-            const spec = JSON.parse(rawSpec);
-            // If agent spec with instructionsFile, read the companion .md
-            if (spec.instructionsFile) {
-              try {
-                const mdPath = require('path').join(require('path').dirname(workPath), spec.instructionsFile);
-                spec.instructions = require('fs').readFileSync(mdPath, 'utf-8');
-                delete spec.instructionsFile;
-              } catch { /* md not found */ }
-            }
-            workUsedHtml = formatWorkSpecHtml(spec, escapeHtml);
-          } catch { /* file may not exist */ }
+        } else {
+          workUsedHtml = resolveSpecFromRef(attempt.workRef, storagePath, plan.id, escapeHtml);
         }
+        const prechecksUsedHtml = resolveSpecFromRef(attempt.prechecksRef, storagePath, plan.id, escapeHtml);
+        const postchecksUsedHtml = resolveSpecFromRef(attempt.postchecksRef, storagePath, plan.id, escapeHtml);
 
         const card: AttemptCardData = {
           attemptNumber: attempt.attemptNumber,
@@ -992,12 +1090,15 @@ export class NodeDetailPanel {
           failedPhase: attempt.failedPhase,
           error: attempt.error,
           exitCode: attempt.exitCode,
-          copilotSessionId: attempt.copilotSessionId,
-          stepStatuses: attempt.stepStatuses as any,
-          worktreePath: attempt.worktreePath,
-          baseCommit: attempt.baseCommit,
-          logFilePath: resolvedLogPath,
+          copilotSessionId: attempt.copilotSessionId || (attempt.status === 'running' ? state.copilotSessionId : undefined),
+          stepStatuses: (attempt.stepStatuses || (attempt.status === 'running' ? state.stepStatuses : undefined)) as any,
+          // Running attempts may not have context yet — fall back to current nodeState
+          worktreePath: attempt.worktreePath || (attempt.status === 'running' ? state.worktreePath : undefined),
+          baseCommit: attempt.baseCommit || (attempt.status === 'running' ? state.baseCommit : undefined),
+          logFilePath: resolvedLogPath || (attempt.status === 'running' ? logFilePath : undefined),
           workUsedHtml,
+          prechecksUsedHtml,
+          postchecksUsedHtml,
           logs: attemptLogs,
           metricsHtml: attempt.metrics ? attemptMetricsTemplateHtml(attempt.metrics, attempt.phaseMetrics) : '',
         };
@@ -1030,9 +1131,9 @@ export class NodeDetailPanel {
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' ${this._panel.webview.cspSource};">
   <style>
-    ${this._getStyles()}
+    ${renderNodeDetailStyles()}
   </style>
 </head>
 <body>
@@ -1063,13 +1164,27 @@ export class NodeDetailPanel {
   ${nodeMetricsHtml}
   <div id="aiUsageStatsContainer" style="display:none;"></div>
   
-  <div id="configDisplayContainer"></div>
+  <div id="configDisplayContainer">
+  ${configSectionHtml({
+    task: node.task || node.name,
+    work: resolvedWork || node.work,
+    prechecks: resolvedPrechecks || node.prechecks,
+    postchecks: resolvedPostchecks || node.postchecks,
+    instructions: (node as any).instructions,
+    currentPhase: getCurrentExecutionPhase(state),
+    expectsNoChanges: node.expectsNoChanges,
+    autoHeal: node.autoHeal,
+    group: (node as any).group,
+    producerId: (node as any).producerId,
+    planEnv: plan.env,
+  })}
+  </div>
   
-  ${logViewerSectionHtml({
+  ${(state.status === 'running' || state.status === 'scheduled' || logFilePath) ? logViewerSectionHtml({
     phaseStatus,
     isRunning: state.status === 'running',
     logFilePath,
-  })}
+  }) : ''}
   
   ${processTreeSectionHtml({ status: state.status })}
   
@@ -1094,6 +1209,7 @@ export class NodeDetailPanel {
   
   ${bottomActionsHtml(actionData)}
   
+  ${webviewScriptTag(this._panel.webview, this._extensionUri, 'nodeDetail')}
   <script>
     ${webviewScripts({
       planId: plan.id,
@@ -1317,1194 +1433,4 @@ export class NodeDetailPanel {
     `;
   }
   
-  /**
-   * Generate the shared CSS styles used across the node detail panel.
-   *
-   * Includes styles for phase tabs, log viewer, status badges, meta grid,
-   * work summary, process tree, breadcrumb navigation, and attempt history cards.
-   *
-   * @returns CSS style string (without `<style>` tags).
-   */
-  private _getStyles(): string {
-    return `
-    * { box-sizing: border-box; }
-    body {
-      font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      padding: 0;
-      color: var(--vscode-foreground);
-      background: var(--vscode-editor-background);
-      line-height: 1.5;
-    }
-    
-    /* Sticky header */
-    .sticky-header {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: var(--vscode-editor-background);
-      padding: 12px 16px 8px 16px;
-      border-bottom: 1px solid var(--vscode-panel-border);
-    }
-    .sticky-header + * {
-      padding-top: 8px;
-    }
-    body > *:not(.sticky-header) {
-      padding-left: 16px;
-      padding-right: 16px;
-    }
-    
-    /* Force Fail button in sticky header */
-    .force-fail-btn {
-      padding: 4px 12px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      margin-top: 8px;
-      background: var(--vscode-inputValidation-errorBackground, rgba(244, 135, 113, 0.2));
-      color: #f48771;
-    }
-    .force-fail-btn:hover {
-      background: rgba(244, 135, 113, 0.4);
-    }
-    
-    /* Header */
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 4px;
-    }
-    .header h2 { margin: 0; font-size: 18px; flex: 1; margin-left: 12px; }
-    
-    /* Phase indicator in header */
-    .header-phase {
-      font-size: 11px;
-      font-weight: 600;
-      padding: 3px 10px;
-      border-radius: 10px;
-      background: rgba(0, 122, 204, 0.15);
-      color: #3794ff;
-      white-space: nowrap;
-      margin-right: 12px;
-      animation: pulse-phase-badge 2s infinite;
-    }
-    @keyframes pulse-phase-badge {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
-    }
-    
-    /* Duration display in header */
-    .header-duration {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      color: var(--vscode-descriptionForeground);
-      white-space: nowrap;
-    }
-    .duration-icon { font-size: 16px; }
-    .duration-value {
-      font-family: var(--vscode-editor-font-family);
-      font-weight: 600;
-      color: var(--vscode-foreground);
-    }
-    .duration-value.running { color: #3794ff; }
-    .duration-value.succeeded { color: #4ec9b0; }
-    .duration-value.failed { color: #f48771; }
-    
-    .status-badge {
-      padding: 4px 12px;
-      border-radius: 12px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-    .status-badge.running { background: rgba(0, 122, 204, 0.2); color: #3794ff; }
-    .status-badge.succeeded { background: rgba(78, 201, 176, 0.2); color: #4ec9b0; }
-    .status-badge.failed { background: rgba(244, 135, 113, 0.2); color: #f48771; }
-    .status-badge.pending, .status-badge.ready { background: rgba(133, 133, 133, 0.2); color: #858585; }
-    .status-badge.blocked { background: rgba(133, 133, 133, 0.2); color: #858585; }
-    .status-badge.scheduled { background: rgba(0, 122, 204, 0.15); color: #3794ff; }
-    
-    /* Breadcrumb */
-    .breadcrumb {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      margin-bottom: 8px;
-    }
-    .breadcrumb a, .link {
-      color: var(--vscode-textLink-foreground);
-      cursor: pointer;
-      text-decoration: none;
-    }
-    .breadcrumb a:hover, .link:hover { text-decoration: underline; }
-    
-    /* Section */
-    .section {
-      margin-bottom: 16px;
-      padding: 12px;
-      background: var(--vscode-sideBar-background);
-      border-radius: 8px;
-    }
-    .section h3 {
-      margin: 0 0 10px 0;
-      font-size: 12px;
-      color: var(--vscode-descriptionForeground);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    
-    /* Meta Grid */
-    .meta-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-      gap: 12px;
-    }
-    .meta-item { }
-    .meta-label {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      margin-bottom: 2px;
-    }
-    .meta-value { font-size: 13px; }
-    
-    /* Git Info - stacked vertical list */
-    .git-info-list {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .git-info-row {
-      display: flex;
-      flex-direction: row;
-      align-items: baseline;
-      gap: 12px;
-    }
-    .git-info-label {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      min-width: 120px;
-      flex-shrink: 0;
-    }
-    .git-info-value {
-      font-size: 13px;
-      word-break: break-all;
-    }
-    .meta-value.mono, .config-value.mono {
-      font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 12px;
-      background: var(--vscode-textCodeBlock-background);
-      padding: 4px 8px;
-      border-radius: 4px;
-      word-break: break-all;
-    }
-    
-    /* Config Items */
-    .config-item { margin-bottom: 10px; }
-    .config-label {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      margin-bottom: 4px;
-    }
-    .config-value { }
-    
-    /* Config Phase Sections (Prechecks / Work / Postchecks) */
-    .config-phases { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-    .config-phase { border: 1px solid var(--vscode-panel-border); border-radius: 6px; overflow: hidden; }
-    .config-phase-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      background: var(--vscode-sideBarSectionHeader-background);
-      border-bottom: 1px solid var(--vscode-panel-border);
-    }
-    .config-phase-header.collapsed {
-      cursor: pointer;
-      border-bottom: none;
-    }
-    .config-phase-header.collapsed:hover {
-      background: var(--vscode-list-hoverBackground);
-    }
-    .config-phase-header.non-collapsible {
-      cursor: default;
-    }
-    .config-collapsible-toggle { cursor: pointer; }
-    .config-collapsible-toggle:hover { background: var(--vscode-list-hoverBackground); }
-    .phase-label { font-size: 12px; font-weight: 600; }
-    .phase-type-badge {
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      padding: 2px 8px;
-      border-radius: 4px;
-      background: rgba(128, 128, 128, 0.2);
-      color: var(--vscode-descriptionForeground);
-    }
-    .phase-type-badge.shell { background: rgba(72, 187, 120, 0.2); color: #48bb78; }
-    .phase-type-badge.process { background: rgba(237, 137, 54, 0.2); color: #ed8936; }
-    .phase-type-badge.agent { background: rgba(99, 179, 237, 0.2); color: #63b3ed; }
-    .phase-type-badge.skipped { background: rgba(128, 128, 128, 0.15); color: var(--vscode-disabledForeground); font-style: italic; }
-    .config-phase-body { padding: 8px 12px; }
-
-    /* On-failure config display */
-    .on-failure-config {
-      margin-top: 8px;
-      padding: 6px 10px;
-      border: 1px solid rgba(237, 137, 54, 0.3);
-      border-radius: 5px;
-      background: rgba(237, 137, 54, 0.06);
-      font-size: 11px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
-    }
-    .failure-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      padding: 2px 7px;
-      border-radius: 4px;
-      font-weight: 600;
-      font-size: 10px;
-    }
-    .failure-badge.no-heal { background: rgba(220, 38, 38, 0.15); color: #ef4444; }
-    .failure-badge.resume { background: rgba(99, 179, 237, 0.15); color: #63b3ed; }
-    .failure-badge-inline {
-      font-size: 12px;
-      margin-left: 2px;
-      opacity: 0.8;
-    }
-    .failure-message {
-      width: 100%;
-      color: var(--vscode-descriptionForeground);
-      font-style: italic;
-      line-height: 1.4;
-    }
-    .config-hint {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      font-style: italic;
-    }
-    .spec-empty {
-      color: var(--vscode-disabledForeground);
-      font-style: italic;
-      font-size: 12px;
-      padding: 4px 0;
-    }
-    
-    /* Work Display Formatting */
-    .work-item .config-value {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    
-    /* Code block container */
-    .work-code-block {
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 6px;
-      overflow: hidden;
-      background: var(--vscode-editor-background);
-    }
-    .work-code-block.agent-block {
-      background: var(--vscode-textCodeBlock-background);
-    }
-    
-    /* Code block header with language badge */
-    .work-code-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 12px;
-      background: var(--vscode-sideBarSectionHeader-background);
-      border-bottom: 1px solid var(--vscode-panel-border);
-    }
-    
-    /* Language/type badge */
-    .work-lang-badge {
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      padding: 2px 8px;
-      border-radius: 4px;
-      background: rgba(128, 128, 128, 0.2);
-      color: var(--vscode-descriptionForeground);
-    }
-    .work-lang-badge.shell {
-      background: rgba(72, 187, 120, 0.2);
-      color: #48bb78;
-    }
-    .work-lang-badge.process {
-      background: rgba(237, 137, 54, 0.2);
-      color: #ed8936;
-    }
-    .work-lang-badge.agent {
-      background: rgba(99, 179, 237, 0.2);
-      color: #63b3ed;
-    }
-    
-    /* Agent model label */
-    .agent-model {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      font-style: italic;
-    }
-    
-    /* Environment variables section */
-    .env-section {
-      margin: 6px 0 2px;
-      font-size: 12px;
-    }
-    .env-section summary {
-      cursor: pointer;
-      color: var(--vscode-descriptionForeground);
-      font-size: 11px;
-      padding: 2px 0;
-    }
-    .env-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 4px 0;
-      font-size: 12px;
-    }
-    .env-table td {
-      padding: 2px 8px 2px 0;
-      vertical-align: top;
-      border-bottom: 1px solid var(--vscode-panel-border);
-    }
-    .env-key {
-      font-family: var(--vscode-editor-font-family);
-      font-weight: bold;
-      white-space: nowrap;
-      color: var(--vscode-symbolIcon-variableForeground, #75beff);
-    }
-    .env-val {
-      font-family: var(--vscode-editor-font-family);
-      word-break: break-all;
-    }
-    
-    /* Agent instructions markdown rendering */
-    .agent-instructions {
-      padding: 8px 12px;
-      font-size: 13px;
-      line-height: 1.5;
-    }
-    .agent-instructions h3 { font-size: 15px; margin: 12px 0 6px; color: var(--vscode-foreground); }
-    .agent-instructions h4 { font-size: 14px; margin: 10px 0 4px; color: var(--vscode-foreground); }
-    .agent-instructions h5 { font-size: 13px; margin: 8px 0 4px; color: var(--vscode-descriptionForeground); }
-    .agent-instructions p { margin: 4px 0; }
-    .agent-instructions ul { margin: 4px 0 4px 16px; padding: 0; }
-    .agent-instructions li { margin: 2px 0; }
-    .agent-instructions pre.spec-code {
-      background: var(--vscode-textCodeBlock-background);
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 4px;
-      padding: 8px 12px;
-      margin: 6px 0;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      overflow-wrap: break-word;
-      max-width: 100%;
-      overflow-x: auto;
-      font-size: 12px;
-    }
-    .agent-instructions code.inline-code {
-      background: var(--vscode-textCodeBlock-background);
-      padding: 1px 4px;
-      border-radius: 3px;
-      font-size: 12px;
-    }
-    .agent-instructions strong { color: var(--vscode-foreground); }
-    
-    /* General spec-code styling with wrapping */
-    pre.spec-code {
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      overflow-wrap: break-word;
-      max-width: 100%;
-      overflow-x: auto;
-    }
-    
-    .spec-meta { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
-    .spec-meta .spec-field { font-size: 11px; margin: 2px 0; }
-    .spec-meta .spec-label { color: var(--vscode-descriptionForeground); }
-    
-    /* Code content area */
-    .work-code {
-      margin: 0;
-      padding: 12px 16px;
-      background: var(--vscode-editor-background);
-      font-family: var(--vscode-editor-font-family), 'Consolas', 'Monaco', monospace;
-      font-size: 12px;
-      line-height: 1.5;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .work-code code {
-      font-family: inherit;
-      background: none;
-      padding: 0;
-    }
-    
-    /* Agent instructions (markdown content) */
-    .work-instructions {
-      padding: 12px 16px;
-      font-size: 13px;
-      line-height: 1.6;
-    }
-    
-    /* Legacy badge styles (keep for backward compat) */
-    .work-type-badge {
-      display: inline-block;
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      padding: 2px 6px;
-      border-radius: 3px;
-      margin-bottom: 6px;
-    }
-    .work-type-badge.agent { background: rgba(99, 179, 237, 0.2); color: #63b3ed; }
-    .work-type-badge.shell { background: rgba(72, 187, 120, 0.2); color: #48bb78; }
-    .work-type-badge.process { background: rgba(237, 137, 54, 0.2); color: #ed8936; }
-    .work-instructions p, .work-instructions .md-para {
-      margin: 0 0 8px 0;
-    }
-    .work-instructions p:last-child, .work-instructions .md-para:last-child {
-      margin-bottom: 0;
-    }
-    
-    /* Markdown rendering styles */
-    .md-list {
-      margin: 8px 0;
-      padding-left: 24px;
-    }
-    .md-list li {
-      margin-bottom: 6px;
-      line-height: 1.5;
-    }
-    .md-list li:last-child {
-      margin-bottom: 0;
-    }
-    .md-header {
-      margin: 12px 0 8px 0;
-      font-weight: 600;
-      color: var(--vscode-foreground);
-    }
-    h3.md-header { font-size: 15px; }
-    h4.md-header { font-size: 14px; }
-    h5.md-header { font-size: 13px; }
-    .md-code-block {
-      background: var(--vscode-editor-background);
-      padding: 10px 12px;
-      border-radius: 4px;
-      margin: 8px 0;
-      overflow-x: auto;
-      font-family: var(--vscode-editor-font-family), monospace;
-      font-size: 12px;
-    }
-    .md-code-block code {
-      background: none;
-      padding: 0;
-    }
-    .md-inline-code {
-      background: var(--vscode-editor-background);
-      padding: 2px 5px;
-      border-radius: 3px;
-      font-family: var(--vscode-editor-font-family), monospace;
-      font-size: 12px;
-    }
-    .md-link {
-      color: var(--vscode-textLink-foreground);
-      text-decoration: none;
-    }
-    .md-link:hover {
-      text-decoration: underline;
-    }
-    .work-list {
-      margin: 8px 0;
-      padding-left: 24px;
-    }
-    .work-list li {
-      margin-bottom: 6px;
-      line-height: 1.5;
-    }
-    .work-list li:last-child {
-      margin-bottom: 0;
-    }
-    .work-bullet {
-      margin: 4px 0;
-      padding-left: 8px;
-    }
-    
-    /* Error */
-    .error-box {
-      background: rgba(244, 135, 113, 0.1);
-      border: 1px solid rgba(244, 135, 113, 0.3);
-      border-radius: 6px;
-      padding: 10px;
-      margin-top: 12px;
-      color: #f48771;
-    }
-    .error-message {
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-family: var(--vscode-editor-font-family), monospace;
-      font-size: 12px;
-      line-height: 1.5;
-      display: block;
-      margin-top: 4px;
-    }
-    .error-message.crashed {
-      background: rgba(255, 100, 0, 0.1);
-      border: 1px solid rgba(255, 100, 0, 0.3);
-      border-radius: 4px;
-      padding: 4px 8px;
-      color: #ff6400;
-      font-weight: 500;
-    }
-    .error-phase {
-      margin-top: 6px;
-      font-size: 12px;
-      color: var(--vscode-descriptionForeground);
-    }
-    
-    /* Session ID */
-    .session-id {
-      cursor: pointer;
-      font-family: var(--vscode-editor-font-family), monospace;
-      background: var(--vscode-textCodeBlock-background);
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-    .session-id:hover {
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
-    .meta-item.full-width {
-      grid-column: 1 / -1;
-    }
-    
-    /* Retry Buttons */
-    .retry-section {
-      display: flex;
-      gap: 8px;
-      margin-top: 12px;
-      flex-wrap: wrap;
-    }
-    .retry-btn {
-      padding: 8px 16px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 13px;
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-    }
-    .retry-btn:hover {
-      background: var(--vscode-button-hoverBackground);
-    }
-    .retry-btn.secondary {
-      background: var(--vscode-button-secondaryBackground);
-      color: var(--vscode-button-secondaryForeground);
-    }
-    .retry-btn.secondary:hover {
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
-    
-    /* Phase Tabs */
-    .phase-tabs {
-      display: flex;
-      gap: 4px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-    .phase-tab {
-      padding: 6px 12px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      background: var(--vscode-button-secondaryBackground);
-      color: var(--vscode-button-secondaryForeground);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .phase-tab:hover {
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
-    .phase-tab.active {
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-    }
-    .phase-icon { font-size: 11px; }
-    .phase-tab.phase-success .phase-icon { color: #4ec9b0; }
-    .phase-tab.phase-failed .phase-icon { color: #f48771; }
-    .phase-tab.phase-running .phase-icon { color: #3794ff; animation: pulse-phase 1.2s infinite; }
-    .phase-tab.active.phase-running .phase-icon { color: #ffffff; animation: pulse-phase-active 1.2s infinite; }
-    @keyframes pulse-phase { 50% { opacity: 0.4; } }
-    @keyframes pulse-phase-active { 0%, 100% { opacity: 1; text-shadow: 0 0 6px rgba(255,255,255,0.8); } 50% { opacity: 0.5; text-shadow: none; } }
-    
-    /* Log File Path */
-    .log-file-path {
-      font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 11px;
-      padding: 6px 10px;
-      margin-bottom: 4px;
-      background: var(--vscode-textBlockQuote-background);
-      border-radius: 4px;
-      color: var(--vscode-textLink-foreground);
-      cursor: pointer;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      max-width: 100%;
-      display: block;
-      box-sizing: border-box;
-    }
-    .log-file-path:hover {
-      text-decoration: underline;
-      background: var(--vscode-textBlockQuote-border);
-    }
-    
-    /* Log Viewer */
-    .log-viewer {
-      background: var(--vscode-editor-background);
-      border: 1px solid var(--vscode-widget-border);
-      border-radius: 6px;
-      max-height: 300px;
-      overflow: auto;
-    }
-    .log-placeholder, .log-loading {
-      padding: 20px;
-      text-align: center;
-      color: var(--vscode-descriptionForeground);
-    }
-    .log-content {
-      margin: 0;
-      padding: 12px;
-      font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 12px;
-      line-height: 1.4;
-      white-space: pre-wrap;
-      word-break: break-word;
-      user-select: text;
-      -webkit-user-select: text;
-      cursor: text;
-    }
-    .log-viewer:focus-within {
-      outline: 1px solid var(--vscode-focusBorder);
-    }
-    
-    /* Dependencies */
-    .deps-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .dep-badge {
-      padding: 3px 10px;
-      border-radius: 12px;
-      font-size: 11px;
-      background: var(--vscode-badge-background);
-      color: var(--vscode-badge-foreground);
-    }
-    .dep-badge.succeeded { background: rgba(78, 201, 176, 0.2); color: #4ec9b0; }
-    .dep-badge.failed { background: rgba(244, 135, 113, 0.2); color: #f48771; }
-    .dep-badge.running { background: rgba(0, 122, 204, 0.2); color: #3794ff; }
-    
-    /* Work Summary */
-    .work-summary-stats {
-      display: flex;
-      gap: 16px;
-    }
-    .work-stat {
-      text-align: center;
-      padding: 8px 16px;
-      background: var(--vscode-editor-background);
-      border-radius: 6px;
-    }
-    .work-stat-value {
-      font-size: 18px;
-      font-weight: 600;
-    }
-    .work-stat-label {
-      font-size: 10px;
-      color: var(--vscode-descriptionForeground);
-      text-transform: uppercase;
-    }
-    .work-stat.added .work-stat-value { color: #4ec9b0; }
-    .work-stat.modified .work-stat-value { color: #dcdcaa; }
-    .work-stat.deleted .work-stat-value { color: #f48771; }
-    .work-summary-desc {
-      margin-top: 12px;
-      font-style: italic;
-      color: var(--vscode-descriptionForeground);
-    }
-    
-    /* Aggregated Work Summary */
-    .work-summary-section.aggregated {
-      border-top: 1px solid var(--vscode-panel-border);
-      margin-top: 16px;
-      padding-top: 16px;
-      opacity: 0.9;
-    }
-    .work-summary-section.aggregated h4 {
-      color: var(--vscode-descriptionForeground);
-      font-weight: normal;
-      font-size: 14px;
-      margin-bottom: 12px;
-    }
-    .work-summary-stats.aggregated-stats {
-      opacity: 0.95;
-    }
-    
-    /* Commit Details */
-    .commits-list {
-      margin-top: 16px;
-      border-top: 1px solid var(--vscode-panel-border);
-      padding-top: 12px;
-    }
-    .commit-item {
-      padding: 8px 0;
-      border-bottom: 1px solid var(--vscode-panel-border);
-    }
-    .commit-item:last-child {
-      border-bottom: none;
-    }
-    .commit-hash {
-      background: var(--vscode-textCodeBlock-background);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 12px;
-      color: #dcdcaa;
-    }
-    .commit-message {
-      margin-left: 8px;
-      font-size: 13px;
-    }
-    .commit-files {
-      margin-top: 8px;
-      margin-left: 60px;
-      font-size: 11px;
-      font-family: var(--vscode-editor-font-family), monospace;
-    }
-    .file-item {
-      padding: 2px 0;
-    }
-    .file-added { color: #4ec9b0; }
-    .file-modified { color: #dcdcaa; }
-    .file-deleted { color: #f48771; }
-    
-    /* Process Tree */
-    .process-tree-section {
-      border-left: 3px solid var(--vscode-progressBar-background);
-    }
-    .process-tree-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      cursor: pointer;
-      user-select: none;
-      margin-bottom: 12px;
-    }
-    .process-tree-header:hover { opacity: 0.8; }
-    .process-tree-chevron {
-      font-size: 10px;
-      transition: transform 0.2s;
-      opacity: 0.7;
-    }
-    .process-tree-icon { font-size: 16px; }
-    .process-tree-title {
-      font-weight: 600;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      opacity: 0.8;
-    }
-    .process-tree {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      max-height: 300px;
-      overflow-y: auto;
-    }
-    .process-loading {
-      padding: 12px;
-      text-align: center;
-      color: var(--vscode-descriptionForeground);
-      font-style: italic;
-    }
-    .agent-work-indicator {
-      padding: 12px 16px;
-      background: rgba(99, 179, 237, 0.1);
-      border: 1px solid rgba(99, 179, 237, 0.3);
-      border-radius: 6px;
-      color: #63b3ed;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      animation: pulse 2s ease-in-out infinite;
-    }
-    .agent-icon {
-      font-size: 18px;
-    }
-    .agent-duration {
-      opacity: 0.7;
-      font-size: 12px;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.7; }
-    }
-    .process-node {
-      background: var(--vscode-editor-background);
-      border-radius: 4px;
-      padding: 8px 10px;
-      border-left: 2px solid var(--vscode-progressBar-background);
-    }
-    .process-node-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .process-node-icon { font-size: 14px; }
-    .process-node-name {
-      font-weight: 600;
-      font-size: 12px;
-      color: var(--vscode-foreground);
-    }
-    .process-node-pid {
-      font-size: 10px;
-      opacity: 0.6;
-      font-family: monospace;
-    }
-    .process-node-stats {
-      display: flex;
-      gap: 12px;
-      margin-top: 4px;
-      padding-left: 22px;
-    }
-    .process-stat {
-      font-size: 11px;
-      font-family: monospace;
-      color: var(--vscode-descriptionForeground);
-    }
-    .process-node-cmdline {
-      font-size: 10px;
-      opacity: 0.5;
-      font-family: monospace;
-      margin-top: 4px;
-      padding-left: 22px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    
-    /* Actions */
-    .actions {
-      margin-top: 16px;
-      display: flex;
-      gap: 8px;
-    }
-    .action-btn {
-      padding: 6px 14px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      background: var(--vscode-button-secondaryBackground);
-      color: var(--vscode-button-secondaryForeground);
-    }
-    .action-btn:hover {
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
-    
-    /* Attempt History Cards */
-    .attempt-card {
-      background: var(--vscode-sideBar-background);
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 6px;
-      margin-bottom: 10px;
-      overflow: hidden;
-    }
-    .attempt-card.active {
-      border-color: var(--vscode-progressBar-background);
-      border-width: 2px;
-    }
-    .attempt-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px 14px;
-      cursor: pointer;
-      user-select: none;
-    }
-    .attempt-header:hover {
-      background: var(--vscode-list-hoverBackground);
-    }
-    .attempt-header-left {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      flex: 1;
-    }
-    .attempt-badge {
-      font-weight: 700;
-      padding: 3px 8px;
-      background: var(--vscode-badge-background);
-      color: var(--vscode-badge-foreground);
-      border-radius: 4px;
-      font-size: 10px;
-      min-width: 20px;
-      text-align: center;
-    }
-    .trigger-badge {
-      font-size: 10px;
-      font-weight: 600;
-      padding: 2px 6px;
-      border-radius: 4px;
-      white-space: nowrap;
-    }
-    .trigger-badge.auto-heal {
-      background: rgba(255, 167, 38, 0.2);
-      color: #ffa726;
-    }
-    .trigger-badge.retry {
-      background: rgba(66, 165, 245, 0.2);
-      color: #42a5f5;
-    }
-    .step-indicators {
-      display: flex;
-      gap: 4px;
-    }
-    .step-dot, .step-icon { font-size: 14px; }
-    .step-dot.success, .step-icon.success { color: var(--vscode-testing-iconPassed); }
-    .step-dot.failed, .step-icon.failed { color: var(--vscode-errorForeground); }
-    .step-dot.skipped, .step-icon.skipped { color: #808080; }
-    .step-dot.pending, .step-icon.pending { color: var(--vscode-descriptionForeground); opacity: 0.5; }
-    .step-dot.running, .step-icon.running { color: #7DD3FC; animation: pulse-dot 1.5s ease-in-out infinite; }
-    @keyframes pulse-dot {
-      0%, 100% { opacity: 0.4; transform: scale(1); }
-      50% { opacity: 1; transform: scale(1.2); }
-    }
-    .attempt-time { font-size: 10px; opacity: 0.7; }
-    .attempt-duration { font-size: 10px; opacity: 0.7; }
-    .chevron {
-      font-size: 12px;
-      transition: transform 0.2s;
-    }
-    .chevron.expanded {
-      transform: rotate(90deg);
-    }
-    .attempt-body {
-      padding: 14px;
-      border-top: 1px solid var(--vscode-panel-border);
-      background: var(--vscode-editor-background);
-    }
-    .attempt-meta {
-      font-size: 11px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .attempt-meta-row { line-height: 1.6; }
-    .attempt-meta-row strong { opacity: 0.7; }
-    .status-succeeded { color: #4ec9b0; }
-    .status-failed { color: #f48771; }
-    .status-canceled { color: #858585; }
-    .attempt-error {
-      margin-top: 8px;
-      padding: 8px;
-      background: rgba(244, 135, 113, 0.1);
-      border: 1px solid rgba(244, 135, 113, 0.3);
-      border-radius: 4px;
-      color: #f48771;
-      font-size: 11px;
-    }
-    .attempt-error .error-message {
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-family: var(--vscode-editor-font-family), monospace;
-      font-size: 11px;
-      line-height: 1.5;
-      display: block;
-      margin-top: 4px;
-    }
-    .attempt-context {
-      margin-top: 8px;
-      padding: 8px;
-      background: var(--vscode-sideBar-background);
-      border-radius: 4px;
-      font-size: 11px;
-      overflow: hidden;
-    }
-    .attempt-context code {
-      background: rgba(255, 255, 255, 0.05);
-      padding: 1px 4px;
-      border-radius: 2px;
-      font-family: var(--vscode-editor-font-family);
-      font-size: 10px;
-    }
-    .attempt-work-row {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .attempt-work-content {
-      margin-top: 4px;
-    }
-    .attempt-work-content .work-instructions {
-      font-size: 11px;
-      padding: 8px 12px;
-    }
-    .attempt-work-content .work-command {
-      font-size: 11px;
-      padding: 6px 10px;
-    }
-    /* Attempt phase tabs */
-    .attempt-phases {
-      margin-top: 8px;
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    .attempt-phase-tabs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 2px;
-      padding: 4px;
-      background: var(--vscode-sideBar-background);
-      border-bottom: 1px solid var(--vscode-panel-border);
-    }
-    .attempt-phase-tab {
-      padding: 4px 8px;
-      font-size: 10px;
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: 3px;
-      color: var(--vscode-foreground);
-      cursor: pointer;
-      opacity: 0.7;
-    }
-    .attempt-phase-tab:hover {
-      background: var(--vscode-list-hoverBackground);
-      opacity: 1;
-    }
-    .attempt-phase-tab.active {
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-      opacity: 1;
-    }
-    .attempt-phase-tab.success {
-      color: #3fb950;
-    }
-    .attempt-phase-tab.failed {
-      color: #f85149;
-    }
-    .attempt-phase-tab.skipped {
-      opacity: 0.5;
-    }
-    .attempt-phase-tab.active.success,
-    .attempt-phase-tab.active.failed,
-    .attempt-phase-tab.active.skipped {
-      color: var(--vscode-button-foreground);
-    }
-    .attempt-log-viewer {
-      margin: 0;
-      padding: 8px;
-      background: var(--vscode-editor-background);
-      font-family: var(--vscode-editor-font-family);
-      font-size: 11px;
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-height: 300px;
-      overflow: auto;
-    }
-    
-    /* AI Usage Metrics Card */
-    .metrics-card {
-      border: 1px solid var(--vscode-progressBar-background);
-      background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-progressBar-background));
-      border-radius: 8px;
-    }
-    .metrics-card h3 {
-      margin-top: 0;
-    }
-    .metrics-stats-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px 16px;
-      margin-bottom: 12px;
-    }
-    .metrics-stat {
-      font-size: 12px;
-      white-space: nowrap;
-    }
-    .model-breakdown {
-      margin-top: 8px;
-    }
-    .model-breakdown-label {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      margin-bottom: 6px;
-    }
-    .model-breakdown-list {
-      background: var(--vscode-editor-background);
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 4px;
-      padding: 8px 10px;
-    }
-    .model-row {
-      display: flex;
-      gap: 12px;
-      align-items: baseline;
-      padding: 2px 0;
-      font-size: 11px;
-      font-family: var(--vscode-editor-font-family), monospace;
-    }
-    .model-name {
-      font-weight: 600;
-      min-width: 140px;
-    }
-    .model-tokens {
-      color: var(--vscode-descriptionForeground);
-    }
-    /* Attempt-level metrics card (matches main metrics card style) */
-    .attempt-metrics-card {
-      margin-top: 8px;
-      padding: 8px 10px;
-      background: color-mix(in srgb, var(--vscode-sideBar-background) 80%, var(--vscode-progressBar-background));
-      border-radius: 4px;
-    }
-    .attempt-metrics-card .metrics-stats-grid {
-      margin-bottom: 8px;
-    }
-    .attempt-metrics-card .model-breakdown {
-      margin-top: 6px;
-    }
-    /* Phase breakdown */
-    .phase-metrics-breakdown {
-      margin-top: 8px;
-    }
-    .phase-metrics-row {
-      display: flex;
-      gap: 12px;
-      align-items: baseline;
-      padding: 2px 0;
-      font-size: 11px;
-    }
-    .phase-metrics-label {
-      font-weight: 600;
-      min-width: 120px;
-      white-space: nowrap;
-    }
-    .phase-metrics-stats {
-      color: var(--vscode-descriptionForeground);
-      font-size: 11px;
-    }
-    `;
-  }
 }

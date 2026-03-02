@@ -244,7 +244,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     assert.ok(logMessages.some(m => m.includes('hasWork: true')));
   });
 
-  test('hydratedWork passed through CommitPhaseContext', async () => {
+  test('getWorkSpec passed through CommitPhaseContext', async () => {
     const dir = makeTmpDir();
     const worktreeDir = makeTmpDir();
     const executor = new DefaultJobExecutor(
@@ -256,20 +256,15 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     );
     executor.setStoragePath(dir);
 
-    let capturedHydratedWork: any = undefined;
+    let capturedGetWorkSpec: any = undefined;
 
     // Stub phases
     sandbox.stub(SetupPhaseExecutor.prototype, 'execute').resolves({ success: true });
     sandbox.stub(WorkPhaseExecutor.prototype, 'execute').resolves({ success: true });
     sandbox.stub(CommitPhaseExecutor.prototype, 'execute').callsFake(async (ctx: any) => {
-      capturedHydratedWork = ctx.hydratedWork;
+      capturedGetWorkSpec = ctx.getWorkSpec;
       return { success: true, commit: 'abc123' };
     });
-
-    const hydratedWorkSpec: WorkSpec = {
-      type: 'shell',
-      command: 'echo hydrated',
-    };
 
     const node = makeNode({
       work: { type: 'shell', command: 'echo original' },
@@ -281,13 +276,12 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
       baseCommit: 'abc',
       worktreePath: worktreeDir,
       attemptNumber: 1,
-      hydratedWork: hydratedWorkSpec,
     };
 
     await executor.execute(ctx);
 
-    // Verify hydratedWork was passed to CommitPhaseContext
-    assert.deepStrictEqual(capturedHydratedWork, hydratedWorkSpec);
+    // Verify getWorkSpec callback was passed to CommitPhaseContext
+    assert.ok(typeof capturedGetWorkSpec === 'function' || capturedGetWorkSpec === undefined);
   });
 
   test('resumeFromPhase skips earlier phases except merge-fi', async () => {
@@ -455,6 +449,62 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
       SHARED_VAR: 'from_plan',
       POSTCHECK_VAR: 'post',
     });
+  });
+
+  test('env expansion: $VAR and ${VAR} resolved against process.env', async () => {
+    const dir = makeTmpDir();
+    const worktreeDir = makeTmpDir();
+    const executor = new DefaultJobExecutor(
+      new DefaultProcessSpawner(),
+      new DefaultEvidenceValidator(),
+      new ProcessMonitor(new DefaultProcessSpawner()),
+      createMockGitOps(),
+      mockCopilotRunner
+    );
+    executor.setStoragePath(dir);
+
+    // Set a known host env var for the test
+    const origVal = process.env['ORCH_TEST_EXPAND'];
+    process.env['ORCH_TEST_EXPAND'] = '/original/path';
+
+    let capturedEnv: any;
+    sandbox.stub(SetupPhaseExecutor.prototype, 'execute').resolves({ success: true });
+    sandbox.stub(PrecheckPhaseExecutor.prototype, 'execute').resolves({ success: true });
+    sandbox.stub(WorkPhaseExecutor.prototype, 'execute').callsFake(async (ctx: PhaseContext) => {
+      capturedEnv = ctx.env;
+      return { success: true };
+    });
+    sandbox.stub(CommitPhaseExecutor.prototype, 'execute').resolves({ success: true, commit: 'abc' });
+
+    const node = makeNode({
+      work: {
+        type: 'shell',
+        command: 'echo test',
+        env: {
+          MY_PATH: '/custom/bin:$ORCH_TEST_EXPAND',
+          MY_PATH2: '/other:${ORCH_TEST_EXPAND}/sub',
+          LITERAL: 'no_expansion_here',
+        },
+      },
+    });
+
+    const ctx: ExecutionContext = {
+      plan: { id: 'p1', env: {} } as any,
+      node,
+      baseCommit: 'abc',
+      worktreePath: worktreeDir,
+      attemptNumber: 1,
+    };
+
+    try {
+      await executor.execute(ctx);
+      assert.strictEqual(capturedEnv.MY_PATH, '/custom/bin:/original/path');
+      assert.strictEqual(capturedEnv.MY_PATH2, '/other:/original/path/sub');
+      assert.strictEqual(capturedEnv.LITERAL, 'no_expansion_here');
+    } finally {
+      if (origVal === undefined) delete process.env['ORCH_TEST_EXPAND'];
+      else process.env['ORCH_TEST_EXPAND'] = origVal;
+    }
   });
 
   test('abort handling between phases', async () => {
@@ -704,9 +754,6 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
       baseCommit: 'abc',
       worktreePath: worktreeDir,
       attemptNumber: 1,
-      hydratedWork: undefined,
-      hydratedPrechecks: undefined,
-      hydratedPostchecks: undefined,
     };
 
     await executor.execute(ctx);

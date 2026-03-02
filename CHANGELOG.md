@@ -5,6 +5,149 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-02-28
+
+### 🚀 Major Features
+
+#### Auto-Heal Multi-Retry System
+- **Configurable retry budget**: New `copilotOrchestrator.autoHeal.maxAttempts` setting (default: 4, range: 0-1024) controls maximum auto-heal attempts per failed phase
+- **Multi-attempt retry loop**: Auto-heal now retries up to the configured limit instead of giving up after the first attempt, spawning a fresh AI agent for each retry with full failure context
+- **No-op detection**: Automatically detects when an auto-heal agent diagnoses the problem but makes no code changes, failing immediately instead of burning retry budget on diagnosis-only loops
+- **Per-phase exhaustion tracking**: Each phase (prechecks, work, postchecks, merge-ri) has independent retry budgets
+- **Attempt history preservation**: All retry attempts are tracked with trigger types, phase timing, and failure context for detailed debugging
+
+#### Timeline Visualization (Experimental)
+- **Pixel-based Gantt chart**: Interactive timeline showing plan execution history with horizontal scrolling and sticky time axis
+- **Live phase updates**: Real-time colored phase segments (merge-fi, setup, prechecks, work, commit, postchecks, merge-ri) with exact timestamps
+- **Clickable attempt focus**: Click any timeline bar attempt to focus that job in the node detail panel
+- **Rich HTML tooltips**: Hover over timeline bars for phase breakdown with color-coded status squares and exact durations
+- **Plan state markers**: Visual indicators for plan events (queued, started, paused, resumed, completed) on dedicated plan row
+- **Dependency arrows**: Visual dependency lines connecting related jobs in the timeline
+- **Group headers**: Collapsible group sections organizing related jobs
+- **Trigger type badges**: Visual indicators showing initial runs vs auto-heal retries
+- **Hidden by default**: Timeline is opt-in via `copilotOrchestrator.experimental.showTimeline` setting (default: false) to allow iterative improvement without disrupting existing workflows
+
+#### Job & Plan Configuration Display
+- **Job configuration section**: New "Job Configuration" panel in node detail showing:
+  - Auto-heal settings and attempt count
+  - `expectsNoChanges` flag for validation-only jobs
+  - Group membership and producer ID
+  - Per-job environment variables with sensitive value redaction
+  - Agent specifications (model, allowed folders, allowed URLs)
+  - Phase configurations (prechecks, work, postchecks) with collapsible sections
+  - Instructions rendered as formatted markdown
+  - Failure handling directives (noAutoHeal, resumeFromPhase, custom messages)
+- **Plan configuration section**: New "Plan Configuration" panel in plan detail showing:
+  - Plan-level environment variables (inheritable by all jobs)
+  - Max parallelism settings
+  - Auto-cleanup behavior
+  - Repository and worktree root paths
+  - Snapshot branch information
+  - Plan ID for debugging
+
+#### Per-Spec Environment Variables
+- **Node-level env vars**: Each node can define environment variables that override plan-level values
+- **Inheritance model**: Jobs inherit plan-level `env`, then overlay node-specific `env` values
+- **Configuration visibility**: Both plan and job env vars displayed in configuration sections with sensitive value masking
+
+### 🎨 UI Improvements
+
+#### Timeline Enhancements
+- **Actual time proportions**: Phase segments sized by actual wall-clock duration instead of normalized percentages
+- **Absolute pixel positioning**: Timeline bars positioned using exact timestamps for accurate visual representation
+- **Horizontal growth**: Timeline expands rightward as execution progresses, with smooth scroll behavior
+- **Scroll preservation**: Timeline scroll position maintained during incremental updates
+- **Phase coloring**: Live phase colors update during execution to reflect current job state
+- **Duration counter**: Real-time elapsed time display in timeline bars for running jobs
+
+#### Panel Layout Improvements
+- **Sticky header refinement**: Action buttons (Cancel, Pause, Resume, Delete) moved into always-visible sticky header
+- **Phase-colored borders**: Node detail phase tabs (Prechecks, Work, Postchecks) show left border colored by phase type
+- **DAG and Timeline together**: Removed tab bar UI, now showing both DAG diagram and timeline simultaneously
+- **Improved metrics bar**: Better visual hierarchy for plan statistics (nodes completed, duration, AI usage)
+- **Process monitoring placement**: Running Processes section moved below both DAG and Timeline for consistent layout
+
+### 🏗️ Architecture Refactoring
+
+#### Webview Bundle Migration
+- **esbuild entry points**: New bundled JavaScript for nodeDetail, planDetail, and plansList webviews
+- **Template extraction**: Separated HTML/CSS/JS from inline code into modular templates:
+  - `src/ui/templates/nodeDetail/` - Node detail panel templates
+  - `src/ui/templates/planDetail/` - Plan detail panel templates
+  - `src/ui/templates/plansView/` - Plans sidebar templates
+  - `src/ui/webview/controls/` - Reusable webview controls (TimelineChart, ViewTabBar)
+  - `src/ui/webview/entries/` - Webview bootstrap entry points
+- **Message routing consolidation**: Extracted message routers and event handlers into dedicated modules
+- **Control wiring separation**: Control initialization logic separated from HTML generation
+- **Standalone diagram builder**: MermaidBuilder extracted as standalone module
+- **Template testing**: Comprehensive unit test coverage for all template modules
+- **Webview URI helper**: New `webviewUri.ts` for CSP-compliant script tag generation
+
+#### Codebase Organization
+- **Test infrastructure isolation**: Moved test helpers (`compositionTest.ts`, `testAdapters.ts`) from `src/` to `src/test/helpers/` to separate production from test code
+- **Plan state mapping**: Extracted `planStateMapper.ts` and `planStatePersister.ts` for cleaner repository implementation
+- **Documentation updates**: Comprehensive updates to `ARCHITECTURE.md` with new class diagrams and sequence flows
+
+### 🐛 Bug Fixes
+
+#### Timeline Fixes
+- **Scroll preservation**: Fixed timeline scroll position resetting during updates
+- **Marker positioning**: Timeline event markers now use exact bar pixel positions instead of approximations
+- **Phase rendering**: Fixed phase display for all node types (JobNode, MergeNode, SupervisorNode) during live execution
+- **Empty segment handling**: Eliminated empty or zero-width phase segments in timeline bars
+- **Tooltip accuracy**: Fixed tooltips showing all phases as 'skipped' for jobs with no timing data
+- **Plan row visibility**: Plan state row now always visible even when stateHistory is empty
+
+#### Node Detail Panel Fixes
+- **Duration counter drift**: Fixed duration timer drift after system sleep/resume
+- **Button handler restoration**: Restored button handler functions lost during webview bundle migration
+- **Phase tab icons**: Replaced emoji icons with clean Unicode symbols for better cross-platform rendering
+- **Mermaid sizing**: Fixed Mermaid diagram node text clamping and duration template formatting
+
+#### Plan Detail Panel Fixes
+- **Merge-fi status reporting**: merge-fi phase now correctly reports 'success' instead of 'skipped' when no dependencies exist
+- **Process monitoring**: Moved Running Processes section to correct position below DAG/Timeline
+- **Sticky header z-index**: Increased sticky header z-index to 100 to stay above all content
+
+#### MCP Integration Fixes
+- **Schema validation errors**: Included valid schemas in MCP validation error responses for better debugging
+- **Status update payloads**: Enriched statusUpdate events with attempt data for live timeline updates
+
+### ⚙️ Configuration
+
+#### New Settings
+- `copilotOrchestrator.autoHeal.maxAttempts` (default: 4) - Maximum auto-heal retry attempts per phase
+- `copilotOrchestrator.experimental.showTimeline` (default: false) - Show experimental timeline visualization
+
+### 📊 Testing
+
+- **Line coverage**: 95.22% (27,932 / 29,332 lines)
+- **New test suites**:
+  - Timeline chart unit tests (`timelineChart.unit.test.ts`)
+  - View tab bar tests (`viewTabBar.unit.test.ts`)
+  - Webview bundle integration tests (nodeDetail, planDetail, plansList entry points)
+  - Template module tests (styles, scripts, body templates)
+  - Control consistency tests
+  - Plan state history type tests
+  - Repository mapper and persister tests
+- **Test infrastructure improvements**: All tests migrated to dedicated test helpers directory
+
+### 🔧 Internal Changes
+
+- **Auto-heal execution engine refactor**: Converted single-shot auto-heal into while-loop with continue/break flow control for exhaustion handling
+- **Timeline data optimization**: Timeline data only computed when experimental flag is enabled
+- **CSS conditional loading**: Timeline styles only injected when feature is enabled
+- **Logger enhancements**: Added component-level logging (`copilotOrchestrator.logging.components`) for focused debugging
+
+### 📦 Migration Notes
+
+No breaking changes. All changes are backward-compatible with existing plans and configurations.
+
+**To enable the experimental timeline:**
+1. Open VS Code Settings (Ctrl+,)
+2. Search for "copilot orchestrator experimental"
+3. Check "Experimental: Show Timeline"
+
 ## [0.13.0] - 2026-02-21
 
 ### Added

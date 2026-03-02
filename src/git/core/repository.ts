@@ -9,7 +9,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { execAsync, execAsyncOrNull, execAsyncOrThrow, GitLogger } from './executor';
+import { execAsync, execAsyncOrNull, execAsyncOrThrow, GitLogger, CommandResult } from './executor';
 
 /**
  * Commit information.

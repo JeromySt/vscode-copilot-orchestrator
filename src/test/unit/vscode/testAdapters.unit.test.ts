@@ -3,7 +3,7 @@
  */
 
 import * as assert from 'assert';
-import { MockConfigProvider, MockDialogService, MockClipboardService } from '../../../vscode/testAdapters';
+import { MockConfigProvider, MockDialogService, MockClipboardService } from '../../helpers/testAdapters';
 
 suite('MockConfigProvider', () => {
   let mockConfig: MockConfigProvider;

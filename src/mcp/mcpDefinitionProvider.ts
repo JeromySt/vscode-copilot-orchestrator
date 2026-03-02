@@ -104,15 +104,14 @@ export function registerMcpDefinitionProvider(
       const extensionPath = context.extensionPath;
       const serverScript = path.join(extensionPath, 'dist', 'mcp-stdio-server.js');
 
-      // The stdio server connects back to the extension via IPC
-      // All config passed via environment variables to keep server "shape" stable
-      // McpStdioServerDefinition constructor: (label, command, args?, env?, version?)
-      // Note: cwd is a property that can be set after construction
+      // Use VS Code's bundled Node.js runtime (process.execPath + ELECTRON_RUN_AS_NODE)
+      // so users don't need Node.js installed separately on their system.
       const server = new (vscode as any).McpStdioServerDefinition(
         'Copilot Orchestrator',  // label
-        'node',                  // command
+        process.execPath,        // command — VS Code's bundled Electron/Node binary
         [serverScript],          // args - no variable args, keeps shape stable
         {
+          ELECTRON_RUN_AS_NODE: '1',           // Run Electron as plain Node.js
           MCP_IPC_PATH: currentIpcPath,        // IPC connection path
           MCP_AUTH_NONCE: currentAuthNonce,    // Security: auth nonce for IPC
         },

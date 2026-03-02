@@ -306,7 +306,7 @@ suite('PlanStateMachine', () => {
       assert.strictEqual(sm.computePlanStatus(), 'failed');
     });
 
-    test('mixed succeeded and failed → partial', () => {
+    test('mixed succeeded and failed → failed', () => {
       const plan = buildPlan([['a', []], ['b', []]]);
       const sm = new PlanStateMachine(plan);
       // a succeeds
@@ -319,7 +319,7 @@ suite('PlanStateMachine', () => {
       sm.transition('b', 'scheduled');
       sm.transition('b', 'running');
       sm.transition('b', 'failed');
-      assert.strictEqual(sm.computePlanStatus(), 'partial');
+      assert.strictEqual(sm.computePlanStatus(), 'failed');
     });
 
     test('canceled → canceled', () => {

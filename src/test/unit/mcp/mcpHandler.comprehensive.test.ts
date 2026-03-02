@@ -16,7 +16,7 @@ import { suite, test, setup, teardown } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { McpHandler } from '../../../mcp/handler';
-import { JsonRpcRequest } from '../../../mcp/types';
+import { JsonRpcRequest, JsonRpcResponse } from '../../../mcp/types';
 
 // Mock PlanRunner for testing
 class MockPlanRunner {

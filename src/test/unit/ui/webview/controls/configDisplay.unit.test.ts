@@ -6,7 +6,7 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { EventBus } from '../../../../../ui/webview/eventBus';
 import { Topics } from '../../../../../ui/webview/topics';
-import { ConfigDisplay, JobSpec } from '../../../../../ui/webview/controls/configDisplay';
+import { ConfigDisplay, ConfigDisplayData, JobSpec } from '../../../../../ui/webview/controls/configDisplay';
 
 function mockDocument(elements: Record<string, any> = {}): () => void {
   const prev = (globalThis as any).document;
@@ -264,7 +264,7 @@ suite('ConfigDisplay', () => {
     cd.dispose();
   });
 
-  test('truncates long agent instructions', () => {
+  test('renders long agent instructions without truncation', () => {
     const el = makeEl();
     restoreDoc = mockDocument({ config: el });
 
@@ -280,8 +280,8 @@ suite('ConfigDisplay', () => {
       work: agentSpec 
     });
 
-    assert.ok(el.innerHTML.includes('...'));
-    assert.ok(!el.innerHTML.includes(longInstructions));
+    // Source now renders full instructions without truncation
+    assert.ok(el.innerHTML.includes(longInstructions), 'Should render full instructions');
     cd.dispose();
   });
 

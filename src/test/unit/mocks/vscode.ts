@@ -111,6 +111,11 @@ export class Uri {
       _change.fragment ?? this.fragment,
     );
   }
+
+  static joinPath(base: Uri, ...pathSegments: string[]): Uri {
+    const joined = [base.path, ...pathSegments].join('/').replace(/\/+/g, '/');
+    return new Uri(base.scheme, base.authority, joined, base.query, base.fragment);
+  }
 }
 
 // ---------------------------------------------------------------------------

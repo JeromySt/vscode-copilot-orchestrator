@@ -4,7 +4,61 @@
 
 ## Overview
 
-Copilot Orchestrator uses a Symbol-based dependency injection container to manage service lifecycle, enable testability, and provide clean separation of concerns. This guide covers adding new services, registration patterns, mocking strategies, and best practices.
+Copilot Orchestrator uses a Symbol-based dependency injection container with **23 tokens** to manage service lifecycle, enable testability, and provide clean separation of concerns.
+
+```mermaid
+classDiagram
+    class ServiceContainer {
+        +registerSingleton(token, factory) void
+        +register(token, factory) void
+        +resolve(token) T
+        +createScope() ServiceContainer
+    }
+
+    class IConfigProvider {
+        <<interface>>
+        +getConfig(section, key, default) T
+    }
+    class IDialogService {
+        <<interface>>
+        +showInfo(msg) void
+        +showError(msg) void
+    }
+    class IGitOperations {
+        <<interface>>
+        +branches: IGitBranches
+        +worktrees: IGitWorktrees
+        +merge: IGitMerge
+    }
+    class IProcessSpawner {
+        <<interface>>
+        +spawn(cmd, args, opts) ChildProcess
+    }
+    class ILogger {
+        <<interface>>
+        +info(msg, ctx) void
+        +error(msg, ctx) void
+        +debug(msg, ctx) void
+    }
+
+    class VsCodeConfigProvider
+    class VsCodeDialogService
+    class DefaultGitOperations
+    class DefaultProcessSpawner
+    class Logger
+
+    IConfigProvider <|.. VsCodeConfigProvider
+    IDialogService <|.. VsCodeDialogService
+    IGitOperations <|.. DefaultGitOperations
+    IProcessSpawner <|.. DefaultProcessSpawner
+    ILogger <|.. Logger
+
+    ServiceContainer --> IConfigProvider
+    ServiceContainer --> IDialogService
+    ServiceContainer --> IGitOperations
+    ServiceContainer --> IProcessSpawner
+    ServiceContainer --> ILogger
+```
 
 ---
 
@@ -30,7 +84,7 @@ Copilot Orchestrator uses a Symbol-based dependency injection container to manag
 | **ServiceContainer** | `src/core/container.ts` | Type-safe DI container with Symbol tokens |
 | **Tokens** | `src/core/tokens.ts` | Symbol-based service registration keys |
 | **Production Root** | `src/composition.ts` | Wires real implementations for production |
-| **Test Root** | `src/compositionTest.ts` | Wires mock implementations for testing |
+| **Test Root** | `src/test/helpers/compositionTest.ts` | Wires mock implementations for testing |
 
 ### Container Features
 
@@ -349,7 +403,7 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
 
 ### Step 5: Create Mock for Testing
 
-Add mock implementation in `src/vscode/testAdapters.ts`:
+Add mock implementation in `src/test/helpers/testAdapters.ts`:
 
 ```typescript
 export class MockMyNewService implements IMyNewService {
@@ -396,10 +450,10 @@ export class MockMyNewService implements IMyNewService {
 
 ### Step 6: Register Mock in Test Root
 
-Add to `src/compositionTest.ts`:
+Add to `src/test/helpers/compositionTest.ts`:
 
 ```typescript
-import { MockMyNewService } from './vscode/testAdapters';
+import { MockMyNewService } from '../test/helpers/testAdapters';
 
 export function createTestContainer(): ServiceContainer {
   const container = new ServiceContainer();
@@ -423,9 +477,9 @@ export function createTestContainer(): ServiceContainer {
 ### Test Setup Pattern
 
 ```typescript
-import { createTestContainer } from '../../../src/compositionTest';
+import { createTestContainer } from '../../test/helpers/compositionTest';
 import * as Tokens from '../../../src/core/tokens';
-import type { MockMyNewService } from '../../../src/vscode/testAdapters';
+import type { MockMyNewService } from '../../test/helpers/testAdapters';
 
 suite('MyComponent Tests', () => {
   let container: ServiceContainer;
@@ -538,7 +592,7 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
 }
 ```
 
-### Test Composition (`src/compositionTest.ts`)
+### Test Composition (`src/test/helpers/compositionTest.ts`)
 
 The test composition root wires mock implementations:
 
@@ -745,4 +799,4 @@ Available DI tokens for service resolution:
 
 ---
 
-This guide provides comprehensive coverage of dependency injection patterns, service registration, and testing strategies used throughout Copilot Orchestrator. For specific implementations, refer to the examples in `src/composition.ts`, `src/compositionTest.ts`, and the mock adapters in `src/vscode/testAdapters.ts`.
+This guide provides comprehensive coverage of dependency injection patterns, service registration, and testing strategies used throughout Copilot Orchestrator. For specific implementations, refer to the examples in `src/composition.ts`, `src/test/helpers/compositionTest.ts`, and the mock adapters in `src/test/helpers/testAdapters.ts`.

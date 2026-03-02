@@ -22,6 +22,13 @@ import * as os from 'os';
 
 type AsyncFn = (...args: any[]) => Promise<any>;
 
+/** Minimal stub that replaces a function on `obj` and restores it later. */
+function stub<T extends Record<string, any>>(obj: T, method: keyof T, replacement: AsyncFn) {
+  const original = obj[method];
+  (obj as any)[method] = replacement;
+  return { restore: () => { (obj as any)[method] = original; } };
+}
+
 /** Suppress Logger console output to avoid hanging test workers. */
 function silenceConsole(): { restore: () => void } {
   const origLog = console.log;

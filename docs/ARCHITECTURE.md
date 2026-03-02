@@ -2,70 +2,83 @@
 
 > Copilot Orchestrator — Parallel Copilot-driven development using DAG execution in isolated git worktrees.
 
-## Overview
+## System Overview
 
 Copilot Orchestrator is a VS Code extension that decomposes complex development tasks into a **Directed Acyclic Graph (DAG)** of work nodes, each executing in parallel within isolated git worktrees. It integrates with GitHub Copilot Chat via the **Model Context Protocol (MCP)** and provides real-time visual feedback through VS Code's UI.
 
 ```mermaid
 graph TB
-    subgraph "VS Code Extension Host"
-        EXT[Extension Entry Point]
-        PR[PlanRunner]
-        EX[JobExecutor]
-        SM[StateMachine]
-        SCH[Scheduler]
-        PERS[Persistence]
-    end
-
-    subgraph "MCP Layer"
-        IPC[IPC Server]
-        STDIO[Stdio Child Process]
-        HANDLER[McpHandler]
-    end
-
-    subgraph "Git Layer"
-        GIT[Git Orchestrator]
-        WT[Worktree Manager]
-        MRG[Merge Manager]
-        BR[Branch Manager]
-    end
-
-    subgraph "UI Layer"
-        PV[Plans View]
-        SB[Status Bar]
-        PDP[Plan Detail Panel]
-        NDP[Node Detail Panel]
-    end
-
     subgraph "External"
         CHAT[Copilot Chat]
         CLI[Copilot CLI]
         REPO[Git Repository]
     end
 
+    subgraph "VS Code Extension Host"
+        subgraph "MCP Layer"
+            IPC[IPC Server]
+            STDIO[Stdio Child Process]
+            HANDLER[McpHandler]
+        end
+
+        subgraph "Plan Engine"
+            PR[PlanRunner]
+            LC[PlanLifecycle]
+            SM[StateMachine]
+            SCH[Scheduler]
+            PUMP[ExecutionPump]
+            EX[JobExecutor]
+        end
+
+        subgraph "Storage"
+            REPO_L[PlanRepository]
+            STORE[PlanStore]
+            DEF[PlanDefinition]
+        end
+
+        subgraph "Git Layer"
+            GIT[GitOperations]
+            WT[Worktrees]
+            MRG[Merge]
+            BR[Branches]
+        end
+
+        subgraph "UI Layer"
+            PV[Plans Sidebar]
+            SB[Status Bar]
+            PDP[Plan Detail Panel]
+            NDP[Node Detail Panel]
+        end
+    end
+
     CHAT -->|JSON-RPC stdio| STDIO
-    STDIO -->|IPC| IPC
+    STDIO -->|IPC + nonce auth| IPC
     IPC --> HANDLER
     HANDLER --> PR
 
-    EXT --> PR
-    PR --> SM
-    PR --> SCH
-    PR --> EX
-    PR --> PERS
-    PR --> PV
-    PR --> SB
-
+    PR --> LC
+    LC --> PUMP
+    PUMP --> SCH
+    SCH --> SM
+    PUMP --> EX
     EX --> GIT
     EX --> CLI
+    PR --> REPO_L
+    REPO_L --> STORE
+    REPO_L --> DEF
+
     GIT --> WT
     GIT --> MRG
     GIT --> BR
     WT --> REPO
     MRG --> REPO
 
-    PV --> PDP
-    PDP --> NDP
+    PR -.->|events| PV
+    PR -.->|events| PDP
+    PR -.->|events| NDP
+    PR -.->|polling| SB
+    PV -->|openPlan| PDP
+    PDP -->|openNode| NDP
 ```
 
 ### Design Principles
@@ -75,810 +88,666 @@ graph TB
 | **Isolation** | Each node executes in its own git worktree — no interference with the user's working directory |
 | **Composability** | Plans are flat DAGs with visual grouping — no nested execution hierarchy |
 | **Fault tolerance** | Failed nodes block only their dependents; retry resumes from the failed phase |
-| **Extensibility** | DI interfaces (`INodeRunner`, `INodeExecutor`, `IGitOperations`) allow pluggable implementations |
+| **Extensibility** | DI interfaces (`INodeRunner`, `INodeExecutor`, `IGitOperations`) make every subsystem pluggable |
 | **Observability** | Real-time UI updates via event emission on every state transition |
+| **Security** | Agents sandboxed to their worktree; MCP bridge uses nonce authentication |
 
 ---
 
-## Core Components
+## Class Diagram — Core Domain
 
-### Module Layout
+```mermaid
+classDiagram
+    class PlanRunner {
+        -lifecycle: PlanLifecycle
+        -persistence: PlanPersistence
+        -events: PlanEventEmitter
+        +enqueue(spec) PlanInstance
+        +cancel(planId) void
+        +get(planId) PlanInstance
+        +registerPlan(plan) void
+    }
+
+    class PlanLifecycle {
+        -pump: ExecutionPump
+        -stateMachineFactory
+        +register(plan) void
+        +resume(planId) void
+        +pause(planId) void
+        +cancel(planId) void
+    }
+
+    class ExecutionPump {
+        -scheduler: PlanScheduler
+        -engine: JobExecutionEngine
+        +pump() void
+    }
+
+    class PlanScheduler {
+        +selectReady(plan) JobNode[]
+    }
+
+    class JobExecutionEngine {
+        -executor: DefaultJobExecutor
+        -git: IGitOperations
+        +executeJobNode(plan, node) void
+    }
+
+    class DefaultJobExecutor {
+        -spawner: IProcessSpawner
+        -evidenceValidator: IEvidenceValidator
+        -git: IGitOperations
+        -copilotRunner: ICopilotRunner
+        +execute(ctx) JobExecutionResult
+    }
+
+    class PlanStateMachine {
+        -plan: PlanInstance
+        +transition(nodeId, status) boolean
+        +cancelAll() void
+        +resetNodeToPending(nodeId) void
+    }
+
+    class PlanInstance {
+        +id: string
+        +spec: PlanSpec
+        +jobs: Map
+        +nodeStates: Map
+        +roots: string[]
+        +leaves: string[]
+        +definition: IPlanDefinition
+    }
+
+    class JobNode {
+        +id: string
+        +producerId: string
+        +name: string
+        +dependencies: string[]
+        +dependents: string[]
+        +work: WorkSpec
+    }
+
+    PlanRunner --> PlanLifecycle
+    PlanRunner --> PlanInstance
+    PlanLifecycle --> ExecutionPump
+    ExecutionPump --> PlanScheduler
+    ExecutionPump --> JobExecutionEngine
+    JobExecutionEngine --> DefaultJobExecutor
+    PlanLifecycle --> PlanStateMachine
+    PlanStateMachine --> PlanInstance
+    PlanInstance --> JobNode
+```
+
+---
+
+## Class Diagram — Storage Layer
+
+```mermaid
+classDiagram
+    class IPlanRepository {
+        <<interface>>
+        +scaffold(spec) PlanInstance
+        +addNode(planId, spec) PlanInstance
+        +finalize(planId) PlanInstance
+        +loadState(planId) PlanInstance
+        +saveState(plan) void
+        +getDefinition(planId) IPlanDefinition
+    }
+
+    class DefaultPlanRepository {
+        -store: IPlanRepositoryStore
+        -repoPath: string
+    }
+
+    class IPlanDefinition {
+        <<interface>>
+        +getWorkSpec(nodeId) WorkSpec
+        +getPrechecksSpec(nodeId) WorkSpec
+        +getPostchecksSpec(nodeId) WorkSpec
+    }
+
+    class FilePlanDefinition {
+        -metadata: StoredPlanMetadata
+        -store: IPlanRepositoryStore
+    }
+
+    class IPlanRepositoryStore {
+        <<interface>>
+        +readPlanMetadata(planId) StoredPlanMetadata
+        +writePlanMetadata(metadata) void
+        +writeNodeSpec(planId, nodeId, phase, spec) void
+        +readNodeSpec(planId, nodeId, phase) WorkSpec
+    }
+
+    class FileSystemPlanStore {
+        -fs: IFileSystem
+        -basePath: string
+    }
+
+    IPlanRepository <|.. DefaultPlanRepository
+    IPlanDefinition <|.. FilePlanDefinition
+    IPlanRepositoryStore <|.. FileSystemPlanStore
+    DefaultPlanRepository --> IPlanRepositoryStore
+    DefaultPlanRepository --> FilePlanDefinition
+    FilePlanDefinition --> IPlanRepositoryStore
+```
+
+---
+
+## Class Diagram — DI & Adapters
+
+```mermaid
+classDiagram
+    class ServiceContainer {
+        -singletons: Map
+        -factories: Map
+        +registerSingleton(token, factory)
+        +register(token, factory)
+        +resolve(token) T
+        +createScope() ServiceContainer
+    }
+
+    class IConfigProvider {
+        <<interface>>
+        +getConfig(section, key, default) T
+    }
+    class IDialogService {
+        <<interface>>
+        +showInfo(msg) void
+        +showError(msg) void
+        +showWarning(msg, opts) string
+    }
+    class IProcessSpawner {
+        <<interface>>
+        +spawn(cmd, args, opts) ChildProcess
+    }
+    class IGitOperations {
+        <<interface>>
+        +branches: IGitBranches
+        +worktrees: IGitWorktrees
+        +merge: IGitMerge
+        +repository: IGitRepository
+        +executor: IGitExecutor
+    }
+
+    class VsCodeConfigProvider
+    class VsCodeDialogService
+    class DefaultProcessSpawner
+    class DefaultGitOperations
+
+    IConfigProvider <|.. VsCodeConfigProvider
+    IDialogService <|.. VsCodeDialogService
+    IProcessSpawner <|.. DefaultProcessSpawner
+    IGitOperations <|.. DefaultGitOperations
+
+    ServiceContainer --> IConfigProvider
+    ServiceContainer --> IDialogService
+    ServiceContainer --> IProcessSpawner
+    ServiceContainer --> IGitOperations
+```
+
+---
+
+## Sequence Diagram — Plan Creation via MCP
+
+```mermaid
+sequenceDiagram
+    participant Chat as Copilot Chat
+    participant MCP as MCP Stdio Process
+    participant IPC as IPC Bridge
+    participant Handler as MCP Handler
+    participant Validate as Ajv Validator
+    participant Repo as PlanRepository
+    participant Store as FileSystemPlanStore
+    participant Runner as PlanRunner
+    participant UI as Webview UI
+
+    Chat->>MCP: JSON-RPC tools/call (create_copilot_plan)
+    MCP->>IPC: Forward via named pipe
+    IPC->>Handler: Route to createPlanHandler
+    Handler->>Validate: validateInput(schema, args)
+    Validate-->>Handler: valid: true
+    Handler->>Repo: scaffold(spec)
+    Repo->>Store: writePlanMetadata()
+    Repo-->>Handler: PlanInstance (scaffolding)
+
+    loop For each job
+        Handler->>Repo: addNode(planId, jobSpec)
+        Repo->>Store: writeNodeSpec(work)
+        Repo-->>Handler: rebuilt PlanInstance
+    end
+
+    Handler->>Repo: finalize(planId)
+    Repo->>Store: writePlanMetadata()
+    Repo-->>Handler: finalized PlanInstance
+    Handler->>Runner: registerPlan(plan)
+    Runner->>UI: emit planCreated
+
+    Handler-->>IPC: MCP response
+    IPC-->>MCP: Forward response
+    MCP-->>Chat: JSON-RPC response
+```
+
+---
+
+## Sequence Diagram — Node Execution Pipeline
+
+```mermaid
+sequenceDiagram
+    participant Pump as ExecutionPump
+    participant Engine as ExecutionEngine
+    participant Exec as JobExecutor
+    participant Git as GitOperations
+    participant CLI as Copilot CLI
+    participant Store as PlanStore
+
+    Pump->>Engine: executeJobNode(plan, node)
+    Engine->>Git: createDetachedWorktree(commit)
+    Git-->>Engine: worktreePath
+
+    Note over Engine,Exec: Phase 1 — Merge-FI
+    Engine->>Exec: execute(context)
+    Exec->>Git: merge dependency commits into worktree
+
+    Note over Engine,Exec: Phase 2 — Setup
+    Exec->>Exec: write .gitignore, skill files
+
+    Note over Engine,Exec: Phase 3 — Prechecks (optional)
+    Exec->>CLI: run precheck command
+
+    Note over Engine,Exec: Phase 4 — Work
+    alt Agent Work
+        Exec->>CLI: copilot -p instructions --add-dir worktree
+        CLI-->>Exec: exit code + metrics
+    else Shell Work
+        Exec->>Exec: spawn shell command
+    end
+
+    Note over Engine,Exec: Phase 5 — Commit
+    Exec->>Git: stage + commit changes
+    Git-->>Exec: completedCommit SHA
+
+    Note over Engine,Exec: Phase 6 — Postchecks (optional)
+    Exec->>CLI: run postcheck command
+
+    Note over Engine,Exec: Phase 7 — Merge-RI (leaf nodes)
+    Exec->>Git: merge-tree --write-tree (in-memory)
+    Git-->>Exec: new commit on snapshot branch
+
+    Exec-->>Engine: JobExecutionResult
+    Engine->>Store: saveState(plan)
+    Engine-->>Pump: node completed
+```
+
+---
+
+## Sequence Diagram — Snapshot Validation & Final Merge
+
+```mermaid
+sequenceDiagram
+    participant Pump as ExecutionPump
+    participant SV as Snapshot Validation Node
+    participant Git as GitOperations
+    participant Target as Target Branch
+
+    Note over Pump: All leaf nodes merged to snapshot branch
+
+    Pump->>SV: execute (worktree = snapshot worktree)
+
+    Note over SV: Prechecks — target branch health
+    SV->>Git: check targetBranch dirty/ahead
+    alt Target is dirty
+        SV-->>Pump: force-fail (user must resolve)
+    else Target advanced
+        SV->>Git: rebase snapshot onto target
+    end
+
+    Note over SV: Work — run verifyRiSpec
+    SV->>SV: npm run compile && npm run test:unit
+
+    Note over SV: Merge-RI — final merge to target
+    SV->>Git: merge-tree snapshot to target
+    Git->>Target: update branch ref
+    Git-->>SV: success
+
+    SV-->>Pump: succeeded
+    Note over Pump: Clean up snapshot worktree + branch
+```
+
+---
+
+## Component Dependency Map
+
+```mermaid
+graph LR
+    subgraph "Entry"
+        EXT[extension.ts]
+        COMP[composition.ts]
+    end
+
+    subgraph "Orchestration"
+        PR[PlanRunner]
+        LC[PlanLifecycle]
+        PUMP[ExecutionPump]
+        SM[StateMachine]
+        SCH[Scheduler]
+        ENG[ExecutionEngine]
+        EXEC[JobExecutor]
+    end
+
+    subgraph "MCP"
+        MGR[McpServerManager]
+        HAND[McpHandler]
+        TOOLS[ToolDefinitions]
+        VAL[SchemaValidation]
+    end
+
+    subgraph "Storage"
+        REPO[PlanRepository]
+        STORE[PlanStore]
+        PERS[Persistence]
+    end
+
+    subgraph "Git"
+        GITOPS[GitOperations]
+        WT[Worktrees]
+        MRG[Merge]
+        BR[Branches]
+    end
+
+    subgraph "Agent"
+        DELEG[AgentDelegator]
+        COPRUN[CopilotCliRunner]
+        DISC[ModelDiscovery]
+    end
+
+    subgraph "Infrastructure"
+        LOG[Logger]
+        CONT[ServiceContainer]
+        GLOB[GlobalCapacity]
+        PWR[PowerManager]
+        PULSE[PulseEmitter]
+    end
+
+    EXT --> COMP
+    COMP --> CONT
+
+    PR --> LC
+    PR --> PERS
+    LC --> PUMP
+    PUMP --> SCH
+    PUMP --> ENG
+    SCH --> SM
+    ENG --> EXEC
+
+    EXEC --> GITOPS
+    EXEC --> COPRUN
+    EXEC --> DELEG
+
+    HAND --> PR
+    HAND --> REPO
+    HAND --> VAL
+    MGR --> HAND
+
+    REPO --> STORE
+    GITOPS --> WT
+    GITOPS --> MRG
+    GITOPS --> BR
+
+    COPRUN --> DISC
+```
+
+---
+
+## Module Layout
 
 ```
 src/
 ├── extension.ts              # Extension activation and lifecycle
 ├── composition.ts            # Production DI composition root
-├── compositionTest.ts        # Test DI composition root
 ├── agent/                    # Copilot CLI delegation
+│   ├── agentDelegator.ts     #   Agent orchestration and prompt building
+│   ├── copilotCliRunner.ts   #   CLI invocation wrapper
+│   ├── copilotStatsParser.ts #   Usage metrics extraction
+│   ├── modelDiscovery.ts     #   Dynamic model enumeration
+│   └── cliCheck*.ts          #   CLI availability detection
 ├── commands/                 # VS Code command registrations
 ├── core/                     # Core infrastructure
-│   ├── container.ts          # Symbol-based DI container
-│   ├── tokens.ts             # Service registration tokens
-│   ├── logger.ts             # Centralized logging with per-component debug
-│   ├── globalCapacity.ts     # Cross-instance job coordination
-│   └── powerManager.ts       # Sleep prevention during execution
-├── git/                      # Git operations (worktrees, merges, branches)
-│   └── core/                 # Low-level git command modules
-├── interfaces/               # DI interface definitions
-│   ├── IConfigProvider.ts    # VS Code configuration abstraction
-│   ├── IDialogService.ts     # VS Code dialog operations
-│   ├── IProcessMonitor.ts    # Process monitoring interface
-│   └── ...                   # Other service interfaces
-├── vscode/                   # VS Code API adapters
-│   ├── adapters.ts           # Production VS Code implementations
-│   └── testAdapters.ts       # Mock implementations for testing
-├── mcp/                      # MCP server, tools, handlers, transports
-│   ├── handlers/             # Business logic for MCP tool calls
-│   ├── ipc/                  # Inter-process communication bridge
-│   ├── stdio/                # Stdio transport for MCP child process
-│   ├── tools/                # MCP tool definitions (schemas)
-│   └── validation/           # Ajv-based input validation
+│   ├── container.ts          #   Symbol-based DI container
+│   ├── tokens.ts             #   23 service registration tokens
+│   ├── logger.ts             #   Structured logging (Logger.for())
+│   ├── globalCapacity.ts     #   Cross-instance job coordination
+│   ├── powerManager.ts       #   Sleep prevention during execution
+│   ├── pulse.ts              #   UI heartbeat timer
+│   └── orphanedWorktreeCleanup.ts
+├── git/                      # Git operations
+│   ├── DefaultGitOperations.ts  # IGitOperations facade
+│   ├── orchestrator.ts       #   High-level git workflows
+│   └── core/                 #   Low-level git commands
+│       ├── branches.ts       #     Branch CRUD
+│       ├── executor.ts       #     Async git command execution
+│       ├── merge.ts          #     In-memory merge-tree operations
+│       └── worktrees.ts      #     Worktree CRUD with per-repo mutex
+├── interfaces/               # 18 DI interface files (one per interface)
+├── mcp/                      # Model Context Protocol integration
+│   ├── handler.ts            #   Tool dispatch router
+│   ├── handlers/             #   Business logic per tool
+│   │   ├── plan/             #     scaffold, addJob, finalize, reshape, update
+│   │   ├── planHandlers.ts   #     Plan CRUD, status, cancel, retry
+│   │   └── jobHandlers.ts    #     Job-centric API
+│   ├── tools/                #   JSON Schema tool definitions
+│   ├── validation/           #   Ajv schema validation
+│   ├── ipc/                  #   Named-pipe IPC bridge
+│   └── stdio/                #   Stdio transport for MCP child process
 ├── plan/                     # DAG execution engine
-│   ├── phases/               # Execution phase handlers (prechecks, work, etc.)
-│   ├── repository/           # Plan repository (DefaultPlanRepository, FilePlanDefinition)
-│   ├── store/                # Plan storage (FileSystemPlanStore)
-│   └── types/                # Type definitions (nodes, plans, specs)
-├── process/                  # OS process monitoring
-├── types/                    # Shared types (config, job, process)
-└── ui/                       # VS Code UI components
-    ├── panels/               # Webview panels (plan detail, node detail)
-    └── templates/            # HTML/CSS template functions
-        ├── planDetail/       # Plan detail panel templates
-        └── nodeDetail/       # Node detail panel templates
+│   ├── runner.ts             #   PlanRunner — top-level orchestrator
+│   ├── planLifecycle.ts      #   Start, pause, resume, cancel
+│   ├── executionPump.ts      #   Main scheduling loop
+│   ├── executionEngine.ts    #   Per-node 7-phase execution
+│   ├── executor.ts           #   DefaultJobExecutor (work routing)
+│   ├── stateMachine.ts       #   DAG state transitions & propagation
+│   ├── scheduler.ts          #   Capacity-aware node selection
+│   ├── builder.ts            #   PlanSpec → PlanInstance DAG builder
+│   ├── phases/               #   Individual phase implementations
+│   │   ├── mergeFiPhase.ts   #     Forward Integration merge
+│   │   ├── setupPhase.ts     #     Worktree environment prep
+│   │   ├── precheckPhase.ts  #     Pre-execution validation
+│   │   ├── workPhase.ts      #     Agent/shell/process execution
+│   │   ├── commitPhase.ts    #     Stage + commit changes
+│   │   ├── postcheckPhase.ts #     Post-execution validation
+│   │   └── mergeRiPhase.ts   #     Reverse Integration (in-memory)
+│   ├── repository/           #   Plan persistence layer
+│   └── store/                #   Filesystem storage backend
+├── process/                  # OS process monitoring (CPU/memory)
+├── types/                    # Shared configuration types
+├── ui/                       # VS Code UI components
+│   ├── plansViewProvider.ts  #   Sidebar webview
+│   ├── statusBar.ts          #   Status bar item
+│   ├── panels/               #   Webview panels + controllers
+│   ├── templates/            #   HTML/CSS/JS template generators
+│   └── webview/              #   Browser-bundled control framework
+│       ├── eventBus.ts       #     Pub/sub event bus
+│       ├── subscribableControl.ts  # Base control class
+│       ├── controls/         #     15 reusable webview controls
+│       └── entries/          #     esbuild browser entry points
+└── vscode/                   # VS Code API adapters
+    └── adapters.ts           #   Production implementations
 ```
 
-### Dependency Injection Architecture
+---
 
-Copilot Orchestrator uses a Symbol-based dependency injection container to manage service lifecycle, enable testability, and provide clean separation of concerns.
-
-#### Core DI Components
-
-| Component | File | Purpose |
-|-----------|------|---------|
-| **ServiceContainer** | `src/core/container.ts` | Type-safe DI container with Symbol tokens |
-| **Tokens** | `src/core/tokens.ts` | Symbol-based service registration keys |
-| **Production Root** | `src/composition.ts` | Wires real implementations for production |
-| **Test Root** | `src/compositionTest.ts` | Wires mock implementations for testing |
-
-#### Service Registration Patterns
-
-```typescript
-// Singleton services (shared state)
-container.registerSingleton<ILogger>(Tokens.ILogger, (c) => {
-  const logger = Logger.initialize(context);
-  logger.setConfigProvider(c.resolve(Tokens.IConfigProvider));
-  return logger;
-});
-
-// Transient services (new instance per resolve)
-container.register<IEvidenceValidator>(
-  Tokens.IEvidenceValidator,
-  () => new DefaultEvidenceValidator()
-);
-```
-
-#### VS Code API Abstraction
-
-The DI layer provides clean abstractions over VS Code APIs:
-
-```mermaid
-graph TB
-    subgraph "Production"
-        VP[VsCodeConfigProvider]
-        VD[VsCodeDialogService]
-        VC[VsCodeClipboardService]
-    end
-    
-    subgraph "Testing"
-        MP[MockConfigProvider]
-        MD[MockDialogService] 
-        MC[MockClipboardService]
-    end
-    
-    subgraph "Interfaces"
-        ICP[IConfigProvider]
-        IDS[IDialogService]
-        ICS[IClipboardService]
-    end
-    
-    VP -.-> ICP
-    VD -.-> IDS
-    VC -.-> ICS
-    
-    MP -.-> ICP
-    MD -.-> IDS
-    MC -.-> ICS
-```
-
-**Benefits:**
-- **Testability**: Mock adapters provide controllable test doubles
-- **Isolation**: No direct vscode module coupling in business logic
-- **Type Safety**: Symbol tokens prevent registration/resolution errors
-- **Scoping**: Child containers enable isolated subsystem testing
-
-### Template Architecture
-
-UI panels use a template-based architecture for clean separation of presentation and logic:
-
-#### Template Organization
-
-```
-src/ui/templates/
-├── planDetail/              # Plan detail panel templates
-│   ├── headerTemplate.ts    # Plan status and controls
-│   ├── controlsTemplate.ts  # Action buttons
-│   ├── dagTemplate.ts       # Mermaid DAG visualization
-│   ├── nodeCardTemplate.ts  # Individual node cards
-│   ├── summaryTemplate.ts   # Work summary display
-│   ├── scriptsTemplate.ts   # Script elements
-│   └── index.ts             # Barrel exports
-└── nodeDetail/              # Node detail panel templates
-    ├── headerTemplate.ts    # Node status header
-    ├── actionButtons.ts     # Node action controls
-    ├── processTree.ts       # Process monitoring display
-    ├── logViewer.ts         # Log output formatting
-    ├── attempts.ts          # Retry attempt history
-    ├── config.ts            # Configuration display
-    ├── metrics.ts           # Usage metrics display
-    ├── scripts.ts           # Script elements
-    └── index.ts             # Barrel exports
-```
-
-#### Template Pattern
-
-Templates are pure functions that take data and return HTML strings:
-
-```typescript
-export function headerTemplate(data: HeaderData): string {
-  return `
-    <div class="header">
-      <h1>${escapeHtml(data.title)}</h1>
-      <span class="status ${data.status}">${data.status.toUpperCase()}</span>
-    </div>
-  `;
-}
-```
-
-#### Controller Pattern
-
-Controllers handle webview messages and coordinate with services via dependency injection:
-
-```typescript
-export class PlanDetailController {
-  constructor(
-    private readonly dialogService: IDialogService,
-    private readonly planRunner: IPlanRunner
-  ) {}
-
-  handleMessage(message: WebviewMessage): Promise<any> {
-    switch (message.command) {
-      case 'cancelPlan':
-        return this.handleCancelPlan(message.planId);
-      // ... other handlers
-    }
-  }
-
-  private async handleCancelPlan(planId: string): Promise<void> {
-    const confirmed = await this.dialogService.showWarning(
-      'Are you sure you want to cancel this plan?',
-      { modal: true },
-      'Yes', 'No'
-    );
-    
-    if (confirmed === 'Yes') {
-      this.planRunner.cancel(planId);
-    }
-  }
-}
-```
-
-**Template Benefits:**
-- **Zero vscode imports**: Pure functions can be unit tested easily
-- **Reusable components**: Templates can be composed and shared
-- **Separation of concerns**: Logic in controllers, presentation in templates
-- **Type safety**: Strongly typed template data interfaces
-
-### PlanRunner — Central Orchestrator
-
-`PlanRunner` (`src/plan/runner.ts`) is the composition root for plan execution. It owns the pump loop, coordinates all subsystems, and emits events consumed by the UI.
-
-```mermaid
-graph LR
-    PR[PlanRunner]
-    PR --> SCH[PlanScheduler]
-    PR --> SM[PlanStateMachine]
-    PR --> EX[JobExecutor]
-    PR --> PERS[PlanPersistence]
-    PR --> GIT[GitOrchestrator]
-
-    SCH -->|selects ready nodes| SM
-    SM -->|validates transitions| NODES[(Node States)]
-    EX -->|runs work| WORK[WorkSpec Routing]
-    PERS -->|saves/loads| DISK[(plan-*.json)]
-```
-
-**Responsibilities:**
-- **Lifecycle**: `initialize()` → pump loop (~200ms) → `shutdown()`
-- **Plan creation**: `enqueue(spec)` builds the DAG via `buildPlan()` and persists it
-- **Pump loop**: Selects ready nodes → schedules → executes → transitions state → checks completion
-- **Retry**: `retryNode()` resets a failed node to `pending`, unblocks descendants, optionally resumes from the failed phase
-- **Events**: Emits `planCreated`, `planScaffolded`, `scaffoldNodeAdded`, `planFinalized`, `planCompleted`, `nodeTransition`, `planDeleted`
-
-#### Plan Chaining (`resumeAfterPlan`)
-
-Plans can declare a dependency on another plan via the `resumeAfterPlan` field. When set:
-
-1. The dependent plan is created in **paused** state
-2. `PlanLifecycle` listens for the prerequisite plan's completion
-3. On **success** → the dependent plan auto-resumes
-4. On **cancel/delete** → the dependency link is cleared (plan stays paused for manual decision)
-5. On **failure** → the dependent remains paused (does not auto-resume)
-
-The UI shows a chain reason message when paused for dependency and hides the Resume button. Use `update_copilot_plan` to set or modify `resumeAfterPlan` on an existing plan.
-
-### DAG Builder
-
-`buildPlan()` (`src/plan/builder.ts`) converts a `PlanSpec` into a `PlanInstance` using a three-pass algorithm:
-
-1. **Node creation** — Assigns UUIDs, resolves group paths, auto-creates group hierarchy
-2. **Dependency resolution** — Maps `producerId` references to node UUIDs
-3. **Reverse edge computation** — Builds `dependents` arrays, identifies root/leaf nodes
-
-**Validation**: Cycle detection (DFS), duplicate `producerId` rejection, unknown dependency checks, requires at least one root node.
-
-Root nodes (no dependencies) start in `ready` status; all others start `pending`.
-
-### PlanStateMachine — State Transitions
-
-`PlanStateMachine` (`src/plan/stateMachine.ts`) is the single source of truth for node and group state. It enforces valid transitions and propagates status changes through the DAG.
+## Node State Machine
 
 ```mermaid
 stateDiagram-v2
     [*] --> pending
-    pending --> ready : Dependencies met
-    pending --> blocked : Dependency failed
-    pending --> canceled : User cancel
+    pending --> ready : All dependencies succeeded
+    pending --> blocked : A dependency failed
+    pending --> canceled : Plan canceled
 
     ready --> scheduled : Selected by scheduler
-    ready --> blocked : Dependency failed
-    ready --> canceled : User cancel
+    ready --> blocked : Dependency failed (race)
+    ready --> canceled : Plan canceled
 
     scheduled --> running : Executor started
     scheduled --> failed : Startup error
-    scheduled --> canceled : User cancel
+    scheduled --> canceled : Plan canceled
 
-    running --> succeeded : Work completed
-    running --> failed : Error occurred
-    running --> canceled : User cancel
+    running --> succeeded : All phases passed
+    running --> failed : Phase error
+    running --> canceled : Plan canceled
+
+    failed --> pending : retryNode()
+    blocked --> pending : Upstream retried and succeeded
 
     succeeded --> [*]
-    failed --> [*]
-    blocked --> [*]
     canceled --> [*]
 ```
 
-**Valid transitions** are enforced by a lookup table (`VALID_TRANSITIONS` in `src/plan/types/nodes.ts`). Terminal states (`succeeded`, `failed`, `blocked`, `canceled`) allow no further transitions.
-
 **DAG propagation rules:**
-- **On success** → Check all dependents; if all their dependencies are met, transition to `ready`
+- **On success** → Check all dependents; if all their dependencies succeeded, transition to `ready`
 - **On failure** → BFS propagation of `blocked` to all downstream nodes
-- **On retry** → `resetNodeToPending()` resets node and unblocks descendants
-
-**Group state aggregation**: Groups recompute their status from direct children (nodes + child groups) using priority: `running` > `failed`/`blocked` > `succeeded` > `canceled` > `pending`. Changes propagate up the parent hierarchy.
-
-### PlanScheduler — Capacity Management
-
-`PlanScheduler` (`src/plan/scheduler.ts`) selects which `ready` nodes to execute next, respecting concurrency limits.
-
-**Algorithm:**
-1. Collect all nodes with status `ready`
-2. Count currently `running`/`scheduled` nodes that perform work (excludes coordination nodes)
-3. Compute available capacity: `min(plan.maxParallel − planRunning, globalMaxParallel − globalRunning)`
-4. Sort by dependent count (descending) — nodes that unlock the most work execute first
-5. Return the top N nodes
-
-### JobExecutor — Work Execution
-
-`DefaultJobExecutor` (`src/plan/executor.ts`) runs each node through a seven-phase pipeline:
-
-```
-merge-fi → setup → prechecks → work → commit → postchecks → merge-ri
-```
-
-**Phase details:**
-- **Merge FI** — Forward integration of dependency commits into the worktree
-- **Setup** — Worktree environment preparation (symlinks, instructions)
-- **Prechecks/Postchecks** — Optional validation commands (auto-healable unless `onFailure.noAutoHeal` is set)
-- **Work** — Routed by `WorkSpec` type (lazy-loaded via `IPlanDefinition.getWorkSpec()`) (see [Work Specification Types](#work-specification-types))
-- **Commit** — Validates work evidence, stages and commits changes in the worktree
-- **Merge RI** — Reverse integration merge. In v0.12.0+, leaf merges go into a **snapshot branch** (not targetBranch directly). Uses in-memory `git merge-tree --write-tree`; conflicts resolved by extracting files to temp dir → Copilot CLI → hash objects back.
-
-**Failure control:** Each phase checks the work spec's `onFailure` config. When `noAutoHeal` is true, the phase returns a force-fail result that skips auto-heal. The `overrideResumeFromPhase` field controls which phase a retry starts from.
-
-Each phase captures **AI usage metrics** independently (tokens, session time, code changes). The executor aggregates phase-level metrics into a total and returns a `phaseMetrics` record so the UI can display a per-phase breakdown.
-
-On retry, the executor can **skip completed phases** using `resumeFromPhase` and resume the Copilot session via captured session IDs.
-
-#### Snapshot Validation Node
-
-The builder auto-injects a **Snapshot Validation** node into every plan. This is a regular `JobNode` (not a separate type) identified by `producerId: '__snapshot-validation__'`:
-
-- **Group:** `Final Merge Validation`
-- **Dependencies:** All original leaf nodes
-- **Work:** `spec.verifyRiSpec` (plan-level verification command)
-- **`assignedWorktreePath`:** Set at runtime to the snapshot worktree path (not at build time)
-
-The snapshot-validation node runs through the standard executor pipeline. Its prechecks/postchecks handle targetBranch health checks (dirty/ahead detection, rebase), and its merge-ri goes directly to `targetBranch`. This replaces the previous `FinalMergeExecutor` and the separate verify-ri phase.
-
-**Root node pinning:** When a snapshot exists, root nodes (no dependencies) use `plan.snapshot.baseCommit` instead of resolving `plan.baseBranch` at execution time. This ensures all root nodes start from the same commit even if `targetBranch` advances during execution.
-
-### Work Specification Types
-
-Defined in `src/plan/types/specs.ts`:
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `ProcessSpec` | Direct process spawn, no shell interpretation | `{ type: 'process', executable: 'node', args: ['build.js'] }` |
-| `ShellSpec` | Shell command with configurable shell | `{ type: 'shell', command: 'npm test', shell: 'bash' }` |
-| `AgentSpec` | AI agent delegation with Markdown instructions | `{ type: 'agent', instructions: '## Task\n...', model: 'gpt-4' }` |
-| `string` | Legacy format — shell command or `@agent ...` | `"npm run lint"` |
-
-All structured specs support an optional `onFailure: OnFailureConfig` field (snake_case `on_failure` accepted from MCP) to control auto-heal behavior, user-facing failure messages, and retry resume points.
-
-### Plan Repository & Storage
-
-The plan storage system uses a **three-layer abstraction** for efficient memory usage and clear separation of concerns:
-
-#### Architecture Layers
-
-1. **IPlanRepository** (`src/interfaces/IPlanRepository.ts`) — High-level lifecycle operations
-   - `scaffold(spec)` → create plan structure without loading specs
-   - `addNode(planId, spec)` → add work specs to scaffolded plan
-   - `finalize(planId)` → mark plan complete and ready for execution
-   - `load(planId)` → get existing plan with lazy-loading capabilities
-
-2. **IPlanDefinition** (`src/interfaces/IPlanDefinition.ts`) — Lazy work spec access
-   - `getWorkSpec(nodeId)` → loads specs on-demand from storage
-   - `getAllWorkSpecs()` → bulk load for execution scenarios
-   - Prevents memory bloat by keeping large instruction strings on disk
-
-3. **IPlanRepositoryStore** (`src/plan/store/`) — Low-level filesystem operations
-   - `FileSystemPlanStore.ts` — concrete implementation with direct fs calls
-   - JSON serialization/deserialization
-   - Migration from legacy `plan-{id}.json` format
-
-#### Filesystem Layout
-
-```
-.orchestrator/plans/<plan-id>/
-├── plan.json              # Plan topology + execution state 
-└── specs/<producer-id>/   # Work specifications (lazy-loaded)
-    └── work.md            # Instruction files
-```
-
-#### Benefits
-
-- **Memory efficiency**: Work specs (often large instructions) loaded on-demand only
-- **Write-once pattern**: Specs written during scaffold/addNode, read during execution
-- **Legacy migration**: Old `plan-{id}.json` files auto-migrated on first load
-- **Clean separation**: PlanInstance holds IPlanDefinition reference, not inline strings
-
-#### Scaffold Workflow
-
-For plans with 5+ nodes, use the scaffold workflow:
-1. `scaffold()` — create plan structure
-2. `addNode()` — add each work spec individually  
-3. `finalize()` — mark complete and ready for execution
-
-### PlanPersistence — State Durability
-
-`PlanPersistence` (`src/plan/persistence.ts`) serializes plan state to disk:
-
-- **Per-plan files**: `plan-{id}.json` — Full plan topology + execution state (Maps serialized as Records)
-- **Index file**: `plans-index.json` — Fast lookup of `{ planId → { name, createdAt } }`
-- **Storage directory**: `.orchestrator/plans/` within the workspace
+- **On retry** → `resetNodeToPending()` resets the node and unblocks descendants
 
 ---
 
-## MCP Integration
-
-The extension exposes its functionality to Copilot Chat via the [Model Context Protocol](https://modelcontextprotocol.io/). MCP tools allow natural language plan creation and management.
-
-### Architecture
-
-```mermaid
-sequenceDiagram
-    participant Chat as Copilot Chat
-    participant Stdio as MCP Stdio Process
-    participant IPC as IPC Bridge
-    participant Handler as McpHandler
-    participant Runner as PlanRunner
-
-    Chat->>Stdio: JSON-RPC request (tools/call)
-    Stdio->>IPC: Forward via named pipe
-    IPC->>Handler: Route to handler
-    Handler->>Handler: Validate (Ajv schemas)
-    Handler->>Runner: Execute operation
-    Runner-->>Handler: Result
-    Handler-->>IPC: MCP response
-    IPC-->>Stdio: Forward response
-    Stdio-->>Chat: JSON-RPC response
-```
-
-### Transport
-
-The MCP server uses a **child-process architecture** with IPC:
-
-1. **Stdio child process** (`src/mcp/stdio/server.ts`) — Spawned by VS Code as `node out/mcp/stdio/server.js`. Reads newline-delimited JSON-RPC from stdin, writes responses to stdout.
-2. **IPC bridge** (`src/mcp/ipc/`) — The child process connects to the extension host via a named pipe (secured with an auth nonce via `MCP_AUTH_NONCE` environment variable).
-3. **McpHandler** (`src/mcp/handler.ts`) — Routes `tools/call` requests to handler functions via a switch statement.
-
-**VS Code registration**: `McpDefinitionProvider` (`src/mcp/mcpDefinitionProvider.ts`) implements `vscode.McpServerDefinitionProvider` to auto-register the stdio server with VS Code's MCP subsystem.
-
-### Tool Definitions
-
-Tools are statically defined with JSON Schemas for LLM discoverability:
-
-- **Plan tools** (`src/mcp/tools/planTools.ts`) — 15 tools: `create_copilot_plan`, `get_copilot_plan_status`, `list_copilot_plans`, `get_copilot_job_logs`, `get_copilot_job_attempts`, `cancel_copilot_plan`, `pause_copilot_plan`, `resume_copilot_plan`, `delete_copilot_plan`, `retry_copilot_plan`, `reshape_copilot_plan`, `update_copilot_plan`, `scaffold_copilot_plan`, `add_copilot_plan_job`, `finalize_copilot_plan`
-- **Job tools** (`src/mcp/tools/jobTools.ts`) — 6 tools: `get_copilot_job`, `list_copilot_jobs`, `retry_copilot_job`, `force_fail_copilot_job`, `get_copilot_job_failure_context`, `update_copilot_plan_job`
-
-### Request Pipeline
-
-```
-Tool call → Ajv schema validation → Handler dispatch → PlanRunner operation → Response formatting
-```
-
-**Validation** (`src/mcp/validation/`) uses Ajv with strict mode. All validation errors are formatted for LLM consumption.
-
-**Handlers** (`src/mcp/handlers/`) implement business logic:
-- `planHandlers.ts` — Plan CRUD, status queries, cancel/retry
-- `jobHandlers.ts` — Job-centric API (query, retry, force-fail, update)
-- `plan/scaffoldPlanHandler.ts` — Scaffold, add job, and finalize handlers
-- `plan/updatePlanHandler.ts` — Plan-level settings (env, maxParallel, resumeAfterPlan)
-- `utils.ts` — Shared utilities: `errorResult()`, `lookupPlan()`, `lookupNode()`, `resolveBaseBranch()`
-
----
-
-## Git Operations
-
-### Worktree Lifecycle
-
-Each node executes in an isolated git worktree. The orchestrator manages the full lifecycle:
+## 7-Phase Execution Pipeline
 
 ```mermaid
 graph LR
-    CREATE[Create Worktree] --> SETUP[Setup .gitignore<br/>Fetch & Submodules]
-    SETUP --> EXECUTE[Execute Work]
-    EXECUTE --> COMMIT[Stage & Commit]
-    COMMIT --> MERGE[Squash Merge to Target]
-    MERGE --> CLEANUP[Remove Worktree]
+    MFI[Merge-FI] --> SETUP[Setup]
+    SETUP --> PRE[Prechecks]
+    PRE --> WORK[Work]
+    WORK --> COMMIT[Commit]
+    COMMIT --> POST[Postchecks]
+    POST --> MRI[Merge-RI]
+
+    style MFI fill:#e1f5fe
+    style SETUP fill:#e8f5e9
+    style PRE fill:#fff3e0
+    style WORK fill:#fce4ec
+    style COMMIT fill:#f3e5f5
+    style POST fill:#fff3e0
+    style MRI fill:#e1f5fe
 ```
 
-**Key modules:**
-- `git/orchestrator.ts` — High-level: `createJobWorktree()`, `finalizeWorktree()`, `squashMerge()`, `removeJobWorktree()`
-- `git/core/worktrees.ts` — Low-level worktree CRUD with **per-repository mutex** serialization to prevent race conditions
-- `git/core/executor.ts` — Async git command execution (`execAsync()`, `execAsyncOrThrow()`)
+| Phase | Purpose | Skippable |
+|-------|---------|-----------|
+| **Merge-FI** | Forward-integrate dependency commits into worktree | Never (idempotent) |
+| **Setup** | Prepare worktree (.gitignore, skill files, symlinks) | On resume |
+| **Prechecks** | Optional validation before work (build, lint) | If not specified |
+| **Work** | Execute the actual task (agent/shell/process) | If not specified |
+| **Commit** | Stage and commit file changes | On resume |
+| **Postchecks** | Optional validation after work (tests) | If not specified |
+| **Merge-RI** | In-memory merge to snapshot/target branch (leaf nodes only) | Non-leaf nodes |
 
-### Orphaned Worktree Cleanup (`src/core/orphanedWorktreeCleanup.ts`)
-
-Detects and removes stale worktree directories on extension activation.
-
-**Detection Logic:**
-A worktree directory is considered "orphaned" if:
-1. It exists in `.worktrees/` folder
-2. It's NOT registered with git (`git worktree list` doesn't include it)
-3. It's NOT tracked by any active plan's `nodeStates.worktreePath`
-
-**Activation Flow:**
-1. Extension activates
-2. Plans loaded from persistence
-3. After 2-second delay, trigger async cleanup
-4. Scan all repo paths (from plans + workspace folders)
-5. Remove orphaned directories
-6. Log results (show message if ≥3 cleaned)
-
-**Safety:**
-- Never removes directories tracked by active plans
-- Never removes git-registered worktrees
-- Continues on individual failures
-- Runs asynchronously (doesn't block startup)
-
-### Worktree Directory Structure
-
-Each job worktree contains orchestrator-specific directories:
-
-```
-{worktreePath}/
-  .orchestrator/              # Orchestrator state (gitignored)
-    .copilot/                 # Copilot CLI config directory
-      session-state/          # Session data
-      config.json             # Per-job config
-    evidence/                 # Work evidence files
-  .gitignore                  # Auto-updated to include .orchestrator
-  ... (repository files)
-```
-
-#### Gitignore Auto-Update
-
-When worktrees are created, the orchestrator ensures `.gitignore` contains:
-- `.worktrees` - The worktree root directory
-- `.orchestrator` - Per-worktree orchestrator state
-
-This change is staged automatically so it's included in the job's commit.
-
-#### Session Storage
-
-Copilot CLI sessions are stored per-worktree using `--config-dir`:
-- Sessions don't appear in user's VS Code session history
-- Sessions are automatically cleaned when worktree is removed
-- Each job has isolated session state
-
-### Merge Strategies
-
-Two merge strategies are available:
-
-| Strategy | Method | Requirements | Working Directory Impact |
-|----------|--------|-------------|--------------------------|
-| **Standard** | `git merge` | Target branch checked out | Modifies working directory |
-| **Checkout-free** | `git merge-tree` | Git 2.38+ | None — operates on tree objects |
-
-The checkout-free strategy (`mergeWithoutCheckout()` in `src/git/core/merge.ts`) is preferred as it avoids touching the user's working directory. It returns a `MergeTreeResult` with the merged tree SHA and any conflicts.
-
-### Branch Management
-
-`src/git/core/branches.ts` handles branch lifecycle:
-- **Default branch detection** — Queries git (not hardcoded), cached per repository
-- **Existence checks** — Local and remote
-- **Merge base** — `getMergeBase()` for common ancestor resolution
+On retry, the executor resumes from the failed phase using `resumeFromPhase`, skipping completed phases.
 
 ---
 
-## UI Components
-
-### Component Overview
+## Three-Layer Storage Architecture
 
 ```mermaid
 graph TB
-    subgraph "Sidebar"
-        PV[PlansViewProvider<br/>WebviewView]
+    subgraph "Business Logic"
+        Runner[PlanRunner]
+        Engine[ExecutionEngine]
     end
 
-    subgraph "Editor Panels"
-        PDP[PlanDetailPanel<br/>WebviewPanel]
-        NDP[NodeDetailPanel<br/>WebviewPanel]
+    subgraph "Repository Layer"
+        Repo["IPlanRepository<br/>(DefaultPlanRepository)"]
+        Def["IPlanDefinition<br/>(FilePlanDefinition)"]
     end
 
-    subgraph "Status Bar"
-        SB[StatusBar Item]
+    subgraph "Storage Layer"
+        Store["IPlanRepositoryStore<br/>(FileSystemPlanStore)"]
+        FS["IFileSystem<br/>(DefaultFileSystem)"]
     end
 
-    PV -->|openPlan| PDP
-    PDP -->|openNode| NDP
-    SB -->|click| PDP
+    Runner --> Repo
+    Engine --> Repo
+    Repo --> Def
+    Repo --> Store
+    Store --> FS
 
-    PR[PlanRunner Events] -->|planCreated<br/>planScaffolded<br/>planFinalized<br/>nodeTransition<br/>planCompleted| PV
-    PR -->|nodeTransition| PDP
-    PR -->|nodeTransition| NDP
-    PR -->|polling| SB
+    style Repo fill:#e3f2fd
+    style Store fill:#f1f8e9
 ```
 
-### PlansViewProvider
+**Filesystem layout:**
 
-`PlansViewProvider` (`src/ui/plansViewProvider.ts`) implements `vscode.WebviewViewProvider`:
-- Displays all plans with progress bars, status badges, and node counts
-- **Auto-refresh**: Listens to PlanRunner events (`planCreated`, `planScaffolded`, `planFinalized`, `planCompleted`, `planDeleted`, `nodeTransition`) with debouncing
-- **Message protocol**: Webview sends `openPlan`, `cancelPlan`, `deletePlan`, `refresh`; extension sends `update` with plan list
-
-### Detail Panels
-
-- **PlanDetailPanel** (`src/ui/panels/planDetailPanel.ts`) — Full execution view for a single plan: node breakdown, logs, Mermaid DAG rendering
-- **NodeDetailPanel** (`src/ui/panels/nodeDetailPanel.ts`) — Individual node logs, status, evidence, error details
-
-### Status Bar
-
-`attachStatusBar()` (`src/ui/statusBar.ts`) shows live counts of running plans and active jobs, polling every second. Clicking opens the plan detail panel.
-
-### Templates
-
-`src/ui/templates/` provides HTML generation utilities:
-- `helpers.ts` — `escapeHtml()`, `formatDuration()`, error/loading page generators
-- `styles.ts` — Shared CSS for all webviews
-- `workSummary.ts` — Commit and file change HTML rendering
+```
+.orchestrator/plans/<plan-id>/
+├── plan.json                      # Topology + execution state
+└── specs/<node-id>/
+    ├── current/                   # Active specifications
+    │   ├── work.json              # Work spec (type, model)
+    │   └── work_instructions.md   # Agent instructions (lazy-loaded)
+    └── attempts/<n>/              # Per-attempt snapshots
+```
 
 ---
 
-## State Management
+## MCP Transport Architecture
 
-### Node Execution State
+```mermaid
+graph LR
+    subgraph "Copilot Chat"
+        CHAT[Chat UI]
+    end
 
-Each node maintains an `NodeExecutionState` record (`src/plan/types/plan.ts`):
+    subgraph "MCP Stdio Child"
+        STDIO[StdioTransport]
+    end
 
-| Field | Purpose |
-|-------|---------|
-| `status` | Current `NodeStatus` |
-| `baseCommit` | Git commit the worktree was created from |
-| `completedCommit` | Git commit after successful work |
-| `scheduledAt` / `startedAt` / `endedAt` | Phase timestamps |
-| `worktreePath` | Path to the node's isolated worktree |
-| `workSummary` | Commit stats and file changes |
-| `aggregatedWorkSummary` | Total work being merged to targetBranch (leaf nodes only) |
-| `attempts` | Array of `AttemptRecord` for retry history |
-| `lastAttempt` | Most recent attempt with phase statuses |
-| `metrics` | Aggregate AI usage metrics for the node |
-| `phaseMetrics` | Per-phase AI usage breakdown (`merge-fi`, `prechecks`, `work`, `commit`, `postchecks`, `merge-ri`) |
-| `forceFailMessage` | User-facing message when node was force-failed via `OnFailureConfig` |
+    subgraph "Extension Host"
+        IPC_S[IPC Server]
+        ROUTE[McpHandler]
+        PLAN[PlanRunner]
+    end
 
-**Work Summary Behavior:** When a plan has a `targetBranch` configured, the plan detail panel filters the work summary to show only commits from leaf nodes that have successfully merged to the target branch (`mergedToTarget === true`). This ensures the displayed work summary reflects actual integrated work rather than all work performed across the plan. The summary updates dynamically as nodes complete their merge operations.
-
-### Aggregated Work Summary
-
-Leaf nodes that merge to `targetBranch` have two work summaries:
-
-1. **`workSummary`**: Work done by this specific job (commits from baseCommit to completedCommit)
-2. **`aggregatedWorkSummary`**: Total work being merged to targetBranch (commits from baseBranch to completedCommit)
-
-The aggregated summary includes all upstream dependency work accumulated through FI (Forward Integration) merges. This is important for:
-
-- No-op leaf nodes that only aggregate upstream work
-- Accurately representing what's being merged to targetBranch
-- Plan work summary views that show "merged work"
-
-Example DAG:
-```
-A (3 files) → B (2 files) → C (leaf, 0 files)
+    CHAT -->|JSON-RPC stdin/stdout| STDIO
+    STDIO -->|Named pipe + nonce| IPC_S
+    IPC_S --> ROUTE
+    ROUTE --> PLAN
 ```
 
-- C's `workSummary`: 0 files (no changes)
-- C's `aggregatedWorkSummary`: 5 files (A's 3 + B's 2 merged through FI)
+**21 MCP tools** across two APIs:
 
-### Group State Aggregation
-
-Groups provide visual hierarchy without affecting execution. Each `GroupExecutionState` aggregates from its direct children:
-
-```
-runningCount > 0       → 'running'
-failedCount > 0        → 'failed'
-blockedCount > 0       → 'blocked'
-succeededCount = total → 'succeeded'
-canceledCount > 0      → 'canceled'
-else                   → 'pending'
-```
-
-Changes propagate up the parent group hierarchy.
-
-### Persistence Model
-
-Plans are persisted as JSON files in `.orchestrator/plans/`:
-
-```
-.orchestrator/
-└── plans/
-    ├── plans-index.json          # { planId → { name, createdAt } }
-    ├── plan-abc123.json          # Full plan topology + state
-    └── plan-def456.json
-```
-
-Maps are serialized as `Record<string, T>` objects for JSON compatibility and restored to `Map` instances on load.
+| API | Tools | Examples |
+|-----|-------|----------|
+| **Plan-based** | 15 | `create_copilot_plan`, `scaffold_copilot_plan`, `add_copilot_plan_job`, `finalize_copilot_plan`, `get_copilot_plan_status`, `retry_copilot_plan`, `reshape_copilot_plan` |
+| **Job-centric** | 6 | `get_copilot_job`, `list_copilot_jobs`, `retry_copilot_job`, `force_fail_copilot_job`, `update_copilot_plan_job` |
 
 ---
 
-## Model Discovery
+## DI Token Registry (23 tokens)
 
-### Dynamic Model Discovery
-
-The orchestrator discovers available LLM models at runtime by parsing `copilot --help` output. This ensures compatibility as Copilot CLI evolves.
-
-**Flow:**
-1. On extension activation, `discoverAvailableModels()` runs
-2. Parses `--model` choices from CLI help
-3. Caches results for 1 hour
-4. MCP tool schemas include discovered models as enum
-
-**Classification:**
-- Vendor: claude→anthropic, gpt→openai, gemini→google
-- Tier: mini/haiku→fast, opus/max→premium, default→standard
-
----
-
-## Token Tracking
-
-### Token Usage Tracking
-
-After each agent job completes, the orchestrator extracts token usage from Copilot CLI output using `CopilotStatsParser`. Metrics are captured per-phase (prechecks, work, postchecks, merge-fi, merge-ri, verify-ri) and aggregated for the node total.
-
-**Extracted Metrics:**
-- Premium requests consumed
-- API time and total session time
-- Code changes (lines added/removed)
-- Per-model token breakdown (input, output, cached tokens)
-
-**Storage:**
-Metrics are stored in `NodeExecutionState.metrics` (aggregate) and `NodeExecutionState.phaseMetrics` (per-phase breakdown), persisted with the plan.
-
----
-
-## Power Management
-
-### Power Management (`src/core/powerManager.ts`)
-
-Prevents system sleep during plan execution to ensure reliability:
-
-- **Reference-counted wake locks** — Multiple plans can hold locks simultaneously; system only sleeps when all locks are released
-- **Cross-platform implementation** — Automatically selects the appropriate mechanism based on the operating system
-  - **Windows**: `SetThreadExecutionState` API called periodically via PowerShell
-  - **macOS**: `caffeinate` command with flags to prevent system, display, and disk sleep
-  - **Linux**: `systemd-inhibit` with fallback to `xdg-screensaver` if systemd is unavailable
-- **Automatic cleanup** — Wake locks are released when plans complete, are cancelled, or when VS Code closes
-- **Error resilience** — If platform-specific methods fail, the extension logs a warning but continues operation gracefully
-
-**Lifecycle:**
-1. PlanRunner calls `powerManager.acquireWakeLock(reason)` when a plan starts
-2. Platform-specific process is spawned to actively maintain wake lock
-3. On plan completion/cancellation, the cleanup function is called
-4. Process is terminated and resources are freed
-5. On extension deactivation, `releaseAll()` terminates all remaining processes
-
----
-
-## Extension Points and Interfaces
-
-All DI interfaces are defined in `src/interfaces/` and exported via `src/interfaces/index.ts`.
-
-### Core Interfaces
-
-```typescript
-// Node execution strategy — plug in custom executors
-interface INodeExecutor {
-  execute(context: NodeExecutionContext): Promise<NodeExecutionResult>;
-  cancel(planId: string, nodeId: string): Promise<void>;
-  getLogs(planId: string, nodeId: string): string[];
-}
-
-// Node lifecycle management
-interface INodeRunner {
-  createNodes(spec: NodeSpec[]): Promise<NodeInstance[]>;
-  getNode(nodeId: string): NodeInstance | undefined;
-  cancel(nodeId: string): Promise<void>;
-  retryNode(nodeId: string, options?: RetryOptions): Promise<void>;
-  setExecutor(executor: INodeExecutor): void;
-}
-
-// Git operations facade — composable sub-interfaces
-interface IGitOperations {
-  branches: IGitBranches;    // Branch CRUD, default branch detection
-  worktrees: IGitWorktrees;  // Worktree lifecycle with mutex
-  merge: IGitMerge;          // Standard and checkout-free merge
-  repository: IGitRepository; // Fetch, pull, push, commit, stash
-  executor: IGitExecutor;     // Low-level git command execution
-}
-```
-
-### Supporting Interfaces
-
-| Interface | File | Purpose |
-|-----------|------|---------|
-| `IProcessMonitor` | `IProcessMonitor.ts` | Process tree tracking, PID queries, termination |
-| `IMcpManager` | `IMcpManager.ts` | MCP server lifecycle (`start`, `stop`, `isRunning`) |
-| `ILogger` | `ILogger.ts` | Structured logging abstraction |
-| `IFileSystem` | `IFileSystem.ts` | File system operations (for testability) |
-| `IEvidenceValidator` | `IEvidenceValidator.ts` | Work evidence validation |
-
-### Extending the System
-
-**Custom executor**: Implement `INodeExecutor` to add new execution strategies (e.g., container-based, remote SSH):
-
-```typescript
-class RemoteExecutor implements INodeExecutor {
-  async execute(ctx: NodeExecutionContext): Promise<NodeExecutionResult> {
-    // SSH into remote machine, run work, collect results
-  }
-}
-runner.setExecutor(new RemoteExecutor());
-```
-
-**Custom MCP tools**: Add tool definitions in `src/mcp/tools/`, handler functions in `src/mcp/handlers/`, and wire them in the switch statement in `src/mcp/handler.ts`.
-
-**Custom work spec**: Extend the `WorkSpec` union type in `src/plan/types/specs.ts` and add routing logic in `DefaultJobExecutor.runWorkSpec()`.
+| Token | Interface | Concrete Class | Lifetime |
+|-------|-----------|---------------|----------|
+| `IConfigProvider` | `IConfigProvider` | `VsCodeConfigProvider` | Singleton |
+| `IDialogService` | `IDialogService` | `VsCodeDialogService` | Singleton |
+| `IClipboardService` | `IClipboardService` | `VsCodeClipboardService` | Singleton |
+| `IGitOperations` | `IGitOperations` | `DefaultGitOperations` | Singleton |
+| `IProcessSpawner` | `IProcessSpawner` | `DefaultProcessSpawner` | Singleton |
+| `IProcessMonitor` | `IProcessMonitor` | `ProcessMonitor` | Singleton |
+| `IPulseEmitter` | `IPulseEmitter` | `PulseEmitter` | Singleton |
+| `ILogger` | `ILogger` | `Logger` | Singleton |
+| `IEnvironment` | `IEnvironment` | `DefaultEnvironment` | Singleton |
+| `ICopilotRunner` | `ICopilotRunner` | `CopilotCliRunner` | Singleton |
+| `INodeExecutor` | `INodeExecutor` | `DefaultJobExecutor` | Singleton |
+| `INodeStateMachine` | `INodeStateMachine` | _(scoped per plan)_ | Transient |
+| `INodePersistence` | `INodePersistence` | `PlanPersistence` | Singleton |
+| `IEvidenceValidator` | `IEvidenceValidator` | `DefaultEvidenceValidator` | Singleton |
+| `IFileSystem` | `IFileSystem` | `DefaultFileSystem` | Singleton |
+| `IMcpRequestRouter` | `IMcpRequestRouter` | _(scoped per request)_ | Transient |
+| `IMcpManager` | `IMcpManager` | `StdioMcpServerManager` | Singleton |
+| `IGlobalCapacity` | `IGlobalCapacity` | `GlobalCapacityManager` | Singleton |
+| `IPlanConfigManager` | `IPlanConfigManager` | `PlanConfigManager` | Singleton |
+| `IPlanRepositoryStore` | `IPlanRepositoryStore` | `FileSystemPlanStore` | Singleton |
+| `IPlanRepository` | `IPlanRepository` | `DefaultPlanRepository` | Singleton |
+| `IAgentDelegator` | _(internal)_ | `AgentDelegator` | Singleton |
+| `INodeRunner` | `INodeRunner` | _(composed)_ | Singleton |
 
 ---
 
@@ -886,86 +755,53 @@ runner.setExecutor(new RemoteExecutor());
 
 ### Agent Sandbox
 
-Agent jobs run in isolated worktree folders with restricted file system and network access:
+```mermaid
+graph TB
+    subgraph "Allowed"
+        WT[Job Worktree Directory]
+        AF[Explicit allowedFolders]
+        AU[Explicit allowedUrls]
+    end
 
-#### File System Access
-The Copilot CLI is invoked with `--add-dir` restricted to:
-1. The job's worktree folder (always included)
-2. Any additional folders specified in `allowedFolders`
+    subgraph "Blocked"
+        ROOT[Repository Root]
+        SYS[System Files]
+        NET[Unauthorized Network]
+        OTHER[Other Worktrees]
+    end
 
-#### Network Access
-By default, agents have no network access. URLs are allowed via:
-1. Specific URLs or domains in `allowedUrls`
-2. Each URL becomes an `--allow-url` flag to Copilot CLI
-
-This prevents:
-- Cross-job file access
-- Modification of repository root
-- Access to system files
-- Data exfiltration via unauthorized network requests
-- Malicious API calls
-
-**Default Isolation**: When no `allowedFolders` are specified, agents can only read/write files within their assigned worktree. This provides baseline security for concurrent job execution without requiring explicit allowlisting.
-
-**Opt-in Sharing**: Teams can grant agents access to shared resources (libraries, configs, shared tools) by explicitly listing paths in `allowedFolders` within the work specification. This follows a principle of least privilege — sharing is explicit, not implicit.
-
-### Global Capacity Coordination (`src/core/globalCapacity.ts`)
-
-Coordinates job capacity across multiple VS Code instances:
-
-#### Registry File
-
-Location: `{globalStorageUri}/capacity-registry.json`
-
-```json
-{
-  "version": 1,
-  "globalMaxParallel": 16,
-  "instances": [
-    {
-      "instanceId": "abc123def456",
-      "processId": 12345,
-      "runningJobs": 3,
-      "lastHeartbeat": 1234567890,
-      "activePlans": ["plan-uuid-1"]
-    }
-  ]
-}
+    CLI[Copilot CLI] -->|--add-dir| WT
+    CLI -->|--add-dir| AF
+    CLI -->|--allow-url| AU
+    CLI -.->|blocked| ROOT
+    CLI -.->|blocked| SYS
+    CLI -.->|blocked| NET
+    CLI -.->|blocked| OTHER
 ```
 
-#### Coordination Flow
+### MCP Authentication
 
-1. On activation: Register instance with unique ID
-2. Every 5 seconds: Update heartbeat, clean stale instances
-3. Before scheduling: Check global capacity across all instances
-4. On deactivation: Unregister instance
+The stdio child process authenticates to the extension host via a nonce:
+1. Extension generates random nonce, passes via `MCP_AUTH_NONCE` env var
+2. Child presents nonce in IPC handshake
+3. Mismatch = connection rejected
 
-#### Failure Modes
+### Global Capacity Coordination
 
-- **Registry file locked**: Retry with exponential backoff
-- **Corrupt registry**: Reset to empty state
-- **Coordination unavailable**: Fall back to local counting
-
----
-
-## Configuration
-
-Key VS Code settings (prefix `copilotOrchestrator`):
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `maxWorkers` | `4` | Maximum parallel node executions |
-| `mcp.enabled` | `true` | Enable MCP server |
-| `mcp.transport` | `"http"` | MCP transport type (`"http"` or `"stdio"`) |
+Multi-instance coordination via `capacity-registry.json` at the global storage path:
+- Instances register on activation, deregister on deactivation
+- Heartbeat every 5 seconds; stale instances (>30s) pruned
+- Scheduling checks global running count before dispatching work
 
 ---
 
 ## Related Documentation
 
-- [README](../README.md) — Product overview and quick start
-- [Copilot Integration](COPILOT_INTEGRATION.md) — Using MCP tools with Copilot Chat
-- [Groups](GROUPS.md) — Visual hierarchy and group semantics
-- [Worktrees and Merging](WORKTREES_AND_MERGING.md) — Git isolation and merge strategies
-- [Simplified Node Design](SIMPLIFIED_NODE_DESIGN.md) — Flat DAG design rationale
-- [Stdio MCP Design](STDIO_MCP_DESIGN.md) — Stdio transport architecture
-- [Work Evidence Design](WORK_EVIDENCE_DESIGN.md) — Evidence validation for no-change nodes
+| Document | Focus |
+|----------|-------|
+| [DI Guide](DI_GUIDE.md) | DI patterns, adding services, mocking |
+| [Testing Guide](TESTING.md) | Test framework, patterns, coverage |
+| [Copilot Integration](COPILOT_INTEGRATION.md) | MCP tools, agent delegation |
+| [Groups](GROUPS.md) | Visual hierarchy, namespace isolation |
+| [Worktrees & Merging](WORKTREES_AND_MERGING.md) | Git isolation, merge strategies |
+| [Contributing](CONTRIBUTING.md) | Setup, workflow, PR process |

@@ -35,7 +35,8 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | 🔀 **Git Worktree Isolation** | Each agent works in its own worktree branch — zero conflicts, clean history |
 | 📊 **Interactive DAG Visualization** | See your entire plan as a live, zoomable Mermaid dependency graph |
 | ⚡ **Automated 8-Phase Pipeline** | Merge FI → Prechecks → AI Work → Commit → Postchecks → Merge RI → Verify RI → Cleanup |
-| 🔧 **Auto-Heal** | Failed phases automatically retried by a fresh AI agent with failure context |
+| 🔧 **Multi-Retry Auto-Heal** | Failed phases automatically retried up to 4 times with fresh AI agents and failure context |
+| 📈 **Timeline Gantt Chart** | [Experimental] Pixel-perfect timeline showing execution history with phases, retries, and durations |
 | 🤖 **21 Native MCP Tools** | Create and manage plans directly from GitHub Copilot Chat |
 | ⏸️ **Pause / Resume / Retry** | Pause running plans, resume later, or retry failed nodes with AI failure context |
 | 🔒 **Secure MCP Architecture** | Nonce-authenticated IPC ensures 1:1 pairing between VS Code and MCP stdio process |
@@ -227,11 +228,15 @@ When a **prechecks**, **work**, or **postchecks** phase fails due to a process o
 1. The failed phase's exit code, error output, and original command are captured
 2. A new AI agent is given the failure context and asked to fix the issue
 3. If auto-heal succeeds, the node continues from where it left off
-4. If auto-heal also fails, the node transitions to `failed` with both attempts recorded
+4. If auto-heal exhausts all retry attempts, the node transitions to `failed` with the full attempt history recorded
+
+**Multi-retry capability:** Auto-heal now retries up to **4 attempts** per phase by default (configurable via `copilotOrchestrator.autoHeal.maxAttempts` setting, range: 0-1024). Each attempt spawns a fresh AI agent with complete failure context from all previous attempts, maximizing recovery success rate.
+
+**No-op detection:** If an auto-heal agent diagnoses the problem but makes no code changes, the system immediately fails the phase instead of burning additional retry budget on diagnosis-only loops.
 
 **Per-phase replacement strategy:** Auto-heal replaces only the failed phase's work spec — other completed phases are preserved. This means a node that passed prechecks but failed during work won't re-run prechecks during auto-heal.
 
-Auto-heal attempts are tracked in the node's **attempt history** with `triggerType: 'auto-heal'`, visible in the node detail panel.
+Auto-heal attempts are tracked in the node's **attempt history** with `triggerType: 'auto-heal'`, visible in the node detail panel and [timeline visualization](#-timeline-visualization-experimental).
 
 #### Per-Phase Failure Control (`OnFailureConfig`)
 
@@ -259,7 +264,28 @@ Work specs can include an `onFailure` (or snake_case `on_failure`) configuration
 
 This is used internally by the snapshot-validation node to force-fail (rather than auto-heal) when `targetBranch` is in an unrecoverable state, and to control retry reset points for different failure modes.
 
-### 🔗 Plan Chaining (`resumeAfterPlan`)
+### � Timeline Visualization (Experimental)
+
+**Note:** This feature is opt-in and disabled by default. Enable via Settings → "Copilot Orchestrator: Experimental: Show Timeline".
+
+The timeline provides a **pixel-perfect Gantt chart** showing your plan's execution history in real-time:
+
+**Features:**
+- **Horizontal scroll timeline** — Each job shown as a horizontal bar with phases (merge-fi, setup, prechecks, work, commit, postchecks, merge-ri) colored by status
+- **Live updates** — Phase segments update in real-time during execution, with exact timestamps and durations
+- **Clickable job focus** — Click any timeline bar attempt to navigate to that job's detail panel
+- **Rich tooltips** — Hover over bars for phase-by-phase breakdown with color-coded status indicators
+- **Attempt history** — Multiple attempts (initial + auto-heal retries) shown as stacked rows per job
+- **Plan event markers** — Visual indicators for plan state changes (queued, started, paused, resumed, completed)
+- **Dependency arrows** — Visual lines connecting dependent jobs
+- **Group organization** — Collapsible group headers for hierarchical visualization
+- **Trigger badges** — Visual distinction between initial runs and auto-heal retries
+
+**Proportional timing:** Phase segments are sized by actual wall-clock duration, giving accurate visual representation of where execution time is spent.
+
+**Why experimental?** The timeline is under active development and subject to UI/UX iteration based on user feedback. Keeping it opt-in allows us to improve the feature without disrupting existing workflows.
+
+### �🔗 Plan Chaining (`resumeAfterPlan`)
 
 Chain plans together for sequential execution — a dependent plan auto-resumes when its prerequisite succeeds.
 
@@ -853,6 +879,8 @@ not Mocha. Mock the database with jest.mock().
 | `copilotOrchestrator.mcp.enabled` | `true` | Enable MCP server auto-registration |
 | `copilotOrchestrator.worktreeRoot` | `.worktrees` | Worktree directory (relative to repo root) |
 | `copilotOrchestrator.maxConcurrentJobs` | `0` (auto) | Max parallel jobs (0 = CPU count − 1) |
+| `copilotOrchestrator.autoHeal.maxAttempts` | `4` | Max auto-heal retry attempts per phase (0-1024) |
+| `copilotOrchestrator.experimental.showTimeline` | `false` | [EXPERIMENTAL] Show timeline visualization in plan detail panels |
 | `copilotOrchestrator.merge.mode` | `squash` | Merge strategy: `squash`, `merge`, or `rebase` |
 | `copilotOrchestrator.merge.prefer` | `theirs` | Conflict resolution: `ours` or `theirs` |
 | `copilotOrchestrator.merge.pushOnSuccess` | `false` | Auto-push to remote after successful merge |

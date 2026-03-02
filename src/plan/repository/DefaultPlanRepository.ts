@@ -39,6 +39,8 @@ import {
   validateAllDepsExist, 
   type DagJob 
 } from '../dagUtils';
+import { buildPlanInstance, loadNodeSpecs } from './planStateMapper';
+import { serializePlanState, serializePlanStateSync } from './planStatePersister';
 
 const log = Logger.for('plan-persistence');
 
@@ -130,6 +132,7 @@ export class DefaultPlanRepository implements IPlanRepository {
       cleanUpSuccessfulWork: true,
       env: options.env,
       resumeAfterPlan: options.resumeAfterPlan,
+      isPaused: true,
     };
 
     await this.store.writePlanMetadata(metadata);
@@ -559,17 +562,16 @@ export class DefaultPlanRepository implements IPlanRepository {
       // Use buildPlanInstanceFromMetadata to preserve stable IDs
       const plan = this.buildPlanInstanceFromMetadata(metadata);
       plan.stateVersion = metadata.stateVersion || 0;
-      plan.isPaused = metadata.isPaused;
+      // Scaffolding plans MUST always be paused — they're not ready to execute.
+      // Fallback to true even if metadata.isPaused was never set (pre-fix scaffold).
+      plan.isPaused = true;
       plan.startedAt = metadata.startedAt;
       plan.endedAt = metadata.endedAt;
       plan.baseCommitAtStart = metadata.baseCommitAtStart;
       return plan;
     }
 
-    // For finalized plans, reconstruct PlanInstance directly from metadata.
-    // We do NOT call buildPlan() here because it assigns new UUIDs — the
-    // metadata already has stable node IDs from finalization, and nodeStates
-    // are keyed by those IDs.
+    // For finalized plans, load specs from disk and reconstruct
     const nodes = new Map<string, any>();
     const nodeStates = new Map<string, any>();
     const producerIdToNodeId = new Map<string, string>();
@@ -578,20 +580,15 @@ export class DefaultPlanRepository implements IPlanRepository {
     const groupPathToId = new Map<string, string>();
 
     for (const node of metadata.jobs) {
-      // Load work specs from disk if available
-      let work: WorkSpec | undefined;
-      let prechecks: WorkSpec | undefined;
-      let postchecks: WorkSpec | undefined;
-      
-      if (node.hasWork) {
-        work = await this.store.readNodeSpec(planId, node.id, 'work');
-      }
-      if (node.hasPrechecks) {
-        prechecks = await this.store.readNodeSpec(planId, node.id, 'prechecks');
-      }
-      if (node.hasPostchecks) {
-        postchecks = await this.store.readNodeSpec(planId, node.id, 'postchecks');
-      }
+      // Load work specs from disk using the helper
+      const specs = await loadNodeSpecs(
+        this.store,
+        planId,
+        node.id,
+        !!node.hasWork,
+        !!node.hasPrechecks,
+        !!node.hasPostchecks
+      );
 
       nodes.set(node.id, {
         id: node.id,
@@ -599,9 +596,9 @@ export class DefaultPlanRepository implements IPlanRepository {
         name: node.name,
         type: 'job',
         task: node.task,
-        work,
-        prechecks,
-        postchecks,
+        work: specs.work,
+        prechecks: specs.prechecks,
+        postchecks: specs.postchecks,
         autoHeal: node.autoHeal,
         expectsNoChanges: node.expectsNoChanges,
         baseBranch: node.baseBranch,
@@ -745,62 +742,27 @@ export class DefaultPlanRepository implements IPlanRepository {
       meta.spec.jobs = [];
     }
 
-    // Sync jobs from in-memory plan
-    meta.jobs = [];
-    for (const [nodeId, node] of plan.jobs) {
-      const jobNode = node as any;
-      meta.jobs.push({
-        id: nodeId,
-        producerId: jobNode.producerId,
-        name: jobNode.name,
-        task: jobNode.task,
-        dependencies: jobNode.dependencies || [],
-        group: jobNode.group,
-        hasWork: !!jobNode.work || await this.store.hasNodeSpec(plan.id, nodeId, 'work'),
-        hasPrechecks: !!jobNode.prechecks || await this.store.hasNodeSpec(plan.id, nodeId, 'prechecks'),
-        hasPostchecks: !!jobNode.postchecks || await this.store.hasNodeSpec(plan.id, nodeId, 'postchecks'),
-        workRef: await this.store.hasNodeSpec(plan.id, nodeId, 'work') ? `specs/${nodeId}/current/work.json` : undefined,
-        prechecksRef: await this.store.hasNodeSpec(plan.id, nodeId, 'prechecks') ? `specs/${nodeId}/current/prechecks.json` : undefined,
-        postchecksRef: await this.store.hasNodeSpec(plan.id, nodeId, 'postchecks') ? `specs/${nodeId}/current/postchecks.json` : undefined,
-        autoHeal: jobNode.autoHeal,
-        expectsNoChanges: jobNode.expectsNoChanges,
-        baseBranch: jobNode.baseBranch,
-        assignedWorktreePath: jobNode.assignedWorktreePath,
-      });
-    }
-
-    // Sync producerIdToNodeId
-    meta.producerIdToNodeId = {};
-    for (const [pid, nid] of plan.producerIdToNodeId) {
-      meta.producerIdToNodeId[pid] = nid;
-    }
-
-    // Update metadata with current plan state
-    meta.startedAt = plan.startedAt;
-    meta.endedAt = plan.endedAt;
-    meta.baseCommitAtStart = plan.baseCommitAtStart;
-    meta.isPaused = plan.isPaused;
-    meta.resumeAfterPlan = plan.resumeAfterPlan;
-    meta.branchReady = plan.branchReady;
-    meta.snapshot = plan.snapshot;
-    meta.workSummary = plan.workSummary;
-    meta.stateVersion = plan.stateVersion;
-    meta.roots = plan.roots;
-    meta.leaves = plan.leaves;
-
-    // Update node states
-    meta.nodeStates = {};
-    for (const [nodeId, nodeState] of plan.nodeStates) {
-      meta.nodeStates[nodeId] = { ...nodeState };
-    }
-
-    // Update group states
-    if (plan.groupStates) {
-      meta.groupStates = {};
-      for (const [groupId, groupState] of plan.groupStates) {
-        meta.groupStates[groupId] = { ...groupState };
-      }
-    }
+    // Serialize plan state using helper
+    const serializedState = await serializePlanState(plan, this.store);
+    
+    // Update metadata with serialized state
+    meta.jobs = serializedState.jobs;
+    meta.producerIdToNodeId = serializedState.producerIdToNodeId;
+    meta.roots = serializedState.roots;
+    meta.leaves = serializedState.leaves;
+    meta.nodeStates = serializedState.nodeStates;
+    meta.groupStates = serializedState.groupStates;
+    meta.startedAt = serializedState.startedAt as number | undefined;
+    meta.endedAt = serializedState.endedAt as number | undefined;
+    meta.baseCommitAtStart = serializedState.baseCommitAtStart;
+    meta.isPaused = serializedState.isPaused;
+    meta.stateHistory = serializedState.stateHistory as any;
+    meta.pauseHistory = serializedState.pauseHistory;
+    meta.resumeAfterPlan = serializedState.resumeAfterPlan;
+    meta.branchReady = serializedState.branchReady;
+    meta.snapshot = serializedState.snapshot;
+    meta.workSummary = serializedState.workSummary;
+    meta.stateVersion = serializedState.stateVersion;
 
     await this.store.writePlanMetadata(meta);
     log.debug('Plan state saved successfully', { planId: plan.id });
@@ -831,46 +793,29 @@ export class DefaultPlanRepository implements IPlanRepository {
       if (metadata.deleted) { return; }
 
       metadata.spec.jobs = [];
-      // Preserve existing hasWork/hasPrechecks/hasPostchecks from on-disk metadata
-      // when the in-memory node doesn't have inline specs (finalized plans store
-      // specs on disk, not inline — so node.work is undefined even if hasWork was true)
-      const existingJobFlags = new Map<string, { hasWork: boolean; hasPrechecks: boolean; hasPostchecks: boolean }>();
-      for (const job of metadata.jobs || []) {
-        existingJobFlags.set(job.id, { hasWork: !!job.hasWork, hasPrechecks: !!job.hasPrechecks, hasPostchecks: !!job.hasPostchecks });
-      }
-      metadata.jobs = [];
-      for (const [nodeId, node] of plan.jobs) {
-        const jobNode = node as any;
-        const existing = existingJobFlags.get(nodeId);
-        metadata.jobs.push({
-          id: nodeId, producerId: jobNode.producerId, name: jobNode.name, task: jobNode.task,
-          dependencies: jobNode.dependencies || [], group: jobNode.group,
-          hasWork: !!jobNode.work || (existing?.hasWork ?? false),
-          hasPrechecks: !!jobNode.prechecks || (existing?.hasPrechecks ?? false),
-          hasPostchecks: !!jobNode.postchecks || (existing?.hasPostchecks ?? false),
-          autoHeal: jobNode.autoHeal, expectsNoChanges: jobNode.expectsNoChanges,
-          baseBranch: jobNode.baseBranch, assignedWorktreePath: jobNode.assignedWorktreePath,
-        });
-      }
-      metadata.producerIdToNodeId = Object.fromEntries(plan.producerIdToNodeId);
-      metadata.roots = plan.roots;
-      metadata.leaves = plan.leaves;
-      metadata.stateVersion = plan.stateVersion;
-      metadata.isPaused = plan.isPaused;
-      metadata.resumeAfterPlan = plan.resumeAfterPlan;
-      metadata.startedAt = plan.startedAt;
-      metadata.endedAt = plan.endedAt;
-      metadata.nodeStates = {};
-      for (const [nodeId, nodeState] of plan.nodeStates) {
-        metadata.nodeStates[nodeId] = { ...nodeState };
-      }
+      
+      // Serialize plan state using helper (sync version)
+      const serializedState = serializePlanStateSync(plan, metadata);
+      
+      // Update metadata with serialized state
+      metadata.jobs = serializedState.jobs;
+      metadata.producerIdToNodeId = serializedState.producerIdToNodeId;
+      metadata.roots = serializedState.roots;
+      metadata.leaves = serializedState.leaves;
+      metadata.nodeStates = serializedState.nodeStates;
+      metadata.stateVersion = serializedState.stateVersion;
+      metadata.isPaused = serializedState.isPaused;
+      metadata.stateHistory = serializedState.stateHistory as any;
+      metadata.pauseHistory = serializedState.pauseHistory;
+      metadata.resumeAfterPlan = serializedState.resumeAfterPlan;
+      metadata.startedAt = serializedState.startedAt as number | undefined;
+      metadata.endedAt = serializedState.endedAt as number | undefined;
+      
       // Persist group states (duration tracking, status)
-      if (plan.groupStates) {
-        metadata.groupStates = {};
-        for (const [groupId, groupState] of plan.groupStates) {
-          metadata.groupStates[groupId] = { ...groupState };
-        }
+      if (serializedState.groupStates) {
+        metadata.groupStates = serializedState.groupStates;
       }
+      
       this.store.writePlanMetadataSync(metadata);
     } catch (error: any) {
       log.warn('Sync state save failed, falling back to legacy persistence only', { planId: plan.id, error: error.message });
@@ -1122,167 +1067,20 @@ export class DefaultPlanRepository implements IPlanRepository {
   }
 
   /**
-   * Build a PlanInstance from metadata without calling buildPlan().
+   * Build a PlanInstance from metadata using the planStateMapper module.
    * 
-   * Uses stable node IDs from metadata.producerIdToNodeId. This is the
-   * authoritative reconstruction path for scaffolding plans — no UUID
-   * regeneration, no duplicate SV injection.
+   * Delegates to buildPlanInstance() which uses stable node IDs from
+   * metadata.producerIdToNodeId. No UUID regeneration, no duplicate SV injection.
    * 
    * @param metadata - Stored plan metadata.
    * @returns Fully constructed PlanInstance with stable IDs.
    */
   private buildPlanInstanceFromMetadata(metadata: StoredPlanMetadata): PlanInstance {
-    // For scaffolding plans, jobs are inline in spec.jobs (with full specs).
-    // For finalized plans, spec.jobs is [] and jobs are in metadata.jobs
-    // (StoredJobMetadata[] with hasWork/hasPrechecks/hasPostchecks flags).
-    const specJobs = metadata.spec.jobs || [];
-    const storedJobs = metadata.jobs || [];
-    const jobs = specJobs.length > 0 ? specJobs : storedJobs;
-    
-    const nodes = new Map<string, any>();
-    const nodeStates = new Map<string, NodeExecutionState>();
-    const producerIdToNodeId = new Map<string, string>();
-    const groups = new Map<string, GroupInstance>();
-    const groupStates = new Map<string, GroupExecutionState>();
-    const groupPathToId = new Map<string, string>();
-
-    // First pass: create nodes from job specs using stable IDs
-    for (const jobSpec of jobs) {
-      const nodeId = (jobSpec as any).id || metadata.producerIdToNodeId[(jobSpec as any).producerId];
-      if (!nodeId) {
-        log.warn('Job missing stable ID, skipping', { producerId: (jobSpec as any).producerId });
-        continue;
-      }
-
-      const node: any = {
-        id: nodeId,
-        producerId: (jobSpec as any).producerId,
-        name: (jobSpec as any).name || (jobSpec as any).producerId,
-        type: 'job',
-        task: (jobSpec as any).task,
-        work: (jobSpec as any).work,
-        prechecks: (jobSpec as any).prechecks,
-        postchecks: (jobSpec as any).postchecks,
-        autoHeal: (jobSpec as any).autoHeal,
-        expectsNoChanges: (jobSpec as any).expectsNoChanges,
-        baseBranch: (jobSpec as any).baseBranch,
-        assignedWorktreePath: (jobSpec as any).assignedWorktreePath,
-        dependencies: [], // Resolve in second pass
-        dependents: [],
-        group: (jobSpec as any).group,
-        groupId: undefined, // Resolved after groupPathToId is populated
-      };
-
-      nodes.set(nodeId, node);
-      producerIdToNodeId.set((jobSpec as any).producerId, nodeId);
-
-      // Restore or initialize node state
-      const storedState = metadata.nodeStates[nodeId];
-      nodeStates.set(nodeId, storedState || {
-        status: (jobSpec as any).dependencies?.length === 0 ? 'ready' : 'pending',
-        version: 0,
-        attempts: 0
-      });
-    }
-
-    // Second pass: resolve dependencies
-    // Dependencies may be producerIds (scaffolding plans) or nodeIds (finalized plans).
-    // Try producerId lookup first, fall back to direct nodeId if the value is already a UUID.
-    for (const jobSpec of jobs) {
-      const nodeId = (jobSpec as any).id || metadata.producerIdToNodeId[(jobSpec as any).producerId];
-      if (!nodeId) {continue;}
-
-      const node = nodes.get(nodeId);
-      if (!node) {continue;}
-
-      const deps = (jobSpec as any).dependencies || [];
-      const resolvedDeps: string[] = [];
-      for (const dep of deps) {
-        // Try as producerId first (scaffolding plans store producerIds)
-        const depNodeId = producerIdToNodeId.get(dep);
-        if (depNodeId) {
-          resolvedDeps.push(depNodeId);
-        } else if (nodes.has(dep)) {
-          // Already a nodeId (finalized plans store resolved UUIDs)
-          resolvedDeps.push(dep);
-        } else {
-          log.warn('Dependency not found, skipping', { producerId: (jobSpec as any).producerId, dep });
-        }
-      }
-      node.dependencies = resolvedDeps;
-    }
-
-    // Third pass: compute dependents (reverse edges)
-    for (const node of nodes.values()) {
-      for (const depId of node.dependencies) {
-        const depNode = nodes.get(depId);
-        if (depNode) {
-          depNode.dependents.push(node.id);
-        }
-      }
-    }
-
-    // Restore groups if present
-    if (metadata.groups) {
-      for (const [groupId, group] of Object.entries(metadata.groups)) {
-        groups.set(groupId, group as GroupInstance);
-      }
-    }
-    if (metadata.groupStates) {
-      for (const [groupId, state] of Object.entries(metadata.groupStates)) {
-        groupStates.set(groupId, state as GroupExecutionState);
-      }
-    }
-    if (metadata.groupPathToId) {
-      for (const [path, id] of Object.entries(metadata.groupPathToId)) {
-        groupPathToId.set(path, id as string);
-      }
-    }
-
-    // Resolve groupId on nodes: map group path → UUID so the state machine
-    // can push node transitions to parent groups (updateGroupState checks node.groupId)
-    for (const node of nodes.values()) {
-      if (node.group && !node.groupId) {
-        node.groupId = groupPathToId.get(node.group);
-      }
-    }
-
-    const planInstance: PlanInstance = {
-      id: metadata.id,
-      spec: metadata.spec as any,
-      jobs: nodes,
-      nodeStates,
-      producerIdToNodeId,
-      roots: metadata.roots || [],
-      leaves: metadata.leaves || [],
-      groups,
-      groupStates,
-      groupPathToId,
-      parentPlanId: metadata.parentPlanId,
-      parentNodeId: metadata.parentNodeId,
-      repoPath: metadata.repoPath || this.repoPath,
-      baseBranch: metadata.baseBranch || 'main',
-      targetBranch: metadata.targetBranch || metadata.baseBranch || 'main',
-      worktreeRoot: metadata.worktreeRoot || this.worktreeRoot,
-      createdAt: metadata.createdAt,
-      startedAt: metadata.startedAt,
-      endedAt: metadata.endedAt,
-      baseCommitAtStart: metadata.baseCommitAtStart,
-      isPaused: metadata.isPaused,
-      resumeAfterPlan: metadata.resumeAfterPlan,
-      branchReady: metadata.branchReady,
-      env: metadata.env,
-      snapshot: metadata.snapshot,
-      workSummary: metadata.workSummary,
-      stateVersion: metadata.stateVersion || 0,
-      cleanUpSuccessfulWork: metadata.cleanUpSuccessfulWork !== false,
-      maxParallel: metadata.maxParallel || 0,
-      // Attach lazy spec loader so the execution engine can hydrate
-      // work/prechecks/postchecks from disk when they aren't inline
-      definition: new FilePlanDefinition(metadata, this.store),
-    } as PlanInstance;
-
-    return planInstance;
+    return buildPlanInstance(metadata, {
+      store: this.store,
+      repoPath: this.repoPath,
+      worktreeRoot: this.worktreeRoot,
+    });
   }
 
   /**

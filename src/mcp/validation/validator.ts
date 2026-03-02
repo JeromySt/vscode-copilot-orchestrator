@@ -174,6 +174,30 @@ function formatErrors(errors: ErrorObject[] | null | undefined, toolName: string
 // ============================================================================
 
 /**
+ * Extract a concise schema summary for inclusion in validation error messages.
+ * Shows required/optional properties with their types so the LLM can self-correct.
+ */
+function getSchemaHint(toolName: string): string {
+  const schema = schemas[toolName] as any;
+  if (!schema?.properties) { return ''; }
+
+  const required = new Set<string>(schema.required || []);
+  const lines: string[] = [];
+
+  for (const [key, prop] of Object.entries(schema.properties) as [string, any][]) {
+    const req = required.has(key) ? '(required)' : '(optional)';
+    let typeStr = prop.type || '';
+    if (prop.enum) { typeStr = prop.enum.join(' | '); }
+    else if (prop.oneOf) { typeStr = prop.oneOf.map((o: any) => o.type || 'object').join(' | '); }
+    if (prop.description) { typeStr += ` — ${prop.description}`; }
+    else if (prop.pattern) { typeStr += ` [pattern: ${prop.pattern}]`; }
+    lines.push(`  ${key} ${req}: ${typeStr}`);
+  }
+
+  return `\n\nValid schema for '${toolName}':\n${lines.join('\n')}`;
+}
+
+/**
  * Validate MCP tool input against its JSON schema.
  * 
  * @param toolName - The MCP tool name (e.g., 'create_copilot_plan')
@@ -206,7 +230,7 @@ export function validateInput(toolName: string, input: unknown): ValidationResul
 
   return {
     valid: false,
-    error: formatErrors(validate.errors, toolName),
+    error: formatErrors(validate.errors, toolName) + getSchemaHint(toolName),
     errors: validate.errors || undefined,
   };
 }

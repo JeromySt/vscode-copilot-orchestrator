@@ -148,7 +148,7 @@ POWERSHELL NOTE: Do NOT use '2>&1' in PowerShell commands.`,
           env: {
             type: 'object',
             additionalProperties: { type: 'string' },
-            description: 'Environment variables applied to all jobs in this plan. Individual work specs (work/prechecks/postchecks) can override specific keys with their own env property.'
+            description: 'Environment variables applied to all jobs in this plan. Individual work specs (work/prechecks/postchecks) can override specific keys with their own env property. Supports variable expansion: use $VAR or ${VAR} (Unix) or %VAR% (Windows) to reference existing env vars. Example: { "PATH": "/custom/bin:$PATH" } prepends to the existing PATH.'
           },
           verifyRi: {
             description: 'Optional (but HIGHLY recommended) verification command run as the work phase of the auto-injected Snapshot Validation node. Executes after all leaf nodes complete, validating the accumulated snapshot before merging to targetBranch. Auto-healable: on failure, Copilot CLI attempts to fix the issue. String command or object with type: process/shell/agent. Example: "dotnet build --no-restore" or "npm run build"',
@@ -368,7 +368,7 @@ Use this to analyze the history of retries and their outcomes.`,
     
     {
       name: 'resume_copilot_plan',
-      description: 'Resume a paused Plan. Allows new work to be scheduled again.',
+      description: 'Resume (or start) a paused or pending-start Plan. Allows new work to be scheduled.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -584,7 +584,7 @@ EXAMPLES:
           env: {
             type: 'object',
             additionalProperties: { type: 'string' },
-            description: 'Environment variables applied to all jobs. Job-level env overrides specific keys. Pass {} to clear.'
+            description: 'Environment variables applied to all jobs. Job-level env overrides specific keys. Pass {} to clear. Supports variable expansion: use $VAR or ${VAR} (Unix) or %VAR% (Windows) to reference existing host env vars. Example: { "PATH": "/custom/bin:$PATH" } prepends to PATH.'
           },
           maxParallel: {
             type: 'number',
@@ -633,7 +633,7 @@ EXAMPLES:
           env: {
             type: 'object',
             additionalProperties: { type: 'string' },
-            description: 'Environment variables applied to all jobs in this plan. Individual work specs (work/prechecks/postchecks) can override specific keys with their own env property.'
+            description: 'Environment variables applied to all jobs in this plan. Individual work specs (work/prechecks/postchecks) can override specific keys with their own env property. Supports variable expansion: use $VAR or ${VAR} (Unix) or %VAR% (Windows) to reference existing env vars. Example: { "PATH": "/custom/bin:$PATH" } prepends to the existing PATH.'
           },
           additionalSymlinkDirs: {
             type: 'array',

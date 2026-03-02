@@ -30,8 +30,11 @@ export interface JobSpec {
 export interface ConfigDisplayData {
   task: string;
   work?: JobSpec | string;
+  workInstructionsHtml?: string;
   prechecks?: JobSpec | string;
+  prechecksInstructionsHtml?: string;
   postchecks?: JobSpec | string;
+  postchecksInstructionsHtml?: string;
   instructions?: string;
   currentPhase?: string;
   status?: string;
@@ -115,17 +118,17 @@ export class ConfigDisplay extends SubscribableControl {
 
     // Render prechecks phase (collapsible, collapsed by default)
     if (data.prechecks !== undefined && data.prechecks !== null) {
-      html += this.renderPhase('prechecks', 'Prechecks', data.prechecks, true);
+      html += this.renderPhase('prechecks', 'Prechecks', data.prechecks, true, data.prechecksInstructionsHtml);
     }
 
     // Render work phase (always expanded, not collapsible)
     if (data.work !== undefined && data.work !== null) {
-      html += this.renderPhase('work', 'Work', data.work, false);
+      html += this.renderPhase('work', 'Work', data.work, false, data.workInstructionsHtml);
     }
 
     // Render postchecks phase (collapsible, collapsed by default)
     if (data.postchecks !== undefined && data.postchecks !== null) {
-      html += this.renderPhase('postchecks', 'Postchecks', data.postchecks, true);
+      html += this.renderPhase('postchecks', 'Postchecks', data.postchecks, true, data.postchecksInstructionsHtml);
     }
 
     if (data.instructions) {
@@ -135,9 +138,9 @@ export class ConfigDisplay extends SubscribableControl {
     return html;
   }
 
-  private renderPhase(phaseKey: string, phaseLabel: string, spec: JobSpec | string, collapsible: boolean): string {
+  private renderPhase(phaseKey: string, phaseLabel: string, spec: JobSpec | string, collapsible: boolean, instructionsHtml?: string): string {
     const typeInfo = this.getSpecTypeInfo(spec);
-    const specHtml = this.renderSpecContent(spec);
+    const specHtml = this.renderSpecContent(spec, instructionsHtml);
     
     if (collapsible) {
       return `
@@ -184,14 +187,14 @@ export class ConfigDisplay extends SubscribableControl {
     }
   }
 
-  private renderSpecContent(spec: JobSpec | string): string {
+  private renderSpecContent(spec: JobSpec | string, instructionsHtml?: string): string {
     if (typeof spec === 'string') {
       return `<div class="spec-content"><pre class="spec-code"><code>${escapeHtml(spec)}</code></pre></div>`;
     }
 
     switch (spec.type) {
       case 'agent':
-        return this.renderAgentSpec(spec);
+        return this.renderAgentSpec(spec, instructionsHtml);
       case 'process':
         return this.renderProcessSpec(spec);
       case 'shell':
@@ -201,15 +204,8 @@ export class ConfigDisplay extends SubscribableControl {
     }
   }
 
-  private renderAgentSpec(spec: JobSpec): string {
+  private renderAgentSpec(spec: JobSpec, instructionsHtml?: string): string {
     let html = '<div class="spec-content spec-agent">';
-    
-    if (spec.instructions) {
-      const truncated = spec.instructions.length > 200 ? 
-        spec.instructions.substring(0, 200) + '...' : 
-        spec.instructions;
-      html += `<div class="spec-field"><span class="spec-label">Instructions:</span> <span class="spec-value">${escapeHtml(truncated)}</span></div>`;
-    }
     
     if (spec.model) {
       html += `<div class="spec-field"><span class="spec-label">Model:</span> <span class="spec-value">${escapeHtml(spec.model)}</span></div>`;
@@ -221,6 +217,16 @@ export class ConfigDisplay extends SubscribableControl {
     
     if (spec.allowedUrls && spec.allowedUrls.length > 0) {
       html += `<div class="spec-field"><span class="spec-label">Allowed URLs:</span> <span class="spec-value">${escapeHtml(spec.allowedUrls.join(', '))}</span></div>`;
+    }
+    
+    if (spec.instructions) {
+      if (instructionsHtml) {
+        // Use pre-rendered markdown HTML from the extension (full rendering)
+        html += `<div class="work-instructions">${instructionsHtml}</div>`;
+      } else {
+        // Fallback: plain text display
+        html += `<div class="work-instructions"><pre style="white-space:pre-wrap;font-size:12px;line-height:1.5;">${escapeHtml(spec.instructions)}</pre></div>`;
+      }
     }
     
     html += '</div>';

@@ -44,10 +44,12 @@ export {
 export {
   PlanSpec,
   PhaseStatus,
+  StateTransition,
   NodeExecutionState,
   AttemptRecord,
   PlanStatus,
   PlanInstance,
+  VALID_PLAN_TRANSITIONS,
   JobWorkSummary,
   CommitDetail,
   WorkSummary,

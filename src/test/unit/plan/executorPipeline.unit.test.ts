@@ -201,7 +201,7 @@ suite('DefaultJobExecutor.execute pipeline', () => {
       onStepStatusChange: (phase, status) => { stepChanges.push({ phase, status }); },
     };
 
-    await executor.execute(ctx);
+    const result = await executor.execute(ctx);
     // Prechecks should be skipped (no 'running' status for prechecks)
     const precheckChanges = stepChanges.filter(s => s.phase === 'prechecks');
     assert.strictEqual(precheckChanges.length, 0);

@@ -279,7 +279,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       const callbacks = createCallbacksTracker();
       
       // Create the expected directory structure for session share file
-      const sessionSharePath = path.join(tmpDir, '.copilot-orchestrator', 'session-test.md');
+      const sessionSharePath = path.join(tmpDir, '.orchestrator/.copilot-cli', 'session-test.md');
       fs.mkdirSync(path.dirname(sessionSharePath), { recursive: true });
       fs.writeFileSync(sessionSharePath, 'Session ID: fa11bacc-0000-0000-0000-123456789abc\nOther content');
 
@@ -298,7 +298,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       const delegator = new AgentDelegator(logger, gitOps, callbacks, runner);
 
       const options = defaultOptions(tmpDir);
-      await delegator.delegate(options);
+      const result = await delegator.delegate(options);
 
       // Log the messages to debug
       console.log('Logger messages:', logger.messages);
@@ -319,7 +319,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       const logger = createLogger();
       
       // Create log files with token usage data
-      const logDir = path.join(tmpDir, '.copilot-orchestrator', 'logs');
+      const logDir = path.join(tmpDir, '.orchestrator/.copilot-cli', 'logs');
       fs.mkdirSync(logDir, { recursive: true });
       fs.writeFileSync(path.join(logDir, 'copilot.log'), 'prompt_tokens: 100, completion_tokens: 200');
 
@@ -374,7 +374,7 @@ suite('AgentDelegator - Missing Coverage', () => {
       const callbacks = createCallbacksTracker();
 
       // Setup log files for legacy token extraction
-      const logDir = path.join(tmpDir, '.copilot-orchestrator', 'logs');
+      const logDir = path.join(tmpDir, '.orchestrator/.copilot-cli', 'logs');
       fs.mkdirSync(logDir, { recursive: true });
       fs.writeFileSync(path.join(logDir, 'copilot.log'), 'input_tokens: 50, output_tokens: 75');
 

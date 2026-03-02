@@ -280,7 +280,7 @@ suite('CopilotCliRunner DI', () => {
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
       const runner = new CopilotCliRunner(noopLogger(), spawner, env);
-      runner.isAvailable = () => true;
+      runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({
         cwd: '/worktree',
@@ -302,7 +302,7 @@ suite('CopilotCliRunner DI', () => {
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
       const runner = new CopilotCliRunner(noopLogger(), spawner, env);
-      runner.isAvailable = () => true;
+      runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({
         cwd: '/worktree',
@@ -323,7 +323,7 @@ suite('CopilotCliRunner DI', () => {
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
       const runner = new CopilotCliRunner(noopLogger(), spawner, env);
-      runner.isAvailable = () => true;
+      runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({
         cwd: '/worktree',
@@ -346,7 +346,7 @@ suite('CopilotCliRunner DI', () => {
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
       const runner = new CopilotCliRunner(noopLogger(), spawner, env);
-      runner.isAvailable = () => true;
+      runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
       const lines: string[] = [];
 
       const resultPromise = runner.run({
@@ -371,7 +371,7 @@ suite('CopilotCliRunner DI', () => {
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
       const runner = new CopilotCliRunner(noopLogger(), spawner, env);
-      runner.isAvailable = () => true;
+      runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
       let capturedPid: number | undefined;
 
       const resultPromise = runner.run({
@@ -392,7 +392,7 @@ suite('CopilotCliRunner DI', () => {
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
       const runner = new CopilotCliRunner(noopLogger(), spawner, env);
-      runner.isAvailable = () => true;
+      runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({
         cwd: '/worktree',
@@ -413,7 +413,7 @@ suite('CopilotCliRunner DI', () => {
       const spawner = createMockSpawner(proc);
       const env = createMockEnv({ platform: 'win32' });
       const runner = new CopilotCliRunner(noopLogger(), spawner, env);
-      runner.isAvailable = () => true;
+      runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({
         cwd: '/worktree',
@@ -444,7 +444,7 @@ suite('CopilotCliRunner DI', () => {
         env: { HOME: '/test', NODE_OPTIONS: '--no-warnings', PATH: '/usr/bin' },
       });
       const runner = new CopilotCliRunner(noopLogger(), spawner, env);
-      runner.isAvailable = () => true;
+      runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({
         cwd: '/worktree',

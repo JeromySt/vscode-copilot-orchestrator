@@ -6,7 +6,7 @@ import { suite, test, setup, teardown } from 'mocha';
 import * as sinon from 'sinon';
 import { Module } from 'module';
 import { handleRefreshCopilotCli } from '../../../commands/utilityCommandLogic';
-import { MockDialogService } from '../../../vscode/testAdapters';
+import { MockDialogService } from '../../helpers/testAdapters';
 
 suite('handleRefreshCopilotCli', () => {
   let mockDialog: MockDialogService;

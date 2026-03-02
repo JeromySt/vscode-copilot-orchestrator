@@ -56,7 +56,9 @@ export interface PlanSpec {
   /** 
    * Environment variables applied to all jobs in this plan.
    * Individual work specs can override specific keys.
-   * At execution time: { ...planEnv, ...workSpecEnv, ...processEnv }
+   * Supports variable expansion: `$VAR`, `${VAR}` (Unix), `%VAR%` (Windows)
+   * resolve against the host environment at execution time.
+   * At execution time: { ...planEnv, ...workSpecEnv } → expand → { ...processEnv, ...expanded }
    */
   env?: Record<string, string>;
   
@@ -85,6 +87,59 @@ export interface PlanSpec {
  * Per-phase execution status
  */
 export type PhaseStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped';
+
+/**
+ * A single state transition event, used at all levels (plan, job, attempt, phase).
+ * The stateHistory array on each object is the canonical source of truth for timing.
+ * `startedAt` and `endedAt` are derived: first 'running' transition and first terminal transition.
+ */
+export interface StateTransition {
+  /** Previous status (empty string for initial state) */
+  from: string;
+  /** New status after transition */
+  to: string;
+  /** Epoch milliseconds when the transition occurred */
+  timestamp: number;
+  /** Optional reason for the transition */
+  reason?: string;
+}
+
+/**
+ * A single plan-level state change event.
+ * @deprecated Use StateTransition instead. Kept for backward compat with existing plan data.
+ */
+export interface PlanStateChange {
+  /** Plan status string */
+  status: string;
+  /** Epoch milliseconds timestamp */
+  timestamp: number;
+  /** Reason for state change */
+  reason?: string; // 'user-paused', 'user-resumed', 'started', 'completed', 'canceled', 'startPaused', 'resumeAfterPlan', 'capacity-wait'
+}
+
+/**
+ * A pause/resume interval.
+ */
+export interface PauseInterval {
+  /** When the plan was paused (epoch ms) */
+  pausedAt: number;
+  /** When the plan was resumed (epoch ms), undefined if currently paused */
+  resumedAt?: number;
+  /** Reason for pause */
+  reason?: string; // 'user', 'startPaused', 'resumeAfterPlan'
+}
+
+/**
+ * Per-phase wall-clock timing within a node attempt.
+ */
+export interface PhaseTiming {
+  /** Execution phase name */
+  phase: string;
+  /** When the phase started (epoch ms) */
+  startedAt: number;
+  /** When the phase ended (epoch ms), undefined if currently running */
+  endedAt?: number;
+}
 
 /**
  * Execution state for a single node
@@ -122,6 +177,20 @@ export interface NodeExecutionState {
   
   /** Execution attempt count */
   attempts: number;
+  
+  /** Log of status transitions for timeline rendering.
+   * @deprecated Use stateHistory instead — kept for backward compat with pre-0.14 plan data. */
+  transitionLog?: Array<{ from: string; to: string; timestamp: number }>;
+
+  /**
+   * Canonical state history for this node.
+   * Every status transition is recorded here. Timestamps are derived:
+   * - scheduledAt = first transition to 'scheduled'
+   * - startedAt = first transition to 'running'
+   * - endedAt = first transition to a terminal state (succeeded/failed/blocked/canceled)
+   * On retry, a new 'pending'/'ready' transition is appended (not cleared).
+   */
+  stateHistory?: StateTransition[];
   
   /** Work summary (files changed, commits) - set on success */
   workSummary?: JobWorkSummary;
@@ -175,6 +244,7 @@ export interface NodeExecutionState {
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
     'merge-ri'?: PhaseStatus;
+    cleanup?: PhaseStatus;
   };
   
   /**
@@ -222,7 +292,7 @@ export interface NodeExecutionState {
    */
   lastAttempt?: {
     /** Which phase failed or was running */
-    phase: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup';
+    phase: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup' | 'cleanup';
     /** When the attempt started */
     startTime: number;
     /** When the attempt ended */
@@ -250,7 +320,7 @@ export interface NodeExecutionState {
    * Keys are phase names for which metrics are available:
    * 'prechecks', 'work', 'commit', 'postchecks', 'merge-fi', 'merge-ri', 'setup'.
    */
-  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup', CopilotUsageMetrics>>;
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup' | 'cleanup', CopilotUsageMetrics>>;
 }
 
 /**
@@ -261,7 +331,7 @@ export interface AttemptRecord {
   attemptNumber: number;
   
   /** Status of this attempt */
-  status: 'succeeded' | 'failed' | 'canceled';
+  status: 'running' | 'succeeded' | 'failed' | 'canceled';
   
   /** What triggered this attempt */
   triggerType?: 'initial' | 'auto-heal' | 'retry' | 'postchecks-revalidation';
@@ -273,7 +343,7 @@ export interface AttemptRecord {
   endedAt: number;
   
   /** Which phase failed (if failed) */
-  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup';
+  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup' | 'cleanup';
   
   /** Error message (if failed) */
   error?: string;
@@ -293,7 +363,11 @@ export interface AttemptRecord {
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
     'merge-ri'?: PhaseStatus;
+    cleanup?: PhaseStatus;
   };
+  
+  /** Per-phase wall-clock timing within this attempt. */
+  phaseTiming?: PhaseTiming[];
   
   /** Worktree path used in this attempt */
   worktreePath?: string;
@@ -332,7 +406,14 @@ export interface AttemptRecord {
   metrics?: CopilotUsageMetrics;
 
   /** Per-phase AI usage metrics breakdown */
-  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup', CopilotUsageMetrics>>;
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup' | 'cleanup', CopilotUsageMetrics>>;
+
+  /**
+   * Attempt-level state history.
+   * Tracks transitions: scheduled → running → succeeded/failed.
+   * Timestamps derived: startedAt = first → running, endedAt = first → terminal.
+   */
+  stateHistory?: StateTransition[];
 }
 
 // ============================================================================
@@ -411,14 +492,36 @@ export interface GroupExecutionState {
  * Overall Plan status (derived from node states)
  */
 export type PlanStatus = 
-  | 'scaffolding' // Plan being built (not ready for execution)
-  | 'pending'    // Not started
-  | 'running'    // At least one node running
-  | 'paused'     // Paused by user (can resume)
-  | 'succeeded'  // All nodes succeeded
-  | 'failed'     // At least one node failed (not blocked)
-  | 'partial'    // Some succeeded, some failed
-  | 'canceled';  // User canceled
+  | 'scaffolding'    // Plan being built (not ready for execution)
+  | 'pending'        // Not started
+  | 'pending-start'  // Created paused, awaiting user start (never ran)
+  | 'running'        // At least one node running
+  | 'pausing'        // User requested pause, running jobs still completing
+  | 'paused'         // Fully paused — no jobs running, awaiting resume
+  | 'resumed'        // Resume requested, transitioning back to running
+  | 'succeeded'      // All nodes succeeded
+  | 'failed'         // At least one node failed (not blocked)
+  | 'partial'        // @deprecated — maps to 'failed' in computePlanStatus. Kept for backward compat serialization.
+  | 'canceled';      // User canceled
+
+/**
+ * Valid plan-level state transitions.
+ * Non-status events like 'reshaped', 'job-updated', 'plan-updated' are not validated
+ * since they don't change the plan's status — they're informational stateHistory entries.
+ */
+export const VALID_PLAN_TRANSITIONS: Partial<Record<PlanStatus, readonly PlanStatus[]>> = {
+  'scaffolding':    ['pending', 'pending-start', 'canceled'],
+  'pending':        ['pending-start', 'running', 'canceled'],
+  'pending-start':  ['running', 'canceled'],
+  'running':        ['pausing', 'paused', 'succeeded', 'failed', 'canceled'],
+  'pausing':        ['paused', 'running', 'canceled'],
+  'paused':         ['running', 'resumed', 'canceled'],
+  'resumed':        ['running', 'canceled'],
+  'succeeded':      [],  // Terminal
+  'failed':         ['running'],  // Can be retried
+  'partial':        ['running'],  // Deprecated, same as failed
+  'canceled':       [],  // Terminal
+};
 
 /**
  * Full Plan instance (topology + state)
@@ -501,6 +604,14 @@ export interface PlanInstance {
   
   /** Whether the plan is paused (no new work scheduled, worktrees preserved) */
   isPaused?: boolean;
+  
+  /** Historical log of plan-level state changes for timeline rendering.
+   * Uses StateTransition shape: { from, to, timestamp, reason? }
+   * Backward compat: old plans may have PlanStateChange shape { status, timestamp, reason? } */
+  stateHistory?: StateTransition[];
+  
+  /** Historical log of pause/resume intervals for timeline rendering. */
+  pauseHistory?: PauseInterval[];
 
   /**
    * Plan ID that must complete successfully before this plan auto-resumes.
@@ -623,17 +734,18 @@ export interface JobExecutionResult {
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
     'merge-ri'?: PhaseStatus;
+    cleanup?: PhaseStatus;
   };
   /** Copilot session ID captured during agent work (for session resumption) */
   copilotSessionId?: string;
   /** Which phase failed (for retry context) */
-  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup';
+  failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup' | 'cleanup';
   /** Exit code from failed process */
   exitCode?: number;
   /** Agent execution metrics (token usage, duration, turns, tool calls) */
   metrics?: CopilotUsageMetrics;
   /** Per-phase metrics breakdown */
-  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup', CopilotUsageMetrics>>;
+  phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup' | 'cleanup', CopilotUsageMetrics>>;
   /** Process ID of the main running process (for crash detection) */
   pid?: number;
 
@@ -655,6 +767,9 @@ export interface JobExecutionResult {
    * Takes precedence over the default (resume from failedPhase).
    */
   overrideResumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
+  
+  /** Per-phase timing information collected during this execution */
+  phaseTiming?: PhaseTiming[];
 }
 
 /**
@@ -700,6 +815,7 @@ export interface ExecutionContext {
     commit?: PhaseStatus;
     postchecks?: PhaseStatus;
     'merge-ri'?: PhaseStatus;
+    cleanup?: PhaseStatus;
   };
   
   // --- Merge phase specific fields ---
@@ -717,13 +833,8 @@ export interface ExecutionContext {
   /** Snapshot worktree path (real worktree on disk for the snapshot branch) */
   snapshotWorktreePath?: string;
   
-  // --- Hydrated specs from IPlanRepository ---
-  /** Hydrated work specification (lazily loaded from repository) */
-  hydratedWork?: WorkSpec;
-  /** Hydrated prechecks specification (lazily loaded from repository) */
-  hydratedPrechecks?: WorkSpec;
-  /** Hydrated postchecks specification (lazily loaded from repository) */
-  hydratedPostchecks?: WorkSpec;
+  /** Per-phase timing information collected during execution */
+  phaseTiming?: PhaseTiming[];
 }
 
 // ============================================================================

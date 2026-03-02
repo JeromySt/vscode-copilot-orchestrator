@@ -100,7 +100,7 @@ export function logViewerSectionHtml(data: LogViewerData): string {
   return `<!-- Phase Progress -->
   <div class="section">
     <h3>Execution Phases</h3>
-    <div class="phase-tabs">
+    <div class="phase-tabs" id="phaseTabs">
       ${phaseTabsHtml(data.phaseStatus, data.isRunning)}
     </div>
     ${data.logFilePath ? `<div class="log-file-path" id="logFilePath" data-path="${escapeHtml(data.logFilePath)}" title="${escapeHtml(data.logFilePath)}">📄 ${escapeHtml(truncateLogPath(data.logFilePath))}</div>` : ''}

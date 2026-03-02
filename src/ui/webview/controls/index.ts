@@ -19,3 +19,5 @@ export { AiUsageStats, AiUsageData, ModelBreakdown } from './aiUsageStats';
 export { WorkSummary, WorkSummaryData } from './workSummary';
 export { ConfigDisplay, ConfigDisplayData } from './configDisplay';
 export { PlanListCard, PlanListCardData } from './planListCard';
+export { TimelineChart, TimelineData, TimelineNodeData } from './timelineChart';
+export { ViewTabBar, ViewTab, ViewTabData } from './viewTabBar';

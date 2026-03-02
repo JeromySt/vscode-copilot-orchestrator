@@ -104,6 +104,10 @@ export interface DelegateOptions {
   configDir?: string;
   /** Additional environment variables to inject into the spawned agent process */
   env?: Record<string, string>;
+  /** Callback for writing lines to the execution log (separate from the delegator's internal logger) */
+  logOutput?: (line: string) => void;
+  /** Callback when the agent process is spawned */
+  onProcess?: (proc: any) => void;
 }
 
 /**
@@ -205,7 +209,7 @@ export class AgentDelegator {
    * @returns Promise resolving to delegation result
    */
   async delegate(options: DelegateOptions): Promise<DelegateResult> {
-    const { jobId, taskDescription, label, worktreePath } = options;
+    const { jobId, taskDescription, label, worktreePath, baseBranch, targetBranch, instructions, sessionId } = options;
 
     this.logger.log(`[${label}] AI Agent Delegation: ${taskDescription}`);
     this.logger.log(`[${label}] Worktree: ${worktreePath}`);
@@ -322,8 +326,10 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       return new CopilotCliRunner(cliLogger); // eslint-disable-line no-restricted-syntax -- legacy fallback before DI
     })();
 
-    // Create job-specific directories for Copilot logs and session tracking
-    const copilotJobDir = path.join(worktreePath, '.copilot-orchestrator');
+    // Create job-specific directories for Copilot logs and session tracking.
+    // IMPORTANT: Must be under .orchestrator/ which is .gitignored.
+    // Using .copilot-orchestrator/ would put logs inside the commit tree.
+    const copilotJobDir = path.join(worktreePath, '.orchestrator', '.copilot-cli');
     const copilotLogDir = path.join(copilotJobDir, 'logs');
     const sessionSharePath = path.join(copilotJobDir, `session-${label}.md`);
 
@@ -354,6 +360,78 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
     let spawnedPid: number | undefined;
     let earlySessionId: string | undefined;
 
+    // Start tailing CLI log files for real-time visibility.
+    // The CLI writes detailed tool calls to --log-dir which are not in stdout.
+    let logTailInterval: NodeJS.Timeout | undefined;
+    let logTailOffset = 0;
+    let logTailFile: string | undefined;
+    
+    // Capture logOutput callback for use in setInterval (ensure stable reference)
+    const emitLogLine = options.logOutput || (() => {});
+    const hasLogOutput = !!options.logOutput;
+
+    const startLogTail = () => {
+      // Emit a marker so we know tailing started
+      emitLogLine(`[cli-log] Log tailing started (hasCallback=${hasLogOutput}), watching: ${copilotLogDir}`);
+      this.logger.log(`[${label}] [log-tail] Started. hasLogOutput=${hasLogOutput}, dir=${copilotLogDir}`);
+      logTailInterval = setInterval(() => {
+        try {
+          // On every poll, check if a newer log file has appeared.
+          if (fs.existsSync(copilotLogDir)) {
+            const files = fs.readdirSync(copilotLogDir)
+              .filter(f => f.endsWith('.log'))
+              .map(f => ({ name: f, time: fs.statSync(path.join(copilotLogDir, f)).mtime.getTime() }))
+              .sort((a, b) => b.time - a.time);
+            if (files.length > 0) {
+              const newest = path.join(copilotLogDir, files[0].name);
+              if (newest !== logTailFile) {
+                // Flush remaining bytes from the old file before switching
+                if (logTailFile && fs.existsSync(logTailFile)) {
+                  try {
+                    const oldStat = fs.statSync(logTailFile);
+                    if (oldStat.size > logTailOffset) {
+                      const fd = fs.openSync(logTailFile, 'r');
+                      const buf = Buffer.alloc(oldStat.size - logTailOffset);
+                      fs.readSync(fd, buf, 0, buf.length, logTailOffset);
+                      fs.closeSync(fd);
+                      for (const line of buf.toString('utf-8').split('\n')) {
+                        if (line.trim()) { emitLogLine(`[cli-log] ${line.trim()}`); }
+                      }
+                    }
+                  } catch { /* ignore */ }
+                }
+                this.logger.log(`[${label}] [log-tail] Switched to: ${path.basename(newest)}`);
+                logTailFile = newest;
+                logTailOffset = 0; // Reset offset for the new file
+              }
+            }
+          }
+          if (logTailFile && fs.existsSync(logTailFile)) {
+            const stat = fs.statSync(logTailFile);
+            if (stat.size > logTailOffset) {
+              const fd = fs.openSync(logTailFile, 'r');
+              const buf = Buffer.alloc(stat.size - logTailOffset);
+              fs.readSync(fd, buf, 0, buf.length, logTailOffset);
+              fs.closeSync(fd);
+              logTailOffset = stat.size;
+              const newContent = buf.toString('utf-8');
+              const lineCount = newContent.split('\n').filter(l => l.trim()).length;
+              this.logger.log(`[${label}] [log-tail] Read ${lineCount} lines (${buf.length} bytes) from ${path.basename(logTailFile)}`);
+              for (const line of newContent.split('\n')) {
+                if (line.trim()) {
+                  emitLogLine(`[cli-log] ${line.trim()}`);
+                }
+              }
+            }
+          }
+        } catch (err: any) {
+          this.logger.log(`[${label}] [log-tail] Error: ${err.message}`);
+        }
+      }, 2000); // Poll every 2 seconds
+    };
+    
+    startLogTail();
+
     // Run via the unified CopilotCliRunner (handles instructions, spawn, stats parsing)
     const result = await cliRunner.run({
       cwd: worktreePath,
@@ -378,6 +456,7 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       },
       onOutput: (line) => {
         this.logger.log(`[${label}] ${line}`);
+        options.logOutput?.(line);
 
         // Try to extract session ID from output for early callback notification
         if (!earlySessionId) {
@@ -391,9 +470,31 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
       },
     });
 
+    // Stop log tailing
+    if (logTailInterval) { clearInterval(logTailInterval); }
+
     // Process has exited — notify callback
     if (spawnedPid) {
       this.callbacks.onProcessExited?.(spawnedPid);
+    }
+
+    // Final flush: read any remaining log content not yet tailed
+    if (hasLogOutput && logTailFile && fs.existsSync(logTailFile)) {
+      try {
+        const stat = fs.statSync(logTailFile);
+        if (stat.size > logTailOffset) {
+          const fd = fs.openSync(logTailFile, 'r');
+          const buf = Buffer.alloc(stat.size - logTailOffset);
+          fs.readSync(fd, buf, 0, buf.length, logTailOffset);
+          fs.closeSync(fd);
+          const remaining = buf.toString('utf-8');
+          for (const line of remaining.split('\n')) {
+            if (line.trim()) { emitLogLine(`[cli-log] ${line.trim()}`); }
+          }
+        }
+      } catch (e) {
+        this.logger.log(`[${label}] Could not flush CLI log tail: ${e}`);
+      }
     }
 
     // Use the session captured by the runner, then early output capture, then file fallback

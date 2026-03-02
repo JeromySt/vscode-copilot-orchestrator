@@ -265,6 +265,14 @@ export class NodeManager {
     nodeState.version = (nodeState.version || 0) + 1;
     plan.stateVersion = (plan.stateVersion || 0) + 1;
 
+    // Record in stateHistory (canonical state transition log)
+    const now = Date.now();
+    if (!nodeState.stateHistory) { nodeState.stateHistory = []; }
+    nodeState.stateHistory.push({ from: previousStatus, to: 'failed', timestamp: now, reason: 'force-failed' });
+    // Legacy compat
+    if (!nodeState.transitionLog) { nodeState.transitionLog = []; }
+    nodeState.transitionLog.push({ from: previousStatus, to: 'failed', timestamp: now });
+
     this.state.persistence.save(plan);
 
     this.state.events.emitNodeTransitionFull({
@@ -382,10 +390,11 @@ export class NodeManager {
     }
 
     // Reset node state for retry
+    // INVARIANT: nodeState.startedAt is set-once (first attempt start) and never cleared.
+    // Each attempt tracks its own startedAt/endedAt in AttemptRecord.
     nodeState.status = 'pending';
     nodeState.error = undefined;
     nodeState.endedAt = undefined;
-    nodeState.startedAt = undefined;
 
     const hasNewWork = !!options?.newWork;
     const hasNewPrechecks = options?.newPrechecks !== undefined;
@@ -393,13 +402,33 @@ export class NodeManager {
     const failedPhase = nodeState.lastAttempt?.phase;
     const shouldResetPhases = hasNewWork || hasNewPrechecks || options?.clearWorktree;
 
+    // Reset auto-heal budget for phases with new specs so fresh work gets fresh heal attempts
+    if (nodeState.autoHealAttempted) {
+      if (hasNewWork) delete nodeState.autoHealAttempted['work'];
+      if (hasNewPrechecks) delete nodeState.autoHealAttempted['prechecks'];
+      if (hasNewPostchecks) delete nodeState.autoHealAttempted['postchecks'];
+    }
+
     if (shouldResetPhases) {
       nodeState.stepStatuses = undefined;
       nodeState.resumeFromPhase = undefined;
     } else if (hasNewPostchecks && failedPhase === 'postchecks') {
-      nodeState.resumeFromPhase = 'postchecks' as any;
+      // Only advance resumeFromPhase if it wasn't already set to an earlier phase
+      // (e.g. by update_copilot_plan_job setting resumeFromPhase='work' before retry)
+      const phaseOrder = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
+      const existingIdx = nodeState.resumeFromPhase ? phaseOrder.indexOf(nodeState.resumeFromPhase as any) : -1;
+      const candidateIdx = phaseOrder.indexOf('postchecks');
+      if (existingIdx < 0 || candidateIdx < existingIdx) {
+        nodeState.resumeFromPhase = 'postchecks' as any;
+      }
     } else if (failedPhase) {
-      nodeState.resumeFromPhase = failedPhase as any;
+      // Only advance resumeFromPhase if it wasn't already set to an earlier phase
+      const phaseOrder = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
+      const existingIdx = nodeState.resumeFromPhase ? phaseOrder.indexOf(nodeState.resumeFromPhase as any) : -1;
+      const candidateIdx = phaseOrder.indexOf(failedPhase as any);
+      if (existingIdx < 0 || candidateIdx < existingIdx) {
+        nodeState.resumeFromPhase = failedPhase as any;
+      }
     }
 
     // Handle worktree reset

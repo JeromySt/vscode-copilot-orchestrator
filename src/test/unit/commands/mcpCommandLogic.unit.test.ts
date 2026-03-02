@@ -22,7 +22,7 @@ import {
   MockDialogService, 
   MockClipboardService, 
   MockConfigProvider 
-} from '../../../vscode/testAdapters';
+} from '../../helpers/testAdapters';
 
 suite('MCP Command Logic Unit Tests', () => {
   let mockDialog: MockDialogService;

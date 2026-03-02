@@ -4,7 +4,7 @@
  */
 
 import type { IConfigProvider, IDialogService, IClipboardService } from '../interfaces';
-import { MockConfigProvider, MockDialogService, MockClipboardService } from '../vscode/testAdapters';
+import { MockConfigProvider, MockDialogService, MockClipboardService } from './helpers/testAdapters';
 
 // Type-level verification that mocks implement interfaces
 const configProvider: IConfigProvider = new MockConfigProvider();

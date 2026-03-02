@@ -680,7 +680,8 @@ suite('JobExecutionEngine - helper methods', () => {
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'failed');
-      assert.strictEqual(executeStub.callCount, 2);
+      // With MAX_AUTO_HEAL_PER_PHASE=4, engine retries up to 4 times: 1 initial + 4 retries = 5
+      assert.strictEqual(executeStub.callCount, 5);
     });
   });
 
@@ -1136,8 +1137,8 @@ suite('JobExecutionEngine - helper methods', () => {
         phaseMetrics: { work: { premiumRequests: 1, apiTimeSeconds: 10, sessionTimeSeconds: 30, durationMs: 5000 } },
       };
       const executeStub = sinon.stub();
-      executeStub.onFirstCall().resolves(failResult);
-      executeStub.onSecondCall().resolves(healFail);
+      executeStub.resolves(healFail); // default: all heal calls fail
+      executeStub.onFirstCall().resolves(failResult); // initial: shell fails
 
       const { engine, state } = createEngine(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
@@ -1152,7 +1153,8 @@ suite('JobExecutionEngine - helper methods', () => {
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'failed');
-      assert.strictEqual(ns.attempts, 2);
+      // With MAX_AUTO_HEAL_PER_PHASE=4: 1 initial + 4 heal attempts = 5
+      assert.strictEqual(ns.attempts, 5);
       assert.ok(ns.metrics);
     });
 
@@ -1304,11 +1306,9 @@ suite('JobExecutionEngine - helper methods', () => {
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'succeeded');
-      assert.strictEqual(executeStub.callCount, 3);
-      // Verify re-validation context resumes from postchecks
-      const revalCall = executeStub.getCall(2).args[0] as ExecutionContext;
-      assert.strictEqual(revalCall.resumeFromPhase, 'postchecks');
-      // Attempt history should include both heal and revalidation
+      // Re-validation is now part of the heal execution call (not a separate call)
+      assert.strictEqual(executeStub.callCount, 2);
+      // Attempt history should include auto-heal
       assert.ok(ns.attemptHistory);
       assert.ok(ns.attemptHistory!.some(a => a.triggerType === 'auto-heal'));
     });
@@ -1324,15 +1324,9 @@ suite('JobExecutionEngine - helper methods', () => {
       const executeStub = sinon.stub();
       // 1st: original execution fails at postchecks
       executeStub.onCall(0).resolves({ success: false, error: 'Gate check failed', failedPhase: 'postchecks', exitCode: 1, stepStatuses: { postchecks: 'failed' } });
-      // 2nd: heal agent succeeds
-      executeStub.onCall(1).resolves({ success: true, completedCommit: 'heal1-aabbccddee1234567890123', stepStatuses: { postchecks: 'success' } });
-      // 3rd: re-validation fails — gate still doesn't pass
-      executeStub.onCall(2).resolves({ success: false, error: 'Still failing', failedPhase: 'postchecks', exitCode: 1, stepStatuses: { postchecks: 'failed' } });
-      // 4th: second heal attempt succeeds
-      executeStub.onCall(3).resolves({ success: true, completedCommit: 'heal2-aabbccddee1234567890123', stepStatuses: { postchecks: 'success' } });
-      // 5th: second re-validation fails
-      executeStub.onCall(4).resolves({ success: false, error: 'Still failing again', failedPhase: 'postchecks', exitCode: 1, stepStatuses: { postchecks: 'failed' } });
-      // Budget should be exhausted after 2 heal cycles (MAX_AUTO_HEAL_PER_PHASE = 2)
+      // All subsequent heal attempts also fail at postchecks (re-validation is now part of the heal call)
+      executeStub.resolves({ success: false, error: 'Still failing', failedPhase: 'postchecks', exitCode: 1, stepStatuses: { postchecks: 'failed' } });
+      // Budget should be exhausted after MAX_AUTO_HEAL_PER_PHASE (4) heal cycles
 
       const { engine, state } = createEngine(dir, { execute: executeStub });
       state.plans.set(plan.id, plan);
@@ -1344,10 +1338,9 @@ suite('JobExecutionEngine - helper methods', () => {
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'failed');
-      // Should have postchecks-revalidation attempts in history
+      // Should have auto-heal attempts in history
       assert.ok(ns.attemptHistory);
-      const revalAttempts = ns.attemptHistory!.filter(a => a.triggerType === 'postchecks-revalidation');
-      assert.ok(revalAttempts.length >= 1, 'Should have postchecks-revalidation attempts');
+      assert.ok(ns.attemptHistory!.some(a => a.triggerType === 'auto-heal'), 'Should have auto-heal attempts');
     });
 
     test('work-phase heal runs original postchecks naturally (no extra re-validation)', async () => {
@@ -1478,7 +1471,7 @@ suite('JobExecutionEngine - helper methods', () => {
   suite('allConsumersConsumed leaf path', () => {
     test('leaf node with no targetBranch and cleanUpSuccessfulWork', async () => {
       const dir = makeTmpDir();
-      makeTmpDir();
+      const worktreeDir = makeTmpDir();
       const node = createJobNode('leaf-1', [], []);
       const nodes = new Map<string, PlanNode>([['leaf-1', node]]);
       const nodeStates = new Map<string, NodeExecutionState>([
@@ -1492,7 +1485,7 @@ suite('JobExecutionEngine - helper methods', () => {
       });
       const sm = new PlanStateMachine(plan);
 
-      sandbox.stub(git.worktrees, 'removeSafe').resolves();
+      const removeStub = sandbox.stub(git.worktrees, 'removeSafe').resolves();
       const { engine, state } = createEngine(dir, {
         execute: sinon.stub().resolves({
           success: true,
