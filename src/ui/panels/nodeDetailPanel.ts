@@ -26,7 +26,6 @@ import {
   configSectionHtml,
   metricsSummaryHtml, attemptMetricsHtml as attemptMetricsTemplateHtml,
   attemptHistoryHtml, webviewScripts,
-  renderSpecContent, getSpecTypeInfo,
   renderNodeDetailStyles,
 } from '../templates/nodeDetail';
 import type { AttemptCardData } from '../templates/nodeDetail';
@@ -34,19 +33,7 @@ import { NodeDetailController, NodeDetailCommands } from './nodeDetailController
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
 import { webviewScriptTag } from '../webviewUri';
 
-/**
- * Extract onFailure config from a WorkSpec (if present).
- */
-function extractOnFailure(spec: WorkSpec | undefined): { noAutoHeal?: boolean; message?: string; resumeFromPhase?: string } | undefined {
-  if (!spec || typeof spec === 'string') {return undefined;}
-  const onFailure = (spec as any).onFailure;
-  if (!onFailure) {return undefined;}
-  return {
-    noAutoHeal: onFailure.noAutoHeal,
-    message: onFailure.message,
-    resumeFromPhase: onFailure.resumeFromPhase,
-  };
-}
+
 
 /**
  * Format a {@link WorkSpec} as a plain-text summary string.

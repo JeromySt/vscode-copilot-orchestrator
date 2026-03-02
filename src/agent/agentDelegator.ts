@@ -386,19 +386,20 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
               const newest = path.join(copilotLogDir, files[0].name);
               if (newest !== logTailFile) {
                 // Flush remaining bytes from the old file before switching
-                if (logTailFile && fs.existsSync(logTailFile)) {
+                if (logTailFile) {
                   try {
-                    const oldStat = fs.statSync(logTailFile);
-                    if (oldStat.size > logTailOffset) {
-                      const fd = fs.openSync(logTailFile, 'r');
-                      const buf = Buffer.alloc(oldStat.size - logTailOffset);
-                      fs.readSync(fd, buf, 0, buf.length, logTailOffset);
-                      fs.closeSync(fd);
-                      for (const line of buf.toString('utf-8').split('\n')) {
-                        if (line.trim()) { emitLogLine(`[cli-log] ${line.trim()}`); }
+                    const fd = fs.openSync(logTailFile, 'r');
+                    try {
+                      const oldStat = fs.fstatSync(fd);
+                      if (oldStat.size > logTailOffset) {
+                        const buf = Buffer.alloc(oldStat.size - logTailOffset);
+                        fs.readSync(fd, buf, 0, buf.length, logTailOffset);
+                        for (const line of buf.toString('utf-8').split('\n')) {
+                          if (line.trim()) { emitLogLine(`[cli-log] ${line.trim()}`); }
+                        }
                       }
-                    }
-                  } catch { /* ignore */ }
+                    } finally { fs.closeSync(fd); }
+                  } catch { /* ignore — file may have been deleted */ }
                 }
                 this.logger.log(`[${label}] [log-tail] Switched to: ${path.basename(newest)}`);
                 logTailFile = newest;
@@ -406,23 +407,26 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
               }
             }
           }
-          if (logTailFile && fs.existsSync(logTailFile)) {
-            const stat = fs.statSync(logTailFile);
-            if (stat.size > logTailOffset) {
+          if (logTailFile) {
+            try {
               const fd = fs.openSync(logTailFile, 'r');
-              const buf = Buffer.alloc(stat.size - logTailOffset);
-              fs.readSync(fd, buf, 0, buf.length, logTailOffset);
-              fs.closeSync(fd);
-              logTailOffset = stat.size;
-              const newContent = buf.toString('utf-8');
-              const lineCount = newContent.split('\n').filter(l => l.trim()).length;
-              this.logger.log(`[${label}] [log-tail] Read ${lineCount} lines (${buf.length} bytes) from ${path.basename(logTailFile)}`);
-              for (const line of newContent.split('\n')) {
-                if (line.trim()) {
-                  emitLogLine(`[cli-log] ${line.trim()}`);
+              try {
+                const stat = fs.fstatSync(fd);
+                if (stat.size > logTailOffset) {
+                  const buf = Buffer.alloc(stat.size - logTailOffset);
+                  fs.readSync(fd, buf, 0, buf.length, logTailOffset);
+                  logTailOffset = stat.size;
+                  const newContent = buf.toString('utf-8');
+                  const lineCount = newContent.split('\n').filter(l => l.trim()).length;
+                  this.logger.log(`[${label}] [log-tail] Read ${lineCount} lines (${buf.length} bytes) from ${path.basename(logTailFile)}`);
+                  for (const line of newContent.split('\n')) {
+                    if (line.trim()) {
+                      emitLogLine(`[cli-log] ${line.trim()}`);
+                    }
+                  }
                 }
-              }
-            }
+              } finally { fs.closeSync(fd); }
+            } catch { /* file may have been deleted */ }
           }
         } catch (err: any) {
           this.logger.log(`[${label}] [log-tail] Error: ${err.message}`);
@@ -479,19 +483,20 @@ ${sessionId ? `Session ID: ${sessionId}\n\nThis job has an active Copilot sessio
     }
 
     // Final flush: read any remaining log content not yet tailed
-    if (hasLogOutput && logTailFile && fs.existsSync(logTailFile)) {
+    if (hasLogOutput && logTailFile) {
       try {
-        const stat = fs.statSync(logTailFile);
-        if (stat.size > logTailOffset) {
-          const fd = fs.openSync(logTailFile, 'r');
-          const buf = Buffer.alloc(stat.size - logTailOffset);
-          fs.readSync(fd, buf, 0, buf.length, logTailOffset);
-          fs.closeSync(fd);
-          const remaining = buf.toString('utf-8');
-          for (const line of remaining.split('\n')) {
-            if (line.trim()) { emitLogLine(`[cli-log] ${line.trim()}`); }
+        const fd = fs.openSync(logTailFile, 'r');
+        try {
+          const stat = fs.fstatSync(fd);
+          if (stat.size > logTailOffset) {
+            const buf = Buffer.alloc(stat.size - logTailOffset);
+            fs.readSync(fd, buf, 0, buf.length, logTailOffset);
+            const remaining = buf.toString('utf-8');
+            for (const line of remaining.split('\n')) {
+              if (line.trim()) { emitLogLine(`[cli-log] ${line.trim()}`); }
+            }
           }
-        }
+        } finally { fs.closeSync(fd); }
       } catch (e) {
         this.logger.log(`[${label}] Could not flush CLI log tail: ${e}`);
       }

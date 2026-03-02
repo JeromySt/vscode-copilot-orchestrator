@@ -143,26 +143,6 @@ function extractGroupSubgraphs(diagram: string): Array<{ id: string; displayedNa
   return subgraphs;
 }
 
-/**
- * Initialize helper methods on a panel instance for testing
- */
-function initializePanelHelpers(panel: any): void {
-  panel._sanitizeId = (id: string) => 'n' + id.replace(/-/g, '');
-  panel._escapeForMermaid = (str: string) => str.replace(/"/g, "'").replace(/[<>{}|:#]/g, '').replace(/\[/g, '(').replace(/\]/g, ')');
-  panel._getStatusIcon = () => '⏸';
-  panel._truncateLabel = (name: string, durationLabel: string, maxLen: number): string => {
-    const totalLen = 2 + name.length + durationLabel.length;
-    if (totalLen <= maxLen) {
-      return name;
-    }
-    const available = maxLen - 2 - durationLabel.length - 3;
-    if (available <= 0) {
-      return name;
-    }
-    return name.slice(0, available) + '...';
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

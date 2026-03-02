@@ -16,7 +16,7 @@ import { escapeHtml, formatDurationMs, errorPageHtml, commitDetailsHtml, workSum
 import { renderWorkSummaryPanelHtml } from '../templates/workSummaryPanel';
 import type { WorkSummaryPanelData, WsPanelJob, WsJourneyNode } from '../templates/workSummaryPanel';
 import { getPlanMetrics, formatPremiumRequests, formatDurationSeconds, formatCodeChanges, formatTokenCount } from '../../plan/metricsAggregator';
-import { renderPlanHeader, renderPlanControls, renderPlanDag, renderPlanNodeCard, renderPlanSummary, renderMetricsBar, renderPlanScripts, renderPlanDetailStyles, buildMermaidDiagram, renderViewTabBar, renderPlanTimeline, renderTabBarStyles, renderTimelineStyles } from '../templates/planDetail';
+import { renderPlanHeader, renderPlanControls, renderPlanDag, renderPlanNodeCard, renderPlanSummary, renderMetricsBar, renderPlanScripts, renderPlanDetailStyles, buildMermaidDiagram, renderPlanTimeline, renderTabBarStyles, renderTimelineStyles } from '../templates/planDetail';
 import type { PlanSummaryData, PlanMetricsBarData } from '../templates/planDetail';
 import { PlanDetailController } from './planDetailController';
 import type { PlanDetailDelegate } from './planDetailController';

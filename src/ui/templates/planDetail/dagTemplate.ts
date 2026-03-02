@@ -27,7 +27,7 @@ export interface PlanDagData {
  * @returns HTML fragment string for the diagram section.
  */
 export function renderPlanDag(data: PlanDagData): string {
-  const { mermaidDef, status } = data;
+  const { mermaidDef } = data;
 
   let html = `
   <h3 style="display:flex;align-items:center;gap:6px;margin:16px 0 8px 0;font-size:14px;color:var(--vscode-foreground);">

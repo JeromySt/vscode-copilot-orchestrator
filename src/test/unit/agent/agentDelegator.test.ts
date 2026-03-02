@@ -7,11 +7,7 @@ import * as sinon from 'sinon';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { EventEmitter } from 'events';
-import type { ChildProcess } from 'child_process';
 import type { IGitOperations } from '../../../interfaces/IGitOperations';
-
-const cp = require('child_process');
 
 function silenceConsole(): { restore: () => void } {
   const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
@@ -29,32 +25,6 @@ function makeTmpDir(): string {
 
 function rmrf(dir: string): void {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-}
-
-function makeFakeProc(exitCode: number | null = 0, stdoutData = '', stderrData = ''): ChildProcess {
-  const proc = new EventEmitter() as any;
-  proc.pid = 12345;
-  proc.kill = sinon.stub();
-  proc.stdout = new EventEmitter();
-  proc.stderr = new EventEmitter();
-  proc.stdin = null;
-  setTimeout(() => {
-    if (stdoutData) {proc.stdout.emit('data', Buffer.from(stdoutData));}
-    if (stderrData) {proc.stderr.emit('data', Buffer.from(stderrData));}
-    setTimeout(() => proc.emit('exit', exitCode), 10);
-  }, 10);
-  return proc as ChildProcess;
-}
-
-function makeFakeErrorProc(err: Error = new Error('spawn ENOENT')): ChildProcess {
-  const proc = new EventEmitter() as any;
-  proc.pid = 12345;
-  proc.kill = sinon.stub();
-  proc.stdout = new EventEmitter();
-  proc.stderr = new EventEmitter();
-  proc.stdin = null;
-  setTimeout(() => proc.emit('error', err), 10);
-  return proc as ChildProcess;
 }
 
 function makeLogger(): { log: (m: string) => void; messages: string[] } {

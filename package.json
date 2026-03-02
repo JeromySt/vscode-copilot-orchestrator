@@ -359,5 +359,11 @@
     "markdown-it": "^14.1.1",
     "micromatch": "^4.0.5",
     "uuid": "^11.1.0"
+  },
+  "overrides": {
+    "mocha": {
+      "serialize-javascript": "^7.0.3",
+      "diff": "^8.0.3"
+    }
   }
 }

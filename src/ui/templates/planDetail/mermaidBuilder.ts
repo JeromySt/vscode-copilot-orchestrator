@@ -8,7 +8,7 @@
  */
 
 import type { PlanInstance, PlanNode, JobNode } from '../../../plan/types';
-import { formatDurationMs, escapeHtml } from '../helpers';
+import { formatDurationMs } from '../helpers';
 
 /**
  * Result of Mermaid diagram generation
@@ -184,7 +184,7 @@ export function buildMermaidDiagram(plan: PlanInstance): MermaidDiagramResult {
     
     // First pass: determine which nodes are roots and leaves in this Plan
     const nodeHasDependents = new Set<string>();
-    for (const [nodeId, node] of d.jobs) {
+    for (const [, node] of d.jobs) {
       for (const depId of node.dependencies) {
         nodeHasDependents.add(depId);
       }
@@ -328,7 +328,6 @@ export function buildMermaidDiagram(plan: PlanInstance): MermaidDiagramResult {
       if (truncatedGroupName !== escapedName || groupPath.includes('/')) {
         nodeTooltips[sanitizedGroupId] = groupPath.includes('/') ? groupPath : displayName;
       }
-      const emSp = '\u2003'; // em space — proportional-font-safe padding
       const padding = ''; // no extra padding — sizing template handles width
       
       lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedGroupName}${groupDurationLabel}${padding}"]`);

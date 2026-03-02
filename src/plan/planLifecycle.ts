@@ -535,7 +535,6 @@ export class PlanLifecycleManager {
       this.log.warn(`Git fetch failed before resume (continuing anyway): ${e.message}`);
     }
 
-    const wasPaused = plan.isPaused;
     const wasNeverStarted = !plan.startedAt;
     if (plan.isPaused) {
       plan.isPaused = false;
