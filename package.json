@@ -15,7 +15,8 @@
   },
   "homepage": "https://github.com/JeromySt/vscode-copilot-orchestrator#readme",
   "engines": {
-    "vscode": "^1.109.0"
+    "vscode": "^1.109.0",
+    "node": ">=20.0.0"
   },
   "categories": [
     "AI",
