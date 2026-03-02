@@ -15,7 +15,8 @@
   },
   "homepage": "https://github.com/JeromySt/vscode-copilot-orchestrator#readme",
   "engines": {
-    "vscode": "^1.109.0"
+    "vscode": "^1.109.0",
+    "node": ">=20.0.0"
   },
   "categories": [
     "AI",
@@ -359,5 +360,11 @@
     "markdown-it": "^14.1.1",
     "micromatch": "^4.0.5",
     "uuid": "^11.1.0"
+  },
+  "overrides": {
+    "mocha": {
+      "serialize-javascript": "^7.0.3",
+      "diff": "^8.0.3"
+    }
   }
 }

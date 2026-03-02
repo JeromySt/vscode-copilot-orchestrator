@@ -106,7 +106,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
 
     // Capture the context passed to CommitPhaseExecutor
     let capturedGetLogFilePath: (() => string | undefined) | undefined;
-    const commitPhaseStub = sandbox.stub(require('../../../plan/phases').CommitPhaseExecutor.prototype, 'execute').callsFake(async function(this: any, ctx: any) {
+    const _commitPhaseStub = sandbox.stub(require('../../../plan/phases').CommitPhaseExecutor.prototype, 'execute').callsFake(async function(this: any, ctx: any) {
       capturedGetLogFilePath = ctx.getLogFilePath;
       return { success: true, commit: 'abc123' };
     });

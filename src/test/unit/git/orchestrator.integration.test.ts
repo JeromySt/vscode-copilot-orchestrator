@@ -105,8 +105,8 @@ suite('Git Orchestrator', () => {
       sinon.stub(branches, 'exists').resolves(true);
 
       // Stub .gitignore reading/writing
-      const readStub = sinon.stub(fs.promises, 'readFile').resolves('');
-      const writeStub = sinon.stub(fs.promises, 'writeFile').resolves();
+      sinon.stub(fs.promises, 'readFile').resolves('');
+      sinon.stub(fs.promises, 'writeFile').resolves();
 
       const result = await orchestrator.createJobWorktree({
         repoPath: '/repo',

@@ -2316,7 +2316,6 @@ suite('JobExecutionEngine - Coverage', () => {
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'failed');
       // Check that attemptHistory[0].workUsed matches diskWork
-      const attempt = ns.attemptHistory![0];
       // workUsed is converted to workRef by toRefAttempt, but the original diskWork was passed
       // We verify indirectly by confirming plan.definition.getWorkSpec was called
       assert.ok(plan.definition && (plan.definition.getWorkSpec as sinon.SinonStub).called);

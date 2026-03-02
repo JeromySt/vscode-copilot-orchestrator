@@ -447,9 +447,7 @@ suite('PlanLifecycleManager', () => {
       const cleanupSnapshotStub = sinon.stub().resolves();
       const mockSnapshotManager = { cleanupSnapshot: cleanupSnapshotStub };
       
-      // Stub the dynamic import
-      const importStub = sinon.stub().resolves({ SnapshotManager: function() { return mockSnapshotManager; } });
-      const origImport = (global as any).__importStar;
+      // The SnapshotManager import is dynamic in production; here we verify behavior via side effects only
       
       // Call the handler with succeeded status
       await planCompleteHandler({ planId: plan.id, status: 'succeeded' });

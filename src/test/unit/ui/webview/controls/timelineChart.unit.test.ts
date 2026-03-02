@@ -3,7 +3,6 @@
  */
 
 import * as assert from 'assert';
-import * as sinon from 'sinon';
 import { suite, test, setup, teardown } from 'mocha';
 import { EventBus } from '../../../../../ui/webview/eventBus';
 import { Topics } from '../../../../../ui/webview/topics';
