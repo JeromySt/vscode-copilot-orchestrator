@@ -162,6 +162,10 @@
         "title": "Copilot Orchestrator: Create Release"
       },
       {
+        "command": "orchestrator.createReleaseFromBranch",
+        "title": "Copilot Orchestrator: Create Release from Current Branch"
+      },
+      {
         "command": "orchestrator.cancelRelease",
         "title": "Copilot Orchestrator: Cancel Release"
       },
