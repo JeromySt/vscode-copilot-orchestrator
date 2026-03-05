@@ -16,14 +16,33 @@ const log = Logger.for('gitignore-debouncer');
 /** Duration to wait after a branch change before allowing .gitignore writes. */
 export const BRANCH_CHANGE_DELAY_MS = 30_000;
 
+/**
+ * Debounces .gitignore writes after branch changes to prevent race conditions.
+ * 
+ * When a branch change occurs, this class defers .gitignore writes for 30 seconds
+ * to avoid creating uncommitted changes that would block subsequent `git checkout`
+ * operations by VS Code or the user. Multiple write requests during the delay
+ * window are merged and deduplicated.
+ */
 export class GitignoreDebouncer implements IGitignoreDebouncer {
   private _lastBranchChangeTime = 0;
   private _pendingTimer: ReturnType<typeof setTimeout> | undefined;
   private _pendingEntries: string[] = [];
   private _pendingResolvers: Array<() => void> = [];
 
+  /**
+   * Creates a new GitignoreDebouncer instance.
+   * 
+   * @param _git - Git operations interface for writing .gitignore entries
+   */
   constructor(private readonly _git: IGitOperations) {}
 
+  /**
+   * Notifies the debouncer that a branch change has occurred.
+   * 
+   * Starts the debounce delay window. Any .gitignore write requests
+   * within the next 30 seconds will be deferred and merged.
+   */
   notifyBranchChange(): void {
     this._lastBranchChangeTime = Date.now();
     log.info('Branch change detected, deferring gitignore writes', {
@@ -31,6 +50,16 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
     });
   }
 
+  /**
+   * Ensures .gitignore entries exist, deferring writes during the branch-change delay.
+   * 
+   * If called within 30 seconds of `notifyBranchChange()`, the write is deferred
+   * and merged with other pending entries. Otherwise, writes immediately.
+   * 
+   * @param repoPath - Absolute path to the git repository root
+   * @param entries - Lines to ensure exist in .gitignore
+   * @returns Promise that resolves when entries are written (immediately or after delay)
+   */
   async ensureEntries(repoPath: string, entries: string[]): Promise<void> {
     const elapsed = Date.now() - this._lastBranchChangeTime;
     if (elapsed < BRANCH_CHANGE_DELAY_MS) {
@@ -88,6 +117,12 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
     }
   }
 
+  /**
+   * Cleans up pending timers and resolves waiting callers.
+   * 
+   * Cancels any pending delayed write operation and immediately resolves
+   * all waiting promises to prevent hanging callers.
+   */
   dispose(): void {
     if (this._pendingTimer) {
       clearTimeout(this._pendingTimer);
