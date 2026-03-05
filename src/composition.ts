@@ -297,5 +297,61 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     },
   );
 
+  // ─── Release PR Monitor ─────────────────────────────────────────────
+  // TODO: Implement DefaultReleasePRMonitor
+  container.registerSingleton<import('./interfaces/IReleasePRMonitor').IReleasePRMonitor>(
+    Tokens.IReleasePRMonitor,
+    () => {
+      // Stub implementation until DefaultReleasePRMonitor is implemented
+      return {
+        startMonitoring: async () => { /* stub */ },
+        stopMonitoring: () => { /* stub */ },
+        isMonitoring: () => false,
+        getMonitorCycles: () => [],
+      } as any;
+    },
+  );
+
+  // ─── Release Manager ────────────────────────────────────────────────
+  // ReleaseManager requires PlanRunner which is created outside the container.
+  // This must be registered with an actual PlanRunner instance after initialization.
+  container.register<import('./interfaces/IReleaseManager').IReleaseManager>(
+    Tokens.IReleaseManager,
+    () => {
+      throw new Error('IReleaseManager must be registered after PlanRunner initialization with createReleaseManager()');
+    },
+  );
+
   return container;
+}
+
+/**
+ * Create a ReleaseManager instance with PlanRunner dependency.
+ * 
+ * Call this after PlanRunner is initialized to wire up the release management system.
+ * 
+ * @param container - The DI container
+ * @param planRunner - The initialized PlanRunner instance
+ * @returns A fully-wired ReleaseManager instance
+ * 
+ * @example
+ * ```typescript
+ * const container = createContainer(context);
+ * const planRunner = await initializePlanRunner(context, container, git);
+ * const releaseManager = createReleaseManager(container, planRunner);
+ * ```
+ */
+export function createReleaseManager(
+  container: ServiceContainer,
+  planRunner: import('./interfaces/IPlanRunner').IPlanRunner,
+): import('./interfaces/IReleaseManager').IReleaseManager {
+  const git = container.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+  const copilot = container.resolve<import('./interfaces/ICopilotRunner').ICopilotRunner>(Tokens.ICopilotRunner);
+  const isolatedRepos = container.resolve<import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager>(Tokens.IIsolatedRepoManager);
+  const prMonitor = container.resolve<import('./interfaces/IReleasePRMonitor').IReleasePRMonitor>(Tokens.IReleasePRMonitor);
+  const prServiceFactory = container.resolve<import('./interfaces/IRemotePRServiceFactory').IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
+  const store = container.resolve<import('./interfaces/IReleaseStore').IReleaseStore>(Tokens.IReleaseStore);
+  
+  const { DefaultReleaseManager } = require('./plan/releaseManager');
+  return new DefaultReleaseManager(planRunner, git, copilot, isolatedRepos, prMonitor, prServiceFactory, store);
 }
