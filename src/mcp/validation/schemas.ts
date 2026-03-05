@@ -918,6 +918,149 @@ export const listReleasesSchema = {
   additionalProperties: false
 } as const;
 
+// ============================================================================
+// PR LIFECYCLE SCHEMAS
+// ============================================================================
+
+/**
+ * Schema for list_available_prs input
+ */
+export const listAvailablePRsSchema = {
+  $id: 'list_available_prs',
+  type: 'object',
+  properties: {
+    repoPath: { type: 'string', minLength: 1 },
+    baseBranch: { type: 'string' },
+    state: { type: 'string', enum: ['open', 'closed', 'all'] },
+    limit: { type: 'number', minimum: 1, maximum: 100 }
+  },
+  required: ['repoPath'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for adopt_pr input
+ */
+export const adoptPRSchema = {
+  $id: 'adopt_pr',
+  type: 'object',
+  properties: {
+    prNumber: { type: 'number', minimum: 1 },
+    repoPath: { type: 'string', minLength: 1 },
+    workingDirectory: { type: 'string' },
+    releaseId: { type: 'string' },
+    priority: { type: 'number', minimum: 0 }
+  },
+  required: ['prNumber', 'repoPath'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for get_managed_pr input
+ */
+export const getManagedPRSchema = {
+  $id: 'get_managed_pr',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for list_managed_prs input
+ */
+export const listManagedPRsSchema = {
+  $id: 'list_managed_prs',
+  type: 'object',
+  properties: {
+    status: {
+      type: 'string',
+      enum: ['adopted', 'monitoring', 'addressing', 'ready', 'blocked', 'abandoned']
+    }
+  },
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for start_pr_monitoring input
+ */
+export const startPRMonitoringSchema = {
+  $id: 'start_pr_monitoring',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for stop_pr_monitoring input
+ */
+export const stopPRMonitoringSchema = {
+  $id: 'stop_pr_monitoring',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for promote_pr input
+ */
+export const promotePRSchema = {
+  $id: 'promote_pr',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for demote_pr input
+ */
+export const demotePRSchema = {
+  $id: 'demote_pr',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for abandon_pr input
+ */
+export const abandonPRSchema = {
+  $id: 'abandon_pr',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for remove_pr input
+ */
+export const removePRSchema = {
+  $id: 'remove_pr',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
 /**
  * All schemas indexed by tool name
  */
@@ -955,4 +1098,16 @@ export const schemas: Record<string, object> = {
   get_copilot_release_status: getReleaseStatusSchema,
   cancel_copilot_release: cancelReleaseSchema,
   list_copilot_releases: listReleasesSchema,
+
+  // PR lifecycle tools
+  list_available_prs: listAvailablePRsSchema,
+  adopt_pr: adoptPRSchema,
+  get_managed_pr: getManagedPRSchema,
+  list_managed_prs: listManagedPRsSchema,
+  start_pr_monitoring: startPRMonitoringSchema,
+  stop_pr_monitoring: stopPRMonitoringSchema,
+  promote_pr: promotePRSchema,
+  demote_pr: demotePRSchema,
+  abandon_pr: abandonPRSchema,
+  remove_pr: removePRSchema,
 };

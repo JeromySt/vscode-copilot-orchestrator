@@ -39,3 +39,6 @@ export * from './jobDetailsHandler';
 
 // Release handlers
 export * from './releaseHandlers';
+
+// PR lifecycle handlers
+export * from './prLifecycleHandlers';
