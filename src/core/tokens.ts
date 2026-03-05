@@ -148,3 +148,9 @@ export const IPlanRepository = Symbol('IPlanRepository');
  * Provides storage backend for plan persistence.
  */
 export const IPlanRepositoryStore = Symbol('IPlanRepositoryStore');
+
+/**
+ * Token for IBulkPlanActions service.
+ * Provides bulk operations on multiple plans.
+ */
+export const IBulkPlanActions = Symbol('IBulkPlanActions');
