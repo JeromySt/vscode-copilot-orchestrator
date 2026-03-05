@@ -262,7 +262,8 @@ export async function initializeMcpServer(
     const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
     const configProvider = c.resolve<import('../interfaces/IConfigProvider').IConfigProvider>(Tokens.IConfigProvider);
     const repo = c.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
-    return new McpHandler(planRunner, workspacePath, git, configProvider, repo);
+    const archiver = c.resolve<import('../interfaces/IPlanArchiver').IPlanArchiver>(Tokens.IPlanArchiver);
+    return new McpHandler(planRunner, workspacePath, git, configProvider, repo, archiver);
   });
 
   // Register PlanArchiver with PlanRunner dependency
