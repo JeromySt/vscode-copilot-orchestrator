@@ -13,6 +13,7 @@ export * from './IProcessMonitor';
 export * from './IMcpManager';
 export * from './ILogger';
 export * from './IGitOperations';
+export * from './IGitignoreDebouncer';
 export * from './IFileSystem';
 export * from './INodeRunner';
 export * from './IEvidenceValidator';

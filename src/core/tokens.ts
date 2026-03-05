@@ -69,6 +69,12 @@ export const IMcpManager = Symbol('IMcpManager');
  */
 export const IFileSystem = Symbol('IFileSystem');
 
+/**
+ * Token for IGitignoreDebouncer service.
+ * Provides .gitignore write debouncing after branch changes.
+ */
+export const IGitignoreDebouncer = Symbol('IGitignoreDebouncer');
+
 // ─── New Interface Tokens ──────────────────────────────────────────────────
 
 /**

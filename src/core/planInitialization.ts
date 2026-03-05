@@ -26,6 +26,7 @@ import type { ServiceContainer } from './container';
 import type { DefaultJobExecutor } from '../plan/executor';
 import * as Tokens from './tokens';
 import type { IGitOperations } from '../interfaces/IGitOperations';
+import type { IGitignoreDebouncer } from '../interfaces/IGitignoreDebouncer';
 import { PlanConfigManager } from '../plan/configManager';
 import { PlanPersistence } from '../plan/persistence';
 import { PlanStateMachine } from '../plan/stateMachine';
@@ -151,7 +152,8 @@ function createAgentDelegatorAdapter(runner: ICopilotRunner, log: any) {
 export async function initializePlanRunner(
   context: vscode.ExtensionContext,
   container: ServiceContainer,
-  git: IGitOperations
+  git: IGitOperations,
+  debouncer: IGitignoreDebouncer
 ): Promise<{ planRunner: PlanRunner; processMonitor: IProcessMonitor }> {
   log.info('Initializing Plan Runner...');
   
@@ -198,9 +200,9 @@ export async function initializePlanRunner(
   const planRepository = container.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
   planRunner.setPlanRepository(planRepository);
 
-  // Ensure .orchestrator and .worktrees are in .gitignore
+  // Ensure .orchestrator and .worktrees are in .gitignore (via debouncer)
   if (workspacePath) {
-    git.gitignore.ensureGitignoreEntries(workspacePath, ['.orchestrator/', '.worktrees/'], log.debug).catch((err: any) => {
+    debouncer.ensureEntries(workspacePath, ['.orchestrator/', '.worktrees/']).catch((err: any) => {
       log.warn('Failed to update .gitignore', { error: err.message });
     });
   }
