@@ -14,7 +14,13 @@
 export function renderPlansViewBody(): string {
   return `<div class="header">
     <h3>Plans</h3>
-    <span class="pill" id="badge">0 total</span>
+    <div class="header-actions">
+      <button id="adoptPRButton" class="action-button" title="Adopt an existing PR">
+        <span class="codicon codicon-add"></span>
+        Adopt PR
+      </button>
+      <span class="pill" id="badge">0 total</span>
+    </div>
   </div>
   <div class="global-capacity-bar" id="globalCapacityBar" style="display: none;">
     <span class="capacity-label">Global Capacity:</span>

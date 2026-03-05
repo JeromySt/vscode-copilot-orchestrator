@@ -18,6 +18,14 @@ export function renderPlansViewControlWiring(): string {
 var planListContainer = new PlanListContainerControl(bus, 'plan-list-container', 'plans');
 var capacityBar = new CapacityBarControl(bus, 'capacity-bar');
 
+// ── Adopt PR Button ───────────────────────────────────────────────────
+var adoptPRButton = document.getElementById('adoptPRButton');
+if (adoptPRButton) {
+  adoptPRButton.addEventListener('click', function() {
+    vscode.postMessage({ type: 'adoptPR' });
+  });
+}
+
 // ── Global duration ticker ───────────────────────────────────────────
 // Identical pattern to plan detail panel: one global PULSE handler that
 // ticks all duration elements. Each .plan-duration stores its own

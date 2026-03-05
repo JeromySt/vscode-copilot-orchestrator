@@ -24,8 +24,33 @@ export function renderPlansViewStyles(): string {
       gap: 8px; 
       margin-bottom: 12px; 
       align-items: center; 
+      justify-content: space-between;
     }
     .header h3 { margin: 0; }
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .action-button {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 11px;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      white-space: nowrap;
+    }
+    .action-button:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .action-button .codicon {
+      font-size: 14px;
+    }
     .pill { 
       padding: 2px 8px; 
       border-radius: 10px; 

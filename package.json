@@ -154,6 +154,11 @@
       {
         "command": "orchestrator.addressPRFeedback",
         "title": "Copilot Orchestrator: Address PR Feedback"
+      },
+      {
+        "command": "orchestrator.adoptPR",
+        "title": "Copilot Orchestrator: Adopt PR",
+        "icon": "$(add)"
       }
     ],
     "views": {

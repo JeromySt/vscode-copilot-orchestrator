@@ -129,6 +129,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         case 'deletePlan':
           vscode.commands.executeCommand('orchestrator.deletePlan', message.planId);
           break;
+        case 'adoptPR':
+          // Trigger the adopt PR command
+          vscode.commands.executeCommand('orchestrator.adoptPR');
+          break;
         case 'refresh':
           this._initialRefreshDone = true;
           this.refresh();
