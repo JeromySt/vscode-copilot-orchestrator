@@ -517,62 +517,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
    * Detects current git branch and creates a release for it.
    */
   private async _handleCreateReleaseFromBranch() {
-    if (!this._releaseManager) {
-      vscode.window.showErrorMessage('Release manager is not available.');
-      return;
-    }
-    
-    try {
-      // Get current git branch
-      const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
-      const git = gitExtension?.getAPI(1);
-      
-      if (!git || git.repositories.length === 0) {
-        vscode.window.showErrorMessage('No git repository found.');
-        return;
-      }
-      
-      const repo = git.repositories[0];
-      const branch = repo.state.HEAD?.name;
-      
-      if (!branch) {
-        vscode.window.showErrorMessage('Could not detect current branch.');
-        return;
-      }
-      
-      // Prompt for release name
-      const name = await vscode.window.showInputBox({
-        prompt: `Create release from branch "${branch}"`,
-        placeHolder: 'Enter release name (e.g., v1.2.0)',
-        validateInput: (value) => {
-          if (!value || value.trim().length === 0) {
-            return 'Release name is required';
-          }
-          return null;
-        }
-      });
-      
-      if (!name) {
-        return; // User cancelled
-      }
-      
-      // For now, create an empty release (no plans selected yet)
-      // The user can add plans later via the release panel
-      const release = await this._releaseManager.createRelease({
-        name: name.trim(),
-        planIds: [],
-        releaseBranch: branch,
-        targetBranch: 'main', // Default, can be changed later
-      });
-      
-      // Open the release panel
-      vscode.commands.executeCommand('orchestrator.showReleasePanel', release.id);
-      
-      vscode.window.showInformationMessage(`Release "${name}" created from branch "${branch}".`);
-      
-    } catch (error: any) {
-      vscode.window.showErrorMessage(`Failed to create release: ${error.message}`);
-    }
+    // Delegate to the registered command which has the full implementation
+    vscode.commands.executeCommand('orchestrator.createReleaseFromBranch');
   }
 
   /**

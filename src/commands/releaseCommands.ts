@@ -15,10 +15,12 @@ import type { ReleaseDefinition } from '../plan/types/release';
  *
  * @param context - VS Code extension context.
  * @param getReleaseData - Function to fetch release data.
+ * @param releaseManager - Release manager instance (optional).
  */
 export function registerReleaseCommands(
   context: vscode.ExtensionContext,
   getReleaseData: (id: string) => ReleaseDefinition | undefined,
+  releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager,
 ): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.showReleasePanel', (releaseId: string) => {
@@ -58,6 +60,79 @@ export function registerReleaseCommands(
 
       // TODO: Actually create the release in the release manager
       vscode.window.showInformationMessage(`Release "${name}" created (not yet implemented)`);
+    }),
+
+    vscode.commands.registerCommand('orchestrator.createReleaseFromBranch', async () => {
+      if (!releaseManager) {
+        vscode.window.showErrorMessage('Release manager is not available.');
+        return;
+      }
+
+      try {
+        // 1. Get current branch from VS Code git extension (since IGitOperations doesn't have current() method)
+        const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+        const git = gitExtension?.getAPI(1);
+        
+        if (!git || git.repositories.length === 0) {
+          vscode.window.showErrorMessage('No git repository found.');
+          return;
+        }
+        
+        const repo = git.repositories[0];
+        const currentBranch = repo.state.HEAD?.name;
+        
+        if (!currentBranch) {
+          vscode.window.showErrorMessage('Could not detect current branch.');
+          return;
+        }
+
+        // Don't allow creating release from main
+        if (currentBranch === 'main') {
+          vscode.window.showWarningMessage('Switch to a release branch first.');
+          return;
+        }
+        
+        // 2. Get repository path for PR checks
+        const repoPath = repo.rootUri.fsPath;
+        
+        // 3. Prompt for release name (default to branch name with 'release/' prefix removed)
+        const defaultName = currentBranch.replace(/^release\//, '');
+        const name = await vscode.window.showInputBox({
+          prompt: 'Release name',
+          value: defaultName,
+          placeHolder: 'v0.15.0',
+          validateInput: (value) => {
+            if (!value || value.trim().length === 0) {
+              return 'Release name is required';
+            }
+            return null;
+          }
+        });
+        
+        if (!name) {
+          return; // User cancelled
+        }
+        
+        // 4. Create release via IReleaseManager
+        const release = await releaseManager.createRelease({
+          name: name.trim(),
+          planIds: [], // No plans — this is a manual release
+          releaseBranch: currentBranch,
+          targetBranch: 'main', // Default target branch
+        });
+        
+        // 5. Check if a PR already exists for this branch (async, don't block)
+        // Note: PR adoption happens separately via the PR lifecycle manager
+        // The release panel will show if a PR exists and allow adoption
+        
+        // 6. Open the release panel
+        vscode.commands.executeCommand('orchestrator.showReleasePanel', release.id);
+        
+        vscode.window.showInformationMessage(`Release "${name}" created from branch "${currentBranch}".`);
+        
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to create release: ${error.message}`);
+      }
     }),
 
     vscode.commands.registerCommand('orchestrator.cancelRelease', async (releaseId: string) => {

@@ -378,7 +378,8 @@ export function initializePlansView(
   context: vscode.ExtensionContext,
   planRunner: PlanRunner,
   pulse?: import('../interfaces/IPulseEmitter').IPulseEmitter,
-  prLifecycleManager?: import('../interfaces/IPRLifecycleManager').IPRLifecycleManager
+  prLifecycleManager?: import('../interfaces/IPRLifecycleManager').IPRLifecycleManager,
+  releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager
 ): void {
   log.info('Initializing Plans view...');
   
@@ -388,7 +389,7 @@ export function initializePlansView(
   // Import the view provider
   const { plansViewProvider } = require('../ui/plansViewProvider');
   
-  const plansView = new plansViewProvider(context, planRunner, effectivePulse, prLifecycleManager);
+  const plansView = new plansViewProvider(context, planRunner, effectivePulse, prLifecycleManager, releaseManager);
   
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
