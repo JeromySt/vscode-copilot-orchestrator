@@ -12,7 +12,7 @@ import type { IBulkPlanActions, BulkActionType, BulkActionResult } from '../inte
 import type { IPlanRunner } from '../interfaces/IPlanRunner';
 import type { IDialogService } from '../interfaces/IDialogService';
 
-const log = Logger.for('bulk-plan-actions');
+const log = Logger.for('ui');
 
 export class BulkPlanActions implements IBulkPlanActions {
   constructor(

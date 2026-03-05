@@ -139,9 +139,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerUtilityCommands(context);
 
   // ── Bulk Action Commands ───────────────────────────────────────────────
+  // Register BulkPlanActions with the container now that PlanRunner is available
   const { BulkPlanActions } = require('./plan/bulkPlanActions');
   const dialogService = container.resolve<import('./interfaces').IDialogService>(Tokens.IDialogService);
-  const bulkActions = new BulkPlanActions(planRunner, dialogService);
+  container.registerSingleton<import('./interfaces/IBulkPlanActions').IBulkPlanActions>(
+    Tokens.IBulkPlanActions,
+    () => new BulkPlanActions(planRunner, dialogService)
+  );
+  const bulkActions = container.resolve<import('./interfaces/IBulkPlanActions').IBulkPlanActions>(Tokens.IBulkPlanActions);
   const { registerBulkCommands } = require('./commands');
   registerBulkCommands(context, bulkActions);
 

@@ -186,7 +186,7 @@ export class MultiSelectManager extends SubscribableControl {
     
     // Delete: trigger bulk delete action
     if (key === 'Delete' && this._state.selectedIds.size > 0) {
-      this._bus.emit(Topics.PLANS_BULK_ACTION, {
+      this.bus.emit(Topics.PLANS_BULK_ACTION, {
         action: 'delete',
         selectedIds: Array.from(this._state.selectedIds),
       } as BulkActionEvent);
@@ -382,7 +382,7 @@ export class MultiSelectManager extends SubscribableControl {
    * Emit selection changed event.
    */
   private _emitSelectionChanged(): void {
-    this._bus.emit(Topics.PLANS_SELECTION_CHANGED, {
+    this.bus.emit(Topics.PLANS_SELECTION_CHANGED, {
       selectedIds: Array.from(this._state.selectedIds),
       count: this._state.selectedIds.size,
     } as SelectionChangedEvent);

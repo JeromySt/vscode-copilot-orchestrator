@@ -184,46 +184,12 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     
-    switch (action) {
-      case 'resume':
-        for (const planId of planIds) {
-          await vscode.commands.executeCommand('orchestrator.resumePlan', planId);
-        }
-        break;
-      case 'pause':
-        for (const planId of planIds) {
-          await vscode.commands.executeCommand('orchestrator.pausePlan', planId);
-        }
-        break;
-      case 'cancel':
-        for (const planId of planIds) {
-          await vscode.commands.executeCommand('orchestrator.cancelPlan', planId);
-        }
-        break;
-      case 'retry':
-        for (const planId of planIds) {
-          await vscode.commands.executeCommand('orchestrator.retryPlan', planId);
-        }
-        break;
-      case 'finalize':
-        for (const planId of planIds) {
-          await vscode.commands.executeCommand('orchestrator.finalizePlan', planId);
-        }
-        break;
-      case 'delete':
-        // Ask for confirmation for bulk delete
-        const confirm = await vscode.window.showWarningMessage(
-          `Delete ${planIds.length} plan(s)?`,
-          { modal: true },
-          'Delete'
-        );
-        if (confirm === 'Delete') {
-          for (const planId of planIds) {
-            await vscode.commands.executeCommand('orchestrator.deletePlan', planId);
-          }
-        }
-        break;
-    }
+    // Capitalize first letter to match command naming convention
+    const commandAction = action.charAt(0).toUpperCase() + action.slice(1);
+    vscode.commands.executeCommand(
+      `orchestrator.bulk${commandAction}`,
+      planIds
+    );
   }
   
   /**
