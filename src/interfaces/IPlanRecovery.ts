@@ -1,8 +1,8 @@
 /**
  * @fileoverview Plan recovery service.
- * Recovers plans from canceled or archived state by:
+ * Recovers plans from canceled or failed state by:
  * A) Recovering the targetBranch at its initial commit
- * B) For canceled plans: recovering worktree states from the deepest
+ * B) For canceled/failed plans: recovering worktree states from the deepest
  *    successfully-completed job(s) using git rev-parse and DAG status
  * All recovered plans enter 'paused' state.
  *
@@ -13,9 +13,9 @@ import type { RecoveryResult, RecoveryOptions, NodeRecoveryInfo } from '../plan/
 
 export interface IPlanRecovery {
   /**
-   * Recover a plan from canceled or archived state.
+   * Recover a plan from canceled or failed state.
    * - Recovers targetBranch at initial commit (always)
-   * - Recovers worktrees from deepest successful nodes (for canceled plans)
+   * - Recovers worktrees from deepest successful nodes (for canceled/failed plans)
    * - Uses copilot CLI/agent for recovery orchestration
    * - Places plan in 'paused' state after recovery
    *
@@ -27,7 +27,7 @@ export interface IPlanRecovery {
 
   /**
    * Check if a plan can be recovered.
-   * Only canceled or archived plans can be recovered.
+   * Only canceled or failed plans can be recovered.
    */
   canRecover(planId: string): boolean;
 

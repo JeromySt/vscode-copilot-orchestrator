@@ -198,6 +198,19 @@ export async function initializePlanRunner(
   const planRepository = container.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
   planRunner.setPlanRepository(planRepository);
 
+  // Register PlanRecovery service now that PlanRunner exists
+  // (IPlanRecovery needs IPlanRunner, so it must be registered after PlanRunner is created)
+  const { PlanRecovery } = await import('../plan/planRecovery');
+  container.registerSingleton<import('../interfaces/IPlanRecovery').IPlanRecovery>(
+    Tokens.IPlanRecovery,
+    (c) => {
+      const planRepo = c.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
+      const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+      const copilot = c.resolve<import('../interfaces/ICopilotRunner').ICopilotRunner>(Tokens.ICopilotRunner);
+      return new PlanRecovery(planRunner, planRepo, git, copilot);
+    }
+  );
+
   // Ensure .orchestrator and .worktrees are in .gitignore
   if (workspacePath) {
     git.gitignore.ensureGitignoreEntries(workspacePath, ['.orchestrator/', '.worktrees/'], log.debug).catch((err: any) => {

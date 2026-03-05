@@ -151,6 +151,6 @@ export const IPlanRepositoryStore = Symbol('IPlanRepositoryStore');
 
 /**
  * Token for IPlanRecovery service.
- * Provides plan recovery from canceled or archived state.
+ * Provides plan recovery from canceled or failed state.
  */
 export const IPlanRecovery = Symbol('IPlanRecovery');

@@ -1,5 +1,5 @@
 /**
- * @fileoverview Types for plan recovery from canceled or archived state.
+ * @fileoverview Types for plan recovery from canceled or failed state.
  */
 
 export interface RecoveryResult {
