@@ -196,3 +196,9 @@ export const IReleaseConfigManager = Symbol('IReleaseConfigManager');
  * Provides isolated repository clone management for release workflows.
  */
 export const IIsolatedRepoManager = Symbol('IIsolatedRepoManager');
+
+/**
+ * Token for IPRLifecycleManager service.
+ * Provides PR lifecycle management including adoption, monitoring, and autonomous feedback handling.
+ */
+export const IPRLifecycleManager = Symbol('IPRLifecycleManager');

@@ -35,3 +35,4 @@ export * from './IRemoteProviderDetector';
 export * from './IRemotePRServiceFactory';
 export * from './IReleaseConfigManager';
 export * from './IIsolatedRepoManager';
+export * from './IPRLifecycleManager';
