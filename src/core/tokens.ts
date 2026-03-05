@@ -178,3 +178,9 @@ export const IRemoteProviderDetector = Symbol('IRemoteProviderDetector');
  * Provides factory for creating provider-specific PR service instances.
  */
 export const IRemotePRServiceFactory = Symbol('IRemotePRServiceFactory');
+
+/**
+ * Token for IReleaseConfigManager service.
+ * Provides release management configuration access.
+ */
+export const IReleaseConfigManager = Symbol('IReleaseConfigManager');

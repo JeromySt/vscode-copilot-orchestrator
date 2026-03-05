@@ -32,3 +32,4 @@ export * from './IReleasePRMonitor';
 export * from './IRemotePRService';
 export * from './IRemoteProviderDetector';
 export * from './IRemotePRServiceFactory';
+export * from './IReleaseConfigManager';
