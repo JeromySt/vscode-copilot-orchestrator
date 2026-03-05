@@ -321,6 +321,20 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     },
   );
 
+  // ─── PR Lifecycle Manager ───────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IPRLifecycleManager>(
+    Tokens.IPRLifecycleManager,
+    (c) => {
+      const prServiceFactory = c.resolve<import('./interfaces').IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
+      const prMonitor = c.resolve<import('./interfaces').IReleasePRMonitor>(Tokens.IReleasePRMonitor);
+      const isolatedRepos = c.resolve<import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager>(Tokens.IIsolatedRepoManager);
+      const store = c.resolve<import('./interfaces').IManagedPRStore>(Tokens.IManagedPRStore);
+      const releaseConfig = c.resolve<import('./interfaces').IReleaseConfigManager>(Tokens.IReleaseConfigManager);
+      const { DefaultPRLifecycleManager } = require('./plan/prLifecycleManager');
+      return new DefaultPRLifecycleManager(prServiceFactory, prMonitor, isolatedRepos, store, releaseConfig);
+    },
+  );
+
   return container;
 }
 
