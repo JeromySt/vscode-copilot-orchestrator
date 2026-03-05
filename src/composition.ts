@@ -44,6 +44,7 @@ import { DefaultJobExecutor } from './plan/executor';
 import { DefaultEvidenceValidator } from './plan/evidenceValidator';
 import { GlobalCapacityManager } from './core/globalCapacity';
 import { PlanConfigManager } from './plan/configManager';
+import { ReleaseConfigManager } from './plan/releaseConfigManager';
 import { PlanPersistence } from './plan/persistence';
 import { StdioMcpServerManager } from './mcp/mcpServerManager';
 import { DefaultGitOperations } from './git/DefaultGitOperations';
@@ -204,6 +205,26 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     (c) => {
       const configProvider = c.resolve<import('./interfaces').IConfigProvider>(Tokens.IConfigProvider);
       return new PlanConfigManager(configProvider);
+    },
+  );
+
+  // ─── Release Config Manager ─────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IReleaseConfigManager>(
+    Tokens.IReleaseConfigManager,
+    (c) => {
+      const configProvider = c.resolve<import('./interfaces').IConfigProvider>(Tokens.IConfigProvider);
+      return new ReleaseConfigManager(configProvider);
+    },
+  );
+
+  // ─── Isolated Repo Manager ──────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager>(
+    Tokens.IIsolatedRepoManager,
+    (c) => {
+      const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+      const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+      const { DefaultIsolatedRepoManager } = require('./git/isolatedRepoManager');
+      return new DefaultIsolatedRepoManager(git, fileSystem);
     },
   );
 

@@ -160,3 +160,15 @@ export const IReleaseManager = Symbol('IReleaseManager');
  * Provides PR monitoring for releases.
  */
 export const IReleasePRMonitor = Symbol('IReleasePRMonitor');
+
+/**
+ * Token for IReleaseConfigManager service.
+ * Provides release management configuration access.
+ */
+export const IReleaseConfigManager = Symbol('IReleaseConfigManager');
+
+/**
+ * Token for IIsolatedRepoManager service.
+ * Provides isolated repository clone management for release workflows.
+ */
+export const IIsolatedRepoManager = Symbol('IIsolatedRepoManager');
