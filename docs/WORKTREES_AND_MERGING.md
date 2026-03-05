@@ -479,6 +479,111 @@ git worktree remove <path> --force
 git worktree prune
 ```
 
+## Recovery
+
+When plans are canceled or fail before completion, the plan recovery feature can restore the plan's state from historical commits, allowing work to continue from where it left off.
+
+### Recovery Process
+
+Recovery follows these steps:
+
+1. **Validate plan status**: Only `canceled` or `failed` plans can be recovered
+2. **Recreate target branch**: Reset the target branch to the base branch commit (initial state)
+3. **Analyze successful nodes**: Use git rev-parse to verify which nodes completed successfully and have recoverable commits
+4. **Recover worktrees**: Create worktrees from the deepest successfully-completed nodes at their commit hashes
+5. **Optional verification**: Invoke Copilot CLI agent to verify recovered worktree integrity
+6. **Transition to paused**: Place the plan in paused state for safe inspection before resuming
+
+### Commit Discovery
+
+For each node, recovery attempts to find the commit hash in this priority order:
+
+1. **`nodeState.completedCommit`** — Primary storage for successful commits
+2. **Attempt records** — Search attempt history for the last successful attempt's commit
+3. **Worktree HEAD** — Fallback to reading the worktree's current HEAD commit
+
+### Worktree Recovery
+
+Worktrees are created using detached HEAD mode at the recovered commit:
+
+```bash
+git worktree add --detach <path> <commit-hash>
+```
+
+**Path validation:** All worktree paths are validated for security (no path traversal). Paths must resolve within the repository directory.
+
+**Skip conditions:** Nodes are skipped if:
+- No commit hash could be found
+- The commit no longer exists in the repository (verified via `git rev-parse`)
+- The worktree path would escape the repository (security)
+- Worktree creation fails (logged, non-fatal)
+
+### Recovery API
+
+**MCP Tool:**
+```typescript
+recover_copilot_plan({
+  planId: string,
+  useCopilotAgent?: boolean  // default: true
+})
+```
+
+**IPlanRecovery Service:**
+```typescript
+interface IPlanRecovery {
+  recover(planId: string, options?: RecoveryOptions): Promise<RecoveryResult>;
+  canRecover(planId: string): boolean;
+  analyzeRecoverableNodes(planId: string): Promise<NodeRecoveryInfo[]>;
+}
+```
+
+**RecoveryResult:**
+```typescript
+interface RecoveryResult {
+  planId: string;
+  success: boolean;
+  recoveredBranch: string;        // The target branch recreated
+  recoveredWorktrees: string[];   // Worktree paths that were recreated
+  recoveredNodes: string[];       // Node IDs recovered from successful commits
+  error?: string;
+}
+```
+
+### Post-Recovery State
+
+After successful recovery:
+- Target branch is reset to base branch commit
+- Succeeded nodes have their worktrees recreated at their completion commits
+- Failed/canceled nodes remain in their terminal state (ready to retry)
+- Plan enters **paused state** for inspection
+- User can resume the plan to continue from failed nodes
+
+### Example Recovery Scenario
+
+```
+Plan State Before Recovery:
+  ├─ node-1 [succeeded, commit: abc123]
+  ├─ node-2 [succeeded, commit: def456]
+  ├─ node-3 [failed]
+  └─ Status: canceled
+
+Recovery Actions:
+  1. Recreate targetBranch at baseBranch commit
+  2. Create worktree for node-1 at abc123
+  3. Create worktree for node-2 at def456
+  4. Skip node-3 (no commit to recover)
+  5. Transition plan to paused
+
+Plan State After Recovery:
+  ├─ node-1 [succeeded] — worktree ready
+  ├─ node-2 [succeeded] — worktree ready
+  ├─ node-3 [failed] — ready to retry
+  └─ Status: paused
+
+User Action: Resume plan
+  → node-3 retries (dependencies already satisfied)
+```
+
 ## Configuration
 
 ### VS Code Settings

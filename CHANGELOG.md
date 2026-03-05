@@ -5,6 +5,15 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Plan recovery from canceled or archived state via right-click menu and plan detail panel
+- `recover_copilot_plan` MCP tool for programmatic recovery
+- Git rev-parse based recovery: recreates target branch and recovers deepest successful node worktrees
+- Copilot CLI agent verifies recovered worktree integrity
+- All recovered plans enter paused state for safe inspection before resuming
+
 ## [0.14.0] - 2026-02-28
 
 ### 🚀 Major Features

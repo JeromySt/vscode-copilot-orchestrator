@@ -50,27 +50,34 @@ export async function handleRecoverPlan(args: any, ctx: PlanHandlerContext): Pro
     };
   }
   
-  // Analyze recoverable nodes (for preview)
-  const analysis = await ctx.PlanRecovery.analyzeRecoverableNodes(planId);
-  const recoverableCount = analysis.filter(n => n.wasSuccessful && n.commitHash).length;
-  
-  // Perform recovery
-  const result = await ctx.PlanRecovery.recover(planId, { useCopilotAgent });
-  
-  if (!result.success) {
+  try {
+    // Analyze recoverable nodes (for preview)
+    const analysis = await ctx.PlanRecovery.analyzeRecoverableNodes(planId);
+    const recoverableCount = analysis.filter(n => n.wasSuccessful && n.commitHash).length;
+    
+    // Perform recovery
+    const result = await ctx.PlanRecovery.recover(planId, { useCopilotAgent });
+    
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error || 'Recovery failed'
+      };
+    }
+    
+    return {
+      success: true,
+      planId,
+      recoveredBranch: result.recoveredBranch,
+      recoveredNodeCount: result.recoveredNodes.length,
+      recoveredNodes: result.recoveredNodes,
+      totalNodeCount: analysis.length,
+      message: `Plan '${planId}' recovered. Branch '${result.recoveredBranch}' recreated. ${result.recoveredNodes.length} of ${analysis.length} nodes recovered. Plan is now PAUSED.`
+    };
+  } catch (err: any) {
     return {
       success: false,
-      error: result.error || 'Recovery failed'
+      error: err.message || 'Recovery operation failed'
     };
   }
-  
-  return {
-    success: true,
-    planId,
-    recoveredBranch: result.recoveredBranch,
-    recoveredNodeCount: result.recoveredNodes.length,
-    recoveredNodes: result.recoveredNodes,
-    totalNodeCount: analysis.length,
-    message: `Plan '${planId}' recovered. Branch '${result.recoveredBranch}' recreated. ${result.recoveredNodes.length} of ${analysis.length} nodes recovered. Plan is now PAUSED.`
-  };
 }
