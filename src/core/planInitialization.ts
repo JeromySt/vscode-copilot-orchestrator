@@ -404,6 +404,39 @@ export function initializePlansView(
 }
 
 /**
+ * Initialize the Plans view in the sidebar with release manager
+ */
+export function initializePlansViewWithReleaseManager(
+  context: vscode.ExtensionContext,
+  planRunner: PlanRunner,
+  pulse?: import('../interfaces/IPulseEmitter').IPulseEmitter,
+  prLifecycleManager?: import('../interfaces/IPRLifecycleManager').IPRLifecycleManager,
+  releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager
+): void {
+  log.info('Initializing Plans view with release manager...');
+  
+  // Default no-op pulse if not provided
+  const effectivePulse = pulse ?? { onPulse: () => ({ dispose: () => {} }), isRunning: false };
+  
+  // Import the view provider
+  const { plansViewProvider } = require('../ui/plansViewProvider');
+  
+  const plansView = new plansViewProvider(context, planRunner, effectivePulse, prLifecycleManager, releaseManager);
+  
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
+  );
+
+  // Initialize TreeView for badge functionality - AFTER plan recovery is complete
+  const { PlanTreeViewManager } = require('../ui/planTreeProvider');
+  const treeViewManager = new PlanTreeViewManager(planRunner, effectivePulse);
+  treeViewManager.createTreeView(context);
+  context.subscriptions.push(treeViewManager);
+  
+  log.info('Plans view initialized with release manager');
+}
+
+/**
  * Register commands for the Plan system
  */
 export function registerPlanCommands(

@@ -102,6 +102,8 @@ class PlanListCardControl extends SubscribableControl {
       '<button class="archive-action" data-plan-id="' + escapeHtml(data.id) + '" title="Archive this plan">$(archive)</button>' : '';
     var recoverBtn = (data.status === 'canceled' || data.status === 'failed') ?
       '<button class="recover-btn" title="Recover this plan" onclick="event.stopPropagation(); vscode.postMessage({ type: \'recoverPlan\', planId: \'' + data.id + '\' });">$(history)</button>' : '';
+    var releaseTag = data.release ? 
+      '<span class="release-tag" title="Release: ' + escapeHtml(data.release.name) + ' (' + data.release.status + ')">$(package) ' + escapeHtml(data.release.name) + '</span>' : '';
     
     this.element.innerHTML =
       '<div class="plan-name">' +
@@ -109,6 +111,7 @@ class PlanListCardControl extends SubscribableControl {
         archiveButton +
         '<span class="plan-status ' + data.status + '">' + (data.status === 'scaffolding' ? '\\u{1F6A7} Under Construction' : data.status) + '</span>' +
         recoverBtn +
+        releaseTag +
       '</div>' +
       '<div class="plan-details">' +
         '<span class="plan-node-count">' + data.nodes + ' jobs</span>' +
@@ -168,6 +171,22 @@ class PlanListCardControl extends SubscribableControl {
       if (planNameEl) planNameEl.appendChild(recoverBtn);
     } else if (!shouldShowRecover && existingRecoverBtn) {
       existingRecoverBtn.parentNode.removeChild(existingRecoverBtn);
+    }
+    
+    // Update or add/remove release tag
+    var existingReleaseTag = this.element.querySelector('.release-tag');
+    if (data.release && !existingReleaseTag) {
+      var releaseTag = document.createElement('span');
+      releaseTag.className = 'release-tag';
+      releaseTag.title = 'Release: ' + data.release.name + ' (' + data.release.status + ')';
+      releaseTag.textContent = '$(package) ' + data.release.name;
+      var planNameEl = this.element.querySelector('.plan-name');
+      if (planNameEl) planNameEl.appendChild(releaseTag);
+    } else if (!data.release && existingReleaseTag) {
+      existingReleaseTag.parentNode.removeChild(existingReleaseTag);
+    } else if (data.release && existingReleaseTag) {
+      existingReleaseTag.title = 'Release: ' + data.release.name + ' (' + data.release.status + ')';
+      existingReleaseTag.textContent = '$(package) ' + data.release.name;
     }
     
     var countEl = this.element.querySelector('.plan-node-count');
