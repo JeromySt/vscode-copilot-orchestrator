@@ -412,6 +412,8 @@ export class JobExecutionEngine {
               const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1];
               if (last.status === 'running') {
                 last.stepStatuses = { ...nodeState.stepStatuses };
+                // Sync phaseTiming so timeline can render proportional phase widths
+                if (context.phaseTiming) { last.phaseTiming = [...context.phaseTiming]; }
               }
             }
           },
@@ -668,7 +670,10 @@ export class JobExecutionEngine {
                   (nodeState.stepStatuses as any)[phase] = status;
                   if (nodeState.attemptHistory && nodeState.attemptHistory.length > 0) {
                     const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1];
-                    if (last.status === 'running') { last.stepStatuses = { ...nodeState.stepStatuses }; }
+                    if (last.status === 'running') {
+                      last.stepStatuses = { ...nodeState.stepStatuses };
+                      if (retryContext.phaseTiming) { last.phaseTiming = [...retryContext.phaseTiming]; }
+                    }
                   }
                 },
               };
@@ -957,7 +962,10 @@ export class JobExecutionEngine {
                 (nodeState.stepStatuses as any)[phase] = status;
                 if (nodeState.attemptHistory && nodeState.attemptHistory.length > 0) {
                   const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1];
-                  if (last.status === 'running') { last.stepStatuses = { ...nodeState.stepStatuses }; }
+                  if (last.status === 'running') {
+                    last.stepStatuses = { ...nodeState.stepStatuses };
+                    if (healContext.phaseTiming) { last.phaseTiming = [...healContext.phaseTiming]; }
+                  }
                 }
               },
             };
@@ -1131,7 +1139,7 @@ export class JobExecutionEngine {
                 onStepStatusChange: (p, s) => {
                   if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};}
                   (nodeState.stepStatuses as any)[p] = s;
-                  if (nodeState.attemptHistory?.length) { const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1]; if (last.status === 'running') { last.stepStatuses = { ...nodeState.stepStatuses }; } }
+                  if (nodeState.attemptHistory?.length) { const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1]; if (last.status === 'running') { last.stepStatuses = { ...nodeState.stepStatuses }; if (retryCtx.phaseTiming) { last.phaseTiming = [...retryCtx.phaseTiming]; } } }
                 },
               };
 
