@@ -44,7 +44,8 @@ function setupExecMocks(sandbox: sinon.SinonSandbox, sharedSuccess = true, refer
   const execModule = require('../../../git/core/executor');
   const origExec = execModule.execAsync;
   
-  const execStub = sandbox.stub(execModule, 'execAsync').callsFake(async (args: string[], options?: any) => {
+  const execStub = sandbox.stub(execModule, 'execAsync').callsFake(async (...callArgs: any[]) => {
+    const args = callArgs[0] as string[];
     // Handle different git commands
     if (args[0] === 'config' && args[1] === '--get') {
       return { success: true, stdout: 'https://github.com/test/repo.git\n', stderr: '' };
@@ -135,7 +136,8 @@ suite('IsolatedRepoManager', () => {
     const info = await manager.createIsolatedRepo('rel-1', '/repo', 'safe-branch');
     
     // Should be within .orchestrator/release/
-    assert.ok(info.clonePath.startsWith('/repo'));
+    const nodePath = require('path');
+    assert.ok(info.clonePath.startsWith(nodePath.join('/repo')));
     assert.ok(info.clonePath.includes('.orchestrator'));
     assert.ok(info.clonePath.includes('release'));
     

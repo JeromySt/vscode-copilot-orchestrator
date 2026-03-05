@@ -213,7 +213,7 @@ export class ReleaseManagementPanel {
     
     const release = this._getReleaseData(this._releaseId);
     if (!release) {
-      this._panel.webview.html = errorPageHtml('Release not found', this._panel.webview.cspSource);
+      this._panel.webview.html = errorPageHtml('Release not found');
       return;
     }
     

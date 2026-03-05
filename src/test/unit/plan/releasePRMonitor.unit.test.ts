@@ -163,12 +163,13 @@ suite('ReleasePRMonitor', () => {
     // First cycle runs immediately
     assert.strictEqual(mockService.getPRChecks.callCount, 1);
 
-    // Advance by 40 minutes (20 cycles at 2 minutes each)
-    for (let i = 0; i < 20; i++) {
+    // Advance past 40 minutes (21 cycles at 2 minutes each = 42 min)
+    // The check is > MAX_MONITORING_MS, so at exactly 40 min it's still active
+    for (let i = 0; i < 21; i++) {
       await clock.tickAsync(120000);
     }
 
-    // Should stop monitoring after 40 minutes
+    // Should stop monitoring after exceeding 40 minutes
     const isMonitoring = monitor.isMonitoring('rel-1');
     assert.strictEqual(isMonitoring, false);
   });

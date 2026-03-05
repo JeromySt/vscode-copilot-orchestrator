@@ -37,6 +37,7 @@ import { Logger } from '../core/logger';
 import { ReleaseEventEmitter } from './releaseEvents';
 
 const log = Logger.for('plan');
+const gitLog = (msg: string) => log.info(msg);
 
 /**
  * Default implementation of IReleaseManager.
@@ -91,14 +92,16 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       if (!plan) {
         throw new Error(`Plan not found: ${planId}`);
       }
-      if (plan.status !== 'succeeded' && plan.status !== 'partial') {
-        throw new Error(`Plan ${planId} must be succeeded or partial, but is ${plan.status}`);
+      const sm = this.planRunner.getStateMachine(planId);
+      const planStatus = sm?.computePlanStatus();
+      if (planStatus !== 'succeeded' && planStatus !== 'partial') {
+        throw new Error(`Plan ${planId} must be succeeded or partial, but is ${planStatus}`);
       }
     }
 
     // Get repository path from first plan
     const firstPlan = this.planRunner.get(options.planIds[0])!;
-    const repoPath = firstPlan.spec.repoPath;
+    const repoPath = firstPlan.spec.repoPath ?? firstPlan.repoPath;
 
     // Resolve target branch (default to main if not specified)
     let targetBranch = options.targetBranch;
@@ -166,7 +169,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         release.releaseBranch,
         release.targetBranch,
         isolatedRepo.clonePath,
-        log,
+        gitLog,
       );
       await this.git.branches.checkout(isolatedRepo.clonePath, release.releaseBranch);
       log.info('Release branch created', { releaseId, branch: release.releaseBranch });
@@ -179,7 +182,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       const pushSuccess = await this.git.repository.push(isolatedRepo.clonePath, {
         remote: 'origin',
         branch: release.releaseBranch,
-        log,
+        log: gitLog,
       });
       if (!pushSuccess) {
         throw new Error('Failed to push release branch to origin');
@@ -345,11 +348,11 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
   // ── EventEmitter Typed Overloads ───────────────────────────────────────
 
-  on(event: 'releaseCreated', handler: (release: ReleaseDefinition) => void): void;
-  on(event: 'releaseStatusChanged', handler: (release: ReleaseDefinition) => void): void;
-  on(event: 'releaseProgress', handler: (releaseId: string, progress: ReleaseProgress) => void): void;
-  on(event: 'releasePRCycle', handler: (releaseId: string, cycle: import('./types/release').PRMonitorCycle) => void): void;
-  on(event: 'releaseCompleted', handler: (release: ReleaseDefinition) => void): void;
+  on(event: 'releaseCreated', handler: (release: ReleaseDefinition) => void): this;
+  on(event: 'releaseStatusChanged', handler: (release: ReleaseDefinition) => void): this;
+  on(event: 'releaseProgress', handler: (releaseId: string, progress: ReleaseProgress) => void): this;
+  on(event: 'releasePRCycle', handler: (releaseId: string, cycle: import('./types/release').PRMonitorCycle) => void): this;
+  on(event: 'releaseCompleted', handler: (release: ReleaseDefinition) => void): this;
   on(event: string | symbol, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
@@ -379,7 +382,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         continue;
       }
 
-      const sourceBranch = plan.spec.targetBranch;
+      const sourceBranch = plan.spec.targetBranch ?? plan.targetBranch ?? 'main';
       log.info('Merging plan into release branch', {
         releaseId: release.id,
         planId,
@@ -391,16 +394,17 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         // Fetch the plan's target branch from origin
         await this.git.repository.fetch(isolatedPath, {
           remote: 'origin',
-          log,
+          log: gitLog,
         });
 
         // Merge with --no-ff to preserve plan boundary commits
         const mergeResult = await this.git.merge.merge({
           cwd: isolatedPath,
           source: `origin/${sourceBranch}`,
+          target: release.releaseBranch,
           message: `Merge plan '${plan.spec.name}' (${planId}) from ${sourceBranch}`,
-          noFF: true,
-          log,
+          fastForward: false,
+          log: gitLog,
         });
 
         if (mergeResult.success) {
@@ -409,7 +413,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
             planName: plan.spec.name,
             sourceBranch,
             success: true,
-            conflictsResolved: mergeResult.conflicts ? mergeResult.conflicts.length > 0 : false,
+            conflictsResolved: mergeResult.hasConflicts,
           });
           log.info('Plan merged successfully', { releaseId: release.id, planId });
         } else {
@@ -494,12 +498,12 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         const continueSuccess = await this.git.merge.continueAfterResolve(
           cwd,
           `Merge plan '${planName}' from ${sourceBranch} (conflicts auto-resolved)`,
-          log,
+          gitLog,
         );
         return { success: continueSuccess };
       } else {
         // Abort the merge
-        await this.git.merge.abort(cwd, log);
+        await this.git.merge.abort(cwd, gitLog);
         return { success: false, error: 'Copilot failed to resolve conflicts' };
       }
     } catch (error) {
@@ -508,7 +512,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         error: (error as Error).message,
       });
       try {
-        await this.git.merge.abort(cwd, log);
+        await this.git.merge.abort(cwd, gitLog);
       } catch {
         // Ignore abort errors
       }

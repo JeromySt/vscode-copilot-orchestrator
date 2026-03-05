@@ -362,7 +362,6 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       return new DefaultPRLifecycleManager(prServiceFactory, prMonitor, isolatedRepos, store, releaseConfig);
     },
   );
-  );
 
   return container;
 }

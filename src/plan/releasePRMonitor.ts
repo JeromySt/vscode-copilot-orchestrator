@@ -435,7 +435,7 @@ export class DefaultReleasePRMonitor implements IReleasePRMonitor {
     if (!copilotResult.success) {
       log.warn('Copilot CLI reported failure', {
         releaseId: state.releaseId,
-        output: copilotResult.output?.substring(0, 500),
+        output: copilotResult.error?.substring(0, 500),
       });
       actions.push({
         type: 'fix-code',

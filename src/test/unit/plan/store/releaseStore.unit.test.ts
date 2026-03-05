@@ -211,9 +211,10 @@ suite('FileSystemReleaseStore', () => {
     await store.saveRelease(release);
     
     assert.ok(fs.mkdirAsync.calledOnce);
-    const path = fs.mkdirAsync.firstCall.args[0];
-    assert.ok(path.startsWith('/repo'));
-    assert.ok(path.includes('.orchestrator'));
+    const dirPath = fs.mkdirAsync.firstCall.args[0];
+    const nodePath = require('path');
+    assert.ok(dirPath.startsWith(nodePath.join('/repo')));
+    assert.ok(dirPath.includes('.orchestrator'));
   });
 
   test('returns empty array when no releases exist', async () => {

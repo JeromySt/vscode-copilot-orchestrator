@@ -22,6 +22,7 @@ function createMockPlanRunner(overrides?: Record<string, any>): any {
     delete: sinon.stub(),
     pause: sinon.stub(),
     resume: sinon.stub(),
+    getStateMachine: sinon.stub().returns({ computePlanStatus: () => 'succeeded' }),
     ...overrides,
   };
 }
@@ -186,7 +187,10 @@ suite('ReleaseManager', () => {
         spec: { name: 'Test Plan', repoPath: '/repo' },
         status: 'running',
       };
-      const planRunner = createMockPlanRunner({ get: sinon.stub().returns(mockPlan) });
+      const planRunner = createMockPlanRunner({
+        get: sinon.stub().returns(mockPlan),
+        getStateMachine: sinon.stub().returns({ computePlanStatus: () => 'running' }),
+      });
       const manager = new DefaultReleaseManager(
         planRunner,
         createMockGitOps(),
@@ -394,7 +398,7 @@ suite('ReleaseManager', () => {
       assert.ok(git.merge.merge.calledOnce);
       const mergeCall = git.merge.merge.firstCall.args[0];
       assert.strictEqual(mergeCall.source, 'origin/feature-1');
-      assert.strictEqual(mergeCall.noFF, true);
+      assert.strictEqual(mergeCall.fastForward, false);
     });
 
     test('pushes release branch', async () => {
