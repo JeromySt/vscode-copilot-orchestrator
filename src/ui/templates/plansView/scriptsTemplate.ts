@@ -251,6 +251,7 @@ class PlanListContainerControl extends SubscribableControl {
 class CapacityBarControl extends SubscribableControl {
   constructor(bus, controlId) {
     super(bus, controlId);
+    this._idleTimer = null;
     this.subscribe(PlansTopics.CAPACITY_UPDATE, (data) => { this._onUpdate(data); });
   }
 
@@ -278,16 +279,32 @@ class CapacityBarControl extends SubscribableControl {
       capacityBarEl.style.display = 'none';
     }
 
+    // Local stats: always show when there are running OR queued jobs,
+    // and briefly show "idle" after jobs complete so user sees the transition.
     var gs = data.globalStats;
-    if (gs && (gs.running > 0 || gs.queued > 0)) {
+    if (gs) {
+      var hasActivity = gs.running > 0 || gs.queued > 0;
       statsEl.style.display = 'block';
       this.getElement('runningJobs').textContent = gs.running;
       this.getElement('maxParallel').textContent = gs.maxParallel;
       this.getElement('queuedJobs').textContent = gs.queued;
       var qs = this.getElement('queuedSection');
       if (qs) qs.style.display = gs.queued > 0 ? 'inline' : 'none';
-    } else {
-      statsEl.style.display = 'none';
+      // When idle (0 running, 0 queued), keep visible briefly then fade
+      if (!hasActivity) {
+        if (!this._idleTimer) {
+          this._idleTimer = setTimeout(function() {
+            statsEl.style.display = 'none';
+            this._idleTimer = null;
+          }.bind(this), 5000); // Keep showing for 5s after last job completes
+        }
+      } else {
+        // Cancel idle timer if new activity starts
+        if (this._idleTimer) {
+          clearTimeout(this._idleTimer);
+          this._idleTimer = null;
+        }
+      }
     }
 
     this.publishUpdate(data);

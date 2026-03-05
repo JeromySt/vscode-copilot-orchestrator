@@ -63,17 +63,21 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     // Listen for Plan events — emit targeted per-plan messages
     _planRunner.on('planCreated', (plan: PlanInstance) => {
       this._sendPlanAdded(plan);
+      this._refreshCapacity();  // Capacity changed: new plan registered
     });
     _planRunner.on('planStarted', (plan: PlanInstance) => {
       this._sendPlanStateChange(plan.id);
+      this._refreshCapacity();  // Capacity changed: jobs now running
     });
     _planRunner.on('planCompleted', (plan: PlanInstance) => {
       this._sendPlanStateChange(plan.id);
+      this._refreshCapacity();  // Capacity changed: jobs freed up
     });
     _planRunner.on('planDeleted', (planId: string) => {
       planDetailPanel.closeForPlan(planId);
       NodeDetailPanel.closeForPlan(planId);
       this._sendPlanDeleted(planId);
+      this._refreshCapacity();  // Capacity changed: plan removed
     });
     _planRunner.on('planUpdated', (planId: string) => {
       this._sendPlanStateChange(planId);
@@ -83,6 +87,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (planId) {
         this._sendPlanStateChange(planId);
       }
+      this._refreshCapacity();  // Capacity changed: node started/stopped/queued
     });
   }
   
@@ -167,6 +172,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (this._debounceTimer) {
         clearTimeout(this._debounceTimer);
       }
+      if (this._capacityDebounceTimer) {
+        clearTimeout(this._capacityDebounceTimer);
+      }
     });
   }
   
@@ -233,22 +241,37 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     this._view.webview.postMessage({ type: 'badgeUpdate', total });
   }
   
-  /** Refresh capacity stats independently (called on its own cadence). */
+  /** 
+   * Refresh capacity stats independently (called on its own cadence + on events).
+   * Debounced to avoid flooding the webview when multiple node transitions fire rapidly.
+   */
+  private _capacityDebounceTimer?: NodeJS.Timeout;
   private async _refreshCapacity() {
     if (!this._view) {return;}
-    const globalStats = this._planRunner.getGlobalStats();
-    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
-    this._view.webview.postMessage({
-      type: 'capacityUpdate',
-      globalStats,
-      globalCapacity: globalCapacityStats ? {
-        thisInstanceJobs: globalCapacityStats.thisInstanceJobs,
-        totalGlobalJobs: globalCapacityStats.totalGlobalJobs,
-        globalMaxParallel: globalCapacityStats.globalMaxParallel,
-        activeInstances: globalCapacityStats.activeInstances,
-        instanceDetails: globalCapacityStats.instanceDetails
-      } : null,
-    });
+    // Debounce: if multiple events fire within 200ms, only send one update
+    if (this._capacityDebounceTimer) {clearTimeout(this._capacityDebounceTimer);}
+    this._capacityDebounceTimer = setTimeout(async () => {
+      this._capacityDebounceTimer = undefined;
+      if (!this._view) {return;}
+      try {
+        const globalStats = this._planRunner.getGlobalStats();
+        const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch((err: any) => {
+          // Log but don't fail — global capacity is optional (single-instance mode)
+          return null;
+        });
+        this._view.webview.postMessage({
+          type: 'capacityUpdate',
+          globalStats,
+          globalCapacity: globalCapacityStats ? {
+            thisInstanceJobs: globalCapacityStats.thisInstanceJobs,
+            totalGlobalJobs: globalCapacityStats.totalGlobalJobs,
+            globalMaxParallel: globalCapacityStats.globalMaxParallel,
+            activeInstances: globalCapacityStats.activeInstances,
+            instanceDetails: globalCapacityStats.instanceDetails
+          } : null,
+        });
+      } catch { /* webview may have been disposed between debounce and fire */ }
+    }, 200);
   }
 
   /**
