@@ -148,3 +148,21 @@ export const IPlanRepository = Symbol('IPlanRepository');
  * Provides storage backend for plan persistence.
  */
 export const IPlanRepositoryStore = Symbol('IPlanRepositoryStore');
+
+/**
+ * Token for IRemotePRService service.
+ * Provides unified PR operations across GitHub, GitHub Enterprise, and Azure DevOps.
+ */
+export const IRemotePRService = Symbol('IRemotePRService');
+
+/**
+ * Token for IRemoteProviderDetector service.
+ * Provides remote provider detection and credential acquisition.
+ */
+export const IRemoteProviderDetector = Symbol('IRemoteProviderDetector');
+
+/**
+ * Token for IRemotePRServiceFactory service.
+ * Provides factory for creating provider-specific PR service instances.
+ */
+export const IRemotePRServiceFactory = Symbol('IRemotePRServiceFactory');
