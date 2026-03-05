@@ -116,6 +116,7 @@ suite('.gitignore Handling', () => {
 
 suite('BranchChangeWatcher', () => {
   let mockLogger: any;
+  let mockDebouncer: any;
   
   setup(() => {
     mockLogger = {
@@ -123,6 +124,12 @@ suite('BranchChangeWatcher', () => {
       debug: sinon.fake(),
       info: sinon.fake(),
       error: sinon.fake()
+    };
+    
+    mockDebouncer = {
+      notifyBranchChange: sinon.stub(),
+      ensureEntries: sinon.stub().resolves(),
+      dispose: sinon.stub()
     };
   });
   
@@ -133,14 +140,14 @@ suite('BranchChangeWatcher', () => {
   test('should NOT call ensureOrchestratorGitIgnore on branch change (no longer aggressive)', async () => {
     // The branch watcher no longer writes .gitignore on branch change.
     // This prevents uncommitted changes that block git checkout.
-    const watcher = new BranchChangeWatcher(mockLogger);
+    const watcher = new BranchChangeWatcher(mockLogger, mockDebouncer);
     assert.ok(watcher); // Just verify it constructs without error
   });
   
   test('should detect branch change via repository state', async () => {
     // This would require mocking VS Code Git extension API
     // Implementation depends on how the watcher is structured
-    const _watcher = new BranchChangeWatcher(mockLogger);
+    const _watcher = new BranchChangeWatcher(mockLogger, mockDebouncer);
     assert.ok(_watcher);
   });
 });

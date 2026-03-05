@@ -59,7 +59,7 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
           this._pendingTimer = undefined;
 
           try {
-            await this._git.ensureGitignoreEntries(repoPath, toWrite);
+            await this._git.gitignore.ensureGitignoreEntries(repoPath, toWrite);
             log.info('Deferred gitignore entries written', {
               count: toWrite.length,
               entries: toWrite
@@ -79,7 +79,7 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
 
     // No recent branch change — write immediately
     try {
-      await this._git.ensureGitignoreEntries(repoPath, entries);
+      await this._git.gitignore.ensureGitignoreEntries(repoPath, entries);
     } catch (err: any) {
       log.error('Failed to write gitignore entries', {
         error: err.message,

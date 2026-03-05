@@ -27,7 +27,6 @@ import { PlanRunner } from './plan';
 import { Logger } from './core/logger';
 import { cleanupOrphanedWorktrees } from './core/orphanedWorktreeCleanup';
 import { BranchChangeWatcher } from './git/branchWatcher';
-import { ensureOrchestratorGitIgnore } from './git/core/gitignore';
 import type { PlanInstance } from './plan/types/plan';
 import { createContainer } from './composition';
 import * as Tokens from './core/tokens';
@@ -56,6 +55,9 @@ let powerMgr: import('./core/powerManager').PowerManager | undefined;
 
 /** Global Capacity Manager - retained for cleanup */
 let globalCapacity: GlobalCapacityManager | undefined;
+
+/** Gitignore Debouncer - retained for cleanup */
+let gitignoreDebouncer: import('./interfaces/IGitignoreDebouncer').IGitignoreDebouncer | undefined;
 
 /** Process event handlers - retained for cleanup */
 let exitHandler: (() => void) | undefined;
@@ -95,7 +97,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Plan Runner ─────────────────────────────────────────────────────────
   const git = container.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
-  const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context, container, git);
+  const debouncer = container.resolve<import('./interfaces/IGitignoreDebouncer').IGitignoreDebouncer>(Tokens.IGitignoreDebouncer);
+  gitignoreDebouncer = debouncer; // Retain for cleanup
+  const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context, container, git, debouncer);
   processMonitor = pm;
   planRunner = runner;
 
@@ -139,8 +143,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerUtilityCommands(context);
 
   // ── Branch Change Watcher ──────────────────────────────────────────────
-  // Watch for branch changes and ensure .gitignore entries
-  const branchWatcher = new BranchChangeWatcher(Logger.for('git'));
+  // Watch for branch changes and notify debouncer
+  const branchWatcher = new BranchChangeWatcher(Logger.for('git'), debouncer);
   await branchWatcher.initialize();
   context.subscriptions.push(branchWatcher);
 
@@ -153,12 +157,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (workspaceFolder) {
       const gitLogger = Logger.for('git');
       try {
-        const modified = await ensureOrchestratorGitIgnore(workspaceFolder.uri.fsPath);
-        if (modified) {
-          gitLogger.info('.gitignore updated after external modification', { 
-            path: uri.fsPath 
-          });
-        }
+        // Route through debouncer to avoid writes right after branch changes
+        await debouncer.ensureEntries(workspaceFolder.uri.fsPath, [
+          '.orchestrator/',
+          '.worktrees/'
+        ]);
+        gitLogger.info('.gitignore re-checked after external modification', { 
+          path: uri.fsPath 
+        });
       } catch (error) {
         gitLogger.error('Failed to update .gitignore after external change', {
           path: uri.fsPath,
@@ -305,6 +311,13 @@ export function deactivate(): void {
     console.error('Failed to shutdown global capacity manager:', e);
   });
   
+  // Dispose gitignore debouncer
+  try {
+    gitignoreDebouncer?.dispose();
+  } catch (e) {
+    console.error('Failed to dispose gitignore debouncer:', e);
+  }
+  
   // Note: mcpManager.stop() is also called by subscriptions.dispose(),
   // but it's idempotent so calling it here for safety is fine
   try {
@@ -316,4 +329,5 @@ export function deactivate(): void {
   processMonitor = undefined;
   planRunner = undefined;
   powerMgr = undefined;
+  gitignoreDebouncer = undefined;
 }
