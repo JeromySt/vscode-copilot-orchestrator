@@ -50,6 +50,9 @@ import { DefaultGitOperations } from './git/DefaultGitOperations';
 import { FileSystemPlanStore } from './plan/store/FileSystemPlanStore';
 import { DefaultPlanRepository } from './plan/repository/DefaultPlanRepository';
 import { DefaultFileSystem } from './core/defaultFileSystem';
+import { DefaultRemoteProviderDetector } from './git/remotePR/remoteProviderDetector';
+import { GitHubPRService } from './git/remotePR/githubPRService';
+import { RemotePRServiceFactory } from './git/remotePR/remotePRServiceFactory';
 
 /**
  * Create and wire the production DI container.
@@ -228,6 +231,37 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
       const worktreeRoot = workspacePath ? path.join(workspacePath, '.worktrees') : '';
       return new DefaultPlanRepository(store, workspacePath, worktreeRoot);
+    },
+  );
+
+  // ─── Remote Provider Detector ───────────────────────────────────
+  container.registerSingleton<import('./interfaces').IRemoteProviderDetector>(
+    Tokens.IRemoteProviderDetector,
+    (c) => {
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const env = c.resolve<import('./interfaces').IEnvironment>(Tokens.IEnvironment);
+      return new DefaultRemoteProviderDetector(spawner, env);
+    },
+  );
+
+  // ─── Remote PR Service ──────────────────────────────────────────────
+  // Factory pattern: creates a new instance on each resolve
+  container.register<import('./interfaces').IRemotePRService>(
+    Tokens.IRemotePRService,
+    (c) => {
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const detector = c.resolve<import('./interfaces').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
+      return new GitHubPRService(spawner, detector);
+    },
+  );
+
+  // ─── Remote PR Service Factory ─────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IRemotePRServiceFactory>(
+    Tokens.IRemotePRServiceFactory,
+    (c) => {
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const detector = c.resolve<import('./interfaces').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
+      return new RemotePRServiceFactory(spawner, detector);
     },
   );
 

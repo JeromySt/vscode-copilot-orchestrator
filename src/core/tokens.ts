@@ -160,3 +160,21 @@ export const IReleaseManager = Symbol('IReleaseManager');
  * Provides PR monitoring for releases.
  */
 export const IReleasePRMonitor = Symbol('IReleasePRMonitor');
+
+/**
+ * Token for IRemotePRService service.
+ * Provides unified PR operations across GitHub, GitHub Enterprise, and Azure DevOps.
+ */
+export const IRemotePRService = Symbol('IRemotePRService');
+
+/**
+ * Token for IRemoteProviderDetector service.
+ * Provides remote provider detection and credential acquisition.
+ */
+export const IRemoteProviderDetector = Symbol('IRemoteProviderDetector');
+
+/**
+ * Token for IRemotePRServiceFactory service.
+ * Provides factory for creating provider-specific PR service instances.
+ */
+export const IRemotePRServiceFactory = Symbol('IRemotePRServiceFactory');
