@@ -5,6 +5,14 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Plan archiving: preserve plan state/logs while cleaning up git worktrees and branches
+- "Archived" collapsible section in Plans sidebar with dimmed visual treatment
+- `archive_copilot_plan` MCP tool for programmatic archiving
+- Archive button on eligible plan cards (succeeded, partial, canceled)
+
 ## [0.14.0] - 2026-02-28
 
 ### 🚀 Major Features

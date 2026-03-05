@@ -395,6 +395,31 @@ Use this to analyze the history of retries and their outcomes.`,
         required: ['planId']
       }
     },
+
+    {
+      name: 'archive_copilot_plan',
+      description: 'Archive a completed or canceled plan. Preserves plan state and logs while cleaning up git worktrees and target branches to reduce repository clutter. Only plans in succeeded, partial, failed, or canceled status can be archived.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: { 
+            type: 'string', 
+            description: 'The ID of the plan to archive' 
+          },
+          force: { 
+            type: 'boolean', 
+            description: 'Force-delete worktrees even with uncommitted changes', 
+            default: false 
+          },
+          deleteRemoteBranches: { 
+            type: 'boolean', 
+            description: 'Also delete remote tracking branches', 
+            default: false 
+          }
+        },
+        required: ['planId']
+      }
+    },
     
     {
       name: 'retry_copilot_plan',

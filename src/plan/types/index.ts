@@ -67,3 +67,9 @@ export {
   GroupInstance,
   GroupExecutionState,
 } from './plan';
+
+// Archive types
+export {
+  ArchiveResult,
+  ArchiveOptions,
+} from './archive';

@@ -27,3 +27,4 @@ export * from './IPulseEmitter';
 export * from './IPlanRepository';
 export * from './IPlanDefinition';
 export * from './IPlanRepositoryStore';
+export * from './IPlanArchiver';
