@@ -154,6 +154,182 @@ Releases execute in isolated git clones under `.orchestrator/release/<sanitized-
 
 See [docs/RELEASES.md](RELEASES.md) for the complete release user guide, credential troubleshooting, and FAQ.
 
+### PR Lifecycle Management API
+
+The PR lifecycle API enables adopting and managing pull requests created outside the orchestrator. Once adopted, PRs receive the same autonomous monitoring, feedback handling, and priority management as release-generated PRs. Supports GitHub, GitHub Enterprise, and Azure DevOps.
+
+#### PR Discovery
+
+| Tool | Description |
+|------|-------------|
+| `list_available_prs` | List PRs from the remote provider with `isManaged` flag showing which are already under management |
+
+**Example: Listing available PRs**
+
+```json
+{
+  "repoPath": "/path/to/repo",
+  "baseBranch": "main",
+  "state": "open",
+  "limit": 50
+}
+// Returns: {
+//   success: true,
+//   prs: [
+//     { prNumber: 42, title: "Add feature X", isManaged: false, author: "user", ... },
+//     { prNumber: 38, title: "Fix bug Y", isManaged: true, author: "user", ... }
+//   ]
+// }
+```
+
+#### PR Adoption and Management
+
+| Tool | Description |
+|------|-------------|
+| `adopt_pr` | Adopt an existing PR for lifecycle management, creating a managed PR record |
+| `get_managed_pr` | Get details of a managed PR by its lifecycle manager ID |
+| `list_managed_prs` | List all managed PRs with optional status filter (`adopted`, `monitoring`, `addressing`, `ready`, `blocked`, `abandoned`) |
+
+**Example: Adopting a PR**
+
+```json
+{
+  "prNumber": 42,
+  "repoPath": "/path/to/repo",
+  "priority": 1
+}
+// Returns: {
+//   success: true,
+//   managedPR: {
+//     id: "pr-uuid-123",
+//     prNumber: 42,
+//     status: "adopted",
+//     title: "Add feature X",
+//     baseBranch: "main",
+//     headBranch: "feature/x",
+//     ...
+//   },
+//   message: "PR #42 adopted with ID 'pr-uuid-123'. Use start_pr_monitoring to begin monitoring."
+// }
+```
+
+#### Monitoring Control
+
+| Tool | Description |
+|------|-------------|
+| `start_pr_monitoring` | Begin autonomous monitoring for an adopted PR (40-minute cycles checking CI, comments, alerts) |
+| `stop_pr_monitoring` | Pause monitoring without abandoning the PR — transitions back to `adopted` status |
+
+**Example: Starting monitoring**
+
+```json
+{
+  "id": "pr-uuid-123"
+}
+// Returns: {
+//   success: true,
+//   message: "Monitoring started for PR #42. The PR will be autonomously monitored for feedback."
+// }
+```
+
+**Monitoring Workflow:**
+
+1. **40-minute cycles** — Same as release PRs: checks CI status, review comments, security alerts
+2. **Autonomous addressing** — Spawns Copilot agents to fix CI failures, reply to comments, resolve threads
+3. **Status transitions** — `monitoring` → `addressing` (when fixing) → `ready` (all checks pass) or `blocked` (failures/alerts)
+
+#### Priority Management
+
+| Tool | Description |
+|------|-------------|
+| `promote_pr` | Elevate a managed PR to a higher priority tier for more frequent monitoring |
+| `demote_pr` | Lower a managed PR to a lower priority tier for less frequent monitoring |
+
+**Example: Promoting a critical PR**
+
+```json
+{
+  "id": "pr-uuid-123"
+}
+// Returns: {
+//   success: true,
+//   message: "PR #42 promoted to priority 2. Monitoring frequency increased."
+// }
+```
+
+**Priority Effects:**
+- Higher priority → More frequent CI checks, earlier scheduling when capacity is limited
+- Lower priority → Less frequent checks, deferred when higher-priority PRs need attention
+
+#### Lifecycle Transitions
+
+| Tool | Description |
+|------|-------------|
+| `abandon_pr` | Stop management and mark as abandoned — monitoring halts but PR record remains for history |
+| `remove_pr` | Completely remove PR from management — deletes all managed PR data |
+
+**Example: Abandoning a PR**
+
+```json
+{
+  "id": "pr-uuid-123"
+}
+// Returns: {
+//   success: true,
+//   message: "PR #42 abandoned. Management stopped but PR record preserved."
+// }
+```
+
+#### PR Lifecycle States
+
+```
+adopted → monitoring → addressing → ready / blocked → abandoned
+```
+
+| Status | Description |
+|--------|-------------|
+| `adopted` | PR has been adopted but monitoring has not started yet |
+| `monitoring` | Actively polling for CI checks, review comments, security alerts |
+| `addressing` | Copilot agents are spawned to fix failures or reply to feedback |
+| `ready` | All checks passed, PR is ready to merge |
+| `blocked` | Failing checks or unresolved feedback blocking merge |
+| `abandoned` | Management stopped — PR remains in history but is no longer monitored |
+
+#### Integration with Releases
+
+- **Release-generated PRs** are automatically adopted when created
+- **Externally-created PRs** can be adopted to join the same monitoring workflow
+- **Unified tracking** — All managed PRs appear in the Active PRs sidebar regardless of origin
+- **Release linking** — Adopted PRs can be linked to releases via `releaseId` parameter
+
+**Example: Complete adoption workflow**
+
+```json
+// 1. List available PRs
+{ "repoPath": "/path/to/repo", "baseBranch": "main", "state": "open" }
+
+// 2. Adopt PR #42
+{ "prNumber": 42, "repoPath": "/path/to/repo", "priority": 1 }
+// → Returns managed PR with id: "pr-uuid-123"
+
+// 3. Start monitoring
+{ "id": "pr-uuid-123" }
+
+// 4. Check status
+{ "id": "pr-uuid-123" }
+// → Returns { status: "monitoring", prNumber: 42, ... }
+
+// 5. If critical, promote
+{ "id": "pr-uuid-123" }
+// → Increases priority tier
+
+// 6. When PR merged externally, remove
+{ "id": "pr-uuid-123" }
+// → Cleans up managed PR record
+```
+
+See [docs/RELEASES.md](RELEASES.md) for details on PR monitoring and feedback handling workflows.
+
 ### Model Selection
 
 Both `create_copilot_plan` and `create_copilot_node` support a `model` property on each node, allowing you to choose which LLM runs the agent work. Models are dynamically discovered from the installed Copilot CLI and organized into three tiers:

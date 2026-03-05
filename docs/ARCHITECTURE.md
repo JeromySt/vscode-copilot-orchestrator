@@ -416,6 +416,149 @@ sequenceDiagram
 
 ---
 
+## Sequence Diagram — PR Lifecycle Management
+
+```mermaid
+sequenceDiagram
+    participant Chat as Copilot Chat
+    participant MCP as MCP Handler
+    participant PRMgr as PRLifecycleManager
+    participant Store as ManagedPRStore
+    participant Remote as RemotePRService
+    participant Monitor as ReleasePRMonitor
+    participant Agent as Copilot Agent
+
+    Note over Chat,Agent: PR Discovery & Adoption
+
+    Chat->>MCP: list_available_prs(repoPath, baseBranch)
+    MCP->>PRMgr: listAvailablePRs(options)
+    PRMgr->>Remote: getPRs(filters)
+    Remote-->>PRMgr: [PR #42, PR #38, ...]
+    PRMgr->>Store: loadAll()
+    Store-->>PRMgr: [managedPR records]
+    PRMgr-->>MCP: [{prNumber, title, isManaged, ...}]
+    MCP-->>Chat: PRs with managed status
+
+    Chat->>MCP: adopt_pr(prNumber: 42, priority: 1)
+    MCP->>PRMgr: adoptPR(options)
+    PRMgr->>Remote: getPR(42)
+    Remote-->>PRMgr: PR metadata
+    PRMgr->>PRMgr: create ManagedPR (status: adopted)
+    PRMgr->>Store: save(managedPR)
+    PRMgr-->>MCP: {success: true, managedPR}
+    MCP-->>Chat: PR adopted
+
+    Note over Chat,Agent: Monitoring Lifecycle
+
+    Chat->>MCP: start_pr_monitoring(id)
+    MCP->>PRMgr: startMonitoring(id)
+    PRMgr->>PRMgr: transition adopted → monitoring
+    PRMgr->>Monitor: registerPR(managedPR)
+    Monitor->>Monitor: start 40-min monitoring cycle
+    PRMgr-->>MCP: {success: true}
+
+    loop Every 2 minutes for 40 minutes
+        Monitor->>Remote: checkCI()
+        Remote-->>Monitor: check status
+        Monitor->>Remote: getComments()
+        Remote-->>Monitor: unresolved threads
+        Monitor->>Remote: getSecurityAlerts()
+        Remote-->>Monitor: vulnerabilities
+
+        alt Issues detected
+            Monitor->>PRMgr: transition monitoring → addressing
+            Monitor->>Agent: spawn fix agent (failure context)
+            Agent->>Agent: fix issue + commit + push
+            Agent-->>Monitor: fix completed
+            Monitor->>PRMgr: transition addressing → monitoring
+        else All clear
+            Monitor->>PRMgr: update (ready or blocked)
+        end
+    end
+
+    Note over Chat,Agent: Priority & Lifecycle Management
+
+    Chat->>MCP: promote_pr(id)
+    MCP->>PRMgr: promotePR(id)
+    PRMgr->>PRMgr: increment priority tier
+    PRMgr->>Store: save(managedPR)
+    PRMgr-->>MCP: {success: true}
+
+    Chat->>MCP: abandon_pr(id)
+    MCP->>PRMgr: abandonPR(id)
+    PRMgr->>Monitor: unregisterPR(id)
+    PRMgr->>PRMgr: transition → abandoned
+    PRMgr->>Store: save(managedPR)
+    PRMgr-->>MCP: {success: true}
+```
+
+---
+
+## State Machine — PR Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> adopted: adopt_pr()
+
+    adopted --> monitoring: start_pr_monitoring()
+    adopted --> abandoned: abandon_pr()
+    adopted --> [*]: remove_pr()
+
+    monitoring --> addressing: Issues detected\n(CI fail, comments, alerts)
+    monitoring --> ready: All checks passed
+    monitoring --> blocked: Failing checks\nor unresolved feedback
+    monitoring --> adopted: stop_pr_monitoring()
+    monitoring --> abandoned: abandon_pr()
+
+    addressing --> monitoring: Fixes applied
+    addressing --> blocked: Fix failed
+    addressing --> abandoned: abandon_pr()
+
+    ready --> monitoring: New feedback\ndetected
+    ready --> abandoned: abandon_pr()
+    ready --> [*]: remove_pr()
+
+    blocked --> monitoring: Manual intervention\nor retry
+    blocked --> addressing: Auto-fix retry
+    blocked --> abandoned: abandon_pr()
+
+    abandoned --> [*]: remove_pr()
+
+    note right of adopted
+        PR taken ownership
+        Not yet monitored
+    end note
+
+    note right of monitoring
+        40-min autonomous cycles
+        Check CI, comments, alerts
+        Every 2 minutes
+    end note
+
+    note right of addressing
+        Copilot agents spawned
+        Fixing failures
+        Replying to comments
+    end note
+
+    note right of ready
+        All checks passed
+        Ready to merge
+    end note
+
+    note right of blocked
+        Failing checks or
+        Unresolved feedback
+    end note
+
+    note right of abandoned
+        Management stopped
+        PR record preserved
+    end note
+```
+
+---
+
 ## Component Dependency Map
 
 ```mermaid
