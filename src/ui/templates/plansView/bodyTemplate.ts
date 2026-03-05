@@ -29,5 +29,25 @@ export function renderPlansViewBody(): string {
     <span>Jobs: <span id="runningJobs">0</span>/<span id="maxParallel">8</span></span>
     <span style="margin-left: 8px;" id="queuedSection">Queued: <span id="queuedJobs">0</span></span>
   </div>
-  <div id="plans"><div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div></div>`;
+  <div class="bulk-actions" id="bulkActions" style="display: none;">
+    <span class="selection-count" id="selectionCount">0 selected</span>
+    <div class="bulk-buttons">
+      <button class="bulk-btn" data-action="resume" title="Resume selected plans">Resume</button>
+      <button class="bulk-btn" data-action="pause" title="Pause selected plans">Pause</button>
+      <button class="bulk-btn" data-action="cancel" title="Cancel selected plans">Cancel</button>
+      <button class="bulk-btn" data-action="retry" title="Retry selected plans">Retry</button>
+      <button class="bulk-btn" data-action="finalize" title="Finalize selected plans">Finalize</button>
+      <button class="bulk-btn danger" data-action="delete" title="Delete selected plans">Delete</button>
+    </div>
+  </div>
+  <div id="plans" role="listbox" aria-multiselectable="true"><div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div></div>
+  <div class="context-menu" id="contextMenu" style="display: none;">
+    <div class="context-menu-item" data-action="resume">Resume</div>
+    <div class="context-menu-item" data-action="pause">Pause</div>
+    <div class="context-menu-item" data-action="cancel">Cancel</div>
+    <div class="context-menu-item" data-action="retry">Retry</div>
+    <div class="context-menu-item" data-action="finalize">Finalize</div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item danger" data-action="delete">Delete</div>
+  </div>`;
 }

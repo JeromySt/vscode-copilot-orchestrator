@@ -129,6 +129,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         case 'deletePlan':
           vscode.commands.executeCommand('orchestrator.deletePlan', message.planId);
           break;
+        case 'bulkAction':
+          this._handleBulkAction(message.action, message.planIds);
+          break;
         case 'refresh':
           this._initialRefreshDone = true;
           this.refresh();
@@ -168,6 +171,59 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         clearTimeout(this._debounceTimer);
       }
     });
+  }
+  
+  /**
+   * Handle bulk actions on multiple plans.
+   * 
+   * @param action - The action to perform (resume, pause, cancel, retry, finalize, delete)
+   * @param planIds - Array of plan IDs to act on
+   */
+  private async _handleBulkAction(action: string, planIds: string[]) {
+    if (!planIds || planIds.length === 0) {
+      return;
+    }
+    
+    switch (action) {
+      case 'resume':
+        for (const planId of planIds) {
+          await vscode.commands.executeCommand('orchestrator.resumePlan', planId);
+        }
+        break;
+      case 'pause':
+        for (const planId of planIds) {
+          await vscode.commands.executeCommand('orchestrator.pausePlan', planId);
+        }
+        break;
+      case 'cancel':
+        for (const planId of planIds) {
+          await vscode.commands.executeCommand('orchestrator.cancelPlan', planId);
+        }
+        break;
+      case 'retry':
+        for (const planId of planIds) {
+          await vscode.commands.executeCommand('orchestrator.retryPlan', planId);
+        }
+        break;
+      case 'finalize':
+        for (const planId of planIds) {
+          await vscode.commands.executeCommand('orchestrator.finalizePlan', planId);
+        }
+        break;
+      case 'delete':
+        // Ask for confirmation for bulk delete
+        const confirm = await vscode.window.showWarningMessage(
+          `Delete ${planIds.length} plan(s)?`,
+          { modal: true },
+          'Delete'
+        );
+        if (confirm === 'Delete') {
+          for (const planId of planIds) {
+            await vscode.commands.executeCommand('orchestrator.deletePlan', planId);
+          }
+        }
+        break;
+    }
   }
   
   /**
