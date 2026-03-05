@@ -202,3 +202,9 @@ export const IIsolatedRepoManager = Symbol('IIsolatedRepoManager');
  * Provides PR lifecycle management including adoption, monitoring, and autonomous feedback handling.
  */
 export const IPRLifecycleManager = Symbol('IPRLifecycleManager');
+
+/**
+ * Token for IManagedPRStore service.
+ * Provides storage backend for managed PR persistence.
+ */
+export const IManagedPRStore = Symbol('IManagedPRStore');

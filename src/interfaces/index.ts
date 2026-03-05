@@ -36,3 +36,4 @@ export * from './IRemotePRServiceFactory';
 export * from './IReleaseConfigManager';
 export * from './IIsolatedRepoManager';
 export * from './IPRLifecycleManager';
+export * from './IManagedPRStore';
