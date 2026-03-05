@@ -8,10 +8,12 @@
  */
 
 import * as vscode from 'vscode';
-import { PlanRunner, PlanInstance, PlanStatus, NodeStatus } from '\.\./plan';
+import { PlanRunner, PlanInstance, PlanStatus, NodeStatus } from '../plan';
 import { planDetailPanel } from './panels/planDetailPanel';
 import { NodeDetailPanel } from './panels/nodeDetailPanel';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../interfaces/IPulseEmitter';
+import type { IPRLifecycleManager } from '../interfaces/IPRLifecycleManager';
+import type { ManagedPR } from '../plan/types/prLifecycle';
 
 /**
  * Sidebar webview provider that displays all top-level Plans and their execution status.
@@ -54,11 +56,14 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   /**
    * @param _context - The extension context for managing subscriptions and resources.
    * @param _planRunner - The {@link PlanRunner} instance used to query Plan state.
+   * @param _pulse - The pulse emitter for periodic updates.
+   * @param _prLifecycleManager - The PR lifecycle manager (optional).
    */
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _planRunner: PlanRunner,
-    private readonly _pulse: IPulseEmitter
+    private readonly _pulse: IPulseEmitter,
+    private readonly _prLifecycleManager?: IPRLifecycleManager
   ) {
     // Listen for Plan events — emit targeted per-plan messages
     _planRunner.on('planCreated', (plan: PlanInstance) => {
@@ -84,6 +89,34 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         this._sendPlanStateChange(planId);
       }
     });
+    
+    // Listen for PR lifecycle events
+    if (_prLifecycleManager) {
+      _prLifecycleManager.on('prAdopted', (pr: ManagedPR) => {
+        this._sendPRAdded(pr);
+      });
+      _prLifecycleManager.on('prStatusChanged', (pr: ManagedPR) => {
+        this._sendPRStateChange(pr);
+      });
+      _prLifecycleManager.on('prMonitoringStarted', (pr: ManagedPR) => {
+        this._sendPRStateChange(pr);
+      });
+      _prLifecycleManager.on('prMonitoringStopped', (pr: ManagedPR) => {
+        this._sendPRStateChange(pr);
+      });
+      _prLifecycleManager.on('prAbandoned', (pr: ManagedPR) => {
+        this._sendPRStateChange(pr);
+      });
+      _prLifecycleManager.on('prPromoted', (pr: ManagedPR) => {
+        this._sendPRStateChange(pr);
+      });
+      _prLifecycleManager.on('prDemoted', (pr: ManagedPR) => {
+        this._sendPRStateChange(pr);
+      });
+      _prLifecycleManager.on('prRemoved', (id: string) => {
+        this._sendPRDeleted(id);
+      });
+    }
   }
   
   /**
@@ -132,6 +165,10 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         case 'adoptPR':
           // Trigger the adopt PR command
           vscode.commands.executeCommand('orchestrator.adoptPR');
+          break;
+        case 'openPR':
+          // Open Active PR Panel for the PR
+          vscode.commands.executeCommand('orchestrator.showActivePRPanel', message.prId);
           break;
         case 'refresh':
           this._initialRefreshDone = true;
@@ -256,6 +293,57 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Build data object for a single PR (used by both initial load and per-PR events).
+   */
+  private _buildPRData(pr: ManagedPR) {
+    return {
+      id: pr.id,
+      prNumber: pr.prNumber,
+      prUrl: pr.prUrl,
+      title: pr.title,
+      baseBranch: pr.baseBranch,
+      headBranch: pr.headBranch,
+      status: pr.status,
+      isDraft: pr.status === 'adopted' || pr.status === 'monitoring',
+      priority: pr.priority ?? 0,
+      adoptedAt: pr.adoptedAt,
+      unresolvedComments: pr.unresolvedComments ?? 0,
+      failingChecks: pr.failingChecks ?? 0,
+    };
+  }
+
+  /** Send a per-PR state change to the webview. */
+  private _sendPRStateChange(pr: ManagedPR) {
+    if (!this._view) {return;}
+    const data = this._buildPRData(pr);
+    this._view.webview.postMessage({ type: 'prStateChange', pr: data });
+  }
+
+  /** Send notification that a new PR was added. */
+  private _sendPRAdded(pr: ManagedPR) {
+    if (!this._view) {return;}
+    const data = this._buildPRData(pr);
+    this._view.webview.postMessage({ type: 'prAdded', pr: data });
+  }
+
+  /** Send notification that a PR was deleted. */
+  private _sendPRDeleted(id: string) {
+    if (!this._view) {return;}
+    this._view.webview.postMessage({ type: 'prDeleted', prId: id });
+  }
+
+  /** Refresh PRs independently. */
+  private async _refreshPRs() {
+    if (!this._view || !this._prLifecycleManager) {return;}
+    const prs = this._prLifecycleManager.getAllManagedPRs();
+    const prData = prs.map(pr => this._buildPRData(pr));
+    this._view.webview.postMessage({
+      type: 'prsUpdate',
+      prs: prData,
+    });
+  }
+
+  /**
    * Initial load: send all plans to the webview.
    * After this, only per-plan events are sent.
    */
@@ -277,6 +365,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     
     // Kick off first capacity refresh
     this._refreshCapacity();
+    
+    // Kick off first PRs refresh
+    this._refreshPRs();
   }
   
   /**

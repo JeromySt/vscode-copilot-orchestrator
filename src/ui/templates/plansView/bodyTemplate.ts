@@ -35,5 +35,17 @@ export function renderPlansViewBody(): string {
     <span>Jobs: <span id="runningJobs">0</span>/<span id="maxParallel">8</span></span>
     <span style="margin-left: 8px;" id="queuedSection">Queued: <span id="queuedJobs">0</span></span>
   </div>
+  <div class="section managed-prs-section">
+    <div class="section-header" id="managedPRsHeader">
+      <span class="section-title">
+        <span class="codicon codicon-chevron-down section-chevron" id="prsSectionChevron"></span>
+        Managed PRs
+        <span class="pill" id="prsBadge">0</span>
+      </span>
+    </div>
+    <div class="section-content" id="managedPRsContent">
+      <div id="prs"><div class="empty">No managed PRs.</div></div>
+    </div>
+  </div>
   <div id="plans"><div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div></div>`;
 }

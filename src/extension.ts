@@ -135,7 +135,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Plans view ──────────────────────────────────────────────────────────
   const pulse = container.resolve<IPulseEmitter>(Tokens.IPulseEmitter);
-  initializePlansView(context, planRunner, pulse);
+  const prLifecycleManager = container.resolve<import('./interfaces/IPRLifecycleManager').IPRLifecycleManager>(Tokens.IPRLifecycleManager);
+  initializePlansView(context, planRunner, pulse, prLifecycleManager);
 
   // ── Commands ───────────────────────────────────────────────────────────
   registerPlanCommands(context, planRunner, pulse);
@@ -143,8 +144,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Register release commands with a stub getReleaseData function
   registerReleaseCommands(context, () => undefined);
   // Register PR lifecycle commands
-  const prLifecycleManager = container.resolve<import('./interfaces/IPRLifecycleManager').IPRLifecycleManager>(Tokens.IPRLifecycleManager);
-  registerPRLifecycleCommands(context, prLifecycleManager);
+  registerPRLifecycleCommands(context, (id: string) => prLifecycleManager.getManagedPR(id));
 
   // ── Branch Change Watcher ──────────────────────────────────────────────
   // Watch for branch changes and ensure .gitignore entries

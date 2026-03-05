@@ -17,12 +17,32 @@ export function renderPlansViewControlWiring(): string {
   return `// ── Control Initialization ───────────────────────────────────────────
 var planListContainer = new PlanListContainerControl(bus, 'plan-list-container', 'plans');
 var capacityBar = new CapacityBarControl(bus, 'capacity-bar');
+var prListContainer = new PRListContainerControl(bus, 'pr-list-container', 'prs');
 
 // ── Adopt PR Button ───────────────────────────────────────────────────
 var adoptPRButton = document.getElementById('adoptPRButton');
 if (adoptPRButton) {
   adoptPRButton.addEventListener('click', function() {
     vscode.postMessage({ type: 'adoptPR' });
+  });
+}
+
+// ── Managed PRs Section Collapse/Expand ────────────────────────────────
+var managedPRsHeader = document.getElementById('managedPRsHeader');
+var managedPRsContent = document.getElementById('managedPRsContent');
+var prsSectionChevron = document.getElementById('prsSectionChevron');
+var prsSectionCollapsed = false;
+
+if (managedPRsHeader && managedPRsContent && prsSectionChevron) {
+  managedPRsHeader.addEventListener('click', function() {
+    prsSectionCollapsed = !prsSectionCollapsed;
+    if (prsSectionCollapsed) {
+      managedPRsContent.classList.add('collapsed');
+      prsSectionChevron.classList.add('collapsed');
+    } else {
+      managedPRsContent.classList.remove('collapsed');
+      prsSectionChevron.classList.remove('collapsed');
+    }
   });
 }
 
