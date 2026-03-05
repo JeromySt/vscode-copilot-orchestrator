@@ -267,6 +267,17 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     },
   );
 
+  // ─── Managed PR Store ───────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IManagedPRStore').IManagedPRStore>(
+    Tokens.IManagedPRStore,
+    (c) => {
+      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+      const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+      const { FileSystemManagedPRStore } = require('./plan/store/managedPRStore');
+      return new FileSystemManagedPRStore(workspacePath, fileSystem);
+    },
+  );
+
   // ─── Remote Provider Detector ───────────────────────────────────
   container.registerSingleton<import('./interfaces').IRemoteProviderDetector>(
     Tokens.IRemoteProviderDetector,
@@ -307,6 +318,20 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
       const prServiceFactory = c.resolve<import('./interfaces').IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
       return new DefaultReleasePRMonitor(copilotRunner, spawner, git, prServiceFactory);
+    },
+  );
+
+  // ─── PR Lifecycle Manager ───────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IPRLifecycleManager>(
+    Tokens.IPRLifecycleManager,
+    (c) => {
+      const prServiceFactory = c.resolve<import('./interfaces').IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
+      const prMonitor = c.resolve<import('./interfaces').IReleasePRMonitor>(Tokens.IReleasePRMonitor);
+      const isolatedRepos = c.resolve<import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager>(Tokens.IIsolatedRepoManager);
+      const store = c.resolve<import('./interfaces').IManagedPRStore>(Tokens.IManagedPRStore);
+      const releaseConfig = c.resolve<import('./interfaces').IReleaseConfigManager>(Tokens.IReleaseConfigManager);
+      const { DefaultPRLifecycleManager } = require('./plan/prLifecycleManager');
+      return new DefaultPRLifecycleManager(prServiceFactory, prMonitor, isolatedRepos, store, releaseConfig);
     },
   );
 

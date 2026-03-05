@@ -18,6 +18,7 @@ import { IMcpRequestRouter } from '../interfaces/IMcpManager';
 import { getPlanToolDefinitions } from './tools/planTools';
 import { getJobToolDefinitions } from './tools/jobTools';
 import { getReleaseToolDefinitions } from './tools/releaseTools';
+import { getPRLifecycleToolDefinitions } from './tools/prLifecycleTools';
 import { validateInput, hasSchema, validatePostchecksPresence } from './validation';
 import { BUILD_COMMIT, BUILD_TIMESTAMP, BUILD_VERSION } from '../core/buildInfo';
 import {
@@ -49,6 +50,16 @@ import {
   handleGetReleaseStatus,
   handleCancelRelease,
   handleListReleases,
+  handleListAvailablePRs,
+  handleAdoptPR,
+  handleGetManagedPR,
+  handleListManagedPRs,
+  handleStartPRMonitoring,
+  handleStopPRMonitoring,
+  handlePromotePR,
+  handleDemotePR,
+  handleAbandonPR,
+  handleRemovePR,
 } from './handlers';
 
 /** MCP component logger */
@@ -104,12 +115,13 @@ export class McpHandler implements IMcpRequestRouter {
   /**
    * Create a new MCP handler.
    *
-   * @param PlanRunner      - Singleton {@link PlanRunner} that manages plan lifecycle.
-   * @param workspacePath   - Absolute path to the workspace root (git repository).
-   * @param git             - Git operations interface.
-   * @param configProvider  - Optional configuration provider for reading VS Code settings.
-   * @param planRepository  - Plan repository for filesystem-backed storage.
-   * @param releaseManager  - Optional release manager for multi-plan releases.
+   * @param PlanRunner         - Singleton {@link PlanRunner} that manages plan lifecycle.
+   * @param workspacePath      - Absolute path to the workspace root (git repository).
+   * @param git                - Git operations interface.
+   * @param configProvider     - Optional configuration provider for reading VS Code settings.
+   * @param planRepository     - Plan repository for filesystem-backed storage.
+   * @param releaseManager     - Optional release manager for multi-plan releases.
+   * @param prLifecycleManager - Optional PR lifecycle manager for PR adoption and monitoring.
    */
   constructor(
     PlanRunner: PlanRunner,
@@ -118,6 +130,7 @@ export class McpHandler implements IMcpRequestRouter {
     configProvider?: import('../interfaces/IConfigProvider').IConfigProvider,
     planRepository?: import('../interfaces/IPlanRepository').IPlanRepository,
     releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager,
+    prLifecycleManager?: import('../interfaces/IPRLifecycleManager').IPRLifecycleManager,
   ) {
     this.context = { 
       PlanRunner, 
@@ -126,6 +139,7 @@ export class McpHandler implements IMcpRequestRouter {
       configProvider,
       PlanRepository: planRepository!,
       releaseManager,
+      prLifecycleManager,
       // Legacy fields - kept for type compatibility
       runner: null as any,
       plans: null as any,
@@ -208,13 +222,14 @@ export class McpHandler implements IMcpRequestRouter {
    *
    * Returns all registered MCP tool definitions from
    * {@link getPlanToolDefinitions}, {@link getJobToolDefinitions},
-   * and {@link getReleaseToolDefinitions}.
+   * {@link getReleaseToolDefinitions}, and {@link getPRLifecycleToolDefinitions}.
    */
   private async handleToolsList(request: JsonRpcRequest): Promise<JsonRpcResponse> {
     const tools = [
       ...(await getPlanToolDefinitions()),
       ...(await getJobToolDefinitions()),
       ...(await getReleaseToolDefinitions()),
+      ...(await getPRLifecycleToolDefinitions()),
     ];
     log.info('Tools list requested', { toolCount: tools.length });
     log.debug('Tools list - tool names', { tools: tools.map(t => t.name) });
@@ -365,6 +380,47 @@ export class McpHandler implements IMcpRequestRouter {
       
       case 'list_copilot_releases':
         result = await handleListReleases(args || {}, this.context);
+        break;
+
+      // --- PR Lifecycle tools ---
+      case 'list_available_prs':
+        result = await handleListAvailablePRs(args || {}, this.context);
+        break;
+      
+      case 'adopt_pr':
+        result = await handleAdoptPR(args || {}, this.context);
+        break;
+      
+      case 'get_managed_pr':
+        result = await handleGetManagedPR(args || {}, this.context);
+        break;
+      
+      case 'list_managed_prs':
+        result = await handleListManagedPRs(args || {}, this.context);
+        break;
+      
+      case 'start_pr_monitoring':
+        result = await handleStartPRMonitoring(args || {}, this.context);
+        break;
+      
+      case 'stop_pr_monitoring':
+        result = await handleStopPRMonitoring(args || {}, this.context);
+        break;
+      
+      case 'promote_pr':
+        result = await handlePromotePR(args || {}, this.context);
+        break;
+      
+      case 'demote_pr':
+        result = await handleDemotePR(args || {}, this.context);
+        break;
+      
+      case 'abandon_pr':
+        result = await handleAbandonPR(args || {}, this.context);
+        break;
+      
+      case 'remove_pr':
+        result = await handleRemovePR(args || {}, this.context);
         break;
         
       default:

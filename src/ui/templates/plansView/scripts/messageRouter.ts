@@ -10,7 +10,7 @@
  * Render the message router script for plans view.
  *
  * Handles messages from the extension: 'update', 'planAdded', 'planStateChange',
- * 'planDeleted', 'badgeUpdate', 'capacityUpdate', 'pulse'.
+ * 'planDeleted', 'badgeUpdate', 'capacityUpdate', 'pulse', PR events.
  *
  * @returns JavaScript code string.
  */
@@ -70,6 +70,33 @@ window.addEventListener('message', function(ev) {
         globalCapacity: msg.globalCapacity,
         globalStats: msg.globalStats
       });
+      break;
+      
+    case 'prsUpdate':
+      // Initial load: full PR list
+      var prs = msg.prs || [];
+      bus.emit('prs:update', prs);
+      break;
+      
+    case 'prAdded':
+      // Single PR added
+      if (msg.pr) {
+        prListContainer.addPR(msg.pr);
+      }
+      break;
+      
+    case 'prStateChange':
+      // Per-PR state update — emit to EventBus for the matching card
+      if (msg.pr) {
+        bus.emit('pr:state', msg.pr);
+      }
+      break;
+      
+    case 'prDeleted':
+      // Single PR removed
+      if (msg.prId) {
+        prListContainer.removePR(msg.prId);
+      }
       break;
 
   }

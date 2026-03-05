@@ -148,3 +148,81 @@ export interface PRSecurityAlert {
   /** Whether the alert has been resolved */
   resolved: boolean;
 }
+
+/**
+ * Options for listing pull requests.
+ */
+export interface PRListOptions {
+  /** Filter by author username (default: current user / @me) */
+  author?: string;
+  
+  /** Filter by assignee username */
+  assignee?: string;
+  
+  /** PR state filter */
+  state?: 'open' | 'closed' | 'all';
+  
+  /** Maximum number of results to return */
+  limit?: number;
+}
+
+/**
+ * Summary information about a pull request.
+ */
+export interface PRListItem {
+  /** PR number */
+  prNumber: number;
+  
+  /** PR title */
+  title: string;
+  
+  /** Head branch (source) */
+  headBranch: string;
+  
+  /** Base branch (target) */
+  baseBranch: string;
+  
+  /** PR state */
+  state: 'open' | 'closed' | 'merged';
+  
+  /** Whether the PR is a draft */
+  isDraft: boolean;
+  
+  /** PR author username */
+  author: string;
+  
+  /** PR URL */
+  url: string;
+}
+
+/**
+ * Detailed information about a pull request.
+ */
+export interface PRDetails {
+  /** PR number */
+  prNumber: number;
+  
+  /** PR title */
+  title: string;
+  
+  /** Head branch (source) */
+  headBranch: string;
+  
+  /** Base branch (target) */
+  baseBranch: string;
+  
+  /** Whether the PR is a draft */
+  isDraft: boolean;
+  
+  /** PR state/status */
+  state: 'open' | 'closed' | 'merged';
+  
+  /** PR author username */
+  author: string;
+  
+  /** PR URL */
+  url: string;
+  
+  /** PR description/body */
+  body?: string;
+}

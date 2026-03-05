@@ -15,6 +15,9 @@ import type {
   PRComment,
   PRCheck,
   PRSecurityAlert,
+  PRListOptions,
+  PRListItem,
+  PRDetails,
 } from '../plan/types/remotePR';
 
 /**
@@ -138,4 +141,62 @@ export interface IRemotePRService {
    * @throws If the thread does not exist or cannot be resolved
    */
   resolveThread(prNumber: number, threadId: string, cwd: string): Promise<void>;
+
+  /**
+   * List pull requests filtered by author or assignee.
+   * 
+   * Returns a summary list of PRs matching the filter criteria.
+   * 
+   * @param cwd - Working directory of the repository
+   * @param options - Filter options (author, assignee, state, limit)
+   * @returns Array of PR summary items
+   * @throws If the repository cannot be accessed or the query fails
+   */
+  listPRs(cwd: string, options?: PRListOptions): Promise<PRListItem[]>;
+
+  /**
+   * Get detailed information about a specific pull request.
+   * 
+   * Retrieves full PR metadata including title, branches, draft status, state, and author.
+   * 
+   * @param prNumber - PR number to query
+   * @param cwd - Working directory of the repository
+   * @returns Detailed PR information
+   * @throws If the PR does not exist or cannot be accessed
+   */
+  getPRDetails(prNumber: number, cwd: string): Promise<PRDetails>;
+
+  /**
+   * Abandon (close) a pull request without merging.
+   * 
+   * Closes the PR and optionally adds a closing comment.
+   * 
+   * @param prNumber - PR number to abandon
+   * @param cwd - Working directory of the repository
+   * @param comment - Optional closing comment
+   * @throws If the PR does not exist or cannot be closed
+   */
+  abandonPR(prNumber: number, cwd: string, comment?: string): Promise<void>;
+
+  /**
+   * Promote a draft pull request to ready-for-review.
+   * 
+   * Marks a draft PR as ready for review, making it visible to reviewers.
+   * 
+   * @param prNumber - PR number to promote
+   * @param cwd - Working directory of the repository
+   * @throws If the PR does not exist, is not a draft, or cannot be promoted
+   */
+  promotePR(prNumber: number, cwd: string): Promise<void>;
+
+  /**
+   * Demote an active pull request to draft.
+   * 
+   * Marks a ready-for-review PR as a draft, hiding it from review queues.
+   * 
+   * @param prNumber - PR number to demote
+   * @param cwd - Working directory of the repository
+   * @throws If the PR does not exist, is already a draft, or cannot be demoted
+   */
+  demotePR(prNumber: number, cwd: string): Promise<void>;
 }

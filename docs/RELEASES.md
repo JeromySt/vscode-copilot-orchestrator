@@ -289,6 +289,228 @@ After **40 minutes**, if the PR is not merged:
 
 ---
 
+## Adopting Existing PRs
+
+The orchestrator can adopt **any existing pull request** (created manually, via release, or by another tool) for lifecycle management and autonomous monitoring. This enables unified PR tracking regardless of how the PR was created.
+
+### Why Adopt PRs?
+
+**Without PR Adoption:**
+- Manual monitoring of CI status
+- Manual response to review comments
+- Manual tracking of security alerts
+- Context-switching between code, CI dashboard, and PR conversations
+
+**With PR Adoption:**
+- **Autonomous monitoring** — Same 40-minute cycles as release-generated PRs
+- **Automatic feedback handling** — Copilot agents fix CI failures and reply to comments
+- **Priority-based scheduling** — Promote critical PRs for more frequent checks
+- **Unified dashboard** — All managed PRs in one sidebar with status visibility
+
+### Adoption Workflow
+
+#### 1. List Available PRs
+
+Use `list_available_prs` to discover PRs on your remote:
+
+```json
+{
+  "repoPath": "/path/to/repo",
+  "baseBranch": "main",
+  "state": "open",
+  "limit": 50
+}
+```
+
+Returns:
+```json
+{
+  "success": true,
+  "prs": [
+    { "prNumber": 42, "title": "Add auth module", "isManaged": false, "author": "alice", ... },
+    { "prNumber": 38, "title": "Fix login bug", "isManaged": true, "author": "bob", ... }
+  ]
+}
+```
+
+The `isManaged` flag shows which PRs are already under lifecycle management.
+
+#### 2. Adopt a PR
+
+Use `adopt_pr` to take ownership:
+
+```json
+{
+  "prNumber": 42,
+  "repoPath": "/path/to/repo",
+  "priority": 1,
+  "releaseId": "rel-xyz-optional"
+}
+```
+
+Returns:
+```json
+{
+  "success": true,
+  "managedPR": {
+    "id": "pr-uuid-123",
+    "prNumber": 42,
+    "status": "adopted",
+    "title": "Add auth module",
+    "baseBranch": "main",
+    "headBranch": "feature/auth",
+    "providerType": "github",
+    "priority": 1,
+    ...
+  }
+}
+```
+
+The PR is now managed but **not yet monitored**. Status is `adopted`.
+
+#### 3. Start Monitoring
+
+Use `start_pr_monitoring` to begin autonomous cycles:
+
+```json
+{
+  "id": "pr-uuid-123"
+}
+```
+
+The PR transitions to `monitoring` status and begins 40-minute autonomous monitoring (same as release PRs):
+- **Every 2 minutes**: Check CI status, review comments, security alerts
+- **Autonomous addressing**: Spawn agents to fix failures and reply to feedback
+- **Status updates**: Transitions to `addressing` when fixing, `ready` when all checks pass, `blocked` if issues remain
+
+#### 4. Monitor Progress
+
+Use `get_managed_pr` to check status:
+
+```json
+{
+  "id": "pr-uuid-123"
+}
+```
+
+Returns current PR state, CI status, unresolved comments, and monitoring history.
+
+### Priority Management
+
+Control monitoring frequency and resource allocation:
+
+#### Promote PR
+
+Use `promote_pr` to increase priority:
+
+```json
+{
+  "id": "pr-uuid-123"
+}
+```
+
+**Effect:**
+- More frequent CI checks
+- Earlier scheduling when agents are at capacity
+- Higher priority in addressing queue
+
+#### Demote PR
+
+Use `demote_pr` to decrease priority:
+
+```json
+{
+  "id": "pr-uuid-123"
+}
+```
+
+**Effect:**
+- Less frequent checks
+- Deferred when higher-priority PRs need attention
+
+### Lifecycle Transitions
+
+#### Stop Monitoring (without abandoning)
+
+Use `stop_pr_monitoring` to pause monitoring:
+
+```json
+{
+  "id": "pr-uuid-123"
+}
+```
+
+The PR transitions back to `adopted` status. Monitoring halts but the PR remains managed. You can restart monitoring later with `start_pr_monitoring`.
+
+#### Abandon PR
+
+Use `abandon_pr` to stop management:
+
+```json
+{
+  "id": "pr-uuid-123"
+}
+```
+
+The PR transitions to `abandoned` status. Monitoring stops and the PR is no longer actively managed, but the record remains for historical tracking.
+
+#### Remove PR
+
+Use `remove_pr` to completely delete from management:
+
+```json
+{
+  "id": "pr-uuid-123"
+}
+```
+
+All managed PR data is deleted. The PR itself remains on the remote, but the orchestrator has no record of it.
+
+### Integration with Releases
+
+- **Release-generated PRs** are automatically adopted when created
+- **Externally-created PRs** can be adopted to join the same monitoring workflow
+- **Unified tracking** — All managed PRs appear in the Active PRs sidebar regardless of origin
+- **Release linking** — Adopted PRs can be linked to releases via the `releaseId` parameter during adoption
+
+### Sidebar Integration
+
+Managed PRs appear in the **"Active PRs"** section of the Plans sidebar:
+
+- **Status badge** — Color-coded status (green = ready, yellow = monitoring, red = blocked)
+- **Priority indicator** — Shows current priority tier
+- **Quick actions** — Start/stop monitoring, promote/demote, abandon
+- **PR detail panel** — Click to open detailed view with monitoring state, check status, unresolved comments
+
+### Multi-Provider Support
+
+PR adoption works with **any remote provider** supported by the orchestrator:
+- **GitHub** (`github.com`)
+- **GitHub Enterprise** (custom hostname)
+- **Azure DevOps** (`dev.azure.com`)
+
+Provider detection and credential acquisition happen automatically based on the repository's remote URL.
+
+### Example: Complete Adoption Flow via Copilot Chat
+
+```
+@workspace List all open PRs targeting main
+
+@workspace Adopt PR #42 with priority 1
+
+@workspace Start monitoring the adopted PR
+
+@workspace Check status of managed PR pr-uuid-123
+
+@workspace The PR is critical — promote its priority
+
+@workspace PR merged externally — remove it from management
+```
+
+Copilot will call the appropriate MCP tools (`list_available_prs`, `adopt_pr`, `start_pr_monitoring`, `get_managed_pr`, `promote_pr`, `remove_pr`) and handle the workflow.
+
+---
+
 ## Credential Troubleshooting
 
 ### GitHub and GitHub Enterprise

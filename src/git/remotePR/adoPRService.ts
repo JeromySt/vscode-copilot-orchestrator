@@ -20,6 +20,9 @@ import type {
   PRComment,
   PRCheck,
   PRSecurityAlert,
+  PRListOptions,
+  PRListItem,
+  PRDetails,
 } from '../../plan/types/remotePR';
 import { Logger } from '../../core/logger';
 
@@ -333,6 +336,241 @@ export class AdoPRService implements IRemotePRService {
   }
 
   /**
+   * List pull requests filtered by author or assignee.
+   * 
+   * GET {org}/{project}/_apis/git/repositories/{repo}/pullrequests?api-version=7.0
+   */
+  async listPRs(cwd: string, options?: PRListOptions): Promise<PRListItem[]> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    const queryParams: Record<string, string> = {};
+
+    // Map options to ADO query parameters
+    if (options?.state) {
+      if (options.state === 'open') {
+        queryParams['searchCriteria.status'] = 'active';
+      } else if (options.state === 'closed') {
+        queryParams['searchCriteria.status'] = 'completed';
+      } else {
+        queryParams['searchCriteria.status'] = 'all';
+      }
+    }
+
+    if (options?.author) {
+      queryParams['searchCriteria.creatorId'] = options.author;
+    }
+
+    if (options?.limit) {
+      queryParams['$top'] = String(options.limit);
+    }
+
+    const apiUrl = this._buildApiUrl(
+      provider,
+      `git/repositories/${provider.repoName}/pullrequests`,
+      queryParams
+    );
+
+    log.debug('Listing Azure DevOps PRs', options);
+
+    try {
+      const response = await this._apiRequest('GET', apiUrl, credentials);
+      const prs = response.value || [];
+
+      const listItems: PRListItem[] = prs.map((pr: any) => {
+        const headBranch = this._extractBranchName(pr.sourceRefName);
+        const baseBranch = this._extractBranchName(pr.targetRefName);
+        const state = this._mapADOPRStatus(pr.status);
+
+        return {
+          prNumber: pr.pullRequestId,
+          title: pr.title,
+          headBranch,
+          baseBranch,
+          state,
+          isDraft: pr.isDraft || false,
+          author: pr.createdBy?.displayName || pr.createdBy?.uniqueName || 'unknown',
+          url: this._buildPRUrl(provider, pr.pullRequestId),
+        };
+      });
+
+      log.info('Azure DevOps PRs listed', { count: listItems.length });
+      return listItems;
+    } catch (error: any) {
+      log.error('Failed to list Azure DevOps PRs', { error: error.message });
+      throw new Error(`Failed to list ADO PRs: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get detailed information about a specific pull request.
+   * 
+   * GET {org}/{project}/_apis/git/repositories/{repo}/pullRequests/{prId}?api-version=7.0
+   */
+  async getPRDetails(prNumber: number, cwd: string): Promise<PRDetails> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    const apiUrl = this._buildApiUrl(
+      provider,
+      `git/repositories/${provider.repoName}/pullRequests/${prNumber}`
+    );
+
+    log.debug('Getting Azure DevOps PR details', { prNumber });
+
+    try {
+      const pr = await this._apiRequest('GET', apiUrl, credentials);
+
+      const headBranch = this._extractBranchName(pr.sourceRefName);
+      const baseBranch = this._extractBranchName(pr.targetRefName);
+      const state = this._mapADOPRStatus(pr.status);
+
+      const details: PRDetails = {
+        prNumber: pr.pullRequestId,
+        title: pr.title,
+        headBranch,
+        baseBranch,
+        isDraft: pr.isDraft || false,
+        state,
+        author: pr.createdBy?.displayName || pr.createdBy?.uniqueName || 'unknown',
+        url: this._buildPRUrl(provider, pr.pullRequestId),
+        body: pr.description,
+      };
+
+      log.info('Azure DevOps PR details retrieved', { prNumber });
+      return details;
+    } catch (error: any) {
+      log.error('Failed to get Azure DevOps PR details', {
+        error: error.message,
+        prNumber,
+      });
+      throw new Error(`Failed to get ADO PR details: ${error.message}`);
+    }
+  }
+
+  /**
+   * Abandon (close) a pull request without merging.
+   * 
+   * PATCH {org}/{project}/_apis/git/repositories/{repo}/pullRequests/{prId}?api-version=7.0
+   */
+  async abandonPR(prNumber: number, cwd: string, comment?: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    log.info('Abandoning Azure DevOps PR', { prNumber, hasComment: !!comment });
+
+    // Step 1: Add comment if provided
+    if (comment) {
+      try {
+        const threadsUrl = this._buildApiUrl(
+          provider,
+          `git/repositories/${provider.repoName}/pullRequests/${prNumber}/threads`
+        );
+
+        const threadBody = {
+          comments: [
+            {
+              content: comment,
+              commentType: 1,
+            },
+          ],
+          status: 'active',
+        };
+
+        await this._apiRequest('POST', threadsUrl, credentials, threadBody);
+      } catch (error: any) {
+        log.warn('Failed to add closing comment', { error: error.message, prNumber });
+        // Continue with abandonment even if comment fails
+      }
+    }
+
+    // Step 2: Set PR status to abandoned
+    const apiUrl = this._buildApiUrl(
+      provider,
+      `git/repositories/${provider.repoName}/pullRequests/${prNumber}`
+    );
+
+    const body = {
+      status: 'abandoned',
+    };
+
+    try {
+      await this._apiRequest('PATCH', apiUrl, credentials, body);
+      log.info('Azure DevOps PR abandoned', { prNumber });
+    } catch (error: any) {
+      log.error('Failed to abandon Azure DevOps PR', {
+        error: error.message,
+        prNumber,
+      });
+      throw new Error(`Failed to abandon ADO PR: ${error.message}`);
+    }
+  }
+
+  /**
+   * Promote a draft pull request to ready-for-review.
+   * 
+   * PATCH {org}/{project}/_apis/git/repositories/{repo}/pullRequests/{prId}?api-version=7.0
+   */
+  async promotePR(prNumber: number, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    log.info('Promoting Azure DevOps PR to ready', { prNumber });
+
+    const apiUrl = this._buildApiUrl(
+      provider,
+      `git/repositories/${provider.repoName}/pullRequests/${prNumber}`
+    );
+
+    const body = {
+      isDraft: false,
+    };
+
+    try {
+      await this._apiRequest('PATCH', apiUrl, credentials, body);
+      log.info('Azure DevOps PR promoted to ready', { prNumber });
+    } catch (error: any) {
+      log.error('Failed to promote Azure DevOps PR', {
+        error: error.message,
+        prNumber,
+      });
+      throw new Error(`Failed to promote ADO PR: ${error.message}`);
+    }
+  }
+
+  /**
+   * Demote an active pull request to draft.
+   * 
+   * PATCH {org}/{project}/_apis/git/repositories/{repo}/pullRequests/{prId}?api-version=7.0
+   */
+  async demotePR(prNumber: number, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    log.info('Demoting Azure DevOps PR to draft', { prNumber });
+
+    const apiUrl = this._buildApiUrl(
+      provider,
+      `git/repositories/${provider.repoName}/pullRequests/${prNumber}`
+    );
+
+    const body = {
+      isDraft: true,
+    };
+
+    try {
+      await this._apiRequest('PATCH', apiUrl, credentials, body);
+      log.info('Azure DevOps PR demoted to draft', { prNumber });
+    } catch (error: any) {
+      log.error('Failed to demote Azure DevOps PR', {
+        error: error.message,
+        prNumber,
+      });
+      throw new Error(`Failed to demote ADO PR: ${error.message}`);
+    }
+  }
+
+  /**
    * Build the full API URL for an Azure DevOps endpoint.
    */
   private _buildApiUrl(
@@ -510,5 +748,42 @@ export class AdoPRService implements IRemotePRService {
     }
     
     return 'human';
+  }
+
+  /**
+   * Extract branch name from ADO ref format (refs/heads/branch-name).
+   */
+  private _extractBranchName(refName: string): string {
+    if (!refName) {
+      return '';
+    }
+    
+    const prefix = 'refs/heads/';
+    if (refName.startsWith(prefix)) {
+      return refName.substring(prefix.length);
+    }
+    
+    return refName;
+  }
+
+  /**
+   * Map Azure DevOps PR status to normalized state.
+   */
+  private _mapADOPRStatus(status: string): 'open' | 'closed' | 'merged' {
+    const statusLower = (status || '').toLowerCase();
+    
+    if (statusLower === 'active') {
+      return 'open';
+    }
+    
+    if (statusLower === 'completed') {
+      return 'merged';
+    }
+    
+    if (statusLower === 'abandoned') {
+      return 'closed';
+    }
+    
+    return 'open';
   }
 }

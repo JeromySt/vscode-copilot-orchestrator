@@ -26,6 +26,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Feedback addressing**: Detects CI failures, review comments, security alerts and spawns Copilot agents to fix issues, reply to comments, and resolve threads
 - **PR state tracking**: Monitors check runs, review threads, unresolved comments, and security vulnerabilities with progress visibility in the UI
 
+#### PR Lifecycle Management
+- **Adopt existing PRs**: Take ownership of pull requests created outside the orchestrator for lifecycle management and autonomous monitoring
+- **PR discovery**: List available PRs from GitHub, GitHub Enterprise, or Azure DevOps with `isManaged` flag showing which are already under management
+- **Autonomous monitoring**: Start/stop automated monitoring for adopted PRs with same 40-minute cycles as release-generated PRs (CI checks, review comments, security alerts)
+- **Priority management**: Promote/demote PRs to adjust monitoring frequency and scheduling priority
+- **Lifecycle transitions**: Track PR status through states: adopted → monitoring → addressing → ready/blocked → abandoned
+- **Managed PR sidebar**: New "Active PRs" section in Plans sidebar showing all managed PRs with status, priority, and quick actions
+- **PR detail panel**: Dedicated panel for managed PRs showing monitoring state, check status, unresolved comments, and feedback history
+- **10 new MCP tools**:
+  - `list_available_prs` — List PRs from remote with managed status
+  - `adopt_pr` — Adopt an existing PR for management
+  - `get_managed_pr` — Get details of a managed PR by ID
+  - `list_managed_prs` — List all managed PRs with optional status filter
+  - `start_pr_monitoring` — Begin autonomous monitoring
+  - `stop_pr_monitoring` — Pause monitoring without abandoning
+  - `promote_pr` — Elevate PR to higher priority tier
+  - `demote_pr` — Lower PR to lower priority tier
+  - `abandon_pr` — Stop management and mark as abandoned
+  - `remove_pr` — Completely remove from management
+- **Integration with releases**: Managed PRs can be linked to releases for unified tracking; release-generated PRs are automatically adopted for monitoring
+
 ## [0.14.0] - 2026-02-28
 
 ### 🚀 Major Features
