@@ -168,18 +168,6 @@ export const IReleasePRMonitor = Symbol('IReleasePRMonitor');
 export const IReleaseStore = Symbol('IReleaseStore');
 
 /**
- * Token for IReleaseConfigManager service.
- * Provides release management configuration access.
- */
-export const IReleaseConfigManager = Symbol('IReleaseConfigManager');
-
-/**
- * Token for IIsolatedRepoManager service.
- * Provides isolated repository clone management for release workflows.
- */
-export const IIsolatedRepoManager = Symbol('IIsolatedRepoManager');
-
-/**
  * Token for IRemotePRService service.
  * Provides unified PR operations across GitHub, GitHub Enterprise, and Azure DevOps.
  */
@@ -196,3 +184,15 @@ export const IRemoteProviderDetector = Symbol('IRemoteProviderDetector');
  * Provides factory for creating provider-specific PR service instances.
  */
 export const IRemotePRServiceFactory = Symbol('IRemotePRServiceFactory');
+
+/**
+ * Token for IReleaseConfigManager service.
+ * Provides release management configuration access.
+ */
+export const IReleaseConfigManager = Symbol('IReleaseConfigManager');
+
+/**
+ * Token for IIsolatedRepoManager service.
+ * Provides isolated repository clone management for release workflows.
+ */
+export const IIsolatedRepoManager = Symbol('IIsolatedRepoManager');

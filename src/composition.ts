@@ -55,6 +55,7 @@ import { DefaultRemoteProviderDetector } from './git/remotePR/remoteProviderDete
 import { GitHubPRService } from './git/remotePR/githubPRService';
 import { RemotePRServiceFactory } from './git/remotePR/remotePRServiceFactory';
 import { FileSystemReleaseStore } from './plan/store/releaseStore';
+import { DefaultReleasePRMonitor } from './plan/releasePRMonitor';
 
 /**
  * Create and wire the production DI container.
@@ -297,28 +298,15 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     },
   );
 
-  // ─── Release PR Monitor ─────────────────────────────────────────────
-  // TODO: Implement DefaultReleasePRMonitor
-  container.registerSingleton<import('./interfaces/IReleasePRMonitor').IReleasePRMonitor>(
+  // ─── Release PR Monitor ────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IReleasePRMonitor>(
     Tokens.IReleasePRMonitor,
-    () => {
-      // Stub implementation until DefaultReleasePRMonitor is implemented
-      return {
-        startMonitoring: async () => { /* stub */ },
-        stopMonitoring: () => { /* stub */ },
-        isMonitoring: () => false,
-        getMonitorCycles: () => [],
-      } as any;
-    },
-  );
-
-  // ─── Release Manager ────────────────────────────────────────────────
-  // ReleaseManager requires PlanRunner which is created outside the container.
-  // This must be registered with an actual PlanRunner instance after initialization.
-  container.register<import('./interfaces/IReleaseManager').IReleaseManager>(
-    Tokens.IReleaseManager,
-    () => {
-      throw new Error('IReleaseManager must be registered after PlanRunner initialization with createReleaseManager()');
+    (c) => {
+      const copilotRunner = c.resolve<import('./interfaces').ICopilotRunner>(Tokens.ICopilotRunner);
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+      const prServiceFactory = c.resolve<import('./interfaces').IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
+      return new DefaultReleasePRMonitor(copilotRunner, spawner, git, prServiceFactory);
     },
   );
 
