@@ -160,3 +160,9 @@ export const IReleaseManager = Symbol('IReleaseManager');
  * Provides PR monitoring for releases.
  */
 export const IReleasePRMonitor = Symbol('IReleasePRMonitor');
+
+/**
+ * Token for IReleaseStore service.
+ * Provides storage backend for release persistence.
+ */
+export const IReleaseStore = Symbol('IReleaseStore');
