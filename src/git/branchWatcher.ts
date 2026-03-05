@@ -8,6 +8,7 @@
 
 import * as vscode from 'vscode';
 import type { ILogger } from '../interfaces/ILogger';
+import type { IGitignoreDebouncer } from '../interfaces/IGitignoreDebouncer';
 
 /**
  * Git extension types from VS Code built-in git extension
@@ -42,7 +43,10 @@ export class BranchChangeWatcher implements vscode.Disposable {
   private disposables: vscode.Disposable[] = [];
   private repositoryBranches = new Map<string, string | undefined>();
   
-  constructor(private readonly logger: ILogger) {}
+  constructor(
+    private readonly logger: ILogger,
+    private readonly debouncer: IGitignoreDebouncer
+  ) {}
   
   /**
    * Initialize the branch change watcher.
@@ -100,6 +104,9 @@ export class BranchChangeWatcher implements vscode.Disposable {
       
       // Check if branch actually changed (not just a commit)
       if (currentBranch !== lastBranch) {
+        // Notify debouncer BEFORE logging — debouncer starts its timer immediately
+        this.debouncer.notifyBranchChange();
+        
         this.logger.info('Branch change detected', {
           repository: workspaceRoot,
           from: lastBranch || '(unknown)',

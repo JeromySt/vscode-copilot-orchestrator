@@ -467,6 +467,7 @@ graph LR
         GLOB[GlobalCapacity]
         PWR[PowerManager]
         PULSE[PulseEmitter]
+        GITDEB[GitignoreDebouncer]
     end
 
     EXT --> COMP
@@ -519,6 +520,7 @@ src/
 │   ├── globalCapacity.ts     #   Cross-instance job coordination
 │   ├── powerManager.ts       #   Sleep prevention during execution
 │   ├── pulse.ts              #   UI heartbeat timer
+│   ├── gitignoreDebouncer.ts #   Branch-change-aware .gitignore write delay
 │   └── orphanedWorktreeCleanup.ts
 ├── git/                      # Git operations
 │   ├── DefaultGitOperations.ts  # IGitOperations facade

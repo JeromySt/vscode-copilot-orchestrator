@@ -50,6 +50,7 @@ import { DefaultGitOperations } from './git/DefaultGitOperations';
 import { FileSystemPlanStore } from './plan/store/FileSystemPlanStore';
 import { DefaultPlanRepository } from './plan/repository/DefaultPlanRepository';
 import { DefaultFileSystem } from './core/defaultFileSystem';
+import { GitignoreDebouncer } from './core/gitignoreDebouncer';
 
 /**
  * Create and wire the production DI container.
@@ -176,6 +177,15 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
   container.registerSingleton<import('./interfaces/IFileSystem').IFileSystem>(
     Tokens.IFileSystem,
     () => new DefaultFileSystem(),
+  );
+
+  // ─── Gitignore Debouncer ────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IGitignoreDebouncer').IGitignoreDebouncer>(
+    Tokens.IGitignoreDebouncer,
+    (c) => {
+      const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+      return new GitignoreDebouncer(git);
+    },
   );
 
   // ─── MCP Request Router ─────────────────────────────────────────────
