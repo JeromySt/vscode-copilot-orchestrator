@@ -137,28 +137,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── MCP Server (stdio transport via IPC) ───────────────────────────────
   mcpManager = await initializeMcpServer(context, planRunner, config.mcp, container);
 
-  // ── Create Release Manager ─────────────────────────────────────────────
+  // ── Release Manager ────────────────────────────────────────────────────
   const { createReleaseManager } = require('./composition');
   const releaseManager = createReleaseManager(container, planRunner);
 
   // ── Plans view ──────────────────────────────────────────────────────────
   const pulse = container.resolve<IPulseEmitter>(Tokens.IPulseEmitter);
   const prLifecycleManager = container.resolve<import('./interfaces/IPRLifecycleManager').IPRLifecycleManager>(Tokens.IPRLifecycleManager);
-  const { initializePlansViewWithReleaseManager } = require('./core/planInitialization');
-  initializePlansViewWithReleaseManager(context, planRunner, pulse, prLifecycleManager, releaseManager);
+  initializePlansView(context, planRunner, pulse, prLifecycleManager, releaseManager);
 
   // ── Commands ───────────────────────────────────────────────────────────
   registerPlanCommands(context, planRunner, pulse, container);
   registerUtilityCommands(context);
-  
-  // Register release commands with release manager and plan runner
-  registerReleaseCommands(
-    context, 
-    (id: string) => releaseManager.getRelease(id),
-    releaseManager,
-    planRunner
-  );
-  
+  // Register release commands with actual releaseManager
+  registerReleaseCommands(context, (id: string) => releaseManager.getRelease(id), releaseManager, planRunner);
   // Register PR lifecycle commands
   registerPRLifecycleCommands(context, (id: string) => prLifecycleManager.getManagedPR(id));
 
