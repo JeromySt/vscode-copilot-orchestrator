@@ -67,3 +67,10 @@ export {
   GroupInstance,
   GroupExecutionState,
 } from './plan';
+
+// Recovery types
+export {
+  RecoveryResult,
+  RecoveryOptions,
+  NodeRecoveryInfo,
+} from './recovery';
