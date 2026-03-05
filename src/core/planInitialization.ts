@@ -672,5 +672,99 @@ export function registerPlanCommands(
     })
   );
   
+  // Recover Plan
+  context.subscriptions.push(
+    vscode.commands.registerCommand('orchestrator.recoverPlan', async (planId?: string) => {
+      if (!planId) {
+        const plans = planRunner.getAll().filter(p => {
+          const sm = planRunner.getStateMachine(p.id);
+          const status = sm?.computePlanStatus();
+          return status === 'canceled' || status === 'failed';
+        });
+        
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No canceled or failed plans to recover');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan to recover',
+        });
+        
+        if (!selected) {return;}
+        planId = selected.planId;
+      }
+      
+      const plan = planRunner.get(planId);
+      if (!plan) {
+        vscode.window.showErrorMessage(`Plan not found: ${planId}`);
+        return;
+      }
+      
+      // Get recovery service from DI container
+      const container = (global as any).__orchestratorContainer as ServiceContainer | undefined;
+      if (!container) {
+        vscode.window.showErrorMessage('Recovery service not available');
+        return;
+      }
+      
+      const recovery = container.resolve<import('../interfaces/IPlanRecovery').IPlanRecovery>(Tokens.IPlanRecovery);
+      
+      // Analyze recoverable nodes for preview
+      const nodeInfos = await recovery.analyzeRecoverableNodes(planId);
+      const recoverableCount = nodeInfos.filter(n => n.wasSuccessful && n.commitHash).length;
+      const targetBranch = plan.targetBranch || plan.baseBranch;
+      
+      // Show recovery preview and confirmation
+      const message = `Recovery Preview for '${plan.spec.name}':\n\n` +
+        `• Target branch '${targetBranch}' will be recreated from '${plan.baseBranch}'\n` +
+        `• ${recoverableCount} of ${plan.jobs.size} nodes had successful work that can be recovered\n` +
+        `• Plan will be placed in PAUSED state\n\n` +
+        `Proceed with recovery?`;
+      
+      const confirm = await vscode.window.showInformationMessage(
+        message,
+        { modal: true },
+        'Recover',
+        'Cancel'
+      );
+      
+      if (confirm !== 'Recover') {
+        return;
+      }
+      
+      // Show progress during recovery
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Recovering plan '${plan.spec.name}'...`,
+          cancellable: false,
+        },
+        async (progress) => {
+          progress.report({ increment: 0, message: 'Analyzing plan state...' });
+          
+          const result = await recovery.recover(planId, { useCopilotAgent: true });
+          
+          if (result.success) {
+            const message = `Plan recovered successfully!\n\n` +
+              `• Branch '${result.recoveredBranch}' recreated\n` +
+              `• ${result.recoveredNodes.length} nodes recovered\n` +
+              `• Plan is now in PAUSED state`;
+            
+            vscode.window.showInformationMessage(message);
+          } else {
+            vscode.window.showErrorMessage(`Recovery failed: ${result.error || 'Unknown error'}`);
+          }
+        }
+      );
+    })
+  );
+  
   log.info('Plan commands registered');
 }
