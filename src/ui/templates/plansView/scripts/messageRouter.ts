@@ -125,6 +125,13 @@ window.addEventListener('message', function(ev) {
         releaseListContainer.removeRelease(msg.releaseId);
       }
       break;
+      
+    case 'switchTab':
+      // Switch to a specific tab programmatically
+      if (msg.tab) {
+        switchTab(msg.tab);
+      }
+      break;
 
   }
 });

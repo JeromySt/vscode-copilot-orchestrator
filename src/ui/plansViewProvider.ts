@@ -131,9 +131,17 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     if (_releaseManager) {
       _releaseManager.on('releaseCreated', (release: ReleaseDefinition) => {
         this._sendReleaseAdded(release);
+        // Update all plans in this release to show release tag
+        release.planIds.forEach(planId => {
+          this._sendPlanStateChange(planId);
+        });
       });
       _releaseManager.on('releaseStatusChanged', (release: ReleaseDefinition) => {
         this._sendReleaseStateChange(release);
+        // Update all plans in this release to reflect release status change
+        release.planIds.forEach(planId => {
+          this._sendPlanStateChange(planId);
+        });
       });
       _releaseManager.on('releaseCompleted', (release: ReleaseDefinition) => {
         this._sendReleaseStateChange(release);
@@ -357,6 +365,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     // Update total badge
     const total = this._planRunner.getAll().filter(p => !p.parentPlanId).length;
     this._view.webview.postMessage({ type: 'badgeUpdate', total });
+    // Auto-switch to Plans tab
+    this._view.webview.postMessage({ type: 'switchTab', tab: 'plans' });
   }
   
   /** Send notification that a plan was deleted. */
@@ -432,6 +442,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     if (!this._view) {return;}
     const data = this._buildPRData(pr);
     this._view.webview.postMessage({ type: 'prAdded', pr: data });
+    // Auto-switch to PRs tab
+    this._view.webview.postMessage({ type: 'switchTab', tab: 'prs' });
   }
 
   /** Send notification that a PR was deleted. */
@@ -508,6 +520,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     if (!this._view) {return;}
     const data = this._buildReleaseData(release);
     this._view.webview.postMessage({ type: 'releaseAdded', release: data });
+    // Auto-switch to Releases tab
+    this._view.webview.postMessage({ type: 'switchTab', tab: 'releases' });
   }
 
   /** Send notification that a release was deleted. */

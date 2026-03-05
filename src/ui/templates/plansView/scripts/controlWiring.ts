@@ -219,6 +219,11 @@ bus.on('prs:update', function(prs) {
   updateTabBadge('prs', prs ? prs.length : 0);
 });
 
+// Update Releases tab badge when release list changes
+bus.on('releases:update', function(releases) {
+  updateTabBadge('releases', releases ? releases.length : 0);
+});
+
 // Auto-switch to PRs tab when PR is adopted
 bus.on('pr:state', function(pr) {
   if (pr && pr.status === 'adopted') {
