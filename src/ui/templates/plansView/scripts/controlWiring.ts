@@ -14,16 +14,77 @@
  * @returns JavaScript code string.
  */
 export function renderPlansViewControlWiring(): string {
-  return `// ── Control Initialization ───────────────────────────────────────────
+  return `// ── Tab Switching ────────────────────────────────────────────────────
+var tabs = document.querySelectorAll('.tab');
+var tabContents = document.querySelectorAll('.tab-content');
+
+function switchTab(tabName) {
+  // Update tab buttons
+  for (var i = 0; i < tabs.length; i++) {
+    var tab = tabs[i];
+    if (tab.dataset.tab === tabName) {
+      tab.classList.add('active');
+    } else {
+      tab.classList.remove('active');
+    }
+  }
+  
+  // Update tab content
+  for (var i = 0; i < tabContents.length; i++) {
+    var content = tabContents[i];
+    if (content.id === 'tabContent' + tabName.charAt(0).toUpperCase() + tabName.slice(1)) {
+      content.classList.add('active');
+    } else {
+      content.classList.remove('active');
+    }
+  }
+  
+  // Persist state
+  vscode.setState({ activeTab: tabName });
+}
+
+// Wire tab click handlers
+for (var i = 0; i < tabs.length; i++) {
+  tabs[i].addEventListener('click', function(e) {
+    var tabName = e.currentTarget.dataset.tab;
+    switchTab(tabName);
+  });
+}
+
+// Restore tab state on load
+var state = vscode.getState();
+if (state && state.activeTab) {
+  switchTab(state.activeTab);
+} else {
+  switchTab('plans'); // Default to Plans tab
+}
+
+// ── Control Initialization ───────────────────────────────────────────
 var planListContainer = new PlanListContainerControl(bus, 'plan-list-container', 'plans');
 var capacityBar = new CapacityBarControl(bus, 'capacity-bar');
 var prListContainer = new PRListContainerControl(bus, 'pr-list-container', 'prs');
+var releaseListContainer = new ReleaseListContainerControl(bus, 'release-list-container', 'releases');
 
 // ── Adopt PR Button ───────────────────────────────────────────────────
 var adoptPRButton = document.getElementById('adoptPRButton');
 if (adoptPRButton) {
   adoptPRButton.addEventListener('click', function() {
     vscode.postMessage({ type: 'adoptPR' });
+  });
+}
+
+// ── Release Buttons ────────────────────────────────────────────────────
+var newReleaseButton = document.getElementById('newReleaseButton');
+if (newReleaseButton) {
+  newReleaseButton.addEventListener('click', function() {
+    vscode.postMessage({ type: 'createRelease' });
+  });
+}
+
+var releaseFromBranchButton = document.getElementById('releaseFromBranchButton');
+if (releaseFromBranchButton) {
+  releaseFromBranchButton.addEventListener('click', function() {
+    vscode.postMessage({ type: 'createReleaseFromBranch' });
   });
 }
 
@@ -42,6 +103,28 @@ if (managedPRsHeader && managedPRsContent && prsSectionChevron) {
     } else {
       managedPRsContent.classList.remove('collapsed');
       prsSectionChevron.classList.remove('collapsed');
+    }
+  });
+}
+
+// ── Releases Section Collapse/Expand ───────────────────────────────────
+var releasesHeader = document.getElementById('releasesHeader');
+var releasesContent = document.getElementById('releasesContent');
+var releasesSectionChevron = document.getElementById('releasesSectionChevron');
+var releasesSectionCollapsed = false;
+
+if (releasesHeader && releasesContent && releasesSectionChevron) {
+  releasesHeader.addEventListener('click', function(e) {
+    // Don't toggle if clicking on buttons
+    if (e.target.closest('.section-action-btn')) return;
+    
+    releasesSectionCollapsed = !releasesSectionCollapsed;
+    if (releasesSectionCollapsed) {
+      releasesContent.classList.add('collapsed');
+      releasesSectionChevron.classList.add('collapsed');
+    } else {
+      releasesContent.classList.remove('collapsed');
+      releasesSectionChevron.classList.remove('collapsed');
     }
   });
 }
@@ -126,7 +209,41 @@ bus.on(PlansTopics.PLANS_UPDATE, function(plans) {
   } else {
     multiSelectManager.setOrderedIds([]);
   }
+  
+  // Update Plans tab badge
+  updateTabBadge('plans', plans.length);
 });
+
+// Update PRs tab badge when PR list changes
+bus.on('prs:update', function(prs) {
+  updateTabBadge('prs', prs ? prs.length : 0);
+});
+
+// Update Releases tab badge when release list changes
+bus.on('releases:update', function(releases) {
+  updateTabBadge('releases', releases ? releases.length : 0);
+});
+
+// Auto-switch to PRs tab when PR is adopted
+bus.on('pr:state', function(pr) {
+  if (pr && pr.status === 'adopted') {
+    switchTab('prs');
+  }
+});
+
+// Badge update helper
+function updateTabBadge(tabName, count) {
+  var badgeId = 'tabBadge' + tabName.charAt(0).toUpperCase() + tabName.slice(1);
+  var badge = document.getElementById(badgeId);
+  if (badge) {
+    if (count > 0) {
+      badge.textContent = count.toString();
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
 
 // ── Global duration ticker ───────────────────────────────────────────
 // Identical pattern to plan detail panel: one global PULSE handler that
