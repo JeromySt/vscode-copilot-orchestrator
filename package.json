@@ -118,6 +118,42 @@
       {
         "command": "copilotOrchestrator.setupCopilotCli",
         "title": "Copilot Orchestrator: Setup Copilot CLI"
+      },
+      {
+        "command": "orchestrator.showReleasePanel",
+        "title": "Copilot Orchestrator: Show Release Panel"
+      },
+      {
+        "command": "orchestrator.createRelease",
+        "title": "Copilot Orchestrator: Create Release"
+      },
+      {
+        "command": "orchestrator.cancelRelease",
+        "title": "Copilot Orchestrator: Cancel Release"
+      },
+      {
+        "command": "orchestrator.startRelease",
+        "title": "Copilot Orchestrator: Start Release"
+      },
+      {
+        "command": "orchestrator.addPlanToRelease",
+        "title": "Copilot Orchestrator: Add Plan to Release"
+      },
+      {
+        "command": "orchestrator.removePlanFromRelease",
+        "title": "Copilot Orchestrator: Remove Plan from Release"
+      },
+      {
+        "command": "orchestrator.updateReleaseConfig",
+        "title": "Copilot Orchestrator: Update Release Config"
+      },
+      {
+        "command": "orchestrator.retryReleaseMerge",
+        "title": "Copilot Orchestrator: Retry Release Merge"
+      },
+      {
+        "command": "orchestrator.addressPRFeedback",
+        "title": "Copilot Orchestrator: Address PR Feedback"
       }
     ],
     "views": {
