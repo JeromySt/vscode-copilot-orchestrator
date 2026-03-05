@@ -31,3 +31,6 @@ export * from './IReleaseManager';
 export * from './IReleasePRMonitor';
 export * from './IReleaseConfigManager';
 export * from './IIsolatedRepoManager';
+export * from './IRemotePRService';
+export * from './IRemoteProviderDetector';
+export * from './IRemotePRServiceFactory';
