@@ -29,3 +29,4 @@ export * from './IPlanDefinition';
 export * from './IPlanRepositoryStore';
 export * from './IRemotePRService';
 export * from './IRemoteProviderDetector';
+export * from './IRemotePRServiceFactory';

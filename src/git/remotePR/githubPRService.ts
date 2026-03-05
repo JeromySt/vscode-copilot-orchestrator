@@ -284,7 +284,14 @@ export class GitHubPRService implements IRemotePRService {
    * Security: Token is passed via GH_TOKEN env var, NEVER as CLI argument.
    */
   private _buildEnv(provider: RemoteProviderInfo, credentials: RemoteCredentials): Record<string, string> {
-    const env: Record<string, string> = { ...process.env };
+    const env: Record<string, string> = {};
+    
+    // Copy process.env, filtering out undefined values
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) {
+        env[key] = value;
+      }
+    }
     
     if (credentials.token) {
       env.GH_TOKEN = credentials.token;
