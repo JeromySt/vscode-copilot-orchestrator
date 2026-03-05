@@ -88,6 +88,72 @@ plan or group ID is required for queries and control operations.
 | `retry_copilot_node` | Retry a specific failed node (global lookup, no plan ID needed) |
 | `get_copilot_node_failure_context` | Get failure context for a node (global lookup, no plan ID needed) |
 
+### Release Management API
+
+The release API combines multiple plan commits into a single pull request with autonomous monitoring and feedback resolution. Supports GitHub, GitHub Enterprise, and Azure DevOps.
+
+#### Release Creation and Control
+
+| Tool | Description |
+|------|-------------|
+| `create_copilot_release` | Create a multi-plan release with auto-detected provider (GitHub/GHE/Azure DevOps) |
+| `start_copilot_release` | Start executing a release (merge → PR creation → monitoring → addressing) |
+| `cancel_copilot_release` | Cancel an in-progress release |
+
+#### Status and Queries
+
+| Tool | Description |
+|------|-------------|
+| `get_copilot_release_status` | Get detailed status, progress, and PR state for a release |
+| `list_copilot_releases` | List all releases with optional status filter |
+
+**Example: Creating and starting a release**
+
+```json
+// Create a release combining multiple plans
+{
+  "name": "v1.2.0 Release",
+  "planIds": ["plan-abc-123", "plan-def-456"],
+  "releaseBranch": "release/v1.2.0",
+  "targetBranch": "main",
+  "autoStart": true
+}
+// Returns: { releaseId: "rel-xyz", status: "merging", message: "..." }
+
+// Monitor progress
+{
+  "releaseId": "rel-xyz"
+}
+// Returns: {
+//   release: { id, name, status, prNumber, prUrl, ... },
+//   progress: { mergeResults, prMonitoring: { checksStatus, unresolvedComments, ... } }
+// }
+```
+
+**Release Lifecycle:**
+
+1. **drafting** → Release created, awaiting start
+2. **merging** → Merging plan commits into release branch in isolated clone
+3. **creating-pr** → Creating pull request with auto-detected provider
+4. **monitoring** → 40-minute monitoring cycles (checks, comments, security alerts)
+5. **addressing** → Spawning Copilot agents to fix issues and reply to feedback
+6. **succeeded** → PR merged successfully
+7. **failed** / **canceled** → Terminal states
+
+**Provider Auto-Detection:**
+
+The release system automatically detects your remote provider from the git remote URL:
+
+- **GitHub** (`github.com`) → Credentials via `gh auth token` → `git credential fill` → `GITHUB_TOKEN`
+- **GitHub Enterprise** (custom hostname) → Same credential chain as GitHub
+- **Azure DevOps** (`dev.azure.com`) → Credentials via `az account get-access-token` → `git credential fill` → `AZURE_DEVOPS_TOKEN`
+
+**Isolated Clones:**
+
+Releases execute in isolated git clones under `.orchestrator/release/<sanitized-branch>/` for concurrent release support and persistent state.
+
+See [docs/RELEASES.md](RELEASES.md) for the complete release user guide, credential troubleshooting, and FAQ.
+
 ### Model Selection
 
 Both `create_copilot_plan` and `create_copilot_node` support a `model` property on each node, allowing you to choose which LLM runs the agent work. Models are dynamically discovered from the installed Copilot CLI and organized into three tiers:
