@@ -264,6 +264,15 @@ export async function initializeMcpServer(
     const repo = c.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
     return new McpHandler(planRunner, workspacePath, git, configProvider, repo);
   });
+
+  // Register PlanArchiver with PlanRunner dependency
+  scope.register(Tokens.IPlanArchiver, (c) => {
+    const { PlanArchiver } = require('../plan/planArchiver');
+    const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+    const repo = c.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
+    return new PlanArchiver(planRunner, repo, git);
+  });
+
   const mcpHandler = scope.resolve<IMcpRequestRouter>(Tokens.IMcpRequestRouter);
 
   // Create and start the IPC server
