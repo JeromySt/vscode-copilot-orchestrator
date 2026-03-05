@@ -180,5 +180,78 @@ export function renderPlansViewStyles(): string {
       color: var(--vscode-charts-yellow);
       font-weight: 600;
     }
+    
+    .section-divider {
+      margin: 16px 0 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--vscode-panel-border);
+    }
+    
+    .collapse-toggle {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: none;
+      border: none;
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      padding: 4px 8px;
+      width: 100%;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+    
+    .collapse-toggle:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    
+    .collapse-toggle .codicon {
+      transition: transform 0.2s;
+    }
+    
+    .collapse-toggle[aria-expanded='true'] .codicon {
+      transform: rotate(90deg);
+    }
+    
+    .archived-plans {
+      margin-top: 8px;
+    }
+    
+    .plan-item.archived {
+      opacity: 0.6;
+      filter: grayscale(20%);
+    }
+    
+    .plan-item.archived .plan-name {
+      font-style: italic;
+    }
+    
+    .plan-status.archived {
+      background: rgba(133, 133, 133, 0.15);
+      color: var(--vscode-descriptionForeground);
+      font-style: italic;
+    }
+    
+    .plan-item .archive-action {
+      display: none;
+      margin-left: auto;
+      padding: 2px 6px;
+      font-size: 11px;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    
+    .plan-item:hover .archive-action {
+      display: inline-block;
+    }
+    
+    .plan-item .archive-action:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
   </style>`;
 }
