@@ -6,6 +6,9 @@
 
 - [Overview](#overview)
 - [Quick Start](#quick-start)
+- [UI Workflows](#ui-workflows)
+  - [Create Release from Current Branch](#create-release-from-current-branch)
+  - [Assign Plans to Release](#assign-plans-to-release)
 - [Multi-Provider Support](#multi-provider-support)
 - [Release Workflow](#release-workflow)
 - [Storage Layout](#storage-layout)
@@ -75,6 +78,64 @@ Copilot will:
 //   progress: { mergeResults, prMonitoring: { ... } }
 // }
 ```
+
+---
+
+## UI Workflows
+
+### Create Release from Current Branch
+
+The quickest way to create a release from the active git branch:
+
+1. Switch to the **Releases** tab in the Orchestrator sidebar
+2. Click the **"From Current Branch"** button (git branch icon)
+3. The release wizard opens with:
+   - Release name pre-filled from the current branch (e.g., `release/v1.2.0` → `v1.2.0 Release`)
+   - Release branch set to current branch
+   - Target branch defaulted to `main`
+   - Empty plan list (you'll assign plans next)
+4. Add plans via:
+   - **Assign from Plans tab**: Select succeeded/partial plans → Right-click → "Assign to Release..." → Choose this release
+   - **Manual entry**: Type plan IDs in the wizard
+5. Click **Create** to draft the release
+6. Click **Start Release** to begin the merge → PR → monitoring cycle
+
+**When to use:**
+- You have a feature/release branch with completed plans you want to bundle into a PR
+- You want to quickly create a release without typing the branch name manually
+- The current branch is already the desired release branch (not `main` or another protected branch)
+
+### Assign Plans to Release
+
+After creating a release (from branch or via MCP), you can assign additional plans:
+
+**Via Plans Tab:**
+1. Switch to the **Plans** tab
+2. Select one or more plans (Ctrl+Click for multi-select)
+3. Right-click → **"Assign to Release..."**
+4. Choose the target release from the dropdown
+5. Plans are added to the release's `planIds` list
+
+**Via Context Menu:**
+1. Right-click a single plan card
+2. Select **"Assign to Release..."**
+3. Choose the release
+
+**Bulk Action:**
+1. Select multiple plans (Shift+Click for range, Ctrl+Click for individual)
+2. Click the **"Assign to Release..."** button in the bulk actions toolbar
+3. All selected plans are assigned to the chosen release
+
+**Requirements:**
+- Only plans with status `succeeded` or `partial` can be assigned
+- Plans must be from the same repository as the release
+- Assigning to a release in `drafting` status adds plans before PR creation
+- Assigning to a release in `merging`, `creating-pr`, or `monitoring` status is not allowed (release must complete or be canceled first)
+
+**When to use:**
+- You've created a release but forgot to include some plans
+- Additional plans completed after the release was created
+- You want to batch-assign plans discovered via search or filter
 
 ---
 

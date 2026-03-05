@@ -23,7 +23,7 @@ import type { IPlanRunner } from '../interfaces/IPlanRunner';
 export function registerReleaseCommands(
   context: vscode.ExtensionContext,
   getReleaseData: (id: string) => ReleaseDefinition | undefined,
-  releaseManager?: IReleaseManager,
+  releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager,
   planRunner?: IPlanRunner,
 ): void {
   context.subscriptions.push(

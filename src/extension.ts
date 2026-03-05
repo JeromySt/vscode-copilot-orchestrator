@@ -150,7 +150,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerPlanCommands(context, planRunner, pulse, container);
   registerUtilityCommands(context);
   // Register release commands with actual releaseManager
-  registerReleaseCommands(context, (id: string) => releaseManager.getRelease(id), releaseManager);
+  registerReleaseCommands(context, (id: string) => releaseManager.getRelease(id), releaseManager, planRunner);
   // Register PR lifecycle commands
   registerPRLifecycleCommands(context, (id: string) => prLifecycleManager.getManagedPR(id));
 
