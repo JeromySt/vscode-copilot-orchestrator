@@ -275,7 +275,13 @@ export async function initializeMcpServer(
     const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
     const configProvider = c.resolve<import('../interfaces/IConfigProvider').IConfigProvider>(Tokens.IConfigProvider);
     const repo = c.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
-    return new McpHandler(planRunner, workspacePath, git, configProvider, repo);
+    const copilotRunner = c.resolve<import('../interfaces/ICopilotRunner').ICopilotRunner>(Tokens.ICopilotRunner);
+    
+    // Create PlanRecovery instance
+    const { PlanRecovery } = require('../plan/planRecovery');
+    const planRecovery = new PlanRecovery(planRunner, repo, git, copilotRunner);
+    
+    return new McpHandler(planRunner, workspacePath, git, configProvider, repo, planRecovery);
   });
   const mcpHandler = scope.resolve<IMcpRequestRouter>(Tokens.IMcpRequestRouter);
 
