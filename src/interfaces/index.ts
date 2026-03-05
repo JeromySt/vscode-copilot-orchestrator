@@ -29,6 +29,7 @@ export * from './IPlanDefinition';
 export * from './IPlanRepositoryStore';
 export * from './IReleaseManager';
 export * from './IReleasePRMonitor';
+export * from './IReleaseStore';
 export * from './IReleaseConfigManager';
 export * from './IIsolatedRepoManager';
 export * from './IRemotePRService';

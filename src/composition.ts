@@ -54,6 +54,7 @@ import { DefaultFileSystem } from './core/defaultFileSystem';
 import { DefaultRemoteProviderDetector } from './git/remotePR/remoteProviderDetector';
 import { GitHubPRService } from './git/remotePR/githubPRService';
 import { RemotePRServiceFactory } from './git/remotePR/remotePRServiceFactory';
+import { FileSystemReleaseStore } from './plan/store/releaseStore';
 
 /**
  * Create and wire the production DI container.
@@ -252,6 +253,16 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
       const worktreeRoot = workspacePath ? path.join(workspacePath, '.worktrees') : '';
       return new DefaultPlanRepository(store, workspacePath, worktreeRoot);
+    },
+  );
+
+  // ─── Release Store ──────────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IReleaseStore').IReleaseStore>(
+    Tokens.IReleaseStore,
+    (c) => {
+      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+      const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+      return new FileSystemReleaseStore(workspacePath, fileSystem);
     },
   );
 
