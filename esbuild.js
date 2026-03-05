@@ -54,6 +54,7 @@ async function main() {
       'src/ui/webview/entries/planDetail.ts',
       'src/ui/webview/entries/nodeDetail.ts',
       'src/ui/webview/entries/plansList.ts',
+      'src/ui/webview/entries/release.ts',
     ],
     bundle: true,
     format: 'iife',

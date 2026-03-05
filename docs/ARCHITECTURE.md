@@ -712,16 +712,17 @@ graph LR
     ROUTE --> PLAN
 ```
 
-**21 MCP tools** across two APIs:
+**26 MCP tools** across three APIs:
 
 | API | Tools | Examples |
 |-----|-------|----------|
 | **Plan-based** | 15 | `create_copilot_plan`, `scaffold_copilot_plan`, `add_copilot_plan_job`, `finalize_copilot_plan`, `get_copilot_plan_status`, `retry_copilot_plan`, `reshape_copilot_plan` |
 | **Job-centric** | 6 | `get_copilot_job`, `list_copilot_jobs`, `retry_copilot_job`, `force_fail_copilot_job`, `update_copilot_plan_job` |
+| **Release Management** | 5 | `create_copilot_release`, `start_copilot_release`, `get_copilot_release_status`, `cancel_copilot_release`, `list_copilot_releases` |
 
 ---
 
-## DI Token Registry (23 tokens)
+## DI Token Registry (31 tokens)
 
 | Token | Interface | Concrete Class | Lifetime |
 |-------|-----------|---------------|----------|
@@ -748,6 +749,14 @@ graph LR
 | `IPlanRepository` | `IPlanRepository` | `DefaultPlanRepository` | Singleton |
 | `IAgentDelegator` | _(internal)_ | `AgentDelegator` | Singleton |
 | `INodeRunner` | `INodeRunner` | _(composed)_ | Singleton |
+| `IReleaseManager` | `IReleaseManager` | `DefaultReleaseManager` | Singleton |
+| `IReleasePRMonitor` | `IReleasePRMonitor` | `DefaultReleasePRMonitor` | Singleton |
+| `IIsolatedRepoManager` | `IIsolatedRepoManager` | `DefaultIsolatedRepoManager` | Singleton |
+| `IReleaseStore` | `IReleaseStore` | `FileSystemReleaseStore` | Singleton |
+| `IRemotePRService` | `IRemotePRService` | `GitHubPRService` / `AdoPRService` | Transient |
+| `IRemoteProviderDetector` | `IRemoteProviderDetector` | `DefaultRemoteProviderDetector` | Singleton |
+| `IRemotePRServiceFactory` | `IRemotePRServiceFactory` | `DefaultRemotePRServiceFactory` | Singleton |
+| `IReleaseConfigManager` | `IReleaseConfigManager` | `DefaultReleaseConfigManager` | Singleton |
 
 ---
 
@@ -795,6 +804,177 @@ Multi-instance coordination via `capacity-registry.json` at the global storage p
 
 ---
 
+## Release Architecture
+
+The release system combines multiple plan commits into a single pull request with autonomous monitoring and feedback resolution, supporting GitHub, GitHub Enterprise, and Azure DevOps.
+
+### Release Pipeline Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Release Wizard Panel
+    participant RM as ReleaseManager
+    participant IRM as IsolatedRepoManager
+    participant Git as GitOperations
+    participant Factory as RemotePRServiceFactory
+    participant Detector as RemoteProviderDetector
+    participant Service as GitHubPRService/AdoPRService
+    participant Monitor as ReleasePRMonitor
+
+    User->>UI: Create Release
+    UI->>RM: createRelease(options)
+    RM->>IRM: createIsolatedRepo(releaseId, repoPath, branch)
+    IRM->>Git: clone --shared (or --reference fallback)
+    Git-->>IRM: isolatedRepoPath
+    IRM-->>RM: IsolatedRepoInfo
+    RM->>RM: Store release metadata
+    RM-->>UI: ReleaseDefinition
+
+    User->>UI: Start Release
+    UI->>RM: startRelease(releaseId)
+    
+    Note over RM: Status: merging
+    RM->>Git: Merge all plan commits
+    
+    Note over RM: Status: creating-pr
+    RM->>Factory: getServiceForRepo(isolatedRepoPath)
+    Factory->>Detector: detect(isolatedRepoPath)
+    Detector->>Git: git config --get remote.origin.url
+    Git-->>Detector: https://github.com/owner/repo.git
+    Detector-->>Factory: RemoteProviderInfo(type: 'github')
+    Factory-->>RM: GitHubPRService
+    
+    RM->>Service: acquireCredentials(providerInfo)
+    Service->>Service: gh auth token → git credential fill → $GITHUB_TOKEN
+    Service-->>RM: RemoteCredentials
+    
+    RM->>Service: createPR(options)
+    Service->>Service: gh pr create (or az repos pr create)
+    Service-->>RM: PRCreateResult(prNumber, prUrl)
+    
+    Note over RM: Status: monitoring
+    RM->>Monitor: startMonitoring(releaseId, prNumber, 40min)
+    
+    loop Every 2 minutes
+        Monitor->>Service: getPRChecks(prNumber)
+        Monitor->>Service: getPRComments(prNumber)
+        Monitor->>Service: getSecurityAlerts(branch)
+        
+        alt CI failures or unresolved comments
+            Note over Monitor: Status: addressing
+            Monitor->>Monitor: Spawn Copilot agent to fix issues
+            Monitor->>Service: replyToComment() / resolveThread()
+        end
+    end
+    
+    Monitor-->>RM: PR merged (or timeout)
+    Note over RM: Status: succeeded
+    RM-->>UI: Release completed
+```
+
+### Provider Detection and Credential Chain
+
+```mermaid
+graph TB
+    subgraph "Provider Detection"
+        URL[git remote URL]
+        Parse[URL Parser]
+        Type{Provider Type}
+    end
+    
+    subgraph "Credential Acquisition"
+        GH_CLI[gh auth token]
+        AZ_CLI[az account get-access-token]
+        GIT_CRED[git credential fill]
+        ENV_GH[GITHUB_TOKEN env var]
+        ENV_ADO[AZURE_DEVOPS_TOKEN env var]
+    end
+    
+    URL --> Parse
+    Parse --> Type
+    
+    Type -->|github.com| GH{GitHub}
+    Type -->|custom hostname| GHE{GitHub Enterprise}
+    Type -->|dev.azure.com| ADO{Azure DevOps}
+    
+    GH --> GH_CLI
+    GH_CLI -->|fallback| GIT_CRED
+    GIT_CRED -->|fallback| ENV_GH
+    
+    GHE --> GH_CLI
+    
+    ADO --> AZ_CLI
+    AZ_CLI -->|fallback| GIT_CRED
+    GIT_CRED -->|fallback| ENV_ADO
+    
+    style GH fill:#e3f2fd
+    style GHE fill:#e3f2fd
+    style ADO fill:#fff3e0
+```
+
+### Isolated Repository Architecture
+
+Releases execute in isolated git clones under `.orchestrator/release/<sanitized-branch>/`:
+
+```mermaid
+graph TB
+    subgraph "Main Repository"
+        MainRepo[Repository Root]
+        MainGit[.git/]
+    end
+    
+    subgraph "Isolated Clones (.orchestrator/release/)"
+        Clone1[release-v1.2.0/]
+        Clone2[hotfix-auth/]
+        Clone3[feature-bundle/]
+        
+        C1Git[.git/ (shared objects)]
+        C2Git[.git/ (shared objects)]
+        C3Git[.git/ (shared objects)]
+    end
+    
+    MainRepo --> MainGit
+    MainGit -.->|git clone --shared| C1Git
+    MainGit -.->|git clone --shared| C2Git
+    MainGit -.->|git clone --shared| C3Git
+    
+    Clone1 --> C1Git
+    Clone2 --> C2Git
+    Clone3 --> C3Git
+    
+    style Clone1 fill:#c8e6c9
+    style Clone2 fill:#fff9c4
+    style Clone3 fill:#e1f5fe
+```
+
+**Key benefits:**
+- **Concurrent releases** — Multiple releases can run in parallel without conflicts
+- **Shared objects** — Uses `--shared` or `--reference` to avoid duplicating repository objects
+- **Persistent state** — Release artifacts remain after completion for debugging
+- **Safe cleanup** — Isolated clones can be removed without affecting the main repository
+
+### Storage Layout
+
+```
+.orchestrator/
+└── release/
+    ├── release-v1.2.0/                 # Isolated clone for release/v1.2.0
+    │   ├── .git/                       # Shared with main repo via --shared
+    │   ├── release-state.json          # Release metadata and status
+    │   └── <source files>              # Full working tree with merged commits
+    ├── hotfix-auth/                    # Another concurrent release
+    │   ├── .git/
+    │   ├── release-state.json
+    │   └── <source files>
+    └── feature-bundle/
+        ├── .git/
+        ├── release-state.json
+        └── <source files>
+```
+
+---
+
 ## Related Documentation
 
 | Document | Focus |
@@ -804,4 +984,5 @@ Multi-instance coordination via `capacity-registry.json` at the global storage p
 | [Copilot Integration](COPILOT_INTEGRATION.md) | MCP tools, agent delegation |
 | [Groups](GROUPS.md) | Visual hierarchy, namespace isolation |
 | [Worktrees & Merging](WORKTREES_AND_MERGING.md) | Git isolation, merge strategies |
+| [Releases](RELEASES.md) | Release management, multi-provider PR support, monitoring |
 | [Contributing](CONTRIBUTING.md) | Setup, workflow, PR process |

@@ -4,7 +4,7 @@
 
 ## Overview
 
-Copilot Orchestrator uses a Symbol-based dependency injection container with **23 tokens** to manage service lifecycle, enable testability, and provide clean separation of concerns.
+Copilot Orchestrator uses a Symbol-based dependency injection container with **31 tokens** to manage service lifecycle, enable testability, and provide clean separation of concerns.
 
 ```mermaid
 classDiagram
@@ -752,6 +752,14 @@ Available DI tokens for service resolution:
 | `INodeExecutor` | `INodeExecutor` | Node phase execution |
 | `INodeStateMachine` | `INodeStateMachine` | Node state transitions |
 | `IFileSystem` | `IFileSystem` | Filesystem operations |
+| `IReleaseManager` | `IReleaseManager` | Release lifecycle orchestration |
+| `IReleasePRMonitor` | `IReleasePRMonitor` | PR monitoring and feedback addressing |
+| `IIsolatedRepoManager` | `IIsolatedRepoManager` | Isolated repository clone management |
+| `IReleaseStore` | `IReleaseStore` | Release state persistence |
+| `IRemotePRService` | `IRemotePRService` | Provider-agnostic PR operations |
+| `IRemoteProviderDetector` | `IRemoteProviderDetector` | Remote provider detection and credential acquisition |
+| `IRemotePRServiceFactory` | `IRemotePRServiceFactory` | PR service factory with auto-detection |
+| `IReleaseConfigManager` | `IReleaseConfigManager` | Release configuration management |
 
 ---
 

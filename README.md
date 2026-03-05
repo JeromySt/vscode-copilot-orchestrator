@@ -37,7 +37,8 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | ⚡ **Automated 8-Phase Pipeline** | Merge FI → Prechecks → AI Work → Commit → Postchecks → Merge RI → Verify RI → Cleanup |
 | 🔧 **Multi-Retry Auto-Heal** | Failed phases automatically retried up to 4 times with fresh AI agents and failure context |
 | 📈 **Timeline Gantt Chart** | [Experimental] Pixel-perfect timeline showing execution history with phases, retries, and durations |
-| 🤖 **21 Native MCP Tools** | Create and manage plans directly from GitHub Copilot Chat |
+| 🤖 **26 Native MCP Tools** | Create and manage plans and releases directly from GitHub Copilot Chat |
+| 🚀 **Release Management** | Combine multiple plans into a single PR with autonomous monitoring (GitHub/GHE/Azure DevOps) |
 | ⏸️ **Pause / Resume / Retry** | Pause running plans, resume later, or retry failed nodes with AI failure context |
 | 🔒 **Secure MCP Architecture** | Nonce-authenticated IPC ensures 1:1 pairing between VS Code and MCP stdio process |
 | 🛡️ **Default Branch Protection** | Auto-creates feature branches when targeting main/master — never writes to default |
@@ -400,6 +401,57 @@ Base: feature/x  →  Target: feature/x  (used as-is)
 ```
 
 AI agents **never write directly to your default branch**.
+
+### 🚀 Release Management
+
+Create production releases that combine multiple plan commits into a single pull request, with autonomous monitoring and feedback resolution — supporting **GitHub**, **GitHub Enterprise**, and **Azure DevOps**.
+
+#### How It Works
+
+1. **Create a release** combining commits from multiple succeeded plans
+2. **Merge automation** creates an isolated repository clone under `.orchestrator/release/<branch>/` and merges all plan commits
+3. **PR creation** with auto-detected provider (GitHub/GHE/Azure DevOps) and credential acquisition
+4. **40-minute monitoring cycles** that check CI status, review comments, security alerts
+5. **Autonomous addressing** spawns Copilot agents to fix failures, reply to comments, resolve threads
+
+#### Multi-Provider Support
+
+The orchestrator **auto-detects your remote provider** from the git remote URL:
+
+- **GitHub** (`github.com`) → Uses `gh auth token` → `git credential fill` → `GITHUB_TOKEN`
+- **GitHub Enterprise** (custom hostname) → Uses `gh auth token` → `git credential fill` → `GITHUB_TOKEN`
+- **Azure DevOps** (`dev.azure.com`) → Uses `az account get-access-token` → `git credential fill` → `AZURE_DEVOPS_TOKEN`
+
+No configuration needed — provider detection and credential acquisition happen automatically.
+
+#### Isolated Repository Clones
+
+Releases execute in **isolated git clones** under `.orchestrator/release/<sanitized-branch>/`, never in OS temp directories. This enables:
+
+- **Concurrent releases** — Run multiple release workflows in parallel without conflicts
+- **Persistent state** — Release artifacts remain after completion for debugging
+- **Safe cleanup** — Isolated clones can be removed without affecting the main repository
+
+#### MCP Tools
+
+```typescript
+// Create a release combining multiple plans
+create_copilot_release({
+  name: "v1.2.0 Release",
+  planIds: ["plan-123", "plan-456"],
+  releaseBranch: "release/v1.2.0",
+  targetBranch: "main",
+  autoStart: true
+})
+
+// Monitor progress
+get_copilot_release_status({ releaseId: "rel-abc" })
+
+// List all releases
+list_copilot_releases({ status: "monitoring" })
+```
+
+See [docs/RELEASES.md](docs/RELEASES.md) for detailed user guide, credential troubleshooting, and FAQ.
 
 ### 📡 Real-Time Process Monitoring
 
