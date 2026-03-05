@@ -690,7 +690,75 @@ graph TB
 
 ---
 
+## Plan Archiving
+
+The `PlanArchiver` service preserves completed plan state/logs while cleaning up git worktrees and branches to reduce repository clutter.
+
+### Archive Flow
+
+```mermaid
+sequenceDiagram
+    participant UI as User/MCP
+    participant Arch as PlanArchiver
+    participant Runner as PlanRunner
+    participant Git as GitOperations
+    participant Repo as PlanRepository
+
+    UI->>Arch: archive(planId, options)
+    Arch->>Runner: get(planId)
+    Arch->>Runner: getStatus(planId)
+    alt not archivable (running, paused)
+        Arch-->>UI: error
+    end
+    
+    loop for each job node
+        Arch->>Git: worktrees.isValid(path)
+        Arch->>Git: worktrees.removeSafe(path)
+    end
+    
+    Arch->>Git: worktrees.isValid(snapshot)
+    Arch->>Git: worktrees.removeSafe(snapshot)
+    Arch->>Git: worktrees.prune(repoPath)
+    
+    Arch->>Git: branches.isDefaultBranch(target)
+    alt not default
+        Arch->>Git: branches.deleteLocal(target)
+    end
+    
+    opt deleteRemoteBranches
+        Arch->>Git: branches.deleteRemote(target)
+    end
+    
+    Arch->>Arch: _markAsArchived(planId)
+    Arch->>Repo: saveState(plan)
+    
+    Arch-->>UI: success + cleanup counts
+```
+
+### Archive Process
+
+1. **Validate plan is archivable** (status: succeeded, partial, failed, or canceled)
+2. **Remove all job worktrees** (validates paths are inside repo/worktree root)
+3. **Remove snapshot worktree** (if exists)
+4. **Delete local target branch** (never deletes default branch)
+5. **Delete snapshot branch** (force delete)
+6. **Optionally delete remote branches** (if `deleteRemoteBranches: true`)
+7. **Prune stale worktree references** (`git worktree prune`)
+8. **Mark plan as 'archived'** (adds state transition to plan history)
+9. **Persist updated state** (saves to disk)
+10. **Emit planUpdated event** (refreshes UI)
+
+### Security Validation
+
+- **Path traversal prevention**: Worktree paths validated with `path.resolve()` + `startsWith()` check
+- **Dangerous paths rejected**: Worktrees outside `repoPath` or `worktreeRoot` are skipped with warning
+- **Default branch protection**: Never deletes the default branch (e.g., `main`, `master`)
+- **Graceful degradation**: Individual cleanup failures (worktree, branch) don't halt the archive process
+
+---
+
 ## MCP Transport Architecture
+
 
 ```mermaid
 graph LR
@@ -723,7 +791,7 @@ graph LR
 
 ---
 
-## DI Token Registry (23 tokens)
+## DI Token Registry (24 tokens)
 
 | Token | Interface | Concrete Class | Lifetime |
 |-------|-----------|---------------|----------|
@@ -748,6 +816,7 @@ graph LR
 | `IPlanConfigManager` | `IPlanConfigManager` | `PlanConfigManager` | Singleton |
 | `IPlanRepositoryStore` | `IPlanRepositoryStore` | `FileSystemPlanStore` | Singleton |
 | `IPlanRepository` | `IPlanRepository` | `DefaultPlanRepository` | Singleton |
+| `IPlanArchiver` | `IPlanArchiver` | `PlanArchiver` | Singleton |
 | `IAgentDelegator` | _(internal)_ | `AgentDelegator` | Singleton |
 | `INodeRunner` | `INodeRunner` | _(composed)_ | Singleton |
 

@@ -103,6 +103,11 @@
         "icon": "$(trash)"
       },
       {
+        "command": "orchestrator.archivePlan",
+        "title": "Copilot Orchestrator: Archive Plan",
+        "icon": "$(archive)"
+      },
+      {
         "command": "orchestrator.refreshPlans",
         "title": "Copilot Orchestrator: Refresh Plans",
         "icon": "$(refresh)"

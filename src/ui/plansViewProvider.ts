@@ -134,6 +134,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         case 'deletePlan':
           vscode.commands.executeCommand('orchestrator.deletePlan', message.planId);
           break;
+        case 'archivePlan':
+          vscode.commands.executeCommand('orchestrator.archivePlan', message.planId);
+          break;
         case 'refresh':
           this._initialRefreshDone = true;
           this.refresh();
@@ -183,8 +186,22 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
    */
   private _buildPlanData(plan: PlanInstance) {
     const sm = this._planRunner.getStateMachine(plan.id);
-    // Scaffolding plans use their spec status directly (state machine doesn't understand them)
-    const status = (plan.spec as any)?.status === 'scaffolding' ? 'scaffolding' : (sm?.computePlanStatus() || 'pending');
+    // Check if plan is archived by looking at stateHistory
+    let status: string;
+    if (plan.stateHistory && plan.stateHistory.length > 0) {
+      const lastState = plan.stateHistory[plan.stateHistory.length - 1];
+      if (lastState.to === 'archived') {
+        status = 'archived';
+      } else if ((plan.spec as any)?.status === 'scaffolding') {
+        status = 'scaffolding';
+      } else {
+        status = sm?.computePlanStatus() || 'pending';
+      }
+    } else {
+      // Scaffolding plans use their spec status directly (state machine doesn't understand them)
+      status = (plan.spec as any)?.status === 'scaffolding' ? 'scaffolding' : (sm?.computePlanStatus() || 'pending');
+    }
+    
     const defaultCounts: Record<NodeStatus, number> = {
       pending: 0, ready: 0, scheduled: 0, running: 0,
       succeeded: 0, failed: 0, blocked: 0, canceled: 0

@@ -4,7 +4,7 @@
 
 ## Overview
 
-Copilot Orchestrator uses a Symbol-based dependency injection container with **23 tokens** to manage service lifecycle, enable testability, and provide clean separation of concerns.
+Copilot Orchestrator uses a Symbol-based dependency injection container with **24 tokens** to manage service lifecycle, enable testability, and provide clean separation of concerns.
 
 ```mermaid
 classDiagram
@@ -734,6 +734,7 @@ Available DI tokens for service resolution:
 | `IPlanRepository` | `IPlanRepository` | High-level plan lifecycle management |
 | `IPlanRepositoryStore` | `IPlanRepositoryStore` | Low-level plan storage operations |
 | `IPlanDefinition` | `IPlanDefinition` | Lazy work spec access for plan nodes |
+| `IPlanArchiver` | `IPlanArchiver` | Plan archiving and cleanup |
 | `ILogger` | `ILogger` | Application logging service |
 | `IGitOperations` | `IGitOperations` | Git repository operations |
 | `IProcessMonitor` | `IProcessMonitor` | Process lifecycle monitoring |

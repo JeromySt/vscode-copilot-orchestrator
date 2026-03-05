@@ -139,7 +139,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   initializePlansView(context, planRunner, pulse);
 
   // ── Commands ───────────────────────────────────────────────────────────
-  registerPlanCommands(context, planRunner, pulse);
+  registerPlanCommands(context, planRunner, pulse, container);
   registerUtilityCommands(context);
 
   // ── Branch Change Watcher ──────────────────────────────────────────────

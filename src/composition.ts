@@ -51,6 +51,7 @@ import { FileSystemPlanStore } from './plan/store/FileSystemPlanStore';
 import { DefaultPlanRepository } from './plan/repository/DefaultPlanRepository';
 import { DefaultFileSystem } from './core/defaultFileSystem';
 import { GitignoreDebouncer } from './core/gitignoreDebouncer';
+import { PlanArchiver } from './plan/planArchiver';
 
 /**
  * Create and wire the production DI container.
@@ -239,6 +240,14 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const worktreeRoot = workspacePath ? path.join(workspacePath, '.worktrees') : '';
       return new DefaultPlanRepository(store, workspacePath, worktreeRoot);
     },
+  );
+
+  // ─── Plan Archiver ──────────────────────────────────────────────────
+  // PlanArchiver requires a PlanRunner at construction time.
+  // Scoped containers override this registration with a configured instance.
+  container.register(
+    Tokens.IPlanArchiver,
+    () => { throw new Error('IPlanArchiver must be resolved from a scoped container with a PlanRunner'); },
   );
 
   return container;

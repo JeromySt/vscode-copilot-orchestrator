@@ -154,3 +154,9 @@ export const IPlanRepository = Symbol('IPlanRepository');
  * Provides storage backend for plan persistence.
  */
 export const IPlanRepositoryStore = Symbol('IPlanRepositoryStore');
+
+/**
+ * Token for IPlanArchiver service.
+ * Provides plan archiving functionality.
+ */
+export const IPlanArchiver = Symbol('IPlanArchiver');

@@ -20,6 +20,7 @@ export * from './getPlanHandler';
 // Plan control handlers
 export * from './pauseResumeHandler';
 export * from './cancelDeleteHandler';
+export * from './archivePlanHandler';
 
 // Plan retry handlers
 export * from './retryPlanHandler';

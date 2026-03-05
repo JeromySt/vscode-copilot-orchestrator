@@ -264,8 +264,18 @@ export async function initializeMcpServer(
     const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
     const configProvider = c.resolve<import('../interfaces/IConfigProvider').IConfigProvider>(Tokens.IConfigProvider);
     const repo = c.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
-    return new McpHandler(planRunner, workspacePath, git, configProvider, repo);
+    const archiver = c.resolve<import('../interfaces/IPlanArchiver').IPlanArchiver>(Tokens.IPlanArchiver);
+    return new McpHandler(planRunner, workspacePath, git, configProvider, repo, archiver);
   });
+
+  // Register PlanArchiver with PlanRunner dependency
+  scope.register(Tokens.IPlanArchiver, (c) => {
+    const { PlanArchiver } = require('../plan/planArchiver');
+    const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+    const repo = c.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
+    return new PlanArchiver(planRunner, repo, git);
+  });
+
   const mcpHandler = scope.resolve<IMcpRequestRouter>(Tokens.IMcpRequestRouter);
 
   // Create and start the IPC server
@@ -379,7 +389,8 @@ export function initializePlansView(
 export function registerPlanCommands(
   context: vscode.ExtensionContext,
   planRunner: PlanRunner,
-  pulse?: import('../interfaces/IPulseEmitter').IPulseEmitter
+  pulse?: import('../interfaces/IPulseEmitter').IPulseEmitter,
+  container?: ServiceContainer
 ): void {
   log.info('Registering Plan commands...');
   
@@ -658,6 +669,80 @@ export function registerPlanCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.refreshPlans', () => {
       vscode.commands.executeCommand('orchestrator.plansView.refresh');
+    })
+  );
+  
+  // Archive Plan
+  context.subscriptions.push(
+    vscode.commands.registerCommand('orchestrator.archivePlan', async (planId?: string) => {
+      // If no planId provided, prompt user to select
+      if (!planId) {
+        const plans = planRunner.getAll().filter(p => {
+          const sm = planRunner.getStateMachine(p.id);
+          const status = sm?.computePlanStatus();
+          return status === 'succeeded' || status === 'partial' || status === 'failed' || status === 'canceled';
+        });
+        
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No completed plans to archive');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan to archive',
+        });
+        
+        if (!selected) {
+          return;
+        }
+        planId = selected.planId;
+      }
+      
+      const plan = planRunner.get(planId);
+      if (!plan) {
+        vscode.window.showErrorMessage(`Plan not found: ${planId}`);
+        return;
+      }
+      
+      const confirm = await vscode.window.showWarningMessage(
+        `Archive Plan "${plan.spec.name}"? This will clean up worktrees and branches while preserving logs.`,
+        { modal: true },
+        'Archive'
+      );
+      
+      if (confirm === 'Archive') {
+        if (!container) {
+          vscode.window.showErrorMessage('Container not available');
+          return;
+        }
+        
+        // Create a scoped container with PlanRunner and resolve archiver
+        const scope = container.createScope();
+        scope.register(Tokens.IPlanArchiver, (c) => {
+          const { PlanArchiver } = require('../plan/planArchiver');
+          const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+          const repo = c.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
+          return new PlanArchiver(planRunner, repo, git);
+        });
+        
+        const archiver = scope.resolve<import('../interfaces/IPlanArchiver').IPlanArchiver>(Tokens.IPlanArchiver);
+        
+        const result = await archiver.archive(planId);
+        
+        if (result.success) {
+          vscode.window.showInformationMessage(
+            `Archived plan "${plan.spec.name}". Cleaned up ${result.cleanedWorktrees.length} worktrees and ${result.cleanedBranches.length} branches.`
+          );
+        } else {
+          vscode.window.showErrorMessage(`Failed to archive plan: ${result.error}`);
+        }
+      }
     })
   );
   

@@ -78,9 +78,14 @@ class PlanListCardControl extends SubscribableControl {
   _initDom(data) {
     var progressClass = data.status === 'failed' ? 'failed' :
                        data.status === 'succeeded' ? 'succeeded' : '';
+    var canArchive = data.status === 'succeeded' || data.status === 'partial' || data.status === 'failed' || data.status === 'canceled';
+    var archiveButton = canArchive && data.status !== 'archived' ? 
+      '<button class="archive-action" data-plan-id="' + escapeHtml(data.id) + '" title="Archive this plan">$(archive)</button>' : '';
+    
     this.element.innerHTML =
       '<div class="plan-name">' +
         '<span class="plan-name-text" title="' + escapeHtml(data.name) + '">' + escapeHtml(data.name) + '</span>' +
+        archiveButton +
         '<span class="plan-status ' + data.status + '">' + (data.status === 'scaffolding' ? '\\u{1F6A7} Under Construction' : data.status) + '</span>' +
       '</div>' +
       '<div class="plan-details">' +
@@ -93,6 +98,15 @@ class PlanListCardControl extends SubscribableControl {
       '<div class="plan-progress">' +
         '<div class="plan-progress-bar ' + progressClass + '" style="width: ' + data.progress + '%"></div>' +
       '</div>';
+    
+    // Wire up archive button click
+    var archiveBtn = this.element.querySelector('.archive-action');
+    if (archiveBtn) {
+      archiveBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'archivePlan', planId: data.id });
+      });
+    }
   }
 
   _onUpdate(data) {
@@ -143,20 +157,65 @@ class PlanListContainerControl extends SubscribableControl {
     super(bus, controlId);
     this.containerId = containerId;
     this.planCards = new Map();
+    this.archivedCollapsed = this._loadCollapseState();
 
     this.subscribe(PlansTopics.PLANS_UPDATE, (data) => {
       this.updatePlans(data);
     });
+    
+    // Wire archived toggle
+    var self = this;
+    setTimeout(function() {
+      var toggle = document.getElementById('archivedToggle');
+      if (toggle) {
+        toggle.addEventListener('click', function() {
+          self.toggleArchived();
+        });
+      }
+    }, 0);
   }
 
   update() {}
+  
+  _loadCollapseState() {
+    try {
+      var state = vscode.getState();
+      return state && state.archivedCollapsed !== undefined ? state.archivedCollapsed : false;
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  _saveCollapseState() {
+    try {
+      var state = vscode.getState() || {};
+      state.archivedCollapsed = this.archivedCollapsed;
+      vscode.setState(state);
+    } catch (e) {}
+  }
+  
+  toggleArchived() {
+    this.archivedCollapsed = !this.archivedCollapsed;
+    this._saveCollapseState();
+    
+    var toggle = document.getElementById('archivedToggle');
+    var archivedPlans = document.getElementById('archivedPlans');
+    
+    if (toggle && archivedPlans) {
+      toggle.setAttribute('aria-expanded', String(!this.archivedCollapsed));
+      archivedPlans.style.display = this.archivedCollapsed ? 'none' : 'block';
+    }
+  }
 
   updatePlans(plans) {
     var container = this.getElement(this.containerId);
-    if (!container) return;
+    var archivedContainer = this.getElement('archivedPlans');
+    if (!container || !archivedContainer) return;
 
     if (!plans || plans.length === 0) {
       container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div>';
+      archivedContainer.innerHTML = '';
+      document.getElementById('archivedDivider').style.display = 'none';
       for (var entry of this.planCards.values()) { entry.dispose(); }
       this.planCards.clear();
       return;
@@ -164,6 +223,35 @@ class PlanListContainerControl extends SubscribableControl {
 
     var emptyEl = container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
+
+    // Separate active and archived plans
+    var activePlans = [];
+    var archivedPlans = [];
+    for (var i = 0; i < plans.length; i++) {
+      if (plans[i].status === 'archived') {
+        archivedPlans.push(plans[i]);
+      } else {
+        activePlans.push(plans[i]);
+      }
+    }
+    
+    // Update archived section visibility
+    var archivedDivider = document.getElementById('archivedDivider');
+    var archivedCountEl = document.getElementById('archivedCount');
+    if (archivedPlans.length > 0) {
+      archivedDivider.style.display = 'block';
+      if (archivedCountEl) archivedCountEl.textContent = String(archivedPlans.length);
+      
+      // Apply collapse state
+      var toggle = document.getElementById('archivedToggle');
+      if (toggle) {
+        toggle.setAttribute('aria-expanded', String(!this.archivedCollapsed));
+        archivedContainer.style.display = this.archivedCollapsed ? 'none' : 'block';
+      }
+    } else {
+      archivedDivider.style.display = 'none';
+      archivedContainer.innerHTML = '';
+    }
 
     var existingPlanIds = new Set(this.planCards.keys());
     var newPlanIds = new Set(plans.map(function(p) { return p.id; }));
@@ -184,7 +272,11 @@ class PlanListContainerControl extends SubscribableControl {
         structureChanged = true;
         var element = document.createElement('div');
         element.className = 'plan-item-wrapper';
-        container.appendChild(element);
+        
+        // Place in correct container
+        var targetContainer = plan.status === 'archived' ? archivedContainer : container;
+        targetContainer.appendChild(element);
+        
         var cardId = 'plan-card-' + plan.id;
         var card = new PlanListCardControl(bus, cardId, element, plan.id);
         this.planCards.set(plan.id, card);
@@ -199,9 +291,14 @@ class PlanListContainerControl extends SubscribableControl {
     }
 
     if (structureChanged) {
-      for (var i = 0; i < plans.length; i++) {
-        var card = this.planCards.get(plans[i].id);
+      // Rebuild both containers in correct order
+      for (var i = 0; i < activePlans.length; i++) {
+        var card = this.planCards.get(activePlans[i].id);
         if (card && card.element) container.appendChild(card.element);
+      }
+      for (var i = 0; i < archivedPlans.length; i++) {
+        var card = this.planCards.get(archivedPlans[i].id);
+        if (card && card.element) archivedContainer.appendChild(card.element);
       }
     }
 
@@ -210,18 +307,30 @@ class PlanListContainerControl extends SubscribableControl {
 
   addPlan(planData) {
     var container = this.getElement(this.containerId);
-    if (!container) return;
+    var archivedContainer = this.getElement('archivedPlans');
+    if (!container || !archivedContainer) return;
+    
+    var targetContainer = planData.status === 'archived' ? archivedContainer : container;
+    
     var emptyEl = container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
     if (this.planCards.has(planData.id)) {
       var existing = this.planCards.get(planData.id);
       existing._onUpdate(planData);
+      
+      // Move card if status changed between active/archived
+      if (existing.element) {
+        var currentParent = existing.element.parentNode;
+        if (currentParent && currentParent !== targetContainer) {
+          targetContainer.appendChild(existing.element);
+        }
+      }
       return;
     }
     var element = document.createElement('div');
     element.className = 'plan-item-wrapper';
-    if (container.firstChild) container.insertBefore(element, container.firstChild);
-    else container.appendChild(element);
+    if (targetContainer.firstChild) targetContainer.insertBefore(element, targetContainer.firstChild);
+    else targetContainer.appendChild(element);
     var cardId = 'plan-card-' + planData.id;
     var card = new PlanListCardControl(bus, cardId, element, planData.id);
     this.planCards.set(planData.id, card);
@@ -235,6 +344,7 @@ class PlanListContainerControl extends SubscribableControl {
     if (this.planCards.size === 0) {
       var container = this.getElement(this.containerId);
       if (container) container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div>';
+      document.getElementById('archivedDivider').style.display = 'none';
     }
   }
 

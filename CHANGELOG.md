@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - 30-second debounce delay for .gitignore re-application after branch changes, preventing dirty-branch race conditions that block `git checkout` operations
+- Plan archiving: preserve plan state/logs while cleaning up git worktrees and branches
+- "Archived" collapsible section in Plans sidebar with dimmed visual treatment
+- `archive_copilot_plan` MCP tool for programmatic archiving
+- Archive button on eligible plan cards (succeeded, partial, canceled)
 
 ## [0.14.0] - 2026-02-28
 
