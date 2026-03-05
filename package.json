@@ -154,6 +154,11 @@
       {
         "command": "orchestrator.addressPRFeedback",
         "title": "Copilot Orchestrator: Address PR Feedback"
+      },
+      {
+        "command": "orchestrator.adoptPR",
+        "title": "Copilot Orchestrator: Adopt PR",
+        "icon": "$(add)"
       }
     ],
     "views": {
@@ -436,7 +441,7 @@
   "devDependencies": {
     "@types/glob": "^9.0.0",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^25.3.0",
+    "@types/node": "^25.3.3",
     "@types/sinon": "^21.0.0",
     "@types/uuid": "^10.0.0",
     "@types/vscode": "^1.109.0",
