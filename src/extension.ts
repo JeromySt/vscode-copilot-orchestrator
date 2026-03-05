@@ -138,6 +138,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerPlanCommands(context, planRunner, pulse);
   registerUtilityCommands(context);
 
+  // ── Bulk Action Commands ───────────────────────────────────────────────
+  // Register BulkPlanActions with the container now that PlanRunner is available
+  const { BulkPlanActions } = require('./plan/bulkPlanActions');
+  const dialogService = container.resolve<import('./interfaces').IDialogService>(Tokens.IDialogService);
+  container.registerSingleton<import('./interfaces/IBulkPlanActions').IBulkPlanActions>(
+    Tokens.IBulkPlanActions,
+    () => new BulkPlanActions(planRunner, dialogService)
+  );
+  const bulkActions = container.resolve<import('./interfaces/IBulkPlanActions').IBulkPlanActions>(Tokens.IBulkPlanActions);
+  const { registerBulkCommands } = require('./commands');
+  registerBulkCommands(context, bulkActions);
+
   // ── Branch Change Watcher ──────────────────────────────────────────────
   // Watch for branch changes and ensure .gitignore entries
   const branchWatcher = new BranchChangeWatcher(Logger.for('git'));

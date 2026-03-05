@@ -30,7 +30,7 @@ if (typeof window.Orca === 'undefined') {
   throw new Error('window.Orca is undefined — plansList.js bundle did not load');
 }
 
-const { EventBus, SubscribableControl, Topics, escapeHtml, formatDurationMs } = window.Orca;
+const { EventBus, SubscribableControl, Topics, escapeHtml, formatDurationMs, MultiSelectManager } = window.Orca;
 
 // Global bus instance
 var bus = new EventBus();
@@ -60,16 +60,35 @@ class PlanListCardControl extends SubscribableControl {
     this.element.dataset.id = planId;
     this.element.classList.add('plan-item');
     this.element.tabIndex = 0;
+    this.element.setAttribute('role', 'option');
+    this.element.setAttribute('aria-selected', 'false');
 
     this.subscribe(PlansTopics.PLAN_STATE_CHANGE, (data) => {
       if (data && data.id === this.planId) this._onUpdate(data);
     });
 
-    this.element.addEventListener('click', () => {
-      vscode.postMessage({ type: 'previewPlan', planId: this.planId });
+    this.element.addEventListener('click', (e) => {
+      // Let MultiSelectManager handle the click
+      window._planMultiSelect.handleClick(this.planId, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, metaKey: e.metaKey });
+      
+      // Only preview/open if single-click without multi-select modifiers
+      if (!e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        vscode.postMessage({ type: 'previewPlan', planId: this.planId });
+      }
     });
     this.element.addEventListener('dblclick', () => {
       vscode.postMessage({ type: 'openPlan', planId: this.planId });
+    });
+    this.element.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      window._planMultiSelect.handleContextMenu(this.planId);
+      // Show context menu at cursor position
+      var menu = document.getElementById('contextMenu');
+      if (menu) {
+        menu.style.display = 'block';
+        menu.style.left = e.clientX + 'px';
+        menu.style.top = e.clientY + 'px';
+      }
     });
   }
 

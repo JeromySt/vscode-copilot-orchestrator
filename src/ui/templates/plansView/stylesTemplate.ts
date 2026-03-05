@@ -51,6 +51,14 @@ export function renderPlansViewStyles(): string {
       box-shadow: 0 0 0 2px var(--vscode-focusBorder) inset;
       border-left-width: 4px;
     }
+    .plan-item.selected {
+      background-color: var(--vscode-list-activeSelectionBackground);
+      color: var(--vscode-list-activeSelectionForeground);
+      outline: 1px solid var(--vscode-focusBorder);
+    }
+    .plan-item.selected .plan-status { 
+      opacity: 1;
+    }
     .plan-item.running { border-left-color: var(--vscode-progressBar-background); }
     .plan-item.succeeded { border-left-color: var(--vscode-testing-iconPassed); }
     .plan-item.failed { border-left-color: var(--vscode-testing-iconFailed); }
@@ -179,6 +187,94 @@ export function renderPlansViewStyles(): string {
     .capacity-instances.multiple {
       color: var(--vscode-charts-yellow);
       font-weight: 600;
+    }
+    
+    /* Bulk Actions Toolbar */
+    .bulk-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      margin-bottom: 8px;
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      gap: 8px;
+      animation: slideDown 0.2s ease-out;
+    }
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .selection-count {
+      font-weight: 600;
+      font-size: 11px;
+      color: var(--vscode-foreground);
+      flex-shrink: 0;
+    }
+    .bulk-buttons {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .bulk-btn {
+      font-size: 10px;
+      padding: 3px 8px;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      transition: background 0.15s ease;
+      white-space: nowrap;
+    }
+    .bulk-btn:hover:not(:disabled) {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .bulk-btn.danger {
+      color: var(--vscode-errorForeground);
+    }
+    .bulk-btn.danger:hover:not(:disabled) {
+      background: rgba(244, 71, 71, 0.15);
+    }
+    .bulk-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    
+    /* Context Menu */
+    .context-menu {
+      position: fixed;
+      background: var(--vscode-menu-background);
+      border: 1px solid var(--vscode-menu-border);
+      box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+      border-radius: 4px;
+      padding: 4px 0;
+      min-width: 160px;
+      z-index: 9999;
+      font-size: 12px;
+    }
+    .context-menu-item {
+      padding: 6px 16px;
+      cursor: pointer;
+      color: var(--vscode-menu-foreground);
+      transition: background 0.1s ease;
+    }
+    .context-menu-item:hover:not(.disabled) {
+      background: var(--vscode-menu-selectionBackground);
+      color: var(--vscode-menu-selectionForeground);
+    }
+    .context-menu-item.danger {
+      color: var(--vscode-errorForeground);
+    }
+    .context-menu-item.disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .context-menu-separator {
+      height: 1px;
+      background: var(--vscode-menu-separatorBackground);
+      margin: 4px 0;
     }
   </style>`;
 }

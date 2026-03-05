@@ -129,6 +129,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         case 'deletePlan':
           vscode.commands.executeCommand('orchestrator.deletePlan', message.planId);
           break;
+        case 'bulkAction':
+          this._handleBulkAction(message.action, message.planIds);
+          break;
         case 'refresh':
           this._initialRefreshDone = true;
           this.refresh();
@@ -168,6 +171,25 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         clearTimeout(this._debounceTimer);
       }
     });
+  }
+  
+  /**
+   * Handle bulk actions on multiple plans.
+   * 
+   * @param action - The action to perform (resume, pause, cancel, retry, finalize, delete)
+   * @param planIds - Array of plan IDs to act on
+   */
+  private async _handleBulkAction(action: string, planIds: string[]) {
+    if (!planIds || planIds.length === 0) {
+      return;
+    }
+    
+    // Capitalize first letter to match command naming convention
+    const commandAction = action.charAt(0).toUpperCase() + action.slice(1);
+    vscode.commands.executeCommand(
+      `orchestrator.bulk${commandAction}`,
+      planIds
+    );
   }
   
   /**
