@@ -9,16 +9,22 @@
 import * as vscode from 'vscode';
 import { ReleaseManagementPanel } from '../ui/panels/releaseManagementPanel';
 import type { ReleaseDefinition } from '../plan/types/release';
+import type { IReleaseManager } from '../interfaces/IReleaseManager';
+import type { IPlanRunner } from '../interfaces/IPlanRunner';
 
 /**
  * Register release management commands.
  *
  * @param context - VS Code extension context.
  * @param getReleaseData - Function to fetch release data.
+ * @param releaseManager - Optional release manager instance.
+ * @param planRunner - Optional plan runner instance.
  */
 export function registerReleaseCommands(
   context: vscode.ExtensionContext,
   getReleaseData: (id: string) => ReleaseDefinition | undefined,
+  releaseManager?: IReleaseManager,
+  planRunner?: IPlanRunner,
 ): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.showReleasePanel', (releaseId: string) => {
@@ -101,6 +107,142 @@ export function registerReleaseCommands(
     vscode.commands.registerCommand('orchestrator.addressPRFeedback', async (releaseId: string, feedbackId: string) => {
       // TODO: Implement addressing PR feedback
       vscode.window.showInformationMessage(`Addressing feedback ${feedbackId} in release ${releaseId} (not yet implemented)`);
+    }),
+
+    vscode.commands.registerCommand('orchestrator.assignToRelease', async (planIds: string[]) => {
+      if (!releaseManager || !planRunner) {
+        vscode.window.showErrorMessage('Release manager not available');
+        return;
+      }
+
+      // Validate that all selected plans are succeeded or partial
+      const invalidPlans: string[] = [];
+      for (const planId of planIds) {
+        const plan = planRunner.get(planId);
+        if (!plan) {
+          invalidPlans.push(planId);
+          continue;
+        }
+        const sm = planRunner.getStateMachine(planId);
+        const status = sm?.computePlanStatus();
+        if (status !== 'succeeded' && status !== 'partial') {
+          invalidPlans.push(planId);
+        }
+      }
+
+      if (invalidPlans.length > 0) {
+        vscode.window.showErrorMessage(
+          `Cannot assign plans to release: ${invalidPlans.length} plan(s) are not in succeeded or partial status`
+        );
+        return;
+      }
+
+      // Get drafting releases
+      const draftingReleases = releaseManager.getReleasesByStatus('drafting');
+      const items: vscode.QuickPickItem[] = draftingReleases.map(r => ({
+        label: r.name,
+        description: `${r.planIds.length} plan(s)`,
+        detail: `Branch: ${r.releaseBranch} → ${r.targetBranch}`,
+      }));
+
+      // Add "Create New" option
+      items.push({
+        label: '$(plus) Create New Release',
+        description: 'Create a new release with selected plans',
+      });
+
+      const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Select a release or create a new one',
+      });
+
+      if (!selected) {
+        return;
+      }
+
+      if (selected.label.startsWith('$(plus)')) {
+        // Create new release
+        vscode.commands.executeCommand('orchestrator.createReleaseFromPlans', planIds);
+      } else {
+        // Add to existing release
+        const release = draftingReleases.find(r => r.name === selected.label);
+        if (release) {
+          // For now, show a message that this will be implemented when we add the addPlanToRelease method
+          vscode.window.showInformationMessage(
+            `Adding ${planIds.length} plan(s) to release "${release.name}" (pending IReleaseManager.addPlanToRelease implementation)`
+          );
+        }
+      }
+    }),
+
+    vscode.commands.registerCommand('orchestrator.createReleaseFromPlans', async (planIds: string[]) => {
+      if (!releaseManager || !planRunner) {
+        vscode.window.showErrorMessage('Release manager not available');
+        return;
+      }
+
+      // Validate plans
+      const invalidPlans: string[] = [];
+      for (const planId of planIds) {
+        const plan = planRunner.get(planId);
+        if (!plan) {
+          invalidPlans.push(planId);
+          continue;
+        }
+        const sm = planRunner.getStateMachine(planId);
+        const status = sm?.computePlanStatus();
+        if (status !== 'succeeded' && status !== 'partial') {
+          invalidPlans.push(planId);
+        }
+      }
+
+      if (invalidPlans.length > 0) {
+        vscode.window.showErrorMessage(
+          `Cannot create release: ${invalidPlans.length} plan(s) are not in succeeded or partial status`
+        );
+        return;
+      }
+
+      // Prompt for release details
+      const name = await vscode.window.showInputBox({
+        prompt: 'Enter release name',
+        placeHolder: 'v1.0.0',
+      });
+      if (!name) {
+        return;
+      }
+
+      const releaseBranch = await vscode.window.showInputBox({
+        prompt: 'Enter release branch name',
+        placeHolder: 'release/v1.0.0',
+        value: `release/${name}`,
+      });
+      if (!releaseBranch) {
+        return;
+      }
+
+      const targetBranch = await vscode.window.showInputBox({
+        prompt: 'Enter target branch',
+        placeHolder: 'main',
+        value: 'main',
+      });
+      if (!targetBranch) {
+        return;
+      }
+
+      try {
+        const release = await releaseManager.createRelease({
+          name,
+          planIds,
+          releaseBranch,
+          targetBranch,
+        });
+
+        vscode.window.showInformationMessage(
+          `Release "${name}" created with ${planIds.length} plan(s). ID: ${release.id}`
+        );
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to create release: ${error.message}`);
+      }
     }),
   );
 }

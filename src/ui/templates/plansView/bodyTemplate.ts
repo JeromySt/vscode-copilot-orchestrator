@@ -43,6 +43,8 @@ export function renderPlansViewBody(): string {
       <button class="bulk-btn" data-action="cancel" title="Cancel selected plans">Cancel</button>
       <button class="bulk-btn" data-action="retry" title="Retry selected plans">Retry</button>
       <button class="bulk-btn" data-action="finalize" title="Finalize selected plans">Finalize</button>
+      <button class="bulk-btn" data-action="assignToRelease" title="Assign to Release">Assign to Release...</button>
+      <button class="bulk-btn" data-action="createReleaseFromPlans" title="Create Release from Selected">Create Release</button>
       <button class="bulk-btn danger" data-action="delete" title="Delete selected plans">Delete</button>
     </div>
   </div>
@@ -159,6 +161,9 @@ export function renderPlansViewBody(): string {
     <div class="context-menu-item" data-action="cancel">Cancel</div>
     <div class="context-menu-item" data-action="retry">Retry</div>
     <div class="context-menu-item" data-action="finalize">Finalize</div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" data-action="assignToRelease">Assign to Release...</div>
+    <div class="context-menu-item" data-action="createReleaseFromPlans">Create Release from Selected</div>
     <div class="context-menu-separator"></div>
     <div class="context-menu-item danger" data-action="delete">Delete</div>
   </div>`;

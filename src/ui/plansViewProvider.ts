@@ -67,7 +67,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     private readonly _planRunner: PlanRunner,
     private readonly _pulse: IPulseEmitter,
     private readonly _prLifecycleManager?: IPRLifecycleManager,
-    private readonly _releaseManager?: IReleaseManager
+    private readonly _releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager
   ) {
     // Listen for Plan events — emit targeted per-plan messages
     _planRunner.on('planCreated', (plan: PlanInstance) => {
@@ -305,6 +305,20 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     const completed = counts.succeeded + counts.failed + counts.blocked;
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
+    // Find release info for this plan
+    let releaseInfo: { id: string; name: string; status: string } | undefined;
+    if (this._releaseManager) {
+      const allReleases = this._releaseManager.getAllReleases();
+      const release = allReleases.find(r => r.planIds.includes(plan.id));
+      if (release) {
+        releaseInfo = {
+          id: release.id,
+          name: release.name,
+          status: release.status,
+        };
+      }
+    }
+    
     return {
       id: plan.id,
       name: plan.spec.name,
@@ -321,6 +335,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       startedAt: plan.startedAt,
       endedAt: this._planRunner.getEffectiveEndedAt(plan.id) || plan.endedAt,
       issubPlan: !!plan.parentPlanId,
+      release: releaseInfo,
     };
   }
   

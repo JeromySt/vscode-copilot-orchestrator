@@ -187,6 +187,23 @@ export function renderPlansViewStyles(): string {
     .plan-status.canceled { background: rgba(133, 133, 133, 0.2); color: var(--vscode-descriptionForeground); }
     .plan-status.scaffolding { background: rgba(245, 197, 24, 0.15); color: #f5c518; }
     
+    .release-tag {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 8px;
+      background: rgba(138, 43, 226, 0.2);
+      color: #ba68c8;
+      flex-shrink: 0;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .release-tag:before {
+      content: '';
+      font-family: codicon;
+    }
+    
     .scaffolding { background: rgba(245, 197, 24, 0.08); border: 1px dashed rgba(245, 197, 24, 0.4); }
     
     .plan-details {
