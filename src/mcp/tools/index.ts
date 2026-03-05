@@ -6,15 +6,17 @@
 
 export { getPlanToolDefinitions, PRODUCER_ID_PATTERN } from './planTools';
 export { getJobToolDefinitions } from './jobTools';
+export { getReleaseToolDefinitions } from './releaseTools';
 
 import { McpTool } from '../types';
 import { getPlanToolDefinitions } from './planTools';
 import { getJobToolDefinitions } from './jobTools';
+import { getReleaseToolDefinitions } from './releaseTools';
 
 /**
  * Get all MCP tool definitions across all tool modules.
  *
- * Combines legacy plan tools with new job-centric tools.
+ * Combines plan tools, job-centric tools, and release tools.
  *
  * @returns Combined array of all {@link McpTool} definitions.
  */
@@ -22,5 +24,6 @@ export async function getAllToolDefinitions(): Promise<McpTool[]> {
   return [
     ...(await getPlanToolDefinitions()),
     ...(await getJobToolDefinitions()),
+    ...(await getReleaseToolDefinitions()),
   ];
 }

@@ -844,6 +844,81 @@ export const finalizePlanSchema = {
 } as const;
 
 /**
+ * Schema for create_copilot_release input
+ */
+export const createReleaseSchema = {
+  $id: 'create_copilot_release',
+  type: 'object',
+  properties: {
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    planIds: {
+      type: 'array',
+      items: { type: 'string', minLength: 1 },
+      minItems: 1
+    },
+    releaseBranch: { type: 'string', minLength: 1, maxLength: 200 },
+    targetBranch: { type: 'string', minLength: 1, maxLength: 200 },
+    autoStart: { type: 'boolean' }
+  },
+  required: ['name', 'planIds', 'releaseBranch'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for start_copilot_release input
+ */
+export const startReleaseSchema = {
+  $id: 'start_copilot_release',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for get_copilot_release_status input
+ */
+export const getReleaseStatusSchema = {
+  $id: 'get_copilot_release_status',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for cancel_copilot_release input
+ */
+export const cancelReleaseSchema = {
+  $id: 'cancel_copilot_release',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for list_copilot_releases input
+ */
+export const listReleasesSchema = {
+  $id: 'list_copilot_releases',
+  type: 'object',
+  properties: {
+    status: {
+      type: 'string',
+      enum: ['drafting', 'merging', 'creating-pr', 'monitoring', 'addressing', 'succeeded', 'failed', 'canceled']
+    }
+  },
+  additionalProperties: false
+} as const;
+
+/**
  * All schemas indexed by tool name
  */
 export const schemas: Record<string, object> = {
@@ -873,4 +948,11 @@ export const schemas: Record<string, object> = {
   scaffold_copilot_plan: scaffoldPlanSchema,
   add_copilot_plan_job: addPlanNodeSchema,
   finalize_copilot_plan: finalizePlanSchema,
+
+  // Release tools
+  create_copilot_release: createReleaseSchema,
+  start_copilot_release: startReleaseSchema,
+  get_copilot_release_status: getReleaseStatusSchema,
+  cancel_copilot_release: cancelReleaseSchema,
+  list_copilot_releases: listReleasesSchema,
 };
