@@ -28,3 +28,4 @@ export * from './IPlanRepository';
 export * from './IPlanDefinition';
 export * from './IPlanRepositoryStore';
 export * from './IReleaseConfigManager';
+export * from './IIsolatedRepoManager';

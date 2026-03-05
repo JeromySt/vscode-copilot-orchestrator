@@ -154,3 +154,9 @@ export const IPlanRepositoryStore = Symbol('IPlanRepositoryStore');
  * Provides release management configuration access.
  */
 export const IReleaseConfigManager = Symbol('IReleaseConfigManager');
+
+/**
+ * Token for IIsolatedRepoManager service.
+ * Provides isolated repository clone management for release workflows.
+ */
+export const IIsolatedRepoManager = Symbol('IIsolatedRepoManager');

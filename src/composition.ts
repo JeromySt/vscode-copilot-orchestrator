@@ -217,6 +217,17 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     },
   );
 
+  // ─── Isolated Repo Manager ──────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager>(
+    Tokens.IIsolatedRepoManager,
+    (c) => {
+      const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+      const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+      const { DefaultIsolatedRepoManager } = require('./git/isolatedRepoManager');
+      return new DefaultIsolatedRepoManager(git, fileSystem);
+    },
+  );
+
   // ─── Plan Repository Store ──────────────────────────────────────────
   container.registerSingleton<import('./interfaces/IPlanRepositoryStore').IPlanRepositoryStore>(
     Tokens.IPlanRepositoryStore,
