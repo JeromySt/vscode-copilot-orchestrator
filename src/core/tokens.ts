@@ -148,3 +148,15 @@ export const IPlanRepository = Symbol('IPlanRepository');
  * Provides storage backend for plan persistence.
  */
 export const IPlanRepositoryStore = Symbol('IPlanRepositoryStore');
+
+/**
+ * Token for IReleaseManager service.
+ * Provides release lifecycle management and orchestration.
+ */
+export const IReleaseManager = Symbol('IReleaseManager');
+
+/**
+ * Token for IReleasePRMonitor service.
+ * Provides PR monitoring for releases.
+ */
+export const IReleasePRMonitor = Symbol('IReleasePRMonitor');
