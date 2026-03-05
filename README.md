@@ -824,7 +824,13 @@ When a node's work phase produces no file changes, the orchestrator doesn't imme
 
 ### 1. Open the Orchestrator Panel
 
-Click the **Copilot Orchestrator** icon in the Activity Bar (left sidebar) to open the Plans panel.
+Click the **Copilot Orchestrator** icon in the Activity Bar (left sidebar) to open the Orchestrator panel. The sidebar features **three tabs** for organized workspace management:
+
+- **Plans** — View and manage all active, completed, and archived plans with real-time status updates
+- **Releases** — Create and monitor multi-plan releases with PR tracking and autonomous feedback addressing
+- **PRs** — Manage adopted pull requests with monitoring, priority settings, and lifecycle tracking
+
+Each tab displays a badge count and auto-switches when new items are created (e.g., adopting a PR switches to the PRs tab).
 
 ### 2. Start the MCP Server
 
@@ -845,31 +851,35 @@ to the user registration form
 
 ### 4. Monitor & Review
 
-- Watch progress in the **Plans** sidebar (live status updates)
+- Switch between **Plans**, **Releases**, and **PRs** tabs to view different workspace areas
+- Watch progress in the **Plans** tab (live status updates with color-coded nodes)
 - Click a plan to see the **interactive DAG visualization**
 - Click any node for **execution details, logs, and process monitoring**
 - Use **phase tabs** (Merge FI, Prechecks, Work, Commit, Postchecks, Merge RI) to filter logs
 - Review the **Work Summary** for commits and file changes
+- Monitor releases in the **Releases** tab with PR status, CI checks, and feedback addressing
+- Track adopted PRs in the **PRs** tab with monitoring state and priority management
 
 ---
 
 ## Keyboard Shortcuts
 
-The Plans sidebar supports keyboard shortcuts for efficient plan management:
+The Orchestrator sidebar supports keyboard shortcuts for efficient management:
 
 | Shortcut | Action | Context |
 |---|---|---|
-| Click | Select single plan | Plans sidebar |
-| Ctrl+Click | Toggle plan selection | Plans sidebar |
-| Shift+Click | Range select plans | Plans sidebar |
-| Ctrl+A | Select all plans | Plans sidebar focused |
-| Escape | Deselect all | Plans sidebar focused |
-| Delete | Delete selected plans | Plans sidebar, 1+ selected |
+| Click | Select single item | Any tab (Plans/Releases/PRs) |
+| Ctrl+Click | Toggle selection | Any tab |
+| Shift+Click | Range select | Any tab |
+| Ctrl+A | Select all items | Sidebar focused |
+| Escape | Deselect all | Sidebar focused |
+| Delete | Delete selected items | 1+ selected |
 
 **Tips:**
-- Multi-select enables bulk actions (Delete, Cancel, Pause, Resume, Retry, Finalize)
-- Bulk action buttons appear in the toolbar when multiple plans are selected
-- Right-click on selected plans for context menu with bulk actions
+- Multi-select enables bulk actions (Delete, Cancel, Pause, Resume, Retry, Finalize, Assign to Release, Create Release)
+- Bulk action buttons appear in the toolbar when multiple items are selected
+- Right-click on selected items for context menu with available actions
+- Tab badges show item counts and update in real-time
 
 ---
 

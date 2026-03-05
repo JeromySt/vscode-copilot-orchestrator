@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Tabbed sidebar navigation**: Plans, Releases, and PRs tabs for organized workspace management with badge counts and auto-switching
+- **Create release from current branch**: Quick-action button to create a release directly from the active git branch
+- **Plan-to-release assignment**: Context menu and bulk action to assign succeeded/partial plans to existing releases
+- **Release cards with monitoring**: Status indicators, progress tracking, and action buttons for release lifecycle management
+- **Contextual multi-select actions**: Assign to Release and Create Release from Selected bulk actions in Plans tab
 - 30-second debounce delay for .gitignore re-application after branch changes, preventing dirty-branch race conditions that block `git checkout` operations
 - Plan archiving: preserve plan state/logs while cleaning up git worktrees and branches
 - "Archived" collapsible section in Plans sidebar with dimmed visual treatment
