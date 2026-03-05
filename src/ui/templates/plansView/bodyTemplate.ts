@@ -58,6 +58,28 @@ export function renderPlansViewBody(): string {
       <div id="prs"><div class="empty">No managed PRs.</div></div>
     </div>
   </div>
+  <div class="section releases-section">
+    <div class="section-header" id="releasesHeader">
+      <span class="section-title">
+        <span class="codicon codicon-chevron-down section-chevron" id="releasesSectionChevron"></span>
+        Releases
+        <span class="pill" id="releasesBadge">0</span>
+      </span>
+      <div class="section-actions">
+        <button id="newReleaseButton" class="section-action-btn" title="Create a new release">
+          <span class="codicon codicon-add"></span>
+          New Release
+        </button>
+        <button id="releaseFromBranchButton" class="section-action-btn" title="Create release from current branch">
+          <span class="codicon codicon-git-branch"></span>
+          From Current Branch
+        </button>
+      </div>
+    </div>
+    <div class="section-content" id="releasesContent">
+      <div id="releases"><div class="empty">🚀 No releases yet.</div></div>
+    </div>
+  </div>
   <div id="plans" role="listbox" aria-multiselectable="true"><div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div></div>
   <div class="section-divider" id="archivedDivider" style="display: none;">
     <button class="collapse-toggle" id="archivedToggle" aria-expanded="false">

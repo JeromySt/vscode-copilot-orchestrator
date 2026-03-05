@@ -98,6 +98,33 @@ window.addEventListener('message', function(ev) {
         prListContainer.removePR(msg.prId);
       }
       break;
+      
+    case 'releasesUpdate':
+      // Initial load: full release list
+      var releases = msg.releases || [];
+      bus.emit('releases:update', releases);
+      break;
+      
+    case 'releaseAdded':
+      // Single release added
+      if (msg.release) {
+        releaseListContainer.addRelease(msg.release);
+      }
+      break;
+      
+    case 'releaseStateChange':
+      // Per-release state update — emit to EventBus for the matching card
+      if (msg.release) {
+        bus.emit('release:state', msg.release);
+      }
+      break;
+      
+    case 'releaseDeleted':
+      // Single release removed
+      if (msg.releaseId) {
+        releaseListContainer.removeRelease(msg.releaseId);
+      }
+      break;
 
   }
 });
