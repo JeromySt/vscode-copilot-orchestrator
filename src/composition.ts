@@ -54,6 +54,7 @@ import { DefaultFileSystem } from './core/defaultFileSystem';
 import { DefaultRemoteProviderDetector } from './git/remotePR/remoteProviderDetector';
 import { GitHubPRService } from './git/remotePR/githubPRService';
 import { RemotePRServiceFactory } from './git/remotePR/remotePRServiceFactory';
+import { DefaultReleasePRMonitor } from './plan/releasePRMonitor';
 
 /**
  * Create and wire the production DI container.
@@ -272,6 +273,18 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
       const detector = c.resolve<import('./interfaces').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
       return new RemotePRServiceFactory(spawner, detector);
+    },
+  );
+
+  // ─── Release PR Monitor ────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IReleasePRMonitor>(
+    Tokens.IReleasePRMonitor,
+    (c) => {
+      const copilotRunner = c.resolve<import('./interfaces').ICopilotRunner>(Tokens.ICopilotRunner);
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+      const prServiceFactory = c.resolve<import('./interfaces').IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
+      return new DefaultReleasePRMonitor(copilotRunner, spawner, git, prServiceFactory);
     },
   );
 
