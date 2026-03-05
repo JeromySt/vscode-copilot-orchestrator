@@ -36,3 +36,6 @@ export * from './reshapePlanHandler';
 
 // Job detail handlers
 export * from './jobDetailsHandler';
+
+// Release handlers
+export * from './releaseHandlers';

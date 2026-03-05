@@ -8,7 +8,7 @@
 
 import * as vscode from 'vscode';
 
-export type WebviewBundle = 'planDetail' | 'nodeDetail' | 'plansList';
+export type WebviewBundle = 'planDetail' | 'nodeDetail' | 'plansList' | 'release';
 
 /**
  * Get the webview URI for a specific bundle.
