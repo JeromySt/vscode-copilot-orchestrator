@@ -752,6 +752,7 @@ Available DI tokens for service resolution:
 | `INodeExecutor` | `INodeExecutor` | Node phase execution |
 | `INodeStateMachine` | `INodeStateMachine` | Node state transitions |
 | `IFileSystem` | `IFileSystem` | Filesystem operations |
+| `IBulkPlanActions` | `IBulkPlanActions` | Bulk plan operations (multi-select actions) |
 
 ---
 

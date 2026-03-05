@@ -52,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎨 UI Improvements
 
+#### Multi-Select Support in Plans Sidebar
+- **Multi-select controls**: Ctrl+Click to toggle plan selection, Shift+Click for range selection, Ctrl+A to select all
+- **Bulk actions toolbar**: Delete, Cancel, Pause, Resume, Retry, Finalize buttons for multi-selected plans
+- **Right-click context menu**: Selection-aware bulk actions with keyboard shortcuts (Delete key for bulk delete, Escape to deselect)
+- **Visual selection feedback**: Selected plans highlighted with distinct background color
+- **Smart button states**: Bulk action buttons enable/disable based on selection compatibility (e.g., Resume only for paused plans)
+
 #### Timeline Enhancements
 - **Actual time proportions**: Phase segments sized by actual wall-clock duration instead of normalized percentages
 - **Absolute pixel positioning**: Timeline bars positioned using exact timestamps for accurate visual representation

@@ -678,6 +678,26 @@ to the user registration form
 
 ---
 
+## Keyboard Shortcuts
+
+The Plans sidebar supports keyboard shortcuts for efficient plan management:
+
+| Shortcut | Action | Context |
+|---|---|---|
+| Click | Select single plan | Plans sidebar |
+| Ctrl+Click | Toggle plan selection | Plans sidebar |
+| Shift+Click | Range select plans | Plans sidebar |
+| Ctrl+A | Select all plans | Plans sidebar focused |
+| Escape | Deselect all | Plans sidebar focused |
+| Delete | Delete selected plans | Plans sidebar, 1+ selected |
+
+**Tips:**
+- Multi-select enables bulk actions (Delete, Cancel, Pause, Resume, Retry, Finalize)
+- Bulk action buttons appear in the toolbar when multiple plans are selected
+- Right-click on selected plans for context menu with bulk actions
+
+---
+
 ## Security
 
 ### Agent Folder Restrictions
