@@ -18,6 +18,9 @@ import type {
   PRComment,
   PRCheck,
   PRSecurityAlert,
+  PRListOptions,
+  PRListItem,
+  PRDetails,
 } from '../../plan/types/remotePR';
 import { Logger } from '../../core/logger';
 
@@ -279,6 +282,175 @@ export class GitHubPRService implements IRemotePRService {
   }
 
   /**
+   * List pull requests filtered by author or assignee.
+   */
+  async listPRs(cwd: string, options?: PRListOptions): Promise<PRListItem[]> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.debug('Listing PRs', options);
+
+    const env = this._buildEnv(provider, credentials);
+    
+    const args = [
+      'pr', 'list',
+      '--json', 'number,title,headRefName,baseRefName,state,isDraft,author,url',
+    ];
+
+    // Add filters
+    if (options?.author) {
+      args.push('--author', options.author);
+    } else {
+      // Default to current user
+      args.push('--author', '@me');
+    }
+
+    if (options?.assignee) {
+      args.push('--assignee', options.assignee);
+    }
+
+    if (options?.state) {
+      args.push('--state', options.state);
+    }
+
+    if (options?.limit) {
+      args.push('--limit', String(options.limit));
+    }
+
+    const result = await this._execGh(args, cwd, env);
+    
+    try {
+      const parsed = JSON.parse(result);
+      const prs: PRListItem[] = parsed.map((pr: any) => ({
+        prNumber: pr.number,
+        title: pr.title,
+        headBranch: pr.headRefName,
+        baseBranch: pr.baseRefName,
+        state: this._mapPRState(pr.state),
+        isDraft: pr.isDraft || false,
+        author: pr.author?.login || 'unknown',
+        url: pr.url,
+      }));
+      
+      log.info('PRs listed', { count: prs.length });
+      return prs;
+    } catch (err) {
+      log.error('Failed to parse PR list response', { error: String(err), output: result });
+      throw new Error(`Failed to parse gh pr list output: ${err}`);
+    }
+  }
+
+  /**
+   * Get detailed information about a specific pull request.
+   */
+  async getPRDetails(prNumber: number, cwd: string): Promise<PRDetails> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.debug('Getting PR details', { prNumber });
+
+    const env = this._buildEnv(provider, credentials);
+    const args = [
+      'pr', 'view', String(prNumber),
+      '--json', 'number,title,headRefName,baseRefName,isDraft,state,author,url,body',
+    ];
+
+    const result = await this._execGh(args, cwd, env);
+    
+    try {
+      const pr = JSON.parse(result);
+      const details: PRDetails = {
+        prNumber: pr.number,
+        title: pr.title,
+        headBranch: pr.headRefName,
+        baseBranch: pr.baseRefName,
+        isDraft: pr.isDraft || false,
+        state: this._mapPRState(pr.state),
+        author: pr.author?.login || 'unknown',
+        url: pr.url,
+        body: pr.body,
+      };
+      
+      log.info('PR details retrieved', { prNumber });
+      return details;
+    } catch (err) {
+      log.error('Failed to parse PR details response', { error: String(err), output: result });
+      throw new Error(`Failed to parse gh pr view output: ${err}`);
+    }
+  }
+
+  /**
+   * Abandon (close) a pull request without merging.
+   */
+  async abandonPR(prNumber: number, cwd: string, comment?: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.info('Abandoning PR', { prNumber, hasComment: !!comment });
+
+    const env = this._buildEnv(provider, credentials);
+    const args = ['pr', 'close', String(prNumber)];
+
+    if (comment) {
+      args.push('--comment', comment);
+    }
+
+    await this._execGh(args, cwd, env);
+    log.info('PR abandoned', { prNumber });
+  }
+
+  /**
+   * Promote a draft pull request to ready-for-review.
+   */
+  async promotePR(prNumber: number, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.info('Promoting PR to ready', { prNumber });
+
+    const env = this._buildEnv(provider, credentials);
+    const args = ['pr', 'ready', String(prNumber)];
+
+    await this._execGh(args, cwd, env);
+    log.info('PR promoted to ready', { prNumber });
+  }
+
+  /**
+   * Demote an active pull request to draft.
+   */
+  async demotePR(prNumber: number, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.info('Demoting PR to draft', { prNumber });
+
+    const env = this._buildEnv(provider, credentials);
+    
+    // Step 1: Get the node ID of the PR
+    const viewArgs = ['pr', 'view', String(prNumber), '--json', 'id'];
+    const viewResult = await this._execGh(viewArgs, cwd, env);
+    
+    let nodeId: string;
+    try {
+      const parsed = JSON.parse(viewResult);
+      nodeId = parsed.id;
+    } catch (err) {
+      log.error('Failed to get PR node ID', { error: String(err), prNumber });
+      throw new Error(`Failed to get PR node ID: ${err}`);
+    }
+
+    // Step 2: Use GraphQL mutation to convert to draft
+    const mutation = `mutation { convertPullRequestToDraft(input: {pullRequestId: "${nodeId}"}) { pullRequest { id isDraft } } }`;
+    const mutationArgs = [
+      'api', 'graphql',
+      '-f', `query=${mutation}`,
+    ];
+
+    await this._execGh(mutationArgs, cwd, env);
+    log.info('PR demoted to draft', { prNumber });
+  }
+
+  /**
    * Build environment variables for gh CLI calls.
    * 
    * Security: Token is passed via GH_TOKEN env var, NEVER as CLI argument.
@@ -453,6 +625,23 @@ export class GitHubPRService implements IRemotePRService {
     }
     
     return 'pending';
+  }
+
+  /**
+   * Map gh CLI PR state to normalized state.
+   */
+  private _mapPRState(state: string): 'open' | 'closed' | 'merged' {
+    const upper = state.toUpperCase();
+    
+    if (upper === 'MERGED') {
+      return 'merged';
+    }
+    
+    if (upper === 'CLOSED') {
+      return 'closed';
+    }
+    
+    return 'open';
   }
 
   /**
