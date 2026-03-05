@@ -196,3 +196,9 @@ export const IReleaseConfigManager = Symbol('IReleaseConfigManager');
  * Provides isolated repository clone management for release workflows.
  */
 export const IIsolatedRepoManager = Symbol('IIsolatedRepoManager');
+
+/**
+ * Token for IManagedPRStore service.
+ * Provides storage backend for managed PR persistence.
+ */
+export const IManagedPRStore = Symbol('IManagedPRStore');

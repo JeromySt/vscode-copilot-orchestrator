@@ -267,6 +267,17 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     },
   );
 
+  // ─── Managed PR Store ───────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IManagedPRStore').IManagedPRStore>(
+    Tokens.IManagedPRStore,
+    (c) => {
+      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+      const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+      const { FileSystemManagedPRStore } = require('./plan/store/managedPRStore');
+      return new FileSystemManagedPRStore(workspacePath, fileSystem);
+    },
+  );
+
   // ─── Remote Provider Detector ───────────────────────────────────
   container.registerSingleton<import('./interfaces').IRemoteProviderDetector>(
     Tokens.IRemoteProviderDetector,
