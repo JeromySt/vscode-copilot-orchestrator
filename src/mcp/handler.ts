@@ -30,6 +30,7 @@ import {
   handlePausePlan,
   handleResumePlan,
   handleDeletePlan,
+  handleRecoverPlan,
   handleRetryPlan,
   handleGetJobFailureContext,
   handleUpdatePlanJob,
@@ -103,6 +104,7 @@ export class McpHandler implements IMcpRequestRouter {
    * @param git             - Git operations interface.
    * @param configProvider  - Optional configuration provider for reading VS Code settings.
    * @param planRepository  - Plan repository for filesystem-backed storage.
+   * @param planRecovery    - Optional plan recovery service.
    */
   constructor(
     PlanRunner: PlanRunner,
@@ -110,6 +112,7 @@ export class McpHandler implements IMcpRequestRouter {
     git: import('../interfaces/IGitOperations').IGitOperations,
     configProvider?: import('../interfaces/IConfigProvider').IConfigProvider,
     planRepository?: import('../interfaces/IPlanRepository').IPlanRepository,
+    planRecovery?: import('../interfaces/IPlanRecovery').IPlanRecovery,
   ) {
     this.context = { 
       PlanRunner, 
@@ -117,6 +120,7 @@ export class McpHandler implements IMcpRequestRouter {
       git,
       configProvider,
       PlanRepository: planRepository!,
+      PlanRecovery: planRecovery,
       // Legacy fields - kept for type compatibility
       runner: null as any,
       plans: null as any,
@@ -284,6 +288,10 @@ export class McpHandler implements IMcpRequestRouter {
         
       case 'delete_copilot_plan':
         result = await handleDeletePlan(args || {}, this.context);
+        break;
+        
+      case 'recover_copilot_plan':
+        result = await handleRecoverPlan(args || {}, this.context);
         break;
         
       case 'retry_copilot_plan':

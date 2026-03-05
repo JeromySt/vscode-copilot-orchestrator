@@ -50,6 +50,7 @@ import { DefaultGitOperations } from './git/DefaultGitOperations';
 import { FileSystemPlanStore } from './plan/store/FileSystemPlanStore';
 import { DefaultPlanRepository } from './plan/repository/DefaultPlanRepository';
 import { DefaultFileSystem } from './core/defaultFileSystem';
+import { PlanRecovery } from './plan/planRecovery';
 
 /**
  * Create and wire the production DI container.
