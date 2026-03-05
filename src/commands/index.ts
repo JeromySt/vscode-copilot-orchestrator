@@ -9,3 +9,4 @@
 
 export { registerMcpCommands } from './mcpCommands';
 export { registerUtilityCommands } from './utilityCommands';
+export { registerBulkCommands } from './bulkCommands';

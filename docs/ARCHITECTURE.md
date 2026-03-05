@@ -48,6 +48,7 @@ graph TB
             SB[Status Bar]
             PDP[Plan Detail Panel]
             NDP[Node Detail Panel]
+            BPA[BulkPlanActions]
         end
     end
 
@@ -498,6 +499,38 @@ sequenceDiagram
 
 ---
 
+## Sequence Diagram — Webview Bulk Actions
+
+```mermaid
+sequenceDiagram
+    participant Webview as Plans Sidebar Webview
+    participant Provider as PlansViewProvider
+    participant BPA as BulkPlanActions
+    participant Runner as PlanRunner
+    participant UI as UI Layer
+
+    Note over Webview: User selects multiple plans<br/>(Ctrl+Click, Shift+Click)
+    Webview->>Webview: Update selection state
+    Webview->>Webview: Enable bulk action buttons
+
+    Note over Webview: User clicks bulk action<br/>(Delete, Cancel, Pause, etc.)
+    Webview->>Provider: postMessage({cmd: 'bulkAction', action, planIds})
+    Provider->>BPA: executeBulkAction(action, planIds)
+
+    loop For each plan
+        BPA->>Runner: executeAction(planId)
+        Runner-->>BPA: result
+    end
+
+    BPA->>Provider: Return results summary
+    Provider->>Webview: postMessage({results})
+    Webview->>Webview: Clear selection
+    Webview->>Webview: Update plan list
+
+    Note over UI: Plans updated via<br/>PlanEventEmitter
+```
+
+---
 ## Component Dependency Map
 
 ```mermaid

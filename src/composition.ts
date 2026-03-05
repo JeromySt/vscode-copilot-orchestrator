@@ -251,5 +251,13 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     () => { throw new Error('IPlanArchiver must be resolved from a scoped container with a PlanRunner'); },
   );
 
+  // ─── Bulk Plan Actions ──────────────────────────────────────────────
+  // Note: Requires PlanRunner and IDialogService which must be resolved from a scoped container.
+  // This registration is overridden after PlanRunner is created in extension.ts.
+  container.register(
+    Tokens.IBulkPlanActions,
+    () => { throw new Error('IBulkPlanActions must be resolved from a scoped container with a PlanRunner'); },
+  );
+
   return container;
 }

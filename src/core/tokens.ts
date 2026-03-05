@@ -166,3 +166,9 @@ export const IPlanArchiver = Symbol('IPlanArchiver');
  * Provides plan recovery from canceled or failed state.
  */
 export const IPlanRecovery = Symbol('IPlanRecovery');
+
+/**
+ * Token for IBulkPlanActions service.
+ * Provides bulk operations on multiple plans.
+ */
+export const IBulkPlanActions = Symbol('IBulkPlanActions');

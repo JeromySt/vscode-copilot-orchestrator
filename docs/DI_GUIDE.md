@@ -755,6 +755,7 @@ Available DI tokens for service resolution:
 | `INodeStateMachine` | `INodeStateMachine` | Node state transitions |
 | `IFileSystem` | `IFileSystem` | Filesystem operations |
 | `IGitignoreDebouncer` | `IGitignoreDebouncer` | Branch-change-aware .gitignore write delay |
+| `IBulkPlanActions` | `IBulkPlanActions` | Bulk plan operations (multi-select actions) |
 
 ---
 

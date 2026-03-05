@@ -30,3 +30,4 @@ export * from './IPlanDefinition';
 export * from './IPlanRepositoryStore';
 export * from './IPlanArchiver';
 export * from './IPlanRecovery';
+export * from './IBulkPlanActions';

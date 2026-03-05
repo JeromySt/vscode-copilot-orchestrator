@@ -118,6 +118,30 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "orchestrator.bulkDelete",
+        "title": "Copilot Orchestrator: Delete Selected Plans"
+      },
+      {
+        "command": "orchestrator.bulkCancel",
+        "title": "Copilot Orchestrator: Cancel Selected Plans"
+      },
+      {
+        "command": "orchestrator.bulkPause",
+        "title": "Copilot Orchestrator: Pause Selected Plans"
+      },
+      {
+        "command": "orchestrator.bulkResume",
+        "title": "Copilot Orchestrator: Resume Selected Plans"
+      },
+      {
+        "command": "orchestrator.bulkRetry",
+        "title": "Copilot Orchestrator: Retry Selected Plans"
+      },
+      {
+        "command": "orchestrator.bulkFinalize",
+        "title": "Copilot Orchestrator: Finalize Selected Plans"
+      },
+      {
         "command": "copilotOrchestrator.refreshModels",
         "title": "Copilot Orchestrator: Refresh Available Models"
       },
