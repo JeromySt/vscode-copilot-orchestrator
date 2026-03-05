@@ -20,7 +20,7 @@ import {
   registerPlanCommands,
 } from './core/planInitialization';
 import { GlobalCapacityManager } from './core/globalCapacity';
-import { registerUtilityCommands } from './commands';
+import { registerUtilityCommands, registerReleaseCommands, registerPRLifecycleCommands } from './commands';
 import { IMcpManager } from './interfaces/IMcpManager';
 import type { IProcessMonitor } from './interfaces/IProcessMonitor';
 import { PlanRunner } from './plan';
@@ -58,6 +58,9 @@ let globalCapacity: GlobalCapacityManager | undefined;
 
 /** Gitignore Debouncer - retained for cleanup */
 let gitignoreDebouncer: import('./interfaces/IGitignoreDebouncer').IGitignoreDebouncer | undefined;
+
+/** Isolated Repo Manager - retained for cleanup */
+let isolatedRepoManager: import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager | undefined;
 
 /** Process event handlers - retained for cleanup */
 let exitHandler: (() => void) | undefined;
@@ -136,11 +139,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Plans view ──────────────────────────────────────────────────────────
   const pulse = container.resolve<IPulseEmitter>(Tokens.IPulseEmitter);
-  initializePlansView(context, planRunner, pulse);
+  const prLifecycleManager = container.resolve<import('./interfaces/IPRLifecycleManager').IPRLifecycleManager>(Tokens.IPRLifecycleManager);
+  initializePlansView(context, planRunner, pulse, prLifecycleManager);
 
   // ── Commands ───────────────────────────────────────────────────────────
   registerPlanCommands(context, planRunner, pulse, container);
   registerUtilityCommands(context);
+  // Register release commands with a stub getReleaseData function
+  registerReleaseCommands(context, () => undefined);
+  // Register PR lifecycle commands
+  registerPRLifecycleCommands(context, (id: string) => prLifecycleManager.getManagedPR(id));
 
   // ── Bulk Action Commands ───────────────────────────────────────────────
   // Register BulkPlanActions with the container now that PlanRunner is available
@@ -192,6 +200,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Trigger cleanup asynchronously after extension is fully activated
   triggerOrphanedWorktreeCleanup(planRunner, context, git).catch(err => {
     extLog.warn('Orphaned worktree cleanup failed', { error: err.message });
+  });
+
+  // ── Isolated Repo Cleanup ──────────────────────────────────────────────
+  // Initialize isolated repo manager and trigger orphan cleanup
+  isolatedRepoManager = container.resolve<import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager>(Tokens.IIsolatedRepoManager);
+  triggerOrphanedIsolatedRepoCleanup(isolatedRepoManager).catch(err => {
+    extLog.warn('Orphaned isolated repo cleanup failed', { error: err.message });
   });
 
   // ── CLI Availability Check ─────────────────────────────────────────────
@@ -294,6 +309,42 @@ async function triggerOrphanedWorktreeCleanup(
   }
 }
 
+/**
+ * Clean up orphaned isolated repository clones in the background.
+ * Runs asynchronously to not block extension startup.
+ * 
+ * @param manager - The isolated repo manager
+ */
+async function triggerOrphanedIsolatedRepoCleanup(
+  manager: import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager
+): Promise<void> {
+  const log = Logger.for('git');
+  
+  // Small delay to let extension fully initialize
+  await new Promise(resolve => setTimeout(resolve, 2000));
+  
+  log.info('Starting orphaned isolated repo cleanup');
+  
+  try {
+    const cleanedCount = await manager.cleanupAll();
+    
+    if (cleanedCount > 0) {
+      log.info('Orphaned isolated repo cleanup complete', { cleanedCount });
+      
+      // Show info message if significant cleanup was done
+      if (cleanedCount >= 3) {
+        vscode.window.showInformationMessage(
+          `Copilot Orchestrator: Cleaned up ${cleanedCount} orphaned isolated repositories.`
+        );
+      }
+    } else {
+      log.debug('No orphaned isolated repositories found');
+    }
+  } catch (err: any) {
+    log.error('Orphaned isolated repo cleanup failed', { error: err.message });
+  }
+}
+
 // ============================================================================
 // DEACTIVATION
 // ============================================================================
@@ -329,6 +380,11 @@ export function deactivate(): void {
   } catch (e) {
     console.error('Failed to dispose gitignore debouncer:', e);
   }
+
+  // Cleanup isolated repositories
+  void isolatedRepoManager?.cleanupAll().catch((e: unknown) => {
+    console.error('Failed to cleanup isolated repositories:', e);
+  });
   
   // Note: mcpManager.stop() is also called by subscriptions.dispose(),
   // but it's idempotent so calling it here for safety is fine

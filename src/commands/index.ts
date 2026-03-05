@@ -10,3 +10,5 @@
 export { registerMcpCommands } from './mcpCommands';
 export { registerUtilityCommands } from './utilityCommands';
 export { registerBulkCommands } from './bulkCommands';
+export { registerReleaseCommands } from './releaseCommands';
+export { registerPRLifecycleCommands } from './prLifecycleCommands';

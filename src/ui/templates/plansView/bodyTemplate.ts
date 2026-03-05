@@ -14,7 +14,13 @@
 export function renderPlansViewBody(): string {
   return `<div class="header">
     <h3>Plans</h3>
-    <span class="pill" id="badge">0 total</span>
+    <div class="header-actions">
+      <button id="adoptPRButton" class="action-button" title="Adopt an existing PR">
+        <span class="codicon codicon-add"></span>
+        Adopt PR
+      </button>
+      <span class="pill" id="badge">0 total</span>
+    </div>
   </div>
   <div class="global-capacity-bar" id="globalCapacityBar" style="display: none;">
     <span class="capacity-label">Global Capacity:</span>
@@ -38,6 +44,18 @@ export function renderPlansViewBody(): string {
       <button class="bulk-btn" data-action="retry" title="Retry selected plans">Retry</button>
       <button class="bulk-btn" data-action="finalize" title="Finalize selected plans">Finalize</button>
       <button class="bulk-btn danger" data-action="delete" title="Delete selected plans">Delete</button>
+    </div>
+  </div>
+  <div class="section managed-prs-section">
+    <div class="section-header" id="managedPRsHeader">
+      <span class="section-title">
+        <span class="codicon codicon-chevron-down section-chevron" id="prsSectionChevron"></span>
+        Managed PRs
+        <span class="pill" id="prsBadge">0</span>
+      </span>
+    </div>
+    <div class="section-content" id="managedPRsContent">
+      <div id="prs"><div class="empty">No managed PRs.</div></div>
     </div>
   </div>
   <div id="plans" role="listbox" aria-multiselectable="true"><div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div></div>

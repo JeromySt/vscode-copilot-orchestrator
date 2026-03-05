@@ -24,8 +24,33 @@ export function renderPlansViewStyles(): string {
       gap: 8px; 
       margin-bottom: 12px; 
       align-items: center; 
+      justify-content: space-between;
     }
     .header h3 { margin: 0; }
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .action-button {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 11px;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      white-space: nowrap;
+    }
+    .action-button:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .action-button .codicon {
+      font-size: 14px;
+    }
     .pill { 
       padding: 2px 8px; 
       border-radius: 10px; 
@@ -348,6 +373,130 @@ export function renderPlansViewStyles(): string {
       height: 1px;
       background: var(--vscode-menu-separatorBackground);
       margin: 4px 0;
+    }
+
+    /* Managed PRs Section */
+    .section {
+      margin-bottom: 16px;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      padding: 6px 8px;
+      cursor: pointer;
+      background: var(--vscode-editor-background);
+      border-radius: 4px;
+      user-select: none;
+    }
+    .section-header:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .section-chevron {
+      transition: transform 0.2s ease;
+      font-size: 14px;
+    }
+    .section-chevron.collapsed {
+      transform: rotate(-90deg);
+    }
+    .section-content {
+      margin-top: 8px;
+      max-height: 1000px;
+      overflow: hidden;
+      transition: max-height 0.3s ease, opacity 0.2s ease;
+      opacity: 1;
+    }
+    .section-content.collapsed {
+      max-height: 0;
+      opacity: 0;
+    }
+    
+    /* PR Cards */
+    .pr-item {
+      padding: 8px;
+      margin-bottom: 6px;
+      border-radius: 4px;
+      background: var(--vscode-list-hoverBackground);
+      cursor: pointer;
+      border-left: 3px solid var(--vscode-gitDecoration-modifiedResourceForeground);
+    }
+    .pr-item:hover {
+      background: var(--vscode-list-activeSelectionBackground);
+    }
+    .pr-item.adopted { border-left-color: var(--vscode-gitDecoration-addedResourceForeground); }
+    .pr-item.monitoring { border-left-color: var(--vscode-progressBar-background); }
+    .pr-item.addressing { border-left-color: var(--vscode-editorWarning-foreground); }
+    .pr-item.ready { border-left-color: var(--vscode-testing-iconPassed); }
+    .pr-item.blocked { border-left-color: var(--vscode-testing-iconFailed); }
+    .pr-item.abandoned { border-left-color: var(--vscode-descriptionForeground); }
+    
+    .pr-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    .pr-number {
+      font-weight: 600;
+      color: var(--vscode-textLink-foreground);
+    }
+    .pr-title {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+    }
+    .pr-status-badge {
+      font-size: 9px;
+      padding: 2px 5px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    .pr-status-badge.adopted { background: rgba(78, 201, 176, 0.2); color: var(--vscode-gitDecoration-addedResourceForeground); }
+    .pr-status-badge.monitoring { background: rgba(0, 122, 204, 0.2); color: var(--vscode-progressBar-background); }
+    .pr-status-badge.addressing { background: rgba(255, 204, 0, 0.2); color: var(--vscode-editorWarning-foreground); }
+    .pr-status-badge.ready { background: rgba(78, 201, 176, 0.2); color: var(--vscode-testing-iconPassed); }
+    .pr-status-badge.blocked { background: rgba(244, 135, 113, 0.2); color: var(--vscode-testing-iconFailed); }
+    .pr-status-badge.abandoned { background: rgba(133, 133, 133, 0.2); color: var(--vscode-descriptionForeground); }
+    
+    .pr-draft-indicator {
+      font-size: 9px;
+      padding: 2px 5px;
+      border-radius: 6px;
+      background: rgba(158, 158, 158, 0.2);
+      color: var(--vscode-descriptionForeground);
+      flex-shrink: 0;
+    }
+    
+    .pr-branches {
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .pr-branch {
+      font-family: var(--vscode-editor-font-family);
+      background: var(--vscode-textCodeBlock-background);
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+    .pr-details {
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+      margin-top: 4px;
+      display: flex;
+      gap: 8px;
     }
   </style>`;
 }

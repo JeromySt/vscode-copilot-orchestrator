@@ -37,7 +37,8 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | ⚡ **Automated 8-Phase Pipeline** | Merge FI → Prechecks → AI Work → Commit → Postchecks → Merge RI → Verify RI → Cleanup |
 | 🔧 **Multi-Retry Auto-Heal** | Failed phases automatically retried up to 4 times with fresh AI agents and failure context |
 | 📈 **Timeline Gantt Chart** | [Experimental] Pixel-perfect timeline showing execution history with phases, retries, and durations |
-| 🤖 **21 Native MCP Tools** | Create and manage plans directly from GitHub Copilot Chat |
+| 🤖 **26 Native MCP Tools** | Create and manage plans and releases directly from GitHub Copilot Chat |
+| 🚀 **Release Management** | Combine multiple plans into a single PR with autonomous monitoring (GitHub/GHE/Azure DevOps) |
 | ⏸️ **Pause / Resume / Retry** | Pause running plans, resume later, or retry failed nodes with AI failure context |
 | 🔒 **Secure MCP Architecture** | Nonce-authenticated IPC ensures 1:1 pairing between VS Code and MCP stdio process |
 | 🛡️ **Default Branch Protection** | Auto-creates feature branches when targeting main/master — never writes to default |
@@ -400,6 +401,180 @@ Base: feature/x  →  Target: feature/x  (used as-is)
 ```
 
 AI agents **never write directly to your default branch**.
+
+### 🚀 Release Management
+
+Create production releases that combine multiple plan commits into a single pull request, with autonomous monitoring and feedback resolution — supporting **GitHub**, **GitHub Enterprise**, and **Azure DevOps**.
+
+#### How It Works
+
+1. **Create a release** combining commits from multiple succeeded plans
+2. **Merge automation** creates an isolated repository clone under `.orchestrator/release/<branch>/` and merges all plan commits
+3. **PR creation** with auto-detected provider (GitHub/GHE/Azure DevOps) and credential acquisition
+4. **40-minute monitoring cycles** that check CI status, review comments, security alerts
+5. **Autonomous addressing** spawns Copilot agents to fix failures, reply to comments, resolve threads
+
+#### Multi-Provider Support
+
+The orchestrator **auto-detects your remote provider** from the git remote URL:
+
+- **GitHub** (`github.com`) → Uses `gh auth token` → `git credential fill` → `GITHUB_TOKEN`
+- **GitHub Enterprise** (custom hostname) → Uses `gh auth token` → `git credential fill` → `GITHUB_TOKEN`
+- **Azure DevOps** (`dev.azure.com`) → Uses `az account get-access-token` → `git credential fill` → `AZURE_DEVOPS_TOKEN`
+
+No configuration needed — provider detection and credential acquisition happen automatically.
+
+#### Isolated Repository Clones
+
+Releases execute in **isolated git clones** under `.orchestrator/release/<sanitized-branch>/`, never in OS temp directories. This enables:
+
+- **Concurrent releases** — Run multiple release workflows in parallel without conflicts
+- **Persistent state** — Release artifacts remain after completion for debugging
+- **Safe cleanup** — Isolated clones can be removed without affecting the main repository
+
+#### MCP Tools
+
+```typescript
+// Create a release combining multiple plans
+create_copilot_release({
+  name: "v1.2.0 Release",
+  planIds: ["plan-123", "plan-456"],
+  releaseBranch: "release/v1.2.0",
+  targetBranch: "main",
+  autoStart: true
+})
+
+// Monitor progress
+get_copilot_release_status({ releaseId: "rel-abc" })
+
+// List all releases
+list_copilot_releases({ status: "monitoring" })
+```
+
+See [docs/RELEASES.md](docs/RELEASES.md) for detailed user guide, credential troubleshooting, and FAQ.
+
+### 🎯 PR Management
+
+Adopt and manage pull requests created outside the orchestrator — enabling lifecycle management, autonomous monitoring, and feedback resolution for **any** PR, not just release-generated ones.
+
+#### Why PR Management?
+
+**Traditional PR workflow:**
+- Create PR manually or via release
+- Manually check CI status
+- Manually respond to review comments
+- Manually track security alerts
+- Context-switch between code, CI, and PR discussions
+
+**With PR Lifecycle Management:**
+- **Adopt existing PRs** into the orchestrator
+- **Autonomous monitoring** — same 40-minute cycles as releases
+- **Automatic feedback handling** — Copilot agents fix CI failures and reply to comments
+- **Priority-based scheduling** — promote critical PRs for more frequent checks
+- **Unified dashboard** — All managed PRs in one sidebar with status visibility
+
+#### PR Lifecycle States
+
+```
+adopted → monitoring → addressing → ready / blocked → abandoned
+   ↓          ↓           ↓            ↓      ↓          ↓
+  Take     Start       Spawning      All   Failing   Stopped
+  ownership monitoring  agents to    checks  checks   managing
+  of PR               fix issues    pass   or alerts
+```
+
+| Status | Description |
+|--------|-------------|
+| **adopted** | PR has been adopted but monitoring has not started |
+| **monitoring** | Actively polling for CI checks, review comments, security alerts |
+| **addressing** | Copilot agents are fixing failures or replying to feedback |
+| **ready** | All checks passed, PR is ready to merge |
+| **blocked** | Failing checks or unresolved feedback blocking merge |
+| **abandoned** | Management stopped — PR remains but is no longer monitored |
+
+#### Adoption Workflow
+
+**Step 1: List available PRs**
+```
+@workspace List all open PRs targeting main
+```
+Copilot calls `list_available_prs` and shows which PRs are already managed.
+
+**Step 2: Adopt a PR**
+```
+@workspace Adopt PR #42 with priority 1
+```
+Copilot calls `adopt_pr`, creating a managed PR record.
+
+**Step 3: Start monitoring**
+```
+@workspace Start monitoring the adopted PR
+```
+Copilot calls `start_pr_monitoring`, beginning autonomous feedback cycles.
+
+#### Priority Management
+
+Control monitoring frequency and resource allocation:
+
+- **Promote** — `promote_pr` increases priority (more frequent checks)
+- **Demote** — `demote_pr` decreases priority (less frequent checks)
+
+High-priority PRs are checked more frequently and addressed before lower-priority PRs when agents are at capacity.
+
+#### MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `list_available_prs` | List PRs from remote with `isManaged` flag |
+| `adopt_pr` | Adopt an existing PR for lifecycle management |
+| `get_managed_pr` | Get details of a managed PR by ID |
+| `list_managed_prs` | List all managed PRs with optional status filter |
+| `start_pr_monitoring` | Begin autonomous monitoring cycles |
+| `stop_pr_monitoring` | Pause monitoring without abandoning the PR |
+| `promote_pr` | Elevate PR to higher priority tier |
+| `demote_pr` | Lower PR to lower priority tier |
+| `abandon_pr` | Stop management and mark as abandoned |
+| `remove_pr` | Completely remove PR from management |
+
+#### Integration with Releases
+
+- **Release-generated PRs** are automatically adopted for monitoring
+- **Externally-created PRs** can be adopted to join the same autonomous monitoring workflow
+- **Unified tracking** — All PRs appear in the Active PRs sidebar panel regardless of origin
+
+#### Example: Complete Adoption Flow
+
+```typescript
+// 1. Discover available PRs
+list_available_prs({
+  repoPath: "/path/to/repo",
+  baseBranch: "main",
+  state: "open"
+})
+// Returns: [{ prNumber: 42, title: "Add feature X", isManaged: false, ... }]
+
+// 2. Adopt PR #42
+adopt_pr({
+  prNumber: 42,
+  repoPath: "/path/to/repo",
+  priority: 1
+})
+// Returns: { success: true, managedPR: { id: "pr-uuid", ... } }
+
+// 3. Start autonomous monitoring
+start_pr_monitoring({ id: "pr-uuid" })
+// Returns: { success: true, message: "Monitoring started..." }
+
+// 4. Check status
+get_managed_pr({ id: "pr-uuid" })
+// Returns: { managedPR: { status: "monitoring", prNumber: 42, ... } }
+
+// 5. If critical, promote priority
+promote_pr({ id: "pr-uuid" })
+// Returns: { success: true, message: "PR promoted..." }
+```
+
+See [docs/RELEASES.md](docs/RELEASES.md) for details on how PR lifecycle integrates with release workflows.
 
 ### 📡 Real-Time Process Monitoring
 

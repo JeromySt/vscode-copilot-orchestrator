@@ -1,0 +1,292 @@
+/**
+ * @fileoverview Unit tests for GitHubPRService.
+ * 
+ * Tests gh CLI integration, credential handling, and PR operations for GitHub/GitHub Enterprise.
+ */
+
+import { suite, test, setup, teardown } from 'mocha';
+import * as assert from 'assert';
+import * as sinon from 'sinon';
+import { GitHubPRService } from '../../../git/remotePR/githubPRService';
+import type { IProcessSpawner } from '../../../interfaces/IProcessSpawner';
+import type { IRemoteProviderDetector } from '../../../interfaces/IRemoteProviderDetector';
+import type { RemoteProviderInfo, RemoteCredentials } from '../../../plan/types/remotePR';
+import { EventEmitter } from 'events';
+
+suite('GitHubPRService', () => {
+  let sandbox: sinon.SinonSandbox;
+  let mockSpawner: IProcessSpawner;
+  let mockDetector: IRemoteProviderDetector;
+  let service: GitHubPRService;
+
+  const githubProvider: RemoteProviderInfo = {
+    type: 'github',
+    remoteUrl: 'https://github.com/microsoft/vscode.git',
+    owner: 'microsoft',
+    repoName: 'vscode',
+  };
+
+  const gheProvider: RemoteProviderInfo = {
+    type: 'github-enterprise',
+    remoteUrl: 'https://mygithub.company.com/corp/app.git',
+    hostname: 'mygithub.company.com',
+    owner: 'corp',
+    repoName: 'app',
+  };
+
+  const credentials: RemoteCredentials = {
+    token: 'gho_test_token',
+    tokenSource: 'gh-auth',
+    hostname: 'github.com',
+  };
+
+  setup(() => {
+    sandbox = sinon.createSandbox();
+    
+    mockSpawner = {
+      spawn: sandbox.stub(),
+    } as any;
+    
+    mockDetector = {
+      detect: sandbox.stub().resolves(githubProvider),
+      acquireCredentials: sandbox.stub().resolves(credentials),
+    } as any;
+    
+    service = new GitHubPRService(mockSpawner, mockDetector);
+  });
+
+  teardown(() => {
+    sandbox.restore();
+  });
+
+  /**
+   * Helper to create a mock process with stdout/stderr and exit event.
+   */
+  function makeMockProcess(stdout: string, stderr: string, exitCode: number): any {
+    const proc = new EventEmitter() as any;
+    proc.stdout = new EventEmitter();
+    proc.stderr = new EventEmitter();
+    
+    setImmediate(() => {
+      if (stdout) proc.stdout.emit('data', Buffer.from(stdout));
+      if (stderr) proc.stderr.emit('data', Buffer.from(stderr));
+      proc.emit('close', exitCode);
+    });
+    
+    return proc;
+  }
+
+  suite('createPR', () => {
+    test('calls gh pr create with correct args', async () => {
+      const mockProc = makeMockProcess('{"number":42,"url":"https://github.com/microsoft/vscode/pull/42"}', '', 0);
+      (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
+
+      const result = await service.createPR({
+        baseBranch: 'main',
+        headBranch: 'feature-branch',
+        title: 'Add feature',
+        body: 'This adds a feature',
+        cwd: '/repo/path',
+      });
+
+      assert.strictEqual(result.prNumber, 42);
+      assert.strictEqual(result.prUrl, 'https://github.com/microsoft/vscode/pull/42');
+      
+      const spawnCall = (mockSpawner.spawn as sinon.SinonStub).getCall(0);
+      assert.strictEqual(spawnCall.args[0], 'gh');
+      assert.deepStrictEqual(spawnCall.args[1], [
+        'pr', 'create',
+        '--base', 'main',
+        '--head', 'feature-branch',
+        '--title', 'Add feature',
+        '--body', 'This adds a feature',
+        '--json', 'number,url',
+      ]);
+    });
+
+    test('sets GH_TOKEN env var not CLI arg', async () => {
+      const mockProc = makeMockProcess('{"number":1,"url":"https://github.com/microsoft/vscode/pull/1"}', '', 0);
+      (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
+
+      await service.createPR({
+        baseBranch: 'main',
+        headBranch: 'fix',
+        title: 'Fix',
+        body: 'Body',
+        cwd: '/repo',
+      });
+
+      const spawnCall = (mockSpawner.spawn as sinon.SinonStub).getCall(0);
+      const env = spawnCall.args[2].env;
+      
+      // Token must be in env
+      assert.strictEqual(env.GH_TOKEN, 'gho_test_token');
+      
+      // Token must NOT be in args
+      const args = spawnCall.args[1];
+      assert.ok(!args.includes('gho_test_token'));
+      assert.ok(!args.some((arg: string) => arg.includes('token')));
+    });
+
+    test('sets GH_HOST for GHE', async () => {
+      (mockDetector.detect as sinon.SinonStub).resolves(gheProvider);
+      (mockDetector.acquireCredentials as sinon.SinonStub).resolves({
+        token: 'gho_enterprise_token',
+        tokenSource: 'gh-auth',
+        hostname: 'mygithub.company.com',
+      });
+
+      const mockProc = makeMockProcess('{"number":1,"url":"https://github.company.com/corp/app/pull/1"}', '', 0);
+      (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
+
+      await service.createPR({
+        baseBranch: 'main',
+        headBranch: 'feature',
+        title: 'Feature',
+        body: 'Body',
+        cwd: '/repo',
+      });
+
+      const spawnCall = (mockSpawner.spawn as sinon.SinonStub).getCall(0);
+      const env = spawnCall.args[2].env;
+      
+      assert.strictEqual(env.GH_HOST, 'mygithub.company.com');
+      assert.strictEqual(env.GH_TOKEN, 'gho_enterprise_token');
+    });
+  });
+
+  suite('getPRChecks', () => {
+    test('parses gh output, maps states', async () => {
+      const mockOutput = JSON.stringify([
+        { name: 'CI / build', state: 'SUCCESS', link: 'https://github.com/actions/1' },
+        { name: 'CodeQL', state: 'FAILURE', link: 'https://github.com/actions/2' },
+        { name: 'Lint', state: 'PENDING', link: 'https://github.com/actions/3' },
+      ]);
+      
+      const mockProc = makeMockProcess(mockOutput, '', 0);
+      (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
+
+      const checks = await service.getPRChecks(42, '/repo');
+
+      assert.strictEqual(checks.length, 3);
+      
+      assert.strictEqual(checks[0].name, 'CI / build');
+      assert.strictEqual(checks[0].status, 'passing');
+      
+      assert.strictEqual(checks[1].name, 'CodeQL');
+      assert.strictEqual(checks[1].status, 'failing');
+      
+      assert.strictEqual(checks[2].name, 'Lint');
+      assert.strictEqual(checks[2].status, 'pending');
+    });
+  });
+
+  suite('getPRComments', () => {
+    test('aggregates inline/review/issue comments', async () => {
+      let callCount = 0;
+      (mockSpawner.spawn as sinon.SinonStub).callsFake((cmd: string, args: string[]) => {
+        callCount++;
+        
+        // First call: review comments
+        if (callCount === 1) {
+          return makeMockProcess(JSON.stringify([
+            { id: 1, user: { login: 'alice' }, body: 'Review comment', path: 'src/file.ts', line: 42 },
+          ]), '', 0);
+        }
+        
+        // Second call: reviews
+        if (callCount === 2) {
+          return makeMockProcess(JSON.stringify([
+            { id: 2, user: { login: 'bob' }, body: 'Approved', state: 'APPROVED' },
+          ]), '', 0);
+        }
+        
+        // Third call: issue comments
+        return makeMockProcess(JSON.stringify([
+          { id: 3, user: { login: 'carol' }, body: 'General comment' },
+        ]), '', 0);
+      });
+
+      const comments = await service.getPRComments(42, '/repo');
+
+      assert.strictEqual(comments.length, 3);
+      assert.ok(comments.find(c => c.id === '1' && c.author === 'alice'));
+      assert.ok(comments.find(c => c.id === '2' && c.author === 'bob'));
+      assert.ok(comments.find(c => c.id === '3' && c.author === 'carol'));
+    });
+
+    test('categorizes bot/copilot/codeql', async () => {
+      let callCount = 0;
+      (mockSpawner.spawn as sinon.SinonStub).callsFake(() => {
+        callCount++;
+        
+        if (callCount === 1) {
+          return makeMockProcess(JSON.stringify([
+            { id: 1, user: { login: 'github-actions[bot]' }, body: 'Bot comment', path: 'file.ts', line: 1 },
+          ]), '', 0);
+        }
+        
+        if (callCount === 2) {
+          return makeMockProcess(JSON.stringify([
+            { id: 2, user: { login: 'copilot' }, body: 'Copilot suggestion' },
+          ]), '', 0);
+        }
+        
+        return makeMockProcess(JSON.stringify([
+          { id: 3, user: { login: 'codeql' }, body: 'Security issue' },
+        ]), '', 0);
+      });
+
+      const comments = await service.getPRComments(42, '/repo');
+
+      const botComment = comments.find(c => c.id === '1');
+      const copilotComment = comments.find(c => c.id === '2');
+      const codeqlComment = comments.find(c => c.id === '3');
+      
+      assert.strictEqual(botComment?.source, 'bot');
+      assert.strictEqual(copilotComment?.source, 'copilot');
+      assert.strictEqual(codeqlComment?.source, 'codeql');
+    });
+  });
+
+  suite('getSecurityAlerts', () => {
+    test('returns empty on 404', async () => {
+      const mockProc = makeMockProcess('', 'HTTP 404: Not Found', 1);
+      (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
+
+      const alerts = await service.getSecurityAlerts('main', '/repo');
+
+      assert.strictEqual(alerts.length, 0);
+    });
+  });
+
+  suite('replyToComment', () => {
+    test('posts via gh api', async () => {
+      const mockProc = makeMockProcess('{"id":999}', '', 0);
+      (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
+
+      await service.replyToComment(42, '123', 'My reply', '/repo');
+
+      const spawnCall = (mockSpawner.spawn as sinon.SinonStub).getCall(0);
+      assert.strictEqual(spawnCall.args[0], 'gh');
+      assert.ok(spawnCall.args[1].includes('api'));
+      assert.ok(spawnCall.args[1].some((arg: string) => arg.includes('body=My reply')));
+      assert.ok(spawnCall.args[1].some((arg: string) => arg.includes('in_reply_to=123')));
+    });
+  });
+
+  suite('resolveThread', () => {
+    test('uses graphql mutation', async () => {
+      const mockProc = makeMockProcess('{"data":{"resolveReviewThread":{"thread":{"id":"123"}}}}', '', 0);
+      (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
+
+      await service.resolveThread(42, 'thread_123', '/repo');
+
+      const spawnCall = (mockSpawner.spawn as sinon.SinonStub).getCall(0);
+      assert.strictEqual(spawnCall.args[0], 'gh');
+      assert.ok(spawnCall.args[1].includes('api'));
+      assert.ok(spawnCall.args[1].includes('graphql'));
+      assert.ok(spawnCall.args[1].some((arg: string) => arg.includes('resolveReviewThread')));
+    });
+  });
+});

@@ -172,3 +172,63 @@ export const IPlanRecovery = Symbol('IPlanRecovery');
  * Provides bulk operations on multiple plans.
  */
 export const IBulkPlanActions = Symbol('IBulkPlanActions');
+
+/**
+ * Token for IReleaseManager service.
+ * Provides release lifecycle management and orchestration.
+ */
+export const IReleaseManager = Symbol('IReleaseManager');
+
+/**
+ * Token for IReleasePRMonitor service.
+ * Provides PR monitoring for releases.
+ */
+export const IReleasePRMonitor = Symbol('IReleasePRMonitor');
+
+/**
+ * Token for IReleaseStore service.
+ * Provides storage backend for release persistence.
+ */
+export const IReleaseStore = Symbol('IReleaseStore');
+
+/**
+ * Token for IRemotePRService service.
+ * Provides unified PR operations across GitHub, GitHub Enterprise, and Azure DevOps.
+ */
+export const IRemotePRService = Symbol('IRemotePRService');
+
+/**
+ * Token for IRemoteProviderDetector service.
+ * Provides remote provider detection and credential acquisition.
+ */
+export const IRemoteProviderDetector = Symbol('IRemoteProviderDetector');
+
+/**
+ * Token for IRemotePRServiceFactory service.
+ * Provides factory for creating provider-specific PR service instances.
+ */
+export const IRemotePRServiceFactory = Symbol('IRemotePRServiceFactory');
+
+/**
+ * Token for IReleaseConfigManager service.
+ * Provides release management configuration access.
+ */
+export const IReleaseConfigManager = Symbol('IReleaseConfigManager');
+
+/**
+ * Token for IIsolatedRepoManager service.
+ * Provides isolated repository clone management for release workflows.
+ */
+export const IIsolatedRepoManager = Symbol('IIsolatedRepoManager');
+
+/**
+ * Token for IPRLifecycleManager service.
+ * Provides PR lifecycle management including adoption, monitoring, and autonomous feedback handling.
+ */
+export const IPRLifecycleManager = Symbol('IPRLifecycleManager');
+
+/**
+ * Token for IManagedPRStore service.
+ * Provides storage backend for managed PR persistence.
+ */
+export const IManagedPRStore = Symbol('IManagedPRStore');

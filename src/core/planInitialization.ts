@@ -377,7 +377,8 @@ export async function initializeMcpServer(
 export function initializePlansView(
   context: vscode.ExtensionContext,
   planRunner: PlanRunner,
-  pulse?: import('../interfaces/IPulseEmitter').IPulseEmitter
+  pulse?: import('../interfaces/IPulseEmitter').IPulseEmitter,
+  prLifecycleManager?: import('../interfaces/IPRLifecycleManager').IPRLifecycleManager
 ): void {
   log.info('Initializing Plans view...');
   
@@ -387,7 +388,7 @@ export function initializePlansView(
   // Import the view provider
   const { plansViewProvider } = require('../ui/plansViewProvider');
   
-  const plansView = new plansViewProvider(context, planRunner, effectivePulse);
+  const plansView = new plansViewProvider(context, planRunner, effectivePulse, prLifecycleManager);
   
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
