@@ -310,6 +310,70 @@
           "type": "boolean",
           "default": false,
           "description": "[EXPERIMENTAL] Show the timeline view in plan detail panels. This feature is under active development and hidden by default. Enable to preview and provide feedback on the interactive execution timeline visualization."
+        },
+        "copilotOrchestrator.releaseManagement.pollIntervalSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 30,
+          "maximum": 600,
+          "description": "Seconds between PR monitoring poll cycles (default: 120 = 2 minutes)"
+        },
+        "copilotOrchestrator.releaseManagement.maxMonitoringMinutes": {
+          "type": "number",
+          "default": 40,
+          "minimum": 5,
+          "maximum": 180,
+          "description": "Maximum minutes to monitor a PR after the last push before stopping (default: 40)"
+        },
+        "copilotOrchestrator.releaseManagement.resetTimerOnPush": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reset the monitoring timer when a fix is pushed to the PR branch. When false, monitoring always stops after maxMonitoringMinutes regardless of pushes."
+        },
+        "copilotOrchestrator.releaseManagement.createPRAsDraft": {
+          "type": "boolean",
+          "default": false,
+          "description": "Create pull requests as drafts initially. Use the release panel to promote to active when ready."
+        },
+        "copilotOrchestrator.releaseManagement.autoAddressComments": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically address review comments using Copilot CLI during monitoring. When false, comments are logged but not auto-fixed."
+        },
+        "copilotOrchestrator.releaseManagement.autoFixCI": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically attempt to fix failing CI checks using Copilot CLI during monitoring."
+        },
+        "copilotOrchestrator.releaseManagement.autoResolveSecurityAlerts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically resolve security/CodeQL alerts using Copilot CLI during monitoring."
+        },
+        "copilotOrchestrator.releaseManagement.mergeStrategy": {
+          "type": "string",
+          "enum": [
+            "merge",
+            "squash",
+            "rebase"
+          ],
+          "default": "merge",
+          "description": "Git merge strategy when merging plan branches into the release branch."
+        },
+        "copilotOrchestrator.releaseManagement.isolatedCloneStrategy": {
+          "type": "string",
+          "enum": [
+            "shared",
+            "reference",
+            "full"
+          ],
+          "default": "shared",
+          "description": "Git clone strategy for isolated release repos. 'shared' is fastest but requires same filesystem. 'reference' is portable. 'full' is slowest but most compatible."
+        },
+        "copilotOrchestrator.releaseManagement.cleanupOnComplete": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically clean up isolated clones under .orchestrator/release/ when a release succeeds or is canceled."
         }
       }
     }
