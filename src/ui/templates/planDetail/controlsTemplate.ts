@@ -20,7 +20,7 @@ export interface PlanControlsData {
 /**
  * Render the plan action buttons HTML fragment.
  *
- * Buttons rendered: Pause, Resume, Cancel, Refresh, View Work Summary, Delete.
+ * Buttons rendered: Pause, Resume, Cancel, Recover, Refresh, View Work Summary, Delete.
  * Visibility is based on plan status — hidden buttons are rendered with
  * `style="display:none"` so the client-side incremental update can toggle them.
  *
@@ -36,6 +36,7 @@ export function renderPlanControls(data: PlanControlsData): string {
   const isPendingStart = status === 'pending-start';
   const canControl = isActive || isPaused || isPausing || isPendingStart;
   const isScaffolding = status === 'scaffolding';
+  const canRecover = status === 'canceled' || status === 'failed';
 
   const pauseBtn = isActive
     ? '<button id="pauseBtn" class="action-btn secondary" onclick="pausePlan()">Pause</button>'
@@ -54,6 +55,10 @@ export function renderPlanControls(data: PlanControlsData): string {
     ? '<button id="cancelBtn" class="action-btn secondary" onclick="cancelPlan()">Cancel</button>'
     : '<button id="cancelBtn" class="action-btn secondary" onclick="cancelPlan()" style="display:none">Cancel</button>';
 
+  const recoverBtn = canRecover
+    ? '<button id="recoverBtn" class="action-btn primary" onclick="recoverPlan()" title="Recover plan: recreate target branch and restore successful work">Recover</button>'
+    : '<button id="recoverBtn" class="action-btn primary" onclick="recoverPlan()" style="display:none" title="Recover plan: recreate target branch and restore successful work">Recover</button>';
+
   const workSummaryBtn = status === 'succeeded'
     ? '<button id="workSummaryBtn" class="action-btn primary" onclick="showWorkSummary()">View Work Summary</button>'
     : '<button id="workSummaryBtn" class="action-btn primary" onclick="showWorkSummary()" style="display:none">View Work Summary</button>';
@@ -65,6 +70,7 @@ export function renderPlanControls(data: PlanControlsData): string {
       ${isScaffolding ? '' : startBtn}
       ${isScaffolding ? '' : resumeBtn}
       ${isScaffolding ? '' : cancelBtn}
+      ${isScaffolding ? '' : recoverBtn}
       <button class="action-btn secondary" onclick="refresh()">Refresh</button>
       ${isScaffolding ? '' : workSummaryBtn}
       <button class="action-btn danger" onclick="deletePlan()">Delete</button>

@@ -21,6 +21,7 @@ export * from './getPlanHandler';
 export * from './pauseResumeHandler';
 export * from './cancelDeleteHandler';
 export * from './archivePlanHandler';
+export * from './recoverPlanHandler';
 
 // Plan retry handlers
 export * from './retryPlanHandler';

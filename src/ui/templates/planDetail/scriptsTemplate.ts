@@ -76,6 +76,7 @@ export function renderPlanScripts(data: PlanScriptsData): string {
     function cancelPlan() { vscode.postMessage({ type: 'cancel' }); }
     function pausePlan() { vscode.postMessage({ type: 'pause' }); }
     function resumePlan() { vscode.postMessage({ type: 'resume' }); }
+    function recoverPlan() { vscode.postMessage({ type: 'recover' }); }
     function deletePlan() { vscode.postMessage({ type: 'delete' }); }
     function refresh() { vscode.postMessage({ type: 'refresh' }); }
     function showWorkSummary() { vscode.postMessage({ type: 'showWorkSummary' }); }

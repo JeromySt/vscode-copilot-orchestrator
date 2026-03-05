@@ -52,6 +52,7 @@ import { DefaultPlanRepository } from './plan/repository/DefaultPlanRepository';
 import { DefaultFileSystem } from './core/defaultFileSystem';
 import { GitignoreDebouncer } from './core/gitignoreDebouncer';
 import { PlanArchiver } from './plan/planArchiver';
+import { PlanRecovery } from './plan/planRecovery';
 
 /**
  * Create and wire the production DI container.

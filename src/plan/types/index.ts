@@ -73,3 +73,10 @@ export {
   ArchiveResult,
   ArchiveOptions,
 } from './archive';
+
+// Recovery types
+export {
+  RecoveryResult,
+  RecoveryOptions,
+  NodeRecoveryInfo,
+} from './recovery';

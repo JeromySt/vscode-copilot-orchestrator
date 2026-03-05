@@ -31,6 +31,7 @@ import {
   handleResumePlan,
   handleDeletePlan,
   handleArchivePlan,
+  handleRecoverPlan,
   handleRetryPlan,
   handleGetJobFailureContext,
   handleUpdatePlanJob,
@@ -105,6 +106,7 @@ export class McpHandler implements IMcpRequestRouter {
    * @param configProvider  - Optional configuration provider for reading VS Code settings.
    * @param planRepository  - Plan repository for filesystem-backed storage.
    * @param planArchiver    - Optional plan archiver for cleaning up completed plans.
+   * @param planRecovery    - Optional plan recovery service.
    */
   constructor(
     PlanRunner: PlanRunner,
@@ -113,6 +115,7 @@ export class McpHandler implements IMcpRequestRouter {
     configProvider?: import('../interfaces/IConfigProvider').IConfigProvider,
     planRepository?: import('../interfaces/IPlanRepository').IPlanRepository,
     planArchiver?: import('../interfaces/IPlanArchiver').IPlanArchiver,
+    planRecovery?: import('../interfaces/IPlanRecovery').IPlanRecovery,
   ) {
     this.context = { 
       PlanRunner, 
@@ -121,6 +124,7 @@ export class McpHandler implements IMcpRequestRouter {
       configProvider,
       PlanRepository: planRepository!,
       PlanArchiver: planArchiver,
+      PlanRecovery: planRecovery,
       // Legacy fields - kept for type compatibility
       runner: null as any,
       plans: null as any,
@@ -292,6 +296,10 @@ export class McpHandler implements IMcpRequestRouter {
         
       case 'archive_copilot_plan':
         result = await handleArchivePlan(args || {}, this.context);
+        break;
+        
+      case 'recover_copilot_plan':
+        result = await handleRecoverPlan(args || {}, this.context);
         break;
         
       case 'retry_copilot_plan':

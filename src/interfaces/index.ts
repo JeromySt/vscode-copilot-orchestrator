@@ -29,3 +29,4 @@ export * from './IPlanRepository';
 export * from './IPlanDefinition';
 export * from './IPlanRepositoryStore';
 export * from './IPlanArchiver';
+export * from './IPlanRecovery';

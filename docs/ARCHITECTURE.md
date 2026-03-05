@@ -148,6 +148,16 @@ classDiagram
         +resetNodeToPending(nodeId) void
     }
 
+    class PlanRecovery {
+        -planRunner: IPlanRunner
+        -planRepo: IPlanRepository
+        -git: IGitOperations
+        -copilot: ICopilotRunner
+        +recover(planId, options) RecoveryResult
+        +canRecover(planId) boolean
+        +analyzeRecoverableNodes(planId) NodeRecoveryInfo[]
+    }
+
     class PlanInstance {
         +id: string
         +spec: PlanSpec
@@ -169,6 +179,10 @@ classDiagram
 
     PlanRunner --> PlanLifecycle
     PlanRunner --> PlanInstance
+    PlanRunner --> PlanRecovery
+    PlanRecovery --> PlanRunner
+    PlanRecovery --> IGitOperations
+    PlanRecovery --> ICopilotRunner
     PlanLifecycle --> ExecutionPump
     ExecutionPump --> PlanScheduler
     ExecutionPump --> JobExecutionEngine
@@ -413,6 +427,74 @@ sequenceDiagram
     SV-->>Pump: succeeded
     Note over Pump: Clean up snapshot worktree + branch
 ```
+
+---
+
+## Sequence Diagram — Plan Recovery
+
+```mermaid
+sequenceDiagram
+    participant MCP as MCP Handler
+    participant Recovery as PlanRecovery
+    participant Runner as PlanRunner
+    participant Git as GitOperations
+    participant Repo as PlanRepository
+
+    Note over MCP: recover_copilot_plan tool call
+
+    MCP->>Recovery: canRecover(planId)
+    Recovery->>Runner: getStatus(planId)
+    alt Status is canceled or failed
+        Recovery-->>MCP: true
+    else Status is running/paused/succeeded
+        Recovery-->>MCP: false (error)
+    end
+
+    MCP->>Recovery: analyzeRecoverableNodes(planId)
+    Recovery->>Runner: get(planId)
+    Recovery->>Runner: getStateMachine(planId)
+    loop For each node
+        Recovery->>Recovery: check node status (succeeded?)
+        Recovery->>Recovery: get commitHash from nodeState/attempts/worktree
+    end
+    Recovery-->>MCP: NodeRecoveryInfo[]
+
+    MCP->>Recovery: recover(planId, options)
+    
+    Note over Recovery: Step 1: Recreate target branch
+    Recovery->>Git: resolveRef(baseBranch)
+    Git-->>Recovery: baseCommitHash
+    Recovery->>Git: createOrReset(targetBranch, baseCommitHash)
+
+    Note over Recovery: Step 2: Recover worktrees (canceled/failed plans)
+    loop For each succeeded node with commit
+        Recovery->>Git: resolveRef(commitHash) — verify exists
+        Recovery->>Recovery: validate worktree path (no traversal)
+        Recovery->>Git: createOrReuseDetached(worktreePath, commitHash)
+    end
+
+    opt useCopilotAgent=true
+        Recovery->>Recovery: _runRecoveryAgent() — verify integrity
+    end
+
+    Note over Recovery: Step 3: Transition to paused
+    Recovery->>Runner: pause(planId)
+    Runner->>Repo: saveState(plan)
+
+    Recovery-->>MCP: RecoveryResult (success, recoveredNodes, recoveredBranch)
+```
+
+---
+
+### Recovery Flow Details
+
+1. **Validate plan is recoverable**: Only `canceled` or `failed` plans can be recovered
+2. **Recreate target branch**: Reset target branch to base branch commit (initial state)
+3. **Analyze DAG for successful nodes**: Use git rev-parse to check commit existence and DAG status for work completion
+4. **Create worktrees from successful commits**: Recover deepest successful node worktrees at their completed commits
+5. **Optionally invoke Copilot CLI**: Verify recovery integrity with agent (currently stubbed)
+6. **Transition plan to paused state**: Plan enters paused state for safe inspection
+7. **Reset failed/canceled nodes to pending**: Failed nodes are ready to retry from their last successful dependency
 
 ---
 

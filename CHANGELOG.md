@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - "Archived" collapsible section in Plans sidebar with dimmed visual treatment
 - `archive_copilot_plan` MCP tool for programmatic archiving
 - Archive button on eligible plan cards (succeeded, partial, canceled)
+- Plan recovery from canceled or archived state via right-click menu and plan detail panel
+- `recover_copilot_plan` MCP tool for programmatic recovery
+- Git rev-parse based recovery: recreates target branch and recovers deepest successful node worktrees
+- Copilot CLI agent verifies recovered worktree integrity
+- All recovered plans enter paused state for safe inspection before resuming
 
 ## [0.14.0] - 2026-02-28
 

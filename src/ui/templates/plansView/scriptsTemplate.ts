@@ -81,12 +81,15 @@ class PlanListCardControl extends SubscribableControl {
     var canArchive = data.status === 'succeeded' || data.status === 'partial' || data.status === 'failed' || data.status === 'canceled';
     var archiveButton = canArchive && data.status !== 'archived' ? 
       '<button class="archive-action" data-plan-id="' + escapeHtml(data.id) + '" title="Archive this plan">$(archive)</button>' : '';
+    var recoverBtn = (data.status === 'canceled' || data.status === 'failed') ?
+      '<button class="recover-btn" title="Recover this plan" onclick="event.stopPropagation(); vscode.postMessage({ type: \'recoverPlan\', planId: \'' + data.id + '\' });">$(history)</button>' : '';
     
     this.element.innerHTML =
       '<div class="plan-name">' +
         '<span class="plan-name-text" title="' + escapeHtml(data.name) + '">' + escapeHtml(data.name) + '</span>' +
         archiveButton +
         '<span class="plan-status ' + data.status + '">' + (data.status === 'scaffolding' ? '\\u{1F6A7} Under Construction' : data.status) + '</span>' +
+        recoverBtn +
       '</div>' +
       '<div class="plan-details">' +
         '<span class="plan-node-count">' + data.nodes + ' jobs</span>' +
@@ -128,6 +131,26 @@ class PlanListCardControl extends SubscribableControl {
       statusEl.className = 'plan-status ' + data.status;
       statusEl.textContent = data.status === 'scaffolding' ? '\\u{1F6A7} Under Construction' : data.status;
     }
+    
+    // Update or add/remove recover button based on status
+    var existingRecoverBtn = this.element.querySelector('.recover-btn');
+    var shouldShowRecover = data.status === 'canceled' || data.status === 'failed';
+    if (shouldShowRecover && !existingRecoverBtn) {
+      var recoverBtn = document.createElement('button');
+      recoverBtn.className = 'recover-btn';
+      recoverBtn.title = 'Recover this plan';
+      recoverBtn.innerHTML = '$(history)';
+      var self = this;
+      recoverBtn.onclick = function(e) {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'recoverPlan', planId: self.planId });
+      };
+      var planNameEl = this.element.querySelector('.plan-name');
+      if (planNameEl) planNameEl.appendChild(recoverBtn);
+    } else if (!shouldShowRecover && existingRecoverBtn) {
+      existingRecoverBtn.parentNode.removeChild(existingRecoverBtn);
+    }
+    
     var countEl = this.element.querySelector('.plan-node-count');
     if (countEl) countEl.textContent = data.nodes + ' jobs';
     var sEl = this.element.querySelector('.plan-succeeded');

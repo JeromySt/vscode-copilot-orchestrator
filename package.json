@@ -98,6 +98,11 @@
         "icon": "$(debug-continue)"
       },
       {
+        "command": "orchestrator.recoverPlan",
+        "title": "Copilot Orchestrator: Recover Plan",
+        "icon": "$(history)"
+      },
+      {
         "command": "orchestrator.deletePlan",
         "title": "Copilot Orchestrator: Delete Plan",
         "icon": "$(trash)"

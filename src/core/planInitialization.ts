@@ -200,6 +200,19 @@ export async function initializePlanRunner(
   const planRepository = container.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
   planRunner.setPlanRepository(planRepository);
 
+  // Register PlanRecovery service now that PlanRunner exists
+  // (IPlanRecovery needs IPlanRunner, so it must be registered after PlanRunner is created)
+  const { PlanRecovery } = await import('../plan/planRecovery');
+  container.registerSingleton<import('../interfaces/IPlanRecovery').IPlanRecovery>(
+    Tokens.IPlanRecovery,
+    (c) => {
+      const planRepo = c.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
+      const git = c.resolve<import('../interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+      const copilot = c.resolve<import('../interfaces/ICopilotRunner').ICopilotRunner>(Tokens.ICopilotRunner);
+      return new PlanRecovery(planRunner, planRepo, git, copilot);
+    }
+  );
+
   // Ensure .orchestrator and .worktrees are in .gitignore (via debouncer)
   if (workspacePath) {
     debouncer.ensureEntries(workspacePath, ['.orchestrator/', '.worktrees/']).catch((err: any) => {
@@ -265,7 +278,13 @@ export async function initializeMcpServer(
     const configProvider = c.resolve<import('../interfaces/IConfigProvider').IConfigProvider>(Tokens.IConfigProvider);
     const repo = c.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
     const archiver = c.resolve<import('../interfaces/IPlanArchiver').IPlanArchiver>(Tokens.IPlanArchiver);
-    return new McpHandler(planRunner, workspacePath, git, configProvider, repo, archiver);
+    const copilotRunner = c.resolve<import('../interfaces/ICopilotRunner').ICopilotRunner>(Tokens.ICopilotRunner);
+    
+    // Create PlanRecovery instance
+    const { PlanRecovery } = require('../plan/planRecovery');
+    const planRecovery = new PlanRecovery(planRunner, repo, git, copilotRunner);
+    
+    return new McpHandler(planRunner, workspacePath, git, configProvider, repo, archiver, planRecovery);
   });
 
   // Register PlanArchiver with PlanRunner dependency
@@ -672,6 +691,7 @@ export function registerPlanCommands(
     })
   );
   
+
   // Archive Plan
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.archivePlan', async (planId?: string) => {
@@ -743,6 +763,100 @@ export function registerPlanCommands(
           vscode.window.showErrorMessage(`Failed to archive plan: ${result.error}`);
         }
       }
+    })
+  );
+  
+  // Recover Plan
+  context.subscriptions.push(
+    vscode.commands.registerCommand('orchestrator.recoverPlan', async (planId?: string) => {
+      if (!planId) {
+        const plans = planRunner.getAll().filter(p => {
+          const sm = planRunner.getStateMachine(p.id);
+          const status = sm?.computePlanStatus();
+          return status === 'canceled' || status === 'failed';
+        });
+        
+        if (plans.length === 0) {
+          vscode.window.showInformationMessage('No canceled or failed plans to recover');
+          return;
+        }
+        
+        const items = plans.map(p => ({
+          label: p.spec.name,
+          description: p.id,
+          planId: p.id,
+        }));
+        
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a plan to recover',
+        });
+        
+        if (!selected) {return;}
+        planId = selected.planId;
+      }
+      
+      const plan = planRunner.get(planId);
+      if (!plan) {
+        vscode.window.showErrorMessage(`Plan not found: ${planId}`);
+        return;
+      }
+      
+      // Get recovery service from DI container
+      const recoveryContainer = (global as any).__orchestratorContainer as ServiceContainer | undefined;
+      if (!recoveryContainer) {
+        vscode.window.showErrorMessage('Recovery service not available');
+        return;
+      }
+      
+      const recovery = recoveryContainer.resolve<import('../interfaces/IPlanRecovery').IPlanRecovery>(Tokens.IPlanRecovery);
+      
+      // Analyze recoverable nodes for preview
+      const nodeInfos = await recovery.analyzeRecoverableNodes(planId);
+      const recoverableCount = nodeInfos.filter(n => n.wasSuccessful && n.commitHash).length;
+      const targetBranch = plan.targetBranch || plan.baseBranch;
+      
+      // Show recovery preview and confirmation
+      const message = `Recovery Preview for '${plan.spec.name}':\n\n` +
+        `• Target branch '${targetBranch}' will be recreated from '${plan.baseBranch}'\n` +
+        `• ${recoverableCount} of ${plan.jobs.size} nodes had successful work that can be recovered\n` +
+        `• Plan will be placed in PAUSED state\n\n` +
+        `Proceed with recovery?`;
+      
+      const confirm = await vscode.window.showInformationMessage(
+        message,
+        { modal: true },
+        'Recover',
+        'Cancel'
+      );
+      
+      if (confirm !== 'Recover') {
+        return;
+      }
+      
+      // Show progress during recovery
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Recovering plan '${plan.spec.name}'...`,
+          cancellable: false,
+        },
+        async (progress) => {
+          progress.report({ increment: 0, message: 'Analyzing plan state...' });
+          
+          const result = await recovery.recover(planId, { useCopilotAgent: true });
+          
+          if (result.success) {
+            const message = `Plan recovered successfully!\n\n` +
+              `• Branch '${result.recoveredBranch}' recreated\n` +
+              `• ${result.recoveredNodes.length} nodes recovered\n` +
+              `• Plan is now in PAUSED state`;
+            
+            vscode.window.showInformationMessage(message);
+          } else {
+            vscode.window.showErrorMessage(`Recovery failed: ${result.error || 'Unknown error'}`);
+          }
+        }
+      );
     })
   );
   

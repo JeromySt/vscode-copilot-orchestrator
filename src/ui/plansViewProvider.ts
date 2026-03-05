@@ -137,6 +137,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         case 'archivePlan':
           vscode.commands.executeCommand('orchestrator.archivePlan', message.planId);
           break;
+        case 'recoverPlan':
+          vscode.commands.executeCommand('orchestrator.recoverPlan', message.planId);
+          break;
         case 'refresh':
           this._initialRefreshDone = true;
           this.refresh();

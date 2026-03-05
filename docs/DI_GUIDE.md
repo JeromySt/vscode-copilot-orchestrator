@@ -735,6 +735,7 @@ Available DI tokens for service resolution:
 | `IPlanRepositoryStore` | `IPlanRepositoryStore` | Low-level plan storage operations |
 | `IPlanDefinition` | `IPlanDefinition` | Lazy work spec access for plan nodes |
 | `IPlanArchiver` | `IPlanArchiver` | Plan archiving and cleanup |
+| `IPlanRecovery` | `IPlanRecovery` | Plan recovery from canceled/failed state |
 | `ILogger` | `ILogger` | Application logging service |
 | `IGitOperations` | `IGitOperations` | Git repository operations |
 | `IProcessMonitor` | `IProcessMonitor` | Process lifecycle monitoring |
