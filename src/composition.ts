@@ -50,6 +50,7 @@ import { DefaultGitOperations } from './git/DefaultGitOperations';
 import { FileSystemPlanStore } from './plan/store/FileSystemPlanStore';
 import { DefaultPlanRepository } from './plan/repository/DefaultPlanRepository';
 import { DefaultFileSystem } from './core/defaultFileSystem';
+import { DefaultRemoteProviderDetector } from './git/remotePR/remoteProviderDetector';
 
 /**
  * Create and wire the production DI container.
@@ -228,6 +229,16 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
       const worktreeRoot = workspacePath ? path.join(workspacePath, '.worktrees') : '';
       return new DefaultPlanRepository(store, workspacePath, worktreeRoot);
+    },
+  );
+
+  // ─── Remote Provider Detector ───────────────────────────────────
+  container.registerSingleton<import('./interfaces').IRemoteProviderDetector>(
+    Tokens.IRemoteProviderDetector,
+    (c) => {
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const env = c.resolve<import('./interfaces').IEnvironment>(Tokens.IEnvironment);
+      return new DefaultRemoteProviderDetector(spawner, env);
     },
   );
 
