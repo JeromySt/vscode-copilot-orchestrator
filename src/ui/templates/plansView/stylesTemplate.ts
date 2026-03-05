@@ -15,18 +15,71 @@ export function renderPlansViewStyles(): string {
   return `<style>
     body { 
       font: 12px var(--vscode-font-family); 
-      padding: 8px; 
+      padding: 0; 
       margin: 0; 
       color: var(--vscode-foreground); 
     }
+    
+    /* Tab Bar */
+    .sidebar-tabs {
+      display: flex;
+      gap: 0;
+      background: var(--vscode-sideBar-background);
+      border-bottom: 1px solid var(--vscode-panel-border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: 4px 8px 0;
+    }
+    .tab {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border: none;
+      background: transparent;
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s ease;
+      opacity: 0.7;
+    }
+    .tab:hover {
+      opacity: 1;
+      background: var(--vscode-list-hoverBackground);
+    }
+    .tab.active {
+      opacity: 1;
+      border-bottom-color: var(--vscode-focusBorder);
+      background: var(--vscode-editor-background);
+    }
+    .tab-badge {
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 8px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      font-weight: 600;
+    }
+    
+    /* Tab Content */
+    .tab-content {
+      display: none;
+      padding: 8px;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    
     .header { 
       display: flex; 
       gap: 8px; 
       margin-bottom: 12px; 
       align-items: center; 
-      justify-content: space-between;
+      justify-content: flex-end;
     }
-    .header h3 { margin: 0; }
     .header-actions {
       display: flex;
       gap: 8px;
