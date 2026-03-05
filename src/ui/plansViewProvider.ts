@@ -14,6 +14,8 @@ import { NodeDetailPanel } from './panels/nodeDetailPanel';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../interfaces/IPulseEmitter';
 import type { IPRLifecycleManager } from '../interfaces/IPRLifecycleManager';
 import type { ManagedPR } from '../plan/types/prLifecycle';
+import type { IReleaseManager } from '../interfaces/IReleaseManager';
+import type { ReleaseDefinition } from '../plan/types/release';
 
 /**
  * Sidebar webview provider that displays all top-level Plans and their execution status.
@@ -58,12 +60,14 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
    * @param _planRunner - The {@link PlanRunner} instance used to query Plan state.
    * @param _pulse - The pulse emitter for periodic updates.
    * @param _prLifecycleManager - The PR lifecycle manager (optional).
+   * @param _releaseManager - The release manager (optional).
    */
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _planRunner: PlanRunner,
     private readonly _pulse: IPulseEmitter,
-    private readonly _prLifecycleManager?: IPRLifecycleManager
+    private readonly _prLifecycleManager?: IPRLifecycleManager,
+    private readonly _releaseManager?: IReleaseManager
   ) {
     // Listen for Plan events — emit targeted per-plan messages
     _planRunner.on('planCreated', (plan: PlanInstance) => {
@@ -120,6 +124,19 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       });
       _prLifecycleManager.on('prRemoved', (id: string) => {
         this._sendPRDeleted(id);
+      });
+    }
+    
+    // Listen for release events
+    if (_releaseManager) {
+      _releaseManager.on('releaseCreated', (release: ReleaseDefinition) => {
+        this._sendReleaseAdded(release);
+      });
+      _releaseManager.on('releaseStatusChanged', (release: ReleaseDefinition) => {
+        this._sendReleaseStateChange(release);
+      });
+      _releaseManager.on('releaseCompleted', (release: ReleaseDefinition) => {
+        this._sendReleaseStateChange(release);
       });
     }
   }
@@ -183,6 +200,17 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
         case 'openPR':
           // Open Active PR Panel for the PR
           vscode.commands.executeCommand('orchestrator.showActivePRPanel', message.prId);
+          break;
+        case 'createRelease':
+          // Trigger the create release command
+          vscode.commands.executeCommand('orchestrator.createRelease');
+          break;
+        case 'createReleaseFromBranch':
+          this._handleCreateReleaseFromBranch();
+          break;
+        case 'openRelease':
+          // Open Release Panel for the release
+          vscode.commands.executeCommand('orchestrator.showReleasePanel', message.releaseId);
           break;
         case 'refresh':
           this._initialRefreshDone = true;
@@ -409,6 +437,145 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Build data object for a single release (used by both initial load and per-release events).
+   */
+  private _buildReleaseData(release: ReleaseDefinition) {
+    // Calculate progress based on status
+    let progress = 0;
+    switch (release.status) {
+      case 'drafting':
+        progress = 10;
+        break;
+      case 'merging':
+        progress = 30;
+        break;
+      case 'creating-pr':
+        progress = 50;
+        break;
+      case 'monitoring':
+      case 'addressing':
+        progress = 75;
+        break;
+      case 'succeeded':
+        progress = 100;
+        break;
+      case 'failed':
+      case 'canceled':
+        progress = 0;
+        break;
+    }
+    
+    return {
+      id: release.id,
+      name: release.name,
+      status: release.status,
+      releaseBranch: release.releaseBranch,
+      targetBranch: release.targetBranch,
+      planCount: release.planIds.length,
+      prNumber: release.prNumber,
+      prUrl: release.prUrl,
+      progress,
+      createdAt: release.createdAt,
+      startedAt: release.startedAt,
+      endedAt: release.endedAt,
+    };
+  }
+
+  /** Send a per-release state change to the webview. */
+  private _sendReleaseStateChange(release: ReleaseDefinition) {
+    if (!this._view) {return;}
+    const data = this._buildReleaseData(release);
+    this._view.webview.postMessage({ type: 'releaseStateChange', release: data });
+  }
+
+  /** Send notification that a new release was added. */
+  private _sendReleaseAdded(release: ReleaseDefinition) {
+    if (!this._view) {return;}
+    const data = this._buildReleaseData(release);
+    this._view.webview.postMessage({ type: 'releaseAdded', release: data });
+  }
+
+  /** Send notification that a release was deleted. */
+  private _sendReleaseDeleted(id: string) {
+    if (!this._view) {return;}
+    this._view.webview.postMessage({ type: 'releaseDeleted', releaseId: id });
+  }
+
+  /** Refresh releases independently. */
+  private async _refreshReleases() {
+    if (!this._view || !this._releaseManager) {return;}
+    const releases = this._releaseManager.getAllReleases();
+    const releaseData = releases.map(release => this._buildReleaseData(release));
+    this._view.webview.postMessage({
+      type: 'releasesUpdate',
+      releases: releaseData,
+    });
+  }
+
+  /**
+   * Handle "From Current Branch" button click.
+   * Detects current git branch and creates a release for it.
+   */
+  private async _handleCreateReleaseFromBranch() {
+    if (!this._releaseManager) {
+      vscode.window.showErrorMessage('Release manager is not available.');
+      return;
+    }
+    
+    try {
+      // Get current git branch
+      const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+      const git = gitExtension?.getAPI(1);
+      
+      if (!git || git.repositories.length === 0) {
+        vscode.window.showErrorMessage('No git repository found.');
+        return;
+      }
+      
+      const repo = git.repositories[0];
+      const branch = repo.state.HEAD?.name;
+      
+      if (!branch) {
+        vscode.window.showErrorMessage('Could not detect current branch.');
+        return;
+      }
+      
+      // Prompt for release name
+      const name = await vscode.window.showInputBox({
+        prompt: `Create release from branch "${branch}"`,
+        placeHolder: 'Enter release name (e.g., v1.2.0)',
+        validateInput: (value) => {
+          if (!value || value.trim().length === 0) {
+            return 'Release name is required';
+          }
+          return null;
+        }
+      });
+      
+      if (!name) {
+        return; // User cancelled
+      }
+      
+      // For now, create an empty release (no plans selected yet)
+      // The user can add plans later via the release panel
+      const release = await this._releaseManager.createRelease({
+        name: name.trim(),
+        planIds: [],
+        releaseBranch: branch,
+        targetBranch: 'main', // Default, can be changed later
+      });
+      
+      // Open the release panel
+      vscode.commands.executeCommand('orchestrator.showReleasePanel', release.id);
+      
+      vscode.window.showInformationMessage(`Release "${name}" created from branch "${branch}".`);
+      
+    } catch (error: any) {
+      vscode.window.showErrorMessage(`Failed to create release: ${error.message}`);
+    }
+  }
+
+  /**
    * Initial load: send all plans to the webview.
    * After this, only per-plan events are sent.
    */
@@ -433,6 +600,9 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     
     // Kick off first PRs refresh
     this._refreshPRs();
+    
+    // Kick off first releases refresh
+    this._refreshReleases();
   }
   
   /**

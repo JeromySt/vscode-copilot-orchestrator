@@ -63,12 +63,28 @@ if (state && state.activeTab) {
 var planListContainer = new PlanListContainerControl(bus, 'plan-list-container', 'plans');
 var capacityBar = new CapacityBarControl(bus, 'capacity-bar');
 var prListContainer = new PRListContainerControl(bus, 'pr-list-container', 'prs');
+var releaseListContainer = new ReleaseListContainerControl(bus, 'release-list-container', 'releases');
 
 // ── Adopt PR Button ───────────────────────────────────────────────────
 var adoptPRButton = document.getElementById('adoptPRButton');
 if (adoptPRButton) {
   adoptPRButton.addEventListener('click', function() {
     vscode.postMessage({ type: 'adoptPR' });
+  });
+}
+
+// ── Release Buttons ────────────────────────────────────────────────────
+var newReleaseButton = document.getElementById('newReleaseButton');
+if (newReleaseButton) {
+  newReleaseButton.addEventListener('click', function() {
+    vscode.postMessage({ type: 'createRelease' });
+  });
+}
+
+var releaseFromBranchButton = document.getElementById('releaseFromBranchButton');
+if (releaseFromBranchButton) {
+  releaseFromBranchButton.addEventListener('click', function() {
+    vscode.postMessage({ type: 'createReleaseFromBranch' });
   });
 }
 
@@ -87,6 +103,28 @@ if (managedPRsHeader && managedPRsContent && prsSectionChevron) {
     } else {
       managedPRsContent.classList.remove('collapsed');
       prsSectionChevron.classList.remove('collapsed');
+    }
+  });
+}
+
+// ── Releases Section Collapse/Expand ───────────────────────────────────
+var releasesHeader = document.getElementById('releasesHeader');
+var releasesContent = document.getElementById('releasesContent');
+var releasesSectionChevron = document.getElementById('releasesSectionChevron');
+var releasesSectionCollapsed = false;
+
+if (releasesHeader && releasesContent && releasesSectionChevron) {
+  releasesHeader.addEventListener('click', function(e) {
+    // Don't toggle if clicking on buttons
+    if (e.target.closest('.section-action-btn')) return;
+    
+    releasesSectionCollapsed = !releasesSectionCollapsed;
+    if (releasesSectionCollapsed) {
+      releasesContent.classList.add('collapsed');
+      releasesSectionChevron.classList.add('collapsed');
+    } else {
+      releasesContent.classList.remove('collapsed');
+      releasesSectionChevron.classList.remove('collapsed');
     }
   });
 }

@@ -656,6 +656,242 @@ class PRListContainerControl extends SubscribableControl {
   }
 }
 
+// ── ReleaseCardControl ───────────────────────────────────────────────
+class ReleaseCardControl extends SubscribableControl {
+  constructor(bus, controlId, element, releaseId) {
+    super(bus, controlId);
+    this.element = element;
+    this.releaseId = releaseId;
+    this._rendered = false;
+    this.element.dataset.id = releaseId;
+    this.element.classList.add('release-item');
+
+    this.subscribe('release:state', (data) => {
+      if (data && data.id === this.releaseId) this._onUpdate(data);
+    });
+
+    this.element.addEventListener('click', () => {
+      vscode.postMessage({ type: 'openRelease', releaseId: this.releaseId });
+    });
+  }
+
+  update(data) { if (data) this._onUpdate(data); }
+
+  _initDom(data) {
+    var monitoringIndicator = data.status === 'monitoring' ? 
+      '<span class="release-monitoring-indicator"><span class="monitoring-dot"></span>Monitoring</span>' : '';
+    var prLink = data.prNumber ? 
+      '<a href="#" class="release-pr-link" onclick="event.preventDefault(); event.stopPropagation(); window.open(\'' + escapeHtml(data.prUrl) + '\');">' +
+        '<span class="codicon codicon-link-external"></span>PR #' + data.prNumber +
+      '</a>' : '';
+    var progress = data.progress || 0;
+    var progressClass = data.status === 'failed' ? 'failed' :
+                       data.status === 'succeeded' ? 'succeeded' : '';
+    
+    this.element.innerHTML =
+      '<div class="release-header">' +
+        '<span class="release-name" title="' + escapeHtml(data.name) + '">' + escapeHtml(data.name) + '</span>' +
+        '<span class="release-status-badge ' + data.status + '">' + data.status + '</span>' +
+        monitoringIndicator +
+      '</div>' +
+      '<div class="release-branches">' +
+        '<span class="release-branch">' + escapeHtml(data.releaseBranch) + '</span>' +
+        '<span class="release-arrow">→</span>' +
+        '<span class="release-branch">' + escapeHtml(data.targetBranch) + '</span>' +
+      '</div>' +
+      '<div class="release-details">' +
+        '<span class="release-plan-count">' +
+          '<span class="codicon codicon-layers"></span>' + data.planCount + ' plan' + (data.planCount !== 1 ? 's' : '') +
+        '</span>' +
+        prLink +
+      '</div>' +
+      '<div class="release-progress">' +
+        '<div class="release-progress-bar ' + progressClass + '" style="width: ' + progress + '%"></div>' +
+      '</div>';
+  }
+
+  _onUpdate(data) {
+    if (!data || data.id !== this.releaseId) return;
+    this.element.className = 'release-item ' + data.status;
+    this.element.dataset.status = data.status;
+
+    if (!this._rendered) {
+      this._rendered = true;
+      this._initDom(data);
+      this.publishUpdate(data);
+      return;
+    }
+
+    var nameEl = this.element.querySelector('.release-name');
+    if (nameEl) { nameEl.textContent = data.name; nameEl.title = data.name; }
+    var statusEl = this.element.querySelector('.release-status-badge');
+    if (statusEl) {
+      statusEl.className = 'release-status-badge ' + data.status;
+      statusEl.textContent = data.status;
+    }
+    var branchEls = this.element.querySelectorAll('.release-branch');
+    if (branchEls.length >= 2) {
+      branchEls[0].textContent = data.releaseBranch;
+      branchEls[1].textContent = data.targetBranch;
+    }
+    
+    // Update monitoring indicator
+    var headerEl = this.element.querySelector('.release-header');
+    var existingIndicator = headerEl.querySelector('.release-monitoring-indicator');
+    if (data.status === 'monitoring' && !existingIndicator) {
+      var indicator = document.createElement('span');
+      indicator.className = 'release-monitoring-indicator';
+      indicator.innerHTML = '<span class="monitoring-dot"></span>Monitoring';
+      headerEl.appendChild(indicator);
+    } else if (data.status !== 'monitoring' && existingIndicator) {
+      existingIndicator.parentNode.removeChild(existingIndicator);
+    }
+    
+    // Update plan count and PR link
+    var detailsEl = this.element.querySelector('.release-details');
+    if (detailsEl) {
+      var prLink = data.prNumber ? 
+        '<a href="#" class="release-pr-link" onclick="event.preventDefault(); event.stopPropagation(); window.open(\'' + escapeHtml(data.prUrl) + '\');">' +
+          '<span class="codicon codicon-link-external"></span>PR #' + data.prNumber +
+        '</a>' : '';
+      detailsEl.innerHTML = 
+        '<span class="release-plan-count">' +
+          '<span class="codicon codicon-layers"></span>' + data.planCount + ' plan' + (data.planCount !== 1 ? 's' : '') +
+        '</span>' +
+        prLink;
+    }
+    
+    // Update progress bar
+    var barEl = this.element.querySelector('.release-progress-bar');
+    if (barEl) {
+      var progress = data.progress || 0;
+      var progressClass = data.status === 'failed' ? 'failed' :
+                         data.status === 'succeeded' ? 'succeeded' : '';
+      barEl.className = 'release-progress-bar ' + progressClass;
+      barEl.style.width = progress + '%';
+    }
+
+    this.publishUpdate(data);
+  }
+}
+
+// ── ReleaseListContainerControl ──────────────────────────────────────
+class ReleaseListContainerControl extends SubscribableControl {
+  constructor(bus, controlId, containerId) {
+    super(bus, controlId);
+    this.containerId = containerId;
+    this.releaseCards = new Map();
+
+    this.subscribe('releases:update', (data) => {
+      this.updateReleases(data);
+    });
+  }
+
+  update() {}
+
+  updateReleases(releases) {
+    var container = this.getElement(this.containerId);
+    if (!container) return;
+
+    if (!releases || releases.length === 0) {
+      container.innerHTML = '<div class="empty">🚀 No releases yet.</div>';
+      for (var entry of this.releaseCards.values()) { entry.dispose(); }
+      this.releaseCards.clear();
+      this._updateBadge(0);
+      return;
+    }
+
+    var emptyEl = container.querySelector('.empty');
+    if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
+
+    var existingReleaseIds = new Set(this.releaseCards.keys());
+    var newReleaseIds = new Set(releases.map(function(r) { return r.id; }));
+    var structureChanged = false;
+
+    for (var releaseId of existingReleaseIds) {
+      if (!newReleaseIds.has(releaseId)) {
+        structureChanged = true;
+        var card = this.releaseCards.get(releaseId);
+        if (card) { card.dispose(); if (card.element && card.element.parentNode) card.element.parentNode.removeChild(card.element); }
+        this.releaseCards.delete(releaseId);
+      }
+    }
+
+    for (var i = 0; i < releases.length; i++) {
+      var release = releases[i];
+      if (!this.releaseCards.has(release.id)) {
+        structureChanged = true;
+        var element = document.createElement('div');
+        element.className = 'release-item-wrapper';
+        container.appendChild(element);
+        var cardId = 'release-card-' + release.id;
+        var card = new ReleaseCardControl(bus, cardId, element, release.id);
+        this.releaseCards.set(release.id, card);
+        this.subscribeToChild(cardId, function() {});
+      }
+    }
+
+    for (var i = 0; i < releases.length; i++) {
+      var release = releases[i];
+      var card = this.releaseCards.get(release.id);
+      if (card) card._onUpdate(release);
+    }
+
+    if (structureChanged) {
+      for (var i = 0; i < releases.length; i++) {
+        var card = this.releaseCards.get(releases[i].id);
+        if (card && card.element) container.appendChild(card.element);
+      }
+    }
+
+    this._updateBadge(releases.length);
+    this.publishUpdate(releases);
+  }
+
+  addRelease(releaseData) {
+    var container = this.getElement(this.containerId);
+    if (!container) return;
+    var emptyEl = container.querySelector('.empty');
+    if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
+    if (this.releaseCards.has(releaseData.id)) {
+      var existing = this.releaseCards.get(releaseData.id);
+      existing._onUpdate(releaseData);
+      return;
+    }
+    var element = document.createElement('div');
+    element.className = 'release-item-wrapper';
+    if (container.firstChild) container.insertBefore(element, container.firstChild);
+    else container.appendChild(element);
+    var cardId = 'release-card-' + releaseData.id;
+    var card = new ReleaseCardControl(bus, cardId, element, releaseData.id);
+    this.releaseCards.set(releaseData.id, card);
+    card._onUpdate(releaseData);
+    this._updateBadge(this.releaseCards.size);
+  }
+
+  removeRelease(releaseId) {
+    var card = this.releaseCards.get(releaseId);
+    if (card) { card.dispose(); if (card.element && card.element.parentNode) card.element.parentNode.removeChild(card.element); }
+    this.releaseCards.delete(releaseId);
+    if (this.releaseCards.size === 0) {
+      var container = this.getElement(this.containerId);
+      if (container) container.innerHTML = '<div class="empty">🚀 No releases yet.</div>';
+    }
+    this._updateBadge(this.releaseCards.size);
+  }
+
+  _updateBadge(count) {
+    var badge = this.getElement('releasesBadge');
+    if (badge) badge.textContent = count.toString();
+  }
+
+  dispose() {
+    for (var card of this.releaseCards.values()) card.dispose();
+    this.releaseCards.clear();
+    super.dispose();
+  }
+}
+
 ${renderPlansViewControlWiring()}
 
 ${renderPlansViewMessageRouter()}
