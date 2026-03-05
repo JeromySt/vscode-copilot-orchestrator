@@ -73,6 +73,11 @@ export class PlanDetailController {
           setTimeout(() => this._delegate.forceFullRefresh(), 100);
         });
         break;
+      case 'recover':
+        this._delegate.executeCommand('orchestrator.recoverPlan', this._planId).then(() => {
+          setTimeout(() => this._delegate.forceFullRefresh(), 100);
+        });
+        break;
       case 'delete':
         this._delegate.executeCommand('orchestrator.deletePlan', this._planId);
         break;
