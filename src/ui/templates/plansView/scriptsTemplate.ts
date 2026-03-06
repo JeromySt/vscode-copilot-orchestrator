@@ -110,10 +110,10 @@ class PlanListCardControl extends SubscribableControl {
                        data.status === 'succeeded' ? 'succeeded' : '';
     var canArchive = data.status === 'succeeded' || data.status === 'partial' || data.status === 'failed' || data.status === 'canceled';
     var archiveButton = canArchive && data.status !== 'archived' ? 
-      '<button class="archive-action" data-plan-id="' + escapeHtml(data.id) + '" title="Archive this plan">$(archive)</button>' : '';
+      '<button class="archive-action" data-plan-id="' + escapeHtml(data.id) + '" title="Archive this plan">&#128230;</button>' : '';
     var showRecover = data.status === 'canceled' || data.status === 'failed';
     var recoverBtnHtml = showRecover ?
-      '<button class="recover-btn" title="Recover this plan">$(history)</button>' : '';
+      '<button class="recover-btn" title="Recover this plan">&#128260;</button>' : '';
     var releaseTag = data.release ? 
       '<span class="release-tag" title="Release: ' + escapeHtml(data.release.name) + ' (' + data.release.status + ')">$(package) ' + escapeHtml(data.release.name) + '</span>' : '';
     
@@ -182,7 +182,7 @@ class PlanListCardControl extends SubscribableControl {
       var recoverBtn = document.createElement('button');
       recoverBtn.className = 'recover-btn';
       recoverBtn.title = 'Recover this plan';
-      recoverBtn.innerHTML = '$(history)';
+      recoverBtn.innerHTML = '&#128260;';
       var self = this;
       recoverBtn.onclick = function(e) {
         e.stopPropagation();

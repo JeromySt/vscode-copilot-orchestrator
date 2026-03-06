@@ -275,7 +275,29 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     
-    // Capitalize first letter to match command naming convention
+    // Actions that use single-plan commands (no bulk* variant exists)
+    const singlePlanActions: Record<string, string> = {
+      'archive': 'orchestrator.archivePlan',
+      'recover': 'orchestrator.recoverPlan',
+      'assignToRelease': 'orchestrator.assignToRelease',
+      'createReleaseFromPlans': 'orchestrator.createReleaseFromPlans',
+    };
+    
+    if (singlePlanActions[action]) {
+      const command = singlePlanActions[action];
+      if (action === 'createReleaseFromPlans' || action === 'assignToRelease') {
+        // These take an array of planIds
+        await vscode.commands.executeCommand(command, planIds);
+      } else {
+        // Archive/recover: loop over individual plans
+        for (const planId of planIds) {
+          await vscode.commands.executeCommand(command, planId);
+        }
+      }
+      return;
+    }
+    
+    // Standard bulk commands (resume, pause, cancel, retry, finalize, delete)
     const commandAction = action.charAt(0).toUpperCase() + action.slice(1);
     vscode.commands.executeCommand(
       `orchestrator.bulk${commandAction}`,
