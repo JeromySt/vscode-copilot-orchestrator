@@ -714,7 +714,7 @@ class ReleaseCardControl extends SubscribableControl {
     var monitoringIndicator = data.status === 'monitoring' ? 
       '<span class="release-monitoring-indicator"><span class="monitoring-dot"></span>Monitoring</span>' : '';
     var prLink = data.prNumber ? 
-      '<a href="#" class="release-pr-link" onclick="event.preventDefault(); event.stopPropagation(); window.open(\'' + escapeHtml(data.prUrl) + '\');">' +
+      '<a href="#" class="release-pr-link" data-pr-url="' + escapeHtml(data.prUrl) + '">' +
         '<span class="codicon codicon-link-external"></span>PR #' + data.prNumber +
       '</a>' : '';
     var progress = data.progress || 0;
@@ -741,6 +741,16 @@ class ReleaseCardControl extends SubscribableControl {
       '<div class="release-progress">' +
         '<div class="release-progress-bar ' + progressClass + '" style="width: ' + progress + '%"></div>' +
       '</div>';
+    // Wire PR link clicks via event delegation (not inline onclick)
+    var prLinkEl = this.element.querySelector('.release-pr-link');
+    if (prLinkEl) {
+      prLinkEl.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var url = e.currentTarget.dataset.prUrl;
+        if (url) vscode.postMessage({ type: 'openExternal', url: url });
+      });
+    }
   }
 
   _onUpdate(data) {
@@ -784,7 +794,7 @@ class ReleaseCardControl extends SubscribableControl {
     var detailsEl = this.element.querySelector('.release-details');
     if (detailsEl) {
       var prLink = data.prNumber ? 
-        '<a href="#" class="release-pr-link" onclick="event.preventDefault(); event.stopPropagation(); window.open(\'' + escapeHtml(data.prUrl) + '\');">' +
+        '<a href="#" class="release-pr-link" data-pr-url="' + escapeHtml(data.prUrl) + '">' +
           '<span class="codicon codicon-link-external"></span>PR #' + data.prNumber +
         '</a>' : '';
       detailsEl.innerHTML = 

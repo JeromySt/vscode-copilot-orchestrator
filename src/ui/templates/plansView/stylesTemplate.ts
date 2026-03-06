@@ -29,22 +29,30 @@ export function renderPlansViewStyles(): string {
       position: sticky;
       top: 0;
       z-index: 100;
-      padding: 4px 8px 0;
+      padding: 0;
+      min-width: 0;
     }
     .tab {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
+      justify-content: center;
+      gap: 4px;
+      padding: 7px 0;
       border: none;
       background: transparent;
       color: var(--vscode-foreground);
       cursor: pointer;
-      font-size: 12px;
-      font-weight: 500;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
       border-bottom: 2px solid transparent;
-      transition: all 0.15s ease;
-      opacity: 0.7;
+      transition: color 0.15s, border-color 0.15s;
+      opacity: 0.6;
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
     }
     .tab:hover {
       opacity: 1;
