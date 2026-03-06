@@ -130,6 +130,59 @@ export interface IReleaseManager {
    */
   cleanupIsolatedRepos(): Promise<void>;
 
+  // ── Preparation Tasks ──────────────────────────────────────────────
+
+  /**
+   * Gets preparation tasks for a release.
+   * 
+   * Returns undefined if release has no preparation tasks initialized.
+   * 
+   * @param releaseId - The release ID
+   * @returns Array of preparation tasks or undefined
+   */
+  getPrepTasks(releaseId: string): import('../plan/types/releasePrep').PreparationTask[] | undefined;
+
+  /**
+   * Executes a preparation task using Copilot.
+   * 
+   * Only automatable tasks can be executed. Manual tasks must be completed
+   * by the user and marked complete with completeTask().
+   * 
+   * @param releaseId - The release ID
+   * @param taskId - The task ID to execute
+   * @throws If release not found, task not found, or task not automatable
+   */
+  executeTask(releaseId: string, taskId: string): Promise<void>;
+
+  /**
+   * Marks a task as completed (for manual tasks).
+   * 
+   * @param releaseId - The release ID
+   * @param taskId - The task ID to mark complete
+   * @param result - Optional result message
+   * @returns True if marked complete, false if not found
+   */
+  completeTask(releaseId: string, taskId: string, result?: string): boolean;
+
+  /**
+   * Skips an optional preparation task.
+   * 
+   * Required tasks cannot be skipped.
+   * 
+   * @param releaseId - The release ID
+   * @param taskId - The task ID to skip
+   * @returns True if skipped, false if not found or required
+   */
+  skipTask(releaseId: string, taskId: string): boolean;
+
+  /**
+   * Checks if all required preparation tasks are complete.
+   * 
+   * @param releaseId - The release ID
+   * @returns True if all required tasks are complete
+   */
+  areRequiredTasksComplete(releaseId: string): boolean;
+
   // ── Events ─────────────────────────────────────────────────────────
 
   /**

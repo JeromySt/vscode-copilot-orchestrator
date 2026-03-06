@@ -7,6 +7,8 @@
  * @module plan/types/release
  */
 
+import type { PreparationTask, ReleaseInstructions } from './releasePrep';
+
 // ============================================================================
 // RELEASE STATUS
 // ============================================================================
@@ -15,11 +17,10 @@
  * Release lifecycle status.
  * 
  * - `drafting`: Release is being configured, plans are being added
- * - `preparing`: Pre-PR preparation phase (docs, versioning, AI checks)
+ * - `preparing`: Executing pre-PR preparation tasks (changelog, docs, checks)
+ * - `ready-for-pr`: All required preparation tasks completed, ready to create PR
  * - `merging`: Merging plan commits into the release branch
- * - `ready-for-pr`: All prep done, ready to create PR
  * - `creating-pr`: Creating pull request for the release
- * - `pr-active`: PR exists, not yet monitoring
  * - `monitoring`: Monitoring PR for CI checks, reviews, and feedback
  * - `addressing`: Addressing PR feedback and fixing issues
  * - `succeeded`: Release PR merged successfully
@@ -29,8 +30,8 @@
 export type ReleaseStatus = 
   | 'drafting' 
   | 'preparing'
-  | 'merging' 
   | 'ready-for-pr'
+  | 'merging' 
   | 'creating-pr'
   | 'pr-active'
   | 'monitoring' 
@@ -42,43 +43,6 @@ export type ReleaseStatus =
 // ============================================================================
 // RELEASE DEFINITION
 // ============================================================================
-
-/**
- * Pre-PR preparation task status.
- */
-export type PreparationTaskStatus = 'pending' | 'in-progress' | 'completed' | 'failed' | 'skipped';
-
-/**
- * A task performed during the 'preparing' phase before creating the PR.
- * 
- * Examples: version bump, changelog update, documentation generation,
- * AI-powered pre-release checks.
- */
-export interface PreparationTask {
-  /** Unique task identifier */
-  id: string;
-
-  /** Human-friendly task name */
-  name: string;
-
-  /** Task description */
-  description?: string;
-
-  /** Current task status */
-  status: PreparationTaskStatus;
-
-  /** When task started */
-  startedAt?: number;
-
-  /** When task completed */
-  completedAt?: number;
-
-  /** Error message if task failed */
-  error?: string;
-
-  /** Result/output from the task */
-  result?: string;
-}
 
 /**
  * Defines a release combining multiple plans.
@@ -152,11 +116,11 @@ export interface ReleaseDefinition {
     reason?: string;
   }>;
 
-  /**
-   * Pre-PR preparation tasks (versioning, docs, AI checks).
-   * Only used when in 'preparing' state.
-   */
+  /** Preparation tasks to complete before creating PR */
   preparationTasks?: PreparationTask[];
+
+  /** Release instructions file metadata */
+  releaseInstructions?: ReleaseInstructions;
 }
 
 // ============================================================================
