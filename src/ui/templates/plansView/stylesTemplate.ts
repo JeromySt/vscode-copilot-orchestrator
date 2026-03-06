@@ -67,10 +67,60 @@ export function renderPlansViewStyles(): string {
     /* Tab Content */
     .tab-content {
       display: none;
-      padding: 8px;
+      padding: 6px 8px;
     }
     .tab-content.active {
       display: block;
+    }
+    .tab-header {
+      display: flex;
+      gap: 6px;
+      padding: 6px 0 8px;
+    }
+    .tab-action-btn {
+      padding: 4px 10px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      white-space: nowrap;
+    }
+    .tab-action-btn:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .tab-action-btn.secondary {
+      opacity: 0.8;
+    }
+    
+    /* ── Welcome state ────────────────────────────────── */
+    .welcome-state {
+      padding: 28px 16px;
+      text-align: center;
+    }
+    .welcome-icon {
+      font-size: 24px;
+      margin-bottom: 8px;
+      opacity: 0.7;
+    }
+    .welcome-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 5px;
+      color: var(--vscode-foreground);
+    }
+    .welcome-subtitle {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      line-height: 1.5;
+    }
+    .welcome-subtitle code {
+      background: var(--vscode-textCodeBlock-background);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: var(--vscode-editor-font-family);
+      font-size: 10px;
     }
     
     .header { 
