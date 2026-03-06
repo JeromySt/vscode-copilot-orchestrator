@@ -130,102 +130,85 @@ export interface IReleaseManager {
    */
   cleanupIsolatedRepos(): Promise<void>;
 
+  // ── State Management ───────────────────────────────────────────────
+
+  /**
+   * Transitions a release to a new status.
+   * 
+   * @param releaseId - The release ID
+   * @param newStatus - The target status
+   * @param reason - Optional reason for the transition
+   * @returns True if transition succeeded, false otherwise
+   */
+  transitionToState(releaseId: string, newStatus: ReleaseStatus, reason?: string): Promise<boolean>;
+
   // ── Preparation Tasks ──────────────────────────────────────────────
 
   /**
-   * Prepares a release by transitioning to 'preparing' state and initializing tasks.
-   * 
-   * Creates default preparation tasks based on release type (from-plans vs from-branch).
-   * Also creates or finds release instructions file.
-   * 
-   * @param releaseId - The release ID to prepare
-   * @throws If release not found or already past drafting stage
-   */
-  prepareRelease(releaseId: string): Promise<void>;
-
-  /**
-   * Gets preparation tasks for a release.
-   * 
-   * Returns undefined if release has no preparation tasks initialized.
-   * 
-   * @param releaseId - The release ID
-   * @returns Array of preparation tasks or undefined
-   */
-  getPrepTasks(releaseId: string): import('../plan/types/releasePrep').PreparationTask[] | undefined;
-
-  /**
-   * Executes a preparation task using Copilot.
-   * 
-   * Only automatable tasks can be executed. Manual tasks must be completed
-   * by the user and marked complete with completeTask().
+   * Auto-executes a preparation task using Copilot.
    * 
    * @param releaseId - The release ID
    * @param taskId - The task ID to execute
-   * @throws If release not found, task not found, or task not automatable
    */
-  executeTask(releaseId: string, taskId: string): Promise<void>;
+  executePreparationTask(releaseId: string, taskId: string): Promise<void>;
 
   /**
-   * Marks a task as completed (for manual tasks).
+   * Manually marks a preparation task as complete.
    * 
    * @param releaseId - The release ID
-   * @param taskId - The task ID to mark complete
-   * @param result - Optional result message
-   * @returns True if marked complete, false if not found
+   * @param taskId - The task ID to complete
    */
-  completeTask(releaseId: string, taskId: string, result?: string): boolean;
+  completePreparationTask(releaseId: string, taskId: string): Promise<void>;
 
   /**
-   * Skips an optional preparation task.
-   * 
-   * Required tasks cannot be skipped.
+   * Skips a preparation task.
    * 
    * @param releaseId - The release ID
    * @param taskId - The task ID to skip
-   * @returns True if skipped, false if not found or required
    */
-  skipTask(releaseId: string, taskId: string): boolean;
-
-  /**
-   * Checks if all required preparation tasks are complete.
-   * 
-   * @param releaseId - The release ID
-   * @returns True if all required tasks are complete
-   */
-  areRequiredTasksComplete(releaseId: string): boolean;
+  skipPreparationTask(releaseId: string, taskId: string): Promise<void>;
 
   // ── Plan Management ────────────────────────────────────────────────
 
   /**
    * Adds plans to a release at any stage.
    * 
-   * Merges plan branches into the release branch. If a PR is active,
-   * pushes changes to the PR branch. If drafting/preparing, adds to merge list.
-   * 
    * @param releaseId - The release ID
-   * @param planIds - Plan IDs to add
-   * @throws If release not found or plans not in terminal state
+   * @param planIds - The plan IDs to add
    */
   addPlansToRelease(releaseId: string, planIds: string[]): Promise<void>;
+
+  // ── PR Management ──────────────────────────────────────────────────
+
+  /**
+   * Creates a PR for the release.
+   * 
+   * @param releaseId - The release ID
+   * @param asDraft - Whether to create as draft PR
+   */
+  createPR(releaseId: string, asDraft?: boolean): Promise<void>;
 
   /**
    * Adopts an existing PR for the release.
    * 
-   * Associates an existing PR with the release and transitions to pr-active state.
-   * 
    * @param releaseId - The release ID
    * @param prNumber - The PR number to adopt
-   * @throws If release not found or not in appropriate state
    */
-  adoptExistingPR(releaseId: string, prNumber: number): Promise<void>;
+  adoptPR(releaseId: string, prNumber: number): Promise<void>;
 
   /**
-   * Gets the flow type for a release.
+   * Starts monitoring a release's PR.
    * 
    * @param releaseId - The release ID
-   * @returns The flow type ('from-plans' or 'from-branch'), or undefined if not found
    */
-  getFlowType(releaseId: string): 'from-plans' | 'from-branch' | undefined;
+  startMonitoring(releaseId: string): Promise<void>;
+
+  /**
+   * Stops monitoring a release's PR.
+   * 
+   * @param releaseId - The release ID
+   */
+  stopMonitoring(releaseId: string): Promise<void>;
 
   // ── Events ─────────────────────────────────────────────────────────
 

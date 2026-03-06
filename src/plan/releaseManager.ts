@@ -186,31 +186,74 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     if (!release) {
       throw new Error(`Release not found: ${releaseId}`);
     }
-    if (release.status !== 'drafting' && release.status !== 'preparing') {
+    if (release.status !== 'drafting') {
       throw new Error(`Release ${releaseId} already started (status: ${release.status})`);
     }
 
-    log.info('Starting release', { releaseId, name: release.name, source: release.source });
+    log.info('Starting release', { releaseId, name: release.name });
 
     try {
-      // If not already in preparing state, transition there
-      if (release.status === 'drafting') {
-        await this.prepareRelease(releaseId);
-      }
+      // Phase 1: Create isolated repository clone
+      await this._transitionStatus(release, 'merging');
+      const isolatedRepo = await this.isolatedRepos.createIsolatedRepo(
+        releaseId,
+        release.repoPath,
+        release.targetBranch,
+      );
+      release.isolatedRepoPath = isolatedRepo.clonePath;
+      await this.store.saveRelease(release);
+      log.info('Isolated repo created', { releaseId, path: isolatedRepo.clonePath });
 
-      // Wait for required tasks to be complete
-      if (!this.areRequiredTasksComplete(releaseId)) {
-        log.info('Waiting for required preparation tasks to complete', { releaseId });
-        // Stay in preparing state - user must complete tasks
-        return;
-      }
+      // Phase 2: Create release branch in isolated clone
+      await this.git.branches.checkout(isolatedRepo.clonePath, release.targetBranch);
+      await this.git.branches.create(
+        release.releaseBranch,
+        release.targetBranch,
+        isolatedRepo.clonePath,
+        gitLog,
+      );
+      await this.git.branches.checkout(isolatedRepo.clonePath, release.releaseBranch);
+      log.info('Release branch created', { releaseId, branch: release.releaseBranch });
 
-      // Determine the flow based on source
-      if (release.source === 'from-plans') {
-        await this._executeFromPlansFlow(release);
-      } else {
-        await this._executeFromBranchFlow(release);
+      // Phase 3: Merge all plan branches
+      const mergeResults = await this._mergeAllPlans(release);
+      log.info('All plans merged', { releaseId, succeeded: mergeResults.filter((r) => r.success).length });
+
+      // Phase 4: Push release branch
+      const pushSuccess = await this.git.repository.push(isolatedRepo.clonePath, {
+        remote: 'origin',
+        branch: release.releaseBranch,
+        log: gitLog,
+      });
+      if (!pushSuccess) {
+        throw new Error('Failed to push release branch to origin');
       }
+      log.info('Release branch pushed', { releaseId, branch: release.releaseBranch });
+
+      // Phase 5: Create pull request
+      await this._transitionStatus(release, 'creating-pr');
+      const prService = await this.prServiceFactory.getServiceForRepo(isolatedRepo.clonePath);
+      const prResult = await prService.createPR({
+        baseBranch: release.targetBranch,
+        headBranch: release.releaseBranch,
+        title: release.name,
+        body: this._buildPRBody(release, mergeResults),
+        cwd: isolatedRepo.clonePath,
+      });
+
+      release.prNumber = prResult.prNumber;
+      release.prUrl = prResult.prUrl;
+      await this.store.saveRelease(release);
+      log.info('PR created', { releaseId, prNumber: prResult.prNumber, prUrl: prResult.prUrl });
+
+      // Phase 6: Start PR monitoring
+      await this._transitionStatus(release, 'monitoring');
+      await this.prMonitor.startMonitoring(
+        releaseId,
+        prResult.prNumber,
+        isolatedRepo.clonePath,
+        release.releaseBranch,
+      );
 
       release.startedAt = Date.now();
       await this.store.saveRelease(release);
@@ -223,95 +266,6 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       this.events.emitReleaseFailed(release, release.error);
       throw error;
     }
-  }
-
-  /**
-   * Execute the from-plans flow: preparing -> merging -> ready-for-pr -> creating-pr -> monitoring
-   */
-  private async _executeFromPlansFlow(release: ReleaseDefinition): Promise<void> {
-    const isolatedPath = release.isolatedRepoPath!;
-
-    // Transition to ready-for-pr (preparation is complete)
-    await this._transitionStatus(release, 'ready-for-pr', 'All required preparation tasks complete');
-
-    // Phase 1: Merge all plan branches
-    await this._transitionStatus(release, 'merging');
-    const mergeResults = await this._mergeAllPlans(release);
-    log.info('All plans merged', { releaseId: release.id, succeeded: mergeResults.filter((r) => r.success).length });
-
-    // Phase 2: Push release branch
-    const pushSuccess = await this.git.repository.push(isolatedPath, {
-      remote: 'origin',
-      branch: release.releaseBranch,
-      log: gitLog,
-    });
-    if (!pushSuccess) {
-      throw new Error('Failed to push release branch to origin');
-    }
-    log.info('Release branch pushed', { releaseId: release.id, branch: release.releaseBranch });
-
-    await this._transitionStatus(release, 'ready-for-pr');
-
-    // Phase 3: Create pull request
-    await this._createPRAndStartMonitoring(release, mergeResults);
-  }
-
-  /**
-   * Execute the from-branch flow: preparing -> ready-for-pr -> creating-pr -> monitoring
-   */
-  private async _executeFromBranchFlow(release: ReleaseDefinition): Promise<void> {
-    const isolatedPath = release.isolatedRepoPath!;
-
-    // Transition to ready-for-pr (preparation is complete, no merging needed)
-    await this._transitionStatus(release, 'ready-for-pr', 'All required preparation tasks complete');
-
-    // Ensure the release branch is pushed
-    const pushSuccess = await this.git.repository.push(isolatedPath, {
-      remote: 'origin',
-      branch: release.releaseBranch,
-      log: gitLog,
-    });
-    if (!pushSuccess) {
-      throw new Error('Failed to push release branch to origin');
-    }
-    log.info('Release branch pushed', { releaseId: release.id, branch: release.releaseBranch });
-
-    // Create pull request
-    await this._createPRAndStartMonitoring(release, []);
-  }
-
-  /**
-   * Create PR and start monitoring (common to both flows).
-   */
-  private async _createPRAndStartMonitoring(
-    release: ReleaseDefinition,
-    mergeResults: import('./types/release').ReleaseMergeResult[],
-  ): Promise<void> {
-    const isolatedPath = release.isolatedRepoPath!;
-
-    await this._transitionStatus(release, 'creating-pr');
-    const prService = await this.prServiceFactory.getServiceForRepo(isolatedPath);
-    const prResult = await prService.createPR({
-      baseBranch: release.targetBranch,
-      headBranch: release.releaseBranch,
-      title: release.name,
-      body: this._buildPRBody(release, mergeResults),
-      cwd: isolatedPath,
-    });
-
-    release.prNumber = prResult.prNumber;
-    release.prUrl = prResult.prUrl;
-    await this.store.saveRelease(release);
-    log.info('PR created', { releaseId: release.id, prNumber: prResult.prNumber, prUrl: prResult.prUrl });
-
-    // Start PR monitoring
-    await this._transitionStatus(release, 'monitoring');
-    await this.prMonitor.startMonitoring(
-      release.id,
-      prResult.prNumber,
-      isolatedPath,
-      release.releaseBranch,
-    );
   }
 
   async cancelRelease(releaseId: string): Promise<boolean> {
@@ -434,194 +388,120 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     log.info('Isolated repo cleanup complete', { cleaned: terminalReleases.length });
   }
 
+  // ── State Management ───────────────────────────────────────────────────
+
+  async transitionToState(releaseId: string, newStatus: ReleaseStatus, reason?: string): Promise<boolean> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      log.warn('Cannot transition: release not found', { releaseId });
+      return false;
+    }
+
+    const stateMachine = this.stateMachines.get(releaseId);
+    if (!stateMachine) {
+      log.error('State machine not found', { releaseId });
+      return false;
+    }
+
+    const result = stateMachine.transition(newStatus, reason);
+    if (result.success) {
+      await this.store.saveRelease(release);
+    }
+    return result.success;
+  }
+
   // ── Preparation Tasks ──────────────────────────────────────────────────
 
-  getPrepTasks(releaseId: string): import('./types/releasePrep').PreparationTask[] | undefined {
-    const release = this.releases.get(releaseId);
-    return release?.preparationTasks;
-  }
-
-  async executeTask(releaseId: string, taskId: string): Promise<void> {
+  async executePreparationTask(releaseId: string, taskId: string): Promise<void> {
     const release = this.releases.get(releaseId);
     if (!release) {
       throw new Error(`Release not found: ${releaseId}`);
     }
 
-    if (!release.preparationTasks) {
-      throw new Error(`Release ${releaseId} has no preparation tasks`);
+    const task = release.preparationTasks?.find((t) => t.id === taskId);
+    if (!task) {
+      throw new Error(`Preparation task not found: ${taskId}`);
     }
 
-    const taskIndex = release.preparationTasks.findIndex((t) => t.id === taskId);
-    if (taskIndex === -1) {
-      throw new Error(`Task not found: ${taskId}`);
-    }
+    log.info('Executing preparation task', { releaseId, taskId, taskName: task.name });
 
-    const task = release.preparationTasks[taskIndex];
-    if (!task.automatable) {
-      throw new Error(`Task ${taskId} is not automatable`);
-    }
-
-    // Execute the task
-    const { executeTask } = await import('./releasePreparation');
-    const repoPath = release.isolatedRepoPath || release.repoPath;
-    const updatedTask = await executeTask(task, release, this.copilot, repoPath);
-
-    // Update task in the release
-    release.preparationTasks[taskIndex] = updatedTask;
+    task.status = 'in-progress';
+    task.startedAt = Date.now();
     await this.store.saveRelease(release);
 
-    // Emit event for task status change
-    this.events.emitReleaseTaskStatusChanged(releaseId, taskId, updatedTask.status);
-
-    log.info('Preparation task executed', { releaseId, taskId, status: updatedTask.status });
-  }
-
-  completeTask(releaseId: string, taskId: string, result?: string): boolean {
-    const release = this.releases.get(releaseId);
-    if (!release?.preparationTasks) {
-      return false;
-    }
-
-    const taskIndex = release.preparationTasks.findIndex((t) => t.id === taskId);
-    if (taskIndex === -1) {
-      return false;
-    }
-
-    const { completeTask } = require('./releasePreparation');
-    release.preparationTasks[taskIndex] = completeTask(release.preparationTasks[taskIndex], result);
-    
-    this.store.saveRelease(release).catch((error) => {
-      log.error('Failed to save release after completing task', { 
-        releaseId, 
-        taskId, 
-        error: (error as Error).message 
-      });
-    });
-
-    // Emit event for task status change
-    this.events.emitReleaseTaskStatusChanged(releaseId, taskId, 'completed');
-
-    log.info('Task marked complete', { releaseId, taskId });
-    return true;
-  }
-
-  skipTask(releaseId: string, taskId: string): boolean {
-    const release = this.releases.get(releaseId);
-    if (!release?.preparationTasks) {
-      return false;
-    }
-
-    const taskIndex = release.preparationTasks.findIndex((t) => t.id === taskId);
-    if (taskIndex === -1) {
-      return false;
-    }
-
-    const task = release.preparationTasks[taskIndex];
-    if (task.required) {
-      log.warn('Cannot skip required task', { releaseId, taskId });
-      return false;
-    }
-
-    const { skipTask } = require('./releasePreparation');
-    release.preparationTasks[taskIndex] = skipTask(task);
-    
-    this.store.saveRelease(release).catch((error) => {
-      log.error('Failed to save release after skipping task', { 
-        releaseId, 
-        taskId, 
-        error: (error as Error).message 
-      });
-    });
-
-    // Emit event for task status change
-    this.events.emitReleaseTaskStatusChanged(releaseId, taskId, 'skipped');
-
-    log.info('Task skipped', { releaseId, taskId });
-    return true;
-  }
-
-  areRequiredTasksComplete(releaseId: string): boolean {
-    const release = this.releases.get(releaseId);
-    if (!release?.preparationTasks) {
-      return true; // No tasks means nothing to complete
-    }
-
-    const { areRequiredTasksComplete } = require('./releasePreparation');
-    return areRequiredTasksComplete(release.preparationTasks);
-  }
-
-  // ── Plan Management ────────────────────────────────────────────────
-
-  async prepareRelease(releaseId: string): Promise<void> {
-    const release = this.releases.get(releaseId);
-    if (!release) {
-      throw new Error(`Release not found: ${releaseId}`);
-    }
-
-    if (release.status !== 'drafting') {
-      throw new Error(`Release ${releaseId} must be in drafting state to prepare (current: ${release.status})`);
-    }
-
-    log.info('Preparing release', { releaseId, name: release.name });
-
-    // Transition to preparing state
-    await this._transitionStatus(release, 'preparing', 'User initiated preparation');
-
-    // Import preparation functions
-    const { getDefaultPrepTasks, getOrCreateReleaseInstructions } = await import('./releasePreparation');
-
-    // Generate default prep tasks based on release type
-    release.preparationTasks = getDefaultPrepTasks(release);
-    await this.store.saveRelease(release);
-    log.info('Preparation tasks initialized', { releaseId, taskCount: release.preparationTasks.length });
-
-    // Create isolated repo if not already created
-    if (!release.isolatedRepoPath) {
-      const isolatedRepo = await this.isolatedRepos.createIsolatedRepo(
-        releaseId,
-        release.repoPath,
-        release.targetBranch,
-      );
-      release.isolatedRepoPath = isolatedRepo.clonePath;
-      await this.store.saveRelease(release);
-      log.info('Isolated repo created for preparation', { releaseId, path: isolatedRepo.clonePath });
-    }
-
-    // Create release branch in isolated clone if not already created
-    const isolatedPath = release.isolatedRepoPath;
-    const branches = await this.git.branches.list(isolatedPath);
-    if (!branches.includes(release.releaseBranch)) {
-      await this.git.branches.checkout(isolatedPath, release.targetBranch);
-      await this.git.branches.create(
-        release.releaseBranch,
-        release.targetBranch,
-        isolatedPath,
-        gitLog,
-      );
-      await this.git.branches.checkout(isolatedPath, release.releaseBranch);
-      log.info('Release branch created', { releaseId, branch: release.releaseBranch });
-    }
-
-    // Get or create release instructions
     try {
-      release.releaseInstructions = await getOrCreateReleaseInstructions(
-        isolatedPath,
-        this.copilot,
-      );
-      await this.store.saveRelease(release);
-      log.info('Release instructions ready', {
-        releaseId,
-        source: release.releaseInstructions.source,
+      // Execute task using Copilot CLI
+      const cwd = release.isolatedRepoPath || release.repoPath;
+      const taskDescription = task.description || task.name;
+      
+      const result = await this.copilot.run({
+        cwd,
+        task: taskDescription,
+        sessionId: `release-${releaseId}-task-${taskId}`,
       });
+
+      if (result.success) {
+        task.status = 'completed';
+        task.completedAt = Date.now();
+        task.result = 'Task completed successfully';
+        log.info('Preparation task completed', { releaseId, taskId });
+      } else {
+        task.status = 'failed';
+        task.error = result.error || 'Task execution failed';
+        log.error('Preparation task failed', { releaseId, taskId, error: task.error });
+      }
     } catch (error) {
-      log.warn('Failed to create release instructions, continuing without them', {
-        releaseId,
-        error: (error as Error).message,
-      });
+      task.status = 'failed';
+      task.error = (error as Error).message;
+      log.error('Preparation task execution error', { releaseId, taskId, error: task.error });
     }
 
-    log.info('Release prepared', { releaseId });
+    await this.store.saveRelease(release);
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
   }
+
+  async completePreparationTask(releaseId: string, taskId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    const task = release.preparationTasks?.find((t) => t.id === taskId);
+    if (!task) {
+      throw new Error(`Preparation task not found: ${taskId}`);
+    }
+
+    log.info('Manually completing preparation task', { releaseId, taskId });
+
+    task.status = 'completed';
+    task.completedAt = Date.now();
+    task.result = 'Manually completed';
+
+    await this.store.saveRelease(release);
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  async skipPreparationTask(releaseId: string, taskId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    const task = release.preparationTasks?.find((t) => t.id === taskId);
+    if (!task) {
+      throw new Error(`Preparation task not found: ${taskId}`);
+    }
+
+    log.info('Skipping preparation task', { releaseId, taskId });
+
+    task.status = 'skipped';
+    task.completedAt = Date.now();
+
+    await this.store.saveRelease(release);
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  // ── Plan Management ────────────────────────────────────────────────────
 
   async addPlansToRelease(releaseId: string, planIds: string[]): Promise<void> {
     const release = this.releases.get(releaseId);
@@ -629,7 +509,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       throw new Error(`Release not found: ${releaseId}`);
     }
 
-    log.info('Adding plans to release', { releaseId, planIds, currentStatus: release.status });
+    log.info('Adding plans to release', { releaseId, planIds });
 
     // Validate all plan IDs exist and are in terminal states
     for (const planId of planIds) {
@@ -642,131 +522,136 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       if (planStatus !== 'succeeded' && planStatus !== 'partial') {
         throw new Error(`Plan ${planId} must be succeeded or partial, but is ${planStatus}`);
       }
+      // Avoid duplicates
+      if (release.planIds.includes(planId)) {
+        log.warn('Plan already in release, skipping', { releaseId, planId });
+        continue;
+      }
+      release.planIds.push(planId);
     }
 
-    // Add to planIds list
-    release.planIds.push(...planIds);
     await this.store.saveRelease(release);
 
-    // If we're in a state where we can merge, merge the new plans
-    if (release.status === 'merging' || release.status === 'pr-active' || release.status === 'monitoring') {
-      const isolatedPath = release.isolatedRepoPath!;
-      
-      // Merge the new plans
-      const mergeResults: import('./types/release').ReleaseMergeResult[] = [];
-      for (const planId of planIds) {
-        const plan = this.planRunner.get(planId)!;
-        const sourceBranch = plan.spec.targetBranch ?? plan.targetBranch ?? 'main';
-        
-        try {
-          await this.git.repository.fetch(isolatedPath, {
-            remote: 'origin',
-            log: gitLog,
-          });
-
-          const mergeResult = await this.git.merge.merge({
-            cwd: isolatedPath,
-            source: `origin/${sourceBranch}`,
-            target: release.releaseBranch,
-            message: `Merge plan '${plan.spec.name}' (${planId}) from ${sourceBranch}`,
-            fastForward: false,
-            log: gitLog,
-          });
-
-          if (mergeResult.success) {
-            mergeResults.push({
-              planId,
-              planName: plan.spec.name,
-              sourceBranch,
-              success: true,
-              conflictsResolved: mergeResult.hasConflicts,
-            });
-          } else {
-            // Try to resolve conflicts
-            const conflictResult = await this._resolveConflictsWithCopilot(
-              release,
-              isolatedPath,
-              sourceBranch,
-              plan.spec.name,
-            );
-            mergeResults.push({
-              planId,
-              planName: plan.spec.name,
-              sourceBranch,
-              success: conflictResult.success,
-              conflictsResolved: conflictResult.success,
-              error: conflictResult.error,
-            });
-          }
-        } catch (error) {
-          log.error('Failed to merge newly added plan', {
-            releaseId,
-            planId,
-            error: (error as Error).message,
-          });
-          mergeResults.push({
-            planId,
-            planName: plan.spec.name,
-            sourceBranch,
-            success: false,
-            error: (error as Error).message,
-          });
-        }
-      }
-
-      // If PR is active, push the changes
-      if (release.status === 'pr-active' || release.status === 'monitoring') {
-        const pushSuccess = await this.git.repository.push(isolatedPath, {
+    // If in pr-active state, merge the new plans and push
+    if (release.status === 'pr-active' && release.isolatedRepoPath) {
+      log.info('Release is pr-active, merging new plans and pushing', { releaseId });
+      try {
+        const mergeResults = await this._mergeAllPlans(release);
+        const pushSuccess = await this.git.repository.push(release.isolatedRepoPath, {
           remote: 'origin',
           branch: release.releaseBranch,
           log: gitLog,
         });
         if (!pushSuccess) {
-          log.error('Failed to push added plans to PR', { releaseId });
-        } else {
-          log.info('Added plans pushed to PR', { releaseId, planIds });
+          log.error('Failed to push new plan merges', { releaseId });
         }
+      } catch (error) {
+        log.error('Failed to merge new plans', { releaseId, error: (error as Error).message });
       }
     }
 
-    this.events.emitReleasePlansAdded(releaseId, planIds);
-    log.info('Plans added to release', { releaseId, planIds });
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
   }
 
-  async adoptExistingPR(releaseId: string, prNumber: number): Promise<void> {
+  // ── PR Management ──────────────────────────────────────────────────────
+
+  async createPR(releaseId: string, asDraft?: boolean): Promise<void> {
     const release = this.releases.get(releaseId);
     if (!release) {
       throw new Error(`Release not found: ${releaseId}`);
     }
 
-    if (release.status !== 'drafting' && release.status !== 'ready-for-pr') {
-      throw new Error(`Release ${releaseId} must be in drafting or ready-for-pr state to adopt PR (current: ${release.status})`);
+    if (release.status !== 'ready-for-pr') {
+      throw new Error(`Cannot create PR: release status is ${release.status}, must be ready-for-pr`);
     }
 
-    log.info('Adopting existing PR for release', { releaseId, prNumber });
+    log.info('Creating PR', { releaseId, asDraft });
 
-    // Get PR URL from the PR service
-    const isolatedPath = release.isolatedRepoPath || release.repoPath;
-    const prService = await this.prServiceFactory.getServiceForRepo(isolatedPath);
-    
-    // TODO: Add getPRUrl method to IRemotePRService interface
-    // For now, construct a generic URL
-    const prUrl = `https://github.com/owner/repo/pull/${prNumber}`;
+    await this._transitionStatus(release, 'creating-pr');
 
-    release.prNumber = prNumber;
-    release.prUrl = prUrl;
-    await this.store.saveRelease(release);
+    try {
+      const isolatedPath = release.isolatedRepoPath!;
+      const prService = await this.prServiceFactory.getServiceForRepo(isolatedPath);
+      
+      const prResult = await prService.createPR({
+        baseBranch: release.targetBranch,
+        headBranch: release.releaseBranch,
+        title: release.name,
+        body: this._buildPRBody(release, []),
+        cwd: isolatedPath,
+      });
 
-    // Transition to pr-active state
-    await this._transitionStatus(release, 'pr-active', `Adopted existing PR #${prNumber}`);
+      release.prNumber = prResult.prNumber;
+      release.prUrl = prResult.prUrl;
+      await this.store.saveRelease(release);
 
-    this.events.emitReleasePrAdopted(releaseId, prNumber);
-    log.info('Existing PR adopted', { releaseId, prNumber, prUrl });
+      log.info('PR created', { releaseId, prNumber: prResult.prNumber, prUrl: prResult.prUrl });
+
+      await this._transitionStatus(release, 'pr-active');
+    } catch (error) {
+      log.error('Failed to create PR', { releaseId, error: (error as Error).message });
+      release.error = (error as Error).message;
+      await this._transitionStatus(release, 'failed');
+      throw error;
+    }
   }
 
-  getFlowType(releaseId: string): 'from-plans' | 'from-branch' | undefined {
+  async adoptPR(releaseId: string, prNumber: number): Promise<void> {
     const release = this.releases.get(releaseId);
-    return release?.source;
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    log.info('Adopting existing PR', { releaseId, prNumber });
+
+    release.prNumber = prNumber;
+    // PR URL can be constructed from repo info if needed
+    release.prUrl = `PR #${prNumber}`;
+
+    await this.store.saveRelease(release);
+    await this._transitionStatus(release, 'pr-active', 'Adopted existing PR');
+
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  async startMonitoring(releaseId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    if (!release.prNumber) {
+      throw new Error('Cannot start monitoring: no PR number set');
+    }
+
+    log.info('Starting PR monitoring', { releaseId, prNumber: release.prNumber });
+
+    await this._transitionStatus(release, 'monitoring');
+
+    const isolatedPath = release.isolatedRepoPath || release.repoPath;
+    await this.prMonitor.startMonitoring(
+      releaseId,
+      release.prNumber,
+      isolatedPath,
+      release.releaseBranch,
+    );
+
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  async stopMonitoring(releaseId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    log.info('Stopping PR monitoring', { releaseId });
+
+    if (this.prMonitor.isMonitoring(releaseId)) {
+      this.prMonitor.stopMonitoring(releaseId);
+    }
+
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
   }
 
   // ── EventEmitter Typed Overloads ───────────────────────────────────────
@@ -1018,9 +903,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       case 'drafting':
         return 'Configuring release';
       case 'preparing':
-        return 'Executing preparation tasks';
-      case 'ready-for-pr':
-        return 'Ready to create PR';
+        return 'Preparing release (docs, versioning, checks)';
       case 'merging':
         return 'Merging plan commits';
       case 'ready-for-pr':
