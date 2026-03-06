@@ -327,7 +327,7 @@ function getDefaultPrepTasks(): PrepTask[] {
 function renderPrepTask(task: PrepTask): string {
   const statusIcon = task.status === 'completed' ? '✓' : 
                      task.status === 'skipped' ? '−' :
-                     task.status === 'running' ? '⏳' : '☐';
+                     task.status === 'running' ? '⏳' : '';
   
   const statusClass = task.status;
   const requiredBadge = task.required ? '<span class="required-badge">Required</span>' : '';
@@ -487,8 +487,8 @@ function renderCompletionStep(release: ReleaseDefinition): string {
 }
 
 function renderFloatingAddPlans(release: ReleaseDefinition): string {
-  // Show "+ Add Plans" button until PR is merged or process is canceled
-  const canAddPlans = !['succeeded', 'failed', 'canceled'].includes(release.status);
+  // Only show "+ Add Plans" during drafting/configure steps
+  const canAddPlans = ['drafting'].includes(release.status);
   
   if (!canAddPlans) {
     return '';

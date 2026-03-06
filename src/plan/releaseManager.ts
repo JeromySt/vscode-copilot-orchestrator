@@ -418,15 +418,16 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       throw new Error(`Release not found: ${releaseId}`);
     }
 
-    const task = release.preparationTasks?.find((t) => t.id === taskId);
+    const task = release.prepTasks?.find((t) => t.id === taskId);
     if (!task) {
       throw new Error(`Preparation task not found: ${taskId}`);
     }
 
     log.info('Executing preparation task', { releaseId, taskId, taskTitle: task.title });
 
-    task.status = 'in-progress';
-    task.startedAt = Date.now();
+    task.status = 'running';
+    await this.store.saveRelease(release);
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
     await this.store.saveRelease(release);
 
     try {
@@ -434,24 +435,28 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       const cwd = release.isolatedRepoPath || release.repoPath;
       const taskDescription = task.description || task.title;
       
-      const result = await this.copilot.run({
-        cwd,
-        task: taskDescription,
-        sessionId: `release-${releaseId}-task-${taskId}`,
-      });
+      if (this.copilot) {
+        const result = await this.copilot.run({
+          cwd,
+          task: taskDescription,
+          sessionId: `release-${releaseId}-task-${taskId}`,
+        });
 
-      if (result.success) {
-        task.status = 'completed';
-        task.completedAt = Date.now();
-        task.result = 'Task completed successfully';
-        log.info('Preparation task completed', { releaseId, taskId });
+        if (result.success) {
+          task.status = 'completed';
+          log.info('Preparation task completed', { releaseId, taskId });
+        } else {
+          task.status = 'pending';
+          task.error = result.error || 'Task execution failed';
+          log.error('Preparation task failed', { releaseId, taskId, error: task.error });
+        }
       } else {
-        task.status = 'failed';
-        task.error = result.error || 'Task execution failed';
-        log.error('Preparation task failed', { releaseId, taskId, error: task.error });
+        // No Copilot runner — mark completed immediately for manual flow
+        task.status = 'completed';
+        log.info('Preparation task auto-completed (no runner)', { releaseId, taskId });
       }
     } catch (error) {
-      task.status = 'failed';
+      task.status = 'pending';
       task.error = (error as Error).message;
       log.error('Preparation task execution error', { releaseId, taskId, error: task.error });
     }
@@ -466,7 +471,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       throw new Error(`Release not found: ${releaseId}`);
     }
 
-    const task = release.preparationTasks?.find((t) => t.id === taskId);
+    const task = release.prepTasks?.find((t) => t.id === taskId);
     if (!task) {
       throw new Error(`Preparation task not found: ${taskId}`);
     }
@@ -474,8 +479,6 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     log.info('Manually completing preparation task', { releaseId, taskId });
 
     task.status = 'completed';
-    task.completedAt = Date.now();
-    task.result = 'Manually completed';
 
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
@@ -487,7 +490,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       throw new Error(`Release not found: ${releaseId}`);
     }
 
-    const task = release.preparationTasks?.find((t) => t.id === taskId);
+    const task = release.prepTasks?.find((t) => t.id === taskId);
     if (!task) {
       throw new Error(`Preparation task not found: ${taskId}`);
     }
@@ -495,7 +498,6 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     log.info('Skipping preparation task', { releaseId, taskId });
 
     task.status = 'skipped';
-    task.completedAt = Date.now();
 
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
@@ -945,8 +947,18 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       throw new Error(`Failed to transition release ${releaseId} to preparing status`);
     }
 
-    // TODO: Initialize preparation tasks from release instructions if they don't exist
-    // For now, preparation tasks should be set up when creating the release
+    // Initialize default preparation tasks if not already set
+    if (!release.prepTasks || release.prepTasks.length === 0) {
+      release.prepTasks = [
+        { id: 'changelog', title: 'Update CHANGELOG', description: 'Add release notes to CHANGELOG.md', required: true, autoSupported: true, status: 'pending' },
+        { id: 'version', title: 'Bump Version', description: 'Update version in package.json', required: true, autoSupported: true, status: 'pending' },
+        { id: 'compile', title: 'Run Compilation', description: 'Ensure TypeScript compiles without errors', required: true, autoSupported: true, status: 'pending' },
+        { id: 'tests', title: 'Run Tests', description: 'Execute test suite', required: true, autoSupported: true, status: 'pending' },
+        { id: 'docs', title: 'Update Documentation', description: 'Review and update README if needed', required: false, autoSupported: false, status: 'pending' },
+        { id: 'ai-review', title: 'AI Code Review', description: 'Run Copilot code review on changes', required: false, autoSupported: true, status: 'pending' },
+      ];
+      await this.store.saveRelease(release);
+    }
   }
 
   /**
@@ -959,7 +971,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       return false;
     }
 
-    const tasks = release.preparationTasks || [];
+    const tasks = release.prepTasks || [];
     const requiredTasks = tasks.filter(t => t.required);
     
     // All required tasks must be either completed or skipped (though required tasks shouldn't be skipped)

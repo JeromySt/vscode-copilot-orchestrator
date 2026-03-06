@@ -255,18 +255,28 @@ function prepChecklistStyles(): string {
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 18px;
+      font-size: 16px;
       font-weight: bold;
+      border: 2px solid var(--vscode-input-border);
+      border-radius: 4px;
+      background: transparent;
       transition: all 0.3s ease;
+    }
+    .task-checkbox.pending {
+      border-color: var(--vscode-input-border);
     }
     .task-checkbox.completed {
       color: var(--vscode-testing-iconPassed);
+      border-color: var(--vscode-testing-iconPassed);
+      background: rgba(0, 128, 0, 0.1);
       animation: check-pop 0.3s ease;
     }
     .task-checkbox.skipped {
       color: var(--vscode-descriptionForeground);
+      border-color: var(--vscode-descriptionForeground);
     }
     .task-checkbox.running {
+      border-color: var(--vscode-button-background);
       animation: spin 1s linear infinite;
     }
     @keyframes check-pop {
