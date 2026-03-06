@@ -82,13 +82,9 @@ class PlanListCardControl extends SubscribableControl {
     this.element.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       window._planMultiSelect.handleContextMenu(this.planId);
-      // Show context menu at cursor position with contextual items
+      // Show context menu at cursor position
       var menu = document.getElementById('contextMenu');
       if (menu) {
-        // Update visibility of menu items based on selected plans
-        if (typeof updateContextMenuVisibility === 'function') {
-          updateContextMenuVisibility(window._planMultiSelect.getSelectedIds());
-        }
         menu.style.display = 'block';
         menu.style.left = e.clientX + 'px';
         menu.style.top = e.clientY + 'px';
@@ -107,6 +103,8 @@ class PlanListCardControl extends SubscribableControl {
     var showRecover = data.status === 'canceled' || data.status === 'failed';
     var recoverBtnHtml = showRecover ?
       '<button class="recover-btn" title="Recover this plan">$(history)</button>' : '';
+    var releaseTag = data.release ? 
+      '<span class="release-tag" title="Release: ' + escapeHtml(data.release.name) + ' (' + data.release.status + ')">$(package) ' + escapeHtml(data.release.name) + '</span>' : '';
     
     this.element.innerHTML =
       '<div class="plan-name">' +
@@ -114,6 +112,7 @@ class PlanListCardControl extends SubscribableControl {
         archiveButton +
         '<span class="plan-status ' + data.status + '">' + (data.status === 'scaffolding' ? '\\u{1F6A7} Under Construction' : data.status) + '</span>' +
         recoverBtnHtml +
+        releaseTag +
       '</div>' +
       '<div class="plan-details">' +
         '<span class="plan-node-count">' + data.nodes + ' jobs</span>' +
@@ -146,7 +145,6 @@ class PlanListCardControl extends SubscribableControl {
 
   _onUpdate(data) {
     if (!data || data.id !== this.planId) return;
-    // Preserve selection state when updating status class
     var isSelected = this.element.classList.contains('selected');
     this.element.className = 'plan-item ' + data.status + (isSelected ? ' selected' : '');
     this.element.dataset.status = data.status;
@@ -183,6 +181,22 @@ class PlanListCardControl extends SubscribableControl {
       if (planNameEl) planNameEl.appendChild(recoverBtn);
     } else if (!shouldShowRecover && existingRecoverBtn) {
       existingRecoverBtn.parentNode.removeChild(existingRecoverBtn);
+    }
+    
+    // Update or add/remove release tag
+    var existingReleaseTag = this.element.querySelector('.release-tag');
+    if (data.release && !existingReleaseTag) {
+      var releaseTag = document.createElement('span');
+      releaseTag.className = 'release-tag';
+      releaseTag.title = 'Release: ' + data.release.name + ' (' + data.release.status + ')';
+      releaseTag.textContent = '$(package) ' + data.release.name;
+      var planNameEl = this.element.querySelector('.plan-name');
+      if (planNameEl) planNameEl.appendChild(releaseTag);
+    } else if (!data.release && existingReleaseTag) {
+      existingReleaseTag.parentNode.removeChild(existingReleaseTag);
+    } else if (data.release && existingReleaseTag) {
+      existingReleaseTag.title = 'Release: ' + data.release.name + ' (' + data.release.status + ')';
+      existingReleaseTag.textContent = '$(package) ' + data.release.name;
     }
     
     var countEl = this.element.querySelector('.plan-node-count');
@@ -270,7 +284,7 @@ class PlanListContainerControl extends SubscribableControl {
     if (!container || !archivedContainer) return;
 
     if (!plans || plans.length === 0) {
-      container.innerHTML = '<div class="welcome-state"><div class="welcome-icon">\u2728</div><div class="welcome-title">No plans yet</div><div class="welcome-subtitle">Ask Copilot to create a plan, or use the <code>create_copilot_plan</code> MCP tool to get started.</div></div>';
+      container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div>';
       archivedContainer.innerHTML = '';
       document.getElementById('archivedDivider').style.display = 'none';
       for (var entry of this.planCards.values()) { entry.dispose(); }
@@ -278,7 +292,7 @@ class PlanListContainerControl extends SubscribableControl {
       return;
     }
 
-    var emptyEl = container.querySelector('.welcome-state') || container.querySelector('.empty');
+    var emptyEl = container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
 
     // Separate active and archived plans
@@ -369,7 +383,7 @@ class PlanListContainerControl extends SubscribableControl {
     
     var targetContainer = planData.status === 'archived' ? archivedContainer : container;
     
-    var emptyEl = container.querySelector('.welcome-state') || container.querySelector('.empty');
+    var emptyEl = container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
     if (this.planCards.has(planData.id)) {
       var existing = this.planCards.get(planData.id);
@@ -400,7 +414,7 @@ class PlanListContainerControl extends SubscribableControl {
     this.planCards.delete(planId);
     if (this.planCards.size === 0) {
       var container = this.getElement(this.containerId);
-      if (container) container.innerHTML = '<div class="welcome-state"><div class="welcome-icon">\u2728</div><div class="welcome-title">No plans yet</div><div class="welcome-subtitle">Ask Copilot to create a plan, or use the <code>create_copilot_plan</code> MCP tool to get started.</div></div>';
+      if (container) container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div>';
       document.getElementById('archivedDivider').style.display = 'none';
     }
   }
@@ -447,14 +461,13 @@ class CapacityBarControl extends SubscribableControl {
       capacityBarEl.style.display = 'none';
     }
 
-    // Local stats: show when there are running OR queued jobs.
-    // On transition to idle: keep visible 5s then hide. Don't re-show on subsequent idle updates.
+    // Local stats: always show when there are running OR queued jobs,
+    // and briefly show "idle" after jobs complete so user sees the transition.
     var gs = data.globalStats;
     if (gs) {
       var hasActivity = gs.running > 0 || gs.queued > 0;
       
       if (hasActivity) {
-        // Active: show the bar, update values, cancel any pending idle timer
         if (this._idleTimer) {
           clearTimeout(this._idleTimer);
           this._idleTimer = null;
@@ -467,7 +480,6 @@ class CapacityBarControl extends SubscribableControl {
         var qs = this.getElement('queuedSection');
         if (qs) qs.style.display = gs.queued > 0 ? 'inline' : 'none';
       } else if (this._wasActive && !this._idleTimer) {
-        // Just transitioned to idle: update values to show 0, start hide timer
         this._wasActive = false;
         this.getElement('runningJobs').textContent = '0';
         this.getElement('queuedJobs').textContent = '0';
@@ -478,7 +490,6 @@ class CapacityBarControl extends SubscribableControl {
           this._idleTimer = null;
         }.bind(this), 5000);
       }
-      // else: already idle with timer running or never was active — do nothing (don't re-show)
     }
 
     this.publishUpdate(data);
@@ -580,14 +591,14 @@ class PRListContainerControl extends SubscribableControl {
     if (!container) return;
 
     if (!prs || prs.length === 0) {
-      container.innerHTML = '<div class="empty-section">No managed PRs. Click + to adopt one.</div>';
+      container.innerHTML = '<div class="empty">No managed PRs.</div>';
       for (var entry of this.prCards.values()) { entry.dispose(); }
       this.prCards.clear();
       this._updateBadge(0);
       return;
     }
 
-    var emptyEl = container.querySelector('.empty-section') || container.querySelector('.empty');
+    var emptyEl = container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
 
     var existingPRIds = new Set(this.prCards.keys());
@@ -637,7 +648,7 @@ class PRListContainerControl extends SubscribableControl {
   addPR(prData) {
     var container = this.getElement(this.containerId);
     if (!container) return;
-    var emptyEl = container.querySelector('.empty-section') || container.querySelector('.empty');
+    var emptyEl = container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
     if (this.prCards.has(prData.id)) {
       var existing = this.prCards.get(prData.id);
@@ -661,7 +672,7 @@ class PRListContainerControl extends SubscribableControl {
     this.prCards.delete(prId);
     if (this.prCards.size === 0) {
       var container = this.getElement(this.containerId);
-      if (container) container.innerHTML = '<div class="empty-section">No managed PRs. Click + to adopt one.</div>';
+      if (container) container.innerHTML = '<div class="empty">No managed PRs.</div>';
     }
     this._updateBadge(this.prCards.size);
   }
@@ -674,6 +685,242 @@ class PRListContainerControl extends SubscribableControl {
   dispose() {
     for (var card of this.prCards.values()) card.dispose();
     this.prCards.clear();
+    super.dispose();
+  }
+}
+
+// ── ReleaseCardControl ───────────────────────────────────────────────
+class ReleaseCardControl extends SubscribableControl {
+  constructor(bus, controlId, element, releaseId) {
+    super(bus, controlId);
+    this.element = element;
+    this.releaseId = releaseId;
+    this._rendered = false;
+    this.element.dataset.id = releaseId;
+    this.element.classList.add('release-item');
+
+    this.subscribe('release:state', (data) => {
+      if (data && data.id === this.releaseId) this._onUpdate(data);
+    });
+
+    this.element.addEventListener('click', () => {
+      vscode.postMessage({ type: 'openRelease', releaseId: this.releaseId });
+    });
+  }
+
+  update(data) { if (data) this._onUpdate(data); }
+
+  _initDom(data) {
+    var monitoringIndicator = data.status === 'monitoring' ? 
+      '<span class="release-monitoring-indicator"><span class="monitoring-dot"></span>Monitoring</span>' : '';
+    var prLink = data.prNumber ? 
+      '<a href="#" class="release-pr-link" onclick="event.preventDefault(); event.stopPropagation(); window.open(\'' + escapeHtml(data.prUrl) + '\');">' +
+        '<span class="codicon codicon-link-external"></span>PR #' + data.prNumber +
+      '</a>' : '';
+    var progress = data.progress || 0;
+    var progressClass = data.status === 'failed' ? 'failed' :
+                       data.status === 'succeeded' ? 'succeeded' : '';
+    
+    this.element.innerHTML =
+      '<div class="release-header">' +
+        '<span class="release-name" title="' + escapeHtml(data.name) + '">' + escapeHtml(data.name) + '</span>' +
+        '<span class="release-status-badge ' + data.status + '">' + data.status + '</span>' +
+        monitoringIndicator +
+      '</div>' +
+      '<div class="release-branches">' +
+        '<span class="release-branch">' + escapeHtml(data.releaseBranch) + '</span>' +
+        '<span class="release-arrow">→</span>' +
+        '<span class="release-branch">' + escapeHtml(data.targetBranch) + '</span>' +
+      '</div>' +
+      '<div class="release-details">' +
+        '<span class="release-plan-count">' +
+          '<span class="codicon codicon-layers"></span>' + data.planCount + ' plan' + (data.planCount !== 1 ? 's' : '') +
+        '</span>' +
+        prLink +
+      '</div>' +
+      '<div class="release-progress">' +
+        '<div class="release-progress-bar ' + progressClass + '" style="width: ' + progress + '%"></div>' +
+      '</div>';
+  }
+
+  _onUpdate(data) {
+    if (!data || data.id !== this.releaseId) return;
+    this.element.className = 'release-item ' + data.status;
+    this.element.dataset.status = data.status;
+
+    if (!this._rendered) {
+      this._rendered = true;
+      this._initDom(data);
+      this.publishUpdate(data);
+      return;
+    }
+
+    var nameEl = this.element.querySelector('.release-name');
+    if (nameEl) { nameEl.textContent = data.name; nameEl.title = data.name; }
+    var statusEl = this.element.querySelector('.release-status-badge');
+    if (statusEl) {
+      statusEl.className = 'release-status-badge ' + data.status;
+      statusEl.textContent = data.status;
+    }
+    var branchEls = this.element.querySelectorAll('.release-branch');
+    if (branchEls.length >= 2) {
+      branchEls[0].textContent = data.releaseBranch;
+      branchEls[1].textContent = data.targetBranch;
+    }
+    
+    // Update monitoring indicator
+    var headerEl = this.element.querySelector('.release-header');
+    var existingIndicator = headerEl.querySelector('.release-monitoring-indicator');
+    if (data.status === 'monitoring' && !existingIndicator) {
+      var indicator = document.createElement('span');
+      indicator.className = 'release-monitoring-indicator';
+      indicator.innerHTML = '<span class="monitoring-dot"></span>Monitoring';
+      headerEl.appendChild(indicator);
+    } else if (data.status !== 'monitoring' && existingIndicator) {
+      existingIndicator.parentNode.removeChild(existingIndicator);
+    }
+    
+    // Update plan count and PR link
+    var detailsEl = this.element.querySelector('.release-details');
+    if (detailsEl) {
+      var prLink = data.prNumber ? 
+        '<a href="#" class="release-pr-link" onclick="event.preventDefault(); event.stopPropagation(); window.open(\'' + escapeHtml(data.prUrl) + '\');">' +
+          '<span class="codicon codicon-link-external"></span>PR #' + data.prNumber +
+        '</a>' : '';
+      detailsEl.innerHTML = 
+        '<span class="release-plan-count">' +
+          '<span class="codicon codicon-layers"></span>' + data.planCount + ' plan' + (data.planCount !== 1 ? 's' : '') +
+        '</span>' +
+        prLink;
+    }
+    
+    // Update progress bar
+    var barEl = this.element.querySelector('.release-progress-bar');
+    if (barEl) {
+      var progress = data.progress || 0;
+      var progressClass = data.status === 'failed' ? 'failed' :
+                         data.status === 'succeeded' ? 'succeeded' : '';
+      barEl.className = 'release-progress-bar ' + progressClass;
+      barEl.style.width = progress + '%';
+    }
+
+    this.publishUpdate(data);
+  }
+}
+
+// ── ReleaseListContainerControl ──────────────────────────────────────
+class ReleaseListContainerControl extends SubscribableControl {
+  constructor(bus, controlId, containerId) {
+    super(bus, controlId);
+    this.containerId = containerId;
+    this.releaseCards = new Map();
+
+    this.subscribe('releases:update', (data) => {
+      this.updateReleases(data);
+    });
+  }
+
+  update() {}
+
+  updateReleases(releases) {
+    var container = this.getElement(this.containerId);
+    if (!container) return;
+
+    if (!releases || releases.length === 0) {
+      container.innerHTML = '<div class="empty">🚀 No releases yet.</div>';
+      for (var entry of this.releaseCards.values()) { entry.dispose(); }
+      this.releaseCards.clear();
+      this._updateBadge(0);
+      return;
+    }
+
+    var emptyEl = container.querySelector('.empty');
+    if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
+
+    var existingReleaseIds = new Set(this.releaseCards.keys());
+    var newReleaseIds = new Set(releases.map(function(r) { return r.id; }));
+    var structureChanged = false;
+
+    for (var releaseId of existingReleaseIds) {
+      if (!newReleaseIds.has(releaseId)) {
+        structureChanged = true;
+        var card = this.releaseCards.get(releaseId);
+        if (card) { card.dispose(); if (card.element && card.element.parentNode) card.element.parentNode.removeChild(card.element); }
+        this.releaseCards.delete(releaseId);
+      }
+    }
+
+    for (var i = 0; i < releases.length; i++) {
+      var release = releases[i];
+      if (!this.releaseCards.has(release.id)) {
+        structureChanged = true;
+        var element = document.createElement('div');
+        element.className = 'release-item-wrapper';
+        container.appendChild(element);
+        var cardId = 'release-card-' + release.id;
+        var card = new ReleaseCardControl(bus, cardId, element, release.id);
+        this.releaseCards.set(release.id, card);
+        this.subscribeToChild(cardId, function() {});
+      }
+    }
+
+    for (var i = 0; i < releases.length; i++) {
+      var release = releases[i];
+      var card = this.releaseCards.get(release.id);
+      if (card) card._onUpdate(release);
+    }
+
+    if (structureChanged) {
+      for (var i = 0; i < releases.length; i++) {
+        var card = this.releaseCards.get(releases[i].id);
+        if (card && card.element) container.appendChild(card.element);
+      }
+    }
+
+    this._updateBadge(releases.length);
+    this.publishUpdate(releases);
+  }
+
+  addRelease(releaseData) {
+    var container = this.getElement(this.containerId);
+    if (!container) return;
+    var emptyEl = container.querySelector('.empty');
+    if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
+    if (this.releaseCards.has(releaseData.id)) {
+      var existing = this.releaseCards.get(releaseData.id);
+      existing._onUpdate(releaseData);
+      return;
+    }
+    var element = document.createElement('div');
+    element.className = 'release-item-wrapper';
+    if (container.firstChild) container.insertBefore(element, container.firstChild);
+    else container.appendChild(element);
+    var cardId = 'release-card-' + releaseData.id;
+    var card = new ReleaseCardControl(bus, cardId, element, releaseData.id);
+    this.releaseCards.set(releaseData.id, card);
+    card._onUpdate(releaseData);
+    this._updateBadge(this.releaseCards.size);
+  }
+
+  removeRelease(releaseId) {
+    var card = this.releaseCards.get(releaseId);
+    if (card) { card.dispose(); if (card.element && card.element.parentNode) card.element.parentNode.removeChild(card.element); }
+    this.releaseCards.delete(releaseId);
+    if (this.releaseCards.size === 0) {
+      var container = this.getElement(this.containerId);
+      if (container) container.innerHTML = '<div class="empty">🚀 No releases yet.</div>';
+    }
+    this._updateBadge(this.releaseCards.size);
+  }
+
+  _updateBadge(count) {
+    var badge = this.getElement('releasesBadge');
+    if (badge) badge.textContent = count.toString();
+  }
+
+  dispose() {
+    for (var card of this.releaseCards.values()) card.dispose();
+    this.releaseCards.clear();
     super.dispose();
   }
 }

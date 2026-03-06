@@ -14,10 +14,56 @@
  * @returns JavaScript code string.
  */
 export function renderPlansViewControlWiring(): string {
-  return `// ── Control Initialization ───────────────────────────────────────────
+  return `// ── Tab Switching ────────────────────────────────────────────────────
+var tabs = document.querySelectorAll('.tab');
+var tabContents = document.querySelectorAll('.tab-content');
+
+function switchTab(tabName) {
+  // Update tab buttons
+  for (var i = 0; i < tabs.length; i++) {
+    var tab = tabs[i];
+    if (tab.dataset.tab === tabName) {
+      tab.classList.add('active');
+    } else {
+      tab.classList.remove('active');
+    }
+  }
+  
+  // Update tab content
+  for (var i = 0; i < tabContents.length; i++) {
+    var content = tabContents[i];
+    if (content.id === 'tabContent' + tabName.charAt(0).toUpperCase() + tabName.slice(1)) {
+      content.classList.add('active');
+    } else {
+      content.classList.remove('active');
+    }
+  }
+  
+  // Persist state
+  vscode.setState({ activeTab: tabName });
+}
+
+// Wire tab click handlers
+for (var i = 0; i < tabs.length; i++) {
+  tabs[i].addEventListener('click', function(e) {
+    var tabName = e.currentTarget.dataset.tab;
+    switchTab(tabName);
+  });
+}
+
+// Restore tab state on load
+var state = vscode.getState();
+if (state && state.activeTab) {
+  switchTab(state.activeTab);
+} else {
+  switchTab('plans'); // Default to Plans tab
+}
+
+// ── Control Initialization ───────────────────────────────────────────
 var planListContainer = new PlanListContainerControl(bus, 'plan-list-container', 'plans');
 var capacityBar = new CapacityBarControl(bus, 'capacity-bar');
 var prListContainer = new PRListContainerControl(bus, 'pr-list-container', 'prs');
+var releaseListContainer = new ReleaseListContainerControl(bus, 'release-list-container', 'releases');
 
 // ── Adopt PR Button ───────────────────────────────────────────────────
 var adoptPRButton = document.getElementById('adoptPRButton');
@@ -27,11 +73,26 @@ if (adoptPRButton) {
   });
 }
 
+// ── Release Buttons ────────────────────────────────────────────────────
+var newReleaseButton = document.getElementById('newReleaseButton');
+if (newReleaseButton) {
+  newReleaseButton.addEventListener('click', function() {
+    vscode.postMessage({ type: 'createRelease' });
+  });
+}
+
+var releaseFromBranchButton = document.getElementById('releaseFromBranchButton');
+if (releaseFromBranchButton) {
+  releaseFromBranchButton.addEventListener('click', function() {
+    vscode.postMessage({ type: 'createReleaseFromBranch' });
+  });
+}
+
 // ── Managed PRs Section Collapse/Expand ────────────────────────────────
-var managedPRsHeader = document.getElementById('managedPRsToggle') || document.getElementById('managedPRsHeader');
+var managedPRsHeader = document.getElementById('managedPRsHeader');
 var managedPRsContent = document.getElementById('managedPRsContent');
 var prsSectionChevron = document.getElementById('prsSectionChevron');
-var prsSectionCollapsed = true;  // Start collapsed by default
+var prsSectionCollapsed = false;
 
 if (managedPRsHeader && managedPRsContent && prsSectionChevron) {
   managedPRsHeader.addEventListener('click', function() {
@@ -46,6 +107,28 @@ if (managedPRsHeader && managedPRsContent && prsSectionChevron) {
   });
 }
 
+// ── Releases Section Collapse/Expand ───────────────────────────────────
+var releasesHeader = document.getElementById('releasesHeader');
+var releasesContent = document.getElementById('releasesContent');
+var releasesSectionChevron = document.getElementById('releasesSectionChevron');
+var releasesSectionCollapsed = false;
+
+if (releasesHeader && releasesContent && releasesSectionChevron) {
+  releasesHeader.addEventListener('click', function(e) {
+    // Don't toggle if clicking on buttons
+    if (e.target.closest('.section-action-btn')) return;
+    
+    releasesSectionCollapsed = !releasesSectionCollapsed;
+    if (releasesSectionCollapsed) {
+      releasesContent.classList.add('collapsed');
+      releasesSectionChevron.classList.add('collapsed');
+    } else {
+      releasesContent.classList.remove('collapsed');
+      releasesSectionChevron.classList.remove('collapsed');
+    }
+  });
+}
+
 // ── Multi-Select Manager ─────────────────────────────────────────────
 var multiSelectManager = new MultiSelectManager(bus, 'plan-multi-select');
 window._planMultiSelect = multiSelectManager; // Global ref for card event handlers
@@ -56,10 +139,11 @@ bus.on(Topics.PLANS_SELECTION_CHANGED, function(event) {
   var selectionCountEl = document.getElementById('selectionCount');
   
   if (event.count > 1) {
+    // Show bulk actions bar
     bulkActionsBar.style.display = 'flex';
     selectionCountEl.textContent = event.count + ' selected';
-    updateBulkActionVisibility(event.selectedIds);
   } else {
+    // Hide bulk actions bar
     bulkActionsBar.style.display = 'none';
   }
   
@@ -73,77 +157,6 @@ bus.on(Topics.PLANS_SELECTION_CHANGED, function(event) {
     card.setAttribute('aria-selected', isSelected ? 'true' : 'false');
   }
 });
-
-// Dismiss button clears selection
-var bulkDismissBtn = document.getElementById('bulkDismiss');
-if (bulkDismissBtn) {
-  bulkDismissBtn.addEventListener('click', function() {
-    multiSelectManager.deselectAll();
-  });
-}
-
-/** Show/hide bulk action buttons based on selected plans' statuses */
-function updateBulkActionVisibility(selectedIds) {
-  var statuses = [];
-  for (var si = 0; si < selectedIds.length; si++) {
-    var card = document.querySelector('.plan-item[data-id=\"' + selectedIds[si] + '\"]');
-    if (card && card.dataset.status) statuses.push(card.dataset.status);
-  }
-  var hasRunning = statuses.indexOf('running') !== -1 || statuses.indexOf('pending') !== -1;
-  var hasPaused = statuses.indexOf('paused') !== -1 || statuses.indexOf('pending-start') !== -1;
-  var hasFailed = statuses.indexOf('failed') !== -1 || statuses.indexOf('partial') !== -1;
-  var hasScaffolding = statuses.indexOf('scaffolding') !== -1;
-  var hasArchivable = statuses.indexOf('succeeded') !== -1 || statuses.indexOf('partial') !== -1 || statuses.indexOf('canceled') !== -1 || statuses.indexOf('failed') !== -1;
-  var hasRecoverable = statuses.indexOf('canceled') !== -1 || statuses.indexOf('archived') !== -1 || statuses.indexOf('failed') !== -1;
-  var btns = document.querySelectorAll('#bulkButtons .bulk-btn');
-  for (var bi = 0; bi < btns.length; bi++) {
-    var action = btns[bi].dataset.action;
-    var show = false;
-    switch (action) {
-      case 'resume':   show = hasPaused; break;
-      case 'pause':    show = hasRunning; break;
-      case 'cancel':   show = hasRunning || hasPaused; break;
-      case 'retry':    show = hasFailed; break;
-      case 'finalize': show = hasScaffolding; break;
-      case 'archive':  show = hasArchivable; break;
-      case 'recover':  show = hasRecoverable; break;
-      case 'delete':   show = true; break;
-    }
-    btns[bi].style.display = show ? '' : 'none';
-  }
-}
-
-/** Show/hide context menu items based on selected plans' statuses */
-function updateContextMenuVisibility(selectedIds) {
-  var statuses = [];
-  for (var si = 0; si < selectedIds.length; si++) {
-    var card = document.querySelector('.plan-item[data-id=\"' + selectedIds[si] + '\"]');
-    if (card && card.dataset.status) statuses.push(card.dataset.status);
-  }
-  var hasRunning = statuses.indexOf('running') !== -1 || statuses.indexOf('pending') !== -1;
-  var hasPaused = statuses.indexOf('paused') !== -1 || statuses.indexOf('pending-start') !== -1;
-  var hasFailed = statuses.indexOf('failed') !== -1 || statuses.indexOf('partial') !== -1;
-  var hasScaffolding = statuses.indexOf('scaffolding') !== -1;
-  var hasArchivable = statuses.indexOf('succeeded') !== -1 || statuses.indexOf('partial') !== -1 || statuses.indexOf('canceled') !== -1 || statuses.indexOf('failed') !== -1;
-  var hasRecoverable = statuses.indexOf('canceled') !== -1 || statuses.indexOf('archived') !== -1 || statuses.indexOf('failed') !== -1;
-  var items = document.querySelectorAll('#contextMenu .context-menu-item');
-  for (var ci = 0; ci < items.length; ci++) {
-    var action = items[ci].dataset.action;
-    if (!action) continue;
-    var show = false;
-    switch (action) {
-      case 'resume':   show = hasPaused; break;
-      case 'pause':    show = hasRunning; break;
-      case 'cancel':   show = hasRunning || hasPaused; break;
-      case 'retry':    show = hasFailed; break;
-      case 'finalize': show = hasScaffolding; break;
-      case 'archive':  show = hasArchivable; break;
-      case 'recover':  show = hasRecoverable; break;
-      case 'delete':   show = true; break;
-    }
-    items[ci].style.display = show ? '' : 'none';
-  }
-}
 
 // Wire bulk action buttons
 var bulkButtons = document.querySelectorAll('.bulk-btn');
@@ -196,7 +209,41 @@ bus.on(PlansTopics.PLANS_UPDATE, function(plans) {
   } else {
     multiSelectManager.setOrderedIds([]);
   }
+  
+  // Update Plans tab badge
+  updateTabBadge('plans', plans.length);
 });
+
+// Update PRs tab badge when PR list changes
+bus.on('prs:update', function(prs) {
+  updateTabBadge('prs', prs ? prs.length : 0);
+});
+
+// Update Releases tab badge when release list changes
+bus.on('releases:update', function(releases) {
+  updateTabBadge('releases', releases ? releases.length : 0);
+});
+
+// Auto-switch to PRs tab when PR is adopted
+bus.on('pr:state', function(pr) {
+  if (pr && pr.status === 'adopted') {
+    switchTab('prs');
+  }
+});
+
+// Badge update helper
+function updateTabBadge(tabName, count) {
+  var badgeId = 'tabBadge' + tabName.charAt(0).toUpperCase() + tabName.slice(1);
+  var badge = document.getElementById(badgeId);
+  if (badge) {
+    if (count > 0) {
+      badge.textContent = count.toString();
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
 
 // ── Global duration ticker ───────────────────────────────────────────
 // Identical pattern to plan detail panel: one global PULSE handler that

@@ -14,77 +14,157 @@
 export function renderPlansViewBody(): string {
   return `<div class="header">
     <h3>Plans</h3>
-    <span class="pill" id="badge">0</span>
-  </div>
-  <div class="global-stats" id="globalStats" style="display: none;">
-    <div class="stats-row">
-      <span class="stat-item"><span class="stat-dot running"></span> <span id="runningJobs">0</span>/<span id="maxParallel">8</span> jobs</span>
-      <span class="stat-item" id="queuedSection" style="display:none"><span class="stat-dot queued"></span> <span id="queuedJobs">0</span> queued</span>
+    <div class="header-actions">
+      <button id="adoptPRButton" class="action-button" title="Adopt an existing PR">
+        <span class="codicon codicon-add"></span>
+        Adopt PR
+      </button>
+      <span class="pill" id="badge">0 total</span>
     </div>
   </div>
   <div class="global-capacity-bar" id="globalCapacityBar" style="display: none;">
-    <span class="capacity-label">Global:</span>
+    <span class="capacity-label">Global Capacity:</span>
     <span class="capacity-jobs">
-      <span id="globalRunningJobs">0</span>/<span id="globalMaxParallel">16</span>
+      <span id="globalRunningJobs">0</span>/<span id="globalMaxParallel">16</span> jobs
     </span>
     <span class="capacity-instances" title="VS Code instances using orchestrator">
-      <span id="activeInstances">1</span> inst
+      <span id="activeInstances">1</span> instance(s)
     </span>
   </div>
+  <div class="global-stats" id="globalStats" style="display: none; margin-bottom: 10px; padding: 6px 8px; background: var(--vscode-editor-inactiveSelectionBackground); border-radius: 4px; font-size: 11px;">
+    <span>Jobs: <span id="runningJobs">0</span>/<span id="maxParallel">8</span></span>
+    <span style="margin-left: 8px;" id="queuedSection">Queued: <span id="queuedJobs">0</span></span>
+  </div>
   <div class="bulk-actions" id="bulkActions" style="display: none;">
-    <div class="bulk-header">
-      <span class="selection-count" id="selectionCount">0 selected</span>
-      <button class="bulk-dismiss" id="bulkDismiss" title="Deselect all">&times;</button>
-    </div>
-    <div class="bulk-buttons" id="bulkButtons">
-      <button class="bulk-btn" data-action="resume" title="Resume">&#9654; Resume</button>
-      <button class="bulk-btn" data-action="pause" title="Pause">&#10074;&#10074; Pause</button>
-      <button class="bulk-btn" data-action="cancel" title="Cancel">&#9632; Cancel</button>
-      <button class="bulk-btn" data-action="retry" title="Retry">&#8635; Retry</button>
-      <button class="bulk-btn" data-action="finalize" title="Finalize">&#10003; Finalize</button>
-      <button class="bulk-btn" data-action="archive" title="Archive">&#128230; Archive</button>
-      <button class="bulk-btn" data-action="recover" title="Recover">&#128260; Recover</button>
-      <button class="bulk-btn danger" data-action="delete" title="Delete">&#128465; Delete</button>
+    <span class="selection-count" id="selectionCount">0 selected</span>
+    <div class="bulk-buttons">
+      <button class="bulk-btn" data-action="resume" title="Resume selected plans">Resume</button>
+      <button class="bulk-btn" data-action="pause" title="Pause selected plans">Pause</button>
+      <button class="bulk-btn" data-action="cancel" title="Cancel selected plans">Cancel</button>
+      <button class="bulk-btn" data-action="retry" title="Retry selected plans">Retry</button>
+      <button class="bulk-btn" data-action="finalize" title="Finalize selected plans">Finalize</button>
+      <button class="bulk-btn" data-action="assignToRelease" title="Assign to Release">Assign to Release...</button>
+      <button class="bulk-btn" data-action="createReleaseFromPlans" title="Create Release from Selected">Create Release</button>
+      <button class="bulk-btn danger" data-action="delete" title="Delete selected plans">Delete</button>
     </div>
   </div>
-  <div id="plans" role="listbox" aria-multiselectable="true">
-    <div class="welcome-state" id="welcomeState">
-      <div class="welcome-icon">\u2728</div>
-      <div class="welcome-title">No plans yet</div>
-      <div class="welcome-subtitle">Ask Copilot to create a plan, or use the <code>create_copilot_plan</code> MCP tool to get started.</div>
+  <div class="section managed-prs-section">
+    <div class="section-header" id="managedPRsHeader">
+      <span class="section-title">
+        <span class="codicon codicon-chevron-down section-chevron" id="prsSectionChevron"></span>
+        Managed PRs
+        <span class="pill" id="prsBadge">0</span>
+      </span>
+    </div>
+    <div class="section-content" id="managedPRsContent">
+      <div id="prs"><div class="empty">No managed PRs.</div></div>
     </div>
   </div>
+  <div class="section releases-section">
+    <div class="section-header" id="releasesHeader">
+      <span class="section-title">
+        <span class="codicon codicon-chevron-down section-chevron" id="releasesSectionChevron"></span>
+        Releases
+        <span class="pill" id="releasesBadge">0</span>
+      </span>
+      <div class="section-actions">
+        <button id="newReleaseButton" class="section-action-btn" title="Create a new release">
+          <span class="codicon codicon-add"></span>
+          New Release
+        </button>
+        <button id="releaseFromBranchButton" class="section-action-btn" title="Create release from current branch">
+          <span class="codicon codicon-git-branch"></span>
+          From Current Branch
+        </button>
+      </div>
+    </div>
+    <div class="section-content" id="releasesContent">
+      <div id="releases"><div class="empty">🚀 No releases yet.</div></div>
+    </div>
+  </div>
+  <div id="plans" role="listbox" aria-multiselectable="true"><div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div></div>
   <div class="section-divider" id="archivedDivider" style="display: none;">
     <button class="collapse-toggle" id="archivedToggle" aria-expanded="false">
       <span class="codicon codicon-chevron-right"></span>
       <span>Archived</span>
-      <span class="pill small" id="archivedCount">0</span>
+      <span class="pill" id="archivedCount">0</span>
     </button>
   </div>
-  <div class="archived-plans" id="archivedPlans" style="display: none;"></div>
-  <div class="section-divider" id="managedPRsDivider">
-    <button class="collapse-toggle" id="managedPRsToggle" aria-expanded="false">
-      <span class="codicon codicon-chevron-right" id="prsSectionChevron"></span>
-      <span>Managed PRs</span>
-      <span class="pill small" id="prsBadge">0</span>
-    </button>
-    <button class="section-action" id="adoptPRButton" title="Adopt an existing PR for release management">
-      <span class="codicon codicon-git-pull-request-create"></span>
-    </button>
+  <div class="tab-content active" id="tabContentPlans">
+    <div class="header">
+      <div class="header-actions">
+        <span class="pill" id="badge">0 total</span>
+      </div>
+    </div>
+    <div class="global-capacity-bar" id="globalCapacityBar" style="display: none;">
+      <span class="capacity-label">Global Capacity:</span>
+      <span class="capacity-jobs">
+        <span id="globalRunningJobs">0</span>/<span id="globalMaxParallel">16</span> jobs
+      </span>
+      <span class="capacity-instances" title="VS Code instances using orchestrator">
+        <span id="activeInstances">1</span> instance(s)
+      </span>
+    </div>
+    <div class="global-stats" id="globalStats" style="display: none; margin-bottom: 10px; padding: 6px 8px; background: var(--vscode-editor-inactiveSelectionBackground); border-radius: 4px; font-size: 11px;">
+      <span>Jobs: <span id="runningJobs">0</span>/<span id="maxParallel">8</span></span>
+      <span style="margin-left: 8px;" id="queuedSection">Queued: <span id="queuedJobs">0</span></span>
+    </div>
+    <div class="bulk-actions" id="bulkActions" style="display: none;">
+      <span class="selection-count" id="selectionCount">0 selected</span>
+      <div class="bulk-buttons">
+        <button class="bulk-btn" data-action="resume" title="Resume selected plans">Resume</button>
+        <button class="bulk-btn" data-action="pause" title="Pause selected plans">Pause</button>
+        <button class="bulk-btn" data-action="cancel" title="Cancel selected plans">Cancel</button>
+        <button class="bulk-btn" data-action="retry" title="Retry selected plans">Retry</button>
+        <button class="bulk-btn" data-action="finalize" title="Finalize selected plans">Finalize</button>
+        <button class="bulk-btn danger" data-action="delete" title="Delete selected plans">Delete</button>
+      </div>
+    </div>
+    <div id="plans" role="listbox" aria-multiselectable="true"><div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div></div>
+    <div class="section-divider" id="archivedDivider" style="display: none;">
+      <button class="collapse-toggle" id="archivedToggle" aria-expanded="false">
+        <span class="codicon codicon-chevron-right"></span>
+        <span>Archived</span>
+        <span class="pill" id="archivedCount">0</span>
+      </button>
+    </div>
+    <div class="archived-plans" id="archivedPlans" style="display: none;"></div>
   </div>
-  <div class="managed-prs-content" id="managedPRsContent" style="display: none;">
-    <div id="prs"><div class="empty-section">No managed PRs. Click + to adopt one.</div></div>
+  <div class="tab-content" id="tabContentReleases">
+    <div class="empty">No releases yet.</div>
+  </div>
+  <div class="tab-content" id="tabContentPRs">
+    <div class="header">
+      <div class="header-actions">
+        <button id="adoptPRButton" class="action-button" title="Adopt an existing PR">
+          <span class="codicon codicon-add"></span>
+          Adopt PR
+        </button>
+      </div>
+    </div>
+    <div class="section managed-prs-section">
+      <div class="section-header" id="managedPRsHeader">
+        <span class="section-title">
+          <span class="codicon codicon-chevron-down section-chevron" id="prsSectionChevron"></span>
+          Managed PRs
+          <span class="pill" id="prsBadge">0</span>
+        </span>
+      </div>
+      <div class="section-content" id="managedPRsContent">
+        <div id="prs"><div class="empty">No managed PRs.</div></div>
+      </div>
+    </div>
   </div>
   <div class="context-menu" id="contextMenu" style="display: none;">
-    <div class="context-menu-item" data-action="resume">&#9654; Resume</div>
-    <div class="context-menu-item" data-action="pause">&#10074;&#10074; Pause</div>
-    <div class="context-menu-item" data-action="cancel">&#9632; Cancel</div>
-    <div class="context-menu-item" data-action="retry">&#8635; Retry</div>
-    <div class="context-menu-item" data-action="finalize">&#10003; Finalize</div>
+    <div class="context-menu-item" data-action="resume">Resume</div>
+    <div class="context-menu-item" data-action="pause">Pause</div>
+    <div class="context-menu-item" data-action="cancel">Cancel</div>
+    <div class="context-menu-item" data-action="retry">Retry</div>
+    <div class="context-menu-item" data-action="finalize">Finalize</div>
     <div class="context-menu-separator"></div>
-    <div class="context-menu-item" data-action="archive">&#128230; Archive</div>
-    <div class="context-menu-item" data-action="recover">&#128260; Recover</div>
+    <div class="context-menu-item" data-action="assignToRelease">Assign to Release...</div>
+    <div class="context-menu-item" data-action="createReleaseFromPlans">Create Release from Selected</div>
     <div class="context-menu-separator"></div>
-    <div class="context-menu-item danger" data-action="delete">&#128465; Delete</div>
+    <div class="context-menu-item danger" data-action="delete">Delete</div>
   </div>`;
 }
