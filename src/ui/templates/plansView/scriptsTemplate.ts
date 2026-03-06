@@ -82,12 +82,23 @@ class PlanListCardControl extends SubscribableControl {
     this.element.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       window._planMultiSelect.handleContextMenu(this.planId);
-      // Show context menu at cursor position
+      // Show context menu, clamped to viewport
       var menu = document.getElementById('contextMenu');
       if (menu) {
+        // Update visibility of menu items based on selected plans
+        if (typeof updateContextMenuVisibility === 'function') {
+          updateContextMenuVisibility(window._planMultiSelect.getSelectedIds());
+        }
         menu.style.display = 'block';
-        menu.style.left = e.clientX + 'px';
-        menu.style.top = e.clientY + 'px';
+        // Measure menu size then clamp to viewport
+        var menuW = menu.offsetWidth || 180;
+        var menuH = menu.offsetHeight || 200;
+        var vpW = document.documentElement.clientWidth || window.innerWidth;
+        var vpH = document.documentElement.clientHeight || window.innerHeight;
+        var left = Math.min(e.clientX, vpW - menuW - 4);
+        var top = Math.min(e.clientY, vpH - menuH - 4);
+        menu.style.left = Math.max(0, left) + 'px';
+        menu.style.top = Math.max(0, top) + 'px';
       }
     });
   }
