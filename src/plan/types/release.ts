@@ -102,6 +102,9 @@ export interface ReleaseDefinition {
   /** Release flow type */
   flowType: ReleaseFlowType;
 
+  /** Internal flow type tracking (same as flowType) */
+  source?: ReleaseFlowType;
+
   /** Plan IDs included in this release */
   planIds: string[];
 
@@ -116,6 +119,9 @@ export interface ReleaseDefinition {
 
   /** Current lifecycle status */
   status: ReleaseStatus;
+
+  /** State transition history */
+  stateHistory: StateTransition[];
 
   /** Preparation tasks checklist */
   prepTasks?: PrepTask[];

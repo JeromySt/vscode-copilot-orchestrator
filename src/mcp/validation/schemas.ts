@@ -858,6 +858,7 @@ export const createReleaseSchema = {
     },
     releaseBranch: { type: 'string', minLength: 1, maxLength: 200 },
     targetBranch: { type: 'string', minLength: 1, maxLength: 200 },
+    repoPath: { type: 'string', minLength: 1 },
     autoStart: { type: 'boolean' }
   },
   required: ['name', 'planIds', 'releaseBranch'],
@@ -912,9 +913,68 @@ export const listReleasesSchema = {
   properties: {
     status: {
       type: 'string',
-      enum: ['drafting', 'merging', 'creating-pr', 'monitoring', 'addressing', 'succeeded', 'failed', 'canceled']
+      enum: ['drafting', 'preparing', 'ready-for-pr', 'merging', 'creating-pr', 'pr-active', 'monitoring', 'addressing', 'succeeded', 'failed', 'canceled']
     }
   },
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for prepare_copilot_release input
+ */
+export const prepareReleaseSchema = {
+  $id: 'prepare_copilot_release',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for execute_release_task input
+ */
+export const executeReleaseTaskSchema = {
+  $id: 'execute_release_task',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 },
+    taskId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId', 'taskId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for skip_release_task input
+ */
+export const skipReleaseTaskSchema = {
+  $id: 'skip_release_task',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 },
+    taskId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId', 'taskId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for add_plans_to_release input
+ */
+export const addPlansToReleaseSchema = {
+  $id: 'add_plans_to_release',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 },
+    planIds: {
+      type: 'array',
+      items: { type: 'string', minLength: 1 },
+      minItems: 1
+    }
+  },
+  required: ['releaseId', 'planIds'],
   additionalProperties: false
 } as const;
 
@@ -1098,6 +1158,10 @@ export const schemas: Record<string, object> = {
   get_copilot_release_status: getReleaseStatusSchema,
   cancel_copilot_release: cancelReleaseSchema,
   list_copilot_releases: listReleasesSchema,
+  prepare_copilot_release: prepareReleaseSchema,
+  execute_release_task: executeReleaseTaskSchema,
+  skip_release_task: skipReleaseTaskSchema,
+  add_plans_to_release: addPlansToReleaseSchema,
 
   // PR lifecycle tools
   list_available_prs: listAvailablePRsSchema,

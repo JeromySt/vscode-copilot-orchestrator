@@ -52,6 +52,10 @@ import {
   handleGetReleaseStatus,
   handleCancelRelease,
   handleListReleases,
+  handlePrepareRelease,
+  handleExecuteReleaseTask,
+  handleSkipReleaseTask,
+  handleAddPlansToRelease,
   handleListAvailablePRs,
   handleAdoptPR,
   handleGetManagedPR,
@@ -396,6 +400,22 @@ export class McpHandler implements IMcpRequestRouter {
       
       case 'list_copilot_releases':
         result = await handleListReleases(args || {}, this.context);
+        break;
+      
+      case 'prepare_copilot_release':
+        result = await handlePrepareRelease(args || {}, this.context);
+        break;
+      
+      case 'execute_release_task':
+        result = await handleExecuteReleaseTask(args || {}, this.context);
+        break;
+      
+      case 'skip_release_task':
+        result = await handleSkipReleaseTask(args || {}, this.context);
+        break;
+      
+      case 'add_plans_to_release':
+        result = await handleAddPlansToRelease(args || {}, this.context);
         break;
 
       // --- PR Lifecycle tools ---

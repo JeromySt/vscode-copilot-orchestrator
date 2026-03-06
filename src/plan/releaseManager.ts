@@ -423,7 +423,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       throw new Error(`Preparation task not found: ${taskId}`);
     }
 
-    log.info('Executing preparation task', { releaseId, taskId, taskName: task.name });
+    log.info('Executing preparation task', { releaseId, taskId, taskTitle: task.title });
 
     task.status = 'in-progress';
     task.startedAt = Date.now();
@@ -432,7 +432,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     try {
       // Execute task using Copilot CLI
       const cwd = release.isolatedRepoPath || release.repoPath;
-      const taskDescription = task.description || task.name;
+      const taskDescription = task.description || task.title;
       
       const result = await this.copilot.run({
         cwd,
@@ -925,6 +925,45 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       default:
         return 'Unknown';
     }
+  }
+
+  /**
+   * Transition release to preparing status and initialize preparation tasks.
+   * @private
+   */
+  private async prepareRelease(releaseId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    log.info('Preparing release', { releaseId });
+
+    // Transition to preparing status
+    const success = await this.transitionToState(releaseId, 'preparing', 'Starting preparation phase');
+    if (!success) {
+      throw new Error(`Failed to transition release ${releaseId} to preparing status`);
+    }
+
+    // TODO: Initialize preparation tasks from release instructions if they don't exist
+    // For now, preparation tasks should be set up when creating the release
+  }
+
+  /**
+   * Check if all required preparation tasks are complete.
+   * @private
+   */
+  private areRequiredTasksComplete(releaseId: string): boolean {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      return false;
+    }
+
+    const tasks = release.preparationTasks || [];
+    const requiredTasks = tasks.filter(t => t.required);
+    
+    // All required tasks must be either completed or skipped (though required tasks shouldn't be skipped)
+    return requiredTasks.every(t => t.status === 'completed' || t.status === 'skipped');
   }
 
   /**

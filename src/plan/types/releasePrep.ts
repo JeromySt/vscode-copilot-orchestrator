@@ -18,9 +18,10 @@
  * - `pending`: Task is waiting to be started
  * - `in-progress`: Task is currently being executed
  * - `completed`: Task finished successfully
+ * - `failed`: Task execution failed
  * - `skipped`: Task was intentionally skipped (optional tasks only)
  */
-export type PrepTaskStatus = 'pending' | 'in-progress' | 'completed' | 'skipped';
+export type PrepTaskStatus = 'pending' | 'in-progress' | 'completed' | 'failed' | 'skipped';
 
 // ============================================================================
 // PREPARATION TASK TYPES
