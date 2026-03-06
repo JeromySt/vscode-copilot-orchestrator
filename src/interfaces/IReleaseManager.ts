@@ -130,6 +130,86 @@ export interface IReleaseManager {
    */
   cleanupIsolatedRepos(): Promise<void>;
 
+  // ── State Management ───────────────────────────────────────────────
+
+  /**
+   * Transitions a release to a new status.
+   * 
+   * @param releaseId - The release ID
+   * @param newStatus - The target status
+   * @param reason - Optional reason for the transition
+   * @returns True if transition succeeded, false otherwise
+   */
+  transitionToState(releaseId: string, newStatus: ReleaseStatus, reason?: string): Promise<boolean>;
+
+  // ── Preparation Tasks ──────────────────────────────────────────────
+
+  /**
+   * Auto-executes a preparation task using Copilot.
+   * 
+   * @param releaseId - The release ID
+   * @param taskId - The task ID to execute
+   */
+  executePreparationTask(releaseId: string, taskId: string): Promise<void>;
+
+  /**
+   * Manually marks a preparation task as complete.
+   * 
+   * @param releaseId - The release ID
+   * @param taskId - The task ID to complete
+   */
+  completePreparationTask(releaseId: string, taskId: string): Promise<void>;
+
+  /**
+   * Skips a preparation task.
+   * 
+   * @param releaseId - The release ID
+   * @param taskId - The task ID to skip
+   */
+  skipPreparationTask(releaseId: string, taskId: string): Promise<void>;
+
+  // ── Plan Management ────────────────────────────────────────────────
+
+  /**
+   * Adds plans to a release at any stage.
+   * 
+   * @param releaseId - The release ID
+   * @param planIds - The plan IDs to add
+   */
+  addPlansToRelease(releaseId: string, planIds: string[]): Promise<void>;
+
+  // ── PR Management ──────────────────────────────────────────────────
+
+  /**
+   * Creates a PR for the release.
+   * 
+   * @param releaseId - The release ID
+   * @param asDraft - Whether to create as draft PR
+   */
+  createPR(releaseId: string, asDraft?: boolean): Promise<void>;
+
+  /**
+   * Adopts an existing PR for the release.
+   * 
+   * @param releaseId - The release ID
+   * @param prNumber - The PR number to adopt
+   */
+  adoptPR(releaseId: string, prNumber: number): Promise<void>;
+
+  /**
+   * Starts monitoring a release's PR.
+   * 
+   * @param releaseId - The release ID
+   */
+  startMonitoring(releaseId: string): Promise<void>;
+
+  /**
+   * Stops monitoring a release's PR.
+   * 
+   * @param releaseId - The release ID
+   */
+  stopMonitoring(releaseId: string): Promise<void>;
+
   // ── Events ─────────────────────────────────────────────────────────
 
   /**

@@ -30,11 +30,21 @@ function createTestRelease(overrides?: Partial<ReleaseDefinition>): ReleaseDefin
   return {
     id: 'rel-1',
     name: 'Release v1.0',
+    flowType: 'from-plans',
     planIds: ['plan-1', 'plan-2'],
     releaseBranch: 'release/v1.0',
     targetBranch: 'main',
     repoPath: '/repo',
     status: 'drafting',
+    source: 'from-plans',
+    stateHistory: [
+      {
+        from: 'drafting',
+        to: 'drafting',
+        timestamp: Date.now(),
+        reason: 'Release created',
+      },
+    ],
     createdAt: Date.now(),
     ...overrides,
   };

@@ -44,6 +44,15 @@ export interface ReleaseEvents {
 
   /** Emitted when a release is deleted */
   'release:deleted': (releaseId: string) => void;
+
+  /** Emitted when a preparation task status changes */
+  'release:taskStatusChanged': (releaseId: string, taskId: string, status: import('./types/releasePrep').PrepTaskStatus) => void;
+
+  /** Emitted when plans are added to a release */
+  'release:plansAdded': (releaseId: string, planIds: string[]) => void;
+
+  /** Emitted when an existing PR is adopted for a release */
+  'release:prAdopted': (releaseId: string, prNumber: number) => void;
 }
 
 /**
@@ -120,5 +129,26 @@ export class ReleaseEventEmitter extends EventEmitter {
    */
   emitReleaseDeleted(releaseId: string): void {
     this.emit('release:deleted', releaseId);
+  }
+
+  /**
+   * Emit a release:taskStatusChanged event.
+   */
+  emitReleaseTaskStatusChanged(releaseId: string, taskId: string, status: import('./types/releasePrep').PrepTaskStatus): void {
+    this.emit('release:taskStatusChanged', releaseId, taskId, status);
+  }
+
+  /**
+   * Emit a release:plansAdded event.
+   */
+  emitReleasePlansAdded(releaseId: string, planIds: string[]): void {
+    this.emit('release:plansAdded', releaseId, planIds);
+  }
+
+  /**
+   * Emit a release:prAdopted event.
+   */
+  emitReleasePrAdopted(releaseId: string, prNumber: number): void {
+    this.emit('release:prAdopted', releaseId, prNumber);
   }
 }

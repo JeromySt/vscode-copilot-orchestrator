@@ -1,13 +1,14 @@
 /**
  * @fileoverview Release management panel body template.
  *
- * Renders the HTML body for the 5-step wizard interface.
+ * Renders the HTML body for the adaptive wizard interface that changes
+ * based on release flow type (from-branch vs from-plans).
  *
  * @module ui/templates/release/bodyTemplate
  */
 
 import { escapeHtml } from '../helpers';
-import type { ReleaseDefinition } from '../../../plan/types/release';
+import type { ReleaseDefinition, PrepTask } from '../../../plan/types/release';
 
 /**
  * Renders the HTML body for the release management panel.
@@ -16,7 +17,8 @@ import type { ReleaseDefinition } from '../../../plan/types/release';
  * @returns HTML body string.
  */
 export function renderReleaseBody(release: ReleaseDefinition): string {
-  const stepIndex = getStepIndex(release.status);
+  const steps = getStepsForFlow(release.flowType);
+  const currentStepIndex = getCurrentStepIndex(release, steps);
   
   return `
 <div class="release-container">
@@ -25,51 +27,108 @@ export function renderReleaseBody(release: ReleaseDefinition): string {
     <div class="release-branch-info">
       ${escapeHtml(release.releaseBranch)} → ${escapeHtml(release.targetBranch)}
     </div>
-    ${renderStepIndicator(stepIndex, release.status)}
+    ${renderAdaptiveStepIndicator(steps, currentStepIndex, release.status)}
   </div>
   
   <div class="wizard-content">
-    ${renderStepContent(release, stepIndex)}
+    ${renderStepContent(release, steps[currentStepIndex])}
   </div>
   
+  ${renderFloatingAddPlans(release)}
+  
   <div class="wizard-nav">
-    ${renderNavigationButtons(release, stepIndex)}
+    ${renderNavigationButtons(release, currentStepIndex, steps)}
   </div>
 </div>`;
 }
 
-function getStepIndex(status: string): number {
-  switch (status) {
-    case 'drafting': return 0;
-    case 'merging': return 1;
-    case 'creating-pr': return 2;
-    case 'monitoring':
-    case 'addressing': return 3;
-    case 'succeeded':
-    case 'failed':
-    case 'canceled': return 4;
-    default: return 0;
+type WizardStep = 
+  | 'select-plans'
+  | 'configure'
+  | 'merge'
+  | 'prepare'
+  | 'create-pr'
+  | 'monitor'
+  | 'complete';
+
+interface StepDefinition {
+  id: WizardStep;
+  label: string;
+}
+
+function getStepsForFlow(flowType: string): StepDefinition[] {
+  if (flowType === 'from-plans') {
+    return [
+      { id: 'select-plans', label: 'Select Plans' },
+      { id: 'configure', label: 'Configure' },
+      { id: 'merge', label: 'Merge' },
+      { id: 'prepare', label: 'Prepare' },
+      { id: 'create-pr', label: 'Create PR' },
+      { id: 'monitor', label: 'Monitor' },
+      { id: 'complete', label: 'Complete' },
+    ];
+  } else {
+    // from-branch flow
+    return [
+      { id: 'configure', label: 'Configure' },
+      { id: 'prepare', label: 'Prepare' },
+      { id: 'create-pr', label: 'Create PR' },
+      { id: 'monitor', label: 'Monitor' },
+      { id: 'complete', label: 'Complete' },
+    ];
   }
 }
 
-function renderStepIndicator(currentStep: number, status: string): string {
-  const steps = ['Select', 'Merge', 'PR', 'Monitor', 'Complete'];
+function getCurrentStepIndex(release: ReleaseDefinition, steps: StepDefinition[]): number {
+  const status = release.status;
+  
+  if (status === 'drafting') {
+    // Check if we're in plan selection (from-plans) or configure (from-branch)
+    return 0;
+  } else if (status === 'merging') {
+    return steps.findIndex(s => s.id === 'merge');
+  } else if (status === 'preparing') {
+    return steps.findIndex(s => s.id === 'prepare');
+  } else if (status === 'creating-pr') {
+    return steps.findIndex(s => s.id === 'create-pr');
+  } else if (status === 'monitoring' || status === 'addressing') {
+    return steps.findIndex(s => s.id === 'monitor');
+  } else {
+    // succeeded, failed, canceled
+    return steps.findIndex(s => s.id === 'complete');
+  }
+}
+
+function renderAdaptiveStepIndicator(
+  steps: StepDefinition[], 
+  currentIndex: number, 
+  status: string
+): string {
   const dots: string[] = [];
   
   for (let i = 0; i < steps.length; i++) {
-    const dotClass = i === currentStep ? 'active' : (i < currentStep ? 'completed' : '');
-    const failedClass = status === 'failed' && i === currentStep ? 'failed' : '';
-    dots.push(`<div class="step-dot ${dotClass} ${failedClass}"></div>`);
+    const isActive = i === currentIndex;
+    const isCompleted = i < currentIndex;
+    const isFailed = status === 'failed' && isActive;
+    
+    const dotClass = [
+      'step-dot',
+      isActive && 'active',
+      isCompleted && 'completed',
+      isFailed && 'failed'
+    ].filter(Boolean).join(' ');
+    
+    dots.push(`<div class="${dotClass}" data-step="${steps[i].id}"></div>`);
     
     if (i < steps.length - 1) {
-      const connectorClass = i < currentStep ? 'completed' : '';
-      dots.push(`<div class="step-connector ${connectorClass}"></div>`);
+      const connectorClass = isCompleted ? 'step-connector completed' : 'step-connector';
+      dots.push(`<div class="${connectorClass}"></div>`);
     }
   }
   
-  const labels = steps.map((label, i) => {
-    const labelClass = i === currentStep ? 'active' : '';
-    return `<div class="step-label ${labelClass}">${label}</div>`;
+  const labels = steps.map((step, i) => {
+    const labelClass = i === currentIndex ? 'step-label active' : 'step-label';
+    return `<div class="${labelClass}">${step.label}</div>`;
   }).join('');
   
   return `
@@ -81,17 +140,21 @@ function renderStepIndicator(currentStep: number, status: string): string {
 </div>`;
 }
 
-function renderStepContent(release: ReleaseDefinition, stepIndex: number): string {
-  switch (stepIndex) {
-    case 0:
+function renderStepContent(release: ReleaseDefinition, step: StepDefinition): string {
+  switch (step.id) {
+    case 'select-plans':
       return renderPlanSelectionStep(release);
-    case 1:
+    case 'configure':
+      return renderConfigureStep(release);
+    case 'merge':
       return renderMergeStep(release);
-    case 2:
+    case 'prepare':
+      return renderPrepareStep(release);
+    case 'create-pr':
       return renderPRCreationStep(release);
-    case 3:
+    case 'monitor':
       return renderMonitoringStep(release);
-    case 4:
+    case 'complete':
       return renderCompletionStep(release);
     default:
       return '';
@@ -108,30 +171,185 @@ function renderPlanSelectionStep(release: ReleaseDefinition): string {
       Loading available plans...
     </div>
   </div>
-</div>
-<div class="configuration-section" style="margin-top: 24px;">
+</div>`;
+}
+
+function renderConfigureStep(release: ReleaseDefinition): string {
+  const isFromPlans = release.flowType === 'from-plans';
+  
+  return `
+<div class="configuration-section">
   <h3>Release Configuration</h3>
   <div style="display: grid; gap: 12px; max-width: 600px;">
     <div>
-      <label style="display: block; margin-bottom: 4px; font-size: 12px;">Release Branch</label>
+      <label style="display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600;">Release Name</label>
+      <input 
+        type="text" 
+        id="release-name" 
+        value="${escapeHtml(release.name)}"
+        style="width: 100%; padding: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px;"
+        placeholder="v1.0.0"
+      />
+    </div>
+    <div>
+      <label style="display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600;">Release Branch</label>
       <input 
         type="text" 
         id="release-branch" 
         value="${escapeHtml(release.releaseBranch)}"
-        style="width: 100%; padding: 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px;"
+        style="width: 100%; padding: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px;"
         placeholder="release/v1.0.0"
+        ${isFromPlans ? '' : 'disabled'}
       />
+      ${!isFromPlans ? '<div style="font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 4px;">Auto-filled from current branch</div>' : ''}
     </div>
     <div>
-      <label style="display: block; margin-bottom: 4px; font-size: 12px;">Target Branch</label>
+      <label style="display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600;">Target Branch</label>
       <input 
         type="text" 
         id="target-branch" 
         value="${escapeHtml(release.targetBranch)}"
-        style="width: 100%; padding: 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px;"
+        style="width: 100%; padding: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px;"
         placeholder="main"
       />
     </div>
+  </div>
+  
+  ${!isFromPlans ? renderOptionalPlansSection(release) : ''}
+</div>`;
+}
+
+function renderOptionalPlansSection(release: ReleaseDefinition): string {
+  return `
+<div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--vscode-panel-border);">
+  <h3>Add Plans (Optional)</h3>
+  <div style="font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 12px;">
+    Include additional succeeded plans in this release
+  </div>
+  <div id="optional-plan-list" class="plan-list">
+    <!-- Optional plans will be populated by JavaScript -->
+    <div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground);">
+      Loading available plans...
+    </div>
+  </div>
+</div>`;
+}
+
+function renderPrepareStep(release: ReleaseDefinition): string {
+  const tasks = release.prepTasks || getDefaultPrepTasks();
+  const completedCount = tasks.filter(t => t.status === 'completed' || t.status === 'skipped').length;
+  const requiredCount = tasks.filter(t => t.required).length;
+  const requiredCompleted = tasks.filter(t => t.required && (t.status === 'completed' || t.status === 'skipped')).length;
+  const canCreatePR = requiredCompleted === requiredCount;
+  
+  return `
+<div class="prep-checklist-container">
+  <div class="prep-header">
+    <h3>Pre-PR Checklist</h3>
+    <div class="prep-progress-summary">
+      <span>${completedCount} of ${tasks.length} tasks complete</span>
+      ${!canCreatePR ? `<span class="required-remaining">• ${requiredCount - requiredCompleted} required task(s) remaining</span>` : ''}
+    </div>
+  </div>
+  
+  <div class="prep-checklist">
+    ${tasks.map(task => renderPrepTask(task)).join('\n')}
+  </div>
+  
+  <div class="prep-footer">
+    <div class="prep-progress-bar">
+      <div class="prep-progress-fill" style="width: ${(completedCount / tasks.length) * 100}%"></div>
+    </div>
+    <button 
+      class="primary create-pr-btn" 
+      ${canCreatePR ? '' : 'disabled'}
+      onclick="createPR()"
+    >
+      ${canCreatePR ? 'Create PR →' : `Create PR (${requiredCount - requiredCompleted} required remaining)`}
+    </button>
+  </div>
+</div>`;
+}
+
+function getDefaultPrepTasks(): PrepTask[] {
+  return [
+    {
+      id: 'changelog',
+      title: 'Update CHANGELOG',
+      description: 'Add release notes to CHANGELOG.md',
+      required: true,
+      autoSupported: true,
+      status: 'pending'
+    },
+    {
+      id: 'version',
+      title: 'Bump Version',
+      description: 'Update version in package.json',
+      required: true,
+      autoSupported: true,
+      status: 'pending'
+    },
+    {
+      id: 'compile',
+      title: 'Run Compilation',
+      description: 'Ensure TypeScript compiles without errors',
+      required: true,
+      autoSupported: true,
+      status: 'pending'
+    },
+    {
+      id: 'tests',
+      title: 'Run Tests',
+      description: 'Execute test suite',
+      required: true,
+      autoSupported: true,
+      status: 'pending'
+    },
+    {
+      id: 'docs',
+      title: 'Update Documentation',
+      description: 'Review and update README if needed',
+      required: false,
+      autoSupported: false,
+      status: 'pending'
+    },
+    {
+      id: 'ai-review',
+      title: 'AI Code Review',
+      description: 'Run Copilot code review on changes',
+      required: false,
+      autoSupported: true,
+      status: 'pending'
+    }
+  ];
+}
+
+function renderPrepTask(task: PrepTask): string {
+  const statusIcon = task.status === 'completed' ? '✓' : 
+                     task.status === 'skipped' ? '−' :
+                     task.status === 'running' ? '⏳' : '☐';
+  
+  const statusClass = task.status;
+  const requiredBadge = task.required ? '<span class="required-badge">Required</span>' : '';
+  
+  return `
+<div class="prep-task" data-task-id="${task.id}" data-status="${task.status}">
+  <span class="task-checkbox ${statusClass}">${statusIcon}</span>
+  <div class="task-info">
+    <div class="task-title">
+      ${escapeHtml(task.title)}
+      ${requiredBadge}
+    </div>
+    ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
+    ${task.error ? `<div class="task-error">Error: ${escapeHtml(task.error)}</div>` : ''}
+  </div>
+  <div class="task-actions">
+    ${task.status === 'pending' && task.autoSupported ? 
+      '<button class="auto-btn" onclick="executeTask(\'' + task.id + '\')" title="Let Copilot handle this">🤖 Auto</button>' : ''}
+    ${task.status === 'pending' ? 
+      '<button class="skip-btn" onclick="skipTask(\'' + task.id + '\')" title="Skip this task">Skip</button>' : ''}
+    ${task.status === 'pending' && !task.autoSupported ? 
+      '<button class="manual-btn" onclick="markTaskComplete(\'' + task.id + '\')" title="Mark as complete">✓ Done</button>' : ''}
   </div>
 </div>`;
 }
@@ -140,10 +358,13 @@ function renderMergeStep(release: ReleaseDefinition): string {
   return `
 <div class="merge-progress">
   <h3>Merging Plans into Release Branch</h3>
+  <div style="font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 16px;">
+    Merging ${release.planIds.length} plan(s) into ${escapeHtml(release.releaseBranch)}
+  </div>
   <div id="merge-list" class="merge-list">
     <!-- Merge progress will be populated by JavaScript -->
     <div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground);">
-      Preparing to merge ${release.planIds.length} plan(s)...
+      Preparing to merge plans...
     </div>
   </div>
   <div class="merge-progress-bar" style="margin-top: 16px;">
@@ -156,10 +377,22 @@ function renderPRCreationStep(release: ReleaseDefinition): string {
   return `
 <div class="pr-creation">
   <h3>Creating Pull Request</h3>
-  <div style="padding: 20px; text-align: center;">
+  <div style="padding: 40px 20px; text-align: center;">
     <div style="font-size: 48px; margin-bottom: 16px;">📝</div>
     <div style="margin-bottom: 8px;">Creating PR from <strong>${escapeHtml(release.releaseBranch)}</strong> to <strong>${escapeHtml(release.targetBranch)}</strong></div>
     <div style="font-size: 11px; color: var(--vscode-descriptionForeground);">This may take a moment...</div>
+  </div>
+  <div style="margin-top: 24px; padding: 16px; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 4px;">
+    <h4 style="margin: 0 0 8px 0; font-size: 13px;">Or adopt an existing PR</h4>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <input 
+        type="number" 
+        id="pr-number-input" 
+        placeholder="PR number" 
+        style="flex: 1; padding: 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px;"
+      />
+      <button onclick="adoptPR()">Adopt PR</button>
+    </div>
   </div>
 </div>`;
 }
@@ -170,10 +403,21 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
   
   return `
 <div class="pr-monitor">
-  <h3>PR Monitoring Dashboard</h3>
-  <div class="pr-header">
-    <span>Pull Request #${prNumber}</span>
-    ${prUrl !== '#' ? `<a href="${escapeHtml(prUrl)}" class="pr-link" target="_blank">View on GitHub ↗</a>` : ''}
+  <div class="pr-header-section">
+    <h3>PR Monitoring Dashboard</h3>
+    <div class="pr-header">
+      <span class="pr-number">Pull Request #${prNumber}</span>
+      ${prUrl !== '#' ? `<a href="${escapeHtml(prUrl)}" class="pr-link" target="_blank">View on GitHub ↗</a>` : ''}
+    </div>
+  </div>
+  
+  <div class="monitoring-controls" style="margin-bottom: 16px;">
+    <button id="start-monitor-btn" onclick="startMonitoring()">Start Monitoring</button>
+    <button id="pause-monitor-btn" onclick="pauseMonitoring()" style="display: none;">Pause Monitoring</button>
+    <button id="stop-monitor-btn" onclick="stopMonitoring()" class="secondary" style="display: none;">Stop</button>
+    <div id="monitor-timer" class="monitor-timer" style="display: none;">
+      Next check in: <span id="countdown">40:00</span>
+    </div>
   </div>
   
   <div class="pr-stats" id="pr-stats">
@@ -192,6 +436,16 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
     <div class="pr-stat-card">
       <div class="pr-stat-value" id="alerts-unresolved">0</div>
       <div class="pr-stat-label">Security Alerts</div>
+    </div>
+  </div>
+  
+  <div class="pr-cycle-timeline" id="pr-cycle-timeline">
+    <h4>Monitoring Cycles</h4>
+    <div id="cycle-dots" class="cycle-dots">
+      <!-- Cycle dots will be populated by JavaScript -->
+      <div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 11px;">
+        No monitoring cycles yet
+      </div>
     </div>
   </div>
   
@@ -232,17 +486,39 @@ function renderCompletionStep(release: ReleaseDefinition): string {
 </div>`;
 }
 
-function renderNavigationButtons(release: ReleaseDefinition, stepIndex: number): string {
-  const canGoBack = stepIndex > 0 && release.status === 'drafting';
-  const canStart = stepIndex === 0 && release.status === 'drafting' && release.planIds.length > 0;
-  const canCancel = ['drafting', 'merging', 'creating-pr', 'monitoring', 'addressing'].includes(release.status);
+function renderFloatingAddPlans(release: ReleaseDefinition): string {
+  // Show "+ Add Plans" button until PR is merged or process is canceled
+  const canAddPlans = !['succeeded', 'failed', 'canceled'].includes(release.status);
+  
+  if (!canAddPlans) {
+    return '';
+  }
+  
+  return `
+<button class="floating-add-plans" onclick="openPlanSelector()" title="Add plans to this release">
+  + Add Plans
+</button>`;
+}
+
+function renderNavigationButtons(release: ReleaseDefinition, stepIndex: number, steps: StepDefinition[]): string {
+  const currentStep = steps[stepIndex].id;
+  const canCancel = !['succeeded', 'failed', 'canceled'].includes(release.status);
+  const canProceed = currentStep === 'configure' && release.status === 'drafting';
+  const isFromPlans = release.flowType === 'from-plans';
+  
+  let proceedButton = '';
+  if (canProceed) {
+    const hasPlans = release.planIds.length > 0;
+    const buttonText = isFromPlans && hasPlans ? 'Start Merge →' : 'Prepare Release →';
+    proceedButton = `<button onclick="proceedFromConfigure()" ${!hasPlans && isFromPlans ? 'disabled' : ''}>${buttonText}</button>`;
+  }
   
   return `
 <div>
-  ${canGoBack ? '<button class="secondary" onclick="goBack()">← Back</button>' : '<div></div>'}
+  <div></div>
 </div>
 <div style="display: flex; gap: 12px;">
   ${canCancel ? '<button class="danger" onclick="cancelRelease()">Cancel Release</button>' : ''}
-  ${canStart ? '<button onclick="startRelease()">Start Release →</button>' : ''}
+  ${proceedButton}
 </div>`;
 }

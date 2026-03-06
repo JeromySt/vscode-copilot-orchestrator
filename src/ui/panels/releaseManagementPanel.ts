@@ -16,6 +16,7 @@ import { escapeHtml, errorPageHtml } from '../templates';
 import { ReleaseManagementController } from './releaseManagementController';
 import type { ReleaseManagementDelegate } from './releaseManagementController';
 import type { IDialogService } from '../../interfaces/IDialogService';
+import type { IReleaseManager } from '../../interfaces/IReleaseManager';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
 import { webviewScriptTag } from '../webviewUri';
 import type { ReleaseDefinition } from '../../plan/types/release';
@@ -61,6 +62,7 @@ export class ReleaseManagementPanel {
    * @param dialogService - Abstraction over VS Code dialog APIs.
    * @param _pulse - Pulse emitter for periodic updates.
    * @param _extensionUri - The extension's root URI (used for local resource roots).
+   * @param releaseManager - Release manager for state transitions and operations.
    */
   private constructor(
     panel: vscode.WebviewPanel,
@@ -68,7 +70,8 @@ export class ReleaseManagementPanel {
     private _getReleaseData: (id: string) => ReleaseDefinition | undefined,
     dialogService: IDialogService,
     private _pulse: IPulseEmitter,
-    private _extensionUri: vscode.Uri
+    private _extensionUri: vscode.Uri,
+    releaseManager: IReleaseManager
   ) {
     this._panel = panel;
     this._releaseId = releaseId;
@@ -83,7 +86,7 @@ export class ReleaseManagementPanel {
       },
       forceFullRefresh: () => this._forceFullRefresh(),
     };
-    this._controller = new ReleaseManagementController(releaseId, dialogService, delegate);
+    this._controller = new ReleaseManagementController(releaseId, dialogService, delegate, releaseManager);
     
     // Initial render
     this._update();
@@ -116,11 +119,13 @@ export class ReleaseManagementPanel {
    * @param extensionUri - The extension's root URI (used for local resource roots).
    * @param releaseId - The unique identifier of the Release to display.
    * @param getReleaseData - Function to fetch release data.
+   * @param releaseManager - Release manager for state transitions and operations.
    */
   public static createOrShow(
     extensionUri: vscode.Uri,
     releaseId: string,
     getReleaseData: (id: string) => ReleaseDefinition | undefined,
+    releaseManager: IReleaseManager,
     options?: { preserveFocus?: boolean },
     dialogService?: IDialogService,
     pulse?: IPulseEmitter
@@ -165,7 +170,7 @@ export class ReleaseManagementPanel {
     // Default pulse emitter (no-op) if not provided
     const effectivePulse: IPulseEmitter = pulse ?? { onPulse: () => ({ dispose: () => {} }), isRunning: false };
     
-    const releasePanel = new ReleaseManagementPanel(panel, releaseId, getReleaseData, effectiveDialogService, effectivePulse, extensionUri);
+    const releasePanel = new ReleaseManagementPanel(panel, releaseId, getReleaseData, effectiveDialogService, effectivePulse, extensionUri, releaseManager);
     ReleaseManagementPanel.panels.set(releaseId, releasePanel);
   }
   

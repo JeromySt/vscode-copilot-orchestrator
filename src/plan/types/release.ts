@@ -7,16 +7,28 @@
  * @module plan/types/release
  */
 
+import type { PreparationTask, ReleaseInstructions } from './releasePrep';
+
 // ============================================================================
 // RELEASE STATUS
 // ============================================================================
 
 /**
+ * Release flow type.
+ * 
+ * - `from-branch`: Release from existing branch (with optional plan selection)
+ * - `from-plans`: Release by merging multiple plans into new branch
+ */
+export type ReleaseFlowType = 'from-branch' | 'from-plans';
+
+/**
  * Release lifecycle status.
  * 
  * - `drafting`: Release is being configured, plans are being added
+ * - `preparing`: Running pre-PR preparation tasks
  * - `merging`: Merging plan commits into the release branch
  * - `creating-pr`: Creating pull request for the release
+ * - `pr-active`: PR exists, not yet monitoring
  * - `monitoring`: Monitoring PR for CI checks, reviews, and feedback
  * - `addressing`: Addressing PR feedback and fixing issues
  * - `succeeded`: Release PR merged successfully
@@ -25,13 +37,71 @@
  */
 export type ReleaseStatus = 
   | 'drafting' 
+  | 'preparing'
+  | 'ready-for-pr'
   | 'merging' 
-  | 'creating-pr' 
+  | 'creating-pr'
+  | 'pr-active'
   | 'monitoring' 
   | 'addressing' 
   | 'succeeded' 
   | 'failed' 
   | 'canceled';
+
+/**
+ * A single state transition in the release lifecycle.
+ */
+export interface StateTransition {
+  /** Previous status */
+  from: ReleaseStatus;
+
+  /** New status */
+  to: ReleaseStatus;
+
+  /** When the transition occurred */
+  timestamp: number;
+
+  /** Optional reason for the transition */
+  reason?: string;
+}
+
+// ============================================================================
+// PREPARATION TASKS
+// ============================================================================
+
+/**
+ * Status of a preparation task.
+ */
+export type PrepTaskStatus = 'pending' | 'running' | 'completed' | 'skipped';
+
+/**
+ * A preparation task in the pre-PR checklist.
+ */
+export interface PrepTask {
+  /** Task ID */
+  id: string;
+
+  /** Task title */
+  title: string;
+
+  /** Task description */
+  description?: string;
+
+  /** Whether this task is required (blocks PR creation) */
+  required: boolean;
+
+  /** Whether this task can be automated by Copilot */
+  autoSupported: boolean;
+
+  /** Current status */
+  status: PrepTaskStatus;
+
+  /** Error message if task failed */
+  error?: string;
+
+  /** Commit hash if task made code changes */
+  commitHash?: string;
+}
 
 // ============================================================================
 // RELEASE DEFINITION
@@ -51,6 +121,12 @@ export interface ReleaseDefinition {
   /** Human-friendly name for the release */
   name: string;
 
+  /** Release flow type */
+  flowType: ReleaseFlowType;
+
+  /** Internal flow type tracking (same as flowType) */
+  source?: ReleaseFlowType;
+
   /** Plan IDs included in this release */
   planIds: string[];
 
@@ -65,6 +141,9 @@ export interface ReleaseDefinition {
 
   /** Current lifecycle status */
   status: ReleaseStatus;
+
+  /** Preparation tasks checklist */
+  prepTasks?: PrepTask[];
 
   /** PR number once created */
   prNumber?: number;
@@ -90,6 +169,15 @@ export interface ReleaseDefinition {
 
   /** Error message if release failed */
   error?: string;
+
+  /** Preparation tasks to complete before creating PR */
+  preparationTasks?: PreparationTask[];
+
+  /** Release instructions file metadata */
+  releaseInstructions?: ReleaseInstructions;
+
+  /** History of state transitions */
+  stateHistory: StateTransition[];
 }
 
 // ============================================================================

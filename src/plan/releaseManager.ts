@@ -35,6 +35,7 @@ import type { IRemotePRServiceFactory } from '../interfaces/IRemotePRServiceFact
 import type { IReleaseStore } from '../interfaces/IReleaseStore';
 import { Logger } from '../core/logger';
 import { ReleaseEventEmitter } from './releaseEvents';
+import { ReleaseStateMachine } from './releaseStateMachine';
 
 const log = Logger.for('plan');
 const gitLog = (msg: string) => log.info(msg);
@@ -47,6 +48,7 @@ const gitLog = (msg: string) => log.info(msg);
  */
 export class DefaultReleaseManager extends EventEmitter implements IReleaseManager {
   private readonly releases = new Map<string, ReleaseDefinition>();
+  private readonly stateMachines = new Map<string, ReleaseStateMachine>();
   private readonly events = new ReleaseEventEmitter();
 
   constructor(
@@ -125,21 +127,53 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       }
     }
 
+    // Determine source flow type
+    const source: 'from-plans' | 'from-branch' = options.planIds.length > 0 ? 'from-plans' : 'from-branch';
+
     // Build release definition
     const releaseId = this._generateReleaseId();
+    const now = Date.now();
     const release: ReleaseDefinition = {
       id: releaseId,
       name: options.name,
+      flowType: options.planIds.length > 0 ? 'from-plans' : 'from-branch',
       planIds: options.planIds,
       releaseBranch: options.releaseBranch,
       targetBranch,
       repoPath,
       status: 'drafting',
-      createdAt: Date.now(),
+      source,
+      stateHistory: [
+        {
+          from: 'drafting',
+          to: 'drafting',
+          timestamp: now,
+          reason: 'Release created',
+        },
+      ],
+      createdAt: now,
     };
+
+    // Create state machine for this release
+    const stateMachine = new ReleaseStateMachine(release);
+    
+    // Forward state machine events to release events
+    stateMachine.on('transition', (event) => {
+      this.events.emitReleaseStatusChanged(event.releaseId, event.from, event.to);
+    });
+    stateMachine.on('completed', (releaseId, finalStatus) => {
+      if (finalStatus === 'succeeded') {
+        this.events.emitReleaseCompleted(release);
+      } else if (finalStatus === 'failed') {
+        this.events.emitReleaseFailed(release, release.error || 'Unknown error');
+      } else if (finalStatus === 'canceled') {
+        this.events.emitReleaseCanceled(releaseId);
+      }
+    });
 
     // Persist and track
     this.releases.set(releaseId, release);
+    this.stateMachines.set(releaseId, stateMachine);
     await this.store.saveRelease(release);
     this.events.emitReleaseCreated(release);
 
@@ -323,6 +357,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     log.info('Deleting release', { releaseId });
 
     this.releases.delete(releaseId);
+    this.stateMachines.delete(releaseId);
     this.store.deleteRelease(releaseId).catch((error) => {
       log.error('Failed to delete release from store', { releaseId, error: (error as Error).message });
     });
@@ -351,6 +386,272 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     }
 
     log.info('Isolated repo cleanup complete', { cleaned: terminalReleases.length });
+  }
+
+  // ── State Management ───────────────────────────────────────────────────
+
+  async transitionToState(releaseId: string, newStatus: ReleaseStatus, reason?: string): Promise<boolean> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      log.warn('Cannot transition: release not found', { releaseId });
+      return false;
+    }
+
+    const stateMachine = this.stateMachines.get(releaseId);
+    if (!stateMachine) {
+      log.error('State machine not found', { releaseId });
+      return false;
+    }
+
+    const result = stateMachine.transition(newStatus, reason);
+    if (result.success) {
+      await this.store.saveRelease(release);
+    }
+    return result.success;
+  }
+
+  // ── Preparation Tasks ──────────────────────────────────────────────────
+
+  async executePreparationTask(releaseId: string, taskId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    const task = release.preparationTasks?.find((t) => t.id === taskId);
+    if (!task) {
+      throw new Error(`Preparation task not found: ${taskId}`);
+    }
+
+    log.info('Executing preparation task', { releaseId, taskId, taskTitle: task.title });
+
+    task.status = 'in-progress';
+    task.startedAt = Date.now();
+    await this.store.saveRelease(release);
+
+    try {
+      // Execute task using Copilot CLI
+      const cwd = release.isolatedRepoPath || release.repoPath;
+      const taskDescription = task.description || task.title;
+      
+      const result = await this.copilot.run({
+        cwd,
+        task: taskDescription,
+        sessionId: `release-${releaseId}-task-${taskId}`,
+      });
+
+      if (result.success) {
+        task.status = 'completed';
+        task.completedAt = Date.now();
+        task.result = 'Task completed successfully';
+        log.info('Preparation task completed', { releaseId, taskId });
+      } else {
+        task.status = 'failed';
+        task.error = result.error || 'Task execution failed';
+        log.error('Preparation task failed', { releaseId, taskId, error: task.error });
+      }
+    } catch (error) {
+      task.status = 'failed';
+      task.error = (error as Error).message;
+      log.error('Preparation task execution error', { releaseId, taskId, error: task.error });
+    }
+
+    await this.store.saveRelease(release);
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  async completePreparationTask(releaseId: string, taskId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    const task = release.preparationTasks?.find((t) => t.id === taskId);
+    if (!task) {
+      throw new Error(`Preparation task not found: ${taskId}`);
+    }
+
+    log.info('Manually completing preparation task', { releaseId, taskId });
+
+    task.status = 'completed';
+    task.completedAt = Date.now();
+    task.result = 'Manually completed';
+
+    await this.store.saveRelease(release);
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  async skipPreparationTask(releaseId: string, taskId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    const task = release.preparationTasks?.find((t) => t.id === taskId);
+    if (!task) {
+      throw new Error(`Preparation task not found: ${taskId}`);
+    }
+
+    log.info('Skipping preparation task', { releaseId, taskId });
+
+    task.status = 'skipped';
+    task.completedAt = Date.now();
+
+    await this.store.saveRelease(release);
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  // ── Plan Management ────────────────────────────────────────────────────
+
+  async addPlansToRelease(releaseId: string, planIds: string[]): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    log.info('Adding plans to release', { releaseId, planIds });
+
+    // Validate all plan IDs exist and are in terminal states
+    for (const planId of planIds) {
+      const plan = this.planRunner.get(planId);
+      if (!plan) {
+        throw new Error(`Plan not found: ${planId}`);
+      }
+      const sm = this.planRunner.getStateMachine(planId);
+      const planStatus = sm?.computePlanStatus();
+      if (planStatus !== 'succeeded' && planStatus !== 'partial') {
+        throw new Error(`Plan ${planId} must be succeeded or partial, but is ${planStatus}`);
+      }
+      // Avoid duplicates
+      if (release.planIds.includes(planId)) {
+        log.warn('Plan already in release, skipping', { releaseId, planId });
+        continue;
+      }
+      release.planIds.push(planId);
+    }
+
+    await this.store.saveRelease(release);
+
+    // If in pr-active state, merge the new plans and push
+    if (release.status === 'pr-active' && release.isolatedRepoPath) {
+      log.info('Release is pr-active, merging new plans and pushing', { releaseId });
+      try {
+        const mergeResults = await this._mergeAllPlans(release);
+        const pushSuccess = await this.git.repository.push(release.isolatedRepoPath, {
+          remote: 'origin',
+          branch: release.releaseBranch,
+          log: gitLog,
+        });
+        if (!pushSuccess) {
+          log.error('Failed to push new plan merges', { releaseId });
+        }
+      } catch (error) {
+        log.error('Failed to merge new plans', { releaseId, error: (error as Error).message });
+      }
+    }
+
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  // ── PR Management ──────────────────────────────────────────────────────
+
+  async createPR(releaseId: string, asDraft?: boolean): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    if (release.status !== 'ready-for-pr') {
+      throw new Error(`Cannot create PR: release status is ${release.status}, must be ready-for-pr`);
+    }
+
+    log.info('Creating PR', { releaseId, asDraft });
+
+    await this._transitionStatus(release, 'creating-pr');
+
+    try {
+      const isolatedPath = release.isolatedRepoPath!;
+      const prService = await this.prServiceFactory.getServiceForRepo(isolatedPath);
+      
+      const prResult = await prService.createPR({
+        baseBranch: release.targetBranch,
+        headBranch: release.releaseBranch,
+        title: release.name,
+        body: this._buildPRBody(release, []),
+        cwd: isolatedPath,
+      });
+
+      release.prNumber = prResult.prNumber;
+      release.prUrl = prResult.prUrl;
+      await this.store.saveRelease(release);
+
+      log.info('PR created', { releaseId, prNumber: prResult.prNumber, prUrl: prResult.prUrl });
+
+      await this._transitionStatus(release, 'pr-active');
+    } catch (error) {
+      log.error('Failed to create PR', { releaseId, error: (error as Error).message });
+      release.error = (error as Error).message;
+      await this._transitionStatus(release, 'failed');
+      throw error;
+    }
+  }
+
+  async adoptPR(releaseId: string, prNumber: number): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    log.info('Adopting existing PR', { releaseId, prNumber });
+
+    release.prNumber = prNumber;
+    // PR URL can be constructed from repo info if needed
+    release.prUrl = `PR #${prNumber}`;
+
+    await this.store.saveRelease(release);
+    await this._transitionStatus(release, 'pr-active', 'Adopted existing PR');
+
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  async startMonitoring(releaseId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    if (!release.prNumber) {
+      throw new Error('Cannot start monitoring: no PR number set');
+    }
+
+    log.info('Starting PR monitoring', { releaseId, prNumber: release.prNumber });
+
+    await this._transitionStatus(release, 'monitoring');
+
+    const isolatedPath = release.isolatedRepoPath || release.repoPath;
+    await this.prMonitor.startMonitoring(
+      releaseId,
+      release.prNumber,
+      isolatedPath,
+      release.releaseBranch,
+    );
+
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  async stopMonitoring(releaseId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    log.info('Stopping PR monitoring', { releaseId });
+
+    if (this.prMonitor.isMonitoring(releaseId)) {
+      this.prMonitor.stopMonitoring(releaseId);
+    }
+
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
   }
 
   // ── EventEmitter Typed Overloads ───────────────────────────────────────
@@ -568,22 +869,30 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
   }
 
   /**
-   * Transition release to a new status and emit events.
+   * Transition release to a new status using the state machine.
+   * 
+   * @param release - The release to transition
+   * @param newStatus - The target status
+   * @param reason - Optional reason for the transition
+   * @throws If transition is invalid
    */
-  private async _transitionStatus(release: ReleaseDefinition, newStatus: ReleaseStatus): Promise<void> {
-    const oldStatus = release.status;
-    if (oldStatus === newStatus) {
-      return;
+  private async _transitionStatus(
+    release: ReleaseDefinition,
+    newStatus: ReleaseStatus,
+    reason?: string
+  ): Promise<void> {
+    const stateMachine = this.stateMachines.get(release.id);
+    if (!stateMachine) {
+      throw new Error(`State machine not found for release ${release.id}`);
     }
 
-    log.debug('Release status transition', { releaseId: release.id, from: oldStatus, to: newStatus });
-    release.status = newStatus;
+    const result = stateMachine.transition(newStatus, reason);
+    if (!result.success) {
+      throw new Error(`Invalid transition for release ${release.id}: ${result.error}`);
+    }
+
+    // Persist the updated release state
     await this.store.saveRelease(release);
-    this.events.emitReleaseStatusChanged(release.id, oldStatus, newStatus);
-
-    if (newStatus === 'succeeded') {
-      this.events.emitReleaseCompleted(release);
-    }
   }
 
   /**
@@ -593,10 +902,16 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     switch (release.status) {
       case 'drafting':
         return 'Configuring release';
+      case 'preparing':
+        return 'Preparing release (docs, versioning, checks)';
       case 'merging':
         return 'Merging plan commits';
+      case 'ready-for-pr':
+        return 'Ready to create pull request';
       case 'creating-pr':
         return 'Creating pull request';
+      case 'pr-active':
+        return 'Pull request created';
       case 'monitoring':
         return 'Monitoring PR for feedback';
       case 'addressing':
@@ -613,6 +928,45 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
   }
 
   /**
+   * Transition release to preparing status and initialize preparation tasks.
+   * @private
+   */
+  private async prepareRelease(releaseId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    log.info('Preparing release', { releaseId });
+
+    // Transition to preparing status
+    const success = await this.transitionToState(releaseId, 'preparing', 'Starting preparation phase');
+    if (!success) {
+      throw new Error(`Failed to transition release ${releaseId} to preparing status`);
+    }
+
+    // TODO: Initialize preparation tasks from release instructions if they don't exist
+    // For now, preparation tasks should be set up when creating the release
+  }
+
+  /**
+   * Check if all required preparation tasks are complete.
+   * @private
+   */
+  private areRequiredTasksComplete(releaseId: string): boolean {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      return false;
+    }
+
+    const tasks = release.preparationTasks || [];
+    const requiredTasks = tasks.filter(t => t.required);
+    
+    // All required tasks must be either completed or skipped (though required tasks shouldn't be skipped)
+    return requiredTasks.every(t => t.status === 'completed' || t.status === 'skipped');
+  }
+
+  /**
    * Generate a unique release ID.
    */
   private _generateReleaseId(): string {
@@ -626,7 +980,40 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     try {
       const releases = await this.store.loadAllReleases();
       for (const release of releases) {
+        // Ensure required fields exist for backward compatibility
+        if (!release.stateHistory) {
+          release.stateHistory = [
+            {
+              from: release.status,
+              to: release.status,
+              timestamp: release.createdAt,
+              reason: 'Loaded from persisted state',
+            },
+          ];
+        }
+        if (!release.source) {
+          release.source = release.planIds.length > 0 ? 'from-plans' : 'from-branch';
+        }
+
+        // Create state machine for this release
+        const stateMachine = new ReleaseStateMachine(release);
+        
+        // Forward state machine events to release events
+        stateMachine.on('transition', (event) => {
+          this.events.emitReleaseStatusChanged(event.releaseId, event.from, event.to);
+        });
+        stateMachine.on('completed', (releaseId, finalStatus) => {
+          if (finalStatus === 'succeeded') {
+            this.events.emitReleaseCompleted(release);
+          } else if (finalStatus === 'failed') {
+            this.events.emitReleaseFailed(release, release.error || 'Unknown error');
+          } else if (finalStatus === 'canceled') {
+            this.events.emitReleaseCanceled(releaseId);
+          }
+        });
+
         this.releases.set(release.id, release);
+        this.stateMachines.set(release.id, stateMachine);
       }
       log.info('Loaded persisted releases', { count: releases.length });
     } catch (error) {

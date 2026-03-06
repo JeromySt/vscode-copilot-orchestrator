@@ -769,6 +769,18 @@ export function renderPlansViewStyles(): string {
     .release-item.drafting { 
       border-left: 3px dashed var(--vscode-progressBar-background); 
     }
+    .release-item.preparing { 
+      border-left-color: var(--vscode-editorWarning-foreground);
+      animation: preparing-pulse 2s ease-in-out infinite;
+    }
+    @keyframes preparing-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .release-item.ready-for-pr { 
+      border-left: 3px solid var(--vscode-testing-iconPassed);
+      border-left-style: solid;
+    }
     .release-item.merging { 
       border-left-color: var(--vscode-progressBar-background);
       border-left-style: solid;
@@ -776,8 +788,11 @@ export function renderPlansViewStyles(): string {
     .release-item.creating-pr { 
       border-left-color: var(--vscode-progressBar-background);
     }
+    .release-item.pr-active { 
+      border-left-color: var(--vscode-progressBar-background);
+    }
     .release-item.monitoring { 
-      border-left-color: var(--vscode-testing-iconPassed);
+      border-left-color: var(--vscode-progressBar-background);
       animation: monitoring-pulse 2s ease-in-out infinite;
     }
     @keyframes monitoring-pulse {
@@ -823,6 +838,20 @@ export function renderPlansViewStyles(): string {
       background: rgba(0, 122, 204, 0.15); 
       color: var(--vscode-progressBar-background); 
     }
+    .release-status-badge.preparing { 
+      background: rgba(255, 204, 0, 0.2); 
+      color: var(--vscode-editorWarning-foreground);
+      animation: preparing-badge-pulse 2s ease-in-out infinite;
+    }
+    @keyframes preparing-badge-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .release-status-badge.ready-for-pr { 
+      background: transparent;
+      border: 1px solid var(--vscode-testing-iconPassed); 
+      color: var(--vscode-testing-iconPassed); 
+    }
     .release-status-badge.merging { 
       background: rgba(0, 122, 204, 0.2); 
       color: var(--vscode-progressBar-background); 
@@ -831,9 +860,18 @@ export function renderPlansViewStyles(): string {
       background: rgba(0, 122, 204, 0.2); 
       color: var(--vscode-progressBar-background); 
     }
+    .release-status-badge.pr-active { 
+      background: rgba(0, 122, 204, 0.2); 
+      color: var(--vscode-progressBar-background); 
+    }
     .release-status-badge.monitoring { 
-      background: rgba(78, 201, 176, 0.2); 
-      color: var(--vscode-testing-iconPassed); 
+      background: rgba(0, 122, 204, 0.2); 
+      color: var(--vscode-progressBar-background);
+      animation: monitoring-badge-pulse 2s ease-in-out infinite;
+    }
+    @keyframes monitoring-badge-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
     }
     .release-status-badge.addressing { 
       background: rgba(255, 204, 0, 0.2); 
@@ -931,6 +969,32 @@ export function renderPlansViewStyles(): string {
     }
     .release-progress-bar.failed { 
       background: var(--vscode-testing-iconFailed); 
+    }
+    
+    .release-prep-progress {
+      font-size: 9px;
+      color: var(--vscode-descriptionForeground);
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .release-prep-progress .codicon {
+      font-size: 10px;
+    }
+    
+    .release-flow-type {
+      font-size: 8px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .release-flow-type .codicon {
+      font-size: 9px;
     }
   </style>`;
 }

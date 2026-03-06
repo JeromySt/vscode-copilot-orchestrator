@@ -28,10 +28,15 @@ export function registerReleaseCommands(
 ): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.showReleasePanel', (releaseId: string) => {
+      if (!releaseManager) {
+        vscode.window.showErrorMessage('Release manager not initialized');
+        return;
+      }
       ReleaseManagementPanel.createOrShow(
         context.extensionUri,
         releaseId,
         getReleaseData,
+        releaseManager,
       );
     }),
 

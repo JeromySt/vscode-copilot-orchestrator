@@ -955,9 +955,26 @@ class ReleaseCardControl extends SubscribableControl {
     var progressClass = data.status === 'failed' ? 'failed' :
                        data.status === 'succeeded' ? 'succeeded' : '';
     
+    // Flow type indicator
+    var flowTypeIcon = data.flowType === 'from-branch' ? 
+      '<span class="codicon codicon-git-branch"></span>' : 
+      '<span class="codicon codicon-layers"></span>';
+    var flowTypeLabel = data.flowType === 'from-branch' ? 'from branch' : 'from plans';
+    var flowType = '<span class="release-flow-type">' + flowTypeIcon + flowTypeLabel + '</span>';
+    
+    // Preparation progress (shown when status is 'preparing')
+    var prepProgress = '';
+    if (data.status === 'preparing' && data.prepTasksCompleted !== undefined && data.prepTasksTotal !== undefined) {
+      prepProgress = '<div class="release-prep-progress">' +
+        '<span class="codicon codicon-checklist"></span>' +
+        data.prepTasksCompleted + '/' + data.prepTasksTotal + ' tasks' +
+        '</div>';
+    }
+    
     this.element.innerHTML =
       '<div class="release-header">' +
         '<span class="release-name" title="' + escapeHtml(data.name) + '">' + escapeHtml(data.name) + '</span>' +
+        flowType +
         '<span class="release-status-badge ' + data.status + '">' + data.status + '</span>' +
         monitoringIndicator +
       '</div>' +
@@ -972,6 +989,7 @@ class ReleaseCardControl extends SubscribableControl {
         '</span>' +
         prLink +
       '</div>' +
+      prepProgress +
       '<div class="release-progress">' +
         '<div class="release-progress-bar ' + progressClass + '" style="width: ' + progress + '%"></div>' +
       '</div>';
@@ -1001,6 +1019,27 @@ class ReleaseCardControl extends SubscribableControl {
 
     var nameEl = this.element.querySelector('.release-name');
     if (nameEl) { nameEl.textContent = data.name; nameEl.title = data.name; }
+    
+    // Update flow type
+    var headerEl = this.element.querySelector('.release-header');
+    var flowTypeEl = headerEl.querySelector('.release-flow-type');
+    var flowTypeIcon = data.flowType === 'from-branch' ? 
+      '<span class="codicon codicon-git-branch"></span>' : 
+      '<span class="codicon codicon-layers"></span>';
+    var flowTypeLabel = data.flowType === 'from-branch' ? 'from branch' : 'from plans';
+    if (flowTypeEl) {
+      flowTypeEl.innerHTML = flowTypeIcon + flowTypeLabel;
+    } else {
+      var flowType = document.createElement('span');
+      flowType.className = 'release-flow-type';
+      flowType.innerHTML = flowTypeIcon + flowTypeLabel;
+      // Insert after name, before status badge
+      var statusEl = headerEl.querySelector('.release-status-badge');
+      if (statusEl) {
+        headerEl.insertBefore(flowType, statusEl);
+      }
+    }
+    
     var statusEl = this.element.querySelector('.release-status-badge');
     if (statusEl) {
       statusEl.className = 'release-status-badge ' + data.status;
@@ -1013,7 +1052,6 @@ class ReleaseCardControl extends SubscribableControl {
     }
     
     // Update monitoring indicator
-    var headerEl = this.element.querySelector('.release-header');
     var existingIndicator = headerEl.querySelector('.release-monitoring-indicator');
     if (data.status === 'monitoring' && !existingIndicator) {
       var indicator = document.createElement('span');
@@ -1036,6 +1074,36 @@ class ReleaseCardControl extends SubscribableControl {
           '<span class="codicon codicon-layers"></span>' + data.planCount + ' plan' + (data.planCount !== 1 ? 's' : '') +
         '</span>' +
         prLink;
+      // Re-wire PR link clicks
+      var prLinkEl = detailsEl.querySelector('.release-pr-link');
+      if (prLinkEl) {
+        prLinkEl.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var url = e.currentTarget.dataset.prUrl;
+          if (url) vscode.postMessage({ type: 'openExternal', url: url });
+        });
+      }
+    }
+    
+    // Update preparation progress
+    var existingPrepProgress = this.element.querySelector('.release-prep-progress');
+    if (data.status === 'preparing' && data.prepTasksCompleted !== undefined && data.prepTasksTotal !== undefined) {
+      var prepProgressHtml = '<div class="release-prep-progress">' +
+        '<span class="codicon codicon-checklist"></span>' +
+        data.prepTasksCompleted + '/' + data.prepTasksTotal + ' tasks' +
+        '</div>';
+      if (existingPrepProgress) {
+        existingPrepProgress.outerHTML = prepProgressHtml;
+      } else {
+        // Insert before progress bar
+        var progressEl = this.element.querySelector('.release-progress');
+        if (progressEl) {
+          progressEl.insertAdjacentHTML('beforebegin', prepProgressHtml);
+        }
+      }
+    } else if (existingPrepProgress) {
+      existingPrepProgress.parentNode.removeChild(existingPrepProgress);
     }
     
     // Update progress bar

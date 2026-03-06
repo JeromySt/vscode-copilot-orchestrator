@@ -80,3 +80,11 @@ export {
   RecoveryOptions,
   NodeRecoveryInfo,
 } from './recovery';
+
+// Release preparation types
+export {
+  PrepTaskStatus,
+  PrepTaskType,
+  PreparationTask,
+  ReleaseInstructions,
+} from './releasePrep';

@@ -1199,6 +1199,109 @@ sequenceDiagram
     RM-->>UI: Release completed
 ```
 
+### Release State Machine
+
+The release lifecycle follows a strict state machine with preparation phase support:
+
+```mermaid
+stateDiagram-v2
+    [*] --> drafting: create_copilot_release
+    
+    drafting --> preparing: prepare_copilot_release
+    drafting --> merging: start_copilot_release (skip prep)
+    drafting --> drafting: add_plans_to_release
+    
+    preparing --> preparing: execute_release_task
+    preparing --> preparing: skip_release_task
+    preparing --> ready_for_pr: All required tasks complete
+    
+    ready_for_pr --> merging: start_copilot_release
+    
+    merging --> creating_pr: Merge complete
+    
+    creating_pr --> pr_active: PR created
+    
+    pr_active --> monitoring: Start monitoring
+    
+    monitoring --> monitoring: CI/checks pending
+    monitoring --> addressing: CI failure or review comments
+    
+    addressing --> monitoring: Issues fixed
+    
+    monitoring --> succeeded: PR merged
+    
+    drafting --> canceled: cancel_copilot_release
+    preparing --> canceled: cancel_copilot_release
+    ready_for_pr --> canceled: cancel_copilot_release
+    merging --> canceled: cancel_copilot_release
+    creating_pr --> canceled: cancel_copilot_release
+    pr_active --> canceled: cancel_copilot_release
+    monitoring --> canceled: cancel_copilot_release
+    addressing --> canceled: cancel_copilot_release
+    
+    merging --> failed: Merge conflict
+    creating_pr --> failed: PR creation failed
+    monitoring --> failed: Timeout (40 min)
+    
+    succeeded --> [*]
+    failed --> [*]
+    canceled --> [*]
+```
+
+### Preparation Task Flow
+
+Pre-PR preparation tasks are managed through a structured checklist:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant RM as ReleaseManager
+    participant StateMachine as ReleaseStateMachine
+    participant Agent as Copilot Agent
+    participant Git as GitOperations
+
+    User->>RM: prepare_copilot_release(releaseId)
+    RM->>StateMachine: transition('preparing')
+    StateMachine-->>RM: State: preparing
+    RM->>RM: Initialize default preparation tasks
+    RM-->>User: PreparationTask[]
+
+    User->>RM: execute_release_task(taskId: "update-changelog")
+    RM->>Agent: Spawn agent with task instructions
+    Agent->>Git: Analyze commit history
+    Agent->>Git: Update CHANGELOG.md
+    Agent->>Git: Commit changes
+    Agent-->>RM: Task completed
+    RM->>RM: Mark task status: completed
+    RM-->>User: Task result
+
+    User->>RM: skip_release_task(taskId: "create-release-notes")
+    RM->>RM: Verify task is optional
+    RM->>RM: Mark task status: skipped
+    RM-->>User: Success
+
+    RM->>StateMachine: Check if all required tasks complete
+    StateMachine->>StateMachine: All required: completed or N/A
+    StateMachine->>StateMachine: transition('ready-for-pr')
+    StateMachine-->>RM: State: ready-for-pr
+
+    User->>RM: start_copilot_release(releaseId)
+    RM->>StateMachine: transition('merging')
+    Note over RM: Proceed with merge → PR → monitoring
+```
+
+### Preparation Task Types
+
+| Task Type | Automatable | Default Required | Agent Instructions |
+|-----------|-------------|------------------|--------------------|
+| `update-changelog` | ✅ | Yes | Analyze commits and update CHANGELOG.md following Keep a Changelog format |
+| `update-version` | ✅ | Yes | Bump version in package.json and other version files |
+| `update-docs` | ✅ | No | Update README.md and docs/ with new features and changes |
+| `create-release-notes` | ✅ | No | Generate release notes from commit messages |
+| `run-checks` | ✅ | Yes | Run compile + test validation |
+| `ai-review` | ✅ | No | Spawn AI agent to review all changes and report issues |
+| `custom` | ❌ | Varies | User-defined task (manual completion required) |
+
 ### Provider Detection and Credential Chain
 
 ```mermaid

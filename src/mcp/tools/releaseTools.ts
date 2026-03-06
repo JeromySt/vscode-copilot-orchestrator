@@ -97,6 +97,10 @@ The release will automatically detect the platform and use the appropriate PR se
             type: 'string',
             description: 'Target branch for the PR (defaults to "main")'
           },
+          repoPath: {
+            type: 'string',
+            description: 'Repository path (required when planIds is empty for from-branch flow)'
+          },
           autoStart: {
             type: 'boolean',
             description: 'If true, starts release execution immediately (defaults to false)'
@@ -132,6 +136,109 @@ PLATFORM SUPPORT: GitHub, GitHub Enterprise, Azure DevOps`,
           }
         },
         required: ['releaseId']
+      }
+    },
+
+    {
+      name: 'prepare_copilot_release',
+      description: `Enter preparation phase for a release.
+
+Transitions the release to 'preparing' status where preparation tasks can be completed
+before creating the pull request. This allows you to:
+- Update changelog
+- Bump version numbers
+- Update documentation
+- Run validation checks
+
+After all preparation tasks are complete, use start_copilot_release to continue.
+
+PLATFORM SUPPORT: GitHub, GitHub Enterprise, Azure DevOps`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          releaseId: {
+            type: 'string',
+            description: 'Release ID to prepare'
+          }
+        },
+        required: ['releaseId']
+      }
+    },
+
+    {
+      name: 'execute_release_task',
+      description: `Auto-execute a preparation task using Copilot.
+
+Copilot will autonomously complete the specified preparation task
+(e.g., update changelog, bump version, update docs).
+
+Only works for tasks with automatable=true.
+
+PLATFORM SUPPORT: GitHub, GitHub Enterprise, Azure DevOps`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          releaseId: {
+            type: 'string',
+            description: 'Release ID'
+          },
+          taskId: {
+            type: 'string',
+            description: 'Preparation task ID to execute'
+          }
+        },
+        required: ['releaseId', 'taskId']
+      }
+    },
+
+    {
+      name: 'skip_release_task',
+      description: `Skip a preparation task.
+
+Marks the task as skipped. Only optional tasks (required=false) can be skipped.
+
+PLATFORM SUPPORT: GitHub, GitHub Enterprise, Azure DevOps`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          releaseId: {
+            type: 'string',
+            description: 'Release ID'
+          },
+          taskId: {
+            type: 'string',
+            description: 'Preparation task ID to skip'
+          }
+        },
+        required: ['releaseId', 'taskId']
+      }
+    },
+
+    {
+      name: 'add_plans_to_release',
+      description: `Add plans to a release at any stage.
+
+Plans can be added to a release even after it has been created, as long as
+the release is not in a terminal state (succeeded/failed/canceled).
+
+All plans must be in succeeded or partial status.
+
+PLATFORM SUPPORT: GitHub, GitHub Enterprise, Azure DevOps`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          releaseId: {
+            type: 'string',
+            description: 'Release ID'
+          },
+          planIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Plan IDs to add to the release',
+            minItems: 1
+          }
+        },
+        required: ['releaseId', 'planIds']
       }
     },
 
