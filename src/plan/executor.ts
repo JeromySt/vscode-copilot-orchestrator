@@ -203,10 +203,11 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Forward integration merge'); context.onStepStatusChange?.('merge-fi', 'running');
         this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'merge-fi', startedAt: phaseStart });
         const ctx = makeCtx('merge-fi'); 
         ctx.dependencyCommits = context.dependencyCommits;
         const r = await new MergeFiPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'merge-fi', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         if (r.metrics) { capturedMetrics = r.metrics; phaseMetrics['merge-fi'] = r.metrics; }
         this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION END ==========');
         if (!r.success) { stepStatuses['merge-fi'] = 'failed'; context.onStepStatusChange?.('merge-fi', 'failed'); return { success: false, error: `Forward integration merge failed: ${r.error}`, stepStatuses, failedPhase: 'merge-fi', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
@@ -223,9 +224,10 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Running setup'); context.onStepStatusChange?.('setup', 'running');
         this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'setup', startedAt: phaseStart });
         const ctx = makeCtx('setup');
         const r = await new SetupPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'setup', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION END ==========');
         if (!r.success) { stepStatuses.setup = 'failed'; context.onStepStatusChange?.('setup', 'failed'); return { success: false, error: `Setup failed: ${r.error}`, stepStatuses, failedPhase: 'setup', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
         stepStatuses.setup = 'success'; context.onStepStatusChange?.('setup', 'success');
@@ -238,10 +240,11 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Running prechecks'); context.onStepStatusChange?.('prechecks', 'running');
         this.logEntry(executionKey, 'prechecks', 'info', '========== PRECHECKS SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'prechecks', startedAt: phaseStart });
         const precheckSpec = prechecksSpec_;
         const ctx = makeCtx('prechecks'); ctx.workSpec = precheckSpec; ctx.env = mergeEnv(precheckSpec); ctx.sessionId = capturedSessionId;
         const r = await new PrecheckPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'prechecks', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = r.metrics; phaseMetrics['prechecks'] = r.metrics; }
         this.logEntry(executionKey, 'prechecks', 'info', '========== PRECHECKS SECTION END ==========');
@@ -256,10 +259,11 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Running work'); context.onStepStatusChange?.('work', 'running');
         this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'work', startedAt: phaseStart });
         const workSpec = workSpec_;
         const ctx = makeCtx('work'); ctx.workSpec = workSpec; ctx.env = mergeEnv(workSpec); ctx.sessionId = capturedSessionId;
         const r = await new WorkPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'work', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['work'] = r.metrics; }
         this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION END ==========');
@@ -278,9 +282,10 @@ export class DefaultJobExecutor implements JobExecutor {
       context.onProgress?.('Committing changes'); context.onStepStatusChange?.('commit', 'running');
       this.logEntry(executionKey, 'commit', 'info', '========== COMMIT SECTION START ==========');
       const phaseStartCommit = Date.now();
+      context.phaseTiming!.push({ phase: 'commit', startedAt: phaseStartCommit });
       const commitCtx: CommitPhaseContext = { ...makeCtx('commit'), baseCommit: context.baseCommit, getWorkSpec: () => resolveSpec('work'), getExecutionLogs: () => this.executionLogs.get(executionKey) || [], getLogFilePath: () => getLogFilePathByKey(executionKey, this.storagePath, this.logFiles) };
       const cr = await new CommitPhaseExecutor({ evidenceValidator: this.evidenceValidator, ...phaseDeps() }).execute(commitCtx);
-      context.phaseTiming!.push({ phase: 'commit', startedAt: phaseStartCommit, endedAt: Date.now() });
+      context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
       this.logEntry(executionKey, 'commit', 'info', '========== COMMIT SECTION END ==========');
       if (cr.reviewMetrics) { phaseMetrics['commit'] = cr.reviewMetrics; capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, cr.reviewMetrics]) : cr.reviewMetrics; }
       if (!cr.success) {
@@ -294,10 +299,11 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Running postchecks'); context.onStepStatusChange?.('postchecks', 'running');
         this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'postchecks', startedAt: phaseStart });
         const postcheckSpec = postchecksSpec_;
         const ctx = makeCtx('postchecks'); ctx.workSpec = postcheckSpec; ctx.env = mergeEnv(postcheckSpec); ctx.sessionId = capturedSessionId;
         const r = await new PostcheckPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'postchecks', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['postchecks'] = r.metrics; }
         this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION END ==========');
@@ -312,6 +318,7 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Reverse integration merge'); context.onStepStatusChange?.('merge-ri', 'running');
         this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'merge-ri', startedAt: phaseStart });
         const ctx = makeCtx('merge-ri'); 
         ctx.repoPath = context.repoPath;
         // If a snapshot branch exists, merge into it instead of targetBranch.
@@ -320,7 +327,7 @@ export class DefaultJobExecutor implements JobExecutor {
         ctx.completedCommit = cr.commit;
         ctx.baseCommit = context.baseCommit;
         const r = await new MergeRiPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'merge-ri', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['merge-ri'] = r.metrics; }
         this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION END ==========');
         if (!r.success) { stepStatuses['merge-ri'] = 'failed'; context.onStepStatusChange?.('merge-ri', 'failed'); return { success: false, error: `Reverse integration merge failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'merge-ri', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
@@ -330,8 +337,9 @@ export class DefaultJobExecutor implements JobExecutor {
       // ---- CLEANUP/REPORT ----
       const cleanupStart = Date.now();
       stepStatuses['cleanup'] = 'running'; context.onStepStatusChange?.('cleanup', 'running');
+      context.phaseTiming!.push({ phase: 'cleanup', startedAt: cleanupStart });
       const ws = await computeWorkSummary(node, worktreePath, context.baseCommit, this.git);
-      context.phaseTiming!.push({ phase: 'cleanup', startedAt: cleanupStart, endedAt: Date.now() });
+      context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
       stepStatuses['cleanup'] = 'success'; context.onStepStatusChange?.('cleanup', 'success');
       return { success: true, completedCommit: cr.commit, workSummary: ws, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming };
     } catch (error: any) {

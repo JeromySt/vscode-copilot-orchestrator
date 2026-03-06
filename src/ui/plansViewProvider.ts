@@ -14,8 +14,6 @@ import { NodeDetailPanel } from './panels/nodeDetailPanel';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../interfaces/IPulseEmitter';
 import type { IPRLifecycleManager } from '../interfaces/IPRLifecycleManager';
 import type { ManagedPR } from '../plan/types/prLifecycle';
-import type { IReleaseManager } from '../interfaces/IReleaseManager';
-import type { ReleaseDefinition } from '../plan/types/release';
 
 /**
  * Sidebar webview provider that displays all top-level Plans and their execution status.
@@ -60,14 +58,12 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
    * @param _planRunner - The {@link PlanRunner} instance used to query Plan state.
    * @param _pulse - The pulse emitter for periodic updates.
    * @param _prLifecycleManager - The PR lifecycle manager (optional).
-   * @param _releaseManager - The release manager (optional).
    */
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _planRunner: PlanRunner,
     private readonly _pulse: IPulseEmitter,
-    private readonly _prLifecycleManager?: IPRLifecycleManager,
-    private readonly _releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager
+    private readonly _prLifecycleManager?: IPRLifecycleManager
   ) {
     // Listen for Plan events — emit targeted per-plan messages
     _planRunner.on('planCreated', (plan: PlanInstance) => {
@@ -124,27 +120,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       });
       _prLifecycleManager.on('prRemoved', (id: string) => {
         this._sendPRDeleted(id);
-      });
-    }
-    
-    // Listen for release events
-    if (_releaseManager) {
-      _releaseManager.on('releaseCreated', (release: ReleaseDefinition) => {
-        this._sendReleaseAdded(release);
-        // Update all plans in this release to show release tag
-        release.planIds.forEach(planId => {
-          this._sendPlanStateChange(planId);
-        });
-      });
-      _releaseManager.on('releaseStatusChanged', (release: ReleaseDefinition) => {
-        this._sendReleaseStateChange(release);
-        // Update all plans in this release to reflect release status change
-        release.planIds.forEach(planId => {
-          this._sendPlanStateChange(planId);
-        });
-      });
-      _releaseManager.on('releaseCompleted', (release: ReleaseDefinition) => {
-        this._sendReleaseStateChange(release);
       });
     }
   }
@@ -209,17 +184,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
           // Open Active PR Panel for the PR
           vscode.commands.executeCommand('orchestrator.showActivePRPanel', message.prId);
           break;
-        case 'createRelease':
-          // Trigger the create release command
-          vscode.commands.executeCommand('orchestrator.createRelease');
-          break;
-        case 'createReleaseFromBranch':
-          this._handleCreateReleaseFromBranch();
-          break;
-        case 'openRelease':
-          // Open Release Panel for the release
-          vscode.commands.executeCommand('orchestrator.showReleasePanel', message.releaseId);
-          break;
         case 'refresh':
           this._initialRefreshDone = true;
           this.refresh();
@@ -275,6 +239,20 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     
+    // Archive and recover use single-plan commands (no bulk* variant exists)
+    if (action === 'archive') {
+      for (const planId of planIds) {
+        await vscode.commands.executeCommand('orchestrator.archivePlan', planId);
+      }
+      return;
+    }
+    if (action === 'recover') {
+      for (const planId of planIds) {
+        await vscode.commands.executeCommand('orchestrator.recoverPlan', planId);
+      }
+      return;
+    }
+    
     // Capitalize first letter to match command naming convention
     const commandAction = action.charAt(0).toUpperCase() + action.slice(1);
     vscode.commands.executeCommand(
@@ -313,20 +291,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     const completed = counts.succeeded + counts.failed + counts.blocked;
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
-    // Find release info for this plan
-    let releaseInfo: { id: string; name: string; status: string } | undefined;
-    if (this._releaseManager) {
-      const allReleases = this._releaseManager.getAllReleases();
-      const release = allReleases.find(r => r.planIds.includes(plan.id));
-      if (release) {
-        releaseInfo = {
-          id: release.id,
-          name: release.name,
-          status: release.status,
-        };
-      }
-    }
-    
     return {
       id: plan.id,
       name: plan.spec.name,
@@ -343,7 +307,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       startedAt: plan.startedAt,
       endedAt: this._planRunner.getEffectiveEndedAt(plan.id) || plan.endedAt,
       issubPlan: !!plan.parentPlanId,
-      release: releaseInfo,
     };
   }
   
@@ -365,8 +328,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     // Update total badge
     const total = this._planRunner.getAll().filter(p => !p.parentPlanId).length;
     this._view.webview.postMessage({ type: 'badgeUpdate', total });
-    // Auto-switch to Plans tab
-    this._view.webview.postMessage({ type: 'switchTab', tab: 'plans' });
   }
   
   /** Send notification that a plan was deleted. */
@@ -442,8 +403,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     if (!this._view) {return;}
     const data = this._buildPRData(pr);
     this._view.webview.postMessage({ type: 'prAdded', pr: data });
-    // Auto-switch to PRs tab
-    this._view.webview.postMessage({ type: 'switchTab', tab: 'prs' });
   }
 
   /** Send notification that a PR was deleted. */
@@ -461,93 +420,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       type: 'prsUpdate',
       prs: prData,
     });
-  }
-
-  /**
-   * Build data object for a single release (used by both initial load and per-release events).
-   */
-  private _buildReleaseData(release: ReleaseDefinition) {
-    // Calculate progress based on status
-    let progress = 0;
-    switch (release.status) {
-      case 'drafting':
-        progress = 10;
-        break;
-      case 'merging':
-        progress = 30;
-        break;
-      case 'creating-pr':
-        progress = 50;
-        break;
-      case 'monitoring':
-      case 'addressing':
-        progress = 75;
-        break;
-      case 'succeeded':
-        progress = 100;
-        break;
-      case 'failed':
-      case 'canceled':
-        progress = 0;
-        break;
-    }
-    
-    return {
-      id: release.id,
-      name: release.name,
-      status: release.status,
-      releaseBranch: release.releaseBranch,
-      targetBranch: release.targetBranch,
-      planCount: release.planIds.length,
-      prNumber: release.prNumber,
-      prUrl: release.prUrl,
-      progress,
-      createdAt: release.createdAt,
-      startedAt: release.startedAt,
-      endedAt: release.endedAt,
-    };
-  }
-
-  /** Send a per-release state change to the webview. */
-  private _sendReleaseStateChange(release: ReleaseDefinition) {
-    if (!this._view) {return;}
-    const data = this._buildReleaseData(release);
-    this._view.webview.postMessage({ type: 'releaseStateChange', release: data });
-  }
-
-  /** Send notification that a new release was added. */
-  private _sendReleaseAdded(release: ReleaseDefinition) {
-    if (!this._view) {return;}
-    const data = this._buildReleaseData(release);
-    this._view.webview.postMessage({ type: 'releaseAdded', release: data });
-    // Auto-switch to Releases tab
-    this._view.webview.postMessage({ type: 'switchTab', tab: 'releases' });
-  }
-
-  /** Send notification that a release was deleted. */
-  private _sendReleaseDeleted(id: string) {
-    if (!this._view) {return;}
-    this._view.webview.postMessage({ type: 'releaseDeleted', releaseId: id });
-  }
-
-  /** Refresh releases independently. */
-  private async _refreshReleases() {
-    if (!this._view || !this._releaseManager) {return;}
-    const releases = this._releaseManager.getAllReleases();
-    const releaseData = releases.map(release => this._buildReleaseData(release));
-    this._view.webview.postMessage({
-      type: 'releasesUpdate',
-      releases: releaseData,
-    });
-  }
-
-  /**
-   * Handle "From Current Branch" button click.
-   * Detects current git branch and creates a release for it.
-   */
-  private async _handleCreateReleaseFromBranch() {
-    // Delegate to the registered command which has the full implementation
-    vscode.commands.executeCommand('orchestrator.createReleaseFromBranch');
   }
 
   /**
@@ -575,9 +447,6 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     
     // Kick off first PRs refresh
     this._refreshPRs();
-    
-    // Kick off first releases refresh
-    this._refreshReleases();
   }
   
   /**

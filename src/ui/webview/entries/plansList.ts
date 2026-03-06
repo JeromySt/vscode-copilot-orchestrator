@@ -13,6 +13,7 @@ import { Topics } from '../topics';
 import { PlanListCard } from '../controls/planListCard';
 import { ProgressBar } from '../controls/progressBar';
 import { DurationCounter } from '../controls/durationCounter';
+import { MultiSelectManager } from '../controls/multiSelectManager';
 import { formatDurationMs, escapeHtml } from '../../templates/helpers';
 
 const api = {
@@ -22,6 +23,7 @@ const api = {
   PlanListCard,
   ProgressBar,
   DurationCounter,
+  MultiSelectManager,
   formatDurationMs,
   escapeHtml,
 };
