@@ -54,8 +54,46 @@ export class ReleaseManagementController {
    */
   public handleMessage(message: any): void {
     switch (message.type) {
-      case 'startRelease':
-        this._delegate.executeCommand('orchestrator.startRelease', this._releaseId);
+      case 'startMerge':
+        this._delegate.executeCommand('orchestrator.startReleaseMerge', this._releaseId);
+        break;
+      case 'startPrepare':
+        this._delegate.executeCommand('orchestrator.startReleasePrepare', this._releaseId);
+        break;
+      case 'executeTask':
+        if (message.taskId) {
+          this._delegate.executeCommand('orchestrator.executeReleaseTask', this._releaseId, message.taskId);
+        }
+        break;
+      case 'skipTask':
+        if (message.taskId) {
+          this._delegate.executeCommand('orchestrator.skipReleaseTask', this._releaseId, message.taskId);
+        }
+        break;
+      case 'markTaskComplete':
+        if (message.taskId) {
+          this._delegate.executeCommand('orchestrator.markReleaseTaskComplete', this._releaseId, message.taskId);
+        }
+        break;
+      case 'createPR':
+        this._delegate.executeCommand('orchestrator.createReleasePR', this._releaseId);
+        break;
+      case 'adoptPR':
+        if (message.prNumber) {
+          this._delegate.executeCommand('orchestrator.adoptReleasePR', this._releaseId, message.prNumber);
+        }
+        break;
+      case 'startMonitoring':
+        this._delegate.executeCommand('orchestrator.startReleaseMonitoring', this._releaseId);
+        break;
+      case 'pauseMonitoring':
+        this._delegate.executeCommand('orchestrator.pauseReleaseMonitoring', this._releaseId);
+        break;
+      case 'stopMonitoring':
+        this._delegate.executeCommand('orchestrator.stopReleaseMonitoring', this._releaseId);
+        break;
+      case 'openPlanSelector':
+        this._delegate.executeCommand('orchestrator.openReleasePlanSelector', this._releaseId);
         break;
       case 'cancelRelease':
         this._delegate.executeCommand('orchestrator.cancelRelease', this._releaseId);

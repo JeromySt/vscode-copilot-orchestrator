@@ -7,18 +7,23 @@
  * @module plan/types/release
  */
 
-import type { PreparationTask, ReleaseInstructions } from './releasePrep';
-
 // ============================================================================
 // RELEASE STATUS
 // ============================================================================
 
 /**
+ * Release flow type.
+ * 
+ * - `from-branch`: Release from existing branch (with optional plan selection)
+ * - `from-plans`: Release by merging multiple plans into new branch
+ */
+export type ReleaseFlowType = 'from-branch' | 'from-plans';
+
+/**
  * Release lifecycle status.
  * 
  * - `drafting`: Release is being configured, plans are being added
- * - `preparing`: Executing pre-PR preparation tasks (changelog, docs, checks)
- * - `ready-for-pr`: All required preparation tasks completed, ready to create PR
+ * - `preparing`: Running pre-PR preparation tasks
  * - `merging`: Merging plan commits into the release branch
  * - `creating-pr`: Creating pull request for the release
  * - `monitoring`: Monitoring PR for CI checks, reviews, and feedback
@@ -30,31 +35,50 @@ import type { PreparationTask, ReleaseInstructions } from './releasePrep';
 export type ReleaseStatus = 
   | 'drafting' 
   | 'preparing'
-  | 'ready-for-pr'
   | 'merging' 
-  | 'creating-pr'
-  | 'pr-active'
+  | 'creating-pr' 
   | 'monitoring' 
   | 'addressing' 
   | 'succeeded' 
   | 'failed' 
   | 'canceled';
 
+// ============================================================================
+// PREPARATION TASKS
+// ============================================================================
+
 /**
- * A single state transition in the release lifecycle.
+ * Status of a preparation task.
  */
-export interface StateTransition {
-  /** Previous status */
-  from: ReleaseStatus;
+export type PrepTaskStatus = 'pending' | 'running' | 'completed' | 'skipped';
 
-  /** New status */
-  to: ReleaseStatus;
+/**
+ * A preparation task in the pre-PR checklist.
+ */
+export interface PrepTask {
+  /** Task ID */
+  id: string;
 
-  /** When the transition occurred */
-  timestamp: number;
+  /** Task title */
+  title: string;
 
-  /** Optional reason for the transition */
-  reason?: string;
+  /** Task description */
+  description?: string;
+
+  /** Whether this task is required (blocks PR creation) */
+  required: boolean;
+
+  /** Whether this task can be automated by Copilot */
+  autoSupported: boolean;
+
+  /** Current status */
+  status: PrepTaskStatus;
+
+  /** Error message if task failed */
+  error?: string;
+
+  /** Commit hash if task made code changes */
+  commitHash?: string;
 }
 
 // ============================================================================
@@ -75,6 +99,9 @@ export interface ReleaseDefinition {
   /** Human-friendly name for the release */
   name: string;
 
+  /** Release flow type */
+  flowType: ReleaseFlowType;
+
   /** Plan IDs included in this release */
   planIds: string[];
 
@@ -90,11 +117,8 @@ export interface ReleaseDefinition {
   /** Current lifecycle status */
   status: ReleaseStatus;
 
-  /** Release flow type */
-  source: 'from-plans' | 'from-branch';
-
-  /** State transition history for timeline rendering */
-  stateHistory: StateTransition[];
+  /** Preparation tasks checklist */
+  prepTasks?: PrepTask[];
 
   /** PR number once created */
   prNumber?: number;
@@ -120,30 +144,6 @@ export interface ReleaseDefinition {
 
   /** Error message if release failed */
   error?: string;
-
-  /**
-   * Source flow type: plan-based or from existing branch.
-   * - 'from-plans': Merges plan commits into release branch
-   * - 'from-branch': Release branch already exists, skips merge
-   */
-  source: 'from-plans' | 'from-branch';
-
-  /**
-   * State transition history with timestamps.
-   * Canonical source of truth for state changes.
-   */
-  stateHistory: Array<{
-    from: ReleaseStatus;
-    to: ReleaseStatus;
-    timestamp: number;
-    reason?: string;
-  }>;
-
-  /** Preparation tasks to complete before creating PR */
-  preparationTasks?: PreparationTask[];
-
-  /** Release instructions file metadata */
-  releaseInstructions?: ReleaseInstructions;
 }
 
 // ============================================================================

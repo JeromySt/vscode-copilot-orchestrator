@@ -136,6 +136,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     const release: ReleaseDefinition = {
       id: releaseId,
       name: options.name,
+      flowType: options.planIds.length > 0 ? 'from-plans' : 'from-branch',
       planIds: options.planIds,
       releaseBranch: options.releaseBranch,
       targetBranch,

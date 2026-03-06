@@ -2,7 +2,7 @@
  * @fileoverview Release management webview scripts template.
  *
  * Orchestrates bundled webview controls and wires view-specific logic
- * for the release management wizard.
+ * for the adaptive release management wizard.
  *
  * @module ui/templates/release/scriptsTemplate
  */
@@ -29,8 +29,55 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
 
     // ── Message Handlers ────────────────────────────────────────────────
     
-    function startRelease() {
-      vscode.postMessage({ type: 'startRelease' });
+    function proceedFromConfigure() {
+      const flowType = releaseData.flowType;
+      if (flowType === 'from-plans' && releaseData.planIds.length > 0) {
+        vscode.postMessage({ type: 'startMerge' });
+      } else {
+        vscode.postMessage({ type: 'startPrepare' });
+      }
+    }
+    
+    function executeTask(taskId) {
+      vscode.postMessage({ type: 'executeTask', taskId });
+    }
+    
+    function skipTask(taskId) {
+      vscode.postMessage({ type: 'skipTask', taskId });
+    }
+    
+    function markTaskComplete(taskId) {
+      vscode.postMessage({ type: 'markTaskComplete', taskId });
+    }
+    
+    function createPR() {
+      vscode.postMessage({ type: 'createPR' });
+    }
+    
+    function adoptPR() {
+      const input = document.getElementById('pr-number-input');
+      const prNumber = input ? parseInt(input.value, 10) : null;
+      if (prNumber && !isNaN(prNumber)) {
+        vscode.postMessage({ type: 'adoptPR', prNumber });
+      } else {
+        alert('Please enter a valid PR number');
+      }
+    }
+    
+    function startMonitoring() {
+      vscode.postMessage({ type: 'startMonitoring' });
+    }
+    
+    function pauseMonitoring() {
+      vscode.postMessage({ type: 'pauseMonitoring' });
+    }
+    
+    function stopMonitoring() {
+      vscode.postMessage({ type: 'stopMonitoring' });
+    }
+    
+    function openPlanSelector() {
+      vscode.postMessage({ type: 'openPlanSelector' });
     }
     
     function cancelRelease() {
@@ -42,29 +89,25 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
     function refresh() {
       vscode.postMessage({ type: 'refresh' });
     }
-    
-    function goBack() {
-      // Navigation handled by re-rendering the panel
-      vscode.postMessage({ type: 'refresh' });
-    }
 
     // ── Plan Selection Control ──────────────────────────────────────────
     
     class PlanSelectorControl {
-      constructor() {
+      constructor(containerId) {
+        this.containerId = containerId;
         this.selectedPlans = new Set(releaseData.planIds || []);
         this.render();
       }
       
       render() {
-        const container = document.getElementById('plan-list');
+        const container = document.getElementById(this.containerId);
         if (!container) return;
         
         // Mock plan data - in real implementation, this would come from the extension
         const availablePlans = [
           { id: 'plan-1', name: 'Feature A', status: 'succeeded', jobCount: 5 },
           { id: 'plan-2', name: 'Feature B', status: 'succeeded', jobCount: 3 },
-          { id: 'plan-3', name: 'Bug Fix', status: 'running', jobCount: 2 },
+          { id: 'plan-3', name: 'Bug Fix', status: 'succeeded', jobCount: 2 },
         ];
         
         container.innerHTML = availablePlans.map(plan => {
@@ -96,6 +139,84 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
       }
     }
     
+    // ── Preparation Tasks Control ───────────────────────────────────────
+    
+    class PrepTasksControl {
+      constructor() {
+        this.tasks = releaseData.prepTasks || [];
+      }
+      
+      updateTask(taskId, status, error) {
+        const task = this.tasks.find(t => t.id === taskId);
+        if (task) {
+          task.status = status;
+          if (error) task.error = error;
+          this.renderTask(taskId);
+          this.updateProgress();
+        }
+      }
+      
+      renderTask(taskId) {
+        const taskEl = document.querySelector(\`.prep-task[data-task-id="\${taskId}"]\`);
+        if (!taskEl) return;
+        
+        const task = this.tasks.find(t => t.id === taskId);
+        if (!task) return;
+        
+        const statusIcon = task.status === 'completed' ? '✓' : 
+                         task.status === 'skipped' ? '−' :
+                         task.status === 'running' ? '⏳' : '☐';
+        
+        taskEl.setAttribute('data-status', task.status);
+        const checkbox = taskEl.querySelector('.task-checkbox');
+        if (checkbox) {
+          checkbox.textContent = statusIcon;
+          checkbox.className = \`task-checkbox \${task.status}\`;
+        }
+        
+        // Update actions
+        const actions = taskEl.querySelector('.task-actions');
+        if (actions && task.status === 'pending') {
+          const html = [];
+          if (task.autoSupported) {
+            html.push('<button class="auto-btn" onclick="executeTask(\\\'' + task.id + '\\\')" title="Let Copilot handle this">🤖 Auto</button>');
+          } else {
+            html.push('<button class="manual-btn" onclick="markTaskComplete(\\\'' + task.id + '\\\')" title="Mark as complete">✓ Done</button>');
+          }
+          html.push('<button class="skip-btn" onclick="skipTask(\\\'' + task.id + '\\\')" title="Skip this task">Skip</button>');
+          actions.innerHTML = html.join('');
+        } else if (actions) {
+          actions.innerHTML = '';
+        }
+      }
+      
+      updateProgress() {
+        const completed = this.tasks.filter(t => t.status === 'completed' || t.status === 'skipped').length;
+        const total = this.tasks.length;
+        const percentage = total > 0 ? (completed / total) * 100 : 0;
+        
+        const progressFill = document.querySelector('.prep-progress-fill');
+        if (progressFill) {
+          progressFill.style.width = percentage + '%';
+        }
+        
+        // Update button state
+        const required = this.tasks.filter(t => t.required);
+        const requiredCompleted = required.filter(t => t.status === 'completed' || t.status === 'skipped').length;
+        const canCreatePR = requiredCompleted === required.length;
+        
+        const createPRBtn = document.querySelector('.create-pr-btn');
+        if (createPRBtn) {
+          createPRBtn.disabled = !canCreatePR;
+          if (!canCreatePR) {
+            createPRBtn.textContent = \`Create PR (\${required.length - requiredCompleted} required remaining)\`;
+          } else {
+            createPRBtn.textContent = 'Create PR →';
+          }
+        }
+      }
+    }
+    
     // ── Merge Progress Control ──────────────────────────────────────────
     
     class MergeProgressControl {
@@ -114,7 +235,6 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
         if (!container) return;
         
         if (this.mergeResults.length === 0) {
-          // Show plan list being prepared
           container.innerHTML = releaseData.planIds.map((planId, idx) => \`
             <div class="merge-item">
               <div class="merge-status-icon pending">⏳</div>
@@ -144,7 +264,6 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
           \`;
         }).join('');
         
-        // Update overall progress
         const completed = this.mergeResults.filter(r => r.success).length;
         const total = this.mergeResults.length;
         const percentage = total > 0 ? (completed / total) * 100 : 0;
@@ -169,6 +288,9 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
           unresolvedComments: 0,
           unresolvedAlerts: 0
         };
+        this.cycles = [];
+        this.isMonitoring = false;
+        this.countdownSeconds = 2400; // 40 minutes
         this.render();
       }
       
@@ -177,6 +299,60 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
           this.stats = data;
           this.render();
         }
+      }
+      
+      addCycle(cycle) {
+        this.cycles.push(cycle);
+        this.renderCycles();
+      }
+      
+      startMonitoring() {
+        this.isMonitoring = true;
+        document.getElementById('start-monitor-btn').style.display = 'none';
+        document.getElementById('pause-monitor-btn').style.display = 'inline-block';
+        document.getElementById('stop-monitor-btn').style.display = 'inline-block';
+        document.getElementById('monitor-timer').style.display = 'inline-block';
+        this.startCountdown();
+      }
+      
+      pauseMonitoring() {
+        this.isMonitoring = false;
+        document.getElementById('pause-monitor-btn').textContent = 'Resume Monitoring';
+        document.getElementById('pause-monitor-btn').onclick = () => this.resumeMonitoring();
+      }
+      
+      resumeMonitoring() {
+        this.isMonitoring = true;
+        document.getElementById('pause-monitor-btn').textContent = 'Pause Monitoring';
+        document.getElementById('pause-monitor-btn').onclick = () => this.pauseMonitoring();
+      }
+      
+      stopMonitoring() {
+        this.isMonitoring = false;
+        document.getElementById('start-monitor-btn').style.display = 'inline-block';
+        document.getElementById('pause-monitor-btn').style.display = 'none';
+        document.getElementById('stop-monitor-btn').style.display = 'none';
+        document.getElementById('monitor-timer').style.display = 'none';
+      }
+      
+      startCountdown() {
+        const countdownEl = document.getElementById('countdown');
+        const updateCountdown = () => {
+          if (!this.isMonitoring) return;
+          
+          const minutes = Math.floor(this.countdownSeconds / 60);
+          const seconds = this.countdownSeconds % 60;
+          countdownEl.textContent = \`\${minutes}:\${seconds.toString().padStart(2, '0')}\`;
+          
+          if (this.countdownSeconds > 0) {
+            this.countdownSeconds--;
+            setTimeout(updateCountdown, 1000);
+          } else {
+            this.countdownSeconds = 2400;
+            updateCountdown();
+          }
+        };
+        updateCountdown();
       }
       
       render() {
@@ -190,6 +366,28 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
         updateStat('comments-unresolved', this.stats.unresolvedComments);
         updateStat('alerts-unresolved', this.stats.unresolvedAlerts);
       }
+      
+      renderCycles() {
+        const container = document.getElementById('cycle-dots');
+        if (!container) return;
+        
+        if (this.cycles.length === 0) {
+          container.innerHTML = \`
+            <div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 11px;">
+              No monitoring cycles yet
+            </div>
+          \`;
+          return;
+        }
+        
+        container.innerHTML = this.cycles.map((cycle, idx) => {
+          const isActive = idx === this.cycles.length - 1;
+          const hasIssues = cycle.actions && cycle.actions.length > 0;
+          const dotClass = isActive ? 'active' : (hasIssues ? 'partial' : 'success');
+          
+          return \`<div class="cycle-dot \${dotClass}" title="Cycle \${cycle.cycleNumber}"></div>\`;
+        }).join('');
+      }
     }
     
     // ── Action Log Control ──────────────────────────────────────────────
@@ -201,7 +399,7 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
       }
       
       addAction(action) {
-        this.actions.unshift(action); // Add to beginning
+        this.actions.unshift(action);
         this.render();
       }
       
@@ -242,10 +440,16 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
 
     // ── Initialize Controls ─────────────────────────────────────────────
     
-    let planSelector, mergeProgress, prMonitor, actionLog;
+    let planSelector, optionalPlanSelector, prepTasks, mergeProgress, prMonitor, actionLog;
     
     if (releaseData.status === 'drafting') {
-      planSelector = new PlanSelectorControl();
+      if (releaseData.flowType === 'from-plans') {
+        planSelector = new PlanSelectorControl('plan-list');
+      } else {
+        optionalPlanSelector = new PlanSelectorControl('optional-plan-list');
+      }
+    } else if (releaseData.status === 'preparing') {
+      prepTasks = new PrepTasksControl();
     } else if (releaseData.status === 'merging') {
       mergeProgress = new MergeProgressControl();
     } else if (releaseData.status === 'monitoring' || releaseData.status === 'addressing') {
@@ -263,6 +467,12 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
           // Update any time-based displays
           break;
           
+        case 'taskUpdate':
+          if (prepTasks && message.taskId) {
+            prepTasks.updateTask(message.taskId, message.status, message.error);
+          }
+          break;
+          
         case 'mergeProgress':
           if (mergeProgress) {
             mergeProgress.update(message.results);
@@ -272,6 +482,12 @@ export function renderReleaseScripts(release: ReleaseDefinition): string {
         case 'prUpdate':
           if (prMonitor) {
             prMonitor.update(message.stats);
+          }
+          break;
+          
+        case 'cycleCompleted':
+          if (prMonitor && message.cycle) {
+            prMonitor.addCycle(message.cycle);
           }
           break;
           
