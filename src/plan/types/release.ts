@@ -40,6 +40,23 @@ export type ReleaseStatus =
   | 'failed' 
   | 'canceled';
 
+/**
+ * A single state transition in the release lifecycle.
+ */
+export interface StateTransition {
+  /** Previous status */
+  from: ReleaseStatus;
+
+  /** New status */
+  to: ReleaseStatus;
+
+  /** When the transition occurred */
+  timestamp: number;
+
+  /** Optional reason for the transition */
+  reason?: string;
+}
+
 // ============================================================================
 // RELEASE DEFINITION
 // ============================================================================
@@ -72,6 +89,12 @@ export interface ReleaseDefinition {
 
   /** Current lifecycle status */
   status: ReleaseStatus;
+
+  /** Release flow type */
+  source: 'from-plans' | 'from-branch';
+
+  /** State transition history for timeline rendering */
+  stateHistory: StateTransition[];
 
   /** PR number once created */
   prNumber?: number;

@@ -133,6 +133,17 @@ export interface IReleaseManager {
   // ── Preparation Tasks ──────────────────────────────────────────────
 
   /**
+   * Prepares a release by transitioning to 'preparing' state and initializing tasks.
+   * 
+   * Creates default preparation tasks based on release type (from-plans vs from-branch).
+   * Also creates or finds release instructions file.
+   * 
+   * @param releaseId - The release ID to prepare
+   * @throws If release not found or already past drafting stage
+   */
+  prepareRelease(releaseId: string): Promise<void>;
+
+  /**
    * Gets preparation tasks for a release.
    * 
    * Returns undefined if release has no preparation tasks initialized.
@@ -182,6 +193,39 @@ export interface IReleaseManager {
    * @returns True if all required tasks are complete
    */
   areRequiredTasksComplete(releaseId: string): boolean;
+
+  // ── Plan Management ────────────────────────────────────────────────
+
+  /**
+   * Adds plans to a release at any stage.
+   * 
+   * Merges plan branches into the release branch. If a PR is active,
+   * pushes changes to the PR branch. If drafting/preparing, adds to merge list.
+   * 
+   * @param releaseId - The release ID
+   * @param planIds - Plan IDs to add
+   * @throws If release not found or plans not in terminal state
+   */
+  addPlansToRelease(releaseId: string, planIds: string[]): Promise<void>;
+
+  /**
+   * Adopts an existing PR for the release.
+   * 
+   * Associates an existing PR with the release and transitions to pr-active state.
+   * 
+   * @param releaseId - The release ID
+   * @param prNumber - The PR number to adopt
+   * @throws If release not found or not in appropriate state
+   */
+  adoptExistingPR(releaseId: string, prNumber: number): Promise<void>;
+
+  /**
+   * Gets the flow type for a release.
+   * 
+   * @param releaseId - The release ID
+   * @returns The flow type ('from-plans' or 'from-branch'), or undefined if not found
+   */
+  getFlowType(releaseId: string): 'from-plans' | 'from-branch' | undefined;
 
   // ── Events ─────────────────────────────────────────────────────────
 
