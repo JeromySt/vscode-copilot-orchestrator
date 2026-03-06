@@ -908,7 +908,7 @@ class ReleaseListContainerControl extends SubscribableControl {
     this.releaseCards.delete(releaseId);
     if (this.releaseCards.size === 0) {
       var container = this.getElement(this.containerId);
-      if (container) container.innerHTML = '<div class=\"welcome-state\"><div class=\"welcome-icon\">&#128640;</div><div class=\"welcome-title\">No releases yet</div><div class=\"welcome-subtitle\">Create a release to merge plans and monitor PRs.</div></div>';
+      if (container) container.innerHTML = '<div class="welcome-state"><div class="welcome-icon">&#128640;</div><div class="welcome-title">No releases yet</div><div class="welcome-subtitle">Create a release to merge plans and monitor PRs.</div></div>';
     }
     this._updateBadge(this.releaseCards.size);
   }
