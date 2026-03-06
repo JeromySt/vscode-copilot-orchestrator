@@ -169,6 +169,101 @@ export function renderPlansViewStyles(): string {
       background: var(--vscode-badge-background); 
       color: var(--vscode-badge-foreground); 
     }
+    
+    /* Release Group Styles */
+    .release-group {
+      margin-bottom: 8px;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .release-group-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      cursor: pointer;
+      background: var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.1));
+      border-bottom: 1px solid var(--vscode-panel-border);
+      font-size: 11px;
+      font-weight: 600;
+      user-select: none;
+    }
+    .release-group-header:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .release-group-chevron {
+      font-size: 12px;
+      transition: transform 0.2s;
+    }
+    .release-group-chevron.collapsed {
+      transform: rotate(-90deg);
+    }
+    .release-group-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .release-group-status {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 8px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .release-group-status.drafting { 
+      background: rgba(0,122,204,0.15); 
+      color: var(--vscode-progressBar-background); 
+    }
+    .release-group-status.merging { 
+      background: rgba(255,165,0,0.15); 
+      color: #ffa500; 
+    }
+    .release-group-status.creating-pr { 
+      background: rgba(255,165,0,0.15); 
+      color: #ffa500; 
+    }
+    .release-group-status.monitoring { 
+      background: rgba(0,122,204,0.15); 
+      color: var(--vscode-progressBar-background); 
+      animation: pulse-dot 2s ease-in-out infinite; 
+    }
+    .release-group-status.addressing { 
+      background: rgba(255,165,0,0.15); 
+      color: #ffa500; 
+    }
+    .release-group-status.succeeded { 
+      background: rgba(78,201,176,0.15); 
+      color: var(--vscode-testing-iconPassed); 
+    }
+    .release-group-status.failed { 
+      background: rgba(244,71,107,0.15); 
+      color: var(--vscode-testing-iconFailed); 
+    }
+    .release-group-status.canceled { 
+      background: rgba(128,128,128,0.15); 
+      color: var(--vscode-descriptionForeground); 
+    }
+    .release-group-count {
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+      font-weight: 400;
+    }
+    .release-group-content {
+      padding-left: 8px;
+      border-left: 2px solid var(--vscode-panel-border);
+      margin-left: 10px;
+    }
+    .unassigned-header {
+      padding: 6px 10px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--vscode-descriptionForeground);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    
     .plan-item {
       padding: 8px;
       margin-bottom: 8px;
