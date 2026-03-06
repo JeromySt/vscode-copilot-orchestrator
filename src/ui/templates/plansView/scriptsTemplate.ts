@@ -233,12 +233,120 @@ class PlanListCardControl extends SubscribableControl {
   }
 }
 
+// ── ReleaseGroupControl ──────────────────────────────────────────────
+class ReleaseGroupControl extends SubscribableControl {
+  constructor(bus, controlId, element, releaseId, releaseName, releaseStatus) {
+    super(bus, controlId);
+    this.element = element;
+    this.releaseId = releaseId;
+    this.collapsed = this._loadCollapseState();
+    this.planCards = [];
+    this._renderHeader(releaseName, releaseStatus);
+    this._renderContent();
+  }
+
+  _loadCollapseState() {
+    try {
+      var state = vscode.getState();
+      if (state && state.releaseGroupsCollapsed && state.releaseGroupsCollapsed[this.releaseId] !== undefined) {
+        return state.releaseGroupsCollapsed[this.releaseId];
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  _saveCollapseState() {
+    try {
+      var state = vscode.getState() || {};
+      if (!state.releaseGroupsCollapsed) {
+        state.releaseGroupsCollapsed = {};
+      }
+      state.releaseGroupsCollapsed[this.releaseId] = this.collapsed;
+      vscode.setState(state);
+    } catch (e) {}
+  }
+
+  _renderHeader(name, status) {
+    this.headerEl = document.createElement('div');
+    this.headerEl.className = 'release-group-header';
+    
+    var chevronClass = this.collapsed ? 'release-group-chevron codicon codicon-chevron-down collapsed' : 'release-group-chevron codicon codicon-chevron-down';
+    
+    this.headerEl.innerHTML = 
+      '<span class="' + chevronClass + '"></span>' +
+      '<span class="release-group-name">' + escapeHtml(name) + '</span>' +
+      '<span class="release-group-status ' + status + '">' + status + '</span>' +
+      '<span class="release-group-count">0 plans</span>';
+    
+    this.element.appendChild(this.headerEl);
+    
+    var self = this;
+    // Click header: toggle collapse
+    this.headerEl.addEventListener('click', function(e) {
+      if (e.ctrlKey || e.shiftKey) {
+        return; // don't interfere with multi-select
+      }
+      self.collapsed = !self.collapsed;
+      self._updateCollapse();
+      self._saveCollapseState();
+    });
+    
+    // Double-click header: navigate to release in Releases tab
+    this.headerEl.addEventListener('dblclick', function() {
+      vscode.postMessage({ type: 'openRelease', releaseId: self.releaseId });
+    });
+  }
+
+  _renderContent() {
+    this.contentEl = document.createElement('div');
+    this.contentEl.className = 'release-group-content';
+    if (this.collapsed) {
+      this.contentEl.style.display = 'none';
+    }
+    this.element.appendChild(this.contentEl);
+  }
+
+  _updateCollapse() {
+    var chevron = this.headerEl.querySelector('.release-group-chevron');
+    if (chevron) {
+      if (this.collapsed) {
+        chevron.classList.add('collapsed');
+      } else {
+        chevron.classList.remove('collapsed');
+      }
+    }
+    this.contentEl.style.display = this.collapsed ? 'none' : 'block';
+  }
+
+  updatePlanCount(count) {
+    var countEl = this.headerEl.querySelector('.release-group-count');
+    if (countEl) {
+      countEl.textContent = count + (count === 1 ? ' plan' : ' plans');
+    }
+  }
+
+  updateStatus(status) {
+    var statusEl = this.headerEl.querySelector('.release-group-status');
+    if (statusEl) {
+      statusEl.className = 'release-group-status ' + status;
+      statusEl.textContent = status;
+    }
+  }
+
+  getContentElement() {
+    return this.contentEl;
+  }
+}
+
 // ── PlanListContainerControl ─────────────────────────────────────────
 class PlanListContainerControl extends SubscribableControl {
   constructor(bus, controlId, containerId) {
     super(bus, controlId);
     this.containerId = containerId;
     this.planCards = new Map();
+    this.releaseGroups = new Map();
     this.archivedCollapsed = this._loadCollapseState();
 
     this.subscribe(PlansTopics.PLANS_UPDATE, (data) => {
@@ -300,6 +408,8 @@ class PlanListContainerControl extends SubscribableControl {
       document.getElementById('archivedDivider').style.display = 'none';
       for (var entry of this.planCards.values()) { entry.dispose(); }
       this.planCards.clear();
+      for (var entry of this.releaseGroups.values()) { entry.dispose(); }
+      this.releaseGroups.clear();
       return;
     }
 
@@ -335,6 +445,26 @@ class PlanListContainerControl extends SubscribableControl {
       archivedContainer.innerHTML = '';
     }
 
+    // Group active plans by release
+    var releaseGroups = new Map(); // releaseId -> { release, plans: [] }
+    var unassignedPlans = [];
+    var hasAnyRelease = false;
+    
+    for (var i = 0; i < activePlans.length; i++) {
+      var plan = activePlans[i];
+      if (plan.release && plan.release.id) {
+        hasAnyRelease = true;
+        var releaseId = plan.release.id;
+        if (!releaseGroups.has(releaseId)) {
+          releaseGroups.set(releaseId, { release: plan.release, plans: [] });
+        }
+        releaseGroups.get(releaseId).plans.push(plan);
+      } else {
+        unassignedPlans.push(plan);
+      }
+    }
+
+    // Clean up removed plans
     var existingPlanIds = new Set(this.planCards.keys());
     var newPlanIds = new Set(plans.map(function(p) { return p.id; }));
     var structureChanged = false;
@@ -348,16 +478,25 @@ class PlanListContainerControl extends SubscribableControl {
       }
     }
 
+    // Clean up removed release groups
+    var existingReleaseIds = new Set(this.releaseGroups.keys());
+    var newReleaseIds = new Set(releaseGroups.keys());
+    for (var releaseId of existingReleaseIds) {
+      if (!newReleaseIds.has(releaseId)) {
+        structureChanged = true;
+        var group = this.releaseGroups.get(releaseId);
+        if (group) { group.dispose(); if (group.element && group.element.parentNode) group.element.parentNode.removeChild(group.element); }
+        this.releaseGroups.delete(releaseId);
+      }
+    }
+
+    // Create plan cards for new plans
     for (var i = 0; i < plans.length; i++) {
       var plan = plans[i];
       if (!this.planCards.has(plan.id)) {
         structureChanged = true;
         var element = document.createElement('div');
         element.className = 'plan-item-wrapper';
-        
-        // Place in correct container
-        var targetContainer = plan.status === 'archived' ? archivedContainer : container;
-        targetContainer.appendChild(element);
         
         var cardId = 'plan-card-' + plan.id;
         var card = new PlanListCardControl(bus, cardId, element, plan.id);
@@ -366,25 +505,109 @@ class PlanListContainerControl extends SubscribableControl {
       }
     }
 
+    // Update all plan cards
     for (var i = 0; i < plans.length; i++) {
       var plan = plans[i];
       var card = this.planCards.get(plan.id);
       if (card) card._onUpdate(plan);
     }
 
-    if (structureChanged) {
-      // Rebuild both containers in correct order
-      for (var i = 0; i < activePlans.length; i++) {
-        var card = this.planCards.get(activePlans[i].id);
-        if (card && card.element) container.appendChild(card.element);
+    if (structureChanged || hasAnyRelease) {
+      // Clear active container to rebuild structure
+      container.innerHTML = '';
+      
+      if (hasAnyRelease) {
+        // Sort release groups by name
+        var sortedReleases = Array.from(releaseGroups.entries()).sort(function(a, b) {
+          return a[1].release.name.localeCompare(b[1].release.name);
+        });
+        
+        // Render release groups
+        for (var i = 0; i < sortedReleases.length; i++) {
+          var entry = sortedReleases[i];
+          var releaseId = entry[0];
+          var groupData = entry[1];
+          
+          // Create or reuse release group control
+          var groupControl;
+          if (this.releaseGroups.has(releaseId)) {
+            groupControl = this.releaseGroups.get(releaseId);
+            // Update status in case it changed
+            groupControl.updateStatus(groupData.release.status);
+          } else {
+            var groupElement = document.createElement('div');
+            groupElement.className = 'release-group';
+            var groupId = 'release-group-' + releaseId;
+            groupControl = new ReleaseGroupControl(bus, groupId, groupElement, releaseId, groupData.release.name, groupData.release.status);
+            this.releaseGroups.set(releaseId, groupControl);
+            this.subscribeToChild(groupId, function() {});
+          }
+          
+          container.appendChild(groupControl.element);
+          
+          // Update plan count
+          groupControl.updatePlanCount(groupData.plans.length);
+          
+          // Place plan cards in this group
+          var groupContent = groupControl.getContentElement();
+          for (var j = 0; j < groupData.plans.length; j++) {
+            var plan = groupData.plans[j];
+            var card = this.planCards.get(plan.id);
+            if (card && card.element) {
+              groupContent.appendChild(card.element);
+            }
+          }
+        }
+        
+        // Render unassigned plans section
+        if (unassignedPlans.length > 0) {
+          var unassignedHeader = document.createElement('div');
+          unassignedHeader.className = 'unassigned-header';
+          unassignedHeader.textContent = 'Unassigned Plans';
+          container.appendChild(unassignedHeader);
+          
+          for (var i = 0; i < unassignedPlans.length; i++) {
+            var plan = unassignedPlans[i];
+            var card = this.planCards.get(plan.id);
+            if (card && card.element) {
+              container.appendChild(card.element);
+            }
+          }
+        }
+      } else {
+        // No releases, just show all active plans
+        for (var i = 0; i < activePlans.length; i++) {
+          var card = this.planCards.get(activePlans[i].id);
+          if (card && card.element) container.appendChild(card.element);
+        }
       }
+      
+      // Rebuild archived container
       for (var i = 0; i < archivedPlans.length; i++) {
         var card = this.planCards.get(archivedPlans[i].id);
         if (card && card.element) archivedContainer.appendChild(card.element);
       }
     }
 
-    this.publishUpdate(plans);
+    // Build display-order plan list for multi-select manager
+    var displayOrderPlans = [];
+    if (hasAnyRelease) {
+      // Add release groups in sorted order
+      var sortedReleases = Array.from(releaseGroups.entries()).sort(function(a, b) {
+        return a[1].release.name.localeCompare(b[1].release.name);
+      });
+      for (var i = 0; i < sortedReleases.length; i++) {
+        displayOrderPlans = displayOrderPlans.concat(sortedReleases[i][1].plans);
+      }
+      // Add unassigned plans
+      displayOrderPlans = displayOrderPlans.concat(unassignedPlans);
+    } else {
+      displayOrderPlans = activePlans;
+    }
+    // Add archived plans at the end
+    displayOrderPlans = displayOrderPlans.concat(archivedPlans);
+    
+    this.publishUpdate(displayOrderPlans);
   }
 
   addPlan(planData) {
