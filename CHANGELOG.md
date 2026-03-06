@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Adaptive release wizard**: Dynamic wizard steps adapt to release flow type (from-branch vs from-plans)
+- **Pre-PR preparation checklist**: Guided preparation tasks before creating pull requests
+  - Update changelog with release notes
+  - Bump version numbers in package.json and other files
+  - Update documentation (README, docs/) for new features
+  - AI code review of all release changes
+  - Run compile + test validation checks
+  - Custom user-defined tasks
+- **Release instructions auto-generation**: Automatically generates `.github/instructions/release-<branch>.instructions.md` with preparation guidance for Copilot agents
+- **Add plans to release at any stage**: Plans can be added to releases in drafting, preparing, or ready-for-pr states via `add_plans_to_release` tool or UI
+- **New release states**: 
+  - `preparing` — Pre-PR preparation tasks in progress
+  - `ready-for-pr` — All preparation tasks complete, ready to create PR
+  - `pr-active` — PR created but monitoring not yet started
+- **3 new MCP tools**:
+  - `prepare_copilot_release` — Enter preparation phase with automated task checklist
+  - `execute_release_task` — Auto-execute preparation tasks using Copilot agents
+  - `add_plans_to_release` — Add plans to existing releases dynamically
 - 30-second debounce delay for .gitignore re-application after branch changes, preventing dirty-branch race conditions that block `git checkout` operations
 - Plan archiving: preserve plan state/logs while cleaning up git worktrees and branches
 - "Archived" collapsible section in Plans sidebar with dimmed visual treatment

@@ -5,10 +5,20 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Release Flow Types](#release-flow-types)
+  - [From-Plans Flow](#from-plans-flow)
+  - [From-Branch Flow](#from-branch-flow)
 - [Quick Start](#quick-start)
 - [UI Workflows](#ui-workflows)
   - [Create Release from Current Branch](#create-release-from-current-branch)
   - [Assign Plans to Release](#assign-plans-to-release)
+- [Pre-PR Preparation](#pre-pr-preparation)
+  - [Preparation Phase Overview](#preparation-phase-overview)
+  - [Preparation Tasks](#preparation-tasks)
+  - [Using prepare_copilot_release](#using-prepare_copilot_release)
+  - [Auto-Executing Tasks](#auto-executing-tasks)
+  - [Skipping Optional Tasks](#skipping-optional-tasks)
+- [Release State Machine](#release-state-machine)
 - [Multi-Provider Support](#multi-provider-support)
 - [Release Workflow](#release-workflow)
 - [Storage Layout](#storage-layout)
@@ -32,6 +42,57 @@
 7. **Track progress** through detailed UI panels and MCP status queries
 
 All release operations happen in **isolated repository clones** under `.orchestrator/release/<sanitized-branch>/` — never in OS temp directories, enabling concurrent releases and persistent state.
+
+---
+
+## Release Flow Types
+
+The release system supports two distinct workflows to accommodate different development patterns.
+
+### From-Plans Flow
+
+**Use this when:** You have completed plans that you want to bundle into a single release PR.
+
+**Workflow:**
+1. Create release with specific `planIds`
+2. System merges commits from those plans into the release branch
+3. Optionally enter preparation phase to update changelog, version, docs
+4. Create PR from the merged changes
+5. Monitor and address feedback until merged
+
+**Example:**
+```typescript
+create_copilot_release({
+  name: "v1.2.0 Release",
+  planIds: ["plan-feature-a", "plan-bugfix-b", "plan-improvement-c"],
+  releaseBranch: "release/v1.2.0",
+  targetBranch: "main"
+})
+```
+
+### From-Branch Flow
+
+**Use this when:** You have an existing branch (e.g., `release/v1.2.0`) with changes already committed, and you want release management without plan merging.
+
+**Workflow:**
+1. Create release with `releaseBranch` pointing to existing branch and empty or optional `planIds`
+2. System skips merge phase (branch already has your changes)
+3. Enter preparation phase for pre-PR quality checks
+4. Create PR from the existing branch
+5. Monitor and address feedback until merged
+
+**Example:**
+```typescript
+create_copilot_release({
+  name: "Hotfix Release",
+  planIds: [],  // Empty for from-branch flow
+  releaseBranch: "hotfix/critical-bug",
+  targetBranch: "main",
+  repoPath: "/path/to/repo"
+})
+```
+
+**Key difference:** From-branch flow is optimized for scenarios where changes are already on a branch (manual commits, external tooling, or importing work from other sources). From-plans flow is for orchestrator-managed work that needs to be bundled.
 
 ---
 
@@ -136,6 +197,206 @@ After creating a release (from branch or via MCP), you can assign additional pla
 - You've created a release but forgot to include some plans
 - Additional plans completed after the release was created
 - You want to batch-assign plans discovered via search or filter
+
+---
+
+## Pre-PR Preparation
+
+Before creating a pull request, you may want to ensure the release meets quality standards, has up-to-date documentation, and passes validation checks. The preparation phase provides a structured checklist of tasks to complete before PR creation.
+
+### Preparation Phase Overview
+
+The **preparation phase** is an optional stage between merging/drafting and PR creation:
+
+1. **Create release** (status: `drafting`)
+2. **Call `prepare_copilot_release`** (status: `preparing`)
+3. **Complete preparation tasks** (changelog, version, docs, review)
+4. **All required tasks complete** (status: `ready-for-pr`)
+5. **Call `start_copilot_release`** to create PR and begin monitoring
+
+**When to use preparation:**
+- Version releases that need changelog updates and version bumps
+- Major features requiring documentation updates
+- Any release where you want AI review before creating the PR
+- Releases with custom validation requirements
+
+**When to skip preparation:**
+- Hotfixes that need immediate PR creation
+- Simple bugfix releases with no version/docs changes
+- When using `autoStart: true` (skips directly to merge → PR → monitoring)
+
+### Preparation Tasks
+
+The system provides a default checklist of tasks. Each task has:
+
+- **Type**: `update-changelog`, `update-version`, `update-docs`, `create-release-notes`, `run-checks`, `ai-review`, or `custom`
+- **Required**: Whether the task blocks PR creation (required tasks must be completed or can never be skipped)
+- **Automatable**: Whether Copilot can auto-execute the task via `execute_release_task`
+- **Status**: `pending`, `in-progress`, `completed`, `failed`, or `skipped`
+
+**Default preparation tasks:**
+
+| Task ID | Type | Title | Required | Automatable |
+|---------|------|-------|----------|-------------|
+| `update-changelog` | `update-changelog` | Update CHANGELOG.md | Yes | Yes |
+| `update-version` | `update-version` | Bump version numbers | Yes | Yes |
+| `update-docs` | `update-docs` | Update documentation | No | Yes |
+| `create-release-notes` | `create-release-notes` | Generate release notes | No | Yes |
+| `run-checks` | `run-checks` | Run compile + tests | Yes | Yes |
+| `ai-review` | `ai-review` | AI code review | No | Yes |
+
+### Using prepare_copilot_release
+
+To enter the preparation phase:
+
+**Via MCP:**
+```typescript
+// 1. Create release
+create_copilot_release({
+  name: "v1.3.0 Release",
+  planIds: ["plan-a", "plan-b"],
+  releaseBranch: "release/v1.3.0",
+  targetBranch: "main"
+})
+// Returns: { releaseId: "rel-xyz", status: "drafting" }
+
+// 2. Enter preparation phase
+prepare_copilot_release({
+  releaseId: "rel-xyz"
+})
+// Returns: { success: true, preparationTasks: [...] }
+
+// 3. Check status
+get_copilot_release_status({
+  releaseId: "rel-xyz"
+})
+// Returns: { release: { status: "preparing", preparationTasks: [...] } }
+```
+
+**Via UI:**
+1. Create release via wizard or "From Current Branch"
+2. Click **"Prepare Release"** button in release detail panel
+3. View preparation task checklist
+4. Complete tasks manually or use auto-execute
+
+### Auto-Executing Tasks
+
+For tasks marked `automatable: true`, Copilot can complete them automatically:
+
+```typescript
+execute_release_task({
+  releaseId: "rel-xyz",
+  taskId: "update-changelog"
+})
+// Spawns Copilot agent to update CHANGELOG.md
+// Returns: { success: true, status: "in-progress" }
+
+// Agent will:
+// 1. Analyze plan commits and changes
+// 2. Update CHANGELOG.md with new entries
+// 3. Commit the changes
+// 4. Mark task as completed
+```
+
+**What auto-execution does:**
+
+| Task Type | Agent Instructions |
+|-----------|-------------------|
+| `update-changelog` | Analyze commits, update CHANGELOG.md following Keep a Changelog format |
+| `update-version` | Bump version in package.json, package-lock.json, and other version files |
+| `update-docs` | Update README.md and docs/ with new features, API changes, configuration |
+| `create-release-notes` | Generate release notes from commit messages and plan summaries |
+| `run-checks` | Run `npm run compile && npm test` (or configured validation command) |
+| `ai-review` | Spawn AI agent to review all changes and report issues |
+
+### Skipping Optional Tasks
+
+Optional tasks (`required: false`) can be skipped if not needed:
+
+```typescript
+skip_release_task({
+  releaseId: "rel-xyz",
+  taskId: "create-release-notes"
+})
+// Returns: { success: true, status: "skipped" }
+```
+
+**Rules:**
+- Only optional tasks can be skipped
+- Required tasks must be completed (via auto-execution or manual completion)
+- Once all required tasks are `completed`, the release transitions to `ready-for-pr`
+- Call `start_copilot_release` to proceed with PR creation
+
+**Marking tasks complete manually:**
+
+If you complete a task outside the orchestrator (e.g., manually edit CHANGELOG), mark it complete via:
+1. UI: Click checkbox next to task in release detail panel
+2. MCP: Tasks auto-transition to `completed` when their expected output is detected
+
+---
+
+## Release State Machine
+
+The release lifecycle follows a strict state machine:
+
+```mermaid
+stateDiagram-v2
+    [*] --> drafting: create_copilot_release
+    
+    drafting --> preparing: prepare_copilot_release
+    drafting --> merging: start_copilot_release (skip prep)
+    
+    preparing --> preparing: execute_release_task, skip_release_task
+    preparing --> ready_for_pr: All required tasks complete
+    
+    ready_for_pr --> merging: start_copilot_release
+    
+    merging --> creating_pr: Merge complete
+    
+    creating_pr --> pr_active: PR created
+    
+    pr_active --> monitoring: Start monitoring
+    
+    monitoring --> monitoring: CI/checks pending
+    monitoring --> addressing: CI failure or review comments
+    
+    addressing --> monitoring: Issues fixed, return to monitoring
+    
+    monitoring --> succeeded: PR merged
+    
+    drafting --> canceled: cancel_copilot_release
+    preparing --> canceled: cancel_copilot_release
+    ready_for_pr --> canceled: cancel_copilot_release
+    merging --> canceled: cancel_copilot_release
+    creating_pr --> canceled: cancel_copilot_release
+    pr_active --> canceled: cancel_copilot_release
+    monitoring --> canceled: cancel_copilot_release
+    addressing --> canceled: cancel_copilot_release
+    
+    merging --> failed: Merge conflict
+    creating_pr --> failed: PR creation failed
+    monitoring --> failed: Timeout (40 min)
+    
+    succeeded --> [*]
+    failed --> [*]
+    canceled --> [*]
+```
+
+**State Descriptions:**
+
+| State | Description | Possible Transitions |
+|-------|-------------|---------------------|
+| `drafting` | Release created, plans can be added | `preparing`, `merging`, `canceled` |
+| `preparing` | Running pre-PR preparation tasks | `ready-for-pr`, `canceled` |
+| `ready-for-pr` | All prep tasks complete, ready for PR | `merging`, `canceled` |
+| `merging` | Merging plan commits into release branch | `creating-pr`, `failed`, `canceled` |
+| `creating-pr` | Creating pull request via gh/az | `pr-active`, `failed`, `canceled` |
+| `pr-active` | PR created, not yet monitoring | `monitoring`, `canceled` |
+| `monitoring` | Monitoring PR for CI/reviews/alerts | `addressing`, `succeeded`, `failed`, `canceled` |
+| `addressing` | Fixing issues and replying to feedback | `monitoring`, `canceled` |
+| `succeeded` | PR merged successfully (terminal) | — |
+| `failed` | Unrecoverable error (terminal) | — |
+| `canceled` | User canceled (terminal) | — |
 
 ---
 
@@ -701,6 +962,76 @@ The release will continue monitoring. If the fix doesn't resolve the issue, anot
 ### Can I retry a failed release?
 
 Not directly. You can create a new release with the same plans and branch name (after deleting the failed release). Future versions will support release retry.
+
+### How do I add plans to a release after creation?
+
+Use the `add_plans_to_release` MCP tool or the UI:
+
+**Via MCP:**
+```typescript
+add_plans_to_release({
+  releaseId: "rel-xyz",
+  planIds: ["plan-new-1", "plan-new-2"]
+})
+```
+
+**Via UI:**
+1. Select plans in the Plans tab
+2. Right-click → "Assign to Release..."
+3. Choose the target release
+
+**Restrictions:**
+- Release must be in `drafting`, `preparing`, or `ready-for-pr` status
+- Cannot add plans to releases in `merging`, `creating-pr`, `pr-active`, `monitoring`, or terminal states
+
+### How do I skip the preparation phase?
+
+Use `autoStart: true` when creating the release:
+
+```typescript
+create_copilot_release({
+  name: "Hotfix",
+  planIds: ["plan-hotfix"],
+  releaseBranch: "hotfix/urgent",
+  autoStart: true  // Skips preparation, goes straight to merge → PR → monitoring
+})
+```
+
+Or omit calling `prepare_copilot_release` and directly call `start_copilot_release`:
+
+```typescript
+// 1. Create release
+const { releaseId } = create_copilot_release({ ... });
+
+// 2. Skip to PR creation (no preparation)
+start_copilot_release({ releaseId });
+```
+
+### Can I customize the preparation tasks?
+
+Not yet. The default task list is fixed. Future versions will support:
+- Custom task definitions via release configuration
+- Repository-specific task templates
+- Task plugins for specialized validation
+
+### What if I manually complete a preparation task?
+
+The system auto-detects changes:
+- If you manually update CHANGELOG.md, the `update-changelog` task will auto-transition to `completed` on next status check
+- You can also manually mark tasks as complete via the UI checkbox
+- Only required tasks block PR creation — optional tasks can be skipped
+
+### When should I use from-branch vs from-plans flow?
+
+**Use from-plans:**
+- You have orchestrator-managed plans that need to be bundled
+- You want the system to handle merging commits from multiple plans
+- Standard version release workflow
+
+**Use from-branch:**
+- You have an existing branch with manual commits
+- Importing work from external sources (another tool, manual changes)
+- The branch already has all changes, you just want prep + PR + monitoring
 
 ---
 

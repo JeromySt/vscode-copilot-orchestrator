@@ -37,7 +37,7 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | ⚡ **Automated 8-Phase Pipeline** | Merge FI → Prechecks → AI Work → Commit → Postchecks → Merge RI → Verify RI → Cleanup |
 | 🔧 **Multi-Retry Auto-Heal** | Failed phases automatically retried up to 4 times with fresh AI agents and failure context |
 | 📈 **Timeline Gantt Chart** | [Experimental] Pixel-perfect timeline showing execution history with phases, retries, and durations |
-| 🤖 **26 Native MCP Tools** | Create and manage plans and releases directly from GitHub Copilot Chat |
+| 🤖 **29 Native MCP Tools** | Create and manage plans and releases directly from GitHub Copilot Chat |
 | 🚀 **Release Management** | Combine multiple plans into a single PR with autonomous monitoring (GitHub/GHE/Azure DevOps) |
 | 📁 **Visual Release Grouping** | Plans tab automatically groups plans by release with collapsible containers and status badges |
 | ⏸️ **Pause / Resume / Retry** | Pause running plans, resume later, or retry failed nodes with AI failure context |
@@ -684,7 +684,7 @@ The extension implements VS Code's `McpServerDefinitionProvider` API to automati
 - **VS Code manages lifecycle** — No manual process management needed
 - **Workspace-scoped** — Each workspace gets its own MCP server instance
 
-### 21 MCP Tools
+### 29 MCP Tools
 
 **Plan Management (15 tools):**
 
@@ -716,6 +716,20 @@ The extension implements VS Code's `McpServerDefinitionProvider` API to automati
 | `force_fail_copilot_job` | Force-fail a stuck job to unblock dependents |
 | `get_copilot_job_failure_context` | Get AI-friendly failure context for a job |
 | `update_copilot_plan_job` | Update a job's work spec, prechecks, or postchecks |
+
+**Release Management (8 tools):**
+
+| Tool | Description |
+|------|-------------|
+| `create_copilot_release` | Create a multi-plan release with auto-detection |
+| `start_copilot_release` | Begin merge → PR creation → monitoring → addressing cycle |
+| `prepare_copilot_release` | Enter preparation phase with automated task checklist |
+| `execute_release_task` | Auto-execute preparation tasks using Copilot agents |
+| `skip_release_task` | Skip an optional preparation task |
+| `add_plans_to_release` | Add plans to existing releases dynamically |
+| `get_copilot_release_status` | Query detailed release progress and PR state |
+| `list_copilot_releases` | List all releases with optional status filter |
+| `cancel_copilot_release` | Cancel an in-progress release |
 
 **Example — Creating a plan via Copilot Chat:**
 ```
