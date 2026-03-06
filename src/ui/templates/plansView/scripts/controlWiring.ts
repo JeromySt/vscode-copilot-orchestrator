@@ -139,9 +139,10 @@ bus.on(Topics.PLANS_SELECTION_CHANGED, function(event) {
   var selectionCountEl = document.getElementById('selectionCount');
   
   if (event.count > 1) {
-    // Show bulk actions bar
+    // Show bulk actions bar with contextual buttons
     bulkActionsBar.style.display = 'flex';
     selectionCountEl.textContent = event.count + ' selected';
+    updateBulkActionVisibility(event.selectedIds);
   } else {
     // Hide bulk actions bar
     bulkActionsBar.style.display = 'none';
@@ -242,6 +243,71 @@ function updateTabBadge(tabName, count) {
     } else {
       badge.style.display = 'none';
     }
+  }
+}
+
+// ── Contextual Action Visibility ─────────────────────────────────────
+// Collect statuses from selected plan cards' data-status attribute
+function getStatusesForIds(selectedIds) {
+  var statuses = [];
+  for (var si = 0; si < selectedIds.length; si++) {
+    var card = document.querySelector('.plan-item[data-id=\"' + selectedIds[si] + '\"]');
+    if (card && card.dataset.status) statuses.push(card.dataset.status);
+  }
+  return statuses;
+}
+
+function computeVisibility(statuses) {
+  var hasRunning = statuses.indexOf('running') !== -1 || statuses.indexOf('pending') !== -1;
+  var hasPaused = statuses.indexOf('paused') !== -1 || statuses.indexOf('pending-start') !== -1;
+  var hasFailed = statuses.indexOf('failed') !== -1 || statuses.indexOf('partial') !== -1;
+  var hasScaffolding = statuses.indexOf('scaffolding') !== -1;
+  var hasArchivable = statuses.indexOf('succeeded') !== -1 || statuses.indexOf('partial') !== -1 || statuses.indexOf('canceled') !== -1 || statuses.indexOf('failed') !== -1;
+  var hasRecoverable = statuses.indexOf('canceled') !== -1 || statuses.indexOf('archived') !== -1 || statuses.indexOf('failed') !== -1;
+  return {
+    resume: hasPaused,
+    pause: hasRunning,
+    cancel: hasRunning || hasPaused,
+    retry: hasFailed,
+    finalize: hasScaffolding,
+    archive: hasArchivable,
+    recover: hasRecoverable,
+    assignToRelease: hasArchivable,
+    createReleaseFromPlans: hasArchivable,
+    delete: true
+  };
+}
+
+/** Show/hide bulk action buttons based on selected plans' statuses */
+function updateBulkActionVisibility(selectedIds) {
+  var vis = computeVisibility(getStatusesForIds(selectedIds));
+  var btns = document.querySelectorAll('#bulkButtons .bulk-btn');
+  for (var bi = 0; bi < btns.length; bi++) {
+    var action = btns[bi].dataset.action;
+    btns[bi].style.display = (vis[action] !== undefined ? vis[action] : true) ? '' : 'none';
+  }
+}
+
+/** Show/hide context menu items based on selected plans' statuses */
+function updateContextMenuVisibility(selectedIds) {
+  var vis = computeVisibility(getStatusesForIds(selectedIds));
+  var items = document.querySelectorAll('#contextMenu .context-menu-item');
+  var prevVisible = false;
+  for (var ci = 0; ci < items.length; ci++) {
+    var action = items[ci].dataset.action;
+    if (!action) continue;
+    var show = vis[action] !== undefined ? vis[action] : true;
+    items[ci].style.display = show ? '' : 'none';
+    prevVisible = show;
+  }
+  // Hide separators that are adjacent to hidden items (clean look)
+  var seps = document.querySelectorAll('#contextMenu .context-menu-separator');
+  for (var si = 0; si < seps.length; si++) {
+    var prev = seps[si].previousElementSibling;
+    var next = seps[si].nextElementSibling;
+    var prevHidden = prev && prev.style.display === 'none';
+    var nextHidden = next && (next.style.display === 'none' || next.classList.contains('context-menu-separator'));
+    seps[si].style.display = (prevHidden || nextHidden) ? 'none' : '';
   }
 }
 
