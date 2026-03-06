@@ -13,10 +13,11 @@ import type { ReleaseDefinition } from '../../../plan/types/release';
  * Render the webview `<script>` block for the release management view.
  *
  * @param release - Release definition data.
+ * @param nonce - CSP nonce for script execution.
  * @returns HTML `<script>…</script>` string.
  */
-export function renderReleaseScripts(release: ReleaseDefinition): string {
-  return `<script>
+export function renderReleaseScripts(release: ReleaseDefinition, nonce: string): string {
+  return `<script nonce="${nonce}">
     // ── Data Injection ──────────────────────────────────────────────────
     const vscode = acquireVsCodeApi();
     const releaseData = ${JSON.stringify(release)};

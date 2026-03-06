@@ -18,7 +18,8 @@ import type { ReleaseManagementDelegate } from './releaseManagementController';
 import type { IDialogService } from '../../interfaces/IDialogService';
 import type { IReleaseManager } from '../../interfaces/IReleaseManager';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
-import { webviewScriptTag } from '../webviewUri';
+import { getWebviewBundleUri } from '../webviewUri';
+import { renderReleaseStyles, renderReleaseBody, renderReleaseScripts } from '../templates/release';
 import type { ReleaseDefinition } from '../../plan/types/release';
 
 /**
@@ -232,12 +233,7 @@ export class ReleaseManagementPanel {
     const nonce = this._getNonce();
     const csp = this._panel.webview.cspSource;
     
-    // Import template modules (will be created next)
-    const { renderReleaseStyles } = require('../templates/release/stylesTemplate');
-    const { renderReleaseBody } = require('../templates/release/bodyTemplate');
-    const { renderReleaseScripts } = require('../templates/release/scriptsTemplate');
-    
-    const scriptTag = webviewScriptTag(this._panel.webview, this._extensionUri, 'release');
+    const scriptUri = getWebviewBundleUri(this._panel.webview, this._extensionUri, 'release');
     
     return `<!DOCTYPE html>
 <html lang="en">
@@ -252,8 +248,8 @@ export class ReleaseManagementPanel {
 </head>
 <body>
   ${renderReleaseBody(release)}
-  ${scriptTag}
-  ${renderReleaseScripts(release)}
+  <script nonce="${nonce}" src="${scriptUri}"></script>
+  ${renderReleaseScripts(release, nonce)}
 </body>
 </html>`;
   }
