@@ -8,6 +8,7 @@
 
 import * as vscode from 'vscode';
 import { ReleaseManagementPanel } from '../ui/panels/releaseManagementPanel';
+import type { AvailablePlanSummary } from '../ui/panels/releaseManagementPanel';
 import type { ReleaseDefinition } from '../plan/types/release';
 import type { IReleaseManager } from '../interfaces/IReleaseManager';
 import type { IPlanRunner } from '../interfaces/IPlanRunner';
@@ -32,11 +33,28 @@ export function registerReleaseCommands(
         vscode.window.showErrorMessage('Release manager not initialized');
         return;
       }
+      const getAvailablePlans = (): AvailablePlanSummary[] => {
+        if (!planRunner) { return []; }
+        return planRunner.getAll()
+          .filter(p => p.spec.name && (p.nodeStates.size > 0))
+          .map(p => ({
+            id: p.id,
+            name: p.spec.name,
+            status: Array.from(p.nodeStates.values()).every(n => n.status === 'succeeded') ? 'succeeded' :
+                    Array.from(p.nodeStates.values()).some(n => n.status === 'running') ? 'running' : 'pending',
+            nodeCount: p.nodeStates.size,
+          }));
+      };
       ReleaseManagementPanel.createOrShow(
         context.extensionUri,
         releaseId,
         getReleaseData,
         releaseManager,
+        undefined, // options
+        undefined, // dialogService
+        undefined, // pulse
+        getAvailablePlans,
+        planRunner,
       );
     }),
 

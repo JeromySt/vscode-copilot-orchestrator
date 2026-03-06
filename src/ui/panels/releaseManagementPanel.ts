@@ -21,6 +21,15 @@ import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfa
 import { getWebviewBundleUri } from '../webviewUri';
 import { renderReleaseStyles, renderReleaseBody, renderReleaseScripts } from '../templates/release';
 import type { ReleaseDefinition } from '../../plan/types/release';
+import type { EventEmitter } from 'events';
+
+/** Lightweight plan summary passed to the release panel template. */
+export interface AvailablePlanSummary {
+  id: string;
+  name: string;
+  status: string;
+  nodeCount: number;
+}
 
 /**
  * Webview panel that shows a detailed view of a single Release's lifecycle.
@@ -55,6 +64,8 @@ export class ReleaseManagementPanel {
   private _pulseSubscription?: PulseDisposable;
   private readonly _controller: ReleaseManagementController;
   private _disposed = false;
+  private _planRunnerListeners: Array<{ event: string; fn: (...args: any[]) => void }> = [];
+  private _planRunner?: EventEmitter;
   
   /**
    * @param panel - The VS Code webview panel instance.
@@ -64,6 +75,8 @@ export class ReleaseManagementPanel {
    * @param _pulse - Pulse emitter for periodic updates.
    * @param _extensionUri - The extension's root URI (used for local resource roots).
    * @param releaseManager - Release manager for state transitions and operations.
+   * @param _getAvailablePlans - Callback that returns plan summaries for the plan selector.
+   * @param planRunner - Optional plan runner EventEmitter for live update subscriptions.
    */
   private constructor(
     panel: vscode.WebviewPanel,
@@ -72,7 +85,9 @@ export class ReleaseManagementPanel {
     dialogService: IDialogService,
     private _pulse: IPulseEmitter,
     private _extensionUri: vscode.Uri,
-    releaseManager: IReleaseManager
+    releaseManager: IReleaseManager,
+    private _getAvailablePlans: () => AvailablePlanSummary[],
+    planRunner?: EventEmitter,
   ) {
     this._panel = panel;
     this._releaseId = releaseId;
@@ -88,6 +103,16 @@ export class ReleaseManagementPanel {
       forceFullRefresh: () => this._forceFullRefresh(),
     };
     this._controller = new ReleaseManagementController(releaseId, dialogService, delegate, releaseManager);
+    
+    // Subscribe to plan runner events so the plan selector stays fresh
+    if (planRunner) {
+      this._planRunner = planRunner;
+      const refreshOnPlanChange = () => { if (!this._disposed) { this._forceFullRefresh(); } };
+      for (const evt of ['planCompleted', 'planCreated', 'planDeleted', 'planUpdated']) {
+        planRunner.on(evt, refreshOnPlanChange);
+        this._planRunnerListeners.push({ event: evt, fn: refreshOnPlanChange });
+      }
+    }
     
     // Initial render
     this._update();
@@ -121,6 +146,8 @@ export class ReleaseManagementPanel {
    * @param releaseId - The unique identifier of the Release to display.
    * @param getReleaseData - Function to fetch release data.
    * @param releaseManager - Release manager for state transitions and operations.
+   * @param getAvailablePlans - Callback returning lightweight plan summaries.
+   * @param planRunner - Optional plan runner EventEmitter for live updates.
    */
   public static createOrShow(
     extensionUri: vscode.Uri,
@@ -129,7 +156,9 @@ export class ReleaseManagementPanel {
     releaseManager: IReleaseManager,
     options?: { preserveFocus?: boolean },
     dialogService?: IDialogService,
-    pulse?: IPulseEmitter
+    pulse?: IPulseEmitter,
+    getAvailablePlans?: () => AvailablePlanSummary[],
+    planRunner?: EventEmitter,
   ) {
     const preserveFocus = options?.preserveFocus ?? false;
     
@@ -171,7 +200,8 @@ export class ReleaseManagementPanel {
     // Default pulse emitter (no-op) if not provided
     const effectivePulse: IPulseEmitter = pulse ?? { onPulse: () => ({ dispose: () => {} }), isRunning: false };
     
-    const releasePanel = new ReleaseManagementPanel(panel, releaseId, getReleaseData, effectiveDialogService, effectivePulse, extensionUri, releaseManager);
+    const effectiveGetPlans = getAvailablePlans ?? (() => []);
+    const releasePanel = new ReleaseManagementPanel(panel, releaseId, getReleaseData, effectiveDialogService, effectivePulse, extensionUri, releaseManager, effectiveGetPlans, planRunner);
     ReleaseManagementPanel.panels.set(releaseId, releasePanel);
   }
   
@@ -194,6 +224,14 @@ export class ReleaseManagementPanel {
     
     if (this._pulseSubscription) {
       this._pulseSubscription.dispose();
+    }
+    
+    // Unsubscribe from plan runner events
+    if (this._planRunner) {
+      for (const { event, fn } of this._planRunnerListeners) {
+        this._planRunner.removeListener(event, fn);
+      }
+      this._planRunnerListeners = [];
     }
     
     this._panel.dispose();
@@ -234,6 +272,7 @@ export class ReleaseManagementPanel {
     const csp = this._panel.webview.cspSource;
     
     const scriptUri = getWebviewBundleUri(this._panel.webview, this._extensionUri, 'release');
+    const availablePlans = this._getAvailablePlans();
     
     return `<!DOCTYPE html>
 <html lang="en">
@@ -249,7 +288,7 @@ export class ReleaseManagementPanel {
 <body>
   ${renderReleaseBody(release)}
   <script nonce="${nonce}" src="${scriptUri}"></script>
-  ${renderReleaseScripts(release, nonce)}
+  ${renderReleaseScripts(release, nonce, availablePlans)}
 </body>
 </html>`;
   }

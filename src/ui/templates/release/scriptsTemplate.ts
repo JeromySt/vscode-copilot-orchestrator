@@ -8,19 +8,22 @@
  */
 
 import type { ReleaseDefinition } from '../../../plan/types/release';
+import type { AvailablePlanSummary } from '../../panels/releaseManagementPanel';
 
 /**
  * Render the webview `<script>` block for the release management view.
  *
  * @param release - Release definition data.
  * @param nonce - CSP nonce for script execution.
+ * @param availablePlans - Real plan summaries from the plan runner.
  * @returns HTML `<script>…</script>` string.
  */
-export function renderReleaseScripts(release: ReleaseDefinition, nonce: string): string {
+export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, availablePlans: AvailablePlanSummary[] = []): string {
   return `<script nonce="${nonce}">
     // ── Data Injection ──────────────────────────────────────────────────
     const vscode = acquireVsCodeApi();
     const releaseData = ${JSON.stringify(release)};
+    const availablePlans = ${JSON.stringify(availablePlans)};
 
     // ── Destructure from Bundle ─────────────────────────────────────────
     const { EventBus, SubscribableControl, Topics } = window.Orca || {};
@@ -104,12 +107,10 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string):
         const container = document.getElementById(this.containerId);
         if (!container) return;
         
-        // Mock plan data - in real implementation, this would come from the extension
-        const availablePlans = [
-          { id: 'plan-1', name: 'Feature A', status: 'succeeded', jobCount: 5 },
-          { id: 'plan-2', name: 'Feature B', status: 'succeeded', jobCount: 3 },
-          { id: 'plan-3', name: 'Bug Fix', status: 'succeeded', jobCount: 2 },
-        ];
+        if (availablePlans.length === 0) {
+          container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground);">No succeeded plans available</div>';
+          return;
+        }
         
         container.innerHTML = availablePlans.map(plan => {
           const isSelected = this.selectedPlans.has(plan.id);
@@ -120,7 +121,7 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string):
               <input type="checkbox" class="plan-checkbox" \${isSelected ? 'checked' : ''} onclick="event.stopPropagation()">
               <div class="plan-info">
                 <div class="plan-name">\${plan.name}</div>
-                <div class="plan-details">\${plan.jobCount} jobs</div>
+                <div class="plan-details">\${plan.nodeCount} jobs</div>
               </div>
               <span class="plan-status-badge \${statusClass}">\${plan.status}</span>
             </div>
