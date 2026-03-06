@@ -434,6 +434,10 @@ export function initializePlansViewWithReleaseManager(
   treeViewManager.createTreeView(context);
   context.subscriptions.push(treeViewManager);
   
+  // Status bar: release rocket icon next to branch indicator
+  const { attachReleaseStatusBar } = require('../ui/statusBar');
+  attachReleaseStatusBar(context);
+  
   log.info('Plans view initialized with release manager');
 }
 
