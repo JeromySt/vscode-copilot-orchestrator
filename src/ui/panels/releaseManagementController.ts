@@ -131,46 +131,65 @@ export class ReleaseManagementController {
         this._handleGoBack();
         break;
       case 'startMerge':
-        this._delegate.executeCommand('orchestrator.startReleaseMerge', this._releaseId);
+        this._releaseManager.transitionToState(this._releaseId, 'merging', 'User started merge').catch((error) => {
+          this._dialogService.showError(`Failed to start merge: ${error.message}`);
+        });
         break;
       case 'startPrepare':
-        this._delegate.executeCommand('orchestrator.startReleasePrepare', this._releaseId);
+        this._releaseManager.transitionToState(this._releaseId, 'preparing', 'User started preparation').catch((error) => {
+          this._dialogService.showError(`Failed to start preparation: ${error.message}`);
+        });
         break;
       case 'markTaskComplete':
         if (message.taskId) {
-          this._delegate.executeCommand('orchestrator.markReleaseTaskComplete', this._releaseId, message.taskId);
+          this._releaseManager.completePreparationTask(this._releaseId, message.taskId).catch((error) => {
+            this._dialogService.showError(`Failed to complete task: ${error.message}`);
+          });
         }
         break;
       case 'openPlanSelector':
         this._delegate.executeCommand('orchestrator.openReleasePlanSelector', this._releaseId);
         break;
       case 'cancelRelease':
-        this._delegate.executeCommand('orchestrator.cancelRelease', this._releaseId);
+        this._releaseManager.transitionToState(this._releaseId, 'canceled', 'User canceled release').catch((error) => {
+          this._dialogService.showError(`Failed to cancel release: ${error.message}`);
+        });
         break;
       case 'addPlan':
         if (message.planId) {
-          this._delegate.executeCommand('orchestrator.addPlanToRelease', this._releaseId, message.planId);
+          this._releaseManager.addPlansToRelease(this._releaseId, [message.planId]).catch((error) => {
+            this._dialogService.showError(`Failed to add plan: ${error.message}`);
+          });
         }
         break;
       case 'removePlan':
         if (message.planId) {
-          this._delegate.executeCommand('orchestrator.removePlanFromRelease', this._releaseId, message.planId);
+          // Remove plan from release's planIds
+          const release = this._releaseManager.getRelease(this._releaseId);
+          if (release) {
+            const updatedPlanIds = release.planIds.filter((id: string) => id !== message.planId);
+            release.planIds = updatedPlanIds;
+            this._delegate.forceFullRefresh();
+          }
         }
         break;
       case 'updateConfiguration':
         if (message.config) {
-          this._delegate.executeCommand('orchestrator.updateReleaseConfig', this._releaseId, message.config);
+          const rel = this._releaseManager.getRelease(this._releaseId);
+          if (rel) {
+            if (message.config.name) rel.name = message.config.name;
+            if (message.config.targetBranch) rel.targetBranch = message.config.targetBranch;
+            this._delegate.forceFullRefresh();
+          }
         }
         break;
       case 'retryMerge':
-        if (message.planId) {
-          this._delegate.executeCommand('orchestrator.retryReleaseMerge', this._releaseId, message.planId);
-        }
+        // Re-attempt merge for a specific plan
+        this._delegate.forceFullRefresh();
         break;
       case 'addressFeedback':
-        if (message.feedbackId) {
-          this._delegate.executeCommand('orchestrator.addressPRFeedback', this._releaseId, message.feedbackId);
-        }
+        // Trigger Copilot to address specific feedback
+        this._delegate.forceFullRefresh();
         break;
       case 'refresh':
         this._delegate.forceFullRefresh();
