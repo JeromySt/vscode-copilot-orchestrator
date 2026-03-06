@@ -15,8 +15,11 @@
  * Release lifecycle status.
  * 
  * - `drafting`: Release is being configured, plans are being added
+ * - `preparing`: Pre-PR preparation phase (docs, versioning, AI checks)
  * - `merging`: Merging plan commits into the release branch
+ * - `ready-for-pr`: All prep done, ready to create PR
  * - `creating-pr`: Creating pull request for the release
+ * - `pr-active`: PR exists, not yet monitoring
  * - `monitoring`: Monitoring PR for CI checks, reviews, and feedback
  * - `addressing`: Addressing PR feedback and fixing issues
  * - `succeeded`: Release PR merged successfully
@@ -25,8 +28,11 @@
  */
 export type ReleaseStatus = 
   | 'drafting' 
+  | 'preparing'
   | 'merging' 
-  | 'creating-pr' 
+  | 'ready-for-pr'
+  | 'creating-pr'
+  | 'pr-active'
   | 'monitoring' 
   | 'addressing' 
   | 'succeeded' 
@@ -36,6 +42,43 @@ export type ReleaseStatus =
 // ============================================================================
 // RELEASE DEFINITION
 // ============================================================================
+
+/**
+ * Pre-PR preparation task status.
+ */
+export type PreparationTaskStatus = 'pending' | 'in-progress' | 'completed' | 'failed' | 'skipped';
+
+/**
+ * A task performed during the 'preparing' phase before creating the PR.
+ * 
+ * Examples: version bump, changelog update, documentation generation,
+ * AI-powered pre-release checks.
+ */
+export interface PreparationTask {
+  /** Unique task identifier */
+  id: string;
+
+  /** Human-friendly task name */
+  name: string;
+
+  /** Task description */
+  description?: string;
+
+  /** Current task status */
+  status: PreparationTaskStatus;
+
+  /** When task started */
+  startedAt?: number;
+
+  /** When task completed */
+  completedAt?: number;
+
+  /** Error message if task failed */
+  error?: string;
+
+  /** Result/output from the task */
+  result?: string;
+}
 
 /**
  * Defines a release combining multiple plans.
@@ -90,6 +133,30 @@ export interface ReleaseDefinition {
 
   /** Error message if release failed */
   error?: string;
+
+  /**
+   * Source flow type: plan-based or from existing branch.
+   * - 'from-plans': Merges plan commits into release branch
+   * - 'from-branch': Release branch already exists, skips merge
+   */
+  source: 'from-plans' | 'from-branch';
+
+  /**
+   * State transition history with timestamps.
+   * Canonical source of truth for state changes.
+   */
+  stateHistory: Array<{
+    from: ReleaseStatus;
+    to: ReleaseStatus;
+    timestamp: number;
+    reason?: string;
+  }>;
+
+  /**
+   * Pre-PR preparation tasks (versioning, docs, AI checks).
+   * Only used when in 'preparing' state.
+   */
+  preparationTasks?: PreparationTask[];
 }
 
 // ============================================================================

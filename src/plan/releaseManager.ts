@@ -35,6 +35,7 @@ import type { IRemotePRServiceFactory } from '../interfaces/IRemotePRServiceFact
 import type { IReleaseStore } from '../interfaces/IReleaseStore';
 import { Logger } from '../core/logger';
 import { ReleaseEventEmitter } from './releaseEvents';
+import { ReleaseStateMachine } from './releaseStateMachine';
 
 const log = Logger.for('plan');
 const gitLog = (msg: string) => log.info(msg);
@@ -47,6 +48,7 @@ const gitLog = (msg: string) => log.info(msg);
  */
 export class DefaultReleaseManager extends EventEmitter implements IReleaseManager {
   private readonly releases = new Map<string, ReleaseDefinition>();
+  private readonly stateMachines = new Map<string, ReleaseStateMachine>();
   private readonly events = new ReleaseEventEmitter();
 
   constructor(
@@ -125,8 +127,12 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       }
     }
 
+    // Determine source flow type
+    const source: 'from-plans' | 'from-branch' = options.planIds.length > 0 ? 'from-plans' : 'from-branch';
+
     // Build release definition
     const releaseId = this._generateReleaseId();
+    const now = Date.now();
     const release: ReleaseDefinition = {
       id: releaseId,
       name: options.name,
@@ -135,11 +141,38 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       targetBranch,
       repoPath,
       status: 'drafting',
-      createdAt: Date.now(),
+      source,
+      stateHistory: [
+        {
+          from: 'drafting',
+          to: 'drafting',
+          timestamp: now,
+          reason: 'Release created',
+        },
+      ],
+      createdAt: now,
     };
+
+    // Create state machine for this release
+    const stateMachine = new ReleaseStateMachine(release);
+    
+    // Forward state machine events to release events
+    stateMachine.on('transition', (event) => {
+      this.events.emitReleaseStatusChanged(event.releaseId, event.from, event.to);
+    });
+    stateMachine.on('completed', (releaseId, finalStatus) => {
+      if (finalStatus === 'succeeded') {
+        this.events.emitReleaseCompleted(release);
+      } else if (finalStatus === 'failed') {
+        this.events.emitReleaseFailed(release, release.error || 'Unknown error');
+      } else if (finalStatus === 'canceled') {
+        this.events.emitReleaseCanceled(releaseId);
+      }
+    });
 
     // Persist and track
     this.releases.set(releaseId, release);
+    this.stateMachines.set(releaseId, stateMachine);
     await this.store.saveRelease(release);
     this.events.emitReleaseCreated(release);
 
@@ -323,6 +356,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     log.info('Deleting release', { releaseId });
 
     this.releases.delete(releaseId);
+    this.stateMachines.delete(releaseId);
     this.store.deleteRelease(releaseId).catch((error) => {
       log.error('Failed to delete release from store', { releaseId, error: (error as Error).message });
     });
@@ -568,22 +602,30 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
   }
 
   /**
-   * Transition release to a new status and emit events.
+   * Transition release to a new status using the state machine.
+   * 
+   * @param release - The release to transition
+   * @param newStatus - The target status
+   * @param reason - Optional reason for the transition
+   * @throws If transition is invalid
    */
-  private async _transitionStatus(release: ReleaseDefinition, newStatus: ReleaseStatus): Promise<void> {
-    const oldStatus = release.status;
-    if (oldStatus === newStatus) {
-      return;
+  private async _transitionStatus(
+    release: ReleaseDefinition,
+    newStatus: ReleaseStatus,
+    reason?: string
+  ): Promise<void> {
+    const stateMachine = this.stateMachines.get(release.id);
+    if (!stateMachine) {
+      throw new Error(`State machine not found for release ${release.id}`);
     }
 
-    log.debug('Release status transition', { releaseId: release.id, from: oldStatus, to: newStatus });
-    release.status = newStatus;
+    const result = stateMachine.transition(newStatus, reason);
+    if (!result.success) {
+      throw new Error(`Invalid transition for release ${release.id}: ${result.error}`);
+    }
+
+    // Persist the updated release state
     await this.store.saveRelease(release);
-    this.events.emitReleaseStatusChanged(release.id, oldStatus, newStatus);
-
-    if (newStatus === 'succeeded') {
-      this.events.emitReleaseCompleted(release);
-    }
   }
 
   /**
@@ -593,10 +635,16 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     switch (release.status) {
       case 'drafting':
         return 'Configuring release';
+      case 'preparing':
+        return 'Preparing release (docs, versioning, checks)';
       case 'merging':
         return 'Merging plan commits';
+      case 'ready-for-pr':
+        return 'Ready to create pull request';
       case 'creating-pr':
         return 'Creating pull request';
+      case 'pr-active':
+        return 'Pull request created';
       case 'monitoring':
         return 'Monitoring PR for feedback';
       case 'addressing':
@@ -626,7 +674,40 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     try {
       const releases = await this.store.loadAllReleases();
       for (const release of releases) {
+        // Ensure required fields exist for backward compatibility
+        if (!release.stateHistory) {
+          release.stateHistory = [
+            {
+              from: release.status,
+              to: release.status,
+              timestamp: release.createdAt,
+              reason: 'Loaded from persisted state',
+            },
+          ];
+        }
+        if (!release.source) {
+          release.source = release.planIds.length > 0 ? 'from-plans' : 'from-branch';
+        }
+
+        // Create state machine for this release
+        const stateMachine = new ReleaseStateMachine(release);
+        
+        // Forward state machine events to release events
+        stateMachine.on('transition', (event) => {
+          this.events.emitReleaseStatusChanged(event.releaseId, event.from, event.to);
+        });
+        stateMachine.on('completed', (releaseId, finalStatus) => {
+          if (finalStatus === 'succeeded') {
+            this.events.emitReleaseCompleted(release);
+          } else if (finalStatus === 'failed') {
+            this.events.emitReleaseFailed(release, release.error || 'Unknown error');
+          } else if (finalStatus === 'canceled') {
+            this.events.emitReleaseCanceled(releaseId);
+          }
+        });
+
         this.releases.set(release.id, release);
+        this.stateMachines.set(release.id, stateMachine);
       }
       log.info('Loaded persisted releases', { count: releases.length });
     } catch (error) {

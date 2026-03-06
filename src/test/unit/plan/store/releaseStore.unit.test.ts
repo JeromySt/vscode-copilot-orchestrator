@@ -35,6 +35,15 @@ function createTestRelease(overrides?: Partial<ReleaseDefinition>): ReleaseDefin
     targetBranch: 'main',
     repoPath: '/repo',
     status: 'drafting',
+    source: 'from-plans',
+    stateHistory: [
+      {
+        from: 'drafting',
+        to: 'drafting',
+        timestamp: Date.now(),
+        reason: 'Release created',
+      },
+    ],
     createdAt: Date.now(),
     ...overrides,
   };
