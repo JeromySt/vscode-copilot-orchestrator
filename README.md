@@ -39,6 +39,7 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | 📈 **Timeline Gantt Chart** | [Experimental] Pixel-perfect timeline showing execution history with phases, retries, and durations |
 | 🤖 **26 Native MCP Tools** | Create and manage plans and releases directly from GitHub Copilot Chat |
 | 🚀 **Release Management** | Combine multiple plans into a single PR with autonomous monitoring (GitHub/GHE/Azure DevOps) |
+| 📁 **Visual Release Grouping** | Plans tab automatically groups plans by release with collapsible containers and status badges |
 | ⏸️ **Pause / Resume / Retry** | Pause running plans, resume later, or retry failed nodes with AI failure context |
 | 🔒 **Secure MCP Architecture** | Nonce-authenticated IPC ensures 1:1 pairing between VS Code and MCP stdio process |
 | 🛡️ **Default Branch Protection** | Auto-creates feature branches when targeting main/master — never writes to default |
@@ -405,6 +406,8 @@ AI agents **never write directly to your default branch**.
 ### 🚀 Release Management
 
 Create production releases that combine multiple plan commits into a single pull request, with autonomous monitoring and feedback resolution — supporting **GitHub**, **GitHub Enterprise**, and **Azure DevOps**.
+
+Plans assigned to the same release are visually grouped together in the Plans tab with collapsible release containers showing the release name, status badge, and plan count. Unassigned plans are displayed separately for easy organization.
 
 #### How It Works
 

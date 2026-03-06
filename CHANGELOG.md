@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git rev-parse based recovery: recreates target branch and recovers deepest successful node worktrees
 - Copilot CLI agent verifies recovered worktree integrity
 - All recovered plans enter paused state for safe inspection before resuming
+- **Release grouping in Plans tab**: Plans assigned to the same release are visually grouped together with collapsible release containers showing release name, status, and plan count
+- **Unassigned plans section**: Plans without a release assignment are displayed separately under "Unassigned Plans" header
+- Release groups are sorted alphabetically by release name for easy navigation
+- Collapse state persists across VS Code sessions for each release group
 
 ## [0.15.0] - 2026-03-05
 
