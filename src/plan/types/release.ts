@@ -7,6 +7,8 @@
  * @module plan/types/release
  */
 
+import type { PreparationTask, ReleaseInstructions } from './releasePrep';
+
 // ============================================================================
 // RELEASE STATUS
 // ============================================================================
@@ -26,6 +28,7 @@ export type ReleaseFlowType = 'from-branch' | 'from-plans';
  * - `preparing`: Running pre-PR preparation tasks
  * - `merging`: Merging plan commits into the release branch
  * - `creating-pr`: Creating pull request for the release
+ * - `pr-active`: PR exists, not yet monitoring
  * - `monitoring`: Monitoring PR for CI checks, reviews, and feedback
  * - `addressing`: Addressing PR feedback and fixing issues
  * - `succeeded`: Release PR merged successfully
@@ -35,13 +38,32 @@ export type ReleaseFlowType = 'from-branch' | 'from-plans';
 export type ReleaseStatus = 
   | 'drafting' 
   | 'preparing'
+  | 'ready-for-pr'
   | 'merging' 
-  | 'creating-pr' 
+  | 'creating-pr'
+  | 'pr-active'
   | 'monitoring' 
   | 'addressing' 
   | 'succeeded' 
   | 'failed' 
   | 'canceled';
+
+/**
+ * A single state transition in the release lifecycle.
+ */
+export interface StateTransition {
+  /** Previous status */
+  from: ReleaseStatus;
+
+  /** New status */
+  to: ReleaseStatus;
+
+  /** When the transition occurred */
+  timestamp: number;
+
+  /** Optional reason for the transition */
+  reason?: string;
+}
 
 // ============================================================================
 // PREPARATION TASKS
@@ -120,9 +142,6 @@ export interface ReleaseDefinition {
   /** Current lifecycle status */
   status: ReleaseStatus;
 
-  /** State transition history */
-  stateHistory: StateTransition[];
-
   /** Preparation tasks checklist */
   prepTasks?: PrepTask[];
 
@@ -150,6 +169,15 @@ export interface ReleaseDefinition {
 
   /** Error message if release failed */
   error?: string;
+
+  /** Preparation tasks to complete before creating PR */
+  preparationTasks?: PreparationTask[];
+
+  /** Release instructions file metadata */
+  releaseInstructions?: ReleaseInstructions;
+
+  /** History of state transitions */
+  stateHistory: StateTransition[];
 }
 
 // ============================================================================
