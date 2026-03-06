@@ -20,7 +20,7 @@ export interface CreateReleaseOptions {
   /** Human-friendly name for the release */
   name: string;
 
-  /** Plan IDs to include in this release */
+  /** Plan IDs to include in this release (can be empty for manual/from-branch releases) */
   planIds: string[];
 
   /** Branch name for the release (e.g., 'release/v1.2.0') */
@@ -28,6 +28,9 @@ export interface CreateReleaseOptions {
 
   /** Target branch for the PR (defaults to 'main') */
   targetBranch?: string;
+
+  /** Repository path (required when planIds is empty) */
+  repoPath?: string;
 }
 
 /**

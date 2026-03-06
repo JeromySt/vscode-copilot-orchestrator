@@ -123,6 +123,7 @@ export function registerReleaseCommands(
           planIds: [], // No plans — this is a manual release
           releaseBranch: currentBranch,
           targetBranch: 'main', // Default target branch
+          repoPath: repoPath,
         });
         
         // 5. Check if a PR already exists for this branch (async, don't block)

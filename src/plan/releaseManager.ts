@@ -99,9 +99,16 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       }
     }
 
-    // Get repository path from first plan
-    const firstPlan = this.planRunner.get(options.planIds[0])!;
-    const repoPath = firstPlan.spec.repoPath ?? firstPlan.repoPath;
+    // Get repository path: from options (from-branch flow) or from first plan
+    let repoPath: string;
+    if (options.planIds.length > 0) {
+      const firstPlan = this.planRunner.get(options.planIds[0])!;
+      repoPath = firstPlan.spec.repoPath ?? firstPlan.repoPath;
+    } else if (options.repoPath) {
+      repoPath = options.repoPath;
+    } else {
+      throw new Error('repoPath is required when planIds is empty');
+    }
 
     // Resolve target branch (default to main if not specified)
     let targetBranch = options.targetBranch;
