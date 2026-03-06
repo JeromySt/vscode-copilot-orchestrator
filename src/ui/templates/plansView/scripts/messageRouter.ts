@@ -28,7 +28,8 @@ window.addEventListener('message', function(ev) {
     case 'update':
       // Initial load: full plan list
       var Plans = msg.Plans || [];
-      document.getElementById('badge').textContent = Plans.length + ' total';
+      var badge = document.getElementById('tabBadgePlans') || document.getElementById('badge');
+      if (badge) badge.textContent = Plans.length;
       bus.emit(PlansTopics.PLANS_UPDATE, Plans);
       if (isInitialLoad) {
         isInitialLoad = false;
@@ -62,7 +63,8 @@ window.addEventListener('message', function(ev) {
       break;
       
     case 'badgeUpdate':
-      document.getElementById('badge').textContent = (msg.total || 0) + ' total';
+      var badge = document.getElementById('tabBadgePlans') || document.getElementById('badge');
+      if (badge) badge.textContent = (msg.total || 0);
       break;
       
     case 'capacityUpdate':

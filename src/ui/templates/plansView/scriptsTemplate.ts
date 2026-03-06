@@ -284,7 +284,7 @@ class PlanListContainerControl extends SubscribableControl {
     if (!container || !archivedContainer) return;
 
     if (!plans || plans.length === 0) {
-      container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div>';
+      container.innerHTML = '<div class="welcome-state"><div class="welcome-icon">&#10024;</div><div class="welcome-title">No plans yet</div><div class="welcome-subtitle">Ask Copilot to create a plan, or use the <code>create_copilot_plan</code> MCP tool.</div></div>';
       archivedContainer.innerHTML = '';
       document.getElementById('archivedDivider').style.display = 'none';
       for (var entry of this.planCards.values()) { entry.dispose(); }
@@ -292,7 +292,7 @@ class PlanListContainerControl extends SubscribableControl {
       return;
     }
 
-    var emptyEl = container.querySelector('.empty');
+    var emptyEl = container.querySelector('.welcome-state') || container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
 
     // Separate active and archived plans
@@ -383,7 +383,7 @@ class PlanListContainerControl extends SubscribableControl {
     
     var targetContainer = planData.status === 'archived' ? archivedContainer : container;
     
-    var emptyEl = container.querySelector('.empty');
+    var emptyEl = container.querySelector('.welcome-state') || container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
     if (this.planCards.has(planData.id)) {
       var existing = this.planCards.get(planData.id);
@@ -414,7 +414,7 @@ class PlanListContainerControl extends SubscribableControl {
     this.planCards.delete(planId);
     if (this.planCards.size === 0) {
       var container = this.getElement(this.containerId);
-      if (container) container.innerHTML = '<div class="empty">No plans yet. Use <code>create_copilot_plan</code> MCP tool.</div>';
+      if (container) container.innerHTML = '<div class="welcome-state"><div class="welcome-icon">&#10024;</div><div class="welcome-title">No plans yet</div><div class="welcome-subtitle">Ask Copilot to create a plan, or use the <code>create_copilot_plan</code> MCP tool.</div></div>';
       document.getElementById('archivedDivider').style.display = 'none';
     }
   }
@@ -591,14 +591,14 @@ class PRListContainerControl extends SubscribableControl {
     if (!container) return;
 
     if (!prs || prs.length === 0) {
-      container.innerHTML = '<div class="empty">No managed PRs.</div>';
+      container.innerHTML = '<div class="welcome-state"><div class="welcome-icon">&#128279;</div><div class="welcome-title">No managed PRs</div><div class="welcome-subtitle">Adopt an existing PR to monitor it.</div></div>';
       for (var entry of this.prCards.values()) { entry.dispose(); }
       this.prCards.clear();
       this._updateBadge(0);
       return;
     }
 
-    var emptyEl = container.querySelector('.empty');
+    var emptyEl = container.querySelector('.welcome-state') || container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
 
     var existingPRIds = new Set(this.prCards.keys());
@@ -648,7 +648,7 @@ class PRListContainerControl extends SubscribableControl {
   addPR(prData) {
     var container = this.getElement(this.containerId);
     if (!container) return;
-    var emptyEl = container.querySelector('.empty');
+    var emptyEl = container.querySelector('.welcome-state') || container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
     if (this.prCards.has(prData.id)) {
       var existing = this.prCards.get(prData.id);
@@ -672,7 +672,7 @@ class PRListContainerControl extends SubscribableControl {
     this.prCards.delete(prId);
     if (this.prCards.size === 0) {
       var container = this.getElement(this.containerId);
-      if (container) container.innerHTML = '<div class="empty">No managed PRs.</div>';
+      if (container) container.innerHTML = '<div class="welcome-state"><div class="welcome-icon">&#128279;</div><div class="welcome-title">No managed PRs</div><div class="welcome-subtitle">Adopt an existing PR to monitor it.</div></div>';
     }
     this._updateBadge(this.prCards.size);
   }
@@ -827,14 +827,14 @@ class ReleaseListContainerControl extends SubscribableControl {
     if (!container) return;
 
     if (!releases || releases.length === 0) {
-      container.innerHTML = '<div class="empty">🚀 No releases yet.</div>';
+      container.innerHTML = '<div class="welcome-state"><div class="welcome-icon">&#128640;</div><div class="welcome-title">No releases yet</div><div class="welcome-subtitle">Create a release to merge plans and monitor PRs.</div></div>';
       for (var entry of this.releaseCards.values()) { entry.dispose(); }
       this.releaseCards.clear();
       this._updateBadge(0);
       return;
     }
 
-    var emptyEl = container.querySelector('.empty');
+    var emptyEl = container.querySelector('.welcome-state') || container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
 
     var existingReleaseIds = new Set(this.releaseCards.keys());
@@ -884,7 +884,7 @@ class ReleaseListContainerControl extends SubscribableControl {
   addRelease(releaseData) {
     var container = this.getElement(this.containerId);
     if (!container) return;
-    var emptyEl = container.querySelector('.empty');
+    var emptyEl = container.querySelector('.welcome-state') || container.querySelector('.empty');
     if (emptyEl) emptyEl.parentNode.removeChild(emptyEl);
     if (this.releaseCards.has(releaseData.id)) {
       var existing = this.releaseCards.get(releaseData.id);
@@ -908,7 +908,7 @@ class ReleaseListContainerControl extends SubscribableControl {
     this.releaseCards.delete(releaseId);
     if (this.releaseCards.size === 0) {
       var container = this.getElement(this.containerId);
-      if (container) container.innerHTML = '<div class="empty">🚀 No releases yet.</div>';
+      if (container) container.innerHTML = '<div class=\"welcome-state\"><div class=\"welcome-icon\">&#128640;</div><div class=\"welcome-title\">No releases yet</div><div class=\"welcome-subtitle\">Create a release to merge plans and monitor PRs.</div></div>';
     }
     this._updateBadge(this.releaseCards.size);
   }
