@@ -424,16 +424,21 @@ export class DefaultReleasePRMonitor implements IReleasePRMonitor {
 
     // Invoke Copilot CLI agent in the isolated clone
     let copilotResult;
+    const outputLines: string[] = [];
     try {
       copilotResult = await this.copilotRunner.run({
         cwd: state.repoPath,
         task: taskDescription,
-        sessionId: `pr-monitor-${state.releaseId}-cycle-${cycle.cycleNumber}`,
+        timeout: 0, // No timeout for PR monitoring actions
+        onOutput: (line: string) => {
+          outputLines.push(line);
+        },
       });
     } catch (err) {
       log.error('Copilot CLI invocation failed', {
         releaseId: state.releaseId,
         error: err instanceof Error ? err.message : String(err),
+        lastOutput: outputLines.slice(-10).join('\n'),
       });
       actions.push({
         type: 'fix-code',
@@ -446,7 +451,8 @@ export class DefaultReleasePRMonitor implements IReleasePRMonitor {
     if (!copilotResult.success) {
       log.warn('Copilot CLI reported failure', {
         releaseId: state.releaseId,
-        output: copilotResult.error?.substring(0, 500),
+        error: copilotResult.error,
+        lastOutput: outputLines.slice(-20).join('\n'),
       });
       actions.push({
         type: 'fix-code',
