@@ -745,7 +745,8 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     await this._transitionStatus(release, 'creating-pr');
 
     try {
-      const cwd = release.isolatedRepoPath || release.repoPath;
+      // For from-branch releases, always use repoPath (not isolatedRepoPath which may not exist)
+      const cwd = release.repoPath;
       
       // Ensure credentials are configured before creating PR
       if (this.providerDetector) {
