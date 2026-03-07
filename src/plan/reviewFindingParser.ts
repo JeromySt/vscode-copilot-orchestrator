@@ -29,25 +29,72 @@ export function parseReviewFindings(output: string): ReviewFinding[] {
   if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
     const jsonBlock = output.substring(startIndex + startMarker.length, endIndex).trim();
     
-    try {
-      const rawFindings = JSON.parse(jsonBlock);
+    // The JSON may be split across multiple lines with interleaved CLI output.
+    // Strategy: find the JSON array within the block by locating the outermost [ ... ]
+    const arrayStart = jsonBlock.indexOf('[');
+    const arrayEnd = jsonBlock.lastIndexOf(']');
+    
+    if (arrayStart !== -1 && arrayEnd !== -1 && arrayEnd > arrayStart) {
+      const jsonCandidate = jsonBlock.substring(arrayStart, arrayEnd + 1);
       
-      if (Array.isArray(rawFindings)) {
-        return rawFindings.map((raw) => ({
-          id: randomUUID(),
-          severity: raw.severity || 'info',
-          title: raw.title || 'Untitled finding',
-          description: raw.description || '',
-          filePath: raw.filePath,
-          line: raw.line,
-          endLine: raw.endLine,
-          category: raw.category,
-          status: 'open',
-          createdAt: Date.now(),
-        }));
+      try {
+        const rawFindings = JSON.parse(jsonCandidate);
+        
+        if (Array.isArray(rawFindings)) {
+          return rawFindings.map((raw) => ({
+            id: randomUUID(),
+            severity: raw.severity || 'info',
+            title: raw.title || 'Untitled finding',
+            description: raw.description || '',
+            filePath: raw.filePath,
+            line: raw.line,
+            endLine: raw.endLine,
+            category: raw.category,
+            status: 'open' as const,
+            createdAt: Date.now(),
+          }));
+        }
+      } catch {
+        // JSON parsing failed — try cleaning up the content
+        // Remove common noise: lines starting with ● (tool calls), └, $, etc.
+        const cleanedLines = jsonCandidate.split('\n')
+          .filter(line => {
+            const trimmed = line.trim();
+            return trimmed.length > 0 &&
+              !trimmed.startsWith('●') &&
+              !trimmed.startsWith('└') &&
+              !trimmed.startsWith('$') &&
+              !trimmed.startsWith('CWD:') &&
+              !trimmed.startsWith('Spawning:') &&
+              !trimmed.startsWith('Environment');
+          })
+          .join(' ');
+        
+        try {
+          // Find the [ ... ] in cleaned text
+          const cleanStart = cleanedLines.indexOf('[');
+          const cleanEnd = cleanedLines.lastIndexOf(']');
+          if (cleanStart !== -1 && cleanEnd !== -1) {
+            const rawFindings = JSON.parse(cleanedLines.substring(cleanStart, cleanEnd + 1));
+            if (Array.isArray(rawFindings)) {
+              return rawFindings.map((raw) => ({
+                id: randomUUID(),
+                severity: raw.severity || 'info',
+                title: raw.title || 'Untitled finding',
+                description: raw.description || '',
+                filePath: raw.filePath,
+                line: raw.line,
+                endLine: raw.endLine,
+                category: raw.category,
+                status: 'open' as const,
+                createdAt: Date.now(),
+              }));
+            }
+          }
+        } catch {
+          // Still failed, fall through to heuristic
+        }
       }
-    } catch (err) {
-      // JSON parsing failed, fall through to heuristic
     }
   }
   

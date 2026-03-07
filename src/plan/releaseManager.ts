@@ -520,8 +520,14 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         log.info('Preparation task auto-completed (no runner)', { releaseId, taskId });
       }
       
-      // Parse findings from collected output
-      const findings = parseReviewFindings(outputBuffer.join('\n'));
+      // Parse findings from collected output (try buffer first, then log file)
+      let fullOutput = outputBuffer.join('\n');
+      if (!fullOutput.includes('FINDINGS_START') && logFilePath) {
+        try {
+          fullOutput = await fs.readFile(logFilePath, 'utf-8');
+        } catch { /* ignore read errors */ }
+      }
+      const findings = parseReviewFindings(fullOutput);
       if (findings.length > 0) {
         task.findings = findings;
         log.info('Parsed review findings', { releaseId, taskId, count: findings.length });
