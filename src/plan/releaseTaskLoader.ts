@@ -200,3 +200,150 @@ export function getDefaultReleaseTasks(): PrepTask[] {
     { id: 'ai-review', title: 'AI Code Review', description: 'Run Copilot code review on changes', required: false, autoSupported: true, status: 'pending' },
   ];
 }
+
+// ============================================================================
+// TASK FILE SCAFFOLDING
+// ============================================================================
+
+interface DefaultTaskTemplate {
+  id: string;
+  title: string;
+  description: string;
+  required: boolean;
+  autoSupported: boolean;
+  order: number;
+}
+
+/**
+ * Template definitions for default task files.
+ * Each will be written as a separate .md file with frontmatter.
+ */
+const DEFAULT_TASK_TEMPLATES: DefaultTaskTemplate[] = [
+  {
+    id: 'changelog',
+    title: 'Update CHANGELOG',
+    description: 'Add comprehensive release notes to CHANGELOG.md covering all features, fixes, and breaking changes in this release. Follow the Keep a Changelog format.',
+    required: true,
+    autoSupported: true,
+    order: 1
+  },
+  {
+    id: 'version',
+    title: 'Bump Version',
+    description: 'Update the version number in package.json (or equivalent) according to semantic versioning. Consider whether this is a major, minor, or patch release.',
+    required: true,
+    autoSupported: true,
+    order: 2
+  },
+  {
+    id: 'compile',
+    title: 'Run Compilation',
+    description: 'Ensure the TypeScript compilation completes without errors. Run the build command to verify all type definitions are correct and the code compiles cleanly.',
+    required: true,
+    autoSupported: true,
+    order: 3
+  },
+  {
+    id: 'tests',
+    title: 'Run Tests',
+    description: 'Execute the full test suite to ensure all tests pass. Verify that no regressions have been introduced by the changes in this release.',
+    required: true,
+    autoSupported: true,
+    order: 4
+  },
+  {
+    id: 'docs',
+    title: 'Update Documentation',
+    description: 'Review and update the README.md and other documentation files if needed. Ensure API changes are documented and examples are up to date.',
+    required: false,
+    autoSupported: false,
+    order: 5
+  },
+  {
+    id: 'ai-review',
+    title: 'AI Code Review',
+    description: 'Run an AI-powered code review on the changes to catch potential issues, suggest improvements, and ensure code quality standards are met.',
+    required: false,
+    autoSupported: true,
+    order: 6
+  }
+];
+
+/**
+ * Generate task file content with YAML frontmatter.
+ * 
+ * @param task - Task template to convert to file content
+ * @returns Markdown file content with frontmatter
+ */
+function generateTaskFileContent(task: DefaultTaskTemplate): string {
+  return `---
+id: ${task.id}
+title: ${task.title}
+required: ${task.required}
+autoSupported: ${task.autoSupported}
+order: ${task.order}
+---
+
+${task.description}
+`;
+}
+
+/**
+ * Scaffold default task files into .orchestrator/release/tasks/ directory.
+ * 
+ * Creates one .md file per default task with YAML frontmatter and description.
+ * Files are named with a numeric prefix for ordering: 01-changelog.md, 02-version.md, etc.
+ * 
+ * If files already exist, they are skipped (not overwritten).
+ * 
+ * @param repoPath - Root path of the repository
+ * @returns Array of created file paths (excludes skipped files)
+ * 
+ * @example
+ * ```ts
+ * const created = await scaffoldDefaultTaskFiles('/path/to/repo');
+ * // created: ['/path/to/repo/.orchestrator/release/tasks/01-changelog.md', ...]
+ * ```
+ */
+export async function scaffoldDefaultTaskFiles(repoPath: string): Promise<string[]> {
+  const tasksDir = path.join(repoPath, '.orchestrator', 'release', 'tasks');
+  
+  // Create tasks directory if it doesn't exist
+  try {
+    if (!fs.existsSync(tasksDir)) {
+      fs.mkdirSync(tasksDir, { recursive: true });
+      log.info('Created release tasks directory', { tasksDir });
+    }
+  } catch (err) {
+    log.error('Failed to create release tasks directory', { tasksDir, error: (err as Error).message });
+    throw new Error(`Failed to create tasks directory: ${(err as Error).message}`);
+  }
+  
+  const createdFiles: string[] = [];
+  
+  // Write each task file
+  for (const task of DEFAULT_TASK_TEMPLATES) {
+    const filename = `${task.order.toString().padStart(2, '0')}-${task.id}.md`;
+    const filepath = path.join(tasksDir, filename);
+    
+    // Skip if file already exists
+    if (fs.existsSync(filepath)) {
+      log.debug('Skipping existing task file', { filepath });
+      continue;
+    }
+    
+    const content = generateTaskFileContent(task);
+    
+    try {
+      fs.writeFileSync(filepath, content, 'utf-8');
+      createdFiles.push(filepath);
+      log.info('Created task file', { filepath, taskId: task.id });
+    } catch (err) {
+      log.warn('Failed to write task file', { filepath, error: (err as Error).message });
+      // Continue with other files even if one fails
+    }
+  }
+  
+  log.info('Scaffolded default task files', { tasksDir, created: createdFiles.length, total: DEFAULT_TASK_TEMPLATES.length });
+  return createdFiles;
+}

@@ -323,6 +323,45 @@ PLATFORM SUPPORT: GitHub, GitHub Enterprise, Azure DevOps`,
           }
         }
       }
+    },
+
+    // =========================================================================
+    // Release CONFIGURATION
+    // =========================================================================
+    {
+      name: 'scaffold_release_tasks',
+      description: `Create default release task files for customization.
+
+Creates task files in .orchestrator/release/tasks/ directory with default
+preparation tasks:
+- 01-changelog.md - Update CHANGELOG
+- 02-version.md - Bump Version  
+- 03-compile.md - Run Compilation
+- 04-tests.md - Run Tests
+- 05-docs.md - Update Documentation
+- 06-ai-review.md - AI Code Review
+
+Each file contains YAML frontmatter with task metadata (id, title, required,
+autoSupported, order) and a markdown body with the task description.
+
+Once created, you can:
+- Edit task descriptions to match your project
+- Add custom tasks by creating new .md files
+- Modify which tasks are required
+- Change task order
+
+Files that already exist are not overwritten.
+
+PLATFORM SUPPORT: GitHub, GitHub Enterprise, Azure DevOps`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repoPath: {
+            type: 'string',
+            description: 'Repository path (optional, defaults to workspace root)'
+          }
+        }
+      }
     }
   ];
 }
