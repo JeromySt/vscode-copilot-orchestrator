@@ -104,9 +104,7 @@ function renderAdaptiveStepIndicator(
   currentIndex: number, 
   status: string
 ): string {
-  const dots: string[] = [];
-  
-  for (let i = 0; i < steps.length; i++) {
+  const stepColumns = steps.map((step, i) => {
     const isActive = i === currentIndex;
     const isCompleted = i < currentIndex;
     const isFailed = status === 'failed' && isActive;
@@ -118,25 +116,31 @@ function renderAdaptiveStepIndicator(
       isFailed && 'failed'
     ].filter(Boolean).join(' ');
     
-    dots.push(`<div class="${dotClass}" data-step="${steps[i].id}"></div>`);
+    const labelClass = [
+      'step-label',
+      isActive && 'active',
+      isCompleted && 'completed',
+    ].filter(Boolean).join(' ');
     
-    if (i < steps.length - 1) {
-      const connectorClass = isCompleted ? 'step-connector completed' : 'step-connector';
-      dots.push(`<div class="${connectorClass}"></div>`);
+    return `<div class="step-column ${isActive ? 'active' : ''}">
+      <div class="${dotClass}"></div>
+      <div class="${labelClass}">${step.label}</div>
+    </div>`;
+  });
+  
+  // Build connectors between columns
+  const items: string[] = [];
+  for (let i = 0; i < stepColumns.length; i++) {
+    items.push(stepColumns[i]);
+    if (i < stepColumns.length - 1) {
+      const connectorClass = i < currentIndex ? 'step-connector completed' : 'step-connector';
+      items.push(`<div class="${connectorClass}"></div>`);
     }
   }
   
-  const labels = steps.map((step, i) => {
-    const labelClass = i === currentIndex ? 'step-label active' : 'step-label';
-    return `<div class="${labelClass}">${step.label}</div>`;
-  }).join('');
-  
   return `
 <div class="step-indicator">
-  ${dots.join('\n  ')}
-</div>
-<div class="step-labels">
-  ${labels}
+  ${items.join('\n  ')}
 </div>`;
 }
 

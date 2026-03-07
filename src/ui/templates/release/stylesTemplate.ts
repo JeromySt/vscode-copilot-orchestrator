@@ -73,10 +73,22 @@ function stepIndicatorStyles(): string {
     .step-indicator {
       display: flex;
       justify-content: center;
-      align-items: center;
-      gap: 12px;
+      align-items: flex-start;
       margin: 20px 0;
-      padding: 16px 0;
+      padding: 16px 0 0;
+    }
+    .step-column {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 80px;
+      position: relative;
+      padding-bottom: 12px;
+      border-bottom: 3px solid transparent;
+      transition: border-color 0.3s ease;
+    }
+    .step-column.active {
+      border-bottom-color: var(--vscode-button-background);
     }
     .step-dot {
       width: 12px;
@@ -84,7 +96,7 @@ function stepIndicatorStyles(): string {
       border-radius: 50%;
       background: var(--vscode-input-border);
       transition: all 0.3s ease;
-      position: relative;
+      margin-bottom: 8px;
     }
     .step-dot.active {
       width: 16px;
@@ -103,25 +115,24 @@ function stepIndicatorStyles(): string {
       height: 2px;
       background: var(--vscode-input-border);
       transition: background 0.3s ease;
+      margin-top: 5px;
+      flex-shrink: 0;
     }
     .step-connector.completed {
       background: var(--vscode-testing-iconPassed);
     }
-    .step-labels {
-      display: flex;
-      justify-content: center;
-      gap: 52px;
-      margin-top: 8px;
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-    }
     .step-label {
       text-align: center;
-      min-width: 80px;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      white-space: nowrap;
     }
     .step-label.active {
       color: var(--vscode-foreground);
       font-weight: 600;
+    }
+    .step-label.completed {
+      color: var(--vscode-testing-iconPassed);
     }`;
 }
 
