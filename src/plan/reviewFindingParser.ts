@@ -73,7 +73,7 @@ export function parseReviewFindingsHeuristic(output: string): ReviewFinding[] {
   const pattern1 = /^\*\*\s*(ERROR|WARNING|INFO|SUGGESTION)\s*\*\*\s*:?\s*(.+?)(?:\s*\(([^:]+):(\d+)\))?$/i;
   
   // Pattern 2: - [severity] description in `file.ts` line 42
-  const pattern2 = /^[-*]\s*\[(error|warning|info|suggestion)\]\s*(.+?)(?:\s+in\s+`([^`]+)`\s+line\s+(\d+))?/i;
+  const pattern2 = /^[-*]\s*\[(error|warning|info|suggestion)\]\s*(.+?)(?:\s+in\s+`([^`]+)`\s+line\s+(\d+))?$/i;
   
   // Pattern 3: ERROR: description (file.ts:42)
   const pattern3 = /^(ERROR|WARNING|INFO|SUGGESTION)\s*:?\s*(.+?)(?:\s*\(([^:]+):(\d+)\))?$/i;
