@@ -127,7 +127,10 @@ export class ReleaseManagementController {
         }
         break;
       case 'createPR':
-        this._releaseManager.createPR(this._releaseId, message.asDraft).catch((error) => {
+        // Transition to ready-for-pr first if still in preparing
+        this._releaseManager.transitionToState(this._releaseId, 'ready-for-pr', 'All tasks complete, creating PR').then(() => {
+          return this._releaseManager.createPR(this._releaseId, message.asDraft);
+        }).catch((error) => {
           this._dialogService.showError(`Failed to create PR: ${error.message}`);
         });
         break;
