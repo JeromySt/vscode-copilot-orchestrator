@@ -535,7 +535,7 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
   
   <div class="monitoring-controls" style="margin-bottom: 16px;">
     ${isPRActive ? '<button onclick="startMonitoring()">Start Monitoring</button>' : ''}
-    ${isMonitoring ? '<button class="secondary" onclick="stopMonitoring()">Stop Monitoring</button>' : ''}
+    ${isMonitoring ? '<button class="secondary" style="padding:6px 14px; border:1px solid var(--vscode-input-border); background:var(--vscode-input-background); color:var(--vscode-foreground); border-radius:4px; cursor:pointer; font-size:12px; font-family:var(--vscode-font-family);" onclick="stopMonitoring()">Stop Monitoring</button>' : ''}
     ${isMonitoring ? `
     <div class="monitor-timer-bar">
       <div class="monitor-timer-label">Next check in:</div>

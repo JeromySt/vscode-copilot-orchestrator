@@ -1061,17 +1061,6 @@ class ReleaseCardControl extends SubscribableControl {
       branchEls[1].textContent = data.targetBranch;
     }
     
-    // Update monitoring indicator
-    var existingIndicator = headerEl.querySelector('.release-monitoring-indicator');
-    if (data.status === 'monitoring' && !existingIndicator) {
-      var indicator = document.createElement('span');
-      indicator.className = 'release-monitoring-indicator';
-      indicator.innerHTML = '<span class="monitoring-dot"></span>Monitoring';
-      headerEl.appendChild(indicator);
-    } else if (data.status !== 'monitoring' && existingIndicator) {
-      existingIndicator.parentNode.removeChild(existingIndicator);
-    }
-    
     // Update plan count and PR link
     var detailsEl = this.element.querySelector('.release-details');
     if (detailsEl) {
