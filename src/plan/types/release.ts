@@ -69,6 +69,38 @@ export interface StateTransition {
 // PREPARATION TASKS
 // ============================================================================
 
+/** Severity level for a code review finding. */
+export type ReviewFindingSeverity = 'error' | 'warning' | 'info' | 'suggestion';
+
+/** Status of a review finding. */
+export type ReviewFindingStatus = 'open' | 'acknowledged' | 'dismissed' | 'fixed';
+
+/** A single code review finding from the AI reviewer. */
+export interface ReviewFinding {
+  /** Unique finding ID (auto-generated) */
+  id: string;
+  /** Severity level */
+  severity: ReviewFindingSeverity;
+  /** Short title/summary of the finding */
+  title: string;
+  /** Detailed explanation */
+  description: string;
+  /** File path (relative to repo root) */
+  filePath?: string;
+  /** Line number in the file */
+  line?: number;
+  /** End line for range */
+  endLine?: number;
+  /** Category (e.g., 'security', 'performance', 'style', 'bug', 'architecture') */
+  category?: string;
+  /** Current status */
+  status: ReviewFindingStatus;
+  /** Timestamp when finding was created */
+  createdAt: number;
+  /** User note when dismissing/acknowledging */
+  note?: string;
+}
+
 /**
  * Status of a preparation task.
  */
@@ -113,6 +145,9 @@ export interface PrepTask {
 
   /** Task result/output summary */
   result?: string;
+
+  /** Code review findings (populated by AI review tasks) */
+  findings?: ReviewFinding[];
 }
 
 // ============================================================================
