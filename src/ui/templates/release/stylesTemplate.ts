@@ -411,6 +411,158 @@ function prepChecklistStyles(): string {
       padding: 10px 20px;
       font-size: 14px;
       font-weight: 600;
+    }
+    
+    /* Findings Section */
+    .findings-badge {
+      padding: 2px 6px;
+      background: var(--vscode-editorWarning-background);
+      color: var(--vscode-editorWarning-foreground);
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .findings-section {
+      margin: 8px 0 0 48px;
+      padding: 12px;
+      background: var(--vscode-input-background);
+      border: 1px solid var(--vscode-input-border);
+      border-radius: 4px;
+    }
+    .findings-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--vscode-input-border);
+      margin-bottom: 8px;
+    }
+    .findings-count {
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .findings-summary {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+    }
+    .findings-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .finding-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px;
+      background: var(--vscode-editor-background);
+      border-left: 3px solid var(--vscode-input-border);
+      border-radius: 3px;
+      transition: all 0.2s ease;
+    }
+    .finding-item:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .finding-item.error {
+      border-left-color: var(--vscode-errorForeground);
+    }
+    .finding-item.warning {
+      border-left-color: var(--vscode-editorWarning-foreground);
+    }
+    .finding-item.info {
+      border-left-color: var(--vscode-button-background);
+    }
+    .finding-item.suggestion {
+      border-left-color: var(--vscode-descriptionForeground);
+    }
+    .finding-item.acknowledged {
+      border-left-color: var(--vscode-testing-iconPassed);
+      opacity: 0.8;
+    }
+    .finding-item.dismissed {
+      opacity: 0.4;
+    }
+    .finding-item.dismissed .finding-title {
+      text-decoration: line-through;
+    }
+    .finding-item.fixed {
+      border-left-color: var(--vscode-testing-iconPassed);
+      background: rgba(0, 128, 0, 0.05);
+    }
+    .finding-severity-badge {
+      font-size: 14px;
+      min-width: 20px;
+      text-align: center;
+    }
+    .finding-content {
+      flex: 1;
+      min-width: 0;
+    }
+    .finding-title {
+      font-weight: 600;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .finding-description {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      margin-bottom: 6px;
+      line-height: 1.4;
+    }
+    .finding-location {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      font-family: var(--vscode-editor-font-family);
+    }
+    .finding-file-link {
+      color: var(--vscode-textLink-foreground);
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .finding-file-link:hover {
+      text-decoration: underline;
+    }
+    .finding-category {
+      padding: 2px 6px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .finding-actions {
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    .finding-item:hover .finding-actions {
+      opacity: 1;
+    }
+    .finding-ack-btn,
+    .finding-dismiss-btn {
+      padding: 4px 8px;
+      font-size: 12px;
+      min-width: 30px;
+      background: transparent;
+      border: 1px solid var(--vscode-input-border);
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      border-radius: 3px;
+      transition: all 0.2s ease;
+    }
+    .finding-ack-btn:hover {
+      background: var(--vscode-testing-iconPassed);
+      border-color: var(--vscode-testing-iconPassed);
+      color: white;
+    }
+    .finding-dismiss-btn:hover {
+      background: var(--vscode-errorForeground);
+      border-color: var(--vscode-errorForeground);
+      color: white;
     }`;
 }
 

@@ -177,6 +177,25 @@ export interface IReleaseManager {
    */
   getTaskLogFilePath(releaseId: string, taskId: string): string | undefined;
 
+  /**
+   * Update the status of a review finding.
+   * 
+   * @param releaseId - The release ID
+   * @param taskId - The task ID
+   * @param findingId - The finding ID to update
+   * @param status - The new status
+   * @param note - Optional note (e.g., reason for dismissal)
+   */
+  updateFindingStatus(releaseId: string, taskId: string, findingId: string, status: import('../plan/types/release').ReviewFindingStatus, note?: string): Promise<void>;
+
+  /**
+   * Get all findings for a release (across all tasks).
+   * 
+   * @param releaseId - The release ID
+   * @returns Array of all findings from all tasks in the release
+   */
+  getAllFindings(releaseId: string): import('../plan/types/release').ReviewFinding[];
+
   // ── Plan Management ────────────────────────────────────────────────
 
   /**
