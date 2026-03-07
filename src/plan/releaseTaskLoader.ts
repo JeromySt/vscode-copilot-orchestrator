@@ -308,12 +308,10 @@ ${task.description}
 export async function scaffoldDefaultTaskFiles(repoPath: string): Promise<string[]> {
   const tasksDir = path.join(repoPath, '.orchestrator', 'release', 'tasks');
   
-  // Create tasks directory if it doesn't exist
+  // Create tasks directory (recursive: true is idempotent — no TOCTOU race)
   try {
-    if (!fs.existsSync(tasksDir)) {
-      fs.mkdirSync(tasksDir, { recursive: true });
-      log.info('Created release tasks directory', { tasksDir });
-    }
+    fs.mkdirSync(tasksDir, { recursive: true });
+    log.debug('Ensured release tasks directory exists', { tasksDir });
   } catch (err) {
     log.error('Failed to create release tasks directory', { tasksDir, error: (err as Error).message });
     throw new Error(`Failed to create tasks directory: ${(err as Error).message}`);
@@ -326,19 +324,17 @@ export async function scaffoldDefaultTaskFiles(repoPath: string): Promise<string
     const filename = `${task.order.toString().padStart(2, '0')}-${task.id}.md`;
     const filepath = path.join(tasksDir, filename);
     
-    // Skip if file already exists
-    if (fs.existsSync(filepath)) {
-      log.debug('Skipping existing task file', { filepath });
-      continue;
-    }
-    
     const content = generateTaskFileContent(task);
     
     try {
-      fs.writeFileSync(filepath, content, 'utf-8');
+      fs.writeFileSync(filepath, content, { encoding: 'utf-8', flag: 'wx' });
       createdFiles.push(filepath);
       log.info('Created task file', { filepath, taskId: task.id });
     } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        log.debug('Skipping existing task file', { filepath });
+        continue;
+      }
       log.warn('Failed to write task file', { filepath, error: (err as Error).message });
       // Continue with other files even if one fails
     }

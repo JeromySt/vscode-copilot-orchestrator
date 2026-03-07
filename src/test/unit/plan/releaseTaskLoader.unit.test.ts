@@ -314,42 +314,42 @@ suite('releaseTaskLoader', () => {
     });
 
     test('should not overwrite existing files', async () => {
-      // Directory exists, some files exist
-      fsModule.existsSync = sandbox.stub()
-        .onFirstCall().returns(true) // Directory exists
-        .onCall(1).returns(true)     // 01-changelog.md exists
-        .onCall(2).returns(false)    // 02-version.md doesn't exist
-        .onCall(3).returns(true)     // 03-compile.md exists
-        .onCall(4).returns(false)    // 04-tests.md doesn't exist
-        .onCall(5).returns(false)    // 05-docs.md doesn't exist
-        .onCall(6).returns(false);   // 06-ai-review.md doesn't exist
+      // Simulate 2 files already exist by throwing EEXIST on those writeFileSync calls.
+      // The production code uses the atomic 'wx' flag (create-exclusive) — no existsSync check.
+      const eexist = Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
       fsModule.mkdirSync = sandbox.stub();
-      fsModule.writeFileSync = sandbox.stub();
+      fsModule.writeFileSync = sandbox.stub()
+        .onCall(0).throws(eexist)       // 01-changelog.md already exists
+        .onCall(1).returns(undefined)   // 02-version.md created
+        .onCall(2).throws(eexist)       // 03-compile.md already exists
+        .onCall(3).returns(undefined)   // 04-tests.md created
+        .onCall(4).returns(undefined)   // 05-docs.md created
+        .onCall(5).returns(undefined);  // 06-ai-review.md created
 
       const { scaffoldDefaultTaskFiles } = await import('../../../plan/releaseTaskLoader');
       const created = await scaffoldDefaultTaskFiles('/test/repo');
 
-      // Should only create 4 files (skipping the 2 that exist)
+      // Should only report 4 newly created files (2 EEXIST skipped)
       assert.strictEqual(created.length, 4);
-      assert.strictEqual(fsModule.writeFileSync.callCount, 4);
+      assert.strictEqual(fsModule.writeFileSync.callCount, 6);
     });
 
     test('should return only newly created file paths', async () => {
-      fsModule.existsSync = sandbox.stub()
-        .onFirstCall().returns(true)  // Directory exists
-        .onCall(1).returns(true)      // File 1 exists
-        .onCall(2).returns(false)     // File 2 doesn't exist
-        .onCall(3).returns(false)     // File 3 doesn't exist
-        .onCall(4).returns(false)     // File 4 doesn't exist
-        .onCall(5).returns(false)     // File 5 doesn't exist
-        .onCall(6).returns(false);    // File 6 doesn't exist
+      // Simulate first file already exists; production code detects this via 'wx' flag EEXIST.
+      const eexist = Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
       fsModule.mkdirSync = sandbox.stub();
-      fsModule.writeFileSync = sandbox.stub();
+      fsModule.writeFileSync = sandbox.stub()
+        .onCall(0).throws(eexist)       // 01-changelog.md already exists
+        .onCall(1).returns(undefined)   // 02-version.md created
+        .onCall(2).returns(undefined)   // 03-compile.md created
+        .onCall(3).returns(undefined)   // 04-tests.md created
+        .onCall(4).returns(undefined)   // 05-docs.md created
+        .onCall(5).returns(undefined);  // 06-ai-review.md created
 
       const { scaffoldDefaultTaskFiles } = await import('../../../plan/releaseTaskLoader');
       const created = await scaffoldDefaultTaskFiles('/test/repo');
 
-      // Should return 5 paths (excluding existing file)
+      // Should return 5 paths (excluding the one that threw EEXIST)
       assert.strictEqual(created.length, 5);
       
       // Check that first file is not in created list
@@ -358,17 +358,17 @@ suite('releaseTaskLoader', () => {
     });
 
     test('should generate file content with valid frontmatter', async () => {
-      fsModule.existsSync = sandbox.stub().returns(false);
       fsModule.mkdirSync = sandbox.stub();
       fsModule.writeFileSync = sandbox.stub();
 
       const { scaffoldDefaultTaskFiles } = await import('../../../plan/releaseTaskLoader');
       await scaffoldDefaultTaskFiles('/test/repo');
 
+      // Production code calls writeFileSync with options object { encoding, flag }
       assert.ok(fsModule.writeFileSync.calledWith(
         sinon.match.string,
         sinon.match(/^---\nid: changelog\ntitle: Update CHANGELOG\nrequired: true/),
-        'utf-8'
+        { encoding: 'utf-8', flag: 'wx' }
       ));
     });
 
