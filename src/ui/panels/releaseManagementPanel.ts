@@ -102,6 +102,9 @@ export class ReleaseManagementPanel {
       },
       forceFullRefresh: () => this._forceFullRefresh(),
       closePanel: () => this.dispose(),
+      getConfig: <T>(section: string, key: string, defaultValue: T): T => {
+        return vscode.workspace.getConfiguration(`copilotOrchestrator.${section}`).get(key, defaultValue);
+      },
     };
     this._controller = new ReleaseManagementController(releaseId, dialogService, delegate, this._releaseManager);
     

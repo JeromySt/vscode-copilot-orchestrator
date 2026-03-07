@@ -26,6 +26,8 @@ export interface ReleaseManagementDelegate {
   forceFullRefresh(): void;
   /** Close and dispose the panel. */
   closePanel(): void;
+  /** Read a VS Code configuration value. */
+  getConfig<T>(section: string, key: string, defaultValue: T): T;
 }
 
 /**
@@ -129,8 +131,8 @@ export class ReleaseManagementController {
       case 'createPR':
         // Transition to ready-for-pr first if still in preparing
         this._releaseManager.transitionToState(this._releaseId, 'ready-for-pr', 'All tasks complete, creating PR').then(() => {
-          // Always create as draft per the orchestrator convention (safe default)
-          return this._releaseManager.createPR(this._releaseId, true);
+          const asDraft = this._delegate.getConfig<boolean>('releaseManagement', 'createPRAsDraft', false);
+          return this._releaseManager.createPR(this._releaseId, asDraft);
         }).catch((error) => {
           this._dialogService.showError(`Failed to create PR: ${error.message}`);
         });
