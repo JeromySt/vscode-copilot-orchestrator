@@ -38,6 +38,8 @@ import type { IReleaseStore } from '../interfaces/IReleaseStore';
 import { Logger } from '../core/logger';
 import { ReleaseEventEmitter } from './releaseEvents';
 import { ReleaseStateMachine } from './releaseStateMachine';
+import { parseReviewFindings } from './reviewFindingParser';
+import type { ReviewFindingStatus } from './types/release';
 
 const log = Logger.for('plan');
 const gitLog = (msg: string) => log.info(msg);
@@ -459,10 +461,22 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     await fs.appendFile(logFilePath, startedMessage);
     this.events.emitReleaseTaskOutput(releaseId, taskId, startedMessage);
 
+    // Buffer to collect all output for finding parsing
+    const outputBuffer: string[] = [];
+
     try {
       // Execute task using Copilot CLI
       const cwd = release.isolatedRepoPath || release.repoPath;
-      const taskDescription = task.description || task.title;
+      let taskDescription = task.description || task.title;
+      
+      // Add structured output instructions for review tasks
+      if (task.id === 'ai-review' || task.id.includes('review')) {
+        taskDescription += '\n\nIMPORTANT: After completing your review, output your findings in this exact format:\n' +
+          '<!-- FINDINGS_START -->\n' +
+          '[{"severity":"warning|error|info|suggestion","title":"Short title","description":"Detailed explanation","filePath":"relative/path.ts","line":42,"category":"security|performance|style|bug|architecture"}]\n' +
+          '<!-- FINDINGS_END -->\n' +
+          'Output the findings as a valid JSON array between the markers. Include ALL findings you discovered.';
+      }
       
       if (this.copilot) {
         const result = await this.copilot.run({
@@ -470,6 +484,9 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           task: taskDescription,
           timeout: 0, // No timeout for release prep tasks
           onOutput: async (line: string) => {
+            // Collect output for finding parsing
+            outputBuffer.push(line);
+            
             // Stream every CLI output line to log file AND event
             const logLine = `${line}\n`;
             try { await fs.appendFile(logFilePath, logLine); } catch { /* ignore write errors */ }
@@ -501,6 +518,13 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         await fs.appendFile(logFilePath, completedMessage);
         this.events.emitReleaseTaskOutput(releaseId, taskId, completedMessage);
         log.info('Preparation task auto-completed (no runner)', { releaseId, taskId });
+      }
+      
+      // Parse findings from collected output
+      const findings = parseReviewFindings(outputBuffer.join('\n'));
+      if (findings.length > 0) {
+        task.findings = findings;
+        log.info('Parsed review findings', { releaseId, taskId, count: findings.length });
       }
     } catch (error) {
       task.status = 'failed';
@@ -586,6 +610,62 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  async updateFindingStatus(
+    releaseId: string,
+    taskId: string,
+    findingId: string,
+    status: ReviewFindingStatus,
+    note?: string
+  ): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    const task = release.prepTasks?.find((t) => t.id === taskId);
+    if (!task) {
+      throw new Error(`Preparation task not found: ${taskId}`);
+    }
+
+    if (!task.findings || task.findings.length === 0) {
+      throw new Error(`No findings found for task: ${taskId}`);
+    }
+
+    const finding = task.findings.find((f) => f.id === findingId);
+    if (!finding) {
+      throw new Error(`Finding not found: ${findingId}`);
+    }
+
+    log.info('Updating finding status', { releaseId, taskId, findingId, status });
+
+    finding.status = status;
+    if (note !== undefined) {
+      finding.note = note;
+    }
+
+    await this.store.saveRelease(release);
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  getAllFindings(releaseId: string): import('./types/release').ReviewFinding[] {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      return [];
+    }
+
+    const allFindings: import('./types/release').ReviewFinding[] = [];
+    
+    if (release.prepTasks) {
+      for (const task of release.prepTasks) {
+        if (task.findings && task.findings.length > 0) {
+          allFindings.push(...task.findings);
+        }
+      }
+    }
+
+    return allFindings;
   }
 
   // ── Plan Management ────────────────────────────────────────────────────
