@@ -346,70 +346,50 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
           unresolvedAlerts: 0
         };
         this.cycles = [];
-        this.isMonitoring = false;
-        this.countdownSeconds = 2400; // 40 minutes
+        this.isMonitoring = releaseData.status === 'monitoring' || releaseData.status === 'addressing';
+        this.countdownSeconds = 120; // 2 minutes (matches POLL_INTERVAL_MS)
         this.render();
+        // Auto-start countdown if already monitoring
+        if (this.isMonitoring) {
+          this.startCountdown();
+        }
       }
       
       update(data) {
         if (data) {
           this.stats = data;
           this.render();
+          // Reset countdown on each update (new cycle just completed)
+          this.countdownSeconds = 120;
         }
       }
       
       addCycle(cycle) {
         this.cycles.push(cycle);
         this.renderCycles();
-      }
-      
-      startMonitoring() {
-        this.isMonitoring = true;
-        document.getElementById('start-monitor-btn').style.display = 'none';
-        document.getElementById('pause-monitor-btn').style.display = 'inline-block';
-        document.getElementById('stop-monitor-btn').style.display = 'inline-block';
-        document.getElementById('monitor-timer').style.display = 'inline-block';
-        this.startCountdown();
-      }
-      
-      pauseMonitoring() {
-        this.isMonitoring = false;
-        document.getElementById('pause-monitor-btn').textContent = 'Resume Monitoring';
-        document.getElementById('pause-monitor-btn').onclick = () => this.resumeMonitoring();
-      }
-      
-      resumeMonitoring() {
-        this.isMonitoring = true;
-        document.getElementById('pause-monitor-btn').textContent = 'Pause Monitoring';
-        document.getElementById('pause-monitor-btn').onclick = () => this.pauseMonitoring();
-      }
-      
-      stopMonitoring() {
-        this.isMonitoring = false;
-        document.getElementById('start-monitor-btn').style.display = 'inline-block';
-        document.getElementById('pause-monitor-btn').style.display = 'none';
-        document.getElementById('stop-monitor-btn').style.display = 'none';
-        document.getElementById('monitor-timer').style.display = 'none';
+        // Reset countdown (cycle just ran)
+        this.countdownSeconds = 120;
       }
       
       startCountdown() {
-        const countdownEl = document.getElementById('countdown');
-        const updateCountdown = () => {
-          if (!this.isMonitoring) return;
-          
-          const minutes = Math.floor(this.countdownSeconds / 60);
-          const seconds = this.countdownSeconds % 60;
-          countdownEl.textContent = \`\${minutes}:\${seconds.toString().padStart(2, '0')}\`;
-          
-          if (this.countdownSeconds > 0) {
-            this.countdownSeconds--;
-            setTimeout(updateCountdown, 1000);
+        const countdownEl = document.getElementById('countdown-display');
+        if (!countdownEl) return;
+        const self = this;
+        const tick = () => {
+          if (!self.isMonitoring) return;
+          const el = document.getElementById('countdown-display');
+          if (!el) return;
+          const m = Math.floor(self.countdownSeconds / 60);
+          const s = self.countdownSeconds % 60;
+          el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+          if (self.countdownSeconds > 0) {
+            self.countdownSeconds--;
           } else {
-            this.countdownSeconds = 2400;
-            updateCountdown();
+            self.countdownSeconds = 120;
           }
+          setTimeout(tick, 1000);
         };
-        updateCountdown();
+        tick();
       }
       
       render() {
@@ -511,7 +491,7 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       prepTasks = new PrepTasksControl();
     } else if (releaseData.status === 'merging') {
       mergeProgress = new MergeProgressControl();
-    } else if (releaseData.status === 'monitoring' || releaseData.status === 'addressing') {
+    } else if (releaseData.status === 'monitoring' || releaseData.status === 'addressing' || releaseData.status === 'pr-active') {
       prMonitor = new PRMonitorControl();
       actionLog = new ActionLogControl();
     }

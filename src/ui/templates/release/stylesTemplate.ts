@@ -672,15 +672,59 @@ function prMonitorStyles(): string {
       border: 1px solid var(--vscode-input-border);
       border-radius: 4px;
     }
-    .monitor-timer {
-      margin-left: auto;
-      font-size: 12px;
-      color: var(--vscode-descriptionForeground);
+    .monitor-status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
       font-weight: 600;
     }
-    .monitor-timer #countdown {
+    .monitor-status-badge.active {
+      background: rgba(0, 128, 0, 0.15);
+      color: var(--vscode-testing-iconPassed);
+    }
+    .monitor-status-badge.addressing {
+      background: rgba(0, 122, 204, 0.15);
       color: var(--vscode-button-background);
+    }
+    .monitor-status-badge.idle {
+      background: rgba(128, 128, 128, 0.15);
+      color: var(--vscode-descriptionForeground);
+    }
+    .monitoring-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--vscode-testing-iconPassed);
+      animation: pulse-glow 2s ease-in-out infinite;
+    }
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--vscode-testing-iconPassed); }
+      50% { opacity: 0.4; box-shadow: none; }
+    }
+    .monitor-timer-bar {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+    }
+    .monitor-timer-label {
+      font-weight: 500;
+    }
+    .monitor-countdown {
+      font-size: 14px;
       font-weight: 700;
+      color: var(--vscode-button-background);
+      font-variant-numeric: tabular-nums;
+      min-width: 36px;
+    }
+    .monitor-poll-info {
+      font-size: 10px;
+      opacity: 0.7;
     }
     .pr-stats {
       display: grid;

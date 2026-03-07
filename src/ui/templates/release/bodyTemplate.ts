@@ -502,6 +502,19 @@ function renderPRCreationStep(release: ReleaseDefinition): string {
 function renderMonitoringStep(release: ReleaseDefinition): string {
   const prNumber = release.prNumber || '---';
   const prUrl = release.prUrl || '#';
+  const isMonitoring = release.status === 'monitoring';
+  const isAddressing = release.status === 'addressing';
+  const isPRActive = release.status === 'pr-active';
+  
+  // Determine status indicator
+  let statusBadge = '';
+  if (isMonitoring) {
+    statusBadge = '<span class="monitor-status-badge active"><span class="monitoring-pulse"></span>Monitoring Active</span>';
+  } else if (isAddressing) {
+    statusBadge = '<span class="monitor-status-badge addressing">🤖 Addressing Feedback</span>';
+  } else if (isPRActive) {
+    statusBadge = '<span class="monitor-status-badge idle">Monitoring Idle</span>';
+  }
   
   return `
 <div class="pr-monitor">
@@ -509,17 +522,20 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
     <h3>PR Monitoring Dashboard</h3>
     <div class="pr-header">
       <span class="pr-number">Pull Request #${prNumber}</span>
+      ${statusBadge}
       ${prUrl !== '#' ? `<a href="${escapeHtml(prUrl)}" class="pr-link" target="_blank">View on GitHub ↗</a>` : ''}
     </div>
   </div>
   
   <div class="monitoring-controls" style="margin-bottom: 16px;">
-    <button id="start-monitor-btn" onclick="startMonitoring()">Start Monitoring</button>
-    <button id="pause-monitor-btn" onclick="pauseMonitoring()" style="display: none;">Pause Monitoring</button>
-    <button id="stop-monitor-btn" onclick="stopMonitoring()" class="secondary" style="display: none;">Stop</button>
-    <div id="monitor-timer" class="monitor-timer" style="display: none;">
-      Next check in: <span id="countdown">40:00</span>
-    </div>
+    ${isPRActive ? '<button onclick="startMonitoring()">Start Monitoring</button>' : ''}
+    ${isMonitoring ? '<button class="secondary" onclick="stopMonitoring()">Stop Monitoring</button>' : ''}
+    ${isMonitoring ? `
+    <div class="monitor-timer-bar">
+      <div class="monitor-timer-label">Next check in:</div>
+      <div class="monitor-countdown" id="countdown-display">2:00</div>
+      <div class="monitor-poll-info">Polling every 2 minutes</div>
+    </div>` : ''}
   </div>
   
   <div class="pr-stats" id="pr-stats">
@@ -544,15 +560,13 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
   <div class="pr-cycle-timeline" id="pr-cycle-timeline">
     <h4>Monitoring Cycles</h4>
     <div id="cycle-dots" class="cycle-dots">
-      <!-- Cycle dots will be populated by JavaScript -->
       <div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 11px;">
-        No monitoring cycles yet
+        ${isMonitoring ? 'Waiting for first cycle to complete...' : 'No monitoring cycles yet'}
       </div>
     </div>
   </div>
   
   <div id="pr-checks-list" class="pr-checks-list">
-    <!-- Checks will be populated by JavaScript -->
   </div>
   
   <div class="action-log" style="margin-top: 24px;">
