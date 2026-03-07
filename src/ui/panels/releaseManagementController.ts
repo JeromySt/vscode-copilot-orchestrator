@@ -151,7 +151,23 @@ export class ReleaseManagementController {
         this._delegate.executeCommand('orchestrator.openReleasePlanSelector', this._releaseId);
         break;
       case 'cancelRelease':
-        this._releaseManager.transitionToState(this._releaseId, 'canceled', 'User canceled release').catch((error) => {
+        this._dialogService.showWarning(
+          'Are you sure you want to cancel this release?',
+          { modal: true },
+          'Cancel Release',
+        ).then((choice) => {
+          if (choice !== 'Cancel Release') { return; }
+          return this._releaseManager.transitionToState(this._releaseId, 'canceled', 'User canceled release').then((success) => {
+            if (!success) {
+              // Force-cancel: directly update the release status even if state machine rejects
+              const rel = this._releaseManager.getRelease(this._releaseId);
+              if (rel) {
+                (rel as any).status = 'canceled';
+              }
+            }
+            this._delegate.forceFullRefresh();
+          });
+        }).catch((error) => {
           this._dialogService.showError(`Failed to cancel release: ${error.message}`);
         });
         break;

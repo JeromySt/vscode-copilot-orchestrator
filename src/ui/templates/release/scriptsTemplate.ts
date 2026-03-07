@@ -85,9 +85,7 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
     }
     
     function cancelRelease() {
-      if (confirm('Are you sure you want to cancel this release?')) {
-        vscode.postMessage({ type: 'cancelRelease' });
-      }
+      vscode.postMessage({ type: 'cancelRelease' });
     }
     
     function refresh() {
