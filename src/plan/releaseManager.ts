@@ -63,6 +63,8 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     private readonly prMonitor: IReleasePRMonitor,
     private readonly prServiceFactory: IRemotePRServiceFactory,
     private readonly store: IReleaseStore,
+    private readonly providerDetector?: import('../interfaces/IRemoteProviderDetector').IRemoteProviderDetector,
+    private readonly dialogService?: import('../interfaces/IDialogService').IDialogService,
   ) {
     super();
 
@@ -744,6 +746,19 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     try {
       const cwd = release.isolatedRepoPath || release.repoPath;
+      
+      // Ensure credentials are configured before creating PR
+      if (this.providerDetector) {
+        try {
+          const provider = await this.providerDetector.detect(cwd);
+          await this.providerDetector.ensureCredentials(cwd, provider, this.dialogService);
+          log.debug('Credentials ensured for PR creation', { releaseId });
+        } catch (err) {
+          log.warn('Failed to ensure credentials', { releaseId, error: (err as Error).message });
+          // Continue anyway - the PR service will attempt its own credential acquisition
+        }
+      }
+      
       const prService = await this.prServiceFactory.getServiceForRepo(cwd);
       
       const prResult = await prService.createPR({

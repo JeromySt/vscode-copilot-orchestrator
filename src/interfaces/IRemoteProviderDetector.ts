@@ -95,4 +95,38 @@ export interface IRemoteProviderDetector {
    * @returns Array of account usernames/identifiers
    */
   listAccounts(provider: RemoteProviderInfo): Promise<string[]>;
+
+  /**
+   * Ensures credentials are available for the provider, with account selection UX.
+   * 
+   * Handles multi-account scenarios by:
+   * 1. Checking repo-local git config for a configured username
+   * 2. If not configured, listing available accounts
+   * 3. If multiple accounts, showing a quickpick with EMU hint (recommended account)
+   * 4. Storing the selected account in repo-local git config
+   * 5. Acquiring credentials via git credential fill with the selected username
+   * 
+   * EMU (Enterprise Managed User) detection:
+   * - EMU accounts use same hostname as personal accounts (github.com)
+   * - EMU usernames typically have org suffix (e.g., jstatia_microsoft)
+   * - When repo owner matches an account's org suffix, that account is recommended
+   * 
+   * @param repoPath - Absolute path to the git repository
+   * @param provider - Provider information from detect()
+   * @param dialogService - Optional dialog service for showing quickpick (headless mode if not provided)
+   * @returns Credentials with username set
+   * @throws If no accounts available or user cancels selection
+   * 
+   * @example
+   * ```typescript
+   * const provider = await detector.detect(repoPath);
+   * const creds = await detector.ensureCredentials(repoPath, provider, dialogService);
+   * // creds.username will be set to the selected account
+   * ```
+   */
+  ensureCredentials(
+    repoPath: string, 
+    provider: RemoteProviderInfo, 
+    dialogService?: import('../interfaces/IDialogService').IDialogService
+  ): Promise<RemoteCredentials>;
 }

@@ -217,6 +217,15 @@ function renderConfigureStep(release: ReleaseDefinition): string {
         placeholder="main"
       />
     </div>
+    <div>
+      <label style="display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600;">Git Account</label>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div id="git-account-display" style="flex: 1; padding: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px;">
+          <span id="git-account-value" style="color: var(--vscode-descriptionForeground);">Loading...</span>
+        </div>
+        <button onclick="switchAccount()" style="padding: 8px 12px; white-space: nowrap;">Switch</button>
+      </div>
+    </div>
   </div>
   
   ${!isFromPlans ? renderOptionalPlansSection(release) : ''}

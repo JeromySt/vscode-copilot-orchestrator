@@ -134,6 +134,10 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       vscode.postMessage({ type: 'openFindingFile', filePath, line });
     }
 
+    function switchAccount() {
+      vscode.postMessage({ type: 'switchAccount' });
+    }
+
     // ── Plan Selection Control ──────────────────────────────────────────
     
     class PlanSelectorControl {
@@ -501,6 +505,8 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       } else {
         optionalPlanSelector = new PlanSelectorControl('optional-plan-list');
       }
+      // Fetch git account on configure step
+      fetchGitAccount();
     } else if (releaseData.status === 'preparing') {
       prepTasks = new PrepTasksControl();
     } else if (releaseData.status === 'merging') {
@@ -510,12 +516,35 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       actionLog = new ActionLogControl();
     }
 
+    // ── Fetch Git Account ───────────────────────────────────────────────
+    
+    function fetchGitAccount() {
+      vscode.postMessage({ type: 'getGitAccount' });
+    }
+
+    function updateGitAccountDisplay(username) {
+      const valueEl = document.getElementById('git-account-value');
+      if (valueEl) {
+        if (username) {
+          valueEl.textContent = username;
+          valueEl.style.color = 'var(--vscode-foreground)';
+        } else {
+          valueEl.textContent = 'Not configured';
+          valueEl.style.color = 'var(--vscode-descriptionForeground)';
+        }
+      }
+    }
+
     // ── Listen for Messages from Extension ──────────────────────────────
     
     window.addEventListener('message', event => {
       const message = event.data;
       
       switch (message.type) {
+        case 'gitAccount':
+          updateGitAccountDisplay(message.username);
+          break;
+          
         case 'pulse':
           // Update any time-based displays
           break;

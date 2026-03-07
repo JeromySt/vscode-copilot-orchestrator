@@ -12,6 +12,7 @@ import type { AvailablePlanSummary } from '../ui/panels/releaseManagementPanel';
 import type { ReleaseDefinition } from '../plan/types/release';
 import type { IReleaseManager } from '../interfaces/IReleaseManager';
 import type { IPlanRunner } from '../interfaces/IPlanRunner';
+import type { IRemoteProviderDetector } from '../interfaces/IRemoteProviderDetector';
 
 /**
  * Register release management commands.
@@ -20,12 +21,14 @@ import type { IPlanRunner } from '../interfaces/IPlanRunner';
  * @param getReleaseData - Function to fetch release data.
  * @param releaseManager - Release manager instance (optional).
  * @param planRunner - Optional plan runner instance.
+ * @param providerDetector - Optional remote provider detector instance.
  */
 export function registerReleaseCommands(
   context: vscode.ExtensionContext,
   getReleaseData: (id: string) => ReleaseDefinition | undefined,
   releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager,
   planRunner?: IPlanRunner,
+  providerDetector?: IRemoteProviderDetector,
 ): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.showReleasePanel', (releaseId: string) => {
@@ -388,6 +391,117 @@ export function registerReleaseCommands(
         }
       } catch (error: any) {
         vscode.window.showErrorMessage(`Failed to scaffold release tasks: ${error.message}`);
+      }
+    }),
+
+    vscode.commands.registerCommand('orchestrator.selectGitAccount', async () => {
+      if (!providerDetector) {
+        vscode.window.showErrorMessage('Provider detector not available.');
+        return;
+      }
+
+      try {
+        // Get current repository path
+        const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+        const git = gitExtension?.getAPI(1);
+        
+        if (!git || git.repositories.length === 0) {
+          vscode.window.showErrorMessage('No git repository found.');
+          return;
+        }
+        
+        const repo = git.repositories[0];
+        const repoPath = repo.rootUri.fsPath;
+
+        // Detect provider
+        const provider = await providerDetector.detect(repoPath);
+        
+        // List accounts
+        const accounts = await providerDetector.listAccounts(provider);
+        
+        if (accounts.length === 0) {
+          vscode.window.showErrorMessage('No accounts found. Please use "Login Git Account" command first.');
+          return;
+        }
+
+        // EMU hint
+        const hostname = provider.type === 'github' ? 'github.com' : provider.hostname || 'github.com';
+        const recommendedAccount = accounts.find(acct => 
+          acct.toLowerCase().endsWith('_' + provider.owner.toLowerCase())
+        );
+
+        const items = accounts.map(account => {
+          const isRecommended = account === recommendedAccount;
+          return {
+            label: account,
+            description: isRecommended ? '(recommended)' : '',
+          };
+        });
+
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: `Select Git account for ${hostname}`,
+        });
+
+        if (!selected) {
+          return; // User cancelled
+        }
+
+        // Store in repo-local git config
+        const key = `credential.https://${hostname}.username`;
+        const terminal = vscode.window.createTerminal({ name: 'Set Git Account' });
+        terminal.sendText(`git config --local ${key} ${selected.label}`);
+        terminal.show();
+        
+        vscode.window.showInformationMessage(`Using account "${selected.label}" for ${hostname}`);
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to select account: ${error.message}`);
+      }
+    }),
+
+    vscode.commands.registerCommand('orchestrator.loginGitAccount', async () => {
+      if (!providerDetector) {
+        vscode.window.showErrorMessage('Provider detector not available.');
+        return;
+      }
+
+      try {
+        // Get current repository path
+        const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+        const git = gitExtension?.getAPI(1);
+        
+        if (!git || git.repositories.length === 0) {
+          vscode.window.showErrorMessage('No git repository found.');
+          return;
+        }
+        
+        const repo = git.repositories[0];
+        const repoPath = repo.rootUri.fsPath;
+
+        // Detect provider
+        const provider = await providerDetector.detect(repoPath);
+        
+        // Launch appropriate login command
+        const terminal = vscode.window.createTerminal({ name: 'Git Login' });
+        
+        switch (provider.type) {
+          case 'github':
+            terminal.sendText('git credential-manager github login');
+            break;
+          case 'github-enterprise':
+            terminal.sendText(`git credential-manager github login --hostname ${provider.hostname}`);
+            break;
+          case 'azure-devops':
+            terminal.sendText('az login');
+            break;
+          default:
+            vscode.window.showErrorMessage(`Login not supported for provider type: ${provider.type}`);
+            return;
+        }
+        
+        terminal.show();
+        vscode.window.showInformationMessage('Login command started in terminal. Follow the prompts.');
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to start login: ${error.message}`);
       }
     }),
   );

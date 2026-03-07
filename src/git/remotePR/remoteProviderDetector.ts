@@ -102,6 +102,75 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
     }
   }
 
+  async ensureCredentials(
+    repoPath: string,
+    provider: RemoteProviderInfo,
+    dialogService?: import('../../interfaces/IDialogService').IDialogService,
+  ): Promise<RemoteCredentials> {
+    log.debug('Ensuring credentials', { type: provider.type, hostname: provider.hostname });
+
+    const hostname = provider.type === 'github' 
+      ? 'github.com' 
+      : provider.hostname || 'github.com';
+
+    // Step 1: Check repo-local config for configured username
+    const configuredUsername = await this.getConfiguredUsername(repoPath, hostname);
+    if (configuredUsername) {
+      log.debug('Using configured username', { username: configuredUsername });
+      const gitCred = await this.tryGitCredentialFill(hostname, configuredUsername);
+      if (gitCred) {
+        return {
+          token: gitCred.token,
+          tokenSource: 'git-credential-cache',
+          hostname,
+          username: gitCred.username,
+        };
+      }
+    }
+
+    // Step 2: List available accounts
+    const accounts = await this.listAccounts(provider);
+    log.debug('Available accounts', { count: accounts.length, accounts });
+
+    // Step 3: Handle different account counts
+    if (accounts.length === 0) {
+      throw new Error('No accounts found. Please log in using the "Login Git Account" command.');
+    }
+
+    let selectedAccount: string;
+
+    if (accounts.length === 1) {
+      // Auto-select single account
+      selectedAccount = accounts[0];
+      log.debug('Auto-selecting single account', { account: selectedAccount });
+    } else {
+      // Multiple accounts - show quickpick with EMU hint
+      selectedAccount = await this.selectAccountWithDialog(
+        accounts,
+        provider.owner,
+        hostname,
+        dialogService,
+      );
+    }
+
+    // Step 4: Store selection in repo-local git config
+    await this.setConfiguredUsername(repoPath, hostname, selectedAccount);
+    log.info('Configured account for repository', { hostname, username: selectedAccount });
+
+    // Step 5: Acquire credentials with selected username
+    const gitCred = await this.tryGitCredentialFill(hostname, selectedAccount);
+    if (!gitCred) {
+      throw new Error(`Failed to acquire credentials for account ${selectedAccount}`);
+    }
+
+    return {
+      token: gitCred.token,
+      tokenSource: 'git-credential-cache',
+      hostname,
+      username: gitCred.username,
+    };
+  }
+
   private async getRemoteUrl(repoPath: string): Promise<string> {
     const proc = this.spawner.spawn('git', ['remote', 'get-url', 'origin'], {
       cwd: repoPath,
@@ -634,5 +703,74 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
     }
 
     return [];
+  }
+
+  private async selectAccountWithDialog(
+    accounts: string[],
+    repoOwner: string,
+    hostname: string,
+    dialogService?: import('../../interfaces/IDialogService').IDialogService,
+  ): Promise<string> {
+    // EMU detection heuristic
+    const recommendedAccount = this.suggestAccountForOwner(accounts, repoOwner);
+    
+    if (!dialogService) {
+      // Headless mode - use recommended or first account
+      const selected = recommendedAccount || accounts[0];
+      log.debug('Headless mode: auto-selecting account', { selected });
+      return selected;
+    }
+
+    // Build quickpick items with EMU hint
+    const items = accounts.map(account => {
+      const isRecommended = account === recommendedAccount;
+      return isRecommended ? `${account} (recommended)` : account;
+    });
+    
+    // Add "Add new account..." option
+    items.push('$(plus) Add new account...');
+
+    const selected = await dialogService.showQuickPick(items, {
+      placeHolder: `Select Git account for ${hostname}`,
+    });
+
+    if (!selected) {
+      throw new Error('Account selection cancelled');
+    }
+
+    if (selected.startsWith('$(plus)')) {
+      // User wants to add a new account - trigger login flow
+      throw new Error('LOGIN_REQUIRED');
+    }
+
+    // Strip "(recommended)" suffix
+    return selected.replace(' (recommended)', '');
+  }
+
+  private suggestAccountForOwner(accounts: string[], owner: string): string | undefined {
+    return accounts.find(acct => acct.toLowerCase().endsWith('_' + owner.toLowerCase()));
+  }
+
+  private async setConfiguredUsername(repoPath: string, hostname: string, username: string): Promise<void> {
+    try {
+      const key = `credential.https://${hostname}.username`;
+      const proc = this.spawner.spawn('git', ['config', '--local', key, username], {
+        cwd: repoPath,
+        shell: false,
+      });
+
+      const exitCode = await new Promise<number>((resolve) => {
+        proc.on('exit', (code) => resolve(code ?? 1));
+        proc.on('error', () => resolve(1));
+      });
+
+      if (exitCode === 0) {
+        log.debug('Configured username in repo-local git config', { hostname, username });
+      } else {
+        log.warn('Failed to configure username', { hostname, username });
+      }
+    } catch (err) {
+      log.debug('Failed to set configured username', { error: (err as Error).message });
+    }
   }
 }
