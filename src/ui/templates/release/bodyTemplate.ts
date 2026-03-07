@@ -89,13 +89,14 @@ function getCurrentStepIndex(release: ReleaseDefinition, steps: StepDefinition[]
     return steps.findIndex(s => s.id === 'merge');
   } else if (status === 'preparing') {
     return steps.findIndex(s => s.id === 'prepare');
-  } else if (status === 'creating-pr') {
+  } else if (status === 'ready-for-pr' || status === 'creating-pr') {
     return steps.findIndex(s => s.id === 'create-pr');
-  } else if (status === 'monitoring' || status === 'addressing') {
+  } else if (status === 'pr-active' || status === 'monitoring' || status === 'addressing') {
     return steps.findIndex(s => s.id === 'monitor');
-  } else {
-    // succeeded, failed, canceled
+  } else if (status === 'succeeded' || status === 'failed' || status === 'canceled') {
     return steps.findIndex(s => s.id === 'complete');
+  } else {
+    return 0;
   }
 }
 
