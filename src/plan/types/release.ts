@@ -72,7 +72,7 @@ export interface StateTransition {
 /**
  * Status of a preparation task.
  */
-export type PrepTaskStatus = 'pending' | 'running' | 'completed' | 'skipped';
+export type PrepTaskStatus = 'pending' | 'running' | 'in-progress' | 'completed' | 'skipped' | 'failed';
 
 /**
  * A preparation task in the pre-PR checklist.
@@ -101,6 +101,18 @@ export interface PrepTask {
 
   /** Commit hash if task made code changes */
   commitHash?: string;
+
+  /** Timestamp when task execution started */
+  startedAt?: number;
+
+  /** Timestamp when task execution completed */
+  completedAt?: number;
+
+  /** Path to log file for task execution output */
+  logFilePath?: string;
+
+  /** Task result/output summary */
+  result?: string;
 }
 
 // ============================================================================

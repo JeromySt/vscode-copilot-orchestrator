@@ -14,6 +14,8 @@
  */
 
 import { EventEmitter } from 'events';
+import * as path from 'path';
+import { promises as fs } from 'fs';
 import type {
   ReleaseDefinition,
   ReleaseStatus,
@@ -423,6 +425,15 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
   // ── Preparation Tasks ──────────────────────────────────────────────────
 
+  /**
+   * Get the log directory path for task logs.
+   * Path: `.orchestrator/release/<sanitized-branch>/task-logs/`
+   */
+  private getTaskLogDirectory(release: ReleaseDefinition): string {
+    const sanitized = release.releaseBranch.replace(/[^a-zA-Z0-9._-]/g, '-');
+    return path.join(release.repoPath, '.orchestrator', 'release', sanitized, 'task-logs');
+  }
+
   async executePreparationTask(releaseId: string, taskId: string): Promise<void> {
     const release = this.releases.get(releaseId);
     if (!release) {
@@ -436,10 +447,22 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     log.info('Executing preparation task', { releaseId, taskId, taskTitle: task.title });
 
+    // Setup log file infrastructure
+    const logDir = this.getTaskLogDirectory(release);
+    await fs.mkdir(logDir, { recursive: true });
+    
+    const logFilePath = path.join(logDir, `${taskId}.log`);
+    task.logFilePath = logFilePath;
+    task.startedAt = Date.now();
     task.status = 'running';
+    
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
-    await this.store.saveRelease(release);
+    
+    // Emit started log line
+    const startedMessage = `Task started: ${task.title}\n`;
+    await fs.appendFile(logFilePath, startedMessage);
+    this.events.emitReleaseTaskOutput(releaseId, taskId, startedMessage);
 
     try {
       // Execute task using Copilot CLI
@@ -455,20 +478,36 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
         if (result.success) {
           task.status = 'completed';
+          task.completedAt = Date.now();
+          const completedMessage = `Task completed successfully\n`;
+          await fs.appendFile(logFilePath, completedMessage);
+          this.events.emitReleaseTaskOutput(releaseId, taskId, completedMessage);
           log.info('Preparation task completed', { releaseId, taskId });
         } else {
-          task.status = 'pending';
+          task.status = 'failed';
+          task.completedAt = Date.now();
           task.error = result.error || 'Task execution failed';
+          const failedMessage = `Task failed: ${task.error}\n`;
+          await fs.appendFile(logFilePath, failedMessage);
+          this.events.emitReleaseTaskOutput(releaseId, taskId, failedMessage);
           log.error('Preparation task failed', { releaseId, taskId, error: task.error });
         }
       } else {
         // No Copilot runner — mark completed immediately for manual flow
         task.status = 'completed';
+        task.completedAt = Date.now();
+        const completedMessage = `Task auto-completed (no runner)\n`;
+        await fs.appendFile(logFilePath, completedMessage);
+        this.events.emitReleaseTaskOutput(releaseId, taskId, completedMessage);
         log.info('Preparation task auto-completed (no runner)', { releaseId, taskId });
       }
     } catch (error) {
-      task.status = 'pending';
+      task.status = 'failed';
+      task.completedAt = Date.now();
       task.error = (error as Error).message;
+      const errorMessage = `Task execution error: ${task.error}\n`;
+      await fs.appendFile(logFilePath, errorMessage);
+      this.events.emitReleaseTaskOutput(releaseId, taskId, errorMessage);
       log.error('Preparation task execution error', { releaseId, taskId, error: task.error });
     }
 
@@ -490,6 +529,23 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     log.info('Manually completing preparation task', { releaseId, taskId });
 
     task.status = 'completed';
+    task.completedAt = Date.now();
+    
+    // Write log entry for manual completion
+    if (task.logFilePath) {
+      const completedMessage = `Task manually marked as completed\n`;
+      await fs.appendFile(task.logFilePath, completedMessage);
+      this.events.emitReleaseTaskOutput(releaseId, taskId, completedMessage);
+    } else {
+      // Create log file if it doesn't exist
+      const logDir = this.getTaskLogDirectory(release);
+      await fs.mkdir(logDir, { recursive: true });
+      const logFilePath = path.join(logDir, `${taskId}.log`);
+      task.logFilePath = logFilePath;
+      const completedMessage = `Task manually marked as completed\n`;
+      await fs.appendFile(logFilePath, completedMessage);
+      this.events.emitReleaseTaskOutput(releaseId, taskId, completedMessage);
+    }
 
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
@@ -509,6 +565,23 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     log.info('Skipping preparation task', { releaseId, taskId });
 
     task.status = 'skipped';
+    task.completedAt = Date.now();
+    
+    // Write log entry for skip
+    if (task.logFilePath) {
+      const skippedMessage = `Task skipped by user\n`;
+      await fs.appendFile(task.logFilePath, skippedMessage);
+      this.events.emitReleaseTaskOutput(releaseId, taskId, skippedMessage);
+    } else {
+      // Create log file if it doesn't exist
+      const logDir = this.getTaskLogDirectory(release);
+      await fs.mkdir(logDir, { recursive: true });
+      const logFilePath = path.join(logDir, `${taskId}.log`);
+      task.logFilePath = logFilePath;
+      const skippedMessage = `Task skipped by user\n`;
+      await fs.appendFile(logFilePath, skippedMessage);
+      this.events.emitReleaseTaskOutput(releaseId, taskId, skippedMessage);
+    }
 
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
@@ -665,6 +738,16 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     }
 
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  getTaskLogFilePath(releaseId: string, taskId: string): string | undefined {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      return undefined;
+    }
+
+    const task = release.prepTasks?.find((t) => t.id === taskId);
+    return task?.logFilePath;
   }
 
   // ── EventEmitter Typed Overloads ───────────────────────────────────────
