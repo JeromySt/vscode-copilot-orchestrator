@@ -62,7 +62,7 @@ export class GitHubPRService implements IRemotePRService {
     const provider = await this.detector.detect(repoPath);
     
     // Initialize cache entry
-    const credentials = await this.detector.acquireCredentials(provider);
+    const credentials = await this.detector.acquireCredentials(provider, repoPath);
     this.cache.set(repoPath, { provider, credentials });
     
     log.info('Provider detected', { 
@@ -78,7 +78,7 @@ export class GitHubPRService implements IRemotePRService {
   /**
    * Acquire credentials for the detected provider.
    */
-  async acquireCredentials(provider: RemoteProviderInfo): Promise<RemoteCredentials> {
+  async acquireCredentials(provider: RemoteProviderInfo, repoPath?: string): Promise<RemoteCredentials> {
     // Check cache first by matching provider
     for (const entry of this.cache.values()) {
       if (entry.provider.remoteUrl === provider.remoteUrl) {
@@ -88,7 +88,7 @@ export class GitHubPRService implements IRemotePRService {
     }
 
     log.debug('Acquiring credentials', { type: provider.type, hostname: provider.hostname });
-    const credentials = await this.detector.acquireCredentials(provider);
+    const credentials = await this.detector.acquireCredentials(provider, repoPath);
     log.info('Credentials acquired', { tokenSource: credentials.tokenSource });
     
     return credentials;

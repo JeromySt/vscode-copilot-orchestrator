@@ -75,6 +75,7 @@ export interface IRemoteProviderDetector {
    * 3. `AZURE_DEVOPS_TOKEN` environment variable
    * 
    * @param provider - Provider information from detect()
+   * @param repoPath - Optional absolute path to the git repository (enables per-repo username config)
    * @returns Credentials with token, source, and hostname
    * @throws If no credentials can be obtained through any available method
    * 
@@ -85,5 +86,13 @@ export interface IRemoteProviderDetector {
    * // Note: NEVER log creds.token itself
    * ```
    */
-  acquireCredentials(provider: RemoteProviderInfo): Promise<RemoteCredentials>;
+  acquireCredentials(provider: RemoteProviderInfo, repoPath?: string): Promise<RemoteCredentials>;
+
+  /**
+   * List known accounts for a provider.
+   * Uses GCM for GitHub (git credential-manager github list),
+   * az CLI for ADO (az account list), gh auth for GHE.
+   * @returns Array of account usernames/identifiers
+   */
+  listAccounts(provider: RemoteProviderInfo): Promise<string[]>;
 }

@@ -53,6 +53,9 @@ export interface RemoteCredentials {
   
   /** Hostname for which the credentials are valid */
   hostname?: string;
+  
+  /** Username/account name associated with these credentials */
+  username?: string;
 }
 
 /**

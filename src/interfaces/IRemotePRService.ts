@@ -61,10 +61,11 @@ export interface IRemotePRService {
    * chains (e.g., gh auth for GitHub, az cli for Azure DevOps, git credential cache).
    * 
    * @param provider - Provider information from detectProvider()
+   * @param repoPath - Optional absolute path to the git repository (enables per-repo username config)
    * @returns Credentials with token and source metadata
    * @throws If credentials cannot be obtained through any available method
    */
-  acquireCredentials(provider: RemoteProviderInfo): Promise<RemoteCredentials>;
+  acquireCredentials(provider: RemoteProviderInfo, repoPath?: string): Promise<RemoteCredentials>;
 
   /**
    * Create a new pull request.
