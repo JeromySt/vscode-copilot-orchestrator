@@ -41,6 +41,7 @@ export * from './jobDetailsHandler';
 
 // Release handlers
 export * from './releaseHandlers';
+export * from './scaffoldReleaseTasksHandler';
 
 // PR lifecycle handlers
 export * from './prLifecycleHandlers';

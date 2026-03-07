@@ -341,5 +341,54 @@ export function registerReleaseCommands(
         vscode.window.showErrorMessage(`Failed to create release: ${error.message}`);
       }
     }),
+
+    vscode.commands.registerCommand('orchestrator.scaffoldReleaseTasks', async () => {
+      const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+      const git = gitExtension?.getAPI(1);
+      
+      if (!git || git.repositories.length === 0) {
+        vscode.window.showErrorMessage('No git repository found.');
+        return;
+      }
+      
+      const repo = git.repositories[0];
+      const repoPath = repo.rootUri.fsPath;
+      
+      // Show confirmation dialog
+      const confirmed = await vscode.window.showInformationMessage(
+        'Create default release task files in .orchestrator/release/tasks/?',
+        { modal: true },
+        'Create',
+        'Cancel'
+      );
+      
+      if (confirmed !== 'Create') {
+        return;
+      }
+      
+      try {
+        // Import the scaffold function
+        const { scaffoldDefaultTaskFiles } = await import('../plan/releaseTaskLoader');
+        const created = await scaffoldDefaultTaskFiles(repoPath);
+        
+        if (created.length === 0) {
+          vscode.window.showInformationMessage('All default task files already exist.');
+          return;
+        }
+        
+        // Show success message
+        vscode.window.showInformationMessage(
+          `Created ${created.length} task file(s): ${created.map(f => require('path').basename(f)).join(', ')}`
+        );
+        
+        // Open the first created file
+        if (created.length > 0) {
+          const doc = await vscode.workspace.openTextDocument(created[0]);
+          await vscode.window.showTextDocument(doc);
+        }
+      } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to scaffold release tasks: ${error.message}`);
+      }
+    }),
   );
 }

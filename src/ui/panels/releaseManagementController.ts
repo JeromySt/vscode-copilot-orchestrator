@@ -172,6 +172,11 @@ export class ReleaseManagementController {
           this._dialogService.showError(`Failed to cancel release: ${error.message}`);
         });
         break;
+      case 'scaffoldTasks':
+        this._delegate.executeCommand('orchestrator.scaffoldReleaseTasks').catch((error) => {
+          this._dialogService.showError(`Failed to scaffold tasks: ${error.message}`);
+        });
+        break;
       case 'addPlan':
         if (message.planId) {
           this._releaseManager.addPlansToRelease(this._releaseId, [message.planId]).catch((error) => {

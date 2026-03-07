@@ -407,16 +407,11 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     const result = stateMachine.transition(newStatus, reason);
     if (result.success) {
-      // Initialize default prep tasks when entering the preparing state
+      // Initialize prep tasks when entering the preparing state
       if (newStatus === 'preparing' && (!release.prepTasks || release.prepTasks.length === 0)) {
-        release.prepTasks = [
-          { id: 'changelog', title: 'Update CHANGELOG', description: 'Add release notes to CHANGELOG.md', required: true, autoSupported: true, status: 'pending' },
-          { id: 'version', title: 'Bump Version', description: 'Update version in package.json', required: true, autoSupported: true, status: 'pending' },
-          { id: 'compile', title: 'Run Compilation', description: 'Ensure TypeScript compiles without errors', required: true, autoSupported: true, status: 'pending' },
-          { id: 'tests', title: 'Run Tests', description: 'Execute test suite', required: true, autoSupported: true, status: 'pending' },
-          { id: 'docs', title: 'Update Documentation', description: 'Review and update README if needed', required: false, autoSupported: false, status: 'pending' },
-          { id: 'ai-review', title: 'AI Code Review', description: 'Run Copilot code review on changes', required: false, autoSupported: true, status: 'pending' },
-        ];
+        const { loadReleaseTasks, getDefaultReleaseTasks } = await import('./releaseTaskLoader');
+        const loadedTasks = await loadReleaseTasks(release.repoPath);
+        release.prepTasks = loadedTasks.length > 0 ? loadedTasks : getDefaultReleaseTasks();
       }
       await this.store.saveRelease(release);
     }
@@ -1041,16 +1036,11 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       throw new Error(`Failed to transition release ${releaseId} to preparing status`);
     }
 
-    // Initialize default preparation tasks if not already set
+    // Initialize preparation tasks if not already set
     if (!release.prepTasks || release.prepTasks.length === 0) {
-      release.prepTasks = [
-        { id: 'changelog', title: 'Update CHANGELOG', description: 'Add release notes to CHANGELOG.md', required: true, autoSupported: true, status: 'pending' },
-        { id: 'version', title: 'Bump Version', description: 'Update version in package.json', required: true, autoSupported: true, status: 'pending' },
-        { id: 'compile', title: 'Run Compilation', description: 'Ensure TypeScript compiles without errors', required: true, autoSupported: true, status: 'pending' },
-        { id: 'tests', title: 'Run Tests', description: 'Execute test suite', required: true, autoSupported: true, status: 'pending' },
-        { id: 'docs', title: 'Update Documentation', description: 'Review and update README if needed', required: false, autoSupported: false, status: 'pending' },
-        { id: 'ai-review', title: 'AI Code Review', description: 'Run Copilot code review on changes', required: false, autoSupported: true, status: 'pending' },
-      ];
+      const { loadReleaseTasks, getDefaultReleaseTasks } = await import('./releaseTaskLoader');
+      const loadedTasks = await loadReleaseTasks(release.repoPath);
+      release.prepTasks = loadedTasks.length > 0 ? loadedTasks : getDefaultReleaseTasks();
       await this.store.saveRelease(release);
     }
   }

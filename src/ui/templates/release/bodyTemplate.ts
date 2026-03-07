@@ -245,6 +245,7 @@ function renderPrepareStep(release: ReleaseDefinition): string {
   const requiredCount = tasks.filter(t => t.required).length;
   const requiredCompleted = tasks.filter(t => t.required && (t.status === 'completed' || t.status === 'skipped')).length;
   const canCreatePR = requiredCompleted === requiredCount;
+  const usingDefaults = !release.prepTasks;
   
   return `
 <div class="prep-checklist-container">
@@ -255,6 +256,17 @@ function renderPrepareStep(release: ReleaseDefinition): string {
       ${!canCreatePR ? `<span class="required-remaining">• ${requiredCount - requiredCompleted} required task(s) remaining</span>` : ''}
     </div>
   </div>
+  
+  ${usingDefaults ? `
+  <div style="margin-bottom: 16px; padding: 12px; background: var(--vscode-editorInfo-background); border-left: 4px solid var(--vscode-editorInfo-foreground); border-radius: 4px;">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 14px;">ℹ️</span>
+      <div style="flex: 1; font-size: 12px;">
+        Using default tasks. <a href="#" onclick="scaffoldTaskFiles(); return false;" style="color: var(--vscode-textLink-foreground); text-decoration: none;">Create task files</a> to customize.
+      </div>
+    </div>
+  </div>
+  ` : ''}
   
   <div class="prep-checklist">
     ${tasks.map(task => renderPrepTask(task)).join('\n')}
