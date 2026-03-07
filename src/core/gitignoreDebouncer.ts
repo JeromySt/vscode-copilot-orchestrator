@@ -17,18 +17,28 @@ const log = Logger.for('gitignore-debouncer');
 export const BRANCH_CHANGE_DELAY_MS = 30_000;
 
 /**
+ * Per-repository pending state.
+ */
+interface PendingRepoState {
+  entries: string[];
+  timer: ReturnType<typeof setTimeout> | undefined;
+  resolvers: Array<() => void>;
+}
+
+/**
  * Debounces .gitignore writes after branch changes to prevent race conditions.
  * 
  * When a branch change occurs, this class defers .gitignore writes for 30 seconds
  * to avoid creating uncommitted changes that would block subsequent `git checkout`
  * operations by VS Code or the user. Multiple write requests during the delay
  * window are merged and deduplicated.
+ * 
+ * Pending state is keyed by repoPath so concurrent writes to different repositories
+ * cannot interfere with each other.
  */
 export class GitignoreDebouncer implements IGitignoreDebouncer {
   private _lastBranchChangeTime = 0;
-  private _pendingTimer: ReturnType<typeof setTimeout> | undefined;
-  private _pendingEntries: string[] = [];
-  private _pendingResolvers: Array<() => void> = [];
+  private readonly _pendingByRepo = new Map<string, PendingRepoState>();
 
   /**
    * Creates a new GitignoreDebouncer instance.
@@ -70,22 +80,27 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
         repoPath
       });
 
-      // Merge with any pending entries (deduplicate)
-      this._pendingEntries = [...new Set([...this._pendingEntries, ...entries])];
+      // Get or create per-repo pending state
+      let pending = this._pendingByRepo.get(repoPath);
+      if (!pending) {
+        pending = { entries: [], timer: undefined, resolvers: [] };
+        this._pendingByRepo.set(repoPath, pending);
+      }
 
-      // Clear existing timer — we'll reset it to fire at the end of the full delay
-      if (this._pendingTimer) {
-        clearTimeout(this._pendingTimer);
+      // Merge with any pending entries for this repo (deduplicate)
+      pending.entries = [...new Set([...pending.entries, ...entries])];
+
+      // Clear existing timer for this repo — reset it to fire at the end of the full delay
+      if (pending.timer) {
+        clearTimeout(pending.timer);
       }
 
       return new Promise<void>((resolve) => {
-        this._pendingResolvers.push(resolve);
-        this._pendingTimer = setTimeout(async () => {
-          const toWrite = [...this._pendingEntries];
-          const resolvers = [...this._pendingResolvers];
-          this._pendingEntries = [];
-          this._pendingResolvers = [];
-          this._pendingTimer = undefined;
+        pending!.resolvers.push(resolve);
+        pending!.timer = setTimeout(async () => {
+          const toWrite = [...pending!.entries];
+          const resolvers = [...pending!.resolvers];
+          this._pendingByRepo.delete(repoPath);
 
           try {
             await this._git.gitignore.ensureGitignoreEntries(repoPath, toWrite);
@@ -120,17 +135,16 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
   /**
    * Cleans up pending timers and resolves waiting callers.
    * 
-   * Cancels any pending delayed write operation and immediately resolves
+   * Cancels any pending delayed write operations and immediately resolves
    * all waiting promises to prevent hanging callers.
    */
   dispose(): void {
-    if (this._pendingTimer) {
-      clearTimeout(this._pendingTimer);
-      this._pendingTimer = undefined;
+    for (const [, pending] of this._pendingByRepo) {
+      if (pending.timer) {
+        clearTimeout(pending.timer);
+      }
+      for (const r of pending.resolvers) { r(); }
     }
-    // Resolve any waiting callers so they don't hang
-    for (const r of this._pendingResolvers) { r(); }
-    this._pendingResolvers = [];
-    this._pendingEntries = [];
+    this._pendingByRepo.clear();
   }
 }

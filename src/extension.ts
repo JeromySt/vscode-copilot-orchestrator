@@ -156,16 +156,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerPRLifecycleCommands(context, (id: string) => prLifecycleManager.getManagedPR(id));
 
   // ── Bulk Action Commands ───────────────────────────────────────────────
-  // Register BulkPlanActions with the container now that PlanRunner is available
-  const { BulkPlanActions } = require('./plan/bulkPlanActions');
+  // Create BulkPlanActions via composition helper (keeps DI wiring in composition.ts)
+  const { createBulkPlanActions } = require('./composition');
+  const bulkActions = createBulkPlanActions(container, planRunner);
   const dialogService = container.resolve<import('./interfaces').IDialogService>(Tokens.IDialogService);
-  container.registerSingleton<import('./interfaces/IBulkPlanActions').IBulkPlanActions>(
-    Tokens.IBulkPlanActions,
-    () => new BulkPlanActions(planRunner, dialogService)
-  );
-  const bulkActions = container.resolve<import('./interfaces/IBulkPlanActions').IBulkPlanActions>(Tokens.IBulkPlanActions);
   const { registerBulkCommands } = require('./commands');
-  registerBulkCommands(context, bulkActions);
+  registerBulkCommands(context, bulkActions, dialogService);
 
   // ── Branch Change Watcher ──────────────────────────────────────────────
   // Watch for branch changes and notify debouncer

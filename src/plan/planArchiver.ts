@@ -63,14 +63,18 @@ export class PlanArchiver implements IPlanArchiver {
       }
       
       // 1. Clean up all worktrees for this plan's jobs
-      for (const [nodeId, jobNode] of plan.jobs) {
+      for (const [nodeId] of plan.jobs) {
         const nodeState = plan.nodeStates.get(nodeId);
         const worktreePath = nodeState?.worktreePath || this._getWorktreePath(plan, nodeId);
         
         if (worktreePath) {
           // Validate worktree path (must be inside repo or worktree root)
           const normalizedWorktreePath = path.resolve(worktreePath);
-          const worktreeRoot = path.resolve(plan.worktreeRoot);
+          // Resolve worktreeRoot relative to normalizedRepoPath to handle empty/relative values safely
+          const worktreeRootRel = plan.worktreeRoot || '.worktrees';
+          const worktreeRoot = path.isAbsolute(worktreeRootRel)
+            ? worktreeRootRel
+            : path.resolve(normalizedRepoPath, worktreeRootRel);
           
           if (!normalizedWorktreePath.startsWith(normalizedRepoPath + path.sep) && 
               !normalizedWorktreePath.startsWith(worktreeRoot + path.sep)) {
@@ -111,7 +115,10 @@ export class PlanArchiver implements IPlanArchiver {
       if (plan.snapshot?.worktreePath) {
         const snapshotPath = plan.snapshot.worktreePath;
         const normalizedSnapshotPath = path.resolve(snapshotPath);
-        const worktreeRoot = path.resolve(plan.worktreeRoot);
+        const worktreeRootRel = plan.worktreeRoot || '.worktrees';
+        const worktreeRoot = path.isAbsolute(worktreeRootRel)
+          ? worktreeRootRel
+          : path.resolve(normalizedRepoPath, worktreeRootRel);
         
         if (normalizedSnapshotPath.startsWith(normalizedRepoPath + path.sep) || 
             normalizedSnapshotPath.startsWith(worktreeRoot + path.sep)) {
@@ -192,8 +199,14 @@ export class PlanArchiver implements IPlanArchiver {
         try {
           const remoteExists = await this._git.branches.remoteExists(targetBranch, repoPath);
           if (remoteExists) {
-            await this._git.branches.deleteRemote(repoPath, targetBranch);
-            log.info('Deleted remote target branch', { planId, targetBranch });
+            // Safety: never delete the default branch remotely
+            const isDefault = await this._git.branches.isDefaultBranch(targetBranch, repoPath);
+            if (!isDefault) {
+              await this._git.branches.deleteRemote(repoPath, targetBranch);
+              log.info('Deleted remote target branch', { planId, targetBranch });
+            } else {
+              log.info('Skipped deletion of remote default branch', { planId, targetBranch });
+            }
           }
         } catch (err: any) {
           log.warn('Failed to delete remote branch', { planId, targetBranch, error: err.message });
@@ -262,7 +275,8 @@ export class PlanArchiver implements IPlanArchiver {
 
   /**
    * Mark plan as archived in persistence.
-   * Updates the plan's stateHistory and persists to disk.
+   * Sets archivedAt timestamp (makes computePlanStatus() return 'archived'),
+   * updates stateHistory, and persists to disk.
    */
   private async _markAsArchived(planId: string): Promise<void> {
     const plan = this._planRunner.get(planId);
@@ -270,7 +284,7 @@ export class PlanArchiver implements IPlanArchiver {
       throw new Error(`Plan ${planId} not found`);
     }
     
-    // Add a state transition to 'archived'
+    // Add a state transition to 'archived' in history
     if (!plan.stateHistory) {
       plan.stateHistory = [];
     }
@@ -282,6 +296,9 @@ export class PlanArchiver implements IPlanArchiver {
       timestamp: Date.now(),
       reason: 'user-archived'
     });
+
+    // Set the canonical archived timestamp — this makes computePlanStatus() return 'archived'
+    plan.archivedAt = Date.now();
     
     // Persist the updated state
     await this._planRepo.saveState(plan);

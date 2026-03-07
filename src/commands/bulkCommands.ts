@@ -9,21 +9,21 @@
 
 import * as vscode from 'vscode';
 import { executeBulkCommand } from './bulkCommandLogic';
-import { VsCodeDialogService } from '../vscode/adapters';
 import type { IBulkPlanActions } from '../interfaces/IBulkPlanActions';
+import type { IDialogService } from '../interfaces/IDialogService';
 
 /**
  * Register bulk action commands with VS Code.
  * 
  * @param context - Extension context for subscription management
  * @param bulkActions - The bulk actions service instance
+ * @param dialog - Dialog service (injected, avoids direct VsCodeDialogService instantiation)
  */
 export function registerBulkCommands(
   context: vscode.ExtensionContext,
-  bulkActions: IBulkPlanActions
+  bulkActions: IBulkPlanActions,
+  dialog: IDialogService
 ): void {
-  const dialog = new VsCodeDialogService();
-  
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'orchestrator.bulkDelete',

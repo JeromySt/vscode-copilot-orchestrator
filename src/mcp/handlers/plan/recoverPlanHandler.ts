@@ -51,9 +51,8 @@ export async function handleRecoverPlan(args: any, ctx: PlanHandlerContext): Pro
   }
   
   try {
-    // Analyze recoverable nodes (for preview)
+    // Analyze recoverable nodes (to report totalNodeCount in response)
     const analysis = await ctx.PlanRecovery.analyzeRecoverableNodes(planId);
-    const recoverableCount = analysis.filter(n => n.wasSuccessful && n.commitHash).length;
     
     // Perform recovery
     const result = await ctx.PlanRecovery.recover(planId, { useCopilotAgent });

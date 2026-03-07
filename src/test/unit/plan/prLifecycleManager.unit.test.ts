@@ -736,22 +736,17 @@ suite('DefaultPRLifecycleManager', () => {
   suite('initialization', () => {
     test('should load persisted PRs on first operation', async () => {
       const storedPR: StoredManagedPR = {
+        id: 'stored-id',
         prNumber: 42,
         title: 'Stored PR',
-        body: 'Body',
-        sourceBranch: 'feature/stored',
-        targetBranch: 'main',
-        repoPath: '/repo',
         prUrl: 'https://github.com/test/repo/pull/42',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        metadata: {
-          id: 'stored-id',
-          status: 'adopted',
-          providerType: 'github',
-          workingDirectory: '/repo',
-        },
+        headBranch: 'feature/stored',
+        baseBranch: 'main',
+        status: 'adopted',
+        providerType: 'github',
+        repoPath: '/repo',
+        workingDirectory: '/repo',
+        adoptedAt: Date.now(),
       };
 
       mockStore.loadAll.resolves([storedPR]);

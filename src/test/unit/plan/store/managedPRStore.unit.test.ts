@@ -18,6 +18,23 @@ import * as path from 'path';
 import { FileSystemManagedPRStore } from '../../../../plan/store/managedPRStore';
 import type { ManagedPR } from '../../../../interfaces/IManagedPRStore';
 
+function makePR(overrides?: Partial<ManagedPR>): ManagedPR {
+  return {
+    id: 'pr-42',
+    prNumber: 42,
+    prUrl: 'https://github.com/test/repo/pull/42',
+    title: 'Test PR',
+    headBranch: 'feature/test',
+    baseBranch: 'main',
+    status: 'adopted',
+    providerType: 'github',
+    repoPath: '/test/repo',
+    workingDirectory: '/test/repo',
+    adoptedAt: Date.now(),
+    ...overrides,
+  };
+}
+
 suite('FileSystemManagedPRStore', () => {
   let sandbox: sinon.SinonSandbox;
   let mockFS: any;
@@ -51,18 +68,7 @@ suite('FileSystemManagedPRStore', () => {
 
   suite('save', () => {
     test('should save managed PR to correct directory', async () => {
-      const pr: ManagedPR = {
-        prNumber: 42,
-        title: 'Test PR',
-        body: 'Test body',
-        sourceBranch: 'feature/test',
-        targetBranch: 'main',
-        repoPath: '/test/repo',
-        prUrl: 'https://github.com/test/repo/pull/42',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+      const pr = makePR();
 
       await store.save(pr);
 
@@ -87,45 +93,24 @@ suite('FileSystemManagedPRStore', () => {
     });
 
     test('should serialize PR with metadata', async () => {
-      const pr: ManagedPR = {
-        prNumber: 42,
-        title: 'Test PR',
-        body: 'Test body',
-        sourceBranch: 'feature/test',
-        targetBranch: 'main',
-        repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+      const pr = makePR({
         releaseId: 'rel-123',
-        planIds: ['plan-1', 'plan-2'],
-        metadata: {
-          customField: 'customValue',
-        },
-      };
+        priority: 2,
+        unresolvedComments: 3,
+      });
 
       await store.save(pr);
 
       const writtenContent = JSON.parse(mockFS.writeFileAsync.firstCall.args[1]);
       assert.strictEqual(writtenContent.releaseId, 'rel-123');
-      assert.deepStrictEqual(writtenContent.planIds, ['plan-1', 'plan-2']);
-      assert.strictEqual(writtenContent.metadata.customField, 'customValue');
+      assert.strictEqual(writtenContent.priority, 2);
+      assert.strictEqual(writtenContent.unresolvedComments, 3);
     });
 
     test('should cleanup temp file on error', async () => {
       mockFS.renameAsync.rejects(new Error('Rename failed'));
 
-      const pr: ManagedPR = {
-        prNumber: 42,
-        title: 'Test PR',
-        body: 'Test body',
-        sourceBranch: 'feature/test',
-        targetBranch: 'main',
-        repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+      const pr = makePR();
 
       await assert.rejects(
         async () => store.save(pr),
@@ -141,17 +126,7 @@ suite('FileSystemManagedPRStore', () => {
       mockFS.renameAsync.rejects(new Error('Rename failed'));
       mockFS.unlinkAsync.rejects(new Error('Cleanup failed'));
 
-      const pr: ManagedPR = {
-        prNumber: 42,
-        title: 'Test PR',
-        body: 'Test body',
-        sourceBranch: 'feature/test',
-        targetBranch: 'main',
-        repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+      const pr = makePR();
 
       // Should throw rename error, not cleanup error
       await assert.rejects(
@@ -166,15 +141,17 @@ suite('FileSystemManagedPRStore', () => {
   suite('load', () => {
     test('should load managed PR from correct file', async () => {
       const storedPR = {
+        id: 'pr-42',
         prNumber: 42,
+        prUrl: 'https://github.com/test/repo/pull/42',
         title: 'Stored PR',
-        body: 'Stored body',
-        sourceBranch: 'feature/stored',
-        targetBranch: 'main',
+        headBranch: 'feature/stored',
+        baseBranch: 'main',
+        status: 'adopted',
+        providerType: 'github',
         repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: 1234567890,
-        updatedAt: 1234567890,
+        workingDirectory: '/test/repo',
+        adoptedAt: 1234567890,
       };
 
       mockFS.readFileAsync.resolves(JSON.stringify(storedPR));
@@ -210,19 +187,19 @@ suite('FileSystemManagedPRStore', () => {
 
     test('should parse JSON with metadata', async () => {
       const storedPR = {
+        id: 'pr-42',
         prNumber: 42,
+        prUrl: 'https://github.com/test/repo/pull/42',
         title: 'PR with metadata',
-        body: '',
-        sourceBranch: 'feature/meta',
-        targetBranch: 'main',
+        headBranch: 'feature/meta',
+        baseBranch: 'main',
+        status: 'monitoring',
+        providerType: 'github',
         repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        workingDirectory: '/test/repo',
+        adoptedAt: Date.now(),
         releaseId: 'rel-456',
-        metadata: {
-          status: 'monitoring',
-        },
+        unresolvedComments: 2,
       };
 
       mockFS.readFileAsync.resolves(JSON.stringify(storedPR));
@@ -231,7 +208,7 @@ suite('FileSystemManagedPRStore', () => {
 
       assert.ok(result);
       assert.strictEqual(result.releaseId, 'rel-456');
-      assert.strictEqual(result.metadata?.status, 'monitoring');
+      assert.strictEqual(result.unresolvedComments, 2);
     });
   });
 
@@ -240,15 +217,17 @@ suite('FileSystemManagedPRStore', () => {
   suite('loadByPRNumber', () => {
     test('should be an alias for load', async () => {
       const storedPR = {
+        id: 'pr-42',
         prNumber: 42,
+        prUrl: 'https://github.com/test/repo/pull/42',
         title: 'PR',
-        body: '',
-        sourceBranch: 'feature',
-        targetBranch: 'main',
+        headBranch: 'feature',
+        baseBranch: 'main',
+        status: 'adopted',
+        providerType: 'github',
         repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        workingDirectory: '/test/repo',
+        adoptedAt: Date.now(),
       };
 
       mockFS.readFileAsync.resolves(JSON.stringify(storedPR));
@@ -265,27 +244,31 @@ suite('FileSystemManagedPRStore', () => {
   suite('loadAll', () => {
     test('should load all managed PRs', async () => {
       const pr1 = {
+        id: 'pr-42',
         prNumber: 42,
+        prUrl: 'https://github.com/test/repo/pull/42',
         title: 'PR 1',
-        body: '',
-        sourceBranch: 'feature/1',
-        targetBranch: 'main',
+        headBranch: 'feature/1',
+        baseBranch: 'main',
+        status: 'adopted',
+        providerType: 'github',
         repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        workingDirectory: '/test/repo',
+        adoptedAt: Date.now(),
       };
 
       const pr2 = {
+        id: 'pr-43',
         prNumber: 43,
+        prUrl: 'https://github.com/test/repo/pull/43',
         title: 'PR 2',
-        body: '',
-        sourceBranch: 'feature/2',
-        targetBranch: 'main',
+        headBranch: 'feature/2',
+        baseBranch: 'main',
+        status: 'adopted',
+        providerType: 'github',
         repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        workingDirectory: '/test/repo',
+        adoptedAt: Date.now(),
       };
 
       mockFS.readdirAsync.resolves(['42', '43']);
@@ -323,15 +306,17 @@ suite('FileSystemManagedPRStore', () => {
 
     test('should skip invalid files', async () => {
       const pr1 = {
+        id: 'pr-42',
         prNumber: 42,
+        prUrl: 'https://github.com/test/repo/pull/42',
         title: 'Valid PR',
-        body: '',
-        sourceBranch: 'feature/valid',
-        targetBranch: 'main',
+        headBranch: 'feature/valid',
+        baseBranch: 'main',
+        status: 'adopted',
+        providerType: 'github',
         repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        workingDirectory: '/test/repo',
+        adoptedAt: Date.now(),
       };
 
       mockFS.readdirAsync.resolves(['42', '43']);
@@ -404,17 +389,7 @@ suite('FileSystemManagedPRStore', () => {
 
   suite('path validation', () => {
     test('should block path traversal with ..', async () => {
-      const pr: ManagedPR = {
-        prNumber: 42,
-        title: 'Test',
-        body: '',
-        sourceBranch: 'feature',
-        targetBranch: 'main',
-        repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+      const pr = makePR();
 
       // The validation happens in getManagedPRPath, which is called by save/load/delete
       // We can test this by checking that the path is constructed correctly
@@ -443,65 +418,40 @@ suite('FileSystemManagedPRStore', () => {
 
   suite('edge cases', () => {
     test('should handle empty metadata', async () => {
-      const pr: ManagedPR = {
-        prNumber: 42,
-        title: 'No metadata PR',
-        body: '',
-        sourceBranch: 'feature',
-        targetBranch: 'main',
-        repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        metadata: {},
-      };
+      const pr = makePR({ unresolvedComments: undefined });
 
       await store.save(pr);
 
       const writtenContent = JSON.parse(mockFS.writeFileAsync.firstCall.args[1]);
-      assert.deepStrictEqual(writtenContent.metadata, {});
+      assert.strictEqual(writtenContent.unresolvedComments, undefined);
     });
 
     test('should handle missing optional fields', async () => {
-      const pr: ManagedPR = {
-        prNumber: 42,
-        title: 'Minimal PR',
-        body: '',
-        sourceBranch: 'feature',
-        targetBranch: 'main',
-        repoPath: '/test/repo',
-        isOpen: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+      const pr = makePR();
 
       await store.save(pr);
 
       const writtenContent = JSON.parse(mockFS.writeFileAsync.firstCall.args[1]);
       assert.strictEqual(writtenContent.releaseId, undefined);
-      assert.strictEqual(writtenContent.planIds, undefined);
-      assert.strictEqual(writtenContent.prUrl, undefined);
+      assert.strictEqual(writtenContent.priority, undefined);
+      assert.strictEqual(writtenContent.error, undefined);
     });
 
     test('should preserve all fields during save-load round trip', async () => {
-      const pr: ManagedPR = {
-        prNumber: 42,
+      const pr: ManagedPR = makePR({
+        id: 'pr-complete',
         title: 'Complete PR',
-        body: 'Full body',
-        sourceBranch: 'feature/complete',
-        targetBranch: 'main',
-        repoPath: '/test/repo',
+        headBranch: 'feature/complete',
         prUrl: 'https://github.com/test/repo/pull/42',
-        isOpen: false,
-        createdAt: 1234567890,
-        updatedAt: 9876543210,
+        status: 'monitoring',
+        workingDirectory: '/test/repo/wt',
+        adoptedAt: 1234567890,
+        monitoringStartedAt: 1234567900,
         releaseId: 'rel-xyz',
-        planIds: ['plan-a', 'plan-b'],
-        metadata: {
-          status: 'ready',
-          priority: 5,
-        },
-      };
+        priority: 3,
+        unresolvedComments: 5,
+        failingChecks: 1,
+      });
 
       // Save
       await store.save(pr);
@@ -513,19 +463,22 @@ suite('FileSystemManagedPRStore', () => {
 
       // Verify all fields preserved
       assert.ok(loaded);
+      assert.strictEqual(loaded.id, pr.id);
       assert.strictEqual(loaded.prNumber, pr.prNumber);
       assert.strictEqual(loaded.title, pr.title);
-      assert.strictEqual(loaded.body, pr.body);
-      assert.strictEqual(loaded.sourceBranch, pr.sourceBranch);
-      assert.strictEqual(loaded.targetBranch, pr.targetBranch);
-      assert.strictEqual(loaded.repoPath, pr.repoPath);
+      assert.strictEqual(loaded.headBranch, pr.headBranch);
+      assert.strictEqual(loaded.baseBranch, pr.baseBranch);
       assert.strictEqual(loaded.prUrl, pr.prUrl);
-      assert.strictEqual(loaded.isOpen, pr.isOpen);
-      assert.strictEqual(loaded.createdAt, pr.createdAt);
-      assert.strictEqual(loaded.updatedAt, pr.updatedAt);
+      assert.strictEqual(loaded.status, pr.status);
+      assert.strictEqual(loaded.providerType, pr.providerType);
+      assert.strictEqual(loaded.repoPath, pr.repoPath);
+      assert.strictEqual(loaded.workingDirectory, pr.workingDirectory);
+      assert.strictEqual(loaded.adoptedAt, pr.adoptedAt);
+      assert.strictEqual(loaded.monitoringStartedAt, pr.monitoringStartedAt);
       assert.strictEqual(loaded.releaseId, pr.releaseId);
-      assert.deepStrictEqual(loaded.planIds, pr.planIds);
-      assert.deepStrictEqual(loaded.metadata, pr.metadata);
+      assert.strictEqual(loaded.priority, pr.priority);
+      assert.strictEqual(loaded.unresolvedComments, pr.unresolvedComments);
+      assert.strictEqual(loaded.failingChecks, pr.failingChecks);
     });
   });
 });

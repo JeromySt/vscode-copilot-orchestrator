@@ -644,6 +644,12 @@ export interface PlanInstance {
   /** Aggregated work summary */
   workSummary?: WorkSummary;
   
+  /**
+   * Timestamp when the plan was archived (set by PlanArchiver).
+   * When set, computePlanStatus() returns 'archived' regardless of node states.
+   */
+  archivedAt?: number;
+
   /** Plan definition for lazy spec loading (set when loaded from repository) */
   definition?: import('../../interfaces/IPlanDefinition').IPlanDefinition;
 }

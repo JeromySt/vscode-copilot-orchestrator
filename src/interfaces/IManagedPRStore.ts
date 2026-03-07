@@ -7,52 +7,19 @@
  * @module interfaces/IManagedPRStore
  */
 
+import type { ManagedPR as LifecycleManagedPR } from '../plan/types/prLifecycle';
+
 /**
  * Managed PR definition.
  * 
  * Represents a pull request that is being managed by the orchestrator,
  * including its metadata and current state.
+ * 
+ * This type is an alias of the canonical ManagedPR used by the PR lifecycle
+ * manager in src/plan/types/prLifecycle.ts to ensure consistency across
+ * persistence and lifecycle layers.
  */
-export interface ManagedPR {
-  /** PR number */
-  prNumber: number;
-
-  /** PR title */
-  title: string;
-
-  /** PR body/description */
-  body: string;
-
-  /** Source branch */
-  sourceBranch: string;
-
-  /** Target branch */
-  targetBranch: string;
-
-  /** Repository path */
-  repoPath: string;
-
-  /** PR URL */
-  prUrl?: string;
-
-  /** Whether the PR is currently open */
-  isOpen: boolean;
-
-  /** Timestamp when PR was created */
-  createdAt: number;
-
-  /** Timestamp when PR was last updated */
-  updatedAt: number;
-
-  /** Associated release ID if this PR is part of a release */
-  releaseId?: string;
-
-  /** Associated plan IDs */
-  planIds?: string[];
-
-  /** Any additional metadata */
-  metadata?: Record<string, any>;
-}
+export type ManagedPR = LifecycleManagedPR;
 
 /**
  * Storage backend interface for managed PR persistence.

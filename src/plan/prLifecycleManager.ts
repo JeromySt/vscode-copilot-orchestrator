@@ -69,9 +69,8 @@ export class DefaultPRLifecycleManager extends EventEmitter implements IPRLifecy
     try {
       const storedPRs = await this.store.loadAll();
       for (const pr of storedPRs) {
-        // Convert IManagedPRStore.ManagedPR to prLifecycle.ManagedPR
-        const managedPR = this.convertStoredPRToManagedPR(pr);
-        this.managedPRs.set(managedPR.id, managedPR);
+        // ManagedPR type is now unified: store and lifecycle use the same shape
+        this.managedPRs.set(pr.id, pr);
       }
       log.info('Loaded managed PRs', { count: storedPRs.length });
       this.initialized = true;
@@ -82,75 +81,11 @@ export class DefaultPRLifecycleManager extends EventEmitter implements IPRLifecy
   }
 
   /**
-   * Convert IManagedPRStore.ManagedPR to prLifecycle.ManagedPR.
-   * The store interface uses a different ManagedPR shape (simpler, storage-focused).
-   */
-  private convertStoredPRToManagedPR(storedPR: import('../interfaces/IManagedPRStore').ManagedPR): ManagedPR {
-    // Extract lifecycle metadata from storedPR.metadata
-    const metadata = storedPR.metadata || {};
-    
-    return {
-      id: metadata.id || `pr-${storedPR.prNumber}-${Date.now()}`,
-      prNumber: storedPR.prNumber,
-      prUrl: storedPR.prUrl || '',
-      title: storedPR.title,
-      baseBranch: storedPR.targetBranch,
-      headBranch: storedPR.sourceBranch,
-      status: (metadata.status || 'adopted') as ManagedPRStatus,
-      providerType: metadata.providerType || 'github',
-      repoPath: storedPR.repoPath,
-      workingDirectory: metadata.workingDirectory || storedPR.repoPath,
-      releaseId: storedPR.releaseId,
-      priority: metadata.priority,
-      adoptedAt: storedPR.createdAt,
-      monitoringStartedAt: metadata.monitoringStartedAt,
-      completedAt: metadata.completedAt,
-      unresolvedComments: metadata.unresolvedComments,
-      failingChecks: metadata.failingChecks,
-      unresolvedAlerts: metadata.unresolvedAlerts,
-      error: metadata.error,
-    };
-  }
-
-  /**
-   * Convert prLifecycle.ManagedPR to IManagedPRStore.ManagedPR for persistence.
-   */
-  private convertManagedPRToStoredPR(managedPR: ManagedPR): import('../interfaces/IManagedPRStore').ManagedPR {
-    return {
-      prNumber: managedPR.prNumber,
-      title: managedPR.title,
-      body: '', // Not tracked in lifecycle manager
-      sourceBranch: managedPR.headBranch,
-      targetBranch: managedPR.baseBranch,
-      repoPath: managedPR.repoPath,
-      prUrl: managedPR.prUrl,
-      isOpen: managedPR.status !== 'abandoned',
-      createdAt: managedPR.adoptedAt,
-      updatedAt: Date.now(),
-      releaseId: managedPR.releaseId,
-      metadata: {
-        id: managedPR.id,
-        status: managedPR.status,
-        providerType: managedPR.providerType,
-        workingDirectory: managedPR.workingDirectory,
-        priority: managedPR.priority,
-        monitoringStartedAt: managedPR.monitoringStartedAt,
-        completedAt: managedPR.completedAt,
-        unresolvedComments: managedPR.unresolvedComments,
-        failingChecks: managedPR.failingChecks,
-        unresolvedAlerts: managedPR.unresolvedAlerts,
-        error: managedPR.error,
-      },
-    };
-  }
-
-  /**
    * Persist a managed PR to storage.
    */
   private async persistPR(managedPR: ManagedPR): Promise<void> {
     try {
-      const storedPR = this.convertManagedPRToStoredPR(managedPR);
-      await this.store.save(storedPR);
+      await this.store.save(managedPR);
       log.debug('Persisted managed PR', { id: managedPR.id, prNumber: managedPR.prNumber });
     } catch (err) {
       log.error('Failed to persist managed PR', { 

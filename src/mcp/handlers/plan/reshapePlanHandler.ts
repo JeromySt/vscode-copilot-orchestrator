@@ -316,14 +316,14 @@ async function handleScaffoldingOp(
         expectsNoChanges: op.spec.expectsNoChanges,
       };
       // Step 1: Add the new node
-      let rebuilt = await ctx.PlanRepository.addNode(planId, newSpec);
+      await ctx.PlanRepository.addNode(planId, newSpec);
       // Step 2: Update existing node's dependencies to include the new node's producerId
       const existingDeps = existingNode.dependencies
         .map(depId => plan.jobs.get(depId)?.producerId)
         .filter((p): p is string => !!p);
       // Replace deps that the new node now satisfies, or simply add new node as additional dep
       const updatedDeps = [...new Set([...existingDeps, op.spec.producerId])];
-      rebuilt = await ctx.PlanRepository.updateNode(planId, existingNode.producerId, { dependencies: updatedDeps });
+      const rebuilt = await ctx.PlanRepository.updateNode(planId, existingNode.producerId, { dependencies: updatedDeps });
       replaceInMemoryPlan(plan, rebuilt);
       return { operation: 'add_before', success: true, nodeId: op.spec.producerId };
     }

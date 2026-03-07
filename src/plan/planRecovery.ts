@@ -208,7 +208,6 @@ export class PlanRecovery implements IPlanRecovery {
     }
     
     const results: NodeRecoveryInfo[] = [];
-    const repoPath = plan.spec.repoPath;
     const sm = this._planRunner.getStateMachine(planId);
     
     for (const [nodeId, jobNode] of plan.jobs) {

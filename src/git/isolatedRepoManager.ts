@@ -54,7 +54,6 @@ export class DefaultIsolatedRepoManager implements IIsolatedRepoManager {
    * Prevents path traversal attacks.
    */
   private _validateClonePath(repoPath: string, clonePath: string): void {
-    const repoResolved = path.resolve(repoPath);
     const orchestratorDir = path.resolve(repoPath, '.orchestrator');
     const cloneResolved = path.resolve(clonePath);
 

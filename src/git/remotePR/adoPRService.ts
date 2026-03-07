@@ -8,7 +8,6 @@
  */
 
 import * as https from 'https';
-import * as http from 'http';
 import type { IRemotePRService } from '../../interfaces/IRemotePRService';
 import type { IProcessSpawner } from '../../interfaces/IProcessSpawner';
 import type { IRemoteProviderDetector } from '../../interfaces/IRemoteProviderDetector';

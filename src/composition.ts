@@ -52,8 +52,6 @@ import { FileSystemPlanStore } from './plan/store/FileSystemPlanStore';
 import { DefaultPlanRepository } from './plan/repository/DefaultPlanRepository';
 import { DefaultFileSystem } from './core/defaultFileSystem';
 import { GitignoreDebouncer } from './core/gitignoreDebouncer';
-import { PlanArchiver } from './plan/planArchiver';
-import { PlanRecovery } from './plan/planRecovery';
 import { DefaultRemoteProviderDetector } from './git/remotePR/remoteProviderDetector';
 import { GitHubPRService } from './git/remotePR/githubPRService';
 import { RemotePRServiceFactory } from './git/remotePR/remotePRServiceFactory';
@@ -398,4 +396,22 @@ export function createReleaseManager(
   
   const { DefaultReleaseManager } = require('./plan/releaseManager');
   return new DefaultReleaseManager(planRunner, git, copilot, isolatedRepos, prMonitor, prServiceFactory, store, providerDetector, dialogService);
+}
+
+/**
+ * Create a BulkPlanActions instance with PlanRunner and IDialogService dependencies.
+ * 
+ * Call this after PlanRunner is initialized. Keeps concrete instantiation out of extension.ts.
+ * 
+ * @param container - The DI container
+ * @param planRunner - The initialized PlanRunner instance
+ * @returns A fully-wired IBulkPlanActions instance
+ */
+export function createBulkPlanActions(
+  container: ServiceContainer,
+  planRunner: import('./interfaces/IPlanRunner').IPlanRunner,
+): import('./interfaces/IBulkPlanActions').IBulkPlanActions {
+  const dialogService = container.resolve<import('./interfaces/IDialogService').IDialogService>(Tokens.IDialogService);
+  const { BulkPlanActions } = require('./plan/bulkPlanActions');
+  return new BulkPlanActions(planRunner, dialogService);
 }

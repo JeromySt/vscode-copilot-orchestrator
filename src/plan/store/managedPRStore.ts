@@ -106,13 +106,22 @@ export class FileSystemManagedPRStore implements IManagedPRStore {
       const prDirs = await this.fs.readdirAsync(managedPRsRoot);
 
       for (const prDir of prDirs) {
+        // Allowlist: PR directories must be numeric (PR numbers)
+        if (!/^\d+$/.test(prDir)) {
+          log.debug('Skipping non-numeric managed PR directory', { prDir });
+          continue;
+        }
+
         const prFile = path.join(managedPRsRoot, prDir, 'managed-pr.json');
         try {
+          // Ensure the managed PR file path stays under the managed-prs root
+          validatePath(managedPRsRoot, prFile);
+
           const content = await this.fs.readFileAsync(prFile);
           const managedPR = JSON.parse(content) as ManagedPR;
           managedPRs.push(managedPR);
         } catch {
-          // Skip invalid or missing files
+          // Skip invalid, missing, or unsafe files
           log.debug('Skipping invalid managed PR file', { path: prFile });
           continue;
         }

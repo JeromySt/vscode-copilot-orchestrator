@@ -736,7 +736,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     if (release.status === 'pr-active' && release.isolatedRepoPath) {
       log.info('Release is pr-active, merging new plans and pushing', { releaseId });
       try {
-        const mergeResults = await this._mergeAllPlans(release);
+        await this._mergeAllPlans(release);
         const pushSuccess = await this.git.repository.push(release.isolatedRepoPath, {
           remote: 'origin',
           branch: release.releaseBranch,
