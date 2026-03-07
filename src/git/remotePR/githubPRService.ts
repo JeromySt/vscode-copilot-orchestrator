@@ -115,17 +115,24 @@ export class GitHubPRService implements IRemotePRService {
       '--head', options.headBranch,
       '--title', options.title,
       '--body', options.body,
-      '--json', 'number,url',
     ];
 
     const result = await this._execGh(args, options.cwd, env);
     
     try {
-      const parsed = JSON.parse(result);
-      log.info('PR created', { prNumber: parsed.number, prUrl: parsed.url });
+      // gh pr create outputs the PR URL on stdout (e.g., "https://github.com/owner/repo/pull/42")
+      const prUrl = result.trim().split('\n').pop()?.trim() || '';
+      const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+      const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : 0;
+      
+      if (!prNumber) {
+        throw new Error(`Could not extract PR number from output: ${result}`);
+      }
+      
+      log.info('PR created', { prNumber, prUrl });
       return {
-        prNumber: parsed.number,
-        prUrl: parsed.url,
+        prNumber,
+        prUrl,
       };
     } catch (err) {
       log.error('Failed to parse PR create response', { error: String(err), output: result });
