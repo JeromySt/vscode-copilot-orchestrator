@@ -76,6 +76,9 @@ export interface PRCreateOptions {
   
   /** Working directory of the release clone (.orchestrator/release/<branch>/) */
   cwd: string;
+  
+  /** Create as draft PR */
+  draft?: boolean;
 }
 
 /**

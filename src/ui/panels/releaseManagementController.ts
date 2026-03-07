@@ -129,7 +129,8 @@ export class ReleaseManagementController {
       case 'createPR':
         // Transition to ready-for-pr first if still in preparing
         this._releaseManager.transitionToState(this._releaseId, 'ready-for-pr', 'All tasks complete, creating PR').then(() => {
-          return this._releaseManager.createPR(this._releaseId, message.asDraft);
+          // Always create as draft per the orchestrator convention (safe default)
+          return this._releaseManager.createPR(this._releaseId, true);
         }).catch((error) => {
           this._dialogService.showError(`Failed to create PR: ${error.message}`);
         });

@@ -116,6 +116,10 @@ export class GitHubPRService implements IRemotePRService {
       '--title', options.title,
       '--body', options.body,
     ];
+    
+    if (options.draft) {
+      args.push('--draft');
+    }
 
     const result = await this._execGh(args, options.cwd, env);
     

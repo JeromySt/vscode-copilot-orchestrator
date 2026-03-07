@@ -569,13 +569,16 @@ function renderCompletionStep(release: ReleaseDefinition): string {
   const isSuccess = release.status === 'succeeded';
   const isFailed = release.status === 'failed';
   const isCanceled = release.status === 'canceled';
+  const hasPR = !!release.prNumber;
   
   const icon = isSuccess ? '✅' : (isFailed ? '❌' : '⚠️');
   const title = isSuccess ? 'Release Completed Successfully!' : 
                 isFailed ? 'Release Failed' : 
+                isCanceled && hasPR ? 'Release Canceled (PR still open)' :
                 'Release Canceled';
   const message = isSuccess ? `PR #${release.prNumber || ''} has been merged.` :
                   isFailed ? (release.error || 'An error occurred during the release process.') :
+                  isCanceled && hasPR ? `The release was canceled but PR #${release.prNumber} is still open on GitHub.` :
                   'The release was canceled.';
   
   return `
@@ -620,12 +623,13 @@ function renderNavigationButtons(release: ReleaseDefinition, stepIndex: number, 
   
   const isTerminal = ['succeeded', 'failed', 'canceled'].includes(release.status);
   
+  // Don't show nav buttons for terminal states (they're in the completion screen)
+  if (isTerminal) {
+    return '';
+  }
+  
   return `
-<div>
-  <div></div>
-</div>
-<div style="display: flex; gap: 12px;">
-  ${isTerminal ? '<button class="danger" onclick="deleteRelease()">Delete Release</button>' : ''}
+<div style="display: flex; gap: 12px; justify-content: flex-end; padding: 16px 0;">
   ${canCancel ? '<button class="danger" onclick="cancelRelease()">Cancel Release</button>' : ''}
   ${proceedButton}
 </div>`;

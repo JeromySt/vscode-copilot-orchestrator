@@ -778,6 +778,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         title: release.name,
         body: this._buildPRBody(release, []),
         cwd,
+        draft: asDraft,
       });
 
       release.prNumber = prResult.prNumber;
