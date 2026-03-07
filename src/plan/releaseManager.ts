@@ -469,6 +469,12 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           cwd,
           task: taskDescription,
           sessionId: `release-${releaseId}-task-${taskId}`,
+          onOutput: async (line: string) => {
+            // Stream every CLI output line to log file AND event
+            const logLine = `${line}\n`;
+            try { await fs.appendFile(logFilePath, logLine); } catch { /* ignore write errors */ }
+            this.events.emitReleaseTaskOutput(releaseId, taskId, line);
+          },
         });
 
         if (result.success) {

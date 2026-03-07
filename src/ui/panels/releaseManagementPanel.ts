@@ -101,6 +101,7 @@ export class ReleaseManagementPanel {
         }
       },
       forceFullRefresh: () => this._forceFullRefresh(),
+      closePanel: () => this.dispose(),
     };
     this._controller = new ReleaseManagementController(releaseId, dialogService, delegate, this._releaseManager);
     

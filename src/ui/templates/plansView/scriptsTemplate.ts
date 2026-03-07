@@ -937,7 +937,9 @@ class ReleaseCardControl extends SubscribableControl {
       if (data && data.id === this.releaseId) this._onUpdate(data);
     });
 
-    this.element.addEventListener('click', () => {
+    this.element.addEventListener('click', (e) => {
+      // Don't open if clicking delete button
+      if (e.target && e.target.closest && e.target.closest('.release-delete-btn')) return;
       vscode.postMessage({ type: 'openRelease', releaseId: this.releaseId });
     });
   }
@@ -977,6 +979,7 @@ class ReleaseCardControl extends SubscribableControl {
         flowType +
         '<span class="release-status-badge ' + data.status + '">' + data.status + '</span>' +
         monitoringIndicator +
+        '<button class="release-delete-btn" title="Delete release">\u00d7</button>' +
       '</div>' +
       '<div class="release-branches">' +
         '<span class="release-branch">' + escapeHtml(data.releaseBranch) + '</span>' +
@@ -1001,6 +1004,16 @@ class ReleaseCardControl extends SubscribableControl {
         e.stopPropagation();
         var url = e.currentTarget.dataset.prUrl;
         if (url) vscode.postMessage({ type: 'openExternal', url: url });
+      });
+    }
+    // Wire delete button
+    var deleteBtn = this.element.querySelector('.release-delete-btn');
+    if (deleteBtn) {
+      var selfRef = this;
+      deleteBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        vscode.postMessage({ type: 'deleteRelease', releaseId: selfRef.releaseId });
       });
     }
   }

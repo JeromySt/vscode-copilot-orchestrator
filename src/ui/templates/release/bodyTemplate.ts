@@ -505,6 +505,7 @@ function renderCompletionStep(release: ReleaseDefinition): string {
   <h3 style="margin: 0 0 12px 0; font-size: 18px;">${title}</h3>
   <div style="color: var(--vscode-descriptionForeground); margin-bottom: 24px;">${escapeHtml(message)}</div>
   ${release.prUrl ? `<a href="${escapeHtml(release.prUrl)}" class="pr-link" target="_blank" style="font-size: 14px;">View PR on GitHub ↗</a>` : ''}
+  <div style="margin-top: 24px;"><button class="danger" onclick="deleteRelease()">Delete Release</button></div>
 </div>`;
 }
 
@@ -535,11 +536,14 @@ function renderNavigationButtons(release: ReleaseDefinition, stepIndex: number, 
     proceedButton = `<button onclick="proceedFromConfigure()" ${!hasPlans && isFromPlans ? 'disabled' : ''}>${buttonText}</button>`;
   }
   
+  const isTerminal = ['succeeded', 'failed', 'canceled'].includes(release.status);
+  
   return `
 <div>
   <div></div>
 </div>
 <div style="display: flex; gap: 12px;">
+  ${isTerminal ? '<button class="danger" onclick="deleteRelease()">Delete Release</button>' : ''}
   ${canCancel ? '<button class="danger" onclick="cancelRelease()">Cancel Release</button>' : ''}
   ${proceedButton}
 </div>`;

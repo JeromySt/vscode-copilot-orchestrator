@@ -818,6 +818,25 @@ export function renderPlansViewStyles(): string {
       gap: 6px;
       margin-bottom: 4px;
     }
+    .release-delete-btn {
+      display: none;
+      background: transparent;
+      border: none;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
+      line-height: 1;
+      flex-shrink: 0;
+      border-radius: 3px;
+    }
+    .release-item:hover .release-delete-btn {
+      display: inline-block;
+    }
+    .release-delete-btn:hover {
+      color: var(--vscode-testing-iconFailed);
+      background: rgba(255, 0, 0, 0.1);
+    }
     .release-name {
       font-weight: 600;
       flex: 1;

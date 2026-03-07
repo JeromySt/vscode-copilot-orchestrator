@@ -88,6 +88,10 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       vscode.postMessage({ type: 'cancelRelease' });
     }
     
+    function deleteRelease() {
+      vscode.postMessage({ type: 'deleteRelease' });
+    }
+    
     function scaffoldTaskFiles() {
       vscode.postMessage({ type: 'scaffoldTasks' });
     }

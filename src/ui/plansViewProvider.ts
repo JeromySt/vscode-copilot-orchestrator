@@ -220,6 +220,22 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
           // Open Release Panel for the release
           vscode.commands.executeCommand('orchestrator.showReleasePanel', message.releaseId);
           break;
+        case 'deleteRelease':
+          if (message.releaseId && this._releaseManager) {
+            const rel = this._releaseManager.getRelease(message.releaseId);
+            const name = rel ? rel.name : message.releaseId.slice(0, 8);
+            vscode.window.showWarningMessage(
+              `Delete release "${name}"? This cannot be undone.`,
+              { modal: true },
+              'Delete'
+            ).then((choice) => {
+              if (choice === 'Delete' && this._releaseManager) {
+                this._releaseManager.deleteRelease(message.releaseId);
+                this.refresh();
+              }
+            });
+          }
+          break;
         case 'refresh':
           this._initialRefreshDone = true;
           this.refresh();

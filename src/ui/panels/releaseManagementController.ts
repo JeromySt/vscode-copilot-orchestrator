@@ -24,6 +24,8 @@ export interface ReleaseManagementDelegate {
   postMessage(message: any): void;
   /** Force a full HTML refresh of the panel. */
   forceFullRefresh(): void;
+  /** Close and dispose the panel. */
+  closePanel(): void;
 }
 
 /**
@@ -175,6 +177,20 @@ export class ReleaseManagementController {
       case 'scaffoldTasks':
         this._delegate.executeCommand('orchestrator.scaffoldReleaseTasks').catch((error) => {
           this._dialogService.showError(`Failed to scaffold tasks: ${error.message}`);
+        });
+        break;
+      case 'deleteRelease':
+        this._dialogService.showWarning(
+          'Delete this release? This cannot be undone.',
+          { modal: true },
+          'Delete',
+        ).then((choice) => {
+          if (choice !== 'Delete') { return; }
+          this._releaseManager.deleteRelease(this._releaseId);
+          // Close the panel
+          this._delegate.closePanel();
+        }).catch((error) => {
+          this._dialogService.showError(`Failed to delete release: ${error.message}`);
         });
         break;
       case 'addPlan':
