@@ -37,7 +37,9 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | ⚡ **Automated 8-Phase Pipeline** | Merge FI → Prechecks → AI Work → Commit → Postchecks → Merge RI → Verify RI → Cleanup |
 | 🔧 **Multi-Retry Auto-Heal** | Failed phases automatically retried up to 4 times with fresh AI agents and failure context |
 | 📈 **Timeline Gantt Chart** | [Experimental] Pixel-perfect timeline showing execution history with phases, retries, and durations |
-| 🤖 **21 Native MCP Tools** | Create and manage plans directly from GitHub Copilot Chat |
+| 🤖 **29 Native MCP Tools** | Create and manage plans and releases directly from GitHub Copilot Chat |
+| 🚀 **Release Management** | Combine multiple plans into a single PR with autonomous monitoring (GitHub/GHE/Azure DevOps) |
+| 📁 **Visual Release Grouping** | Plans tab automatically groups plans by release with collapsible containers and status badges |
 | ⏸️ **Pause / Resume / Retry** | Pause running plans, resume later, or retry failed nodes with AI failure context |
 | 🔒 **Secure MCP Architecture** | Nonce-authenticated IPC ensures 1:1 pairing between VS Code and MCP stdio process |
 | 🛡️ **Default Branch Protection** | Auto-creates feature branches when targeting main/master — never writes to default |
@@ -401,6 +403,182 @@ Base: feature/x  →  Target: feature/x  (used as-is)
 
 AI agents **never write directly to your default branch**.
 
+### 🚀 Release Management
+
+Create production releases that combine multiple plan commits into a single pull request, with autonomous monitoring and feedback resolution — supporting **GitHub**, **GitHub Enterprise**, and **Azure DevOps**.
+
+Plans assigned to the same release are visually grouped together in the Plans tab with collapsible release containers showing the release name, status badge, and plan count. Unassigned plans are displayed separately for easy organization.
+
+#### How It Works
+
+1. **Create a release** combining commits from multiple succeeded plans
+2. **Merge automation** creates an isolated repository clone under `.orchestrator/release/<branch>/` and merges all plan commits
+3. **PR creation** with auto-detected provider (GitHub/GHE/Azure DevOps) and credential acquisition
+4. **40-minute monitoring cycles** that check CI status, review comments, security alerts
+5. **Autonomous addressing** spawns Copilot agents to fix failures, reply to comments, resolve threads
+
+#### Multi-Provider Support
+
+The orchestrator **auto-detects your remote provider** from the git remote URL:
+
+- **GitHub** (`github.com`) → Uses `gh auth token` → `git credential fill` → `GITHUB_TOKEN`
+- **GitHub Enterprise** (custom hostname) → Uses `gh auth token` → `git credential fill` → `GITHUB_TOKEN`
+- **Azure DevOps** (`dev.azure.com`) → Uses `az account get-access-token` → `git credential fill` → `AZURE_DEVOPS_TOKEN`
+
+No configuration needed — provider detection and credential acquisition happen automatically.
+
+#### Isolated Repository Clones
+
+Releases execute in **isolated git clones** under `.orchestrator/release/<sanitized-branch>/`, never in OS temp directories. This enables:
+
+- **Concurrent releases** — Run multiple release workflows in parallel without conflicts
+- **Persistent state** — Release artifacts remain after completion for debugging
+- **Safe cleanup** — Isolated clones can be removed without affecting the main repository
+
+#### MCP Tools
+
+```typescript
+// Create a release combining multiple plans
+create_copilot_release({
+  name: "v1.2.0 Release",
+  planIds: ["plan-123", "plan-456"],
+  releaseBranch: "release/v1.2.0",
+  targetBranch: "main",
+  autoStart: true
+})
+
+// Monitor progress
+get_copilot_release_status({ releaseId: "rel-abc" })
+
+// List all releases
+list_copilot_releases({ status: "monitoring" })
+```
+
+See [docs/RELEASES.md](docs/RELEASES.md) for detailed user guide, credential troubleshooting, and FAQ.
+
+### 🎯 PR Management
+
+Adopt and manage pull requests created outside the orchestrator — enabling lifecycle management, autonomous monitoring, and feedback resolution for **any** PR, not just release-generated ones.
+
+#### Why PR Management?
+
+**Traditional PR workflow:**
+- Create PR manually or via release
+- Manually check CI status
+- Manually respond to review comments
+- Manually track security alerts
+- Context-switch between code, CI, and PR discussions
+
+**With PR Lifecycle Management:**
+- **Adopt existing PRs** into the orchestrator
+- **Autonomous monitoring** — same 40-minute cycles as releases
+- **Automatic feedback handling** — Copilot agents fix CI failures and reply to comments
+- **Priority-based scheduling** — promote critical PRs for more frequent checks
+- **Unified dashboard** — All managed PRs in one sidebar with status visibility
+
+#### PR Lifecycle States
+
+```
+adopted → monitoring → addressing → ready / blocked → abandoned
+   ↓          ↓           ↓            ↓      ↓          ↓
+  Take     Start       Spawning      All   Failing   Stopped
+  ownership monitoring  agents to    checks  checks   managing
+  of PR               fix issues    pass   or alerts
+```
+
+| Status | Description |
+|--------|-------------|
+| **adopted** | PR has been adopted but monitoring has not started |
+| **monitoring** | Actively polling for CI checks, review comments, security alerts |
+| **addressing** | Copilot agents are fixing failures or replying to feedback |
+| **ready** | All checks passed, PR is ready to merge |
+| **blocked** | Failing checks or unresolved feedback blocking merge |
+| **abandoned** | Management stopped — PR remains but is no longer monitored |
+
+#### Adoption Workflow
+
+**Step 1: List available PRs**
+```
+@workspace List all open PRs targeting main
+```
+Copilot calls `list_available_prs` and shows which PRs are already managed.
+
+**Step 2: Adopt a PR**
+```
+@workspace Adopt PR #42 with priority 1
+```
+Copilot calls `adopt_pr`, creating a managed PR record.
+
+**Step 3: Start monitoring**
+```
+@workspace Start monitoring the adopted PR
+```
+Copilot calls `start_pr_monitoring`, beginning autonomous feedback cycles.
+
+#### Priority Management
+
+Control monitoring frequency and resource allocation:
+
+- **Promote** — `promote_pr` increases priority (more frequent checks)
+- **Demote** — `demote_pr` decreases priority (less frequent checks)
+
+High-priority PRs are checked more frequently and addressed before lower-priority PRs when agents are at capacity.
+
+#### MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `list_available_prs` | List PRs from remote with `isManaged` flag |
+| `adopt_pr` | Adopt an existing PR for lifecycle management |
+| `get_managed_pr` | Get details of a managed PR by ID |
+| `list_managed_prs` | List all managed PRs with optional status filter |
+| `start_pr_monitoring` | Begin autonomous monitoring cycles |
+| `stop_pr_monitoring` | Pause monitoring without abandoning the PR |
+| `promote_pr` | Elevate PR to higher priority tier |
+| `demote_pr` | Lower PR to lower priority tier |
+| `abandon_pr` | Stop management and mark as abandoned |
+| `remove_pr` | Completely remove PR from management |
+
+#### Integration with Releases
+
+- **Release-generated PRs** are automatically adopted for monitoring
+- **Externally-created PRs** can be adopted to join the same autonomous monitoring workflow
+- **Unified tracking** — All PRs appear in the Active PRs sidebar panel regardless of origin
+
+#### Example: Complete Adoption Flow
+
+```typescript
+// 1. Discover available PRs
+list_available_prs({
+  repoPath: "/path/to/repo",
+  baseBranch: "main",
+  state: "open"
+})
+// Returns: [{ prNumber: 42, title: "Add feature X", isManaged: false, ... }]
+
+// 2. Adopt PR #42
+adopt_pr({
+  prNumber: 42,
+  repoPath: "/path/to/repo",
+  priority: 1
+})
+// Returns: { success: true, managedPR: { id: "pr-uuid", ... } }
+
+// 3. Start autonomous monitoring
+start_pr_monitoring({ id: "pr-uuid" })
+// Returns: { success: true, message: "Monitoring started..." }
+
+// 4. Check status
+get_managed_pr({ id: "pr-uuid" })
+// Returns: { managedPR: { status: "monitoring", prNumber: 42, ... } }
+
+// 5. If critical, promote priority
+promote_pr({ id: "pr-uuid" })
+// Returns: { success: true, message: "PR promoted..." }
+```
+
+See [docs/RELEASES.md](docs/RELEASES.md) for details on how PR lifecycle integrates with release workflows.
+
 ### 📡 Real-Time Process Monitoring
 
 The extension provides live visibility into every running agent:
@@ -506,7 +684,7 @@ The extension implements VS Code's `McpServerDefinitionProvider` API to automati
 - **VS Code manages lifecycle** — No manual process management needed
 - **Workspace-scoped** — Each workspace gets its own MCP server instance
 
-### 21 MCP Tools
+### 29 MCP Tools
 
 **Plan Management (15 tools):**
 
@@ -538,6 +716,20 @@ The extension implements VS Code's `McpServerDefinitionProvider` API to automati
 | `force_fail_copilot_job` | Force-fail a stuck job to unblock dependents |
 | `get_copilot_job_failure_context` | Get AI-friendly failure context for a job |
 | `update_copilot_plan_job` | Update a job's work spec, prechecks, or postchecks |
+
+**Release Management (8 tools):**
+
+| Tool | Description |
+|------|-------------|
+| `create_copilot_release` | Create a multi-plan release with auto-detection |
+| `start_copilot_release` | Begin merge → PR creation → monitoring → addressing cycle |
+| `prepare_copilot_release` | Enter preparation phase with automated task checklist |
+| `execute_release_task` | Auto-execute preparation tasks using Copilot agents |
+| `skip_release_task` | Skip an optional preparation task |
+| `add_plans_to_release` | Add plans to existing releases dynamically |
+| `get_copilot_release_status` | Query detailed release progress and PR state |
+| `list_copilot_releases` | List all releases with optional status filter |
+| `cancel_copilot_release` | Cancel an in-progress release |
 
 **Example — Creating a plan via Copilot Chat:**
 ```
@@ -649,7 +841,13 @@ When a node's work phase produces no file changes, the orchestrator doesn't imme
 
 ### 1. Open the Orchestrator Panel
 
-Click the **Copilot Orchestrator** icon in the Activity Bar (left sidebar) to open the Plans panel.
+Click the **Copilot Orchestrator** icon in the Activity Bar (left sidebar) to open the Orchestrator panel. The sidebar features **three tabs** for organized workspace management:
+
+- **Plans** — View and manage all active, completed, and archived plans with real-time status updates
+- **Releases** — Create and monitor multi-plan releases with PR tracking and autonomous feedback addressing
+- **PRs** — Manage adopted pull requests with monitoring, priority settings, and lifecycle tracking
+
+Each tab displays a badge count and auto-switches when new items are created (e.g., adopting a PR switches to the PRs tab).
 
 ### 2. Start the MCP Server
 
@@ -670,11 +868,35 @@ to the user registration form
 
 ### 4. Monitor & Review
 
-- Watch progress in the **Plans** sidebar (live status updates)
+- Switch between **Plans**, **Releases**, and **PRs** tabs to view different workspace areas
+- Watch progress in the **Plans** tab (live status updates with color-coded nodes)
 - Click a plan to see the **interactive DAG visualization**
 - Click any node for **execution details, logs, and process monitoring**
 - Use **phase tabs** (Merge FI, Prechecks, Work, Commit, Postchecks, Merge RI) to filter logs
 - Review the **Work Summary** for commits and file changes
+- Monitor releases in the **Releases** tab with PR status, CI checks, and feedback addressing
+- Track adopted PRs in the **PRs** tab with monitoring state and priority management
+
+---
+
+## Keyboard Shortcuts
+
+The Orchestrator sidebar supports keyboard shortcuts for efficient management:
+
+| Shortcut | Action | Context |
+|---|---|---|
+| Click | Select single item | Any tab (Plans/Releases/PRs) |
+| Ctrl+Click | Toggle selection | Any tab |
+| Shift+Click | Range select | Any tab |
+| Ctrl+A | Select all items | Sidebar focused |
+| Escape | Deselect all | Sidebar focused |
+| Delete | Delete selected items | 1+ selected |
+
+**Tips:**
+- Multi-select enables bulk actions (Delete, Cancel, Pause, Resume, Retry, Finalize, Assign to Release, Create Release)
+- Bulk action buttons appear in the toolbar when multiple items are selected
+- Right-click on selected items for context menu with available actions
+- Tab badges show item counts and update in real-time
 
 ---
 

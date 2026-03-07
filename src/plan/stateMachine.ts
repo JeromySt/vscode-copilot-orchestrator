@@ -492,7 +492,7 @@ export class PlanStateMachine extends EventEmitter {
    * @returns Derived {@link PlanStatus} (`'pending'`, `'running'`, `'succeeded'`, etc.).
    */
   computePlanStatus(): PlanStatus {
-    return computePlanStatusHelper(this.plan.nodeStates.values(), !!this.plan.startedAt, !!this.plan.isPaused);
+    return computePlanStatusHelper(this.plan.nodeStates.values(), !!this.plan.startedAt, !!this.plan.isPaused, !!this.plan.archivedAt);
   }
   
   /**

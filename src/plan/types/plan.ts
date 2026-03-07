@@ -502,7 +502,8 @@ export type PlanStatus =
   | 'succeeded'      // All nodes succeeded
   | 'failed'         // At least one node failed (not blocked)
   | 'partial'        // @deprecated — maps to 'failed' in computePlanStatus. Kept for backward compat serialization.
-  | 'canceled';      // User canceled
+  | 'canceled'       // User canceled
+  | 'archived';      // Plan completed and archived (terminal state, git resources cleaned)
 
 /**
  * Valid plan-level state transitions.
@@ -517,10 +518,11 @@ export const VALID_PLAN_TRANSITIONS: Partial<Record<PlanStatus, readonly PlanSta
   'pausing':        ['paused', 'running', 'canceled'],
   'paused':         ['running', 'resumed', 'canceled'],
   'resumed':        ['running', 'canceled'],
-  'succeeded':      [],  // Terminal
-  'failed':         ['running'],  // Can be retried
-  'partial':        ['running'],  // Deprecated, same as failed
-  'canceled':       [],  // Terminal
+  'succeeded':      ['archived'],  // Terminal, can be archived
+  'failed':         ['running', 'archived'],  // Can be retried or archived
+  'partial':        ['running', 'archived'],  // Deprecated, same as failed
+  'canceled':       ['archived'],  // Terminal, can be archived
+  'archived':       [],  // Terminal, no transitions allowed
 };
 
 /**
@@ -642,6 +644,12 @@ export interface PlanInstance {
   /** Aggregated work summary */
   workSummary?: WorkSummary;
   
+  /**
+   * Timestamp when the plan was archived (set by PlanArchiver).
+   * When set, computePlanStatus() returns 'archived' regardless of node states.
+   */
+  archivedAt?: number;
+
   /** Plan definition for lazy spec loading (set when loaded from repository) */
   definition?: import('../../interfaces/IPlanDefinition').IPlanDefinition;
 }

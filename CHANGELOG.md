@@ -5,6 +5,84 @@ All notable changes to the Copilot Orchestrator extension will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Adaptive release wizard**: Dynamic wizard steps adapt to release flow type (from-branch vs from-plans)
+- **Pre-PR preparation checklist**: Guided preparation tasks before creating pull requests
+  - Update changelog with release notes
+  - Bump version numbers in package.json and other files
+  - Update documentation (README, docs/) for new features
+  - AI code review of all release changes
+  - Run compile + test validation checks
+  - Custom user-defined tasks
+- **Release instructions auto-generation**: Automatically generates `.github/instructions/release-<branch>.instructions.md` with preparation guidance for Copilot agents
+- **Add plans to release at any stage**: Plans can be added to releases in drafting, preparing, or ready-for-pr states via `add_plans_to_release` tool or UI
+- **New release states**: 
+  - `preparing` — Pre-PR preparation tasks in progress
+  - `ready-for-pr` — All preparation tasks complete, ready to create PR
+  - `pr-active` — PR created but monitoring not yet started
+- **3 new MCP tools**:
+  - `prepare_copilot_release` — Enter preparation phase with automated task checklist
+  - `execute_release_task` — Auto-execute preparation tasks using Copilot agents
+  - `add_plans_to_release` — Add plans to existing releases dynamically
+- 30-second debounce delay for .gitignore re-application after branch changes, preventing dirty-branch race conditions that block `git checkout` operations
+- Plan archiving: preserve plan state/logs while cleaning up git worktrees and branches
+- "Archived" collapsible section in Plans sidebar with dimmed visual treatment
+- `archive_copilot_plan` MCP tool for programmatic archiving
+- Archive button on eligible plan cards (succeeded, partial, canceled)
+- Plan recovery from canceled or archived state via right-click menu and plan detail panel
+- `recover_copilot_plan` MCP tool for programmatic recovery
+- Git rev-parse based recovery: recreates target branch and recovers deepest successful node worktrees
+- Copilot CLI agent verifies recovered worktree integrity
+- All recovered plans enter paused state for safe inspection before resuming
+- **Release grouping in Plans tab**: Plans assigned to the same release are visually grouped together with collapsible release containers showing release name, status, and plan count
+- **Unassigned plans section**: Plans without a release assignment are displayed separately under "Unassigned Plans" header
+- Release groups are sorted alphabetically by release name for easy navigation
+- Collapse state persists across VS Code sessions for each release group
+
+## [0.15.0] - 2026-03-05
+
+### 🚀 Major Features
+
+#### Target-Release Management
+- **Multi-provider PR support**: Unified release workflow for GitHub, GitHub Enterprise, and Azure DevOps
+- **Auto-detection of remote provider**: Automatically identifies hosting provider from git remote URL (github.com, GHE hostname, dev.azure.com)
+- **Provider-specific credential chain**: GitHub/GHE uses `gh auth token` → `git credential fill` → `GITHUB_TOKEN`; Azure DevOps uses `az account get-access-token` → `git credential fill` → `AZURE_DEVOPS_TOKEN`
+- **Release wizard panel**: Guided UI for creating releases that combine multiple plan commits into a single pull request
+- **Autonomous PR monitoring**: 40-minute monitoring cycles that check CI status, review comments, security alerts, and automatically address feedback
+- **Isolated repository clones**: Concurrent release support via isolated git clones under `.orchestrator/release/<sanitized-branch>/` (never uses OS temp directories)
+- **5 new MCP tools**:
+  - `create_copilot_release` — Create a multi-plan release with auto-detection
+  - `start_copilot_release` — Begin merge → PR creation → monitoring → addressing cycle
+  - `get_copilot_release_status` — Query detailed release progress and PR state
+  - `cancel_copilot_release` — Cancel an in-progress release
+  - `list_copilot_releases` — List all releases with optional status filter
+- **Merge automation**: Automatically merges all plan commits from succeeded/partial plans into the release branch using isolated clone strategy
+- **Feedback addressing**: Detects CI failures, review comments, security alerts and spawns Copilot agents to fix issues, reply to comments, and resolve threads
+- **PR state tracking**: Monitors check runs, review threads, unresolved comments, and security vulnerabilities with progress visibility in the UI
+
+#### PR Lifecycle Management
+- **Adopt existing PRs**: Take ownership of pull requests created outside the orchestrator for lifecycle management and autonomous monitoring
+- **PR discovery**: List available PRs from GitHub, GitHub Enterprise, or Azure DevOps with `isManaged` flag showing which are already under management
+- **Autonomous monitoring**: Start/stop automated monitoring for adopted PRs with same 40-minute cycles as release-generated PRs (CI checks, review comments, security alerts)
+- **Priority management**: Promote/demote PRs to adjust monitoring frequency and scheduling priority
+- **Lifecycle transitions**: Track PR status through states: adopted → monitoring → addressing → ready/blocked → abandoned
+- **Managed PR sidebar**: New "Active PRs" section in Plans sidebar showing all managed PRs with status, priority, and quick actions
+- **PR detail panel**: Dedicated panel for managed PRs showing monitoring state, check status, unresolved comments, and feedback history
+- **10 new MCP tools**:
+  - `list_available_prs` — List PRs from remote with managed status
+  - `adopt_pr` — Adopt an existing PR for management
+  - `get_managed_pr` — Get details of a managed PR by ID
+  - `list_managed_prs` — List all managed PRs with optional status filter
+  - `start_pr_monitoring` — Begin autonomous monitoring
+  - `stop_pr_monitoring` — Pause monitoring without abandoning
+  - `promote_pr` — Elevate PR to higher priority tier
+  - `demote_pr` — Lower PR to lower priority tier
+  - `abandon_pr` — Stop management and mark as abandoned
+  - `remove_pr` — Completely remove from management
+- **Integration with releases**: Managed PRs can be linked to releases for unified tracking; release-generated PRs are automatically adopted for monitoring
+
 ## [0.14.0] - 2026-02-28
 
 ### 🚀 Major Features
@@ -51,6 +129,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Configuration visibility**: Both plan and job env vars displayed in configuration sections with sensitive value masking
 
 ### 🎨 UI Improvements
+
+#### Multi-Select Support in Plans Sidebar
+- **Multi-select controls**: Ctrl+Click to toggle plan selection, Shift+Click for range selection, Ctrl+A to select all
+- **Bulk actions toolbar**: Delete, Cancel, Pause, Resume, Retry, Finalize buttons for multi-selected plans
+- **Right-click context menu**: Selection-aware bulk actions with keyboard shortcuts (Delete key for bulk delete, Escape to deselect)
+- **Visual selection feedback**: Selected plans highlighted with distinct background color
+- **Smart button states**: Bulk action buttons enable/disable based on selection compatibility (e.g., Resume only for paused plans)
 
 #### Timeline Enhancements
 - **Actual time proportions**: Phase segments sized by actual wall-clock duration instead of normalized percentages

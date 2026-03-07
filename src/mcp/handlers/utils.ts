@@ -13,6 +13,10 @@ import { PlanRunner } from '../../plan/runner';
 import type { IGitOperations } from '../../interfaces/IGitOperations';
 import type { IConfigProvider } from '../../interfaces/IConfigProvider';
 import type { IPlanRepository } from '../../interfaces/IPlanRepository';
+import type { IPlanArchiver } from '../../interfaces/IPlanArchiver';
+import type { IPlanRecovery } from '../../interfaces/IPlanRecovery';
+import type { IReleaseManager } from '../../interfaces/IReleaseManager';
+import type { IPRLifecycleManager } from '../../interfaces/IPRLifecycleManager';
 
 /**
  * Extended handler context with access to the {@link PlanRunner} instance.
@@ -30,6 +34,14 @@ export interface PlanHandlerContext extends ToolHandlerContext {
   configProvider?: IConfigProvider;
   /** Plan repository for filesystem-backed storage */
   PlanRepository: IPlanRepository;
+  /** Plan archiver for cleaning up completed plans */
+  PlanArchiver?: IPlanArchiver;
+  /** Plan recovery service for recovering canceled/failed plans */
+  PlanRecovery?: IPlanRecovery;
+  /** Release manager for multi-plan releases */
+  releaseManager?: IReleaseManager;
+  /** PR lifecycle manager for PR adoption and monitoring */
+  prLifecycleManager?: IPRLifecycleManager;
 }
 
 /**

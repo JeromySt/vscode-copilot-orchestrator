@@ -67,3 +67,24 @@ export {
   GroupInstance,
   GroupExecutionState,
 } from './plan';
+
+// Archive types
+export {
+  ArchiveResult,
+  ArchiveOptions,
+} from './archive';
+
+// Recovery types
+export {
+  RecoveryResult,
+  RecoveryOptions,
+  NodeRecoveryInfo,
+} from './recovery';
+
+// Release preparation types
+export {
+  PrepTaskStatus,
+  PrepTaskType,
+  PreparationTask,
+  ReleaseInstructions,
+} from './releasePrep';

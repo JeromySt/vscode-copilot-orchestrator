@@ -20,3 +20,4 @@ export {
 } from './globalCapacity';
 export * from './orphanedWorktreeCleanup';
 export { OrchestratorFileWatcher, PlanFileDeletedCallback, PlanFileCreatedCallback } from './orchestratorFileWatcher';
+export { GitignoreDebouncer, BRANCH_CHANGE_DELAY_MS } from './gitignoreDebouncer';

@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -98,14 +98,48 @@
         "icon": "$(debug-continue)"
       },
       {
+        "command": "orchestrator.recoverPlan",
+        "title": "Copilot Orchestrator: Recover Plan",
+        "icon": "$(history)"
+      },
+      {
         "command": "orchestrator.deletePlan",
         "title": "Copilot Orchestrator: Delete Plan",
         "icon": "$(trash)"
       },
       {
+        "command": "orchestrator.archivePlan",
+        "title": "Copilot Orchestrator: Archive Plan",
+        "icon": "$(archive)"
+      },
+      {
         "command": "orchestrator.refreshPlans",
         "title": "Copilot Orchestrator: Refresh Plans",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "orchestrator.bulkDelete",
+        "title": "Copilot Orchestrator: Delete Selected Plans"
+      },
+      {
+        "command": "orchestrator.bulkCancel",
+        "title": "Copilot Orchestrator: Cancel Selected Plans"
+      },
+      {
+        "command": "orchestrator.bulkPause",
+        "title": "Copilot Orchestrator: Pause Selected Plans"
+      },
+      {
+        "command": "orchestrator.bulkResume",
+        "title": "Copilot Orchestrator: Resume Selected Plans"
+      },
+      {
+        "command": "orchestrator.bulkRetry",
+        "title": "Copilot Orchestrator: Retry Selected Plans"
+      },
+      {
+        "command": "orchestrator.bulkFinalize",
+        "title": "Copilot Orchestrator: Finalize Selected Plans"
       },
       {
         "command": "copilotOrchestrator.refreshModels",
@@ -118,6 +152,47 @@
       {
         "command": "copilotOrchestrator.setupCopilotCli",
         "title": "Copilot Orchestrator: Setup Copilot CLI"
+      },
+      {
+        "command": "orchestrator.showReleasePanel",
+        "title": "Copilot Orchestrator: Show Release Panel"
+      },
+      {
+        "command": "orchestrator.createRelease",
+        "title": "Copilot Orchestrator: Create Release"
+      },
+      {
+        "command": "orchestrator.cancelRelease",
+        "title": "Copilot Orchestrator: Cancel Release"
+      },
+      {
+        "command": "orchestrator.startRelease",
+        "title": "Copilot Orchestrator: Start Release"
+      },
+      {
+        "command": "orchestrator.addPlanToRelease",
+        "title": "Copilot Orchestrator: Add Plan to Release"
+      },
+      {
+        "command": "orchestrator.removePlanFromRelease",
+        "title": "Copilot Orchestrator: Remove Plan from Release"
+      },
+      {
+        "command": "orchestrator.updateReleaseConfig",
+        "title": "Copilot Orchestrator: Update Release Config"
+      },
+      {
+        "command": "orchestrator.retryReleaseMerge",
+        "title": "Copilot Orchestrator: Retry Release Merge"
+      },
+      {
+        "command": "orchestrator.addressPRFeedback",
+        "title": "Copilot Orchestrator: Address PR Feedback"
+      },
+      {
+        "command": "orchestrator.adoptPR",
+        "title": "Copilot Orchestrator: Adopt PR",
+        "icon": "$(add)"
       }
     ],
     "views": {
@@ -310,6 +385,70 @@
           "type": "boolean",
           "default": false,
           "description": "[EXPERIMENTAL] Show the timeline view in plan detail panels. This feature is under active development and hidden by default. Enable to preview and provide feedback on the interactive execution timeline visualization."
+        },
+        "copilotOrchestrator.releaseManagement.pollIntervalSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 30,
+          "maximum": 600,
+          "description": "Seconds between PR monitoring poll cycles (default: 120 = 2 minutes)"
+        },
+        "copilotOrchestrator.releaseManagement.maxMonitoringMinutes": {
+          "type": "number",
+          "default": 40,
+          "minimum": 5,
+          "maximum": 180,
+          "description": "Maximum minutes to monitor a PR after the last push before stopping (default: 40)"
+        },
+        "copilotOrchestrator.releaseManagement.resetTimerOnPush": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reset the monitoring timer when a fix is pushed to the PR branch. When false, monitoring always stops after maxMonitoringMinutes regardless of pushes."
+        },
+        "copilotOrchestrator.releaseManagement.createPRAsDraft": {
+          "type": "boolean",
+          "default": false,
+          "description": "Create pull requests as drafts initially. Use the release panel to promote to active when ready."
+        },
+        "copilotOrchestrator.releaseManagement.autoAddressComments": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically address review comments using Copilot CLI during monitoring. When false, comments are logged but not auto-fixed."
+        },
+        "copilotOrchestrator.releaseManagement.autoFixCI": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically attempt to fix failing CI checks using Copilot CLI during monitoring."
+        },
+        "copilotOrchestrator.releaseManagement.autoResolveSecurityAlerts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically resolve security/CodeQL alerts using Copilot CLI during monitoring."
+        },
+        "copilotOrchestrator.releaseManagement.mergeStrategy": {
+          "type": "string",
+          "enum": [
+            "merge",
+            "squash",
+            "rebase"
+          ],
+          "default": "merge",
+          "description": "Git merge strategy when merging plan branches into the release branch."
+        },
+        "copilotOrchestrator.releaseManagement.isolatedCloneStrategy": {
+          "type": "string",
+          "enum": [
+            "shared",
+            "reference",
+            "full"
+          ],
+          "default": "shared",
+          "description": "Git clone strategy for isolated release repos. 'shared' is fastest but requires same filesystem. 'reference' is portable. 'full' is slowest but most compatible."
+        },
+        "copilotOrchestrator.releaseManagement.cleanupOnComplete": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically clean up isolated clones under .orchestrator/release/ when a release succeeds or is canceled."
         }
       }
     }
@@ -336,30 +475,30 @@
   "devDependencies": {
     "@types/glob": "^9.0.0",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^25.3.0",
+    "@types/node": "^25.3.5",
     "@types/sinon": "^21.0.0",
-    "@types/uuid": "^10.0.0",
+    "@types/uuid": "^11.0.0",
     "@types/vscode": "^1.109.0",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "@vscode/vsce": "^3.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "@vscode/vsce": "^3.7.1",
     "c8": "^10.1.3",
     "canvas": "^3.2.1",
     "esbuild": "^0.27.3",
     "eslint": "^9.39.2",
-    "glob": "^13.0.1",
+    "glob": "^13.0.6",
     "mocha": "^11.7.5",
     "npm-run-all2": "^8.0.4",
     "sharp": "^0.34.5",
-    "sinon": "^21.0.1",
+    "sinon": "^21.0.2",
     "typescript": "^5.9.3"
   },
   "dependencies": {
     "@types/markdown-it": "^14.1.2",
-    "ajv": "^8.17.1",
+    "ajv": "^8.18.0",
     "markdown-it": "^14.1.1",
-    "micromatch": "^4.0.5",
-    "uuid": "^11.1.0"
+    "micromatch": "^4.0.8",
+    "uuid": "^13.0.0"
   },
   "overrides": {
     "mocha": {

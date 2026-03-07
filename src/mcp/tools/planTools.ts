@@ -395,6 +395,44 @@ Use this to analyze the history of retries and their outcomes.`,
         required: ['planId']
       }
     },
+
+    {
+      name: 'archive_copilot_plan',
+      description: 'Archive a completed or canceled plan. Preserves plan state and logs while cleaning up git worktrees and target branches to reduce repository clutter. Only plans in succeeded, partial, failed, or canceled status can be archived.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: { 
+            type: 'string', 
+            description: 'The ID of the plan to archive' 
+          },
+          force: { 
+            type: 'boolean', 
+            description: 'Force-delete worktrees even with uncommitted changes', 
+            default: false 
+          },
+          deleteRemoteBranches: { 
+            type: 'boolean', 
+            description: 'Also delete remote tracking branches', 
+            default: false 
+          }
+        },
+        required: ['planId']
+      }
+    },
+    
+    {
+      name: 'recover_copilot_plan',
+      description: 'Recover a canceled or archived plan. Recreates the target branch at the base commit and recovers worktree states from the deepest successfully-completed jobs. Uses git rev-parse with DAG work result status. The plan will be placed in paused state. For canceled plans, Copilot CLI agent verifies recovered worktree integrity.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: { type: 'string', description: 'The ID of the plan to recover' },
+          useCopilotAgent: { type: 'boolean', description: 'Use Copilot CLI agent to verify recovery integrity', default: true }
+        },
+        required: ['planId']
+      }
+    },
     
     {
       name: 'retry_copilot_plan',

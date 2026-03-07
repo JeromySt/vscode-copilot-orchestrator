@@ -17,6 +17,8 @@ import { JsonRpcRequest, JsonRpcResponse } from './types';
 import { IMcpRequestRouter } from '../interfaces/IMcpManager';
 import { getPlanToolDefinitions } from './tools/planTools';
 import { getJobToolDefinitions } from './tools/jobTools';
+import { getReleaseToolDefinitions } from './tools/releaseTools';
+import { getPRLifecycleToolDefinitions } from './tools/prLifecycleTools';
 import { validateInput, hasSchema, validatePostchecksPresence } from './validation';
 import { BUILD_COMMIT, BUILD_TIMESTAMP, BUILD_VERSION } from '../core/buildInfo';
 import {
@@ -30,6 +32,8 @@ import {
   handlePausePlan,
   handleResumePlan,
   handleDeletePlan,
+  handleArchivePlan,
+  handleRecoverPlan,
   handleRetryPlan,
   handleGetJobFailureContext,
   handleUpdatePlanJob,
@@ -43,6 +47,26 @@ import {
   handleScaffoldPlan,
   handleAddPlanJob,
   handleFinalizePlan,
+  handleCreateRelease,
+  handleStartRelease,
+  handleGetReleaseStatus,
+  handleCancelRelease,
+  handleListReleases,
+  handlePrepareRelease,
+  handleExecuteReleaseTask,
+  handleSkipReleaseTask,
+  handleAddPlansToRelease,
+  handleScaffoldReleaseTasks,
+  handleListAvailablePRs,
+  handleAdoptPR,
+  handleGetManagedPR,
+  handleListManagedPRs,
+  handleStartPRMonitoring,
+  handleStopPRMonitoring,
+  handlePromotePR,
+  handleDemotePR,
+  handleAbandonPR,
+  handleRemovePR,
 } from './handlers';
 
 /** MCP component logger */
@@ -103,6 +127,10 @@ export class McpHandler implements IMcpRequestRouter {
    * @param git             - Git operations interface.
    * @param configProvider  - Optional configuration provider for reading VS Code settings.
    * @param planRepository  - Plan repository for filesystem-backed storage.
+   * @param planArchiver    - Optional plan archiver for cleaning up completed plans.
+   * @param planRecovery    - Optional plan recovery service.
+   * @param releaseManager     - Optional release manager for multi-plan releases.
+   * @param prLifecycleManager - Optional PR lifecycle manager for PR adoption and monitoring.
    */
   constructor(
     PlanRunner: PlanRunner,
@@ -110,6 +138,10 @@ export class McpHandler implements IMcpRequestRouter {
     git: import('../interfaces/IGitOperations').IGitOperations,
     configProvider?: import('../interfaces/IConfigProvider').IConfigProvider,
     planRepository?: import('../interfaces/IPlanRepository').IPlanRepository,
+    planArchiver?: import('../interfaces/IPlanArchiver').IPlanArchiver,
+    planRecovery?: import('../interfaces/IPlanRecovery').IPlanRecovery,
+    releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager,
+    prLifecycleManager?: import('../interfaces/IPRLifecycleManager').IPRLifecycleManager,
   ) {
     this.context = { 
       PlanRunner, 
@@ -117,6 +149,10 @@ export class McpHandler implements IMcpRequestRouter {
       git,
       configProvider,
       PlanRepository: planRepository!,
+      PlanArchiver: planArchiver,
+      PlanRecovery: planRecovery,
+      releaseManager,
+      prLifecycleManager,
       // Legacy fields - kept for type compatibility
       runner: null as any,
       plans: null as any,
@@ -198,12 +234,15 @@ export class McpHandler implements IMcpRequestRouter {
    * Handle the `tools/list` JSON-RPC method.
    *
    * Returns all registered MCP tool definitions from
-   * {@link getPlanToolDefinitions}.
+   * {@link getPlanToolDefinitions}, {@link getJobToolDefinitions},
+   * {@link getReleaseToolDefinitions}, and {@link getPRLifecycleToolDefinitions}.
    */
   private async handleToolsList(request: JsonRpcRequest): Promise<JsonRpcResponse> {
     const tools = [
       ...(await getPlanToolDefinitions()),
       ...(await getJobToolDefinitions()),
+      ...(await getReleaseToolDefinitions()),
+      ...(await getPRLifecycleToolDefinitions()),
     ];
     log.info('Tools list requested', { toolCount: tools.length });
     log.debug('Tools list - tool names', { tools: tools.map(t => t.name) });
@@ -286,6 +325,14 @@ export class McpHandler implements IMcpRequestRouter {
         result = await handleDeletePlan(args || {}, this.context);
         break;
         
+      case 'archive_copilot_plan':
+        result = await handleArchivePlan(args || {}, this.context);
+        break;
+        
+      case 'recover_copilot_plan':
+        result = await handleRecoverPlan(args || {}, this.context);
+        break;
+        
       case 'retry_copilot_plan':
         result = await handleRetryPlan(args || {}, this.context);
         break;
@@ -333,6 +380,88 @@ export class McpHandler implements IMcpRequestRouter {
       
       case 'finalize_copilot_plan':
         result = await handleFinalizePlan(args || {}, this.context);
+        break;
+
+      // --- Release tools ---
+      case 'create_copilot_release':
+        result = await handleCreateRelease(args || {}, this.context);
+        break;
+      
+      case 'start_copilot_release':
+        result = await handleStartRelease(args || {}, this.context);
+        break;
+      
+      case 'get_copilot_release_status':
+        result = await handleGetReleaseStatus(args || {}, this.context);
+        break;
+      
+      case 'cancel_copilot_release':
+        result = await handleCancelRelease(args || {}, this.context);
+        break;
+      
+      case 'list_copilot_releases':
+        result = await handleListReleases(args || {}, this.context);
+        break;
+      
+      case 'prepare_copilot_release':
+        result = await handlePrepareRelease(args || {}, this.context);
+        break;
+      
+      case 'execute_release_task':
+        result = await handleExecuteReleaseTask(args || {}, this.context);
+        break;
+      
+      case 'skip_release_task':
+        result = await handleSkipReleaseTask(args || {}, this.context);
+        break;
+      
+      case 'add_plans_to_release':
+        result = await handleAddPlansToRelease(args || {}, this.context);
+        break;
+      
+      case 'scaffold_release_tasks':
+        result = await handleScaffoldReleaseTasks(args || {}, this.context);
+        break;
+
+      // --- PR Lifecycle tools ---
+      case 'list_available_prs':
+        result = await handleListAvailablePRs(args || {}, this.context);
+        break;
+      
+      case 'adopt_pr':
+        result = await handleAdoptPR(args || {}, this.context);
+        break;
+      
+      case 'get_managed_pr':
+        result = await handleGetManagedPR(args || {}, this.context);
+        break;
+      
+      case 'list_managed_prs':
+        result = await handleListManagedPRs(args || {}, this.context);
+        break;
+      
+      case 'start_pr_monitoring':
+        result = await handleStartPRMonitoring(args || {}, this.context);
+        break;
+      
+      case 'stop_pr_monitoring':
+        result = await handleStopPRMonitoring(args || {}, this.context);
+        break;
+      
+      case 'promote_pr':
+        result = await handlePromotePR(args || {}, this.context);
+        break;
+      
+      case 'demote_pr':
+        result = await handleDemotePR(args || {}, this.context);
+        break;
+      
+      case 'abandon_pr':
+        result = await handleAbandonPR(args || {}, this.context);
+        break;
+      
+      case 'remove_pr':
+        result = await handleRemovePR(args || {}, this.context);
         break;
         
       default:

@@ -11,6 +11,7 @@
 import * as assert from 'assert';
 import { getJobToolDefinitions } from '../../../mcp/tools/jobTools';
 import { getPlanToolDefinitions } from '../../../mcp/tools/planTools';
+import { getReleaseToolDefinitions } from '../../../mcp/tools/releaseTools';
 import { getAllToolDefinitions } from '../../../mcp/tools';
 
 // ---------------------------------------------------------------------------
@@ -174,8 +175,9 @@ suite('MCP Job Tool Definitions', () => {
       const all = await getAllToolDefinitions();
       const planTools = await getPlanToolDefinitions();
       const jobTools = await getJobToolDefinitions();
+      const releaseTools = await getReleaseToolDefinitions();
 
-      assert.strictEqual(all.length, planTools.length + jobTools.length);
+      assert.strictEqual(all.length, planTools.length + jobTools.length + releaseTools.length);
     });
 
     test('no duplicate tool names across plan and job tools', async () => {

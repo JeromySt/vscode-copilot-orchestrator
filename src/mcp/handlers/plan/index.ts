@@ -20,6 +20,8 @@ export * from './getPlanHandler';
 // Plan control handlers
 export * from './pauseResumeHandler';
 export * from './cancelDeleteHandler';
+export * from './archivePlanHandler';
+export * from './recoverPlanHandler';
 
 // Plan retry handlers
 export * from './retryPlanHandler';
@@ -36,3 +38,10 @@ export * from './reshapePlanHandler';
 
 // Job detail handlers
 export * from './jobDetailsHandler';
+
+// Release handlers
+export * from './releaseHandlers';
+export * from './scaffoldReleaseTasksHandler';
+
+// PR lifecycle handlers
+export * from './prLifecycleHandlers';
