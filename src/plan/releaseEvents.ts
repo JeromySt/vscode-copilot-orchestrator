@@ -53,6 +53,9 @@ export interface ReleaseEvents {
 
   /** Emitted when an existing PR is adopted for a release */
   'release:prAdopted': (releaseId: string, prNumber: number) => void;
+
+  /** Emitted when a preparation task outputs a log line */
+  'release:taskOutput': (releaseId: string, taskId: string, line: string) => void;
 }
 
 /**
@@ -150,5 +153,12 @@ export class ReleaseEventEmitter extends EventEmitter {
    */
   emitReleasePrAdopted(releaseId: string, prNumber: number): void {
     this.emit('release:prAdopted', releaseId, prNumber);
+  }
+
+  /**
+   * Emit a release:taskOutput event.
+   */
+  emitReleaseTaskOutput(releaseId: string, taskId: string, line: string): void {
+    this.emit('release:taskOutput', releaseId, taskId, line);
   }
 }

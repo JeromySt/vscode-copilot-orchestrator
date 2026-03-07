@@ -335,6 +335,7 @@ function renderPrepTask(task: PrepTask): string {
   
   const statusClass = task.status;
   const requiredBadge = task.required ? '<span class="required-badge">Required</span>' : '';
+  const hasLog = task.logFilePath || task.status === 'running';
   
   return `
 <div class="prep-task" data-task-id="${task.id}" data-status="${task.status}">
@@ -354,7 +355,12 @@ function renderPrepTask(task: PrepTask): string {
       '<button class="skip-btn" onclick="skipTask(\'' + task.id + '\')" title="Skip this task">Skip</button>' : ''}
     ${task.status === 'pending' && !task.autoSupported ? 
       '<button class="manual-btn" onclick="markTaskComplete(\'' + task.id + '\')" title="Mark as complete">✓ Done</button>' : ''}
+    ${hasLog ? 
+      '<button class="log-btn" onclick="viewTaskLog(\'' + task.id + '\')" title="View task log">📄 Log</button>' : ''}
   </div>
+</div>
+<div class="task-log-area" id="task-log-${task.id}" style="display: none;">
+  <pre class="task-log-content"></pre>
 </div>`;
 }
 

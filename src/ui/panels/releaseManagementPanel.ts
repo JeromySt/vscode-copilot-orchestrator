@@ -85,7 +85,7 @@ export class ReleaseManagementPanel {
     dialogService: IDialogService,
     private _pulse: IPulseEmitter,
     private _extensionUri: vscode.Uri,
-    releaseManager: IReleaseManager,
+    private _releaseManager: IReleaseManager,
     private _getAvailablePlans: () => AvailablePlanSummary[],
     planRunner?: EventEmitter,
   ) {
@@ -102,7 +102,7 @@ export class ReleaseManagementPanel {
       },
       forceFullRefresh: () => this._forceFullRefresh(),
     };
-    this._controller = new ReleaseManagementController(releaseId, dialogService, delegate, releaseManager);
+    this._controller = new ReleaseManagementController(releaseId, dialogService, delegate, this._releaseManager);
     
     // Subscribe to plan runner events so the plan selector stays fresh
     if (planRunner) {
@@ -112,6 +112,18 @@ export class ReleaseManagementPanel {
         planRunner.on(evt, refreshOnPlanChange);
         this._planRunnerListeners.push({ event: evt, fn: refreshOnPlanChange });
       }
+    }
+    
+    // Subscribe to release task output for live log streaming
+    // Note: This event may not exist yet in the IReleaseManager interface
+    if (typeof (this._releaseManager as any).on === 'function') {
+      (this._releaseManager as any).on('releaseTaskOutput', (releaseId: string, taskId: string, line: string) => {
+        if (releaseId === this._releaseId && !this._disposed) {
+          try {
+            this._panel.webview.postMessage({ type: 'taskOutput', taskId, line });
+          } catch { /* panel disposed */ }
+        }
+      });
     }
     
     // Initial render

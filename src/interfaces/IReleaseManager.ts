@@ -168,6 +168,15 @@ export interface IReleaseManager {
    */
   skipPreparationTask(releaseId: string, taskId: string): Promise<void>;
 
+  /**
+   * Gets the log file path for a preparation task.
+   * 
+   * @param releaseId - The release ID
+   * @param taskId - The task ID
+   * @returns The log file path, or undefined if not found or no log exists
+   */
+  getTaskLogFilePath(releaseId: string, taskId: string): string | undefined;
+
   // ── Plan Management ────────────────────────────────────────────────
 
   /**

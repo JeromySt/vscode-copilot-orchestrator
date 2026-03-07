@@ -339,6 +339,32 @@ function prepChecklistStyles(): string {
       font-size: 11px;
       min-width: 60px;
     }
+    .log-btn {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+    .log-btn:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .task-log-area {
+      margin: 8px 0 0 48px;
+      padding: 12px;
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-input-border);
+      border-radius: 4px;
+      max-height: 300px;
+      overflow: auto;
+    }
+    .task-log-content {
+      margin: 0;
+      padding: 0;
+      font-family: var(--vscode-editor-font-family);
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--vscode-editor-foreground);
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
     .auto-btn {
       background: var(--vscode-button-background);
       color: var(--vscode-button-foreground);

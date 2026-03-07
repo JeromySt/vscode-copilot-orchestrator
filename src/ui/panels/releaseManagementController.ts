@@ -8,6 +8,7 @@
  * @module ui/panels/releaseManagementController
  */
 
+import * as vscode from 'vscode';
 import type { IDialogService } from '../../interfaces/IDialogService';
 import type { IReleaseManager } from '../../interfaces/IReleaseManager';
 import type { ReleaseStatus } from '../../plan/types/release';
@@ -209,6 +210,18 @@ export class ReleaseManagementController {
         break;
       case 'refresh':
         this._delegate.forceFullRefresh();
+        break;
+      case 'viewTaskLog':
+        if (message.taskId) {
+          const logPath = this._releaseManager.getTaskLogFilePath(this._releaseId, message.taskId);
+          if (logPath) {
+            this._delegate.executeCommand('vscode.open', vscode.Uri.file(logPath)).catch((error) => {
+              this._dialogService.showError(`Failed to open log file: ${error.message}`);
+            });
+          } else {
+            this._dialogService.showInfo('No log available for this task');
+          }
+        }
         break;
     }
   }

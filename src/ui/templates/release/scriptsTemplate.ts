@@ -91,6 +91,20 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
     function refresh() {
       vscode.postMessage({ type: 'refresh' });
     }
+    
+    function viewTaskLog(taskId) {
+      // Toggle log area visibility
+      const logArea = document.getElementById(\`task-log-\${taskId}\`);
+      if (logArea) {
+        if (logArea.style.display === 'none') {
+          logArea.style.display = 'block';
+        } else {
+          logArea.style.display = 'none';
+        }
+      }
+      // Also notify extension to open the log file
+      vscode.postMessage({ type: 'viewTaskLog', taskId });
+    }
 
     // ── Plan Selection Control ──────────────────────────────────────────
     
@@ -213,6 +227,17 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
           } else {
             createPRBtn.textContent = 'Create PR →';
           }
+        }
+      }
+      
+      appendLogLine(taskId, line) {
+        const logArea = document.getElementById(\`task-log-\${taskId}\`);
+        if (!logArea) return;
+        
+        const logContent = logArea.querySelector('.task-log-content');
+        if (logContent) {
+          logContent.textContent += line + '\\n';
+          logContent.scrollTop = logContent.scrollHeight;
         }
       }
     }
@@ -470,6 +495,12 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
         case 'taskUpdate':
           if (prepTasks && message.taskId) {
             prepTasks.updateTask(message.taskId, message.status, message.error);
+          }
+          break;
+          
+        case 'taskOutput':
+          if (prepTasks && message.taskId && message.line) {
+            prepTasks.appendLogLine(message.taskId, message.line);
           }
           break;
           
