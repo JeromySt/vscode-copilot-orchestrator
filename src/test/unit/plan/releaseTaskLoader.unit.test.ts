@@ -13,6 +13,8 @@ suite('releaseTaskLoader', () => {
   let origReadFileSync: any;
   let origReaddirSync: any;
   let origExistsSync: any;
+  let origWriteFileSync: any;
+  let origMkdirSync: any;
 
   setup(() => {
     sandbox = sinon.createSandbox();
@@ -20,12 +22,16 @@ suite('releaseTaskLoader', () => {
     origReadFileSync = fsModule.readFileSync;
     origReaddirSync = fsModule.readdirSync;
     origExistsSync = fsModule.existsSync;
+    origWriteFileSync = fsModule.writeFileSync;
+    origMkdirSync = fsModule.mkdirSync;
   });
 
   teardown(() => {
     fsModule.readFileSync = origReadFileSync;
     fsModule.readdirSync = origReaddirSync;
     fsModule.existsSync = origExistsSync;
+    fsModule.writeFileSync = origWriteFileSync;
+    fsModule.mkdirSync = origMkdirSync;
     sandbox.restore();
   });
 
@@ -286,6 +292,131 @@ suite('releaseTaskLoader', () => {
       const tasks = getDefaultReleaseTasks();
 
       assert.ok(tasks.every((t) => t.status === 'pending'));
+    });
+  });
+
+  suite('scaffoldDefaultTaskFiles', () => {
+    test('should create directory and 6 files', async () => {
+      fsModule.existsSync = sandbox.stub().returns(false);
+      fsModule.mkdirSync = sandbox.stub();
+      fsModule.writeFileSync = sandbox.stub();
+
+      const { scaffoldDefaultTaskFiles } = await import('../../../plan/releaseTaskLoader');
+      const created = await scaffoldDefaultTaskFiles('/test/repo');
+
+      assert.strictEqual(created.length, 6);
+      assert.ok(fsModule.mkdirSync.calledOnce);
+      assert.ok(fsModule.mkdirSync.calledWith(
+        path.join('/test/repo', '.orchestrator', 'release', 'tasks'),
+        { recursive: true }
+      ));
+      assert.strictEqual(fsModule.writeFileSync.callCount, 6);
+    });
+
+    test('should not overwrite existing files', async () => {
+      // Directory exists, some files exist
+      fsModule.existsSync = sandbox.stub()
+        .onFirstCall().returns(true) // Directory exists
+        .onCall(1).returns(true)     // 01-changelog.md exists
+        .onCall(2).returns(false)    // 02-version.md doesn't exist
+        .onCall(3).returns(true)     // 03-compile.md exists
+        .onCall(4).returns(false)    // 04-tests.md doesn't exist
+        .onCall(5).returns(false)    // 05-docs.md doesn't exist
+        .onCall(6).returns(false);   // 06-ai-review.md doesn't exist
+      fsModule.mkdirSync = sandbox.stub();
+      fsModule.writeFileSync = sandbox.stub();
+
+      const { scaffoldDefaultTaskFiles } = await import('../../../plan/releaseTaskLoader');
+      const created = await scaffoldDefaultTaskFiles('/test/repo');
+
+      // Should only create 4 files (skipping the 2 that exist)
+      assert.strictEqual(created.length, 4);
+      assert.strictEqual(fsModule.writeFileSync.callCount, 4);
+    });
+
+    test('should return only newly created file paths', async () => {
+      fsModule.existsSync = sandbox.stub()
+        .onFirstCall().returns(true)  // Directory exists
+        .onCall(1).returns(true)      // File 1 exists
+        .onCall(2).returns(false)     // File 2 doesn't exist
+        .onCall(3).returns(false)     // File 3 doesn't exist
+        .onCall(4).returns(false)     // File 4 doesn't exist
+        .onCall(5).returns(false)     // File 5 doesn't exist
+        .onCall(6).returns(false);    // File 6 doesn't exist
+      fsModule.mkdirSync = sandbox.stub();
+      fsModule.writeFileSync = sandbox.stub();
+
+      const { scaffoldDefaultTaskFiles } = await import('../../../plan/releaseTaskLoader');
+      const created = await scaffoldDefaultTaskFiles('/test/repo');
+
+      // Should return 5 paths (excluding existing file)
+      assert.strictEqual(created.length, 5);
+      
+      // Check that first file is not in created list
+      const hasChangelogFile = created.some((p: string) => p.includes('01-changelog.md'));
+      assert.strictEqual(hasChangelogFile, false);
+    });
+
+    test('should generate file content with valid frontmatter', async () => {
+      fsModule.existsSync = sandbox.stub().returns(false);
+      fsModule.mkdirSync = sandbox.stub();
+      fsModule.writeFileSync = sandbox.stub();
+
+      const { scaffoldDefaultTaskFiles } = await import('../../../plan/releaseTaskLoader');
+      await scaffoldDefaultTaskFiles('/test/repo');
+
+      assert.ok(fsModule.writeFileSync.calledWith(
+        sinon.match.string,
+        sinon.match(/^---\nid: changelog\ntitle: Update CHANGELOG\nrequired: true/),
+        'utf-8'
+      ));
+    });
+
+    test('should create files numbered 01-06 with correct names', async () => {
+      fsModule.existsSync = sandbox.stub().returns(false);
+      fsModule.mkdirSync = sandbox.stub();
+      fsModule.writeFileSync = sandbox.stub();
+
+      const { scaffoldDefaultTaskFiles } = await import('../../../plan/releaseTaskLoader');
+      const created = await scaffoldDefaultTaskFiles('/test/repo');
+
+      assert.strictEqual(created.length, 6);
+      assert.ok(created[0].includes('01-changelog.md'));
+      assert.ok(created[1].includes('02-version.md'));
+      assert.ok(created[2].includes('03-compile.md'));
+      assert.ok(created[3].includes('04-tests.md'));
+      assert.ok(created[4].includes('05-docs.md'));
+      assert.ok(created[5].includes('06-ai-review.md'));
+    });
+
+    test('should throw error when directory creation fails', async () => {
+      fsModule.existsSync = sandbox.stub().returns(false);
+      fsModule.mkdirSync = sandbox.stub().throws(new Error('Permission denied'));
+
+      const { scaffoldDefaultTaskFiles } = await import('../../../plan/releaseTaskLoader');
+      
+      await assert.rejects(
+        async () => await scaffoldDefaultTaskFiles('/test/repo'),
+        { message: /Failed to create tasks directory/ }
+      );
+    });
+
+    test('should continue with other files if one write fails', async () => {
+      fsModule.existsSync = sandbox.stub().returns(false);
+      fsModule.mkdirSync = sandbox.stub();
+      fsModule.writeFileSync = sandbox.stub()
+        .onFirstCall().throws(new Error('Write error'))  // First file fails
+        .onSecondCall().returns(undefined)               // Rest succeed
+        .onThirdCall().returns(undefined)
+        .onCall(3).returns(undefined)
+        .onCall(4).returns(undefined)
+        .onCall(5).returns(undefined);
+
+      const { scaffoldDefaultTaskFiles } = await import('../../../plan/releaseTaskLoader');
+      const created = await scaffoldDefaultTaskFiles('/test/repo');
+
+      // Should return 5 paths (one failed to write)
+      assert.strictEqual(created.length, 5);
     });
   });
 });
