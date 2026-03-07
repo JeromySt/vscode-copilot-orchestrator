@@ -349,12 +349,16 @@ function renderPrepTask(task: PrepTask): string {
   const requiredBadge = task.required ? '<span class="required-badge">Required</span>' : '';
   const hasLog = task.logFilePath || task.status === 'running';
   
+  // Count findings badge
+  const findingsCount = task.findings?.length || 0;
+  const findingsBadge = findingsCount > 0 ? ` <span class="findings-badge">${findingsCount} finding${findingsCount !== 1 ? 's' : ''}</span>` : '';
+  
   return `
 <div class="prep-task" data-task-id="${task.id}" data-status="${task.status}">
   <span class="task-checkbox ${statusClass}">${statusIcon}</span>
   <div class="task-info">
     <div class="task-title">
-      ${escapeHtml(task.title)}
+      ${escapeHtml(task.title)}${findingsBadge}
       ${requiredBadge}
     </div>
     ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
@@ -375,8 +379,70 @@ function renderPrepTask(task: PrepTask): string {
       '<button class="log-btn" onclick="viewTaskLog(\'' + task.id + '\')" title="View task log">📄 Log</button>' : ''}
   </div>
 </div>
+${task.findings && task.findings.length > 0 ? renderFindings(task.id, task.findings) : ''}
 <div class="task-log-area" id="task-log-${task.id}" style="display: none;">
   <pre class="task-log-content"></pre>
+</div>`;
+}
+
+function renderFindings(taskId: string, findings: any[]): string {
+  // Group findings by severity
+  const errors = findings.filter(f => f.severity === 'error');
+  const warnings = findings.filter(f => f.severity === 'warning');
+  const infos = findings.filter(f => f.severity === 'info');
+  const suggestions = findings.filter(f => f.severity === 'suggestion');
+  
+  const sortedFindings = [...errors, ...warnings, ...infos, ...suggestions];
+  
+  const errorCount = errors.length;
+  const warningCount = warnings.length;
+  const infoCount = infos.length;
+  
+  return `
+<div class="findings-section" data-task-id="${taskId}">
+  <div class="findings-header">
+    <span class="findings-count">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
+    <span class="findings-summary">
+      ${errorCount > 0 ? errorCount + ' error' + (errorCount !== 1 ? 's' : '') : ''}${errorCount > 0 && (warningCount > 0 || infoCount > 0) ? ', ' : ''}${warningCount > 0 ? warningCount + ' warning' + (warningCount !== 1 ? 's' : '') : ''}${warningCount > 0 && infoCount > 0 ? ', ' : ''}${infoCount > 0 ? infoCount + ' info' : ''}
+    </span>
+  </div>
+  <div class="findings-list">
+    ${sortedFindings.map(finding => renderFinding(taskId, finding)).join('')}
+  </div>
+</div>`;
+}
+
+function renderFinding(taskId: string, finding: any): string {
+  const severityIcon = finding.severity === 'error' ? '🔴' :
+                       finding.severity === 'warning' ? '🟡' :
+                       finding.severity === 'info' ? '🔵' :
+                       '💡';
+  
+  const location = finding.filePath 
+    ? `<a class="finding-file-link" onclick="openFindingFile('${escapeHtml(finding.filePath)}', ${finding.line || 1})">${escapeHtml(finding.filePath)}${finding.line ? ':' + finding.line : ''}</a>`
+    : '';
+  
+  const category = finding.category 
+    ? `<span class="finding-category">${escapeHtml(finding.category)}</span>`
+    : '';
+  
+  return `
+<div class="finding-item ${finding.severity} ${finding.status}" data-finding-id="${finding.id}">
+  <div class="finding-severity-badge ${finding.severity}">${severityIcon}</div>
+  <div class="finding-content">
+    <div class="finding-title">${escapeHtml(finding.title)}</div>
+    <div class="finding-description">${escapeHtml(finding.description)}</div>
+    <div class="finding-location">
+      ${location}
+      ${category}
+    </div>
+  </div>
+  <div class="finding-actions">
+    ${finding.status !== 'acknowledged' && finding.status !== 'dismissed' ? 
+      `<button class="finding-ack-btn" onclick="acknowledgeFinding('${taskId}', '${finding.id}')" title="Acknowledge">✓</button>` : ''}
+    ${finding.status !== 'dismissed' ? 
+      `<button class="finding-dismiss-btn" onclick="dismissFinding('${taskId}', '${finding.id}')" title="Dismiss">✕</button>` : ''}
+  </div>
 </div>`;
 }
 

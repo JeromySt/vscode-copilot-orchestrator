@@ -262,6 +262,29 @@ export class ReleaseManagementController {
           }
         }
         break;
+      case 'updateFinding':
+        if (message.taskId && message.findingId && message.status) {
+          this._releaseManager.updateFindingStatus(this._releaseId, message.taskId, message.findingId, message.status).then(() => {
+            this._delegate.forceFullRefresh();
+          }).catch((error) => {
+            this._dialogService.showError(`Failed to update finding: ${error.message}`);
+          });
+        }
+        break;
+      case 'openFindingFile':
+        if (message.filePath) {
+          const release = this._releaseManager.getRelease(this._releaseId);
+          if (release && release.repoPath) {
+            const fullPath = require('path').join(release.repoPath, message.filePath);
+            const uri = vscode.Uri.file(fullPath);
+            const line = message.line || 1;
+            const selection = new vscode.Range(line - 1, 0, line - 1, 0);
+            this._delegate.executeCommand('vscode.open', uri, { selection }).catch((error) => {
+              this._dialogService.showError(`Failed to open file: ${error.message}`);
+            });
+          }
+        }
+        break;
     }
   }
 

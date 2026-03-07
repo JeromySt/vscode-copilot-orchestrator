@@ -117,6 +117,18 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       // Also notify extension to open the log file
       vscode.postMessage({ type: 'viewTaskLog', taskId });
     }
+    
+    function acknowledgeFinding(taskId, findingId) {
+      vscode.postMessage({ type: 'updateFinding', taskId, findingId, status: 'acknowledged' });
+    }
+    
+    function dismissFinding(taskId, findingId) {
+      vscode.postMessage({ type: 'updateFinding', taskId, findingId, status: 'dismissed' });
+    }
+    
+    function openFindingFile(filePath, line) {
+      vscode.postMessage({ type: 'openFindingFile', filePath, line });
+    }
 
     // ── Plan Selection Control ──────────────────────────────────────────
     
