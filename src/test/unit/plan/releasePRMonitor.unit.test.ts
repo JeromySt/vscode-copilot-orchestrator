@@ -85,6 +85,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       createMockGit(),
       factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -104,6 +105,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       createMockGit(),
       factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -125,6 +127,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       createMockGit(),
       factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -156,6 +159,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       createMockGit(),
       factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -199,6 +203,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       git,
       factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -234,6 +239,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       createMockGit(),
       factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -254,6 +260,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       createMockGit(),
       factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -274,6 +281,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       createMockGit(),
       factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -317,6 +325,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       git,
       factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -353,6 +362,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       git,
       factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -383,6 +393,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       createMockGit(),
       factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
     // Start monitoring two releases

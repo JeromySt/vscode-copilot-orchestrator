@@ -947,8 +947,6 @@ class ReleaseCardControl extends SubscribableControl {
   update(data) { if (data) this._onUpdate(data); }
 
   _initDom(data) {
-    var monitoringIndicator = data.status === 'monitoring' ? 
-      '<span class="release-monitoring-indicator"><span class="monitoring-dot"></span>Monitoring</span>' : '';
     var prLink = data.prNumber ? 
       '<a href="#" class="release-pr-link" data-pr-url="' + escapeHtml(data.prUrl) + '">' +
         '<span class="codicon codicon-link-external"></span>PR #' + data.prNumber +
@@ -978,7 +976,6 @@ class ReleaseCardControl extends SubscribableControl {
         '<span class="release-name" title="' + escapeHtml(data.name) + '">' + escapeHtml(data.name) + '</span>' +
         flowType +
         '<span class="release-status-badge ' + data.status + '">' + data.status + '</span>' +
-        monitoringIndicator +
         '<button class="release-delete-btn" title="Delete release">\u00d7</button>' +
       '</div>' +
       '<div class="release-branches">' +

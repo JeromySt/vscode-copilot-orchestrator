@@ -1234,6 +1234,17 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         this.stateMachines.set(release.id, stateMachine);
       }
       log.info('Loaded persisted releases', { count: releases.length });
+      
+      // Restore monitoring for any releases in monitoring state
+      for (const release of releases) {
+        if (release.status === 'monitoring' && release.prNumber) {
+          const cwd = release.repoPath;
+          log.info('Restoring PR monitoring after reload', { releaseId: release.id, prNumber: release.prNumber });
+          this.startMonitoring(release.id).catch((err) => {
+            log.warn('Failed to restore monitoring', { releaseId: release.id, error: (err as Error).message });
+          });
+        }
+      }
     } catch (error) {
       log.error('Failed to load persisted releases', { error: (error as Error).message });
     }

@@ -345,7 +345,8 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
       const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
       const prServiceFactory = c.resolve<import('./interfaces').IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
-      return new DefaultReleasePRMonitor(copilotRunner, spawner, git, prServiceFactory);
+      const pulse = c.resolve<import('./interfaces/IPulseEmitter').IPulseEmitter>(Tokens.IPulseEmitter);
+      return new DefaultReleasePRMonitor(copilotRunner, spawner, git, prServiceFactory, pulse);
     },
   );
 

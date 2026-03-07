@@ -25,12 +25,13 @@ import type {
   PRActionType,
 } from './types/release';
 import type { PRCheck, PRComment, PRSecurityAlert as RemotePRSecurityAlert } from './types/remotePR';
+import type { IPulseEmitter, Disposable as PulseDisposable } from '../interfaces/IPulseEmitter';
 import { Logger } from '../core/logger';
 
 const log = Logger.for('plan');
 
-// Poll every 2 minutes
-const POLL_INTERVAL_MS = 120000;
+// Poll every 2 minutes (120 pulse ticks at ~1s each)
+const POLL_INTERVAL_TICKS = 120;
 
 // Stop monitoring after 40 minutes since last push
 const MAX_MONITORING_MS = 2400000;
@@ -54,8 +55,11 @@ interface MonitorState {
   /** Resolved PR service for this repository (cached at start) */
   prService: IRemotePRService;
 
-  /** Interval timer handle */
-  timer: ReturnType<typeof setInterval> | undefined;
+  /** Pulse subscription handle (replaces setInterval) */
+  pulseSubscription: PulseDisposable | undefined;
+
+  /** Tick counter for pulse-based polling */
+  tickCount: number;
 
   /** Timestamp of the last push (resets the 40-minute timer) */
   lastPushTime: number;
@@ -86,6 +90,7 @@ export class DefaultReleasePRMonitor implements IReleasePRMonitor {
     private readonly spawner: IProcessSpawner,
     private readonly git: IGitOperations,
     private readonly prServiceFactory: IRemotePRServiceFactory,
+    private readonly pulse: IPulseEmitter,
   ) {}
 
   /**
@@ -123,7 +128,8 @@ export class DefaultReleasePRMonitor implements IReleasePRMonitor {
       repoPath,
       releaseBranch,
       prService,
-      timer: undefined,
+      pulseSubscription: undefined,
+      tickCount: 0,
       lastPushTime: Date.now(),
       cycles: [],
       isActive: true,
@@ -134,21 +140,26 @@ export class DefaultReleasePRMonitor implements IReleasePRMonitor {
     // Run the first cycle immediately
     await this._runCycle(state);
 
-    // Schedule periodic polling
-    state.timer = setInterval(async () => {
-      try {
-        await this._runCycle(state);
-      } catch (err) {
-        log.error('Monitoring cycle failed', {
-          releaseId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+    // Subscribe to pulse for periodic polling (every POLL_INTERVAL_TICKS ticks)
+    let isRunningCycle = false;
+    state.pulseSubscription = this.pulse.onPulse(() => {
+      if (!state.isActive || isRunningCycle) return;
+      state.tickCount++;
+      if (state.tickCount >= POLL_INTERVAL_TICKS) {
+        state.tickCount = 0;
+        isRunningCycle = true;
+        this._runCycle(state).catch((err) => {
+          log.error('Monitoring cycle failed', {
+            releaseId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }).finally(() => { isRunningCycle = false; });
       }
-    }, POLL_INTERVAL_MS);
+    });
 
-    log.info('PR monitoring scheduled', {
+    log.info('PR monitoring scheduled via pulse', {
       releaseId,
-      pollIntervalMs: POLL_INTERVAL_MS,
+      pollIntervalTicks: POLL_INTERVAL_TICKS,
       maxMonitoringMs: MAX_MONITORING_MS,
     });
   }
@@ -165,9 +176,9 @@ export class DefaultReleasePRMonitor implements IReleasePRMonitor {
 
     log.info('Stopping PR monitoring', { releaseId });
 
-    if (state.timer) {
-      clearInterval(state.timer);
-      state.timer = undefined;
+    if (state.pulseSubscription) {
+      state.pulseSubscription.dispose();
+      state.pulseSubscription = undefined;
     }
 
     state.isActive = false;

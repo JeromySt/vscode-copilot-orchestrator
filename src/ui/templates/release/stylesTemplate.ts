@@ -672,6 +672,19 @@ function prMonitorStyles(): string {
       border: 1px solid var(--vscode-input-border);
       border-radius: 4px;
     }
+    .monitoring-controls button.secondary {
+      background: var(--vscode-input-background);
+      color: var(--vscode-foreground);
+      border: 1px solid var(--vscode-input-border);
+      padding: 6px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: var(--vscode-font-family);
+    }
+    .monitoring-controls button.secondary:hover {
+      background: var(--vscode-input-border);
+    }
     .monitor-status-badge {
       display: inline-flex;
       align-items: center;
