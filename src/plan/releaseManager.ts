@@ -826,7 +826,10 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     log.info('Starting PR monitoring', { releaseId, prNumber: release.prNumber });
 
-    await this._transitionStatus(release, 'monitoring');
+    // Only transition if not already in monitoring state
+    if (release.status !== 'monitoring') {
+      await this._transitionStatus(release, 'monitoring');
+    }
 
     const isolatedPath = release.isolatedRepoPath || release.repoPath;
     await this.prMonitor.startMonitoring(
