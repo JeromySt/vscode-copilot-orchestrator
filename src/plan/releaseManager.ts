@@ -761,6 +761,16 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       
       const prService = await this.prServiceFactory.getServiceForRepo(cwd);
       
+      // Push the release branch to the remote before creating the PR
+      log.info('Pushing release branch to remote', { releaseId, branch: release.releaseBranch, cwd });
+      try {
+        const { execSync } = require('child_process');
+        execSync(`git push -u origin ${release.releaseBranch}`, { cwd, stdio: 'pipe' });
+        log.info('Release branch pushed', { releaseId, branch: release.releaseBranch });
+      } catch (pushErr) {
+        log.warn('git push failed, PR creation may fail', { releaseId, error: (pushErr as Error).message });
+      }
+      
       const prResult = await prService.createPR({
         baseBranch: release.targetBranch,
         headBranch: release.releaseBranch,
