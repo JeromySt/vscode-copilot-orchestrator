@@ -505,6 +505,12 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
   const isMonitoring = release.status === 'monitoring';
   const isAddressing = release.status === 'addressing';
   const isPRActive = release.status === 'pr-active';
+  const stats = release.monitoringStats;
+  const checksPass = stats?.checksPass ?? 0;
+  const checksFail = stats?.checksFail ?? 0;
+  const unresolvedComments = stats?.unresolvedComments ?? 0;
+  const unresolvedAlerts = stats?.unresolvedAlerts ?? 0;
+  const cycleCount = stats?.cycleCount ?? 0;
   
   // Determine status indicator
   let statusBadge = '';
@@ -540,25 +546,25 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
   
   <div class="pr-stats" id="pr-stats">
     <div class="pr-stat-card">
-      <div class="pr-stat-value passing" id="checks-passing">0</div>
+      <div class="pr-stat-value passing" id="checks-passing">${checksPass}</div>
       <div class="pr-stat-label">Checks Passing</div>
     </div>
     <div class="pr-stat-card">
-      <div class="pr-stat-value failing" id="checks-failing">0</div>
+      <div class="pr-stat-value failing" id="checks-failing">${checksFail}</div>
       <div class="pr-stat-label">Checks Failing</div>
     </div>
     <div class="pr-stat-card">
-      <div class="pr-stat-value pending" id="comments-unresolved">0</div>
+      <div class="pr-stat-value pending" id="comments-unresolved">${unresolvedComments}</div>
       <div class="pr-stat-label">Unresolved Comments</div>
     </div>
     <div class="pr-stat-card">
-      <div class="pr-stat-value" id="alerts-unresolved">0</div>
+      <div class="pr-stat-value" id="alerts-unresolved">${unresolvedAlerts}</div>
       <div class="pr-stat-label">Security Alerts</div>
     </div>
   </div>
   
   <div class="pr-cycle-timeline" id="pr-cycle-timeline">
-    <h4>Monitoring Cycles</h4>
+    <h4>Monitoring Cycles (${cycleCount})</h4>
     <div id="cycle-dots" class="cycle-dots">
       <div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 11px;">
         ${isMonitoring ? 'Waiting for first cycle to complete...' : 'No monitoring cycles yet'}

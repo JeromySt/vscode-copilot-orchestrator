@@ -84,6 +84,31 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     });
     this.events.on('release:completed', (release) => this.emit('releaseCompleted', release));
 
+    // Listen for PR monitor cycle completions and forward to release events + panel refresh
+    if (typeof (this.prMonitor as any).on === 'function') {
+      (this.prMonitor as any).on('cycleComplete', (releaseId: string, cycle: any) => {
+        // Update monitoring stats on the release for panel rendering
+        const rel = this.releases.get(releaseId);
+        if (rel) {
+          const checks = cycle.checks || [];
+          const comments = cycle.comments || [];
+          const alerts = cycle.securityAlerts || [];
+          rel.monitoringStats = {
+            checksPass: checks.filter((c: any) => c.status === 'pass' || c.status === 'success').length,
+            checksFail: checks.filter((c: any) => c.status === 'fail' || c.status === 'failing' || c.status === 'failure').length,
+            checksPending: checks.filter((c: any) => c.status === 'pending').length,
+            unresolvedComments: comments.filter((c: any) => !c.isResolved).length,
+            unresolvedAlerts: alerts.filter((a: any) => !a.resolved).length,
+            cycleCount: (rel.monitoringStats?.cycleCount || 0) + 1,
+            lastCycleAt: Date.now(),
+          };
+          this.store.saveRelease(rel).catch(() => {});
+        }
+        this.events.emitReleasePrCycle(releaseId, cycle);
+        this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+      });
+    }
+
     this._loadPersistedReleases().catch((error) => {
       log.error('Failed to load persisted releases on startup', { error: (error as Error).message });
     });

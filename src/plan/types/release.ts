@@ -223,6 +223,17 @@ export interface ReleaseDefinition {
   /** Release instructions file metadata */
   releaseInstructions?: ReleaseInstructions;
 
+  /** Latest monitoring stats (updated after each cycle) */
+  monitoringStats?: {
+    checksPass: number;
+    checksFail: number;
+    checksPending: number;
+    unresolvedComments: number;
+    unresolvedAlerts: number;
+    cycleCount: number;
+    lastCycleAt?: number;
+  };
+
   /** History of state transitions */
   stateHistory: StateTransition[];
 }

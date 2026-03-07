@@ -25,6 +25,7 @@ import type {
   PRActionType,
 } from './types/release';
 import type { PRCheck, PRComment, PRSecurityAlert as RemotePRSecurityAlert } from './types/remotePR';
+import { EventEmitter } from 'events';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../interfaces/IPulseEmitter';
 import { Logger } from '../core/logger';
 
@@ -82,7 +83,7 @@ interface MonitorState {
  *
  * Timer resets on every push, allowing extended monitoring for active fixes.
  */
-export class DefaultReleasePRMonitor implements IReleasePRMonitor {
+export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRMonitor {
   private readonly monitors = new Map<string, MonitorState>();
 
   constructor(
@@ -91,7 +92,9 @@ export class DefaultReleasePRMonitor implements IReleasePRMonitor {
     private readonly git: IGitOperations,
     private readonly prServiceFactory: IRemotePRServiceFactory,
     private readonly pulse: IPulseEmitter,
-  ) {}
+  ) {
+    super();
+  }
 
   /**
    * Starts monitoring a release PR.
@@ -332,14 +335,18 @@ export class DefaultReleasePRMonitor implements IReleasePRMonitor {
     }
 
     // Record the cycle
-    state.cycles.push({
+    const cycle: PRMonitorCycle = {
       cycleNumber,
       timestamp,
       checks: cycleChecks,
       comments: cycleComments,
       securityAlerts: cycleAlerts,
       actions,
-    });
+    };
+    state.cycles.push(cycle);
+
+    // Emit cycle event so release manager can update the release and UI
+    this.emit('cycleComplete', state.releaseId, cycle);
 
     log.info('Monitoring cycle complete', {
       releaseId: state.releaseId,
