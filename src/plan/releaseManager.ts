@@ -468,7 +468,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         const result = await this.copilot.run({
           cwd,
           task: taskDescription,
-          timeout: 30 * 60 * 1000, // 30 minutes for release prep tasks
+          timeout: 0, // No timeout for release prep tasks
           onOutput: async (line: string) => {
             // Stream every CLI output line to log file AND event
             const logLine = `${line}\n`;
