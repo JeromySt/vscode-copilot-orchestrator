@@ -54,6 +54,10 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       vscode.postMessage({ type: 'markTaskComplete', taskId });
     }
     
+    function retryTask(taskId) {
+      vscode.postMessage({ type: 'retryTask', taskId });
+    }
+    
     function createPR() {
       vscode.postMessage({ type: 'createPR' });
     }

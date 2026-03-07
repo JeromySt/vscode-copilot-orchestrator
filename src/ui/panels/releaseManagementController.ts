@@ -101,6 +101,24 @@ export class ReleaseManagementController {
           });
         }
         break;
+      case 'retryTask':
+        if (message.taskId) {
+          // Reset the failed task to pending, then re-execute
+          const retryRelease = this._releaseManager.getRelease(this._releaseId);
+          if (retryRelease) {
+            const task = retryRelease.prepTasks?.find((t: any) => t.id === message.taskId);
+            if (task) {
+              task.status = 'pending';
+              task.error = undefined;
+              task.completedAt = undefined;
+              this._delegate.forceFullRefresh();
+              this._releaseManager.executePreparationTask(this._releaseId, message.taskId).catch((error) => {
+                this._dialogService.showError(`Failed to retry task: ${error.message}`);
+              });
+            }
+          }
+        }
+        break;
       case 'addPlans':
         if (message.planIds && Array.isArray(message.planIds)) {
           this._releaseManager.addPlansToRelease(this._releaseId, message.planIds).catch((error) => {

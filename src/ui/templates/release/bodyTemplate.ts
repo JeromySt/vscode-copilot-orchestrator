@@ -367,6 +367,10 @@ function renderPrepTask(task: PrepTask): string {
       '<button class="skip-btn" onclick="skipTask(\'' + task.id + '\')" title="Skip this task">Skip</button>' : ''}
     ${task.status === 'pending' && !task.autoSupported ? 
       '<button class="manual-btn" onclick="markTaskComplete(\'' + task.id + '\')" title="Mark as complete">✓ Done</button>' : ''}
+    ${task.status === 'failed' ? 
+      '<button class="auto-btn" onclick="retryTask(\'' + task.id + '\')" title="Retry this task">↻ Retry</button>' : ''}
+    ${task.status === 'failed' && !task.required ? 
+      '<button class="skip-btn" onclick="skipTask(\'' + task.id + '\')" title="Skip this task">Skip</button>' : ''}
     ${hasLog ? 
       '<button class="log-btn" onclick="viewTaskLog(\'' + task.id + '\')" title="View task log">📄 Log</button>' : ''}
   </div>
