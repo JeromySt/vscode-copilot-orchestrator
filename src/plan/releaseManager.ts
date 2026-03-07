@@ -743,15 +743,15 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     await this._transitionStatus(release, 'creating-pr');
 
     try {
-      const isolatedPath = release.isolatedRepoPath!;
-      const prService = await this.prServiceFactory.getServiceForRepo(isolatedPath);
+      const cwd = release.isolatedRepoPath || release.repoPath;
+      const prService = await this.prServiceFactory.getServiceForRepo(cwd);
       
       const prResult = await prService.createPR({
         baseBranch: release.targetBranch,
         headBranch: release.releaseBranch,
         title: release.name,
         body: this._buildPRBody(release, []),
-        cwd: isolatedPath,
+        cwd,
       });
 
       release.prNumber = prResult.prNumber;

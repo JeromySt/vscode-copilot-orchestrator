@@ -214,6 +214,22 @@ export class ReleaseManagementController {
           this._dialogService.showError(`Failed to delete release: ${error.message}`);
         });
         break;
+      case 'retryRelease':
+        // Reset failed release back to preparing so user can retry
+        this._releaseManager.transitionToState(this._releaseId, 'preparing', 'Retrying after failure').then((success) => {
+          if (!success) {
+            // Force reset if state machine rejects
+            const rel = this._releaseManager.getRelease(this._releaseId);
+            if (rel) {
+              (rel as any).status = 'preparing';
+              (rel as any).error = undefined;
+            }
+          }
+          this._delegate.forceFullRefresh();
+        }).catch((error) => {
+          this._dialogService.showError(`Failed to retry release: ${error.message}`);
+        });
+        break;
       case 'addPlan':
         if (message.planId) {
           this._releaseManager.addPlansToRelease(this._releaseId, [message.planId]).catch((error) => {

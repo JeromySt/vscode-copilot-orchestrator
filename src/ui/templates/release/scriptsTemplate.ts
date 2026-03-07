@@ -96,6 +96,10 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       vscode.postMessage({ type: 'deleteRelease' });
     }
     
+    function retryRelease() {
+      vscode.postMessage({ type: 'retryRelease' });
+    }
+    
     function scaffoldTaskFiles() {
       vscode.postMessage({ type: 'scaffoldTasks' });
     }

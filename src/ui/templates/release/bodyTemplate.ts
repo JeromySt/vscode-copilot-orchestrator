@@ -575,7 +575,10 @@ function renderCompletionStep(release: ReleaseDefinition): string {
   <h3 style="margin: 0 0 12px 0; font-size: 18px;">${title}</h3>
   <div style="color: var(--vscode-descriptionForeground); margin-bottom: 24px;">${escapeHtml(message)}</div>
   ${release.prUrl ? `<a href="${escapeHtml(release.prUrl)}" class="pr-link" target="_blank" style="font-size: 14px;">View PR on GitHub ↗</a>` : ''}
-  <div style="margin-top: 24px;"><button class="danger" onclick="deleteRelease()">Delete Release</button></div>
+  <div style="margin-top: 24px; display: flex; gap: 12px; justify-content: center;">
+    ${isFailed ? '<button onclick="retryRelease()">↻ Retry Release</button>' : ''}
+    <button class="danger" onclick="deleteRelease()">Delete Release</button>
+  </div>
 </div>`;
 }
 
