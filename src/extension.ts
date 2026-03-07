@@ -149,8 +149,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── Commands ───────────────────────────────────────────────────────────
   registerPlanCommands(context, planRunner, pulse, container);
   registerUtilityCommands(context);
-  // Register release commands with actual releaseManager
-  registerReleaseCommands(context, (id: string) => releaseManager.getRelease(id), releaseManager, planRunner);
+  // Register release commands with actual releaseManager and providerDetector
+  const providerDetector = container.resolve<import('./interfaces/IRemoteProviderDetector').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
+  registerReleaseCommands(context, (id: string) => releaseManager.getRelease(id), releaseManager, planRunner, providerDetector);
   // Register PR lifecycle commands
   registerPRLifecycleCommands(context, (id: string) => prLifecycleManager.getManagedPR(id));
 

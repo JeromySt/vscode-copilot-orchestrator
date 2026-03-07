@@ -304,6 +304,72 @@ export class ReleaseManagementController {
           }
         }
         break;
+      case 'getGitAccount':
+        this._fetchGitAccount().catch((error) => {
+          this._delegate.postMessage({ type: 'gitAccount', username: null });
+        });
+        break;
+      case 'switchAccount':
+        this._delegate.executeCommand('orchestrator.selectGitAccount').then(() => {
+          // Refresh account display after selection
+          this._fetchGitAccount().catch((error) => {
+            this._delegate.postMessage({ type: 'gitAccount', username: null });
+          });
+        }).catch((error) => {
+          this._dialogService.showError(`Failed to switch account: ${error.message}`);
+        });
+        break;
+    }
+  }
+
+  /**
+   * Fetch the currently configured git account for the release's repository.
+   */
+  private async _fetchGitAccount(): Promise<void> {
+    const release = this._releaseManager.getRelease(this._releaseId);
+    if (!release || !release.repoPath) {
+      this._delegate.postMessage({ type: 'gitAccount', username: null });
+      return;
+    }
+
+    try {
+      // We need to spawn git to get the configured username
+      // Since we don't have access to IProcessSpawner here, we'll use child_process directly
+      const { spawn } = require('child_process');
+      
+      // Detect provider to get hostname
+      const proc = spawn('git', ['remote', 'get-url', 'origin'], {
+        cwd: release.repoPath,
+        shell: false,
+      });
+
+      let remoteUrl = '';
+      proc.stdout.on('data', (chunk: Buffer) => { remoteUrl += chunk.toString(); });
+
+      proc.on('close', async () => {
+        const url = remoteUrl.trim();
+        const hostname = url.includes('github.com') ? 'github.com' : 
+                        url.includes('dev.azure.com') ? 'dev.azure.com' :
+                        'github.com'; // default
+
+        // Get configured username
+        const configProc = spawn('git', ['config', '--local', `credential.https://${hostname}.username`], {
+          cwd: release.repoPath,
+          shell: false,
+        });
+
+        let username = '';
+        configProc.stdout.on('data', (chunk: Buffer) => { username += chunk.toString(); });
+
+        configProc.on('close', () => {
+          this._delegate.postMessage({ 
+            type: 'gitAccount', 
+            username: username.trim() || null 
+          });
+        });
+      });
+    } catch (error) {
+      this._delegate.postMessage({ type: 'gitAccount', username: null });
     }
   }
 

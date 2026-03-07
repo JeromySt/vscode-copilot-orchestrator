@@ -48,20 +48,20 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
     return info;
   }
 
-  async acquireCredentials(provider: RemoteProviderInfo): Promise<RemoteCredentials> {
+  async acquireCredentials(provider: RemoteProviderInfo, repoPath?: string): Promise<RemoteCredentials> {
     log.debug('Acquiring credentials', { type: provider.type, hostname: provider.hostname });
 
     let credentials: RemoteCredentials | null = null;
 
     switch (provider.type) {
       case 'github':
-        credentials = await this.acquireGitHubCredentials(provider);
+        credentials = await this.acquireGitHubCredentials(provider, repoPath);
         break;
       case 'github-enterprise':
-        credentials = await this.acquireGitHubEnterpriseCredentials(provider);
+        credentials = await this.acquireGitHubEnterpriseCredentials(provider, repoPath);
         break;
       case 'azure-devops':
-        credentials = await this.acquireAzureDevOpsCredentials(provider);
+        credentials = await this.acquireAzureDevOpsCredentials(provider, repoPath);
         break;
       default:
         throw new Error(`Unsupported provider type: ${provider.type}`);
@@ -75,9 +75,100 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
       type: provider.type, 
       tokenSource: credentials.tokenSource,
       hostname: credentials.hostname,
+      username: credentials.username,
     });
 
     return credentials;
+  }
+
+  async listAccounts(provider: RemoteProviderInfo): Promise<string[]> {
+    log.debug('Listing accounts', { type: provider.type, hostname: provider.hostname });
+
+    try {
+      switch (provider.type) {
+        case 'github':
+          return await this.listGitHubAccounts();
+        case 'github-enterprise':
+          return await this.listGitHubEnterpriseAccounts(provider.hostname || '');
+        case 'azure-devops':
+          return await this.listAzureDevOpsAccounts();
+        default:
+          log.warn('listAccounts not implemented for provider type', { type: provider.type });
+          return [];
+      }
+    } catch (err) {
+      log.debug('Failed to list accounts', { error: (err as Error).message });
+      return [];
+    }
+  }
+
+  async ensureCredentials(
+    repoPath: string,
+    provider: RemoteProviderInfo,
+    dialogService?: import('../../interfaces/IDialogService').IDialogService,
+  ): Promise<RemoteCredentials> {
+    log.debug('Ensuring credentials', { type: provider.type, hostname: provider.hostname });
+
+    const hostname = provider.type === 'github' 
+      ? 'github.com' 
+      : provider.hostname || 'github.com';
+
+    // Step 1: Check repo-local config for configured username
+    const configuredUsername = await this.getConfiguredUsername(repoPath, hostname);
+    if (configuredUsername) {
+      log.debug('Using configured username', { username: configuredUsername });
+      const gitCred = await this.tryGitCredentialFill(hostname, configuredUsername);
+      if (gitCred) {
+        return {
+          token: gitCred.token,
+          tokenSource: 'git-credential-cache',
+          hostname,
+          username: gitCred.username,
+        };
+      }
+    }
+
+    // Step 2: List available accounts
+    const accounts = await this.listAccounts(provider);
+    log.debug('Available accounts', { count: accounts.length, accounts });
+
+    // Step 3: Handle different account counts
+    if (accounts.length === 0) {
+      throw new Error('No accounts found. Please log in using the "Login Git Account" command.');
+    }
+
+    let selectedAccount: string;
+
+    if (accounts.length === 1) {
+      // Auto-select single account
+      selectedAccount = accounts[0];
+      log.debug('Auto-selecting single account', { account: selectedAccount });
+    } else {
+      // Multiple accounts - show quickpick with EMU hint
+      selectedAccount = await this.selectAccountWithDialog(
+        accounts,
+        provider.owner,
+        hostname,
+        dialogService,
+      );
+    }
+
+    // Step 4: Store selection in repo-local git config
+    await this.setConfiguredUsername(repoPath, hostname, selectedAccount);
+    log.info('Configured account for repository', { hostname, username: selectedAccount });
+
+    // Step 5: Acquire credentials with selected username
+    const gitCred = await this.tryGitCredentialFill(hostname, selectedAccount);
+    if (!gitCred) {
+      throw new Error(`Failed to acquire credentials for account ${selectedAccount}`);
+    }
+
+    return {
+      token: gitCred.token,
+      tokenSource: 'git-credential-cache',
+      hostname,
+      username: gitCred.username,
+    };
   }
 
   private async getRemoteUrl(repoPath: string): Promise<string> {
@@ -192,14 +283,33 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
     throw new Error(`Unsupported or unrecognized remote URL format: ${remoteUrl}`);
   }
 
-  private async acquireGitHubCredentials(provider: RemoteProviderInfo): Promise<RemoteCredentials> {
+  private async acquireGitHubCredentials(provider: RemoteProviderInfo, repoPath?: string): Promise<RemoteCredentials> {
+    const hostname = 'github.com';
+
+    // Check for per-repo configured username
+    const configuredUsername = repoPath ? await this.getConfiguredUsername(repoPath, hostname) : null;
+
+    if (configuredUsername) {
+      // Skip gh auth token (globally active account) and go straight to git credential fill
+      log.debug('Using configured username for GitHub', { username: configuredUsername });
+      const gitCred = await this.tryGitCredentialFill(hostname, configuredUsername);
+      if (gitCred) {
+        return {
+          token: gitCred.token,
+          tokenSource: 'git-credential-cache',
+          hostname,
+          username: gitCred.username,
+        };
+      }
+    }
+
     // Strategy 1: gh auth token
     const ghToken = await this.tryGhAuthToken();
     if (ghToken) {
       return {
         token: ghToken,
         tokenSource: 'gh-auth',
-        hostname: 'github.com',
+        hostname,
       };
     }
 
@@ -209,7 +319,7 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
       return {
         token: this.env.env.GH_TOKEN,
         tokenSource: 'environment',
-        hostname: 'github.com',
+        hostname,
       };
     }
 
@@ -219,25 +329,43 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
       return {
         token: this.env.env.GITHUB_TOKEN,
         tokenSource: 'environment',
-        hostname: 'github.com',
+        hostname,
       };
     }
 
     // Strategy 4: git credential fill (universal fallback)
-    const gitCred = await this.tryGitCredentialFill('github.com');
+    const gitCred = await this.tryGitCredentialFill(hostname);
     if (gitCred) {
       return {
-        token: gitCred,
+        token: gitCred.token,
         tokenSource: 'git-credential-cache',
-        hostname: 'github.com',
+        hostname,
+        username: gitCred.username,
       };
     }
 
     throw new Error('Failed to acquire GitHub credentials through any available method');
   }
 
-  private async acquireGitHubEnterpriseCredentials(provider: RemoteProviderInfo): Promise<RemoteCredentials> {
+  private async acquireGitHubEnterpriseCredentials(provider: RemoteProviderInfo, repoPath?: string): Promise<RemoteCredentials> {
     const hostname = provider.hostname || 'unknown';
+
+    // Check for per-repo configured username
+    const configuredUsername = repoPath ? await this.getConfiguredUsername(repoPath, hostname) : null;
+
+    if (configuredUsername) {
+      // Skip gh auth token (globally active account) and go straight to git credential fill
+      log.debug('Using configured username for GHE', { hostname, username: configuredUsername });
+      const gitCred = await this.tryGitCredentialFill(hostname, configuredUsername);
+      if (gitCred) {
+        return {
+          token: gitCred.token,
+          tokenSource: 'git-credential-cache',
+          hostname,
+          username: gitCred.username,
+        };
+      }
+    }
 
     // Strategy 1: gh auth token -h <hostname>
     const ghToken = await this.tryGhAuthToken(hostname);
@@ -263,19 +391,38 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
     const gitCred = await this.tryGitCredentialFill(hostname);
     if (gitCred) {
       return {
-        token: gitCred,
+        token: gitCred.token,
         tokenSource: 'git-credential-cache',
         hostname,
+        username: gitCred.username,
       };
     }
 
     throw new Error(`Failed to acquire GitHub Enterprise credentials for ${hostname}`);
   }
 
-  private async acquireAzureDevOpsCredentials(provider: RemoteProviderInfo): Promise<RemoteCredentials> {
-    const hostname = provider.organization 
+  private async acquireAzureDevOpsCredentials(provider: RemoteProviderInfo, repoPath?: string): Promise<RemoteCredentials> {
+    const hostname = 'dev.azure.com';
+    const fullHostname = provider.organization 
       ? `dev.azure.com/${provider.organization}` 
-      : 'dev.azure.com';
+      : hostname;
+
+    // Check for per-repo configured username
+    const configuredUsername = repoPath ? await this.getConfiguredUsername(repoPath, hostname) : null;
+
+    if (configuredUsername) {
+      // Skip az CLI (globally active account) and go straight to git credential fill
+      log.debug('Using configured username for Azure DevOps', { username: configuredUsername });
+      const gitCred = await this.tryGitCredentialFill(hostname, configuredUsername);
+      if (gitCred) {
+        return {
+          token: gitCred.token,
+          tokenSource: 'git-credential-cache',
+          hostname: fullHostname,
+          username: gitCred.username,
+        };
+      }
+    }
 
     // Strategy 1: az account get-access-token
     const azToken = await this.tryAzAccessToken();
@@ -283,7 +430,7 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
       return {
         token: azToken,
         tokenSource: 'az-cli',
-        hostname,
+        hostname: fullHostname,
       };
     }
 
@@ -293,7 +440,7 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
       return {
         token: this.env.env.AZURE_DEVOPS_EXT_PAT,
         tokenSource: 'environment',
-        hostname,
+        hostname: fullHostname,
       };
     }
 
@@ -303,17 +450,18 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
       return {
         token: this.env.env.SYSTEM_ACCESSTOKEN,
         tokenSource: 'environment',
-        hostname,
+        hostname: fullHostname,
       };
     }
 
     // Strategy 4: git credential fill
-    const gitCred = await this.tryGitCredentialFill('dev.azure.com');
+    const gitCred = await this.tryGitCredentialFill(hostname);
     if (gitCred) {
       return {
-        token: gitCred,
+        token: gitCred.token,
         tokenSource: 'git-credential-cache',
-        hostname,
+        hostname: fullHostname,
+        username: gitCred.username,
       };
     }
 
@@ -384,11 +532,15 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
     return null;
   }
 
-  private async tryGitCredentialFill(hostname: string): Promise<string | null> {
+  private async tryGitCredentialFill(hostname: string, username?: string): Promise<{ token: string; username: string } | null> {
     try {
       const proc = this.spawner.spawn('git', ['credential', 'fill'], { shell: false });
 
-      const input = `protocol=https\nhost=${hostname}\n\n`;
+      let input = `protocol=https\nhost=${hostname}\n`;
+      if (username) {
+        input += `username=${username}\n`;
+      }
+      input += '\n';
 
       // Cast to any to access stdin (not in ChildProcessLike interface)
       const procAny = proc as any;
@@ -408,11 +560,20 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
       });
 
       if (exitCode === 0 && stdout) {
-        // Parse password=<token> from output
-        const match = stdout.match(/password=(.+)/);
-        if (match && match[1]) {
-          log.debug('Successfully retrieved token via git credential fill', { hostname });
-          return match[1].trim();
+        // Parse password=<token> and username=<username> from output
+        const passwordMatch = stdout.match(/password=(.+)/);
+        const usernameMatch = stdout.match(/username=(.+)/);
+        
+        if (passwordMatch && passwordMatch[1]) {
+          const token = passwordMatch[1].trim();
+          const resultUsername = usernameMatch ? usernameMatch[1].trim() : (username || '');
+          
+          log.debug('Successfully retrieved token via git credential fill', { 
+            hostname, 
+            username: resultUsername,
+          });
+          
+          return { token, username: resultUsername };
         }
       }
     } catch (err) {
@@ -420,5 +581,196 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
     }
 
     return null;
+  }
+
+  private async getConfiguredUsername(repoPath: string, hostname: string): Promise<string | null> {
+    try {
+      const key = `credential.https://${hostname}.username`;
+      const proc = this.spawner.spawn('git', ['config', '--local', key], {
+        cwd: repoPath,
+        shell: false,
+      });
+
+      let stdout = '';
+      if (proc.stdout) {
+        proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+      }
+
+      const exitCode = await new Promise<number>((resolve) => {
+        proc.on('exit', (code) => resolve(code ?? 1));
+        proc.on('error', () => resolve(1));
+      });
+
+      if (exitCode === 0 && stdout.trim()) {
+        const username = stdout.trim();
+        log.debug('Found configured username', { hostname, username });
+        return username;
+      }
+    } catch (err) {
+      log.debug('Failed to get configured username', { error: (err as Error).message });
+    }
+
+    return null;
+  }
+
+  private async listGitHubAccounts(): Promise<string[]> {
+    try {
+      const proc = this.spawner.spawn('git', ['credential-manager', 'github', 'list'], { shell: false });
+
+      let stdout = '';
+      if (proc.stdout) {
+        proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+      }
+
+      const exitCode = await new Promise<number>((resolve) => {
+        proc.on('exit', (code) => resolve(code ?? 1));
+        proc.on('error', () => resolve(1));
+      });
+
+      if (exitCode === 0 && stdout.trim()) {
+        const accounts = stdout.trim().split('\n').map(line => line.trim()).filter(line => line);
+        log.debug('Listed GitHub accounts', { count: accounts.length });
+        return accounts;
+      }
+    } catch (err) {
+      log.debug('git credential-manager github list failed', { error: (err as Error).message });
+    }
+
+    return [];
+  }
+
+  private async listGitHubEnterpriseAccounts(hostname: string): Promise<string[]> {
+    // Try GCM github list and filter by hostname if possible
+    const accounts = await this.listGitHubAccounts();
+    if (accounts.length > 0) {
+      return accounts;
+    }
+
+    // Fallback: try gh auth status to get the username
+    try {
+      const proc = this.spawner.spawn('gh', ['auth', 'status', '-h', hostname], { shell: false });
+
+      let stdout = '';
+      if (proc.stdout) {
+        proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+      }
+
+      const exitCode = await new Promise<number>((resolve) => {
+        proc.on('exit', (code) => resolve(code ?? 1));
+        proc.on('error', () => resolve(1));
+      });
+
+      if (exitCode === 0 && stdout) {
+        // Parse username from "Logged in to <hostname> as <username>"
+        const match = stdout.match(/Logged in to .+ as (\S+)/);
+        if (match && match[1]) {
+          log.debug('Found GHE username via gh auth status', { hostname, username: match[1] });
+          return [match[1]];
+        }
+      }
+    } catch (err) {
+      log.debug('gh auth status failed', { error: (err as Error).message });
+    }
+
+    return [];
+  }
+
+  private async listAzureDevOpsAccounts(): Promise<string[]> {
+    try {
+      const proc = this.spawner.spawn(
+        'az',
+        ['account', 'list', '--query', '[].user.name', '-o', 'tsv'],
+        { shell: false },
+      );
+
+      let stdout = '';
+      if (proc.stdout) {
+        proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+      }
+
+      const exitCode = await new Promise<number>((resolve) => {
+        proc.on('exit', (code) => resolve(code ?? 1));
+        proc.on('error', () => resolve(1));
+      });
+
+      if (exitCode === 0 && stdout.trim()) {
+        const accounts = stdout.trim().split('\n').map(line => line.trim()).filter(line => line);
+        log.debug('Listed Azure DevOps accounts', { count: accounts.length });
+        return accounts;
+      }
+    } catch (err) {
+      log.debug('az account list failed', { error: (err as Error).message });
+    }
+
+    return [];
+  }
+
+  private async selectAccountWithDialog(
+    accounts: string[],
+    repoOwner: string,
+    hostname: string,
+    dialogService?: import('../../interfaces/IDialogService').IDialogService,
+  ): Promise<string> {
+    // EMU detection heuristic
+    const recommendedAccount = this.suggestAccountForOwner(accounts, repoOwner);
+    
+    if (!dialogService) {
+      // Headless mode - use recommended or first account
+      const selected = recommendedAccount || accounts[0];
+      log.debug('Headless mode: auto-selecting account', { selected });
+      return selected;
+    }
+
+    // Build quickpick items with EMU hint
+    const items = accounts.map(account => {
+      const isRecommended = account === recommendedAccount;
+      return isRecommended ? `${account} (recommended)` : account;
+    });
+    
+    // Add "Add new account..." option
+    items.push('$(plus) Add new account...');
+
+    const selected = await dialogService.showQuickPick(items, {
+      placeHolder: `Select Git account for ${hostname}`,
+    });
+
+    if (!selected) {
+      throw new Error('Account selection cancelled');
+    }
+
+    if (selected.startsWith('$(plus)')) {
+      // User wants to add a new account - trigger login flow
+      throw new Error('LOGIN_REQUIRED');
+    }
+
+    // Strip "(recommended)" suffix
+    return selected.replace(' (recommended)', '');
+  }
+
+  private suggestAccountForOwner(accounts: string[], owner: string): string | undefined {
+    return accounts.find(acct => acct.toLowerCase().endsWith('_' + owner.toLowerCase()));
+  }
+
+  private async setConfiguredUsername(repoPath: string, hostname: string, username: string): Promise<void> {
+    try {
+      const key = `credential.https://${hostname}.username`;
+      const proc = this.spawner.spawn('git', ['config', '--local', key, username], {
+        cwd: repoPath,
+        shell: false,
+      });
+
+      const exitCode = await new Promise<number>((resolve) => {
+        proc.on('exit', (code) => resolve(code ?? 1));
+        proc.on('error', () => resolve(1));
+      });
+
+      if (exitCode === 0) {
+        log.debug('Configured username in repo-local git config', { hostname, username });
+      } else {
+        log.warn('Failed to configure username', { hostname, username });
+      }
+    } catch (err) {
+      log.debug('Failed to set configured username', { error: (err as Error).message });
+    }
   }
 }

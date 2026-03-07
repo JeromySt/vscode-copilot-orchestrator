@@ -392,7 +392,9 @@ export function createReleaseManager(
   const prMonitor = container.resolve<import('./interfaces/IReleasePRMonitor').IReleasePRMonitor>(Tokens.IReleasePRMonitor);
   const prServiceFactory = container.resolve<import('./interfaces/IRemotePRServiceFactory').IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
   const store = container.resolve<import('./interfaces/IReleaseStore').IReleaseStore>(Tokens.IReleaseStore);
+  const providerDetector = container.resolve<import('./interfaces/IRemoteProviderDetector').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
+  const dialogService = container.resolve<import('./interfaces/IDialogService').IDialogService>(Tokens.IDialogService);
   
   const { DefaultReleaseManager } = require('./plan/releaseManager');
-  return new DefaultReleaseManager(planRunner, git, copilot, isolatedRepos, prMonitor, prServiceFactory, store);
+  return new DefaultReleaseManager(planRunner, git, copilot, isolatedRepos, prMonitor, prServiceFactory, store, providerDetector, dialogService);
 }

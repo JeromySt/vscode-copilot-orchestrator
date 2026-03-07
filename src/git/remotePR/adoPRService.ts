@@ -60,8 +60,8 @@ export class AdoPRService implements IRemotePRService {
    * Acquire credentials for the provider.
    * Delegates to the detector.
    */
-  async acquireCredentials(provider: RemoteProviderInfo): Promise<RemoteCredentials> {
-    return this.detector.acquireCredentials(provider);
+  async acquireCredentials(provider: RemoteProviderInfo, repoPath?: string): Promise<RemoteCredentials> {
+    return this.detector.acquireCredentials(provider, repoPath);
   }
 
   /**
