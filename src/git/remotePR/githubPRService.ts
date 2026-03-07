@@ -154,23 +154,30 @@ export class GitHubPRService implements IRemotePRService {
     log.debug('Getting PR checks', { prNumber });
 
     const env = this._buildEnv(provider, credentials);
-    const args = ['pr', 'checks', String(prNumber), '--json', 'name,state,link'];
-
-    const result = await this._execGh(args, cwd, env);
+    const ownerRepo = `${provider.owner}/${provider.repoName}`;
+    
+    // Use gh api instead of gh pr checks (which doesn't support --json)
+    const endpoint = `repos/${ownerRepo}/commits/refs/pull/${prNumber}/head/check-runs`;
     
     try {
+      const result = await this._execGhApi(endpoint, cwd, env);
       const parsed = JSON.parse(result);
-      const checks: PRCheck[] = parsed.map((check: any) => ({
-        name: check.name,
-        status: this._mapCheckState(check.state),
-        url: check.link,
+      const checkRuns = parsed.check_runs || [];
+      
+      const checks: PRCheck[] = checkRuns.map((run: any) => ({
+        name: run.name,
+        status: run.conclusion === 'success' ? 'pass' : 
+                run.conclusion === 'failure' ? 'fail' :
+                run.status === 'completed' ? (run.conclusion === 'skipped' ? 'pass' : 'fail') :
+                'pending',
+        url: run.html_url || run.details_url || '',
       }));
       
       log.info('PR checks retrieved', { prNumber, count: checks.length });
       return checks;
     } catch (err) {
-      log.error('Failed to parse PR checks response', { error: String(err), output: result });
-      throw new Error(`Failed to parse gh pr checks output: ${err}`);
+      log.warn('Failed to fetch PR checks via API, returning empty', { prNumber, error: String(err) });
+      return [];
     }
   }
 
