@@ -269,6 +269,50 @@ export class ReleaseManagementController {
         // Trigger Copilot to address specific feedback
         this._delegate.forceFullRefresh();
         break;
+      case 'openPRComment': {
+        // Open a file at the specified line with the PR comment shown as a decoration
+        const release = this._releaseManager.getRelease(this._releaseId);
+        if (release && message.filePath) {
+          const repoPath = release.repoPath || '';
+          const path = require('path');
+          const fullPath = path.isAbsolute(message.filePath)
+            ? message.filePath
+            : path.join(repoPath, message.filePath);
+          const uri = vscode.Uri.file(fullPath);
+          const line = Math.max(1, message.line || 1);
+          const selection = new vscode.Range(line - 1, 0, line - 1, 0);
+          this._delegate.executeCommand('vscode.open', uri, { selection }).then(() => {
+            // After opening the file, show the PR comment as a diagnostic / decoration
+            this._delegate.executeCommand(
+              'orchestrator.showPRCommentDecoration',
+              fullPath,
+              line,
+              message.author || 'Reviewer',
+              message.body || '',
+              message.source || 'human',
+            ).catch(() => { /* command may not exist yet */ });
+          }).catch((error) => {
+            this._dialogService.showError(`Failed to open file: ${error.message}`);
+          });
+        }
+        break;
+      }
+      case 'openExternal':
+        if (message.url) {
+          this._delegate.executeCommand('vscode.open', vscode.Uri.parse(message.url)).catch((error) => {
+            this._dialogService.showError(`Failed to open URL: ${error.message}`);
+          });
+        }
+        break;
+      case 'addressWithAI': {
+        // Send selected findings to the release manager for AI-assisted fixing
+        if (message.findings && Array.isArray(message.findings)) {
+          this._releaseManager.addressFindings(this._releaseId, message.findings).catch((error) => {
+            this._dialogService.showError(`Failed to address findings: ${error.message}`);
+          });
+        }
+        break;
+      }
       case 'refresh':
         this._delegate.forceFullRefresh();
         break;

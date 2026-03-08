@@ -237,7 +237,13 @@ export interface IReleaseManager {
    * @param releaseId - The release ID
    */
   stopMonitoring(releaseId: string): Promise<void>;
-
+  /**
+   * Address selected findings using AI-assisted fixing.
+   *
+   * @param releaseId - The release ID
+   * @param findings - Array of findings to address (comments, checks, alerts)
+   */
+  addressFindings(releaseId: string, findings: any[]): Promise<void>;
   // ── Events ─────────────────────────────────────────────────────────
 
   /**

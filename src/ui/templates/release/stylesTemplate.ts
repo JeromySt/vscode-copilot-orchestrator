@@ -27,6 +27,7 @@ export function renderReleaseStyles(): string {
     prepChecklistStyles(),
     mergeProgressStyles(),
     prMonitorStyles(),
+    pendingActionsStyles(),
     actionLogStyles(),
     floatingButtonStyles(),
     wizardNavigationStyles(),
@@ -839,6 +840,200 @@ function prMonitorStyles(): string {
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
       font-weight: normal;
+    }`;
+}
+
+function pendingActionsStyles(): string {
+  return `
+    .pending-actions-section {
+      margin: 24px 0 16px 0;
+    }
+    .pending-actions-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .pending-actions-header h3 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .pending-actions-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .pending-selected-count {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+    }
+    .pending-action-btn {
+      padding: 4px 12px;
+      border: 1px solid var(--vscode-input-border);
+      background: var(--vscode-input-background);
+      color: var(--vscode-foreground);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: var(--vscode-font-family);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+    }
+    .pending-action-btn.ai {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border-color: var(--vscode-button-background);
+    }
+    .pending-action-btn.ai:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+    .pending-action-btn:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .pending-action-icon {
+      font-size: 13px;
+    }
+    .pending-actions-filters {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 10px;
+    }
+    .pending-filter {
+      padding: 3px 10px;
+      border: 1px solid var(--vscode-input-border);
+      background: transparent;
+      color: var(--vscode-descriptionForeground);
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: var(--vscode-font-family);
+      transition: all 0.15s ease;
+    }
+    .pending-filter.active {
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      border-color: var(--vscode-badge-background);
+    }
+    .pending-filter:hover:not(.active) {
+      background: var(--vscode-list-hoverBackground);
+      color: var(--vscode-foreground);
+    }
+    .pending-actions-list {
+      max-height: 500px;
+      overflow-y: auto;
+      border: 1px solid var(--vscode-input-border);
+      border-radius: 4px;
+      background: var(--vscode-input-background);
+    }
+    .pending-action-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--vscode-input-border);
+      transition: background 0.1s ease;
+      cursor: default;
+    }
+    .pending-action-item:last-child {
+      border-bottom: none;
+    }
+    .pending-action-item:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .pending-action-item.resolved {
+      opacity: 0.5;
+    }
+    .pending-action-checkbox {
+      margin-top: 2px;
+      cursor: pointer;
+      accent-color: var(--vscode-button-background);
+    }
+    .pending-action-body {
+      flex: 1;
+      min-width: 0;
+    }
+    .pending-action-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .pending-action-type-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .pending-action-type-badge.comment {
+      background: rgba(0, 120, 212, 0.15);
+      color: var(--vscode-textLink-foreground);
+    }
+    .pending-action-type-badge.check {
+      background: rgba(255, 0, 0, 0.12);
+      color: var(--vscode-testing-iconFailed);
+    }
+    .pending-action-type-badge.alert {
+      background: rgba(255, 165, 0, 0.15);
+      color: var(--vscode-editorWarning-foreground);
+    }
+    .pending-action-author {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--vscode-foreground);
+    }
+    .pending-action-source {
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+    }
+    .pending-action-text {
+      font-size: 12px;
+      color: var(--vscode-foreground);
+      line-height: 1.5;
+      margin-bottom: 4px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .pending-action-location {
+      font-size: 11px;
+      color: var(--vscode-textLink-foreground);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      text-decoration: none;
+    }
+    .pending-action-location:hover {
+      text-decoration: underline;
+    }
+    .pending-action-location .codicon {
+      font-size: 12px;
+    }
+    .pending-action-severity {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .pending-action-severity.critical {
+      background: rgba(255, 0, 0, 0.2);
+      color: var(--vscode-testing-iconFailed);
+    }
+    .pending-action-severity.high {
+      background: rgba(255, 80, 0, 0.2);
+      color: var(--vscode-testing-iconFailed);
+    }
+    .pending-action-severity.medium {
+      background: rgba(255, 165, 0, 0.15);
+      color: var(--vscode-editorWarning-foreground);
+    }
+    .pending-action-severity.low {
+      background: rgba(0, 128, 0, 0.15);
+      color: var(--vscode-testing-iconPassed);
     }`;
 }
 

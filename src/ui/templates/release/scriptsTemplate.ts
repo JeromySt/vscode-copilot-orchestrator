@@ -427,6 +427,258 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       }
     }
     
+    // ── Pending Actions Control ──────────────────────────────────────────
+    
+    class PendingActionsControl {
+      constructor() {
+        this.findings = [];  // { type, id, ...data }
+        this.selected = new Set();
+        this.filter = 'all';
+        this.render();
+      }
+      
+      updateFromCycle(cycle) {
+        // Build findings list from latest cycle data
+        const newFindings = [];
+        
+        // Failing checks
+        if (cycle.checks) {
+          for (const check of cycle.checks) {
+            if (check.status === 'failing') {
+              newFindings.push({
+                type: 'check',
+                id: 'check-' + check.name.replace(/[^a-zA-Z0-9]/g, '-'),
+                name: check.name,
+                status: check.status,
+                url: check.url,
+                text: 'CI check "' + check.name + '" is failing',
+                resolved: false,
+              });
+            }
+          }
+        }
+        
+        // Unresolved comments
+        if (cycle.comments) {
+          for (const comment of cycle.comments) {
+            if (!comment.isResolved) {
+              newFindings.push({
+                type: 'comment',
+                id: 'comment-' + comment.id,
+                commentId: comment.id,
+                author: comment.author,
+                body: comment.body,
+                path: comment.path,
+                line: comment.line,
+                source: comment.source,
+                threadId: comment.threadId,
+                text: comment.body,
+                resolved: false,
+              });
+            }
+          }
+        }
+        
+        // Unresolved security alerts
+        if (cycle.securityAlerts) {
+          for (const alert of cycle.securityAlerts) {
+            if (!alert.resolved) {
+              newFindings.push({
+                type: 'alert',
+                id: 'alert-' + alert.id,
+                alertId: alert.id,
+                severity: alert.severity,
+                description: alert.description,
+                file: alert.file,
+                text: alert.description,
+                resolved: false,
+              });
+            }
+          }
+        }
+        
+        // Merge: keep selection state for existing items
+        const oldMap = new Map();
+        for (const f of this.findings) { oldMap.set(f.id, f); }
+        this.findings = newFindings.map(f => {
+          const old = oldMap.get(f.id);
+          if (old) { f.resolved = old.resolved; }
+          return f;
+        });
+        
+        // Remove selection for items no longer present
+        const currentIds = new Set(this.findings.map(f => f.id));
+        for (const sel of this.selected) {
+          if (!currentIds.has(sel)) this.selected.delete(sel);
+        }
+        
+        this.render();
+      }
+      
+      getFiltered() {
+        if (this.filter === 'all') return this.findings;
+        return this.findings.filter(f => f.type === this.filter);
+      }
+      
+      setFilter(filter) {
+        this.filter = filter;
+        this.render();
+      }
+      
+      toggleSelect(id) {
+        if (this.selected.has(id)) {
+          this.selected.delete(id);
+        } else {
+          this.selected.add(id);
+        }
+        this.updateToolbar();
+      }
+      
+      selectAll() {
+        const filtered = this.getFiltered();
+        const allSelected = filtered.every(f => this.selected.has(f.id));
+        if (allSelected) {
+          for (const f of filtered) this.selected.delete(f.id);
+        } else {
+          for (const f of filtered) this.selected.add(f.id);
+        }
+        this.render();
+      }
+      
+      updateToolbar() {
+        const toolbar = document.getElementById('pending-actions-toolbar');
+        const countEl = document.getElementById('pending-selected-count');
+        if (toolbar) {
+          toolbar.style.display = this.selected.size > 0 ? 'flex' : 'none';
+        }
+        if (countEl) {
+          countEl.textContent = this.selected.size + ' selected';
+        }
+      }
+      
+      openFinding(finding) {
+        if (finding.type === 'comment' && finding.path) {
+          vscode.postMessage({
+            type: 'openPRComment',
+            filePath: finding.path,
+            line: finding.line || 1,
+            author: finding.author,
+            body: finding.body,
+            source: finding.source,
+          });
+        } else if (finding.type === 'alert' && finding.file) {
+          vscode.postMessage({
+            type: 'openPRComment',
+            filePath: finding.file,
+            line: 1,
+            author: 'Security',
+            body: '[' + (finding.severity || '').toUpperCase() + '] ' + finding.description,
+            source: 'codeql',
+          });
+        } else if (finding.type === 'check' && finding.url) {
+          vscode.postMessage({ type: 'openExternal', url: finding.url });
+        }
+      }
+      
+      render() {
+        const container = document.getElementById('pending-actions-list');
+        if (!container) return;
+        
+        const filtered = this.getFiltered();
+        
+        if (filtered.length === 0) {
+          const emptyText = this.findings.length === 0
+            ? 'No findings yet. Pending actions will appear after the first monitoring cycle.'
+            : 'No ' + this.filter + ' findings.';
+          container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--vscode-descriptionForeground);font-size:11px;">' + emptyText + '</div>';
+          this.updateToolbar();
+          return;
+        }
+        
+        container.innerHTML = filtered.map(f => this.renderItem(f)).join('');
+        this.updateToolbar();
+      }
+      
+      renderItem(finding) {
+        const isChecked = this.selected.has(finding.id) ? 'checked' : '';
+        const resolvedClass = finding.resolved ? ' resolved' : '';
+        
+        let badge = '';
+        let metaInfo = '';
+        let locationHtml = '';
+        let bodyText = '';
+        
+        if (finding.type === 'comment') {
+          badge = '<span class="pending-action-type-badge comment">Comment</span>';
+          metaInfo = '<span class="pending-action-author">' + this.esc(finding.author || '') + '</span>'
+            + '<span class="pending-action-source">' + this.esc(finding.source || '') + '</span>';
+          bodyText = this.esc(this.truncate(finding.body || '', 200));
+          if (finding.path) {
+            locationHtml = '<a class="pending-action-location" onclick="pendingActions.openFinding(pendingActions.findings.find(f=>f.id===\'' + finding.id + '\'))" title="Open in editor">'
+              + '📄 ' + this.esc(finding.path) + (finding.line ? ':' + finding.line : '')
+              + '</a>';
+          }
+        } else if (finding.type === 'check') {
+          badge = '<span class="pending-action-type-badge check">CI Check</span>';
+          metaInfo = '<span class="pending-action-author">' + this.esc(finding.name || '') + '</span>';
+          bodyText = 'Check is failing';
+          if (finding.url) {
+            locationHtml = '<a class="pending-action-location" onclick="pendingActions.openFinding(pendingActions.findings.find(f=>f.id===\'' + finding.id + '\'))" title="View check details">'
+              + '🔗 View details'
+              + '</a>';
+          }
+        } else if (finding.type === 'alert') {
+          badge = '<span class="pending-action-type-badge alert">Security</span>';
+          const sev = (finding.severity || 'medium').toLowerCase();
+          metaInfo = '<span class="pending-action-severity ' + sev + '">' + sev.toUpperCase() + '</span>';
+          bodyText = this.esc(finding.description || '');
+          if (finding.file) {
+            locationHtml = '<a class="pending-action-location" onclick="pendingActions.openFinding(pendingActions.findings.find(f=>f.id===\'' + finding.id + '\'))" title="Open in editor">'
+              + '📄 ' + this.esc(finding.file)
+              + '</a>';
+          }
+        }
+        
+        return '<div class="pending-action-item' + resolvedClass + '" data-type="' + finding.type + '" data-id="' + finding.id + '">'
+          + '<input type="checkbox" class="pending-action-checkbox" ' + isChecked
+          + ' onchange="pendingActions.toggleSelect(\'' + finding.id + '\')" />'
+          + '<div class="pending-action-body">'
+          + '<div class="pending-action-meta">' + badge + metaInfo + '</div>'
+          + '<div class="pending-action-text">' + bodyText + '</div>'
+          + (locationHtml ? '<div>' + locationHtml + '</div>' : '')
+          + '</div>'
+          + '</div>';
+      }
+      
+      esc(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      }
+      
+      truncate(str, max) {
+        if (str.length <= max) return str;
+        return str.substring(0, max) + '...';
+      }
+    }
+
+    // Global functions called from HTML onclick handlers
+    function filterPendingActions(filter, btn) {
+      if (pendingActions) {
+        pendingActions.setFilter(filter);
+        // Update active button
+        document.querySelectorAll('.pending-filter').forEach(b => b.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+      }
+    }
+    
+    function addressSelectedWithAI() {
+      if (pendingActions && pendingActions.selected.size > 0) {
+        const selectedFindings = pendingActions.findings.filter(f => pendingActions.selected.has(f.id));
+        vscode.postMessage({ type: 'addressWithAI', findings: selectedFindings });
+      }
+    }
+    
     // ── Action Log Control ──────────────────────────────────────────────
     
     class ActionLogControl {
@@ -477,7 +729,7 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
 
     // ── Initialize Controls ─────────────────────────────────────────────
     
-    let planSelector, optionalPlanSelector, prepTasks, mergeProgress, prMonitor, actionLog;
+    let planSelector, optionalPlanSelector, prepTasks, mergeProgress, prMonitor, actionLog, pendingActions;
     
     if (releaseData.status === 'drafting') {
       if (releaseData.flowType === 'from-plans') {
@@ -494,6 +746,7 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
     } else if (releaseData.status === 'monitoring' || releaseData.status === 'addressing' || releaseData.status === 'pr-active') {
       prMonitor = new PRMonitorControl();
       actionLog = new ActionLogControl();
+      pendingActions = new PendingActionsControl();
     }
 
     // ── Fetch Git Account ───────────────────────────────────────────────
@@ -556,6 +809,9 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
         case 'cycleCompleted':
           if (prMonitor && message.cycle) {
             prMonitor.addCycle(message.cycle);
+          }
+          if (pendingActions && message.cycle) {
+            pendingActions.updateFromCycle(message.cycle);
           }
           break;
           

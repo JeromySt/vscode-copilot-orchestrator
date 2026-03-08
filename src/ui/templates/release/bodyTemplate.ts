@@ -574,6 +574,29 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
   
   <div id="pr-checks-list" class="pr-checks-list">
   </div>
+
+  <div class="pending-actions-section" id="pending-actions-section">
+    <div class="pending-actions-header">
+      <h3>Pending Actions</h3>
+      <div class="pending-actions-toolbar" id="pending-actions-toolbar" style="display:none;">
+        <span class="pending-selected-count" id="pending-selected-count">0 selected</span>
+        <button class="pending-action-btn ai" onclick="addressSelectedWithAI()" title="Address selected items with Copilot AI">
+          <span class="pending-action-icon">🤖</span> Fix with AI
+        </button>
+      </div>
+    </div>
+    <div class="pending-actions-filters" id="pending-actions-filters">
+      <button class="pending-filter active" data-filter="all" onclick="filterPendingActions('all', this)">All</button>
+      <button class="pending-filter" data-filter="comment" onclick="filterPendingActions('comment', this)">Comments</button>
+      <button class="pending-filter" data-filter="check" onclick="filterPendingActions('check', this)">Checks</button>
+      <button class="pending-filter" data-filter="alert" onclick="filterPendingActions('alert', this)">Alerts</button>
+    </div>
+    <div class="pending-actions-list" id="pending-actions-list">
+      <div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 11px;">
+        No findings yet. Pending actions will appear after the first monitoring cycle.
+      </div>
+    </div>
+  </div>
   
   <div class="action-log" style="margin-top: 24px;">
     <h3>Autonomous Actions</h3>

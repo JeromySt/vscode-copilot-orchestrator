@@ -121,13 +121,14 @@ export class GitHubPRService implements IRemotePRService {
       args.push('--draft');
     }
 
+    args.push('--json', 'number,url');
+
     const result = await this._execGh(args, options.cwd, env);
     
     try {
-      // gh pr create outputs the PR URL on stdout (e.g., "https://github.com/owner/repo/pull/42")
-      const prUrl = result.trim().split('\n').pop()?.trim() || '';
-      const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
-      const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : 0;
+      const parsed = JSON.parse(result.trim());
+      const prNumber = parsed.number;
+      const prUrl = parsed.url;
       
       if (!prNumber) {
         throw new Error(`Could not extract PR number from output: ${result}`);
@@ -154,29 +155,28 @@ export class GitHubPRService implements IRemotePRService {
     log.debug('Getting PR checks', { prNumber });
 
     const env = this._buildEnv(provider, credentials);
-    const ownerRepo = `${provider.owner}/${provider.repoName}`;
-    
-    // Use gh api instead of gh pr checks (which doesn't support --json)
-    const endpoint = `repos/${ownerRepo}/commits/refs/pull/${prNumber}/head/check-runs`;
-    
+
     try {
-      const result = await this._execGhApi(endpoint, cwd, env);
-      const parsed = JSON.parse(result);
-      const checkRuns = parsed.check_runs || [];
-      
-      const checks: PRCheck[] = checkRuns.map((run: any) => ({
-        name: run.name,
-        status: run.conclusion === 'success' ? 'pass' : 
-                run.conclusion === 'failure' ? 'fail' :
-                run.status === 'completed' ? (run.conclusion === 'skipped' ? 'pass' : 'fail') :
-                'pending',
-        url: run.html_url || run.details_url || '',
+      const result = await this._execGh(
+        ['pr', 'checks', String(prNumber), '--json', 'name,state,link'],
+        cwd,
+        env,
+      );
+      const parsed: Array<{ name: string; state: string; link: string }> = JSON.parse(result);
+
+      const checks: PRCheck[] = parsed.map((check) => ({
+        name: check.name,
+        status:
+          check.state === 'SUCCESS' ? 'passing' :
+          check.state === 'FAILURE' ? 'failing' :
+          'pending',
+        url: check.link || '',
       }));
-      
+
       log.info('PR checks retrieved', { prNumber, count: checks.length });
       return checks;
     } catch (err) {
-      log.warn('Failed to fetch PR checks via API, returning empty', { prNumber, error: String(err) });
+      log.warn('Failed to fetch PR checks, returning empty', { prNumber, error: String(err) });
       return [];
     }
   }

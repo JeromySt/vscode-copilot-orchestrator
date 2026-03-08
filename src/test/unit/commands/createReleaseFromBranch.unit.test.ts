@@ -21,9 +21,27 @@ suite('createReleaseFromBranch command', () => {
   let registeredCommands: Map<string, Function>;
   let commandHandler: Function;
 
+  // Save originals so teardown can restore them (prevents sinon stub leakage)
+  let origShowInputBox: any;
+  let origShowErrorMessage: any;
+  let origShowWarningMessage: any;
+  let origShowInformationMessage: any;
+  let origExtensions: any;
+  let origExecuteCommand: any;
+  let origRegisterCommand: any;
+
   setup(async () => {
     sandbox = sinon.createSandbox();
     registeredCommands = new Map();
+
+    // Save originals before replacing
+    origShowInputBox = (vscode.window as any).showInputBox;
+    origShowErrorMessage = (vscode.window as any).showErrorMessage;
+    origShowWarningMessage = (vscode.window as any).showWarningMessage;
+    origShowInformationMessage = (vscode.window as any).showInformationMessage;
+    origExtensions = (vscode as any).extensions;
+    origExecuteCommand = (vscode.commands as any).executeCommand;
+    origRegisterCommand = (vscode.commands as any).registerCommand;
     
     // Mock release manager
     mockReleaseManager = {
@@ -96,6 +114,14 @@ suite('createReleaseFromBranch command', () => {
 
   teardown(() => {
     sandbox.restore();
+    // Restore vscode mock properties to originals (prevents leaking stubs to subsequent test files)
+    (vscode.window as any).showInputBox = origShowInputBox;
+    (vscode.window as any).showErrorMessage = origShowErrorMessage;
+    (vscode.window as any).showWarningMessage = origShowWarningMessage;
+    (vscode.window as any).showInformationMessage = origShowInformationMessage;
+    (vscode as any).extensions = origExtensions;
+    (vscode.commands as any).executeCommand = origExecuteCommand;
+    (vscode.commands as any).registerCommand = origRegisterCommand;
     registeredCommands.clear();
   });
 

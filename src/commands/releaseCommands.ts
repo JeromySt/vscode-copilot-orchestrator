@@ -504,5 +504,81 @@ export function registerReleaseCommands(
         vscode.window.showErrorMessage(`Failed to start login: ${error.message}`);
       }
     }),
+
+    // Show a PR comment as an inline decoration on a file
+    vscode.commands.registerCommand(
+      'orchestrator.showPRCommentDecoration',
+      (filePath: string, line: number, author: string, body: string, source: string) => {
+        const uri = vscode.Uri.file(filePath);
+
+        // Create a decoration type for the PR comment
+        const decorationType = vscode.window.createTextEditorDecorationType({
+          after: {
+            contentText: ` — ${author}: ${body.length > 100 ? body.substring(0, 100) + '...' : body}`,
+            color: new vscode.ThemeColor('editorCodeLens.foreground'),
+            fontStyle: 'italic',
+            margin: '0 0 0 16px',
+          },
+          backgroundColor: source === 'codeql'
+            ? new vscode.ThemeColor('diffEditor.removedTextBackground')
+            : new vscode.ThemeColor('diffEditor.insertedTextBackground'),
+          isWholeLine: true,
+          overviewRulerColor: source === 'codeql'
+            ? new vscode.ThemeColor('editorOverviewRuler.errorForeground')
+            : new vscode.ThemeColor('editorOverviewRuler.infoForeground'),
+          overviewRulerLane: vscode.OverviewRulerLane.Right,
+        });
+
+        // Find the editor showing this file, or wait for it
+        const applyDecoration = (editor: vscode.TextEditor) => {
+          const lineIdx = Math.max(0, line - 1);
+          const range = new vscode.Range(lineIdx, 0, lineIdx, 0);
+
+          editor.setDecorations(decorationType, [{
+            range,
+            hoverMessage: new vscode.MarkdownString(
+              `**${author}** (${source})\n\n${body}`,
+            ),
+          }]);
+
+          // Show a CodeLens-like info message at the top
+          vscode.window.showInformationMessage(
+            `PR Comment from ${author} on line ${line}`,
+            'Dismiss',
+          ).then(() => {
+            // Clear decoration when dismissed
+            editor.setDecorations(decorationType, []);
+            decorationType.dispose();
+          });
+
+          // Auto-clear after 5 minutes
+          setTimeout(() => {
+            try {
+              editor.setDecorations(decorationType, []);
+              decorationType.dispose();
+            } catch { /* editor may be closed */ }
+          }, 300000);
+        };
+
+        // Look for an already-open editor with this file
+        const editor = vscode.window.visibleTextEditors.find(
+          (e) => e.document.uri.fsPath === uri.fsPath,
+        );
+        if (editor) {
+          applyDecoration(editor);
+        } else {
+          // Wait briefly for the editor to open (it was just opened by vscode.open)
+          const disposable = vscode.window.onDidChangeVisibleTextEditors((editors) => {
+            const found = editors.find((e) => e.document.uri.fsPath === uri.fsPath);
+            if (found) {
+              disposable.dispose();
+              applyDecoration(found);
+            }
+          });
+          // Cleanup if editor never opens
+          setTimeout(() => disposable.dispose(), 5000);
+        }
+      },
+    ),
   );
 }

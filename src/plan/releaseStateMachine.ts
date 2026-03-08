@@ -44,7 +44,7 @@ export const VALID_RELEASE_TRANSITIONS: Record<ReleaseStatus, readonly ReleaseSt
   'monitoring': ['addressing', 'succeeded', 'pr-active', 'canceled'],
   'addressing': ['monitoring', 'failed', 'canceled'],
   'succeeded': [], // Terminal
-  'failed': ['drafting', 'preparing', 'ready-for-pr'],    // Can retry from failed
+  'failed': [],         // Terminal
   'canceled': [],  // Terminal
 };
 
@@ -53,6 +53,7 @@ export const VALID_RELEASE_TRANSITIONS: Record<ReleaseStatus, readonly ReleaseSt
  */
 export const TERMINAL_RELEASE_STATES: readonly ReleaseStatus[] = [
   'succeeded',
+  'failed',
   'canceled',
 ] as const;
 

@@ -61,6 +61,36 @@ function createMockPRServiceFactory(mockService?: any): any {
   };
 }
 
+/**
+ * Creates a pulse emitter backed by setInterval so that sinon fake timers
+ * can advance time and trigger pulse callbacks (one tick per second).
+ * Supports multiple concurrent subscribers.
+ */
+function createTimerBasedPulse(): any {
+  const handlers = new Set<() => void>();
+  let intervalId: ReturnType<typeof setInterval> | undefined;
+
+  intervalId = setInterval(() => {
+    for (const h of handlers) h();
+  }, 1000);
+
+  return {
+    onPulse: (fn: () => void) => {
+      handlers.add(fn);
+      return {
+        dispose: () => {
+          handlers.delete(fn);
+          if (handlers.size === 0 && intervalId !== undefined) {
+            clearInterval(intervalId);
+            intervalId = undefined;
+          }
+        },
+      };
+    },
+    isRunning: true,
+  };
+}
+
 suite('ReleasePRMonitor', () => {
   let quiet: { restore: () => void };
   let sandbox: sinon.SinonSandbox;
@@ -127,7 +157,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       createMockGit(),
       factory,
-      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
+      createTimerBasedPulse(),
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -135,7 +165,7 @@ suite('ReleasePRMonitor', () => {
     // First cycle runs immediately
     assert.strictEqual(mockService.getPRChecks.callCount, 1);
 
-    // Advance by 2 minutes
+    // Advance by 2 minutes (120 pulse ticks at 1s each)
     await clock.tickAsync(120000);
 
     // Second cycle should have run
@@ -159,7 +189,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       createMockGit(),
       factory,
-      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
+      createTimerBasedPulse(),
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -203,7 +233,7 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       git,
       factory,
-      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
+      createTimerBasedPulse(),
     );
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
@@ -393,10 +423,8 @@ suite('ReleasePRMonitor', () => {
       createMockSpawner(),
       createMockGit(),
       factory,
-      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
+      createTimerBasedPulse(),
     );
-
-    // Start monitoring two releases
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
     await monitor.startMonitoring('rel-2', 43, '/repo/.orchestrator/release/v2', 'release/v2');
 

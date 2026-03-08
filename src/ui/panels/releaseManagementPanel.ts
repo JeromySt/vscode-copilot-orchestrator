@@ -128,6 +128,37 @@ export class ReleaseManagementPanel {
           } catch { /* panel disposed */ }
         }
       });
+
+      // Forward PR monitoring cycle data to webview
+      (this._releaseManager as any).on('releasePRCycle', (releaseId: string, cycle: any) => {
+        if (releaseId === this._releaseId && !this._disposed) {
+          try {
+            // Send cycle data for the timeline dots
+            this._panel.webview.postMessage({ type: 'cycleCompleted', cycle });
+
+            // Compute stats and send for the stat cards
+            const checks = cycle.checks || [];
+            const comments = cycle.comments || [];
+            const alerts = cycle.securityAlerts || [];
+            this._panel.webview.postMessage({
+              type: 'prUpdate',
+              stats: {
+                checksPass: checks.filter((c: any) => c.status === 'passing').length,
+                checksFail: checks.filter((c: any) => c.status === 'failing').length,
+                unresolvedComments: comments.filter((c: any) => !c.isResolved).length,
+                unresolvedAlerts: alerts.filter((a: any) => !a.resolved).length,
+              },
+            });
+          } catch { /* panel disposed */ }
+        }
+      });
+
+      // Full refresh on release progress changes (status transitions)
+      (this._releaseManager as any).on('releaseProgress', (releaseId: string) => {
+        if (releaseId === this._releaseId && !this._disposed) {
+          this._forceFullRefresh();
+        }
+      });
     }
     
     // Initial render

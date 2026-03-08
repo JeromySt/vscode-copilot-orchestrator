@@ -94,8 +94,8 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           const comments = cycle.comments || [];
           const alerts = cycle.securityAlerts || [];
           rel.monitoringStats = {
-            checksPass: checks.filter((c: any) => c.status === 'pass' || c.status === 'success').length,
-            checksFail: checks.filter((c: any) => c.status === 'fail' || c.status === 'failing' || c.status === 'failure').length,
+            checksPass: checks.filter((c: any) => c.status === 'passing').length,
+            checksFail: checks.filter((c: any) => c.status === 'failing').length,
             checksPending: checks.filter((c: any) => c.status === 'pending').length,
             unresolvedComments: comments.filter((c: any) => !c.isResolved).length,
             unresolvedAlerts: alerts.filter((a: any) => !a.resolved).length,
@@ -262,6 +262,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       log.info('Release branch pushed', { releaseId, branch: release.releaseBranch });
 
       // Phase 5: Create pull request
+      await this._transitionStatus(release, 'ready-for-pr');
       await this._transitionStatus(release, 'creating-pr');
       const prService = await this.prServiceFactory.getServiceForRepo(isolatedRepo.clonePath);
       const prResult = await prService.createPR({
@@ -278,6 +279,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       log.info('PR created', { releaseId, prNumber: prResult.prNumber, prUrl: prResult.prUrl });
 
       // Phase 6: Start PR monitoring
+      await this._transitionStatus(release, 'pr-active');
       await this._transitionStatus(release, 'monitoring');
       await this.prMonitor.startMonitoring(
         releaseId,
@@ -436,11 +438,10 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     const result = stateMachine.transition(newStatus, reason);
     if (result.success) {
-      // Initialize prep tasks when entering the preparing state
-      if (newStatus === 'preparing' && (!release.prepTasks || release.prepTasks.length === 0)) {
-        const { loadReleaseTasks, getDefaultReleaseTasks } = await import('./releaseTaskLoader');
-        const loadedTasks = await loadReleaseTasks(release.repoPath);
-        release.prepTasks = loadedTasks.length > 0 ? loadedTasks : getDefaultReleaseTasks();
+      // Initialize preparation tasks when entering the preparing state
+      if (newStatus === 'preparing' && (!release.preparationTasks || release.preparationTasks.length === 0)) {
+        const { getDefaultPrepTasks } = await import('./releasePreparation');
+        release.preparationTasks = getDefaultPrepTasks(release);
       }
       await this.store.saveRelease(release);
     }
@@ -834,6 +835,9 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     release.prUrl = `PR #${prNumber}`;
 
     await this.store.saveRelease(release);
+    // Transition through valid states: drafting -> ready-for-pr -> creating-pr -> pr-active
+    await this._transitionStatus(release, 'ready-for-pr', 'Adopting existing PR');
+    await this._transitionStatus(release, 'creating-pr', 'Adopting existing PR');
     await this._transitionStatus(release, 'pr-active', 'Adopted existing PR');
 
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
@@ -879,6 +883,30 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       this.prMonitor.stopMonitoring(releaseId);
     }
 
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  /**
+   * Address selected findings using AI-assisted fixing.
+   *
+   * Queues the findings for automated resolution via Copilot CLI.
+   * Currently a stub — full implementation will invoke the PR monitor's
+   * _addressFindings path with only the selected findings.
+   */
+  async addressFindings(releaseId: string, findings: any[]): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    log.info('Address findings requested', {
+      releaseId,
+      findingCount: findings.length,
+      types: findings.map((f: any) => f.type),
+    });
+
+    // TODO: Invoke Copilot CLI agent with the selected findings.
+    // For now, emit a progress event so the UI knows the request was received.
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
   }
 
