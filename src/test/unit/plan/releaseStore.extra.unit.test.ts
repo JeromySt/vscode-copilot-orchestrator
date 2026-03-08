@@ -218,4 +218,93 @@ suite('FileSystemReleaseStore – extra coverage', () => {
       assert.deepStrictEqual(cycles, []);
     });
   });
+
+  suite('findReleaseDirectory – error paths (lines 100-108)', () => {
+    test('skips branches whose release.json cannot be parsed (inner catch, line 100)', async () => {
+      const fs = createMockFS();
+      fs.existsAsync.resolves(true);
+      fs.readdirAsync.resolves(['bad-branch', 'good-branch']);
+      // First readFileAsync call: invalid JSON → inner catch → continue
+      // Second readFileAsync call: valid JSON with matching id
+      fs.readFileAsync
+        .onFirstCall().rejects(new Error('read error'))
+        .onSecondCall().resolves(buildReleaseJson('release-1'));
+
+      const store = new FileSystemReleaseStore(REPO, fs);
+
+      // deleteRelease calls findReleaseDirectory
+      // Should find release-1 in good-branch and delete it
+      await store.deleteRelease('release-1');
+      assert.ok(fs.rmAsync.called, 'rmAsync should have been called after finding release in good-branch');
+    });
+
+    test('returns undefined when outer scan (readdirAsync) throws in findReleaseDirectory (lines 103-105)', async () => {
+      const fs = createMockFS();
+      fs.existsAsync.resolves(true);
+      // readdirAsync throws inside findReleaseDirectory outer try → outer catch logs and returns undefined
+      fs.readdirAsync.rejects(new Error('scan failed'));
+
+      const store = new FileSystemReleaseStore(REPO, fs);
+
+      // deleteRelease with not-found release should just return (no throw)
+      await store.deleteRelease('any-release-id');
+      assert.ok(fs.rmAsync.notCalled, 'rmAsync should not have been called (release not found)');
+    });
+  });
+
+  suite('saveRelease – error paths (lines 120-128)', () => {
+    test('throws and cleans up temp file when writeFileAsync fails', async () => {
+      const fs = createMockFS();
+      fs.mkdirAsync.resolves();
+      fs.writeFileAsync.rejects(new Error('write failure'));
+
+      const store = new FileSystemReleaseStore(REPO, fs);
+
+      await assert.rejects(() => store.saveRelease(buildRelease('release-1')), /write failure/);
+      assert.ok(fs.unlinkAsync.called, 'unlinkAsync should clean up temp file');
+    });
+
+    test('still throws write error even if unlinkAsync cleanup also fails (lines 125-126)', async () => {
+      const fs = createMockFS();
+      fs.mkdirAsync.resolves();
+      fs.writeFileAsync.rejects(new Error('write failure'));
+      fs.unlinkAsync.rejects(new Error('unlink failure'));
+
+      const store = new FileSystemReleaseStore(REPO, fs);
+
+      // The original write error should be rethrown, not the unlink error
+      await assert.rejects(() => store.saveRelease(buildRelease('release-1')), /write failure/);
+    });
+  });
+
+  suite('loadRelease – error paths (lines 142-147)', () => {
+    test('returns undefined when readFileAsync throws ENOENT', async () => {
+      const fs = createMockFS();
+      fs.existsAsync.resolves(true);
+      fs.readdirAsync.resolves(['release-branch']);
+      // findReleaseDirectory reads the file → finds release-1
+      // loadRelease then reads the file again → ENOENT
+      fs.readFileAsync
+        .onFirstCall().resolves(buildReleaseJson('release-1'))
+        .onSecondCall().rejects(Object.assign(new Error('not found'), { code: 'ENOENT' }));
+
+      const store = new FileSystemReleaseStore(REPO, fs);
+      const result = await store.loadRelease('release-1');
+
+      assert.strictEqual(result, undefined);
+    });
+
+    test('throws when readFileAsync throws non-ENOENT error in loadRelease (lines 145-147)', async () => {
+      const fs = createMockFS();
+      fs.existsAsync.resolves(true);
+      fs.readdirAsync.resolves(['release-branch']);
+      fs.readFileAsync
+        .onFirstCall().resolves(buildReleaseJson('release-1'))
+        .onSecondCall().rejects(Object.assign(new Error('permission denied'), { code: 'EACCES' }));
+
+      const store = new FileSystemReleaseStore(REPO, fs);
+
+      await assert.rejects(() => store.loadRelease('release-1'), /permission denied/);
+    });
+  });
 });

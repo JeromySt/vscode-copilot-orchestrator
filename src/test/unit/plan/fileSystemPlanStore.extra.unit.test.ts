@@ -304,4 +304,60 @@ suite('FileSystemPlanStore - extra coverage', () => {
       );
     });
   });
+
+  suite('snapshotSpecsForAttempt - directory migration (lines 207-210)', () => {
+    test('migrates existing plain directory to attempt structure on attempt 1', async () => {
+      const mockFs = makeMockFs({
+        lstatAsync: sinon.stub().resolves({
+          isSymbolicLink: () => false,
+          isDirectory: () => true,
+        }),
+        readdirAsync: sinon.stub().resolves(['work.md', 'prechecks.json']),
+        writeFileAsync: sinon.stub().resolves(),
+      });
+      const store = makeStore(mockFs);
+
+      await store.snapshotSpecsForAttempt('plan-1', 'node-1', 1);
+
+      assert.ok(mockFs.readdirAsync.called, 'readdirAsync should list files in directory');
+      assert.ok(mockFs.renameAsync.called, 'renameAsync should move files to attempt dir');
+      assert.ok(mockFs.rmdirAsync.called, 'rmdirAsync should remove old plain directory');
+    });
+
+    test('skips directory migration when lstatAsync throws on attempt 1', async () => {
+      const mockFs = makeMockFs({
+        lstatAsync: sinon.stub().rejects(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
+        writeFileAsync: sinon.stub().resolves(),
+      });
+      const store = makeStore(mockFs);
+
+      // Should not throw — the catch block handles it
+      await assert.doesNotReject(() => store.snapshotSpecsForAttempt('plan-2', 'node-2', 1));
+      assert.ok(mockFs.mkdirAsync.called, 'mkdirAsync should still be called for attempt dir');
+    });
+  });
+
+  suite('readNodeSpecForAttempt - non-ENOENT error (lines 234-236)', () => {
+    test('throws on non-ENOENT read error', async () => {
+      const mockFs = makeMockFs({
+        readFileAsync: sinon.stub().rejects(Object.assign(new Error('permission denied'), { code: 'EACCES' })),
+      });
+      const store = makeStore(mockFs);
+
+      await assert.rejects(
+        () => store.readNodeSpecForAttempt('plan-1', 'node-1', 'work', 1),
+        /permission denied/
+      );
+    });
+
+    test('returns undefined on ENOENT when reading spec', async () => {
+      const mockFs = makeMockFs({
+        readFileAsync: sinon.stub().rejects(Object.assign(new Error('not found'), { code: 'ENOENT' })),
+      });
+      const store = makeStore(mockFs);
+
+      const result = await store.readNodeSpecForAttempt('plan-1', 'node-1', 'prechecks', 1);
+      assert.strictEqual(result, undefined);
+    });
+  });
 });
