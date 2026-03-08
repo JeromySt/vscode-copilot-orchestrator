@@ -438,4 +438,75 @@ suite('FileSystemPlanStore - extra coverage', () => {
       );
     });
   });
+
+  suite('readPlanMetadata – non-ENOENT error path (lines 36-38)', () => {
+    test('throws and logs when readFileAsync fails with non-ENOENT error', async () => {
+      const mockFs = makeMockFs({
+        readFileAsync: sinon.stub().rejects(Object.assign(new Error('permission denied'), { code: 'EACCES' })),
+      });
+      const store = makeStore(mockFs);
+
+      await assert.rejects(
+        () => store.readPlanMetadata('plan-1'),
+        /permission denied/
+      );
+    });
+
+    test('returns undefined for ENOENT in readPlanMetadata', async () => {
+      const mockFs = makeMockFs({
+        readFileAsync: sinon.stub().rejects(Object.assign(new Error('not found'), { code: 'ENOENT' })),
+      });
+      const store = makeStore(mockFs);
+
+      const result = await store.readPlanMetadata('plan-1');
+      assert.strictEqual(result, undefined);
+    });
+  });
+
+  suite('readPlanMetadataSync (lines 42-50)', () => {
+    test('returns parsed metadata when file exists', () => {
+      const metadata = { id: 'plan-1', name: 'Test Plan' };
+      const mockFs = makeMockFs({
+        readFileSync: sinon.stub().returns(JSON.stringify(metadata)),
+      });
+      const store = makeStore(mockFs);
+
+      const result = store.readPlanMetadataSync('plan-1');
+      assert.deepStrictEqual(result, metadata);
+    });
+
+    test('returns undefined when readFileSync throws ENOENT', () => {
+      const mockFs = makeMockFs({
+        readFileSync: sinon.stub().throws(Object.assign(new Error('not found'), { code: 'ENOENT' })),
+      });
+      const store = makeStore(mockFs);
+
+      const result = store.readPlanMetadataSync('plan-1');
+      assert.strictEqual(result, undefined);
+    });
+
+    test('returns undefined when readFileSync throws non-ENOENT error', () => {
+      const mockFs = makeMockFs({
+        readFileSync: sinon.stub().throws(Object.assign(new Error('permission denied'), { code: 'EACCES' })),
+      });
+      const store = makeStore(mockFs);
+
+      const result = store.readPlanMetadataSync('plan-1');
+      assert.strictEqual(result, undefined);
+    });
+  });
+
+  suite('readNodeSpec – non-ENOENT error path (lines 107-109)', () => {
+    test('throws and logs when readFileAsync fails with non-ENOENT, non-work error', async () => {
+      const mockFs = makeMockFs({
+        readFileAsync: sinon.stub().rejects(Object.assign(new Error('disk error'), { code: 'EIO' })),
+      });
+      const store = makeStore(mockFs);
+
+      await assert.rejects(
+        () => store.readNodeSpec('plan-1', 'node-1', 'prechecks'),
+        /disk error/
+      );
+    });
+  });
 });

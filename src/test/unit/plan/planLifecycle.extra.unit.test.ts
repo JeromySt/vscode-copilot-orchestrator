@@ -73,6 +73,7 @@ function makeState(extras?: Record<string, any>) {
     events,
     configManager,
     config: { storagePath: '/tmp' },
+    scheduler: { getGlobalMaxParallel: sinon.stub().returns(4) },
     ...extras,
   };
 }
@@ -437,6 +438,45 @@ suite('PlanLifecycleManager – extra coverage', () => {
       // delete calls cancel then persistence.delete — should not throw
       assert.doesNotThrow(() => lifecycle.delete('plan-1'));
       assert.ok((log.warn as sinon.SinonStub).calledWithMatch(sinon.match(/legacy/)));
+    });
+
+    test('warns but continues when planRepository.markDeletedSync throws (lines 498-499)', () => {
+      const log = createMockLogger();
+      const state = makeState({
+        planRepository: {
+          markDeletedSync: sinon.stub().throws(new Error('tombstone failed')),
+          delete: sinon.stub().resolves(),
+          saveStateSync: sinon.stub(),
+        },
+      });
+      const lifecycle = new PlanLifecycleManager(state as any, log, createMockGit());
+
+      const plan = createTestPlan('plan-1');
+      state.plans.set('plan-1', plan);
+      const mockSm: any = { cancelAll: sinon.stub(), on: sinon.stub() };
+      state.stateMachines.set('plan-1', mockSm);
+
+      assert.doesNotThrow(() => lifecycle.delete('plan-1'));
+      assert.ok((log.warn as sinon.SinonStub).calledWithMatch(sinon.match(/tombstone/)));
+    });
+  });
+
+  suite('getGlobalStats – queued count (line 359)', () => {
+    test('counts nodes with ready status in queued', () => {
+      const log = createMockLogger();
+      const state = makeState({
+        scheduler: { getGlobalMaxParallel: sinon.stub().returns(4) },
+      });
+      const lifecycle = new PlanLifecycleManager(state as any, log, createMockGit());
+
+      const plan = createTestPlan('plan-1');
+      plan.nodeStates.get('node-1')!.status = 'ready';
+      state.plans.set('plan-1', plan);
+      const mockSm: any = { cancelAll: sinon.stub(), on: sinon.stub() };
+      state.stateMachines.set('plan-1', mockSm);
+
+      const stats = lifecycle.getGlobalStats();
+      assert.strictEqual(stats.queued, 1, 'ready node should be counted as queued');
     });
   });
 
