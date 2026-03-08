@@ -362,6 +362,99 @@ suite('PlanArchiver', () => {
       assert.ok(mockGit.branches.deleteLocal.notCalled);
       assert.strictEqual(result.cleanedBranches.length, 0);
     });
+
+    test('uses derived worktree path when nodeState has no worktreePath', async () => {
+      const plan = makeMockPlan();
+      plan.jobs.set('node-1', { id: 'node-1', name: 'Job 1' });
+      // nodeState exists but without worktreePath — falls through to _getWorktreePath
+      plan.nodeStates.set('node-1', { status: 'succeeded' }); // no worktreePath
+      
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      
+      const result = await archiver.archive('plan-1');
+      
+      assert.strictEqual(result.success, true);
+      // Should have tried to use the derived worktree path
+      assert.ok(mockGit.worktrees.isValid.called);
+    });
+
+    test('uses derived worktree path when no nodeState at all', async () => {
+      const plan = makeMockPlan();
+      plan.jobs.set('node-1', { id: 'node-1', name: 'Job 1' });
+      // No nodeState entry for node-1
+      
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      
+      const result = await archiver.archive('plan-1');
+      
+      assert.strictEqual(result.success, true);
+      assert.ok(mockGit.worktrees.isValid.called);
+    });
+
+    test('initializes stateHistory when plan has no stateHistory', async () => {
+      const plan = makeMockPlan();
+      delete plan.stateHistory; // Remove stateHistory to trigger initialization
+      
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      
+      await archiver.archive('plan-1');
+      
+      // stateHistory should have been initialized and populated
+      assert.ok(Array.isArray(plan.stateHistory));
+      assert.strictEqual(plan.stateHistory.length, 1);
+      assert.strictEqual(plan.stateHistory[0].to, 'archived');
+    });
+
+    test('does not delete remote default branch', async () => {
+      const plan = makeMockPlan();
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      mockGit.branches.remoteExists.resolves(true);
+      mockGit.branches.isDefaultBranch.resolves(true); // Both local and remote are default
+      
+      await archiver.archive('plan-1', { deleteRemoteBranches: true });
+      
+      assert.ok(mockGit.branches.deleteRemote.notCalled);
+    });
+
+    test('skips remote deletion if remote branch does not exist', async () => {
+      const plan = makeMockPlan();
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      mockGit.branches.remoteExists.resolves(false);
+      
+      await archiver.archive('plan-1', { deleteRemoteBranches: true });
+      
+      assert.ok(mockGit.branches.deleteRemote.notCalled);
+    });
+
+    test('handles prune failure gracefully', async () => {
+      const plan = makeMockPlan();
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      mockGit.worktrees.prune.rejects(new Error('Prune failed'));
+      
+      const result = await archiver.archive('plan-1');
+      
+      assert.strictEqual(result.success, true);
+    });
+
+    test('plan with relative worktreeRoot uses repoPath as base', async () => {
+      const plan = makeMockPlan();
+      plan.worktreeRoot = '.custom-worktrees'; // relative path
+      plan.jobs.set('node-1', { id: 'node-1', name: 'Job 1' });
+      plan.nodeStates.set('node-1', { worktreePath: '/repo/.custom-worktrees/plan-1/node-1' });
+      
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      
+      const result = await archiver.archive('plan-1');
+      
+      assert.strictEqual(result.success, true);
+    });
   });
 
   suite('getArchivedPlans', () => {

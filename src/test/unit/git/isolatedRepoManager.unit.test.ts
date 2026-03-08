@@ -117,9 +117,13 @@ suite('IsolatedRepoManager', () => {
     
     // All invalid chars should be replaced with hyphens
     assert.ok(info.clonePath.includes('feature-user-test-path-with-invalid-chars---'));
-    assert.ok(!info.clonePath.includes('/'));
-    assert.ok(!info.clonePath.includes(':'));
-    assert.ok(!info.clonePath.includes('*'));
+    // Check the sanitized branch segment (last path component) doesn't contain invalid chars.
+    // Checking the full path would fail on macOS/Linux since path.sep is '/'.
+    const nodePath = require('path');
+    const sanitizedSegment = nodePath.basename(info.clonePath);
+    assert.ok(!sanitizedSegment.includes('/'));
+    assert.ok(!sanitizedSegment.includes(':'));
+    assert.ok(!sanitizedSegment.includes('*'));
     
     execMocks.restore();
   });

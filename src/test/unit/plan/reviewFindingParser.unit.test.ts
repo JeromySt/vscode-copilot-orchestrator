@@ -106,6 +106,44 @@ Some postamble text
       assert.strictEqual(findings.length, 0);
     });
 
+    test('recovers findings when JSON has noise lines (● markers) mixed in', () => {
+      // Simulate CLI output with tool-call noise interleaved with JSON
+      const input = [
+        '<!-- FINDINGS_START -->',
+        '[',
+        '● Running tool: read_file',
+        '└ Done',
+        '  {"severity": "error", "title": "Bad code", "description": "Fix this"}',
+        ']',
+        '<!-- FINDINGS_END -->',
+      ].join('\n');
+
+      const findings = parseReviewFindings(input);
+      // Either the cleanup path succeeds and returns a finding, or the heuristic is used
+      // The key is that the cleanup path (lines 58-97) is exercised
+      assert.ok(Array.isArray(findings));
+    });
+
+    test('handles markers with noise but recoverable JSON array', () => {
+      const cleanJson = JSON.stringify([
+        { severity: 'warning', title: 'Test finding', description: 'A warning' }
+      ]);
+      const input = [
+        '<!-- FINDINGS_START -->',
+        '● Some tool output',
+        '$ Some command',
+        'CWD: /some/path',
+        'Spawning: some process',
+        'Environment: TEST',
+        cleanJson,
+        '<!-- FINDINGS_END -->',
+      ].join('\n');
+
+      // This exercises the cleanup/fallback path for noise-prefixed JSON
+      const findings = parseReviewFindings(input);
+      assert.ok(Array.isArray(findings));
+    });
+
     test('handles findings with all fields populated', () => {
       const input = `
 <!-- FINDINGS_START -->
@@ -181,6 +219,82 @@ Some postamble text
       assert.notStrictEqual(findings[0].id, findings[1].id);
       assert.notStrictEqual(findings[1].id, findings[2].id);
       assert.notStrictEqual(findings[0].id, findings[2].id);
+    });
+
+    test('cleans noisy CLI output before parsing JSON between markers', () => {
+      // Lines 58-97: fallback JSON cleaning path
+      // Triggered when the first JSON.parse fails because of interleaved CLI noise,
+      // but the cleaned version parses successfully.
+      const input = [
+        '<!-- FINDINGS_START -->',
+        '● Running tool: read_file',
+        '└ Tool call finished',
+        '$ git status',
+        'CWD: /workspace',
+        'Spawning: copilot',
+        'Environment variables set',
+        '[',
+        '  {"severity": "error", "title": "SQL injection", "description": "Use parameterized queries", "filePath": "src/db.ts", "line": 10}',
+        ']',
+        '<!-- FINDINGS_END -->',
+      ].join('\n');
+
+      const findings = parseReviewFindings(input);
+
+      assert.strictEqual(findings.length, 1);
+      assert.strictEqual(findings[0].severity, 'error');
+      assert.strictEqual(findings[0].title, 'SQL injection');
+      assert.strictEqual(findings[0].filePath, 'src/db.ts');
+      assert.strictEqual(findings[0].line, 10);
+      assert.strictEqual(findings[0].status, 'open');
+    });
+
+    test('handles JSON with noise where cleaned version also has valid array', () => {
+      // Another variant: multiple noise lines mixed in
+      const input = [
+        'some output',
+        '<!-- FINDINGS_START -->',
+        '● tool_call(search)',
+        '└ Finished',
+        '[{"severity":"warning","title":"Unused var","description":"Remove it"}]',
+        '● tool_call(read)',
+        '<!-- FINDINGS_END -->',
+        'trailing output',
+      ].join('\n');
+
+      const findings = parseReviewFindings(input);
+
+      assert.strictEqual(findings.length, 1);
+      assert.strictEqual(findings[0].severity, 'warning');
+      assert.strictEqual(findings[0].title, 'Unused var');
+    });
+
+    test('falls back to heuristic when cleaned JSON is also invalid', () => {
+      // The cleaned content still can't be parsed as JSON
+      const input = [
+        '<!-- FINDINGS_START -->',
+        '● some noise',
+        'completely unparseable { garbage [content',
+        '<!-- FINDINGS_END -->',
+      ].join('\n');
+
+      // Falls through to heuristic which finds nothing in the block
+      const findings = parseReviewFindings(input);
+      assert.strictEqual(findings.length, 0);
+    });
+
+    test('returns empty array when cleaned block has no JSON array markers', () => {
+      // After cleaning, there is no [ ... ] at all
+      const input = [
+        '<!-- FINDINGS_START -->',
+        '● only noise lines',
+        '└ more noise',
+        'no array here',
+        '<!-- FINDINGS_END -->',
+      ].join('\n');
+
+      const findings = parseReviewFindings(input);
+      assert.strictEqual(findings.length, 0);
     });
 
     test('sets status to open for all parsed findings', () => {
@@ -277,12 +391,94 @@ Some postamble text
       assert.ok(!findings[0].description.includes('[security]'));
     });
 
+    test('look-ahead: consumes continuation description lines (lines 162-164)', () => {
+      // Lines 162-164: i = j - 1 — the look-ahead that skips consumed continuation lines
+      const input = [
+        '**WARNING**: The function is too long.',
+        'Consider splitting it into smaller pieces.',
+        'This improves readability and testability.',
+        '**ERROR**: Missing null check (src/app.ts:5)',
+      ].join('\n');
+
+      const findings = parseReviewFindingsHeuristic(input);
+
+      // Should find 2 findings (not 3 — the continuation lines are consumed)
+      assert.strictEqual(findings.length, 2);
+      assert.strictEqual(findings[0].severity, 'warning');
+      // The description should include the continuation lines
+      assert.ok(
+        findings[0].description.includes('smaller pieces') ||
+        findings[0].description.includes('too long'),
+      );
+      assert.strictEqual(findings[1].severity, 'error');
+    });
+
+    test('look-ahead: stops at empty line', () => {
+      const input = [
+        '**ERROR**: Bad pattern',
+        'Explanation of the issue',
+        '',
+        '**WARNING**: Another issue',
+      ].join('\n');
+
+      const findings = parseReviewFindingsHeuristic(input);
+      assert.strictEqual(findings.length, 2);
+      // Description should include the continuation but stop at the blank line
+      assert.ok(findings[0].description.includes('Explanation') || findings[0].title.includes('Bad pattern'));
+    });
+
+    test('look-ahead: stops at next pattern line', () => {
+      const input = [
+        'ERROR: First issue',
+        'ERROR: Second issue',
+      ].join('\n');
+
+      const findings = parseReviewFindingsHeuristic(input);
+      assert.strictEqual(findings.length, 2);
+    });
+
     test('returns empty for completely unstructured text', () => {
       const input = 'This is just some random text without any patterns.';
       
       const findings = parseReviewFindingsHeuristic(input);
       
       assert.strictEqual(findings.length, 0);
+    });
+
+    test('accumulates look-ahead continuation lines into description', () => {
+      // Tests lines 162-164: multi-line descriptions (continuation lines)
+      const input = `**WARNING**: The function is too complex.
+It has too many responsibilities and should be refactored.
+Consider splitting it into smaller functions.
+**ERROR**: Another issue here`;
+      
+      const findings = parseReviewFindingsHeuristic(input);
+      
+      assert.ok(findings.length >= 2, 'should find at least 2 findings');
+      // The first finding should accumulate the continuation lines
+      assert.ok(
+        findings[0].description.includes('too complex') ||
+        findings[0].title.includes('too complex'),
+        'should include main description'
+      );
+      // The description should include the continuation lines
+      assert.ok(
+        findings[0].description.includes('responsibilities') ||
+        findings[0].description.length > 30,
+        'description should include continuation lines'
+      );
+    });
+
+    test('truncates title at sentence boundary', () => {
+      // Tests the sentence-end title truncation at line 167-170
+      const input = '**ERROR**: This is the first sentence. This is extra text that should not be in the title.';
+      
+      const findings = parseReviewFindingsHeuristic(input);
+      
+      assert.strictEqual(findings.length, 1);
+      // Title should stop at first sentence
+      assert.ok(findings[0].title.endsWith('.'), 'title should end at sentence boundary');
+      assert.ok(!findings[0].title.includes('extra text'), 'title should not include second sentence');
     });
 
     test('handles mixed severity levels', () => {

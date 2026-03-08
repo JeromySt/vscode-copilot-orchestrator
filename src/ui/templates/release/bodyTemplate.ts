@@ -579,8 +579,11 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
     <div class="pending-actions-header">
       <h3>Pending Actions</h3>
       <div class="pending-actions-toolbar" id="pending-actions-toolbar" style="display:none;">
+        <label class="pending-select-all-label" title="Select / deselect all visible findings">
+          <input type="checkbox" id="pending-select-all" class="pending-action-checkbox" /> Select All
+        </label>
         <span class="pending-selected-count" id="pending-selected-count">0 selected</span>
-        <button class="pending-action-btn ai" onclick="addressSelectedWithAI()" title="Address selected items with Copilot AI">
+        <button class="pending-action-btn ai" id="pending-fix-ai-btn" title="Address selected items with Copilot AI" disabled>
           <span class="pending-action-icon">🤖</span> Fix with AI
         </button>
       </div>

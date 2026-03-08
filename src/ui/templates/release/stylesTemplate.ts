@@ -895,6 +895,19 @@ function pendingActionsStyles(): string {
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
     }
+    .pending-select-all-label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      user-select: none;
+    }
+    .pending-select-all-label input {
+      cursor: pointer;
+      accent-color: var(--vscode-button-background);
+    }
     .pending-action-btn {
       padding: 4px 12px;
       border: 1px solid var(--vscode-input-border);

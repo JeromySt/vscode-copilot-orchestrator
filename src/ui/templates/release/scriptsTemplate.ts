@@ -454,8 +454,9 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
         html += ordered.map(check => {
           const icon = check.status === 'passing' ? '\u2705' :
                       check.status === 'failing' ? '\u274C' : '\u23F3';
+          const urlAttr = check.url ? ' data-check-url="' + check.url.replace(/"/g, '&quot;') + '"' : '';
           const urlLink = check.url ?
-            '<a class="pr-check-url" href="#" onclick="vscode.postMessage({type:\'openExternal\',url:\'' + check.url.replace(/'/g, '') + '\'}); return false;" title="View details">\u2197</a>' : '';
+            '<a class="pr-check-url" href="#"' + urlAttr + ' title="View details">\u2197</a>' : '';
           return '<div class="pr-check-item ' + check.status + '">' +
             '<span class="pr-check-icon">' + icon + '</span>' +
             '<span class="pr-check-name">' + check.name + '</span>' +
@@ -465,6 +466,16 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
         }).join('');
         
         container.innerHTML = html;
+        
+        // Wire up check URL clicks via event delegation
+        container.querySelectorAll('.pr-check-url[data-check-url]').forEach(function(el) {
+          el.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var url = el.getAttribute('data-check-url');
+            if (url) vscode.postMessage({ type: 'openExternal', url: url });
+          });
+        });
       }
     }
     
@@ -601,11 +612,27 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       updateToolbar() {
         const toolbar = document.getElementById('pending-actions-toolbar');
         const countEl = document.getElementById('pending-selected-count');
+        const selectAllEl = document.getElementById('pending-select-all');
+        const fixBtn = document.getElementById('pending-fix-ai-btn');
+        
+        // Show toolbar whenever there are findings (not just when selected)
         if (toolbar) {
-          toolbar.style.display = this.selected.size > 0 ? 'flex' : 'none';
+          toolbar.style.display = this.findings.length > 0 ? 'flex' : 'none';
         }
         if (countEl) {
           countEl.textContent = this.selected.size + ' selected';
+        }
+        // Update select-all checkbox state
+        if (selectAllEl) {
+          const filtered = this.getFiltered();
+          const allSelected = filtered.length > 0 && filtered.every(f => this.selected.has(f.id));
+          const someSelected = filtered.some(f => this.selected.has(f.id));
+          selectAllEl.checked = allSelected;
+          selectAllEl.indeterminate = someSelected && !allSelected;
+        }
+        // Enable/disable Fix button
+        if (fixBtn) {
+          fixBtn.disabled = this.selected.size === 0;
         }
       }
       
@@ -649,7 +676,30 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
         }
         
         container.innerHTML = filtered.map(f => this.renderItem(f)).join('');
+        this._wireEvents(container);
         this.updateToolbar();
+      }
+      
+      _wireEvents(container) {
+        const self = this;
+        // Wire checkbox changes
+        container.querySelectorAll('.pending-action-checkbox').forEach(function(el) {
+          el.addEventListener('change', function() {
+            const id = el.closest('.pending-action-item').getAttribute('data-id');
+            if (id) self.toggleSelect(id);
+          });
+        });
+        // Wire location link clicks
+        container.querySelectorAll('.pending-action-location').forEach(function(el) {
+          el.addEventListener('click', function(e) {
+            e.preventDefault();
+            const id = el.getAttribute('data-finding-id');
+            if (id) {
+              const finding = self.findings.find(function(f) { return f.id === id; });
+              if (finding) self.openFinding(finding);
+            }
+          });
+        });
       }
       
       renderItem(finding) {
@@ -667,8 +717,8 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
             + '<span class="pending-action-source">' + this.esc(finding.source || '') + '</span>';
           bodyText = this.esc(this.truncate(finding.body || '', 200));
           if (finding.path) {
-            locationHtml = '<a class="pending-action-location" onclick="pendingActions.openFinding(pendingActions.findings.find(f=>f.id===\'' + finding.id + '\'))" title="Open in editor">'
-              + '📄 ' + this.esc(finding.path) + (finding.line ? ':' + finding.line : '')
+            locationHtml = '<a class="pending-action-location" href="#" data-finding-id="' + finding.id + '" title="Open in editor">'
+              + '\ud83d\udcc4 ' + this.esc(finding.path) + (finding.line ? ':' + finding.line : '')
               + '</a>';
           }
         } else if (finding.type === 'check') {
@@ -676,8 +726,8 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
           metaInfo = '<span class="pending-action-author">' + this.esc(finding.name || '') + '</span>';
           bodyText = 'Check is failing';
           if (finding.url) {
-            locationHtml = '<a class="pending-action-location" onclick="pendingActions.openFinding(pendingActions.findings.find(f=>f.id===\'' + finding.id + '\'))" title="View check details">'
-              + '🔗 View details'
+            locationHtml = '<a class="pending-action-location" href="#" data-finding-id="' + finding.id + '" title="View check details">'
+              + '\ud83d\udd17 View details'
               + '</a>';
           }
         } else if (finding.type === 'alert') {
@@ -686,15 +736,14 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
           metaInfo = '<span class="pending-action-severity ' + sev + '">' + sev.toUpperCase() + '</span>';
           bodyText = this.esc(finding.description || '');
           if (finding.file) {
-            locationHtml = '<a class="pending-action-location" onclick="pendingActions.openFinding(pendingActions.findings.find(f=>f.id===\'' + finding.id + '\'))" title="Open in editor">'
-              + '📄 ' + this.esc(finding.file)
+            locationHtml = '<a class="pending-action-location" href="#" data-finding-id="' + finding.id + '" title="Open in editor">'
+              + '\ud83d\udcc4 ' + this.esc(finding.file)
               + '</a>';
           }
         }
         
         return '<div class="pending-action-item' + resolvedClass + '" data-type="' + finding.type + '" data-id="' + finding.id + '">'
-          + '<input type="checkbox" class="pending-action-checkbox" ' + isChecked
-          + ' onchange="pendingActions.toggleSelect(\'' + finding.id + '\')" />'
+          + '<input type="checkbox" class="pending-action-checkbox" ' + isChecked + ' />'
           + '<div class="pending-action-body">'
           + '<div class="pending-action-meta">' + badge + metaInfo + '</div>'
           + '<div class="pending-action-text">' + bodyText + '</div>'
@@ -814,6 +863,22 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
             unresolvedAlerts: releaseData.monitoringStats.unresolvedAlerts || 0,
           });
         }
+      }
+
+      // Wire select-all checkbox
+      var selectAllCb = document.getElementById('pending-select-all');
+      if (selectAllCb && pendingActions) {
+        selectAllCb.addEventListener('change', function() {
+          pendingActions.selectAll();
+        });
+      }
+
+      // Wire Fix with AI button
+      var fixAiBtn = document.getElementById('pending-fix-ai-btn');
+      if (fixAiBtn) {
+        fixAiBtn.addEventListener('click', function() {
+          addressSelectedWithAI();
+        });
       }
     }
 
