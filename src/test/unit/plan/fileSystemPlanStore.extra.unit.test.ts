@@ -407,4 +407,35 @@ suite('FileSystemPlanStore - extra coverage', () => {
       );
     });
   });
+
+  suite('writeNodeSpec – error path (lines 126-129)', () => {
+    test('throws and logs when writeFileAsync fails', async () => {
+      const mockFs = makeMockFs({
+        lstatAsync: sinon.stub().resolves({ isSymbolicLink: () => false, isDirectory: () => false }),
+        mkdirAsync: sinon.stub().resolves(),
+        writeFileAsync: sinon.stub().rejects(new Error('write failed')),
+      });
+      const store = makeStore(mockFs);
+
+      await assert.rejects(
+        () => store.writeNodeSpec('plan-1', 'node-1', 'work', { type: 'shell', command: 'echo hello' } as any),
+        /write failed/
+      );
+    });
+  });
+
+  suite('listPlanIds – readdirAsync error path (lines 172-175)', () => {
+    test('throws and logs when readdirAsync fails', async () => {
+      const mockFs = makeMockFs({
+        existsAsync: sinon.stub().resolves(true),
+        readdirAsync: sinon.stub().rejects(new Error('readdir failed')),
+      });
+      const store = makeStore(mockFs);
+
+      await assert.rejects(
+        () => store.listPlanIds(),
+        /readdir failed/
+      );
+    });
+  });
 });
