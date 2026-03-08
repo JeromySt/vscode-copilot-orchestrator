@@ -38,6 +38,8 @@ function makeMockFs(overrides?: Record<string, any>): any {
     mkdirSync: sinon.stub(),
     renameSync: sinon.stub(),
     unlinkSync: sinon.stub(),
+    readJSON: sinon.stub().returns({ plans: {} }),
+    writeJSON: sinon.stub(),
     ...overrides,
   };
 }
@@ -358,6 +360,51 @@ suite('FileSystemPlanStore - extra coverage', () => {
 
       const result = await store.readNodeSpecForAttempt('plan-1', 'node-1', 'prechecks', 1);
       assert.strictEqual(result, undefined);
+    });
+  });
+
+  suite('deletePlan – index cleanup and error paths (lines 184-192)', () => {
+    test('removes plan from plans-index.json when it exists (lines 184-187)', async () => {
+      const mockFs = makeMockFs({
+        rmAsync: sinon.stub().resolves(),
+        existsSync: sinon.stub().returns(true),
+        readJSON: sinon.stub().returns({ plans: { 'plan-1': { id: 'plan-1' } } }),
+        writeJSON: sinon.stub(),
+      });
+      const store = makeStore(mockFs);
+
+      await store.deletePlan('plan-1');
+
+      assert.ok(mockFs.rmAsync.called, 'rmAsync should be called to delete plan dir');
+      assert.ok(mockFs.readJSON.called, 'readJSON should read the index file');
+      assert.ok(mockFs.writeJSON.called, 'writeJSON should update the index file');
+    });
+
+    test('skips index update when existsSync returns false', async () => {
+      const mockFs = makeMockFs({
+        rmAsync: sinon.stub().resolves(),
+        existsSync: sinon.stub().returns(false),
+        readJSON: sinon.stub().returns({ plans: {} }),
+        writeJSON: sinon.stub(),
+      });
+      const store = makeStore(mockFs);
+
+      await store.deletePlan('plan-1');
+
+      assert.ok(mockFs.rmAsync.called, 'rmAsync should be called');
+      assert.ok(mockFs.readJSON.notCalled, 'readJSON should NOT be called when index does not exist');
+    });
+
+    test('throws when rmAsync fails (lines 189-192)', async () => {
+      const mockFs = makeMockFs({
+        rmAsync: sinon.stub().rejects(new Error('delete failed')),
+      });
+      const store = makeStore(mockFs);
+
+      await assert.rejects(
+        () => store.deletePlan('plan-1'),
+        /delete failed/
+      );
     });
   });
 });

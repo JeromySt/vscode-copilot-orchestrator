@@ -491,5 +491,70 @@ suite('NodeManager - extra coverage', () => {
       assert.strictEqual(result.success, true);
       assert.ok((log.warn as sinon.SinonStub).calledWithMatch(sinon.match(/newPostchecks/)));
     });
+
+    test('warns if writing newPrechecks spec to planRepository fails (lines 347-349)', async () => {
+      const dir = makeTmpDir();
+      const plan = createFailedPlan({ type: 'shell', command: 'echo work' });
+      (plan as any).definition = { getWorkSpec: sinon.stub().resolves(null) };
+
+      const state = makeState(dir, 'plan-1', plan);
+      (state as any).planRepository = {
+        writeNodeSpec: sinon.stub().rejects(new Error('prechecks write error')),
+        saveStateSync: sinon.stub(),
+      };
+
+      const log = createMockLogger();
+      const mgr = new NodeManager(state as any, log, createMockGit());
+
+      const result = await mgr.retryNode('plan-1', 'n1', {
+        newPrechecks: { type: 'shell', command: 'echo pre-check' },
+      });
+      assert.strictEqual(result.success, true);
+      assert.ok((log.warn as sinon.SinonStub).calledWithMatch(sinon.match(/newPrechecks/)));
+    });
+  });
+
+  suite('forceFailNode – executor cancel and processMonitor error paths', () => {
+    test('handles executor.cancel throwing (lines 241-246)', async () => {
+      const dir = makeTmpDir();
+      const plan = createFailedPlan({ type: 'shell', command: 'echo work' });
+      // Set node to running so forceFailNode can proceed
+      (plan.nodeStates.get('n1') as NodeExecutionState).status = 'running';
+      (plan.nodeStates.get('n1') as NodeExecutionState).pid = undefined;
+
+      const state = makeState(dir, 'plan-1', plan);
+      // Add executor with cancel that throws
+      (state as any).executor = {
+        cancel: sinon.stub().throws(new Error('cancel failed')),
+      };
+
+      const log = createMockLogger();
+      const mgr = new NodeManager(state as any, log, createMockGit());
+
+      // Should not throw - error is caught and logged at debug level
+      await assert.doesNotReject(() => mgr.forceFailNode('plan-1', 'n1'));
+      assert.ok((log.debug as sinon.SinonStub).calledWithMatch(sinon.match(/cancel/)));
+    });
+
+    test('handles processMonitor.terminate throwing (lines 253-255)', async () => {
+      const dir = makeTmpDir();
+      const plan = createFailedPlan({ type: 'shell', command: 'echo work' });
+      (plan.nodeStates.get('n1') as NodeExecutionState).status = 'running';
+      (plan.nodeStates.get('n1') as NodeExecutionState).pid = 12345;
+
+      const state = makeState(dir, 'plan-1', plan);
+      (state as any).processMonitor = {
+        isRunning: sinon.stub().returns(true),
+        terminate: sinon.stub().rejects(new Error('terminate failed')),
+      };
+      (state as any).executor = {};
+
+      const log = createMockLogger();
+      const mgr = new NodeManager(state as any, log, createMockGit());
+
+      // Should not throw - error is caught and logged at debug level
+      await assert.doesNotReject(() => mgr.forceFailNode('plan-1', 'n1'));
+      assert.ok((log.debug as sinon.SinonStub).calledWithMatch(sinon.match(/kill process/)));
+    });
   });
 });

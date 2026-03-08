@@ -69,7 +69,7 @@ function makeState(extras?: Record<string, any>) {
   return {
     plans: new Map(),
     stateMachines: new Map(),
-    persistence: { save: sinon.stub(), load: sinon.stub(), getStoragePath: sinon.stub().returns('/tmp') },
+    persistence: { save: sinon.stub(), load: sinon.stub(), getStoragePath: sinon.stub().returns('/tmp'), delete: sinon.stub() },
     events,
     configManager,
     config: { storagePath: '/tmp' },
@@ -419,6 +419,71 @@ suite('PlanLifecycleManager – extra coverage', () => {
       await lifecycle.cleanupPlanResources(plan);
 
       assert.ok(git.worktrees.removeSafe.calledOnce);
+    });
+  });
+
+  suite('delete – persistence.delete error path (lines 508-510)', () => {
+    test('warns but continues when persistence.delete throws', () => {
+      const log = createMockLogger();
+      const state = makeState();
+      state.persistence.delete = sinon.stub().throws(new Error('delete failed'));
+      const lifecycle = new PlanLifecycleManager(state as any, log, createMockGit());
+
+      const plan = createTestPlan('plan-1');
+      state.plans.set('plan-1', plan);
+      const mockSm: any = { cancelAll: sinon.stub(), on: sinon.stub() };
+      state.stateMachines.set('plan-1', mockSm);
+
+      // delete calls cancel then persistence.delete — should not throw
+      assert.doesNotThrow(() => lifecycle.delete('plan-1'));
+      assert.ok((log.warn as sinon.SinonStub).calledWithMatch(sinon.match(/legacy/)));
+    });
+  });
+
+  suite('resume – pauseHistory resumedAt update (lines 555-560)', () => {
+    test('sets resumedAt on the last open pause interval when resuming', async () => {
+      const log = createMockLogger();
+      const state = makeState();
+      const lifecycle = new PlanLifecycleManager(state as any, log, createMockGit());
+
+      const plan = createTestPlan('plan-1');
+      // Simulate a paused plan with an open pause interval
+      plan.isPaused = true;
+      (plan as any).pauseHistory = [{ pausedAt: Date.now() - 5000 }];
+      (plan as any).stateHistory = [];
+
+      state.plans.set('plan-1', plan);
+      const PlanStateMachine = require('../../../plan/stateMachine').PlanStateMachine;
+      const sm = new PlanStateMachine(plan);
+      state.stateMachines.set('plan-1', sm);
+
+      await lifecycle.resume('plan-1', () => {});
+
+      // The pause interval should now have resumedAt set
+      const pauseInterval = (plan as any).pauseHistory[0];
+      assert.ok(pauseInterval.resumedAt !== undefined, 'resumedAt should be set after resume');
+    });
+
+    test('skips resumedAt update when last pause interval already has resumedAt', async () => {
+      const log = createMockLogger();
+      const state = makeState();
+      const lifecycle = new PlanLifecycleManager(state as any, log, createMockGit());
+
+      const plan = createTestPlan('plan-1');
+      plan.isPaused = true;
+      const priorResumeTime = Date.now() - 1000;
+      (plan as any).pauseHistory = [{ pausedAt: Date.now() - 10000, resumedAt: priorResumeTime }];
+      (plan as any).stateHistory = [];
+
+      state.plans.set('plan-1', plan);
+      const PlanStateMachine = require('../../../plan/stateMachine').PlanStateMachine;
+      const sm = new PlanStateMachine(plan);
+      state.stateMachines.set('plan-1', sm);
+
+      await lifecycle.resume('plan-1', () => {});
+
+      // The already-set resumedAt should remain unchanged
+      assert.strictEqual((plan as any).pauseHistory[0].resumedAt, priorResumeTime);
     });
   });
 });
