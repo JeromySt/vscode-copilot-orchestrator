@@ -596,4 +596,93 @@ suite('PlanLifecycleManager – extra coverage', () => {
       assert.ok((plan as any).pauseHistory.length > 0, 'pauseHistory should have entry');
     });
   });
+
+  suite('initialize – repository error paths (lines 139-142, 148-149, 154-159)', () => {
+    test('warns when planRepository.list() throws (lines 139-142)', async () => {
+      const log = createMockLogger();
+      const PlanStateMachine = require('../../../plan/stateMachine').PlanStateMachine;
+      const state = makeState({
+        config: { storagePath: '/tmp', defaultRepoPath: '/repo' },
+        stateMachineFactory: (plan: any) => new PlanStateMachine(plan),
+        persistence: {
+          save: sinon.stub(), load: sinon.stub(), getStoragePath: sinon.stub().returns('/tmp'),
+          delete: sinon.stub(), loadAll: sinon.stub().returns([]),
+          disableSaves: sinon.stub(),
+        },
+        planRepository: {
+          list: sinon.stub().rejects(new Error('list failed')),
+          loadState: sinon.stub().resolves(null),
+          saveStateSync: sinon.stub(),
+          markDeletedSync: sinon.stub(),
+          delete: sinon.stub().resolves(),
+          migrateLegacy: sinon.stub().resolves(),
+        },
+      });
+      const lifecycle = new PlanLifecycleManager(state as any, log, createMockGit());
+
+      await lifecycle.initialize();
+
+      assert.ok((log.warn as sinon.SinonStub).calledWithMatch(sinon.match(/Failed to list plans/)));
+    });
+
+    test('calls persistence.disableSaves when planRepository exists (lines 148-149)', async () => {
+      const log = createMockLogger();
+      const PlanStateMachine = require('../../../plan/stateMachine').PlanStateMachine;
+      const disableSaves = sinon.stub();
+      const state = makeState({
+        config: { storagePath: '/tmp', defaultRepoPath: '/repo' },
+        stateMachineFactory: (plan: any) => new PlanStateMachine(plan),
+        persistence: {
+          save: sinon.stub(), load: sinon.stub(), getStoragePath: sinon.stub().returns('/tmp'),
+          delete: sinon.stub(), loadAll: sinon.stub().returns([]),
+          disableSaves,
+        },
+        planRepository: {
+          list: sinon.stub().resolves([]),
+          loadState: sinon.stub().resolves(null),
+          saveStateSync: sinon.stub(),
+          markDeletedSync: sinon.stub(),
+          delete: sinon.stub().resolves(),
+          migrateLegacy: sinon.stub().resolves(),
+        },
+      });
+      const lifecycle = new PlanLifecycleManager(state as any, log, createMockGit());
+
+      await lifecycle.initialize();
+
+      assert.ok(disableSaves.called, 'disableSaves should be called when planRepository exists');
+    });
+
+    test('falls back to legacy persistence when saveStateSync throws (lines 154-159)', async () => {
+      const log = createMockLogger();
+      const PlanStateMachine = require('../../../plan/stateMachine').PlanStateMachine;
+      const legacySave = sinon.stub();
+      const plan = createTestPlan('plan-loaded');
+      (plan as any).stateHistory = [];
+      (plan as any).pauseHistory = [];
+
+      const state = makeState({
+        config: { storagePath: '/tmp', defaultRepoPath: '/repo' },
+        stateMachineFactory: (p: any) => new PlanStateMachine(p),
+        persistence: {
+          save: legacySave, load: sinon.stub(), getStoragePath: sinon.stub().returns('/tmp'),
+          delete: sinon.stub(), loadAll: sinon.stub().returns([plan]),
+          disableSaves: sinon.stub(),
+        },
+        planRepository: {
+          list: sinon.stub().resolves([]),
+          loadState: sinon.stub().resolves(null),
+          saveStateSync: sinon.stub().throws(new Error('save failed')),
+          markDeletedSync: sinon.stub(),
+          delete: sinon.stub().resolves(),
+          migrateLegacy: sinon.stub().resolves(),
+        },
+      });
+      const lifecycle = new PlanLifecycleManager(state as any, log, createMockGit());
+
+      await lifecycle.initialize();
+
+      assert.ok(legacySave.called, 'legacy persistence.save should be called as fallback');
+    });
+  });
 });
