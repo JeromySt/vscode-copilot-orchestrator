@@ -349,14 +349,65 @@ suite('FileSystemReleaseStore', () => {
   test('throws when monitor cycles save and release not found', async () => {
     const fs = createMockFileSystem();
     fs.existsAsync.resolves(false);
-    
     const store = new FileSystemReleaseStore('/repo', fs);
-    
-    const cycles: PRMonitorCycle[] = [];
-    
     await assert.rejects(
-      async () => store.saveMonitorCycles('nonexistent', cycles),
+      async () => store.saveMonitorCycles('nonexistent', []),
       /Release not found/
     );
+  });
+
+  test('deleteRelease does nothing when release not found', async () => {
+    const fs = createMockFileSystem();
+    fs.existsAsync.resolves(false);
+    const store = new FileSystemReleaseStore('/repo', fs);
+    await store.deleteRelease('nonexistent-id');
+    assert.ok(fs.rmAsync.notCalled);
+  });
+
+  test('deleteRelease removes directory when found', async () => {
+    const fs = createMockFileSystem();
+    const release = createTestRelease();
+    fs.existsAsync.resolves(true);
+    fs.readdirAsync.resolves(['release-v1.0']);
+    fs.readFileAsync.resolves(JSON.stringify(release));
+    const store = new FileSystemReleaseStore('/repo', fs);
+    await store.deleteRelease('rel-1');
+    assert.ok(fs.rmAsync.calledOnce);
+    assert.deepStrictEqual(fs.rmAsync.firstCall.args[1], { recursive: true, force: true });
+  });
+
+  test('deleteRelease propagates error from rmAsync', async () => {
+    const fs = createMockFileSystem();
+    const release = createTestRelease();
+    fs.existsAsync.resolves(true);
+    fs.readdirAsync.resolves(['release-v1.0']);
+    fs.readFileAsync.resolves(JSON.stringify(release));
+    fs.rmAsync.rejects(new Error('Permission denied'));
+    const store = new FileSystemReleaseStore('/repo', fs);
+    await assert.rejects(() => store.deleteRelease('rel-1'), /Permission denied/);
+  });
+
+  test('loadMonitorCycles throws on non-ENOENT error', async () => {
+    const fs = createMockFileSystem();
+    const release = createTestRelease();
+    fs.existsAsync.resolves(true);
+    fs.readdirAsync.resolves(['release-v1.0']);
+    fs.readFileAsync
+      .onFirstCall().resolves(JSON.stringify(release))
+      .onSecondCall().rejects(Object.assign(new Error('Permission denied'), { code: 'EACCES' }));
+    const store = new FileSystemReleaseStore('/repo', fs);
+    await assert.rejects(() => store.loadMonitorCycles('rel-1'), /Permission denied/);
+  });
+
+  test('saveMonitorCycles unlinkAsync failure is swallowed', async () => {
+    const fs = createMockFileSystem();
+    const release = createTestRelease();
+    fs.existsAsync.resolves(true);
+    fs.readdirAsync.resolves(['release-v1.0']);
+    fs.readFileAsync.resolves(JSON.stringify(release));
+    fs.renameAsync.rejects(new Error('Rename failed'));
+    fs.unlinkAsync.rejects(new Error('Cannot delete'));
+    const store = new FileSystemReleaseStore('/repo', fs);
+    await assert.rejects(() => store.saveMonitorCycles('rel-1', []), /Rename failed/);
   });
 });

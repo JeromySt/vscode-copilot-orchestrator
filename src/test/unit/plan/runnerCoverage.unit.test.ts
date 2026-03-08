@@ -5,6 +5,7 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as sinon from 'sinon';
 import { PlanRunner } from '../../../plan/runner';
 import { PlanConfigManager } from '../../../plan/configManager';
 import { PlanPersistence } from '../../../plan/persistence';
@@ -302,5 +303,45 @@ suite('PlanRunner delegation coverage', () => {
 
     // Verify plan is registered
     assert.ok(runner.get('test-plan-123'));
+  });
+
+  test('savePlan calls planRepository.saveStateSync when repository is set', () => {
+    const dir = makeTmpDir();
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    const plan = runner.enqueue({
+      name: 'RepoSave', baseBranch: 'main',
+      jobs: [{ producerId: 'x', task: 'do work', dependencies: [] }],
+    });
+    const mockRepo = { saveStateSync: sinon.stub(), saveState: sinon.stub() } as any;
+    runner.setPlanRepository(mockRepo);
+    const result = runner.savePlan(plan.id);
+    assert.strictEqual(result, true);
+    assert.ok(mockRepo.saveStateSync.calledOnce);
+  });
+
+  test('savePlan swallows planRepository.saveStateSync error', () => {
+    const dir = makeTmpDir();
+    const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
+    const plan = runner.enqueue({
+      name: 'RepoSaveErr', baseBranch: 'main',
+      jobs: [{ producerId: 'y', task: 'work', dependencies: [] }],
+    });
+    const mockRepo = {
+      saveStateSync: sinon.stub().throws(new Error('persist failed')),
+      saveState: sinon.stub(),
+    } as any;
+    runner.setPlanRepository(mockRepo);
+    // Should not throw
+    assert.doesNotThrow(() => runner.savePlan(plan.id));
+    assert.ok(mockRepo.saveStateSync.calledOnce);
+  });
+
+  test('getStoragePath returns string path', () => {
+    const dir = makeTmpDir();
+    const plansDir = path.join(dir, 'plans');
+    const runner = new PlanRunner({ storagePath: plansDir }, createRunnerDeps(plansDir));
+    const storagePath = runner.getStoragePath();
+    assert.strictEqual(typeof storagePath, 'string');
+    assert.ok(storagePath.length > 0);
   });
 });

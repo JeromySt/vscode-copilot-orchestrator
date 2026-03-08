@@ -1,0 +1,307 @@
+/**
+ * @fileoverview Extra unit tests for FileSystemPlanStore covering:
+ * - Lines 316-317: ensureNodeSpecDir when currentLink is already a symlink
+ * - Line 323: ensureNodeSpecDir when existing dir is a real directory
+ * - Lines 268-282: migrateLegacy with attemptHistory
+ */
+import { suite, test, setup, teardown } from 'mocha';
+import * as assert from 'assert';
+import * as sinon from 'sinon';
+import * as path from 'path';
+import { FileSystemPlanStore } from '../../../plan/store/FileSystemPlanStore';
+
+function silenceConsole(): { restore: () => void } {
+  const orig = { log: console.log, debug: console.debug, warn: console.warn, error: console.error };
+  console.log = console.debug = console.warn = console.error = () => {};
+  return { restore() { Object.assign(console, orig); } };
+}
+
+function makeMockFs(overrides?: Record<string, any>): any {
+  return {
+    readFileAsync: sinon.stub().resolves('{}'),
+    writeFileAsync: sinon.stub().resolves(),
+    renameAsync: sinon.stub().resolves(),
+    mkdirAsync: sinon.stub().resolves(),
+    unlinkAsync: sinon.stub().resolves(),
+    rmAsync: sinon.stub().resolves(),
+    rmdirAsync: sinon.stub().resolves(),
+    readdirAsync: sinon.stub().resolves([]),
+    existsAsync: sinon.stub().resolves(false),
+    existsSync: sinon.stub().returns(false),
+    lstatAsync: sinon.stub().resolves({ isSymbolicLink: () => false, isDirectory: () => false }),
+    symlinkAsync: sinon.stub().resolves(),
+    accessAsync: sinon.stub().rejects(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
+    readlinkAsync: sinon.stub().resolves('target'),
+    copyFileAsync: sinon.stub().resolves(),
+    readFileSync: sinon.stub().returns('{}'),
+    writeFileSync: sinon.stub(),
+    mkdirSync: sinon.stub(),
+    renameSync: sinon.stub(),
+    unlinkSync: sinon.stub(),
+    ...overrides,
+  };
+}
+
+function makeStore(mockFs?: any): FileSystemPlanStore {
+  return new FileSystemPlanStore('/storage', '/workspace', mockFs || makeMockFs());
+}
+
+suite('FileSystemPlanStore - extra coverage', () => {
+  let sandbox: sinon.SinonSandbox;
+  let silence: ReturnType<typeof silenceConsole>;
+
+  setup(() => {
+    sandbox = sinon.createSandbox();
+    silence = silenceConsole();
+  });
+
+  teardown(() => {
+    sandbox.restore();
+    silence.restore();
+  });
+
+  suite('ensureNodeSpecDir - symlink detection (lines 316-317)', () => {
+    test('returns early when currentLink is already a symlink', async () => {
+      const mockFs = makeMockFs({
+        lstatAsync: sinon.stub().resolves({
+          isSymbolicLink: () => true,
+          isDirectory: () => false,
+        }),
+        writeFileAsync: sinon.stub().resolves(),
+      });
+      const store = makeStore(mockFs);
+
+      // writeNodeSpec calls ensureNodeSpecDir internally
+      await store.writeNodeSpec('plan-1', 'node-1', 'work', { type: 'shell', command: 'echo test' });
+
+      // symlinkAsync should NOT be called since the current dir is already a symlink
+      assert.ok(mockFs.symlinkAsync.notCalled, 'symlinkAsync should not be called for existing symlink');
+      // writeFileAsync SHOULD be called for the spec
+      assert.ok(mockFs.writeFileAsync.called, 'writeFileAsync should be called for the spec content');
+    });
+
+    test('continues to create structure when lstatAsync throws ENOENT', async () => {
+      let lstatCallCount = 0;
+      const mockFs = makeMockFs({
+        lstatAsync: sinon.stub().callsFake(() => {
+          lstatCallCount++;
+          // First call (in ensureNodeSpecDir) - throw ENOENT
+          // Second call (to check if it's a directory) - throw (expected, so catch runs)
+          const err = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+          return Promise.reject(err);
+        }),
+        writeFileAsync: sinon.stub().resolves(),
+      });
+      const store = makeStore(mockFs);
+
+      await store.writeNodeSpec('plan-2', 'node-2', 'work', { type: 'shell', command: 'echo test' });
+
+      // symlinkAsync should be called to create the current link
+      assert.ok(mockFs.symlinkAsync.calledOnce, 'symlinkAsync should be called to create new link');
+      assert.ok(mockFs.mkdirAsync.calledOnce, 'mkdirAsync should be called to create attempt dir');
+    });
+
+    test('ensureNodeSpecDir migrates existing directory to attempt structure (line 323)', async () => {
+      let lstatCallCount = 0;
+      const mockFs = makeMockFs({
+        lstatAsync: sinon.stub().callsFake((_path: string) => {
+          lstatCallCount++;
+          if (lstatCallCount === 1) {
+            // First call - the currentLink doesn't look like a symlink (non-symlink dir)
+            // isSymbolicLink=false, isDirectory=false → fall through to catch, create structure
+            return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+          } else {
+            // Second call (inside try/catch block) - return isDirectory=true
+            return Promise.resolve({
+              isSymbolicLink: () => false,
+              isDirectory: () => true,
+            });
+          }
+        }),
+        readdirAsync: sinon.stub().resolves(['work.json', 'prechecks.json']),
+        writeFileAsync: sinon.stub().resolves(),
+      });
+      const store = makeStore(mockFs);
+
+      await store.writeNodeSpec('plan-3', 'node-3', 'work', { type: 'shell', command: 'echo test' });
+
+      // Should have tried to read directory contents and move them
+      assert.ok(mockFs.readdirAsync.called, 'readdirAsync should be called to list existing files');
+      // renameAsync called to move existing files to attempt dir
+      assert.ok(mockFs.renameAsync.called, 'renameAsync should be called to move files');
+      // rmdirAsync called to remove old directory  
+      assert.ok(mockFs.rmdirAsync.called, 'rmdirAsync should be called to remove old dir');
+      // symlinkAsync called to create new link
+      assert.ok(mockFs.symlinkAsync.called, 'symlinkAsync should be called');
+    });
+  });
+
+  suite('pointCurrentToAttempt - cleanup of existing link (lines 332-336)', () => {
+    test('removes existing symlink before creating new one', async () => {
+      const mockFs = makeMockFs({
+        lstatAsync: sinon.stub().callsFake(() => {
+          return Promise.resolve({
+            isSymbolicLink: () => true,
+            isDirectory: () => false,
+          });
+        }),
+        writeFileAsync: sinon.stub().resolves(),
+      });
+      const store = makeStore(mockFs);
+
+      // Access private method directly to test pointCurrentToAttempt
+      const pointCurrent = (store as any).pointCurrentToAttempt.bind(store);
+      await pointCurrent('plan-x', 'node-x', 2);
+
+      // On non-win32, unlinkAsync is called to remove existing symlink
+      if (process.platform !== 'win32') {
+        assert.ok(mockFs.unlinkAsync.called, 'unlinkAsync should remove existing symlink');
+      } else {
+        assert.ok(mockFs.rmAsync.called, 'rmAsync should remove existing symlink on Windows');
+      }
+      // symlinkAsync called to create the new link
+      assert.ok(mockFs.symlinkAsync.calledOnce, 'symlinkAsync should create new link');
+    });
+
+    test('creates new symlink even when lstatAsync throws for non-existent current link', async () => {
+      const mockFs = makeMockFs({
+        lstatAsync: sinon.stub().rejects(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
+        writeFileAsync: sinon.stub().resolves(),
+      });
+      const store = makeStore(mockFs);
+
+      const pointCurrent = (store as any).pointCurrentToAttempt.bind(store);
+      await pointCurrent('plan-y', 'node-y', 1);
+
+      // symlinkAsync should still create the link
+      assert.ok(mockFs.symlinkAsync.calledOnce);
+    });
+  });
+
+  suite('migrateLegacy - attemptHistory path (lines 268-282)', () => {
+    test('processes nodes with attemptHistory in migration', async () => {
+      const legacyPlan = {
+        id: 'plan-legacy',
+        spec: {
+          name: 'Legacy Plan',
+          baseBranch: 'main',
+          jobs: [{ producerId: 'n1', name: 'Node 1', task: 'test', work: '@agent test' }],
+        },
+        nodes: [
+          { id: 'n1', producerId: 'n1', name: 'Node 1', task: 'test', dependencies: [] },
+        ],
+        nodeStates: {
+          'n1': {
+            status: 'failed',
+            attempts: 2,
+            attemptHistory: [
+              { attemptNumber: 1, startTime: Date.now() - 2000, endTime: Date.now() - 1000, workUsed: '@agent first attempt' },
+              { attemptNumber: 2, startTime: Date.now() - 500, endTime: Date.now(), workUsed: '@agent second attempt' },
+            ],
+          },
+        },
+        roots: ['n1'], leaves: ['n1'],
+        repoPath: '/repo', baseBranch: 'main',
+        worktreeRoot: '/worktrees', createdAt: Date.now(),
+        producerIdToNodeId: { 'n1': 'n1' },
+      };
+
+      const legacyContent = JSON.stringify(legacyPlan);
+
+      const mkdirCalls: string[] = [];
+      const writeFileCalls: Array<{ path: string; content: string }> = [];
+
+      const mockFs = makeMockFs({
+        readFileAsync: sinon.stub().callsFake((filePath: string) => {
+          if (filePath.includes('plan-legacy.json')) {
+            return Promise.resolve(legacyContent);
+          }
+          return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+        }),
+        mkdirAsync: sinon.stub().callsFake((p: string) => {
+          mkdirCalls.push(p);
+          return Promise.resolve();
+        }),
+        writeFileAsync: sinon.stub().callsFake((p: string, content: string) => {
+          writeFileCalls.push({ path: p, content });
+          return Promise.resolve();
+        }),
+        lstatAsync: sinon.stub().callsFake(() => {
+          // For pointCurrentToAttempt, return non-symlink (so no cleanup needed)
+          return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+        }),
+        existsSync: sinon.stub().returns(false),
+      });
+
+      const store = new FileSystemPlanStore('/storage', '/workspace', mockFs);
+
+      await store.migrateLegacy('plan-legacy');
+
+      // Verify that mkdirAsync was called for attempt directories
+      const attemptDirCalls = mkdirCalls.filter(p => p.includes('attempts'));
+      assert.ok(attemptDirCalls.length > 0, 'Should create attempt directories');
+
+      // Verify that work specs were written for attempts
+      const workSpecCalls = writeFileCalls.filter(c => c.path.includes('work.json'));
+      assert.ok(workSpecCalls.length > 0, 'Should write work spec files for attempts');
+
+      // Verify writePlanMetadata was called
+      const planJsonCalls = writeFileCalls.filter(c => c.path.includes('plan.json') || c.path.includes('.plan.json.tmp'));
+      assert.ok(planJsonCalls.length > 0, 'Should write plan metadata');
+    });
+
+    test('handles migration with no attemptHistory', async () => {
+      const legacyPlan = {
+        id: 'plan-simple',
+        spec: {
+          name: 'Simple Plan',
+          baseBranch: 'main',
+          jobs: [],
+        },
+        nodes: [
+          { id: 'n1', producerId: 'n1', name: 'Node 1', task: 'test', dependencies: [] },
+        ],
+        nodeStates: {
+          'n1': { status: 'succeeded', attempts: 1 },
+        },
+        roots: ['n1'], leaves: ['n1'],
+        repoPath: '/repo', baseBranch: 'main',
+        worktreeRoot: '/worktrees', createdAt: Date.now(),
+        producerIdToNodeId: { 'n1': 'n1' },
+      };
+
+      const mockFs = makeMockFs({
+        readFileAsync: sinon.stub().callsFake((filePath: string) => {
+          if (filePath.includes('plan-simple.json')) {
+            return Promise.resolve(JSON.stringify(legacyPlan));
+          }
+          return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+        }),
+        lstatAsync: sinon.stub().rejects(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
+        existsSync: sinon.stub().returns(false),
+      });
+
+      const store = new FileSystemPlanStore('/storage', '/workspace', mockFs);
+
+      // Should complete without error
+      await assert.doesNotReject(() => store.migrateLegacy('plan-simple'));
+      // unlinkAsync called to remove legacy file
+      assert.ok(mockFs.unlinkAsync.called, 'Should delete legacy plan file after migration');
+    });
+
+    test('migration throws on file read error', async () => {
+      const mockFs = makeMockFs({
+        readFileAsync: sinon.stub().rejects(new Error('disk read error')),
+      });
+      const store = new FileSystemPlanStore('/storage', '/workspace', mockFs);
+
+      await assert.rejects(
+        () => store.migrateLegacy('plan-fail'),
+        (err: any) => {
+          assert.ok(err.message.includes('disk read error'));
+          return true;
+        }
+      );
+    });
+  });
+});
