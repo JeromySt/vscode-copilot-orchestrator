@@ -102,6 +102,8 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
             cycleCount: (rel.monitoringStats?.cycleCount || 0) + 1,
             lastCycleAt: Date.now(),
           };
+          // Store the full cycle so the panel can seed Pending Actions on open
+          rel.lastCycle = cycle;
           this.store.saveRelease(rel).catch(() => {});
         }
         this.events.emitReleasePrCycle(releaseId, cycle);
@@ -889,14 +891,20 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
   /**
    * Address selected findings using AI-assisted fixing.
    *
-   * Queues the findings for automated resolution via Copilot CLI.
-   * Currently a stub — full implementation will invoke the PR monitor's
-   * _addressFindings path with only the selected findings.
+   * 1. Builds a task description from the selected findings
+   * 2. Invokes Copilot CLI in the release repo to apply fixes
+   * 3. Commits and pushes changes
+   * 4. Replies to PR comments and resolves threads
+   * 5. Emits actionTaken events for each action so the UI updates live
    */
   async addressFindings(releaseId: string, findings: any[]): Promise<void> {
     const release = this.releases.get(releaseId);
     if (!release) {
       throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    if (findings.length === 0) {
+      return;
     }
 
     log.info('Address findings requested', {
@@ -905,8 +913,249 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       types: findings.map((f: any) => f.type),
     });
 
-    // TODO: Invoke Copilot CLI agent with the selected findings.
-    // For now, emit a progress event so the UI knows the request was received.
+    // Signal addressing started
+    this.emit('releaseActionTaken', releaseId, {
+      type: 'fix-code',
+      description: `Addressing ${findings.length} finding(s) with AI...`,
+      success: true,
+      timestamp: Date.now(),
+    });
+
+    const cwd = release.isolatedRepoPath || release.repoPath;
+
+    // ── 1. Build task description from selected findings ─────────────
+    const taskParts: string[] = [
+      'You are addressing specific PR review findings. Fix ONLY the issues listed below.\n',
+    ];
+
+    const commentFindings = findings.filter((f: any) => f.type === 'comment');
+    const checkFindings = findings.filter((f: any) => f.type === 'check');
+    const alertFindings = findings.filter((f: any) => f.type === 'alert');
+
+    if (checkFindings.length > 0) {
+      taskParts.push('### CI/CD Check Failures\n');
+      for (const f of checkFindings) {
+        taskParts.push(`- **${f.name || 'Unknown check'}**: FAILING`);
+        if (f.url) {
+          taskParts.push(`  URL: ${f.url}`);
+        }
+      }
+      taskParts.push('\nInvestigate and fix the failing checks.\n');
+    }
+
+    if (commentFindings.length > 0) {
+      taskParts.push('### PR Review Comments to Address\n');
+      for (const f of commentFindings) {
+        taskParts.push(`- **${f.author || 'Reviewer'}** (${f.source || 'review'}):`);
+        taskParts.push(`  ${f.body || f.text || ''}`);
+        if (f.path) {
+          taskParts.push(`  File: ${f.path}${f.line ? `:${f.line}` : ''}`);
+        }
+        taskParts.push('');
+      }
+      taskParts.push('Address all listed review feedback.\n');
+    }
+
+    if (alertFindings.length > 0) {
+      taskParts.push('### Security Alerts\n');
+      for (const f of alertFindings) {
+        taskParts.push(`- **[${(f.severity || 'medium').toUpperCase()}]** ${f.description || f.text || ''}`);
+        if (f.file) {
+          taskParts.push(`  File: ${f.file}`);
+        }
+        taskParts.push('');
+      }
+      taskParts.push('Fix all listed security issues.\n');
+    }
+
+    const taskDescription = taskParts.join('\n');
+
+    // ── 2. Invoke Copilot CLI ────────────────────────────────────────
+    log.info('Invoking Copilot CLI to address selected findings', {
+      releaseId,
+      cwd,
+      findingCount: findings.length,
+    });
+
+    let copilotResult;
+    const outputLines: string[] = [];
+    try {
+      copilotResult = await this.copilot.run({
+        cwd,
+        task: taskDescription,
+        timeout: 0,
+        onOutput: (line: string) => {
+          outputLines.push(line);
+        },
+      });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      log.error('Copilot CLI invocation failed', {
+        releaseId,
+        error: errMsg,
+        lastOutput: outputLines.slice(-10).join('\n'),
+      });
+      this.emit('releaseActionTaken', releaseId, {
+        type: 'fix-code',
+        description: `Copilot CLI failed: ${errMsg}`,
+        success: false,
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    if (!copilotResult.success) {
+      log.warn('Copilot CLI reported failure', {
+        releaseId,
+        error: copilotResult.error,
+      });
+      this.emit('releaseActionTaken', releaseId, {
+        type: 'fix-code',
+        description: `Copilot CLI failed to apply fixes: ${copilotResult.error || 'unknown error'}`,
+        success: false,
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    log.info('Copilot CLI completed', { releaseId, success: true });
+
+    // ── 3. Commit and push ───────────────────────────────────────────
+    let hasChanges = false;
+    try {
+      hasChanges = await this.git.repository.hasChanges(cwd);
+    } catch (err) {
+      log.error('Failed to check git status', {
+        releaseId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    let commitHash: string | undefined;
+
+    if (hasChanges) {
+      try {
+        await this.git.repository.stageAll(cwd);
+
+        const commitMessage = `Address ${findings.length} PR finding(s)
+
+Automated fixes for:
+${checkFindings.length > 0 ? `- ${checkFindings.length} failing CI check(s)\n` : ''}${commentFindings.length > 0 ? `- ${commentFindings.length} review comment(s)\n` : ''}${alertFindings.length > 0 ? `- ${alertFindings.length} security alert(s)\n` : ''}
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
+
+        await this.git.repository.commit(cwd, commitMessage);
+
+        const headRef = await this.git.repository.getHead(cwd);
+        commitHash = headRef || undefined;
+
+        await this.git.repository.push(cwd, { branch: release.releaseBranch });
+
+        log.info('Changes committed and pushed', {
+          releaseId,
+          commitHash,
+          branch: release.releaseBranch,
+        });
+
+        this.emit('releaseActionTaken', releaseId, {
+          type: 'fix-code',
+          description: `Committed and pushed fixes for ${findings.length} finding(s)`,
+          success: true,
+          commitHash,
+          timestamp: Date.now(),
+        });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        log.error('Failed to commit/push changes', { releaseId, error: errMsg });
+        this.emit('releaseActionTaken', releaseId, {
+          type: 'fix-code',
+          description: `Failed to commit/push: ${errMsg}`,
+          success: false,
+          timestamp: Date.now(),
+        });
+      }
+    } else {
+      log.info('No changes produced by AI', { releaseId });
+      this.emit('releaseActionTaken', releaseId, {
+        type: 'fix-code',
+        description: 'Copilot completed but produced no code changes',
+        success: true,
+        timestamp: Date.now(),
+      });
+    }
+
+    // ── 4. Reply to PR comments and resolve threads ──────────────────
+    if (release.prNumber && commentFindings.length > 0) {
+      let prService;
+      try {
+        prService = await this.prServiceFactory.getServiceForRepo(cwd);
+      } catch (err) {
+        log.error('Failed to get PR service for comment replies', {
+          releaseId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      if (prService) {
+        for (const comment of commentFindings) {
+          const commentId = comment.commentId || comment.id?.replace('comment-', '');
+          if (!commentId) {
+            continue;
+          }
+
+          try {
+            const replyText = `✅ Addressed in automated fix${commitHash ? ` (${commitHash.substring(0, 7)})` : ''}`;
+
+            await prService.replyToComment(
+              release.prNumber,
+              commentId,
+              replyText,
+              cwd,
+            );
+
+            // Resolve thread if we have a proper GraphQL thread ID
+            if (comment.threadId) {
+              try {
+                await prService.resolveThread(
+                  release.prNumber,
+                  comment.threadId,
+                  cwd,
+                );
+              } catch (resolveErr) {
+                log.warn('Failed to resolve thread (non-fatal)', {
+                  releaseId,
+                  threadId: comment.threadId,
+                  error: resolveErr instanceof Error ? resolveErr.message : String(resolveErr),
+                });
+              }
+            }
+
+            this.emit('releaseActionTaken', releaseId, {
+              type: 'respond-comment',
+              description: `Replied to ${comment.author || 'reviewer'}'s comment`,
+              success: true,
+              timestamp: Date.now(),
+            });
+          } catch (err) {
+            log.error('Failed to reply to comment', {
+              releaseId,
+              commentId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            this.emit('releaseActionTaken', releaseId, {
+              type: 'respond-comment',
+              description: `Failed to reply to ${comment.author || 'reviewer'}'s comment`,
+              success: false,
+              timestamp: Date.now(),
+            });
+          }
+        }
+      }
+    }
+
+    // Emit resolved finding IDs so the webview can mark them resolved
+    const resolvedIds = findings.map((f: any) => f.id);
+    this.emit('findingsResolved', releaseId, resolvedIds, !!commitHash);
+
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
   }
 
@@ -927,6 +1176,8 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
   on(event: 'releaseProgress', handler: (releaseId: string, progress: ReleaseProgress) => void): this;
   on(event: 'releasePRCycle', handler: (releaseId: string, cycle: import('./types/release').PRMonitorCycle) => void): this;
   on(event: 'releaseCompleted', handler: (release: ReleaseDefinition) => void): this;
+  on(event: 'releaseActionTaken', handler: (releaseId: string, action: import('./types/release').PRActionTaken & { timestamp?: number }) => void): this;
+  on(event: 'findingsResolved', handler: (releaseId: string, findingIds: string[], hasCommit: boolean) => void): this;
   on(event: string | symbol, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
@@ -1287,6 +1538,14 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         this.stateMachines.set(release.id, stateMachine);
       }
       log.info('Loaded persisted releases', { count: releases.length });
+
+      // Notify the sidebar that releases are available now
+      // (the sidebar may have already done its initial refresh before loading completed)
+      if (releases.length > 0) {
+        for (const release of releases) {
+          this.emit('releaseCreated', release);
+        }
+      }
       
       // Restore monitoring for any releases in monitoring state (delay to ensure all services are ready)
       const releasesToRestore = releases.filter(r => r.status === 'monitoring' && r.prNumber);

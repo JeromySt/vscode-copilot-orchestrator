@@ -19,11 +19,19 @@ import type { AvailablePlanSummary } from '../../panels/releaseManagementPanel';
  * @returns HTML `<script>…</script>` string.
  */
 export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, availablePlans: AvailablePlanSummary[] = []): string {
+  // Safely serialize data for embedding in a <script> tag.
+  // JSON.stringify doesn't escape </script> or <!, which would prematurely
+  // close the script tag if present in comment bodies or other user content.
+  const safeJson = (obj: unknown): string =>
+    JSON.stringify(obj)
+      .replace(/<\//g, '<\\/')     // </script> → <\/script>
+      .replace(/<!--/g, '<\\!--'); // <!-- → <\!--
+
   return `<script nonce="${nonce}">
     // ── Data Injection ──────────────────────────────────────────────────
     const vscode = acquireVsCodeApi();
-    const releaseData = ${JSON.stringify(release)};
-    const availablePlans = ${JSON.stringify(availablePlans)};
+    const releaseData = ${safeJson(release)};
+    const availablePlans = ${safeJson(availablePlans)};
 
     // ── Destructure from Bundle ─────────────────────────────────────────
     const { EventBus, SubscribableControl, Topics } = window.Orca || {};
@@ -367,6 +375,7 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       addCycle(cycle) {
         this.cycles.push(cycle);
         this.renderCycles();
+        this.renderChecks(cycle);
         // Reset countdown (cycle just ran)
         this.countdownSeconds = 120;
       }
@@ -424,6 +433,38 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
           
           return \`<div class="cycle-dot \${dotClass}" title="Cycle \${cycle.cycleNumber}"></div>\`;
         }).join('');
+      }
+      
+      renderChecks(cycle) {
+        const container = document.getElementById('pr-checks-list');
+        if (!container || !cycle || !cycle.checks || cycle.checks.length === 0) {
+          if (container) container.innerHTML = '';
+          return;
+        }
+        
+        const checks = cycle.checks;
+        const passing = checks.filter(c => c.status === 'passing');
+        const failing = checks.filter(c => c.status === 'failing');
+        const pending = checks.filter(c => c.status === 'pending');
+        
+        let html = '<h4 style="margin: 16px 0 8px 0; font-size: 13px; font-weight: 600;">CI/CD Checks (' + checks.length + ')</h4>';
+        
+        // Show failing first, then pending, then passing
+        const ordered = [...failing, ...pending, ...passing];
+        html += ordered.map(check => {
+          const icon = check.status === 'passing' ? '\u2705' :
+                      check.status === 'failing' ? '\u274C' : '\u23F3';
+          const urlLink = check.url ?
+            '<a class="pr-check-url" href="#" onclick="vscode.postMessage({type:\'openExternal\',url:\'' + check.url.replace(/'/g, '') + '\'}); return false;" title="View details">\u2197</a>' : '';
+          return '<div class="pr-check-item ' + check.status + '">' +
+            '<span class="pr-check-icon">' + icon + '</span>' +
+            '<span class="pr-check-name">' + check.name + '</span>' +
+            '<span class="pr-check-status-label">' + check.status + '</span>' +
+            urlLink +
+            '</div>';
+        }).join('');
+        
+        container.innerHTML = html;
       }
     }
     
@@ -541,6 +582,18 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
           for (const f of filtered) this.selected.delete(f.id);
         } else {
           for (const f of filtered) this.selected.add(f.id);
+        }
+        this.render();
+      }
+      
+      markResolved(findingIds) {
+        if (!Array.isArray(findingIds)) return;
+        const idSet = new Set(findingIds);
+        for (const f of this.findings) {
+          if (idSet.has(f.id)) {
+            f.resolved = true;
+            this.selected.delete(f.id);
+          }
         }
         this.render();
       }
@@ -747,6 +800,21 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       prMonitor = new PRMonitorControl();
       actionLog = new ActionLogControl();
       pendingActions = new PendingActionsControl();
+
+      // Seed controls with the last cycle data if available (panel opened after cycle ran)
+      if (releaseData.lastCycle) {
+        prMonitor.addCycle(releaseData.lastCycle);
+        pendingActions.updateFromCycle(releaseData.lastCycle);
+        // Also update stats from the stored monitoringStats
+        if (releaseData.monitoringStats) {
+          prMonitor.update({
+            checksPass: releaseData.monitoringStats.checksPass || 0,
+            checksFail: releaseData.monitoringStats.checksFail || 0,
+            unresolvedComments: releaseData.monitoringStats.unresolvedComments || 0,
+            unresolvedAlerts: releaseData.monitoringStats.unresolvedAlerts || 0,
+          });
+        }
+      }
     }
 
     // ── Fetch Git Account ───────────────────────────────────────────────
@@ -818,6 +886,12 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
         case 'actionTaken':
           if (actionLog) {
             actionLog.addAction(message.action);
+          }
+          break;
+          
+        case 'findingsResolved':
+          if (pendingActions && message.findingIds) {
+            pendingActions.markResolved(message.findingIds);
           }
           break;
       }

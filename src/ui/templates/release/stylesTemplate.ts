@@ -781,6 +781,33 @@ function prMonitorStyles(): string {
     .pr-check-item.passing { border-left-color: var(--vscode-testing-iconPassed); }
     .pr-check-item.failing { border-left-color: var(--vscode-testing-iconFailed); }
     .pr-check-item.pending { border-left-color: var(--vscode-button-background); }
+    .pr-check-icon {
+      font-size: 14px;
+      min-width: 18px;
+    }
+    .pr-check-name {
+      flex: 1;
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pr-check-status-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      color: var(--vscode-descriptionForeground);
+      min-width: 50px;
+      text-align: right;
+    }
+    .pr-check-url {
+      font-size: 12px;
+      color: var(--vscode-textLink-foreground);
+      text-decoration: none;
+      margin-left: 4px;
+    }
+    .pr-check-url:hover {
+      text-decoration: underline;
+    }
     .pr-cycle-timeline {
       margin: 24px 0 16px 0;
     }

@@ -257,4 +257,6 @@ export interface IReleaseManager {
   on(event: 'releaseProgress', handler: (releaseId: string, progress: ReleaseProgress) => void): void;
   on(event: 'releasePRCycle', handler: (releaseId: string, cycle: import('../plan/types/release').PRMonitorCycle) => void): void;
   on(event: 'releaseCompleted', handler: (release: ReleaseDefinition) => void): void;
+  on(event: 'releaseActionTaken', handler: (releaseId: string, action: import('../plan/types/release').PRActionTaken & { timestamp?: number }) => void): void;
+  on(event: 'findingsResolved', handler: (releaseId: string, findingIds: string[], hasCommit: boolean) => void): void;
 }

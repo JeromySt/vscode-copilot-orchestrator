@@ -234,6 +234,9 @@ export interface ReleaseDefinition {
     lastCycleAt?: number;
   };
 
+  /** Latest monitoring cycle data (comments, checks, alerts for UI rendering) */
+  lastCycle?: PRMonitorCycle;
+
   /** History of state transitions */
   stateHistory: StateTransition[];
 }

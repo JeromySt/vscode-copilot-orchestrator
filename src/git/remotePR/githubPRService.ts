@@ -147,6 +147,10 @@ export class GitHubPRService implements IRemotePRService {
 
   /**
    * Get all CI/CD check statuses for a pull request.
+   *
+   * Uses the REST API (repos/{owner}/{repo}/commits/{ref}/check-runs) instead of
+   * `gh pr checks --json` because older gh CLI versions don't support --json on
+   * the `pr checks` subcommand.
    */
   async getPRChecks(prNumber: number, cwd: string): Promise<PRCheck[]> {
     const provider = await this.detectProvider(cwd);
@@ -155,23 +159,67 @@ export class GitHubPRService implements IRemotePRService {
     log.debug('Getting PR checks', { prNumber });
 
     const env = this._buildEnv(provider, credentials);
+    const ownerRepo = `${provider.owner}/${provider.repoName}`;
 
     try {
-      const result = await this._execGh(
-        ['pr', 'checks', String(prNumber), '--json', 'name,state,link'],
-        cwd,
-        env,
-      );
-      const parsed: Array<{ name: string; state: string; link: string }> = JSON.parse(result);
+      // First get the PR's head SHA
+      const prEndpoint = `repos/${ownerRepo}/pulls/${prNumber}`;
+      const prResult = await this._execGhApi(prEndpoint, cwd, env);
+      const prData = JSON.parse(prResult);
+      const headSha = prData?.head?.sha;
 
-      const checks: PRCheck[] = parsed.map((check) => ({
-        name: check.name,
-        status:
-          check.state === 'SUCCESS' ? 'passing' :
-          check.state === 'FAILURE' ? 'failing' :
-          'pending',
-        url: check.link || '',
-      }));
+      if (!headSha) {
+        log.warn('Could not determine PR head SHA', { prNumber });
+        return [];
+      }
+
+      // Fetch check runs for the head commit via REST API
+      const checksEndpoint = `repos/${ownerRepo}/commits/${headSha}/check-runs?per_page=100`;
+      const checksResult = await this._execGhApi(checksEndpoint, cwd, env);
+      const checksData = JSON.parse(checksResult);
+
+      // Also fetch commit statuses (some CI systems use the status API, not checks)
+      let statuses: Array<{ context: string; state: string; target_url: string }> = [];
+      try {
+        const statusEndpoint = `repos/${ownerRepo}/commits/${headSha}/statuses?per_page=100`;
+        const statusResult = await this._execGhApi(statusEndpoint, cwd, env);
+        statuses = JSON.parse(statusResult);
+      } catch {
+        // Status API may not be available, ignore
+      }
+
+      const checks: PRCheck[] = [];
+
+      // Map check runs
+      if (Array.isArray(checksData?.check_runs)) {
+        for (const run of checksData.check_runs) {
+          checks.push({
+            name: run.name,
+            status: this._mapCheckState(
+              run.conclusion || run.status,
+            ),
+            url: run.html_url || run.details_url || '',
+          });
+        }
+      }
+
+      // Map commit statuses (deduplicate by context, keep latest)
+      const statusByContext = new Map<string, typeof statuses[0]>();
+      for (const s of statuses) {
+        if (!statusByContext.has(s.context)) {
+          statusByContext.set(s.context, s);
+        }
+      }
+      for (const [, s] of statusByContext) {
+        // Don't duplicate if a check run already exists with the same name
+        if (!checks.some(c => c.name === s.context)) {
+          checks.push({
+            name: s.context,
+            status: this._mapCheckState(s.state),
+            url: s.target_url || '',
+          });
+        }
+      }
 
       log.info('PR checks retrieved', { prNumber, count: checks.length });
       return checks;

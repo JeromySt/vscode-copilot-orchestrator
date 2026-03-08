@@ -305,31 +305,16 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
     let actions: PRActionTaken[] = [];
 
     if (hasFindings) {
-      log.info('Findings detected, addressing', {
+      log.info('Findings detected (auto-fix disabled, awaiting user action)', {
         releaseId: state.releaseId,
         failingChecks: cycleChecks.filter((c) => c.status === 'failing').length,
         unresolvedComments: cycleComments.filter((c) => !c.isResolved).length,
         unresolvedAlerts: cycleAlerts.filter((a) => !a.resolved).length,
       });
 
-      actions = await this._addressFindings(state, {
-        cycleNumber,
-        timestamp,
-        checks: cycleChecks,
-        comments: cycleComments,
-        securityAlerts: cycleAlerts,
-        actions: [],
-      });
-
-      // If we made changes and pushed, reset the timer
-      const hasPush = actions.some((a) => a.commitHash);
-      if (hasPush) {
-        state.lastPushTime = Date.now();
-        log.info('Push detected, timer reset', {
-          releaseId: state.releaseId,
-          newLastPushTime: state.lastPushTime,
-        });
-      }
+      // Auto-fix is disabled. Findings are emitted via the cycleComplete event
+      // so the UI can display them in the Pending Actions panel. The user
+      // selects which findings to address and triggers AI fixes from there.
     } else {
       log.info('No findings detected', { releaseId: state.releaseId });
     }

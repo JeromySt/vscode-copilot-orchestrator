@@ -157,25 +157,41 @@ suite('GitHubPRService', () => {
 
   suite('getPRChecks', () => {
     test('parses gh output, maps states', async () => {
-      const mockOutput = JSON.stringify([
-        { name: 'CI / build', state: 'SUCCESS', link: 'https://github.com/actions/1' },
-        { name: 'CodeQL', state: 'FAILURE', link: 'https://github.com/actions/2' },
-        { name: 'Lint', state: 'PENDING', link: 'https://github.com/actions/3' },
-      ]);
-      
-      const mockProc = makeMockProcess(mockOutput, '', 0);
-      (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
+      // The new implementation makes 3 API calls:
+      // 1. GET repos/{owner}/{repo}/pulls/{prNumber}  → { head: { sha } }
+      // 2. GET repos/{owner}/{repo}/commits/{sha}/check-runs → { check_runs: [...] }
+      // 3. GET repos/{owner}/{repo}/commits/{sha}/statuses  → [] (optional)
+      let callCount = 0;
+      (mockSpawner.spawn as sinon.SinonStub).callsFake(() => {
+        callCount++;
+        if (callCount === 1) {
+          // PR detail — return head SHA
+          return makeMockProcess(JSON.stringify({ head: { sha: 'deadbeef' } }), '', 0);
+        }
+        if (callCount === 2) {
+          // Check-runs
+          return makeMockProcess(JSON.stringify({
+            check_runs: [
+              { name: 'CI / build', conclusion: 'success', html_url: 'https://github.com/actions/1' },
+              { name: 'CodeQL', conclusion: 'failure', html_url: 'https://github.com/actions/2' },
+              { name: 'Lint', status: 'in_progress', conclusion: null, html_url: 'https://github.com/actions/3' },
+            ],
+          }), '', 0);
+        }
+        // Statuses (3rd call) — return empty array
+        return makeMockProcess(JSON.stringify([]), '', 0);
+      });
 
       const checks = await service.getPRChecks(42, '/repo');
 
       assert.strictEqual(checks.length, 3);
-      
+
       assert.strictEqual(checks[0].name, 'CI / build');
       assert.strictEqual(checks[0].status, 'passing');
-      
+
       assert.strictEqual(checks[1].name, 'CodeQL');
       assert.strictEqual(checks[1].status, 'failing');
-      
+
       assert.strictEqual(checks[2].name, 'Lint');
       assert.strictEqual(checks[2].status, 'pending');
     });

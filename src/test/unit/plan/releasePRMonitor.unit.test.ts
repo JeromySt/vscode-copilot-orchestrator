@@ -208,7 +208,7 @@ suite('ReleasePRMonitor', () => {
     assert.strictEqual(isMonitoring, false);
   });
 
-  test('resets timer on push', async () => {
+  test('emits cycleComplete event with findings (auto-fix disabled)', async () => {
     const mockService = createMockPRService();
     mockService.getPRComments.resolves([
       {
@@ -225,37 +225,32 @@ suite('ReleasePRMonitor', () => {
 
     const factory = createMockPRServiceFactory(mockService);
     const git = createMockGit();
-    git.repository.hasChanges.resolves(true);
-    git.repository.getHead.resolves('new123');
 
     const monitor = new DefaultReleasePRMonitor(
       createMockCopilot(),
       createMockSpawner(),
       git,
       factory,
-      createTimerBasedPulse(),
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
+
+    const cycleCompleteEvents: any[] = [];
+    monitor.on('cycleComplete', (releaseId: string, cycle: any) => {
+      cycleCompleteEvents.push({ releaseId, cycle });
+    });
 
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
 
-    // First cycle with findings - should push
+    // First cycle runs immediately with findings detected
     assert.strictEqual(mockService.getPRChecks.callCount, 1);
-    assert.ok(git.repository.push.calledOnce);
-
-    // Reset mocks
-    mockService.getPRChecks.resetHistory();
-    mockService.getPRComments.resolves([]);
-    git.repository.hasChanges.resolves(false);
-    git.repository.push.resetHistory();
-
-    // Advance by 40 minutes
-    for (let i = 0; i < 20; i++) {
-      await clock.tickAsync(120000);
-    }
-
-    // Should still be monitoring because timer was reset by the push
-    const isMonitoring = monitor.isMonitoring('rel-1');
-    assert.strictEqual(isMonitoring, true);
+    // Auto-fix is disabled — no push, no replies, no thread resolution
+    assert.ok(git.repository.push.notCalled);
+    assert.ok(mockService.replyToComment.notCalled);
+    assert.ok(mockService.resolveThread.notCalled);
+    // cycleComplete event should have been emitted with the findings
+    assert.strictEqual(cycleCompleteEvents.length, 1);
+    assert.strictEqual(cycleCompleteEvents[0].releaseId, 'rel-1');
+    assert.strictEqual(cycleCompleteEvents[0].cycle.comments.length, 1);
 
     monitor.stopMonitoring('rel-1');
   });
@@ -323,7 +318,7 @@ suite('ReleasePRMonitor', () => {
     monitor.stopMonitoring('rel-1');
   });
 
-  test('calls prService.replyToComment() for each comment', async () => {
+  test('does not auto-reply to comments (auto-fix disabled)', async () => {
     const mockService = createMockPRService();
     mockService.getPRComments.resolves([
       {
@@ -348,7 +343,6 @@ suite('ReleasePRMonitor', () => {
 
     const factory = createMockPRServiceFactory(mockService);
     const git = createMockGit();
-    git.repository.hasChanges.resolves(true);
 
     const monitor = new DefaultReleasePRMonitor(
       createMockCopilot(),
@@ -358,17 +352,21 @@ suite('ReleasePRMonitor', () => {
       { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
+    const cycleEvents: any[] = [];
+    monitor.on('cycleComplete', (_: string, cycle: any) => cycleEvents.push(cycle));
+
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
 
-    // Should reply to both comments
-    assert.strictEqual(mockService.replyToComment.callCount, 2);
-    assert.strictEqual(mockService.replyToComment.firstCall.args[0], 42);
-    assert.strictEqual(mockService.replyToComment.firstCall.args[1], 'c1');
+    // Auto-fix disabled: no automatic replies
+    assert.strictEqual(mockService.replyToComment.callCount, 0);
+    // But the cycle should have captured the comments for display in the UI
+    assert.strictEqual(cycleEvents.length, 1);
+    assert.strictEqual(cycleEvents[0].comments.length, 2);
 
     monitor.stopMonitoring('rel-1');
   });
 
-  test('calls prService.resolveThread()', async () => {
+  test('does not auto-resolve threads (auto-fix disabled)', async () => {
     const mockService = createMockPRService();
     mockService.getPRComments.resolves([
       {
@@ -385,7 +383,6 @@ suite('ReleasePRMonitor', () => {
 
     const factory = createMockPRServiceFactory(mockService);
     const git = createMockGit();
-    git.repository.hasChanges.resolves(true);
 
     const monitor = new DefaultReleasePRMonitor(
       createMockCopilot(),
@@ -395,13 +392,16 @@ suite('ReleasePRMonitor', () => {
       { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
     );
 
+    const cycleEvents: any[] = [];
+    monitor.on('cycleComplete', (_: string, cycle: any) => cycleEvents.push(cycle));
+
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
 
-    // Should resolve the thread
-    assert.ok(mockService.resolveThread.calledOnce);
-    assert.strictEqual(mockService.resolveThread.firstCall.args[0], 42);
-    assert.strictEqual(mockService.resolveThread.firstCall.args[1], 't1');
-    assert.strictEqual(mockService.resolveThread.firstCall.args[2], '/repo/.orchestrator/release/v1');
+    // Auto-fix disabled: no automatic thread resolution
+    assert.ok(mockService.resolveThread.notCalled);
+    // Findings are surfaced via cycleComplete for user-triggered fixes
+    assert.strictEqual(cycleEvents.length, 1);
+    assert.strictEqual(cycleEvents[0].comments[0].isResolved, false);
 
     monitor.stopMonitoring('rel-1');
   });

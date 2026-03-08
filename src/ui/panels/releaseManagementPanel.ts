@@ -153,6 +153,24 @@ export class ReleaseManagementPanel {
         }
       });
 
+      // Forward individual actions to the webview action log
+      (this._releaseManager as any).on('releaseActionTaken', (releaseId: string, action: any) => {
+        if (releaseId === this._releaseId && !this._disposed) {
+          try {
+            this._panel.webview.postMessage({ type: 'actionTaken', action });
+          } catch { /* panel disposed */ }
+        }
+      });
+
+      // Forward finding resolution to the webview pending-actions list
+      (this._releaseManager as any).on('findingsResolved', (releaseId: string, findingIds: string[], hasCommit: boolean) => {
+        if (releaseId === this._releaseId && !this._disposed) {
+          try {
+            this._panel.webview.postMessage({ type: 'findingsResolved', findingIds, hasCommit });
+          } catch { /* panel disposed */ }
+        }
+      });
+
       // Full refresh on release progress changes (status transitions)
       (this._releaseManager as any).on('releaseProgress', (releaseId: string) => {
         if (releaseId === this._releaseId && !this._disposed) {
