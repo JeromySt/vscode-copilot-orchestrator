@@ -526,4 +526,74 @@ suite('PlanLifecycleManager – extra coverage', () => {
       assert.strictEqual((plan as any).pauseHistory[0].resumedAt, priorResumeTime);
     });
   });
+
+  suite('cancel – cleanupPlanResources error path (line 460)', () => {
+    test('logs error when cleanupPlanResources rejects during cancel', async () => {
+      const log = createMockLogger();
+      const state = makeState();
+      const lifecycle = new PlanLifecycleManager(state as any, log, createMockGit());
+
+      // Stub cleanupPlanResources to reject
+      sinon.stub(lifecycle, 'cleanupPlanResources').rejects(new Error('cleanup failed'));
+
+      const plan = createTestPlan('plan-1');
+      (plan as any).stateHistory = [];
+      state.plans.set('plan-1', plan);
+      const mockSm: any = { cancelAll: sinon.stub(), on: sinon.stub() };
+      state.stateMachines.set('plan-1', mockSm);
+
+      lifecycle.cancel('plan-1');
+
+      // Give the promise microtask a tick to resolve
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      assert.ok((log.error as sinon.SinonStub).calledWithMatch(sinon.match(/cleanup canceled/)));
+    });
+  });
+
+  suite('delete – cleanupPlanResources error path (line 513)', () => {
+    test('logs error when cleanupPlanResources rejects during delete', async () => {
+      const log = createMockLogger();
+      const state = makeState();
+      const lifecycle = new PlanLifecycleManager(state as any, log, createMockGit());
+
+      sinon.stub(lifecycle, 'cleanupPlanResources').rejects(new Error('cleanup failed'));
+
+      const plan = createTestPlan('plan-1');
+      (plan as any).stateHistory = [];
+      state.plans.set('plan-1', plan);
+      const mockSm: any = { cancelAll: sinon.stub(), on: sinon.stub() };
+      state.stateMachines.set('plan-1', mockSm);
+
+      lifecycle.delete('plan-1');
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      assert.ok((log.error as sinon.SinonStub).calledWithMatch(sinon.match(/cleanup Plan resources/)));
+    });
+  });
+
+  suite('enqueueJob – startPaused branch (lines 293-298)', () => {
+    test('sets isPaused and records stateHistory when startPaused is true', () => {
+      const log = createMockLogger();
+      const PlanStateMachine = require('../../../plan/stateMachine').PlanStateMachine;
+      const state = makeState({
+        config: { storagePath: '/tmp', defaultRepoPath: '/repo' },
+        stateMachineFactory: (plan: any) => new PlanStateMachine(plan),
+      });
+      const lifecycle = new PlanLifecycleManager(state as any, log, createMockGit());
+
+      const plan = lifecycle.enqueueJob({
+        name: 'Test Job',
+        task: 'test-task',
+        work: 'echo hello',
+        baseBranch: 'main',
+        startPaused: true,
+      });
+
+      assert.ok(plan.isPaused, 'plan should be paused');
+      assert.ok((plan as any).stateHistory.some((e: any) => e.to === 'pending-start'), 'stateHistory should have pending-start');
+      assert.ok((plan as any).pauseHistory.length > 0, 'pauseHistory should have entry');
+    });
+  });
 });
