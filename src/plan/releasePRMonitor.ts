@@ -228,16 +228,15 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       prNumber: state.prNumber,
     });
 
-    // Check if we've exceeded the max monitoring time since last push
+    // Check if we've exceeded the max monitoring time since last push.
+    // Only stop if there are no outstanding findings — if there are still
+    // unresolved comments/checks/alerts, keep monitoring so the user
+    // can see them and trigger AI fixes.
     const elapsedSinceLastPush = timestamp - state.lastPushTime;
     if (elapsedSinceLastPush > MAX_MONITORING_MS) {
-      log.info('Max monitoring time exceeded, stopping', {
-        releaseId: state.releaseId,
-        elapsedMs: elapsedSinceLastPush,
-        maxMs: MAX_MONITORING_MS,
-      });
-      this.stopMonitoring(state.releaseId);
-      return;
+      // We'll check findings after fetching status below.
+      // For now, just log and continue — the actual stop decision
+      // happens after we know the current findings state.
     }
 
     // Fetch current PR status via prService
@@ -320,6 +319,28 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       // selects which findings to address and triggers AI fixes from there.
     } else {
       log.info('No findings detected', { releaseId: state.releaseId });
+
+      // Only stop on timeout when everything is green (no findings)
+      if (elapsedSinceLastPush > MAX_MONITORING_MS) {
+        log.info('All green and max monitoring time exceeded, stopping', {
+          releaseId: state.releaseId,
+          elapsedMs: elapsedSinceLastPush,
+          maxMs: MAX_MONITORING_MS,
+        });
+        // Still record and emit this cycle before stopping
+        const cycle: PRMonitorCycle = {
+          cycleNumber,
+          timestamp,
+          checks: cycleChecks,
+          comments: cycleComments,
+          securityAlerts: cycleAlerts,
+          actions,
+        };
+        state.cycles.push(cycle);
+        this.emit('cycleComplete', state.releaseId, cycle);
+        this.stopMonitoring(state.releaseId);
+        return;
+      }
     }
 
     // Record the cycle

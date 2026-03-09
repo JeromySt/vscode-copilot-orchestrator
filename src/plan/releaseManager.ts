@@ -116,6 +116,18 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       });
     }
 
+    // Persist action log entries on the release so they survive webview re-renders.
+    // The webview seeds ActionLogControl from releaseData.actionLog on initial render.
+    this.on('releaseActionTaken', (releaseId: string, action: any) => {
+      const rel = this.releases.get(releaseId);
+      if (rel) {
+        if (!rel.actionLog) { rel.actionLog = []; }
+        rel.actionLog.unshift(action);
+        // Cap at 100 entries to avoid bloating serialization
+        if (rel.actionLog.length > 100) { rel.actionLog.length = 100; }
+      }
+    });
+
     this._loadPersistedReleases().catch((error) => {
       log.error('Failed to load persisted releases on startup', { error: (error as Error).message });
     });

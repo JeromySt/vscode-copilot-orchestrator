@@ -436,22 +436,41 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
         const container = document.getElementById('cycle-dots');
         if (!container) return;
         
+        // Update the cycle count in the header
+        var headerEl = container.closest('.pr-cycle-timeline');
+        if (headerEl) {
+          var h4 = headerEl.querySelector('h4');
+          if (h4) h4.textContent = 'Monitoring Cycles (' + this.cycles.length + ')';
+        }
+        
         if (this.cycles.length === 0) {
-          container.innerHTML = \`
-            <div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 11px;">
-              No monitoring cycles yet
-            </div>
-          \`;
+          container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 11px;">No monitoring cycles yet</div>';
           return;
         }
         
-        container.innerHTML = this.cycles.map((cycle, idx) => {
-          const isActive = idx === this.cycles.length - 1;
-          const hasIssues = cycle.actions && cycle.actions.length > 0;
-          const dotClass = isActive ? 'active' : (hasIssues ? 'partial' : 'success');
+        // Show last 20 cycles as dots, with a summary for older ones
+        var maxDots = 20;
+        var cycles = this.cycles;
+        var startIdx = Math.max(0, cycles.length - maxDots);
+        var html = '';
+        
+        if (startIdx > 0) {
+          html += '<span style="font-size:10px;color:var(--vscode-descriptionForeground);margin-right:4px;">+' + startIdx + ' older</span>';
+        }
+        
+        for (var i = startIdx; i < cycles.length; i++) {
+          var cycle = cycles[i];
+          var isLatest = i === cycles.length - 1;
+          var hasFindings = false;
+          if (cycle.checks) hasFindings = cycle.checks.some(function(c) { return c.status === 'failing'; });
+          if (!hasFindings && cycle.comments) hasFindings = cycle.comments.some(function(c) { return !c.isResolved; });
+          if (!hasFindings && cycle.securityAlerts) hasFindings = cycle.securityAlerts.some(function(a) { return !a.resolved; });
           
-          return \`<div class="cycle-dot \${dotClass}" title="Cycle \${cycle.cycleNumber}"></div>\`;
-        }).join('');
+          var dotClass = isLatest ? (hasFindings ? 'partial' : 'active') : (hasFindings ? 'partial' : 'success');
+          html += '<div class="cycle-dot ' + dotClass + '" title="Cycle ' + cycle.cycleNumber + (hasFindings ? ' (has findings)' : ' (clean)') + '"></div>';
+        }
+        
+        container.innerHTML = html;
       }
       
       renderChecks(cycle) {
@@ -1055,6 +1074,15 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
             unresolvedComments: releaseData.monitoringStats.unresolvedComments || 0,
             unresolvedAlerts: releaseData.monitoringStats.unresolvedAlerts || 0,
           });
+        }
+      }
+
+      // Seed action log from persisted entries (survive re-renders)
+      if (releaseData.actionLog && releaseData.actionLog.length > 0) {
+        // actionLog is stored newest-first, addAction also prepends, so reverse to maintain order
+        var reversedLog = releaseData.actionLog.slice().reverse();
+        for (var i = 0; i < reversedLog.length; i++) {
+          actionLog.addAction(reversedLog[i]);
         }
       }
 

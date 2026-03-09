@@ -212,9 +212,16 @@ export class ReleaseManagementPanel {
         }
       });
 
-      // Full refresh on release progress changes (status transitions)
+      // Full refresh on release progress changes — but ONLY for status transitions.
+      // During monitoring, all updates are incremental (messages), not full re-renders.
       (this._releaseManager as any).on('releaseProgress', (releaseId: string) => {
         if (releaseId === this._releaseId && !this._disposed) {
+          const release = this._getReleaseData(this._releaseId);
+          const status = release?.status;
+          // Skip full refresh if we're in a monitoring state — incremental updates handle it
+          if (status === 'monitoring' || status === 'addressing' || status === 'pr-active') {
+            return;
+          }
           this._forceFullRefresh();
         }
       });

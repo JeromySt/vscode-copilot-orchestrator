@@ -237,6 +237,9 @@ export interface ReleaseDefinition {
   /** Latest monitoring cycle data (comments, checks, alerts for UI rendering) */
   lastCycle?: PRMonitorCycle;
 
+  /** Persisted action log entries (survives webview re-renders) */
+  actionLog?: Array<PRActionTaken & { timestamp?: number }>;
+
   /** History of state transitions */
   stateHistory: StateTransition[];
 }
