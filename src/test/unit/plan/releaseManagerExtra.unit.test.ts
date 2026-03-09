@@ -105,6 +105,7 @@ function createMockPRServiceFactory(overrides?: any): any {
     getPRComments: sinon.stub().resolves([]),
     getSecurityAlerts: sinon.stub().resolves([]),
     replyToComment: sinon.stub().resolves(),
+    addIssueComment: sinon.stub().resolves(),
     resolveThread: sinon.stub().resolves(),
     ...overrides,
   };
@@ -814,6 +815,7 @@ suite('ReleaseManager – extra coverage', () => {
           id: 'c1',
           commentId: 'comment-123',
           threadId: 'thread-abc',
+          path: 'src/foo.ts',
         },
       ]);
 
