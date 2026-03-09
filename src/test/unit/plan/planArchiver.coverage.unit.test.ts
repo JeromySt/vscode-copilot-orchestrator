@@ -239,4 +239,80 @@ suite('PlanArchiver coverage', () => {
       assert.ok(result.error?.includes('disk full'));
     });
   });
+
+  // ── Snapshot worktree removal failure (lines 139-145) ────────────────────
+
+  suite('snapshot worktree removal failure', () => {
+    test('handles snapshot worktree removeSafe failure gracefully (lines 139-145)', async () => {
+      const plan = makeMockPlan();
+      plan.snapshot = {
+        worktreePath: '/repo/.worktrees/plan-1/snapshot',
+        branch: undefined,
+      };
+
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      mockGit.worktrees.isValid.resolves(true);
+      mockGit.worktrees.removeSafe.rejects(new Error('snapshot worktree locked'));
+      mockGit.branches.exists.resolves(false);
+
+      const result = await archiver.archive('plan-1');
+
+      // Should succeed even though snapshot worktree removal failed
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.cleanedWorktrees.length, 0);
+    });
+  });
+
+  // ── Snapshot branch deletion failure (lines 193-194) ─────────────────────
+
+  suite('snapshot branch deletion failure', () => {
+    test('handles snapshot branch deleteLocal failure gracefully (lines 193-194)', async () => {
+      const plan = makeMockPlan();
+      plan.snapshot = {
+        branch: 'copilot_plan/test-snapshot',
+      };
+
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      // Regular target branch deletion works fine
+      mockGit.branches.exists.callsFake((branch: string) => {
+        return Promise.resolve(true);
+      });
+      mockGit.branches.deleteLocal.callsFake((_repoPath: string, branch: string) => {
+        if (branch === 'copilot_plan/test-snapshot') {
+          return Promise.reject(new Error('snapshot branch in use'));
+        }
+        return Promise.resolve(true);
+      });
+
+      const result = await archiver.archive('plan-1');
+
+      // Should succeed even though snapshot branch deletion failed
+      assert.strictEqual(result.success, true);
+      // The target branch should still be cleaned up
+      assert.ok(result.cleanedBranches.includes('copilot_plan/test'));
+      // But not the snapshot branch
+      assert.ok(!result.cleanedBranches.includes('copilot_plan/test-snapshot'));
+    });
+  });
+
+  // ── Remote branch deletion failure (lines 212-213) ───────────────────────
+
+  suite('remote branch deletion failure', () => {
+    test('handles deleteRemote failure gracefully (lines 212-213)', async () => {
+      const plan = makeMockPlan();
+
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      mockGit.branches.exists.resolves(false);
+      mockGit.branches.remoteExists.resolves(true);
+      mockGit.branches.deleteRemote.rejects(new Error('remote branch locked'));
+
+      const result = await archiver.archive('plan-1', { deleteRemoteBranches: true });
+
+      // Should succeed even though remote branch deletion failed
+      assert.strictEqual(result.success, true);
+    });
+  });
 });
