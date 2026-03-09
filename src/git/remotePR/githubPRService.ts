@@ -327,6 +327,29 @@ export class GitHubPRService implements IRemotePRService {
   }
 
   /**
+   * Add a general comment to a pull request (issue comment).
+   */
+  async addIssueComment(prNumber: number, body: string, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    log.info('Adding issue comment', { prNumber });
+
+    const env = this._buildEnv(provider, credentials);
+    const ownerRepo = `${provider.owner}/${provider.repoName}`;
+    const endpoint = `repos/${ownerRepo}/issues/${prNumber}/comments`;
+
+    const args = [
+      'api', endpoint,
+      '-X', 'POST',
+      '-f', `body=${body}`,
+    ];
+
+    await this._execGh(args, cwd, env);
+    log.info('Issue comment posted', { prNumber });
+  }
+
+  /**
    * Resolve a review thread on a pull request.
    */
   async resolveThread(prNumber: number, threadId: string, cwd: string): Promise<void> {

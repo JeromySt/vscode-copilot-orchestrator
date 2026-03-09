@@ -380,6 +380,25 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
         this.countdownSeconds = 120;
       }
       
+      onStopped() {
+        this.isMonitoring = false;
+        // Update countdown display to show stopped state
+        const el = document.getElementById('countdown-display');
+        if (el) {
+          el.textContent = 'Stopped';
+          el.style.color = 'var(--vscode-descriptionForeground)';
+        }
+        // Update the timer bar label
+        const label = document.querySelector('.monitor-timer-label');
+        if (label) {
+          label.textContent = 'Monitoring idle';
+        }
+        const pollInfo = document.querySelector('.monitor-poll-info');
+        if (pollInfo) {
+          pollInfo.textContent = '(40 min timeout — click Start Monitoring to resume)';
+        }
+      }
+      
       startCountdown() {
         const countdownEl = document.getElementById('countdown-display');
         if (!countdownEl) return;
@@ -483,9 +502,10 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
     
     class PendingActionsControl {
       constructor() {
-        this.findings = [];  // { type, id, ...data }
+        this.findings = [];  // { type, id, ...data, aiStatus? }
         this.selected = new Set();
         this.filter = 'all';
+        this.aiActive = false;
         this.render();
       }
       
@@ -603,10 +623,50 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
         for (const f of this.findings) {
           if (idSet.has(f.id)) {
             f.resolved = true;
+            f.aiStatus = 'fixed';
             this.selected.delete(f.id);
           }
         }
+        this.aiActive = false;
+        this._updateBanner();
         this.render();
+      }
+      
+      setProcessing(findingIds, status) {
+        if (!Array.isArray(findingIds)) return;
+        const idSet = new Set(findingIds);
+        for (const f of this.findings) {
+          if (idSet.has(f.id)) {
+            f.aiStatus = status; // 'queued', 'processing', 'fixed', 'failed'
+          }
+        }
+        this.aiActive = (status === 'queued' || status === 'processing');
+        this._updateBanner();
+        this.render();
+      }
+      
+      // Mark selected items as queued immediately (called before async AI work)
+      markSelectedQueued() {
+        for (const id of this.selected) {
+          const f = this.findings.find(function(x) { return x.id === id; });
+          if (f) f.aiStatus = 'queued';
+        }
+        this.aiActive = true;
+        this._updateBanner();
+        this.render();
+      }
+      
+      _updateBanner() {
+        const banner = document.getElementById('ai-working-banner');
+        if (banner) {
+          if (this.aiActive) {
+            const count = this.findings.filter(function(f) { return f.aiStatus === 'queued' || f.aiStatus === 'processing'; }).length;
+            banner.style.display = 'flex';
+            banner.querySelector('.ai-banner-text').textContent = 'AI is working on ' + count + ' finding(s)...';
+          } else {
+            banner.style.display = 'none';
+          }
+        }
       }
       
       updateToolbar() {
@@ -705,6 +765,19 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       renderItem(finding) {
         const isChecked = this.selected.has(finding.id) ? 'checked' : '';
         const resolvedClass = finding.resolved ? ' resolved' : '';
+        const processingClass = (finding.aiStatus === 'queued' || finding.aiStatus === 'processing') ? ' processing' : '';
+        
+        // AI status badge
+        let aiStatusBadge = '';
+        if (finding.aiStatus === 'queued') {
+          aiStatusBadge = '<span class="pending-action-ai-status queued">\u23F3 Queued</span>';
+        } else if (finding.aiStatus === 'processing') {
+          aiStatusBadge = '<span class="pending-action-ai-status processing"><span class="ai-spinner"></span> Processing</span>';
+        } else if (finding.aiStatus === 'fixed') {
+          aiStatusBadge = '<span class="pending-action-ai-status fixed">\u2705 Fixed</span>';
+        } else if (finding.aiStatus === 'failed') {
+          aiStatusBadge = '<span class="pending-action-ai-status failed">\u274C Failed</span>';
+        }
         
         let badge = '';
         let metaInfo = '';
@@ -742,10 +815,10 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
           }
         }
         
-        return '<div class="pending-action-item' + resolvedClass + '" data-type="' + finding.type + '" data-id="' + finding.id + '">'
+        return '<div class="pending-action-item' + resolvedClass + processingClass + '" data-type="' + finding.type + '" data-id="' + finding.id + '">'
           + '<input type="checkbox" class="pending-action-checkbox" ' + isChecked + ' />'
           + '<div class="pending-action-body">'
-          + '<div class="pending-action-meta">' + badge + metaInfo + '</div>'
+          + '<div class="pending-action-meta">' + badge + metaInfo + aiStatusBadge + '</div>'
           + '<div class="pending-action-text">' + bodyText + '</div>'
           + (locationHtml ? '<div>' + locationHtml + '</div>' : '')
           + '</div>'
@@ -776,6 +849,8 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
     
     function addressSelectedWithAI() {
       if (pendingActions && pendingActions.selected.size > 0) {
+        // Mark selected items as queued immediately for instant feedback
+        pendingActions.markSelectedQueued();
         const selectedFindings = pendingActions.findings.filter(f => pendingActions.selected.has(f.id));
         vscode.postMessage({ type: 'addressWithAI', findings: selectedFindings });
       }
@@ -799,39 +874,156 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
         if (!container) return;
         
         if (this.actions.length === 0) {
-          container.innerHTML = \`
-            <div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 11px;">
-              No actions taken yet. The system will autonomously address feedback as it arrives.
-            </div>
-          \`;
+          container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 11px;">No actions taken yet. Use "Fix with AI" on pending findings to start.</div>';
           return;
         }
         
-        container.innerHTML = this.actions.map(action => {
-          const typeLabel = action.type.replace(/-/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase());
-          const statusClass = action.success ? 'success' : 'failed';
-          const statusText = action.success ? '✓ Success' : '✗ Failed';
-          const timestamp = new Date(action.timestamp || Date.now()).toLocaleTimeString();
+        container.innerHTML = this.actions.map(function(action) {
+          var icon = action.success
+            ? (action.type === 'fix-code' ? '\u2699\uFE0F' : action.type === 'respond-comment' ? '\uD83D\uDCAC' : '\u2705')
+            : '\u274C';
+          var statusClass = action.success ? 'success' : 'failed';
           
-          return \`
-            <div class="action-entry \${action.type}">
-              <div class="action-timestamp">\${timestamp}</div>
-              <div class="action-content">
-                <div class="action-type">
-                  \${typeLabel}
-                  <span class="action-status \${statusClass}">\${statusText}</span>
-                </div>
-                <div class="action-description">\${action.description}</div>
-              </div>
-            </div>
-          \`;
+          // Descriptive status label based on type + success
+          var statusText = 'Done';
+          if (!action.success) {
+            statusText = 'Failed';
+          } else if (action.type === 'fix-code' && action.commitHash) {
+            statusText = 'Pushed';
+          } else if (action.type === 'fix-code') {
+            statusText = 'Applied';
+          } else if (action.type === 'respond-comment') {
+            statusText = 'Replied';
+          }
+          
+          var timestamp = new Date(action.timestamp || Date.now()).toLocaleTimeString();
+          var commitInfo = action.commitHash
+            ? '<span class="action-commit">' + action.commitHash.substring(0, 7) + '</span>'
+            : '';
+          
+          return '<div class="action-entry ' + action.type + ' ' + statusClass + '">'
+            + '<div class="action-icon">' + icon + '</div>'
+            + '<div class="action-content">'
+            + '<div class="action-type">'
+            + action.description
+            + '<span class="action-status ' + statusClass + '">' + statusText + '</span>'
+            + commitInfo
+            + '</div>'
+            + '<div class="action-timestamp">' + timestamp + '</div>'
+            + '</div>'
+            + '</div>';
         }).join('');
+      }
+    }
+    
+    // ── CLI Console Control ──────────────────────────────────────────────
+    
+    class CliConsoleControl {
+      constructor() {
+        this.sessions = [];
+        this.expandedSession = null;
+        this.render();
+      }
+      
+      startSession(sessionId, label) {
+        this.sessions.unshift({
+          id: sessionId,
+          label: label || 'Copilot CLI',
+          lines: [],
+          active: true,
+          startTime: Date.now(),
+        });
+        this.expandedSession = sessionId;
+        this.render();
+      }
+      
+      appendLine(sessionId, line) {
+        var session = this.sessions.find(function(s) { return s.id === sessionId; });
+        if (!session) return;
+        session.lines.push(line);
+        if (this.expandedSession === sessionId) {
+          this._appendToConsole(line);
+        }
+      }
+      
+      endSession(sessionId, success) {
+        var session = this.sessions.find(function(s) { return s.id === sessionId; });
+        if (session) {
+          session.active = false;
+          session.success = success;
+          session.endTime = Date.now();
+        }
+        this.render();
+      }
+      
+      _appendToConsole(line) {
+        var pre = document.getElementById('cli-console-output');
+        if (!pre) return;
+        var lineEl = document.createElement('div');
+        lineEl.className = 'cli-line';
+        lineEl.textContent = line;
+        pre.appendChild(lineEl);
+        pre.scrollTop = pre.scrollHeight;
+      }
+      
+      render() {
+        var container = document.getElementById('cli-console-section');
+        if (!container) return;
+        
+        if (this.sessions.length === 0) {
+          container.style.display = 'none';
+          return;
+        }
+        container.style.display = 'block';
+        
+        var header = document.getElementById('cli-console-header');
+        var body = document.getElementById('cli-console-body');
+        if (!header || !body) return;
+        
+        var self = this;
+        header.innerHTML = this.sessions.map(function(s) {
+          var statusIcon = s.active ? '<span class="ai-spinner"></span>' : (s.success ? '\u2705' : '\u274C');
+          var selected = self.expandedSession === s.id ? ' selected' : '';
+          var elapsed = '';
+          if (s.startTime) {
+            var ms = (s.endTime || Date.now()) - s.startTime;
+            var sec = Math.floor(ms / 1000);
+            elapsed = sec < 60 ? sec + 's' : Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
+          }
+          return '<button class="cli-session-tab' + (s.active ? ' active' : '') + selected + '" data-session-id="' + s.id + '">'
+            + statusIcon + ' ' + s.label + ' <span class="cli-elapsed">' + elapsed + '</span>'
+            + '</button>';
+        }).join('');
+        
+        header.querySelectorAll('.cli-session-tab').forEach(function(tab) {
+          tab.addEventListener('click', function() {
+            self.expandedSession = tab.getAttribute('data-session-id');
+            self.render();
+          });
+        });
+        
+        var session = this.sessions.find(function(s) { return s.id === self.expandedSession; });
+        if (session) {
+          body.innerHTML = '<pre class="cli-console-output" id="cli-console-output"></pre>';
+          var pre = document.getElementById('cli-console-output');
+          if (pre) {
+            session.lines.forEach(function(line) {
+              var lineEl = document.createElement('div');
+              lineEl.className = 'cli-line';
+              lineEl.textContent = line;
+              pre.appendChild(lineEl);
+            });
+            pre.scrollTop = pre.scrollHeight;
+          }
+        } else {
+          body.innerHTML = '<div style="padding:12px;text-align:center;color:var(--vscode-descriptionForeground);font-size:11px;">Select a session above</div>';
+        }
       }
     }
 
     // ── Initialize Controls ─────────────────────────────────────────────
     
-    let planSelector, optionalPlanSelector, prepTasks, mergeProgress, prMonitor, actionLog, pendingActions;
+    let planSelector, optionalPlanSelector, prepTasks, mergeProgress, prMonitor, actionLog, pendingActions, cliConsole;
     
     if (releaseData.status === 'drafting') {
       if (releaseData.flowType === 'from-plans') {
@@ -849,6 +1041,7 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
       prMonitor = new PRMonitorControl();
       actionLog = new ActionLogControl();
       pendingActions = new PendingActionsControl();
+      cliConsole = new CliConsoleControl();
 
       // Seed controls with the last cycle data if available (panel opened after cycle ran)
       if (releaseData.lastCycle) {
@@ -957,6 +1150,36 @@ export function renderReleaseScripts(release: ReleaseDefinition, nonce: string, 
         case 'findingsResolved':
           if (pendingActions && message.findingIds) {
             pendingActions.markResolved(message.findingIds);
+          }
+          break;
+          
+        case 'findingsProcessing':
+          if (pendingActions && message.findingIds) {
+            pendingActions.setProcessing(message.findingIds, message.status);
+          }
+          break;
+          
+        case 'monitoringStopped':
+          if (prMonitor) {
+            prMonitor.onStopped();
+          }
+          break;
+          
+        case 'cliSessionStart':
+          if (cliConsole && message.sessionId) {
+            cliConsole.startSession(message.sessionId, message.label);
+          }
+          break;
+          
+        case 'cliSessionOutput':
+          if (cliConsole && message.sessionId) {
+            cliConsole.appendLine(message.sessionId, message.line);
+          }
+          break;
+          
+        case 'cliSessionEnd':
+          if (cliConsole && message.sessionId) {
+            cliConsole.endSession(message.sessionId, message.success);
           }
           break;
       }

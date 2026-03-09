@@ -132,6 +132,18 @@ export interface IRemotePRService {
   replyToComment(prNumber: number, commentId: string, body: string, cwd: string): Promise<void>;
 
   /**
+   * Add a general comment to a pull request (issue comment, not inline review reply).
+   *
+   * Use this for top-level review responses and general PR discussion.
+   * Unlike replyToComment, this does NOT require an existing review comment to reply to.
+   *
+   * @param prNumber - PR number
+   * @param body - Comment text
+   * @param cwd - Working directory of the release clone
+   */
+  addIssueComment(prNumber: number, body: string, cwd: string): Promise<void>;
+
+  /**
    * Resolve a review thread on a pull request.
    * 
    * Marks a review comment thread as resolved, indicating the feedback has been addressed.

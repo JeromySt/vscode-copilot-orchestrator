@@ -594,6 +594,10 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
       <button class="pending-filter" data-filter="check" onclick="filterPendingActions('check', this)">Checks</button>
       <button class="pending-filter" data-filter="alert" onclick="filterPendingActions('alert', this)">Alerts</button>
     </div>
+    <div class="ai-working-banner" id="ai-working-banner" style="display:none;">
+      <span class="ai-banner-spinner"></span>
+      <span class="ai-banner-text">AI is working...</span>
+    </div>
     <div class="pending-actions-list" id="pending-actions-list">
       <div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 11px;">
         No findings yet. Pending actions will appear after the first monitoring cycle.
@@ -602,11 +606,19 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
   </div>
   
   <div class="action-log" style="margin-top: 24px;">
-    <h3>Autonomous Actions</h3>
+    <h3>Activity Log</h3>
     <div id="action-log-entries" class="action-log-entries">
       <div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 11px;">
-        No actions taken yet. The system will autonomously address feedback as it arrives.
+        No actions taken yet. Actions will appear here when you use "Fix with AI" on pending findings.
       </div>
+    </div>
+  </div>
+  
+  <div class="cli-console-section" id="cli-console-section" style="display: none; margin-top: 24px;">
+    <h3>Copilot CLI Console</h3>
+    <div class="cli-console-tabs" id="cli-console-header"></div>
+    <div class="cli-console-body" id="cli-console-body">
+      <div style="padding:12px;text-align:center;color:var(--vscode-descriptionForeground);font-size:11px;">No CLI sessions yet</div>
     </div>
   </div>
 </div>`;

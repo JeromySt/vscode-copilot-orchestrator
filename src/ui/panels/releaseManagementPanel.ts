@@ -171,6 +171,47 @@ export class ReleaseManagementPanel {
         }
       });
 
+      // Forward finding processing status to the webview
+      (this._releaseManager as any).on('findingsProcessing', (releaseId: string, findingIds: string[], status: string) => {
+        if (releaseId === this._releaseId && !this._disposed) {
+          try {
+            this._panel.webview.postMessage({ type: 'findingsProcessing', findingIds, status });
+          } catch { /* panel disposed */ }
+        }
+      });
+
+      // Forward monitoring stopped to the webview
+      (this._releaseManager as any).on('monitoringStopped', (releaseId: string, totalCycles: number) => {
+        if (releaseId === this._releaseId && !this._disposed) {
+          try {
+            this._panel.webview.postMessage({ type: 'monitoringStopped', totalCycles });
+          } catch { /* panel disposed */ }
+        }
+      });
+
+      // Forward CLI session events to the webview console
+      (this._releaseManager as any).on('cliSessionStart', (releaseId: string, sessionId: string, label: string) => {
+        if (releaseId === this._releaseId && !this._disposed) {
+          try {
+            this._panel.webview.postMessage({ type: 'cliSessionStart', sessionId, label });
+          } catch { /* panel disposed */ }
+        }
+      });
+      (this._releaseManager as any).on('cliSessionOutput', (releaseId: string, sessionId: string, line: string) => {
+        if (releaseId === this._releaseId && !this._disposed) {
+          try {
+            this._panel.webview.postMessage({ type: 'cliSessionOutput', sessionId, line });
+          } catch { /* panel disposed */ }
+        }
+      });
+      (this._releaseManager as any).on('cliSessionEnd', (releaseId: string, sessionId: string, success: boolean) => {
+        if (releaseId === this._releaseId && !this._disposed) {
+          try {
+            this._panel.webview.postMessage({ type: 'cliSessionEnd', sessionId, success });
+          } catch { /* panel disposed */ }
+        }
+      });
+
       // Full refresh on release progress changes (status transitions)
       (this._releaseManager as any).on('releaseProgress', (releaseId: string) => {
         if (releaseId === this._releaseId && !this._disposed) {

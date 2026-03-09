@@ -302,6 +302,38 @@ export class AdoPRService implements IRemotePRService {
   }
 
   /**
+   * Add a general comment to a pull request.
+   * Creates a new thread with a single comment (ADO equivalent of issue comment).
+   */
+  async addIssueComment(prNumber: number, body: string, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    const apiUrl = this._buildApiUrl(
+      provider,
+      `git/repositories/${provider.repoName}/pullRequests/${prNumber}/threads`
+    );
+
+    const requestBody = {
+      comments: [{ content: body, commentType: 1 }],
+      status: 1, // Active
+    };
+
+    log.debug('Adding general comment to Azure DevOps PR', { prNumber });
+
+    try {
+      await this._apiRequest('POST', apiUrl, credentials, requestBody);
+      log.info('General comment added to Azure DevOps PR', { prNumber });
+    } catch (error: any) {
+      log.error('Failed to add general comment to Azure DevOps PR', {
+        error: error.message,
+        prNumber,
+      });
+      throw new Error(`Failed to add general comment to ADO PR: ${error.message}`);
+    }
+  }
+
+  /**
    * Resolve a review thread on a pull request.
    * 
    * PATCH {org}/{project}/_apis/git/repositories/{repo}/pullRequests/{prId}/threads/{threadId}?api-version=7.0

@@ -187,6 +187,9 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
     state.isActive = false;
     this.monitors.delete(releaseId);
 
+    // Notify listeners that monitoring has stopped
+    this.emit('monitoringStopped', releaseId, state.cycles.length);
+
     log.info('PR monitoring stopped', { releaseId, totalCycles: state.cycles.length });
   }
 

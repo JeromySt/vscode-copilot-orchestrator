@@ -109,6 +109,11 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         this.events.emitReleasePrCycle(releaseId, cycle);
         this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
       });
+
+      // Forward monitoring stopped events
+      (this.prMonitor as any).on('monitoringStopped', (releaseId: string, totalCycles: number) => {
+        this.emit('monitoringStopped', releaseId, totalCycles);
+      });
     }
 
     this._loadPersistedReleases().catch((error) => {
@@ -921,6 +926,10 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       timestamp: Date.now(),
     });
 
+    // Emit per-finding "queued" status so the UI can show progress
+    const findingIds = findings.map((f: any) => f.id);
+    this.emit('findingsProcessing', releaseId, findingIds, 'queued');
+
     const cwd = release.isolatedRepoPath || release.repoPath;
 
     // ── 1. Build task description from selected findings ─────────────
@@ -977,8 +986,13 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       findingCount: findings.length,
     });
 
+    // Mark findings as "processing"
+    this.emit('findingsProcessing', releaseId, findingIds, 'processing');
+
     let copilotResult;
     const outputLines: string[] = [];
+    const sessionId = 'cli-' + Date.now();
+    this.emit('cliSessionStart', releaseId, sessionId, 'Fixing ' + findings.length + ' finding(s)');
     try {
       copilotResult = await this.copilot.run({
         cwd,
@@ -986,6 +1000,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         timeout: 0,
         onOutput: (line: string) => {
           outputLines.push(line);
+          this.emit('cliSessionOutput', releaseId, sessionId, line);
         },
       });
     } catch (err) {
@@ -995,12 +1010,14 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         error: errMsg,
         lastOutput: outputLines.slice(-10).join('\n'),
       });
+      this.emit('cliSessionEnd', releaseId, sessionId, false);
       this.emit('releaseActionTaken', releaseId, {
         type: 'fix-code',
         description: `Copilot CLI failed: ${errMsg}`,
         success: false,
         timestamp: Date.now(),
       });
+      this.emit('findingsProcessing', releaseId, findingIds, 'failed');
       return;
     }
 
@@ -1009,16 +1026,19 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         releaseId,
         error: copilotResult.error,
       });
+      this.emit('cliSessionEnd', releaseId, sessionId, false);
       this.emit('releaseActionTaken', releaseId, {
         type: 'fix-code',
         description: `Copilot CLI failed to apply fixes: ${copilotResult.error || 'unknown error'}`,
         success: false,
         timestamp: Date.now(),
       });
+      this.emit('findingsProcessing', releaseId, findingIds, 'failed');
       return;
     }
 
     log.info('Copilot CLI completed', { releaseId, success: true });
+    this.emit('cliSessionEnd', releaseId, sessionId, true);
 
     // ── 3. Commit and push ───────────────────────────────────────────
     let hasChanges = false;
@@ -1105,12 +1125,23 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
           try {
             const replyText = `✅ Addressed in automated fix${commitHash ? ` (${commitHash.substring(0, 7)})` : ''}`;
 
-            await prService.replyToComment(
-              release.prNumber,
-              commentId,
-              replyText,
-              cwd,
-            );
+            // Only use replyToComment for inline review comments (those with a file path).
+            // Top-level reviews and issue comments don't support in_reply_to and return 422.
+            if (comment.path) {
+              await prService.replyToComment(
+                release.prNumber,
+                commentId,
+                replyText,
+                cwd,
+              );
+            } else {
+              // For top-level reviews / issue comments, post a general PR comment instead
+              await prService.addIssueComment(
+                release.prNumber,
+                `Re: ${(comment.author || 'reviewer')}'s feedback — ${replyText}`,
+                cwd,
+              );
+            }
 
             // Resolve thread if we have a proper GraphQL thread ID
             if (comment.threadId) {
@@ -1178,6 +1209,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
   on(event: 'releaseCompleted', handler: (release: ReleaseDefinition) => void): this;
   on(event: 'releaseActionTaken', handler: (releaseId: string, action: import('./types/release').PRActionTaken & { timestamp?: number }) => void): this;
   on(event: 'findingsResolved', handler: (releaseId: string, findingIds: string[], hasCommit: boolean) => void): this;
+  on(event: 'findingsProcessing', handler: (releaseId: string, findingIds: string[], status: string) => void): this;
   on(event: string | symbol, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
