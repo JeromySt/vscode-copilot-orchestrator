@@ -26,7 +26,7 @@ import type { IProcessMonitor } from './interfaces/IProcessMonitor';
 import { PlanRunner } from './plan';
 import { Logger } from './core/logger';
 import { cleanupOrphanedWorktrees } from './core/orphanedWorktreeCleanup';
-import { BranchChangeWatcher } from './git/branchWatcher';
+import { BranchChangeWatcher } from './vscode/branchWatcher';
 import type { PlanInstance } from './plan/types/plan';
 import { createContainer } from './composition';
 import * as Tokens from './core/tokens';

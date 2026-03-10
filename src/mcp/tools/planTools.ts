@@ -423,7 +423,7 @@ Use this to analyze the history of retries and their outcomes.`,
     
     {
       name: 'recover_copilot_plan',
-      description: 'Recover a canceled or archived plan. Recreates the target branch at the base commit and recovers worktree states from the deepest successfully-completed jobs. Uses git rev-parse with DAG work result status. The plan will be placed in paused state. For canceled plans, Copilot CLI agent verifies recovered worktree integrity.',
+      description: 'Recover a canceled or failed plan. Recreates the target branch at the base commit and recovers worktree states from the deepest successfully-completed jobs. Uses git rev-parse with DAG work result status. The plan will be placed in paused state. For canceled plans, Copilot CLI agent verifies recovered worktree integrity.',
       inputSchema: {
         type: 'object',
         properties: {

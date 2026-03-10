@@ -304,26 +304,25 @@ async function handleScaffoldingOp(
       if (!existingResolved) { return { operation: 'add_before', success: false, error: `Job not found: ${op.existingNodeId}` }; }
       const existingNode = plan.jobs.get(existingResolved);
       if (!existingNode) { return { operation: 'add_before', success: false, error: `Job not found: ${op.existingNodeId}` }; }
-      // For scaffolding: add new node with the existing node's deps, then update existing node to depend on new node
+      // For scaffolding: the new node inherits the existing node's current deps,
+      // then the existing node's dependencies are replaced with just the new node.
+      const existingDepProducerIds = existingNode.dependencies
+        .map(depId => plan.jobs.get(depId)?.producerId)
+        .filter((p): p is string => !!p);
       const newSpec = {
         producerId: op.spec.producerId,
         name: op.spec.name || op.spec.task,
         task: op.spec.task,
-        dependencies: op.spec.dependencies || [],
+        dependencies: existingDepProducerIds,
         work: op.spec.work,
         prechecks: op.spec.prechecks,
         postchecks: op.spec.postchecks,
         expectsNoChanges: op.spec.expectsNoChanges,
       };
-      // Step 1: Add the new node
+      // Step 1: Add the new node (with the existing node's previous deps)
       await ctx.PlanRepository.addNode(planId, newSpec);
-      // Step 2: Update existing node's dependencies to include the new node's producerId
-      const existingDeps = existingNode.dependencies
-        .map(depId => plan.jobs.get(depId)?.producerId)
-        .filter((p): p is string => !!p);
-      // Replace deps that the new node now satisfies, or simply add new node as additional dep
-      const updatedDeps = [...new Set([...existingDeps, op.spec.producerId])];
-      const rebuilt = await ctx.PlanRepository.updateNode(planId, existingNode.producerId, { dependencies: updatedDeps });
+      // Step 2: Update existing node to depend only on the new node
+      const rebuilt = await ctx.PlanRepository.updateNode(planId, existingNode.producerId, { dependencies: [op.spec.producerId] });
       replaceInMemoryPlan(plan, rebuilt);
       return { operation: 'add_before', success: true, nodeId: op.spec.producerId };
     }

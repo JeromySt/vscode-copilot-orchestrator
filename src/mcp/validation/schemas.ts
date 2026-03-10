@@ -844,7 +844,11 @@ export const finalizePlanSchema = {
 } as const;
 
 /**
- * Schema for create_copilot_release input
+ * Schema for create_copilot_release input.
+ * 
+ * Supports two modes:
+ * - Plan-based: requires non-empty planIds and releaseBranch
+ * - From-branch: requires repoPath and releaseBranch; planIds may be empty/omitted
  */
 export const createReleaseSchema = {
   $id: 'create_copilot_release',
@@ -854,14 +858,30 @@ export const createReleaseSchema = {
     planIds: {
       type: 'array',
       items: { type: 'string', minLength: 1 },
-      minItems: 1
+      minItems: 0
     },
     releaseBranch: { type: 'string', minLength: 1, maxLength: 200 },
     targetBranch: { type: 'string', minLength: 1, maxLength: 200 },
     repoPath: { type: 'string', minLength: 1 },
     autoStart: { type: 'boolean' }
   },
-  required: ['name', 'planIds', 'releaseBranch'],
+  required: ['name', 'releaseBranch'],
+  anyOf: [
+    { required: ['planIds'], properties: { planIds: { minItems: 1 } } },
+    { required: ['repoPath'] },
+  ],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for scaffold_release_tasks input
+ */
+export const scaffoldReleaseTasksSchema = {
+  $id: 'scaffold_release_tasks',
+  type: 'object',
+  properties: {
+    repoPath: { type: 'string', minLength: 1 }
+  },
   additionalProperties: false
 } as const;
 
@@ -1162,6 +1182,7 @@ export const schemas: Record<string, object> = {
   execute_release_task: executeReleaseTaskSchema,
   skip_release_task: skipReleaseTaskSchema,
   add_plans_to_release: addPlansToReleaseSchema,
+  scaffold_release_tasks: scaffoldReleaseTasksSchema,
 
   // PR lifecycle tools
   list_available_prs: listAvailablePRsSchema,

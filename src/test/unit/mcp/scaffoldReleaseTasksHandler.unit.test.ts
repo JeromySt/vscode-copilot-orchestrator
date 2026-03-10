@@ -5,6 +5,7 @@
 import { suite, test, setup, teardown } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
+import * as path from 'path';
 
 suite('scaffoldReleaseTasksHandler', () => {
   let sandbox: sinon.SinonSandbox;
@@ -48,7 +49,7 @@ suite('scaffoldReleaseTasksHandler', () => {
 
       assert.strictEqual(result.success, true);
       assert.ok(scaffoldStub.calledOnce);
-      assert.ok(scaffoldStub.calledWith('/test/repo'));
+      assert.ok(scaffoldStub.calledWith(path.resolve('/test/repo')));
     });
 
     test('should return created file list', async () => {
@@ -82,7 +83,7 @@ suite('scaffoldReleaseTasksHandler', () => {
 
       assert.strictEqual(result.success, true);
       assert.ok(scaffoldStub.calledOnce);
-      assert.ok(scaffoldStub.calledWith('/workspace'));
+      assert.ok(scaffoldStub.calledWith(path.resolve('/workspace')));
     });
 
     test('should return error when repoPath not provided and no workspace root', async () => {

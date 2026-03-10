@@ -160,14 +160,24 @@ export class FileSystemReleaseStore implements IReleaseStore {
       const branches = await this.fs.readdirAsync(releaseRoot);
 
       for (const branch of branches) {
-        const releaseFile = path.join(releaseRoot, branch, 'release.json');
+        // Skip dangerous or special entries defensively
+        if (!branch || branch === '.' || branch === '..' || branch === '.git') {
+          continue;
+        }
+
+        const releaseDir = path.join(releaseRoot, branch);
+        const releaseFile = path.join(releaseDir, 'release.json');
         try {
+          // Ensure both paths remain under the release root
+          validatePath(releaseRoot, releaseDir);
+          validatePath(releaseRoot, releaseFile);
+
           const content = await this.fs.readFileAsync(releaseFile);
           const release = JSON.parse(content) as ReleaseDefinition;
           releases.push(release);
-        } catch {
-          // Skip invalid or missing files
-          log.debug('Skipping invalid release file', { path: releaseFile });
+        } catch (error) {
+          // Skip invalid, missing, or path-traversing files
+          log.debug('Skipping invalid release file', { path: releaseFile, error: (error as Error).message });
           continue;
         }
       }

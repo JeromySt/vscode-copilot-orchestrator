@@ -3,7 +3,7 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as fs from 'fs';
 import * as git from '../../../git';
-import { BranchChangeWatcher } from '../../../git/branchWatcher';
+import { BranchChangeWatcher } from '../../../vscode/branchWatcher';
 
 suite('.gitignore Handling', () => {
   const mockWorkspaceRoot = '/test/workspace';

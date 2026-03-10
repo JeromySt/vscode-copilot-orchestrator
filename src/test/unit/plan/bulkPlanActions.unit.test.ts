@@ -33,7 +33,7 @@ suite('BulkPlanActions', () => {
       showError: sandbox.stub(),
     };
     
-    bulkActions = new BulkPlanActions(mockPlanRunner, mockDialog);
+    bulkActions = new BulkPlanActions(mockPlanRunner);
   });
 
   teardown(() => {

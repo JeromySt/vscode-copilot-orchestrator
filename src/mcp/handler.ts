@@ -143,12 +143,15 @@ export class McpHandler implements IMcpRequestRouter {
     releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager,
     prLifecycleManager?: import('../interfaces/IPRLifecycleManager').IPRLifecycleManager,
   ) {
+    if (!planRepository) {
+      throw new Error('planRepository is required for McpHandler');
+    }
     this.context = { 
       PlanRunner, 
       workspacePath,
       git,
       configProvider,
-      PlanRepository: planRepository!,
+      PlanRepository: planRepository,
       PlanArchiver: planArchiver,
       PlanRecovery: planRecovery,
       releaseManager,

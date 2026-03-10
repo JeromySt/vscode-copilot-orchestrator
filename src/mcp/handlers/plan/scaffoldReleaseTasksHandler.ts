@@ -7,6 +7,7 @@
  * @module mcp/handlers/plan/scaffoldReleaseTasksHandler
  */
 
+import * as path from 'path';
 import { validateInput } from '../../validation';
 import {
   PlanHandlerContext,
@@ -52,10 +53,25 @@ export async function handleScaffoldReleaseTasks(args: any, ctx: PlanHandlerCont
     }
   }
 
+  // Validate that repoPath is safe: must be absolute, non-empty, no path traversal
+  const resolvedRepoPath = path.resolve(repoPath);
+  if (!resolvedRepoPath || resolvedRepoPath === path.sep) {
+    return errorResult('Invalid repository path');
+  }
+  // Ensure the resolved path matches what was provided (guards against relative traversal)
+  if (resolvedRepoPath !== path.resolve(repoPath)) {
+    return errorResult('Path traversal detected in repoPath');
+  }
+  // Reject dangerous path components
+  const basename = path.basename(resolvedRepoPath);
+  if (basename === '.git' || basename === '..' || basename === '.') {
+    return errorResult('Invalid repository path component');
+  }
+
   try {
-    const created = await scaffoldDefaultTaskFiles(repoPath);
+    const created = await scaffoldDefaultTaskFiles(resolvedRepoPath);
     
-    log.info('Scaffolded release tasks', { repoPath, created: created.length });
+    log.info('Scaffolded release tasks', { repoPath: resolvedRepoPath, created: created.length });
 
     if (created.length === 0) {
       return {
@@ -72,7 +88,7 @@ export async function handleScaffoldReleaseTasks(args: any, ctx: PlanHandlerCont
     };
 
   } catch (error: any) {
-    log.error('Failed to scaffold release tasks', { error: error.message, repoPath });
+    log.error('Failed to scaffold release tasks', { error: error.message, repoPath: resolvedRepoPath });
     return errorResult(`Failed to scaffold release tasks: ${error.message}`);
   }
 }

@@ -41,7 +41,7 @@ suite('GitignoreDebouncer', () => {
     });
 
     test('writes entries immediately when branch change was >30s ago', async () => {
-      debouncer.notifyBranchChange();
+      debouncer.notifyBranchChange('/repo');
       await clock.tickAsync(31000); // 31 seconds
       
       mockGit.gitignore.ensureGitignoreEntries.resetHistory();
@@ -70,7 +70,7 @@ suite('GitignoreDebouncer', () => {
 
   suite('ensureEntries — within branch change window', () => {
     test('defers write when branch change was recent', async () => {
-      debouncer.notifyBranchChange();
+      debouncer.notifyBranchChange('/repo');
       
       const promise = debouncer.ensureEntries('/repo', ['entry1']);
       
@@ -88,7 +88,7 @@ suite('GitignoreDebouncer', () => {
     });
 
     test('defers write for exactly the remaining time', async () => {
-      debouncer.notifyBranchChange();
+      debouncer.notifyBranchChange('/repo');
       await clock.tickAsync(10000); // 10 seconds after branch change
       
       const promise = debouncer.ensureEntries('/repo', ['entry1']);
@@ -108,7 +108,7 @@ suite('GitignoreDebouncer', () => {
     });
 
     test('merges multiple pending entry sets', async () => {
-      debouncer.notifyBranchChange();
+      debouncer.notifyBranchChange('/repo');
       
       const promise1 = debouncer.ensureEntries('/repo', ['a', 'b']);
       const promise2 = debouncer.ensureEntries('/repo', ['b', 'c']);
@@ -133,7 +133,7 @@ suite('GitignoreDebouncer', () => {
     });
 
     test('resolves all pending promises when timer fires', async () => {
-      debouncer.notifyBranchChange();
+      debouncer.notifyBranchChange('/repo');
       
       let resolved1 = false;
       let resolved2 = false;
@@ -159,7 +159,7 @@ suite('GitignoreDebouncer', () => {
     test('handles deferred write failure gracefully', async () => {
       mockGit.gitignore.ensureGitignoreEntries.rejects(new Error('Write failed'));
       
-      debouncer.notifyBranchChange();
+      debouncer.notifyBranchChange('/repo');
       const promise = debouncer.ensureEntries('/repo', ['entry1']);
       
       await clock.tickAsync(30000);
@@ -171,7 +171,7 @@ suite('GitignoreDebouncer', () => {
     });
 
     test('resets timer when new entries arrive during delay', async () => {
-      debouncer.notifyBranchChange();
+      debouncer.notifyBranchChange('/repo');
       
       const promise1 = debouncer.ensureEntries('/repo', ['a']);
       
@@ -194,7 +194,7 @@ suite('GitignoreDebouncer', () => {
   suite('notifyBranchChange', () => {
     test('sets the branch change timestamp', async () => {
       // Verified implicitly by deferred write tests
-      debouncer.notifyBranchChange();
+      debouncer.notifyBranchChange('/repo');
       
       const promise = debouncer.ensureEntries('/repo', ['entry1']);
       
@@ -208,10 +208,10 @@ suite('GitignoreDebouncer', () => {
     });
 
     test('can be called multiple times', async () => {
-      debouncer.notifyBranchChange();
+      debouncer.notifyBranchChange('/repo');
       await clock.tickAsync(10000); // 10s
       
-      debouncer.notifyBranchChange(); // Second call resets the timestamp
+      debouncer.notifyBranchChange('/repo'); // Second call resets the timestamp
       
       const promise = debouncer.ensureEntries('/repo', ['entry1']);
       
@@ -228,7 +228,7 @@ suite('GitignoreDebouncer', () => {
 
   suite('dispose', () => {
     test('clears pending timer', async () => {
-      debouncer.notifyBranchChange();
+      debouncer.notifyBranchChange('/repo');
       debouncer.ensureEntries('/repo', ['entry1']);
       
       debouncer.dispose();
@@ -240,7 +240,7 @@ suite('GitignoreDebouncer', () => {
     });
 
     test('resolves pending promises on dispose', async () => {
-      debouncer.notifyBranchChange();
+      debouncer.notifyBranchChange('/repo');
       
       let resolved = false;
       const promise = debouncer.ensureEntries('/repo', ['entry1']).then(() => { resolved = true; });
@@ -302,5 +302,34 @@ suite('GitignoreDebouncer', () => {
       
       newDebouncer.dispose();
     });
+
+    test('branch change in repo A does not defer writes for repo B', async () => {
+      // Advance clock past initial 0 timestamp so repo-b (no branch change recorded)
+      // has elapsed > 30s when we call ensureEntries
+      await clock.tickAsync(31000);
+
+      // Notify branch change for repo-a only (at current time t=31000)
+      debouncer.notifyBranchChange('/repo-a');
+      
+      // Write for repo-B should be immediate: no branch change was recorded for it,
+      // so elapsed = (31000 - 0) = 31000ms >= BRANCH_CHANGE_DELAY_MS
+      await debouncer.ensureEntries('/repo-b', ['entry1']);
+      
+      // Should write immediately for repo-B
+      assert.ok(mockGit.gitignore.ensureGitignoreEntries.calledOnce);
+      assert.ok(mockGit.gitignore.ensureGitignoreEntries.calledWith('/repo-b', ['entry1']));
+      
+      // Write for repo-A should be deferred: branch change at t=31000, elapsed = 0
+      mockGit.gitignore.ensureGitignoreEntries.resetHistory();
+      const promise = debouncer.ensureEntries('/repo-a', ['entry2']);
+      assert.ok(mockGit.gitignore.ensureGitignoreEntries.notCalled);
+      
+      await clock.tickAsync(30000);
+      assert.ok(mockGit.gitignore.ensureGitignoreEntries.calledOnce);
+      assert.ok(mockGit.gitignore.ensureGitignoreEntries.calledWith('/repo-a', ['entry2']));
+      
+      await promise;
+    });
   });
 });
+

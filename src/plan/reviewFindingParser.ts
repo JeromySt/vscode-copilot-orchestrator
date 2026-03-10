@@ -11,6 +11,31 @@ import { randomUUID } from 'crypto';
 import type { ReviewFinding, ReviewFindingSeverity } from './types/release';
 
 /**
+ * Normalize a raw severity string to a valid ReviewFindingSeverity.
+ * Lowercases, maps synonyms (warn→warning, err→error), and defaults to 'info'.
+ */
+function normalizeSeverity(raw: string | undefined): ReviewFindingSeverity {
+  const lower = (raw || '').toLowerCase().trim();
+  switch (lower) {
+    case 'error':
+    case 'err':
+      return 'error';
+    case 'warning':
+    case 'warn':
+      return 'warning';
+    case 'suggestion':
+    case 'suggest':
+      return 'suggestion';
+    case 'info':
+    case 'information':
+    case 'informational':
+      return 'info';
+    default:
+      return 'info';
+  }
+}
+
+/**
  * Parse review findings from Copilot CLI output.
  * Looks for a JSON array between <!-- FINDINGS_START --> and <!-- FINDINGS_END --> markers.
  * Falls back to heuristic parsing if no markers found.
@@ -43,7 +68,7 @@ export function parseReviewFindings(output: string): ReviewFinding[] {
         if (Array.isArray(rawFindings)) {
           return rawFindings.map((raw) => ({
             id: randomUUID(),
-            severity: raw.severity || 'info',
+            severity: normalizeSeverity(raw.severity),
             title: raw.title || 'Untitled finding',
             description: raw.description || '',
             filePath: raw.filePath,
@@ -79,7 +104,7 @@ export function parseReviewFindings(output: string): ReviewFinding[] {
             if (Array.isArray(rawFindings)) {
               return rawFindings.map((raw) => ({
                 id: randomUUID(),
-                severity: raw.severity || 'info',
+                severity: normalizeSeverity(raw.severity),
                 title: raw.title || 'Untitled finding',
                 description: raw.description || '',
                 filePath: raw.filePath,

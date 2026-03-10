@@ -13,7 +13,7 @@
  */
 export interface IGitignoreDebouncer {
   /** Record that a branch change just occurred; starts the delay window. */
-  notifyBranchChange(): void;
+  notifyBranchChange(repoPath: string): void;
 
   /**
    * Ensure .gitignore entries exist, deferring if within the post-branch-change window.

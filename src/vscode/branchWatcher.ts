@@ -2,8 +2,9 @@
  * @fileoverview Branch change detection.
  * 
  * Monitors VS Code git repositories for branch changes.
+ * Lives in src/vscode/ because it depends on the VS Code API at runtime.
  * 
- * @module git/branchWatcher
+ * @module vscode/branchWatcher
  */
 
 import * as vscode from 'vscode';
@@ -105,7 +106,7 @@ export class BranchChangeWatcher implements vscode.Disposable {
       // Check if branch actually changed (not just a commit)
       if (currentBranch !== lastBranch) {
         // Notify debouncer BEFORE logging — debouncer starts its timer immediately
-        this.debouncer.notifyBranchChange();
+        this.debouncer.notifyBranchChange(workspaceRoot);
         
         this.logger.info('Branch change detected', {
           repository: workspaceRoot,

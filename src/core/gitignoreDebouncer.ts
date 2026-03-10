@@ -37,7 +37,7 @@ interface PendingRepoState {
  * cannot interfere with each other.
  */
 export class GitignoreDebouncer implements IGitignoreDebouncer {
-  private _lastBranchChangeTime = 0;
+  private readonly _lastBranchChangeByRepo = new Map<string, number>();
   private readonly _pendingByRepo = new Map<string, PendingRepoState>();
 
   /**
@@ -48,14 +48,15 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
   constructor(private readonly _git: IGitOperations) {}
 
   /**
-   * Notifies the debouncer that a branch change has occurred.
+   * Notifies the debouncer that a branch change has occurred in the given repo.
    * 
-   * Starts the debounce delay window. Any .gitignore write requests
-   * within the next 30 seconds will be deferred and merged.
+   * Starts the debounce delay window for that specific repository. Any .gitignore
+   * write requests for that repo within the next 30 seconds will be deferred.
    */
-  notifyBranchChange(): void {
-    this._lastBranchChangeTime = Date.now();
+  notifyBranchChange(repoPath: string): void {
+    this._lastBranchChangeByRepo.set(repoPath, Date.now());
     log.info('Branch change detected, deferring gitignore writes', {
+      repoPath,
       delayMs: BRANCH_CHANGE_DELAY_MS
     });
   }
@@ -71,7 +72,8 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
    * @returns Promise that resolves when entries are written (immediately or after delay)
    */
   async ensureEntries(repoPath: string, entries: string[]): Promise<void> {
-    const elapsed = Date.now() - this._lastBranchChangeTime;
+    const lastBranchChange = this._lastBranchChangeByRepo.get(repoPath) ?? 0;
+    const elapsed = Date.now() - lastBranchChange;
     if (elapsed < BRANCH_CHANGE_DELAY_MS) {
       const remaining = BRANCH_CHANGE_DELAY_MS - elapsed;
       log.info('Deferring gitignore write', {
@@ -146,5 +148,6 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
       for (const r of pending.resolvers) { r(); }
     }
     this._pendingByRepo.clear();
+    this._lastBranchChangeByRepo.clear();
   }
 }

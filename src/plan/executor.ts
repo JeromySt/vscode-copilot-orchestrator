@@ -344,6 +344,13 @@ export class DefaultJobExecutor implements JobExecutor {
       return { success: true, completedCommit: cr.commit, workSummary: ws, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming };
     } catch (error: any) {
       log.error(`Execution error: ${node.name}`, { error: error.message });
+      // Ensure any in-flight phase timing entry has an endedAt timestamp
+      if (context.phaseTiming?.length) {
+        const last = context.phaseTiming[context.phaseTiming.length - 1];
+        if (!last.endedAt) {
+          last.endedAt = Date.now();
+        }
+      }
       return { success: false, error: error.message, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming };
     } finally {
       this.activeExecutions.delete(executionKey);

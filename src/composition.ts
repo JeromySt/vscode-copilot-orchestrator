@@ -287,7 +287,10 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
   container.registerSingleton<import('./interfaces/IReleaseStore').IReleaseStore>(
     Tokens.IReleaseStore,
     (c) => {
-      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspacePath) {
+        throw new Error('No workspace folder open. Release store requires an open workspace.');
+      }
       const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
       return new FileSystemReleaseStore(workspacePath, fileSystem);
     },
@@ -297,7 +300,10 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
   container.registerSingleton<import('./interfaces/IManagedPRStore').IManagedPRStore>(
     Tokens.IManagedPRStore,
     (c) => {
-      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspacePath) {
+        throw new Error('No workspace folder open. Managed PR store requires an open workspace.');
+      }
       const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
       const { FileSystemManagedPRStore } = require('./plan/store/managedPRStore');
       return new FileSystemManagedPRStore(workspacePath, fileSystem);
@@ -311,17 +317,6 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
       const env = c.resolve<import('./interfaces').IEnvironment>(Tokens.IEnvironment);
       return new DefaultRemoteProviderDetector(spawner, env);
-    },
-  );
-
-  // ─── Remote PR Service ──────────────────────────────────────────────
-  // Factory pattern: creates a new instance on each resolve
-  container.register<import('./interfaces').IRemotePRService>(
-    Tokens.IRemotePRService,
-    (c) => {
-      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
-      const detector = c.resolve<import('./interfaces').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
-      return new GitHubPRService(spawner, detector);
     },
   );
 
@@ -399,19 +394,18 @@ export function createReleaseManager(
 }
 
 /**
- * Create a BulkPlanActions instance with PlanRunner and IDialogService dependencies.
+ * Create a BulkPlanActions instance with PlanRunner dependency.
  * 
  * Call this after PlanRunner is initialized. Keeps concrete instantiation out of extension.ts.
  * 
- * @param container - The DI container
+ * @param _container - The DI container (unused, kept for API stability)
  * @param planRunner - The initialized PlanRunner instance
  * @returns A fully-wired IBulkPlanActions instance
  */
 export function createBulkPlanActions(
-  container: ServiceContainer,
+  _container: ServiceContainer,
   planRunner: import('./interfaces/IPlanRunner').IPlanRunner,
 ): import('./interfaces/IBulkPlanActions').IBulkPlanActions {
-  const dialogService = container.resolve<import('./interfaces/IDialogService').IDialogService>(Tokens.IDialogService);
   const { BulkPlanActions } = require('./plan/bulkPlanActions');
-  return new BulkPlanActions(planRunner, dialogService);
+  return new BulkPlanActions(planRunner);
 }

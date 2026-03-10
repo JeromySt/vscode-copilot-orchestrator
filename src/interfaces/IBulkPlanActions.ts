@@ -24,7 +24,7 @@ export interface IBulkPlanActions {
   /**
    * Get which actions are valid for a set of plans based on their current states.
    * @param planIds - The plan IDs to check
-   * @returns Map of action type to whether it's valid for ALL selected plans
+   * @returns Map of action type to whether it's valid for ANY of the selected plans
    */
   getValidActions(planIds: string[]): Map<BulkActionType, boolean>;
 }

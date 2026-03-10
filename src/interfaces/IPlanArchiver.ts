@@ -18,7 +18,7 @@ import type { PlanInstance } from '../plan/types/plan';
  * preserving their state and logs while cleaning up associated git resources
  * (worktrees and branches) to reduce repository overhead.
  * 
- * Only plans in terminal states ('succeeded', 'failed', or 'canceled') can
+ * Only plans in terminal states ('succeeded', 'partial', 'failed', or 'canceled') can
  * be archived. Once archived, a plan cannot be executed or modified, but its
  * state and logs remain accessible for historical reference.
  * 
@@ -37,7 +37,7 @@ export interface IPlanArchiver {
    * Archive a plan: preserve state/logs, clean up worktrees and branches.
    * 
    * The archive process:
-   * 1. Verifies the plan is in an archivable state (succeeded, failed, or canceled)
+   * 1. Verifies the plan is in an archivable state (succeeded, partial, failed, or canceled)
    * 2. Changes the plan status to 'archived'
    * 3. Removes all associated git worktrees
    * 4. Deletes target branches (both local and optionally remote)
@@ -56,6 +56,7 @@ export interface IPlanArchiver {
    * A plan can be archived if it is in one of the terminal states:
    * - 'succeeded' - all nodes completed successfully
    * - 'failed' - one or more nodes failed
+   * - 'partial' - some nodes succeeded, some failed
    * - 'canceled' - user canceled the plan
    * 
    * Plans in 'scaffolding', 'pending', 'running', or 'paused' states

@@ -113,7 +113,7 @@ suite('executeBulkCommand', () => {
     assert.ok(!mockBulkActions.executeBulkAction.called);
   });
 
-  test('shows error dialog when some actions fail', async () => {
+  test('shows warning dialog when some actions fail', async () => {
     mockDialog.showWarning.resolves('Delete');
     mockBulkActions.executeBulkAction.resolves([
       { planId: 'plan1', success: true },

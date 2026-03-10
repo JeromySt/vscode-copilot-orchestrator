@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+_No unreleased changes yet._
+
+## [0.15.0] - 2026-03-05
+
+### 🚀 Major Features
+
+#### Release Preparation & Lifecycle
 - **Adaptive release wizard**: Dynamic wizard steps adapt to release flow type (from-branch vs from-plans)
 - **Pre-PR preparation checklist**: Guided preparation tasks before creating pull requests
   - Update changelog with release notes
@@ -26,24 +32,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `prepare_copilot_release` — Enter preparation phase with automated task checklist
   - `execute_release_task` — Auto-execute preparation tasks using Copilot agents
   - `add_plans_to_release` — Add plans to existing releases dynamically
-- 30-second debounce delay for .gitignore re-application after branch changes, preventing dirty-branch race conditions that block `git checkout` operations
+
+#### Plan Archiving & Recovery
 - Plan archiving: preserve plan state/logs while cleaning up git worktrees and branches
 - "Archived" collapsible section in Plans sidebar with dimmed visual treatment
 - `archive_copilot_plan` MCP tool for programmatic archiving
 - Archive button on eligible plan cards (succeeded, partial, canceled)
-- Plan recovery from canceled or archived state via right-click menu and plan detail panel
+- Plan recovery from canceled or failed state via right-click menu and plan detail panel
 - `recover_copilot_plan` MCP tool for programmatic recovery
 - Git rev-parse based recovery: recreates target branch and recovers deepest successful node worktrees
 - Copilot CLI agent verifies recovered worktree integrity
 - All recovered plans enter paused state for safe inspection before resuming
+
+#### Plans Sidebar Enhancements
 - **Release grouping in Plans tab**: Plans assigned to the same release are visually grouped together with collapsible release containers showing release name, status, and plan count
 - **Unassigned plans section**: Plans without a release assignment are displayed separately under "Unassigned Plans" header
 - Release groups are sorted alphabetically by release name for easy navigation
 - Collapse state persists across VS Code sessions for each release group
 
-## [0.15.0] - 2026-03-05
-
-### 🚀 Major Features
+#### .gitignore Debouncing
+- 30-second debounce delay for .gitignore re-application after branch changes, preventing dirty-branch race conditions that block `git checkout` operations
 
 #### Target-Release Management
 - **Multi-provider PR support**: Unified release workflow for GitHub, GitHub Enterprise, and Azure DevOps

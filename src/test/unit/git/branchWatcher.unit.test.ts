@@ -2,7 +2,7 @@ import { suite, test } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import { BranchChangeWatcher } from '../../../git/branchWatcher';
+import { BranchChangeWatcher } from '../../../vscode/branchWatcher';
 
 /**
  * Comprehensive unit tests for git branchWatcher module.

@@ -10,14 +10,12 @@
 import { Logger } from '../core/logger';
 import type { IBulkPlanActions, BulkActionType, BulkActionResult } from '../interfaces/IBulkPlanActions';
 import type { IPlanRunner } from '../interfaces/IPlanRunner';
-import type { IDialogService } from '../interfaces/IDialogService';
 
 const log = Logger.for('ui');
 
 export class BulkPlanActions implements IBulkPlanActions {
   constructor(
     private readonly _planRunner: IPlanRunner,
-    private readonly _dialog: IDialogService
   ) {}
 
   async executeBulkAction(action: BulkActionType, planIds: string[]): Promise<BulkActionResult[]> {
