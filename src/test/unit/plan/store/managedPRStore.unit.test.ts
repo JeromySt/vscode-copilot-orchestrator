@@ -347,6 +347,33 @@ suite('FileSystemManagedPRStore', () => {
         /Permission denied/
       );
     });
+
+    test('should skip non-numeric directory entries', async () => {
+      const pr1 = {
+        id: 'pr-42',
+        prNumber: 42,
+        prUrl: 'https://github.com/test/repo/pull/42',
+        title: 'Valid PR',
+        headBranch: 'feature/valid',
+        baseBranch: 'main',
+        status: 'adopted',
+        providerType: 'github',
+        repoPath: '/test/repo',
+        workingDirectory: '/test/repo',
+        adoptedAt: Date.now(),
+      };
+
+      mockFS.readdirAsync.resolves(['.DS_Store', '42', 'not-a-number']);
+      mockFS.readFileAsync.resolves(JSON.stringify(pr1));
+
+      const result = await store.loadAll();
+
+      // Only the numeric PR entry should be loaded
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0].prNumber, 42);
+      // readFileAsync called only once (for the numeric entry)
+      assert.strictEqual(mockFS.readFileAsync.callCount, 1);
+    });
   });
 
   // ── delete ─────────────────────────────────────────────────────────────

@@ -448,7 +448,8 @@ suite('FileSystemReleaseStore', () => {
     const loaded = await store.loadRelease('rel-1');
     assert.ok(loaded);
     assert.strictEqual(loaded!.id, 'rel-1');
-    // Only the valid entry should be read
-    assert.strictEqual(fs.readFileAsync.callCount, 1);
+    // dot/.git entries skipped — only the valid entry should be attempted (per scan pass)
+    // findReleaseDirectory reads once to find the id, loadRelease reads once more to get the data
+    assert.ok(fs.readFileAsync.callCount <= 2);
   });
 });

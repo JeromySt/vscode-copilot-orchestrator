@@ -920,41 +920,133 @@ class ActionLogControl {
 class CliConsoleControl {
   sessions: any[];
   expandedSession: string | null;
+  private _renderedSession: string | null = null; // tracks which session body is currently in the DOM
 
-  constructor() { this.sessions = []; this.expandedSession = null; this.render(); }
+  constructor() { this.sessions = []; this.expandedSession = null; this._initContainer(); }
 
   startSession(sessionId: string, label: string): void {
     this.sessions.unshift({ id: sessionId, label: label || 'Copilot CLI', lines: [] as string[], active: true, startTime: Date.now() });
     this.expandedSession = sessionId;
-    this.render();
+    this._addTab(this.sessions[0]);
+    this._switchBody(sessionId);
+    this._showContainer();
   }
 
   appendLine(sessionId: string, line: string): void {
     const session = this.sessions.find((s: any) => s.id === sessionId);
     if (!session) return;
     session.lines.push(line);
-    if (this.expandedSession === sessionId) this._appendToConsole(line);
+    if (this._renderedSession === sessionId) this._appendToConsole(line);
   }
 
   endSession(sessionId: string, success: boolean): void {
     const session = this.sessions.find((s: any) => s.id === sessionId);
     if (session) { session.active = false; session.success = success; session.endTime = Date.now(); }
-    this.render();
+    this._updateTabStatus(sessionId);
   }
 
-  /** Called on each pulse event to update elapsed time labels for active sessions. */
+  /** Called on each pulse event — update elapsed time labels surgically. */
   tickElapsed(): void {
     for (const s of this.sessions) {
-      if (!s.active || !s.startTime) continue;
-      const ms = Date.now() - s.startTime;
+      if (!s.startTime) continue;
+      const ms = (s.endTime || Date.now()) - s.startTime;
       const sec = Math.floor(ms / 1000);
       const text = sec < 60 ? sec + 's' : Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
-      const tab = document.querySelector(`.cli-session-tab[data-session-id="${s.id}"] .cli-elapsed`);
-      if (tab) tab.textContent = text;
+      const el = document.querySelector(`.cli-session-tab[data-session-id="${s.id}"] .cli-elapsed`);
+      if (el) el.textContent = text;
     }
   }
 
-  _appendToConsole(line: string): void {
+  /* ── Private: surgical DOM operations ──────────────────────────────── */
+
+  private _initContainer(): void {
+    const container = document.getElementById('cli-console-section');
+    if (container) container.style.display = 'none';
+  }
+
+  private _showContainer(): void {
+    const container = document.getElementById('cli-console-section');
+    if (container) container.style.display = 'block';
+  }
+
+  /** Add a single tab button to the header (no full rebuild). */
+  private _addTab(session: any): void {
+    const header = document.getElementById('cli-console-header');
+    if (!header) return;
+    const btn = document.createElement('button');
+    btn.className = 'cli-session-tab active selected';
+    btn.setAttribute('data-session-id', session.id);
+    btn.innerHTML = '<span class="ai-spinner"></span> ' + escapeHtml(session.label)
+      + ' <span class="cli-elapsed">0s</span>';
+    btn.addEventListener('click', () => {
+      if (this.expandedSession === session.id) return;
+      this.expandedSession = session.id;
+      this._selectTab(session.id);
+      this._switchBody(session.id);
+    });
+    // Deselect all existing tabs
+    header.querySelectorAll('.cli-session-tab').forEach(t => t.classList.remove('selected'));
+    header.prepend(btn);
+  }
+
+  /** Update status icon on a tab when session ends (no full rebuild). */
+  private _updateTabStatus(sessionId: string): void {
+    const session = this.sessions.find((s: any) => s.id === sessionId);
+    if (!session) return;
+    const tab = document.querySelector(`.cli-session-tab[data-session-id="${sessionId}"]`);
+    if (!tab) return;
+    tab.classList.remove('active');
+    // Replace spinner with final icon
+    const spinner = tab.querySelector('.ai-spinner');
+    if (spinner) {
+      const icon = document.createTextNode(session.success ? '\u2705' : '\u274C');
+      spinner.replaceWith(icon);
+    }
+  }
+
+  /** Highlight the selected tab (deselect others). */
+  private _selectTab(sessionId: string): void {
+    const header = document.getElementById('cli-console-header');
+    if (!header) return;
+    header.querySelectorAll('.cli-session-tab').forEach(t => {
+      t.classList.toggle('selected', t.getAttribute('data-session-id') === sessionId);
+    });
+  }
+
+  /**
+   * Switch the console body to show a different session.
+   * Only rebuilds the body when the session actually changes.
+   */
+  private _switchBody(sessionId: string): void {
+    if (this._renderedSession === sessionId) return;
+    this._renderedSession = sessionId;
+    const body = document.getElementById('cli-console-body');
+    if (!body) return;
+
+    const session = this.sessions.find((s: any) => s.id === sessionId);
+    if (!session) {
+      body.innerHTML = '<div style="padding:12px;text-align:center;color:var(--vscode-descriptionForeground);font-size:11px;">Select a session above</div>';
+      return;
+    }
+
+    body.innerHTML = '<pre class="cli-console-output" id="cli-console-output"></pre>';
+    const pre = document.getElementById('cli-console-output');
+    if (pre && session.lines.length > 0) {
+      // Batch-append lines using a document fragment (one reflow, not N)
+      const frag = document.createDocumentFragment();
+      for (const line of session.lines) {
+        const lineEl = document.createElement('div');
+        lineEl.className = 'cli-line';
+        lineEl.textContent = line;
+        frag.appendChild(lineEl);
+      }
+      pre.appendChild(frag);
+      pre.scrollTop = pre.scrollHeight;
+    }
+  }
+
+  /** Append a single line to the visible console (no rebuild). */
+  private _appendToConsole(line: string): void {
     const pre = document.getElementById('cli-console-output');
     if (!pre) return;
     const lineEl = document.createElement('div');
@@ -964,6 +1056,7 @@ class CliConsoleControl {
     pre.scrollTop = pre.scrollHeight;
   }
 
+  /** Full render — only used if we ever need to rebuild from scratch (e.g., panel restore). */
   render(): void {
     const container = document.getElementById('cli-console-section');
     if (!container) return;
@@ -971,46 +1064,34 @@ class CliConsoleControl {
     container.style.display = 'block';
 
     const header = document.getElementById('cli-console-header');
-    const body = document.getElementById('cli-console-body');
-    if (!header || !body) return;
-
-    const self = this;
-    header.innerHTML = this.sessions.map(s => {
-      const statusIcon = s.active ? '<span class="ai-spinner"></span>' : (s.success ? '\u2705' : '\u274C');
-      const selected = self.expandedSession === s.id ? ' selected' : '';
+    if (!header) return;
+    header.innerHTML = '';
+    // Rebuild tabs
+    for (const s of this.sessions) {
+      const btn = document.createElement('button');
+      const isActive = s.active;
+      const isSelected = this.expandedSession === s.id;
+      btn.className = 'cli-session-tab' + (isActive ? ' active' : '') + (isSelected ? ' selected' : '');
+      btn.setAttribute('data-session-id', s.id);
+      const statusIcon = isActive ? '<span class="ai-spinner"></span>' : (s.success ? '\u2705' : '\u274C');
       let elapsed = '';
       if (s.startTime) {
         const ms = (s.endTime || Date.now()) - s.startTime;
         const sec = Math.floor(ms / 1000);
         elapsed = sec < 60 ? sec + 's' : Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
       }
-      return '<button class="cli-session-tab' + (s.active ? ' active' : '') + selected + '" data-session-id="' + s.id + '">'
-        + statusIcon + ' ' + s.label + ' <span class="cli-elapsed">' + elapsed + '</span></button>';
-    }).join('');
-
-    header.querySelectorAll('.cli-session-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        self.expandedSession = (tab as HTMLElement).getAttribute('data-session-id');
-        self.render();
+      btn.innerHTML = statusIcon + ' ' + escapeHtml(s.label) + ' <span class="cli-elapsed">' + elapsed + '</span>';
+      btn.addEventListener('click', () => {
+        if (this.expandedSession === s.id) return;
+        this.expandedSession = s.id;
+        this._selectTab(s.id);
+        this._switchBody(s.id);
       });
-    });
-
-    const session = this.sessions.find((s: any) => s.id === self.expandedSession);
-    if (session) {
-      body.innerHTML = '<pre class="cli-console-output" id="cli-console-output"></pre>';
-      const pre = document.getElementById('cli-console-output');
-      if (pre) {
-        session.lines.forEach((line: string) => {
-          const lineEl = document.createElement('div');
-          lineEl.className = 'cli-line';
-          lineEl.textContent = line;
-          pre.appendChild(lineEl);
-        });
-        pre.scrollTop = pre.scrollHeight;
-      }
-    } else {
-      body.innerHTML = '<div style="padding:12px;text-align:center;color:var(--vscode-descriptionForeground);font-size:11px;">Select a session above</div>';
+      header.appendChild(btn);
     }
+
+    this._renderedSession = null; // force body rebuild
+    if (this.expandedSession) this._switchBody(this.expandedSession);
   }
 }
 
