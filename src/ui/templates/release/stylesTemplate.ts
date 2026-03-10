@@ -1039,6 +1039,36 @@ function pendingActionsStyles(): string {
       white-space: pre-wrap;
       word-break: break-word;
     }
+    .thread-replies {
+      margin: 4px 0 6px 8px;
+      padding-left: 8px;
+      border-left: 2px solid var(--vscode-panel-border);
+    }
+    .thread-reply {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      line-height: 1.5;
+      padding: 2px 0;
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+    }
+    .reply-connector {
+      color: var(--vscode-panel-border);
+      font-family: monospace;
+      font-size: 10px;
+      flex-shrink: 0;
+    }
+    .reply-author {
+      font-weight: 600;
+      color: var(--vscode-foreground);
+      white-space: nowrap;
+      font-size: 11px;
+    }
+    .reply-body {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     .pending-action-location {
       font-size: 11px;
       color: var(--vscode-textLink-foreground);
@@ -1251,6 +1281,39 @@ function actionLogStyles(): string {
       background: var(--vscode-input-background);
       border: 1px solid var(--vscode-input-border);
       color: var(--vscode-descriptionForeground);
+    }
+    .action-entry.clickable {
+      cursor: pointer;
+    }
+    .action-entry.clickable:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .action-console-link {
+      font-size: 10px;
+      color: var(--vscode-textLink-foreground);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .action-console-link:hover {
+      text-decoration: underline;
+    }
+    .action-comment-link {
+      font-size: 10px;
+      color: var(--vscode-textLink-foreground);
+      cursor: pointer;
+      white-space: nowrap;
+      text-decoration: none;
+    }
+    .action-comment-link:hover {
+      text-decoration: underline;
+    }
+    .md-link {
+      color: var(--vscode-textLink-foreground);
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .md-link:hover {
+      text-decoration: underline;
     }`;
 }
 

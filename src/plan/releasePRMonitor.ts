@@ -281,6 +281,8 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       isResolved: c.isResolved,
       source: c.source,
       threadId: c.threadId,
+      url: c.url,
+      replies: c.replies,
     }));
 
     const cycleAlerts: PRSecurityAlert[] = alerts.map((a) => ({
@@ -570,6 +572,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
           type: 'respond-comment',
           description: `Replied to comment from ${comment.author}`,
           success: true,
+          commentUrl: comment.url,
         });
 
         log.debug('Comment addressed', {
@@ -587,6 +590,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
           type: 'respond-comment',
           description: `Failed to reply to comment from ${comment.author}`,
           success: false,
+          commentUrl: comment.url,
         });
       }
     }

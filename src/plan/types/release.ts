@@ -228,7 +228,7 @@ export interface ReleaseDefinition {
     checksPass: number;
     checksFail: number;
     checksPending: number;
-    unresolvedComments: number;
+    unresolvedThreads: number;
     unresolvedAlerts: number;
     cycleCount: number;
     lastCycleAt?: number;
@@ -298,7 +298,7 @@ export type PRCommentSource = 'human' | 'copilot' | 'codeql' | 'bot';
  * A comment or review feedback on the PR.
  */
 export interface PRCommentResult {
-  /** Comment ID */
+  /** Comment ID (root comment of the thread) */
   id: string;
 
   /** Author username */
@@ -321,6 +321,12 @@ export interface PRCommentResult {
 
   /** Thread ID for grouped review comments */
   threadId?: string;
+
+  /** URL to view this comment on the hosting platform */
+  url?: string;
+
+  /** Follow-up replies within this thread */
+  replies?: Array<{ id: string; author: string; body: string; url?: string }>;
 }
 
 /**
@@ -368,6 +374,12 @@ export interface PRActionTaken {
 
   /** Commit hash if a code change was made */
   commitHash?: string;
+
+  /** CLI console session ID — links this action to its console output */
+  sessionId?: string;
+
+  /** URL to the original comment on the hosting platform (for respond-comment actions) */
+  commentUrl?: string;
 }
 
 /**
@@ -424,8 +436,8 @@ export interface PRMonitoringProgress {
   /** Most recent cycle results */
   lastCycle?: PRMonitorCycle;
 
-  /** Number of unresolved comments */
-  unresolvedComments: number;
+  /** Number of unresolved review threads */
+  unresolvedThreads: number;
 
   /** Number of failing checks */
   failingChecks: number;

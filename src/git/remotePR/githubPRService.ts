@@ -358,6 +358,11 @@ export class GitHubPRService implements IRemotePRService {
     
     log.info('Resolving thread', { prNumber, threadId });
 
+    // Validate threadId is a safe GraphQL node ID (alphanumeric, _, -, =)
+    if (!/^[\w\-=]+$/.test(threadId)) {
+      throw new Error(`Invalid threadId format: ${threadId}`);
+    }
+
     const env = this._buildEnv(provider, credentials);
     const query = `mutation { resolveReviewThread(input: {threadId: "${threadId}"}) { thread { id } } }`;
     
@@ -613,7 +618,11 @@ export class GitHubPRService implements IRemotePRService {
   }
 
   /**
-   * Get inline review comments from the pull request.
+   * Get inline review comments from the pull request using GraphQL.
+   *
+   * The REST API (`pulls/{pr}/comments`) does not expose thread resolution
+   * status or GraphQL node IDs needed for `resolveReviewThread`.  The GraphQL
+   * `reviewThreads` connection provides both, so we use it instead.
    */
   private async _getReviewComments(
     ownerRepo: string,
@@ -622,20 +631,66 @@ export class GitHubPRService implements IRemotePRService {
     env: Record<string, string>,
   ): Promise<PRComment[]> {
     try {
-      const endpoint = `repos/${ownerRepo}/pulls/${prNumber}/comments`;
-      const result = await this._execGhApi(endpoint, cwd, env);
+      const [owner, repo] = ownerRepo.split('/');
+      const query = `
+        query {
+          repository(owner: "${owner}", name: "${repo}") {
+            pullRequest(number: ${prNumber}) {
+              reviewThreads(first: 100) {
+                nodes {
+                  id
+                  isResolved
+                  comments(first: 10) {
+                    nodes {
+                      databaseId
+                      url
+                      author { login }
+                      body
+                      path
+                      line
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }`;
+
+      const args = ['api', 'graphql', '-f', `query=${query}`];
+      const result = await this._execGh(args, cwd, env);
       const parsed = JSON.parse(result);
-      
-      return parsed.map((comment: any) => ({
-        id: String(comment.id),
-        author: comment.user?.login || 'unknown',
-        body: comment.body,
-        path: comment.path,
-        line: comment.line || comment.original_line,
-        isResolved: false, // Review comments don't have direct resolution status
-        source: this._categorizeAuthor(comment.user?.login, comment.body),
-        threadId: comment.pull_request_review_id ? String(comment.pull_request_review_id) : undefined,
-      }));
+
+      const threads = parsed?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+      const comments: PRComment[] = [];
+
+      for (const thread of threads) {
+        const threadComments = thread.comments?.nodes ?? [];
+        if (threadComments.length === 0) continue;
+
+        // First comment is the root; the rest are replies
+        const root = threadComments[0];
+        const replies = threadComments.slice(1).map((r: any) => ({
+          id: String(r.databaseId),
+          author: r.author?.login || 'unknown',
+          body: r.body || '',
+          url: r.url,
+        }));
+
+        comments.push({
+          id: String(root.databaseId),
+          author: root.author?.login || 'unknown',
+          body: root.body || '',
+          path: root.path,
+          line: root.line,
+          isResolved: thread.isResolved === true,
+          source: this._categorizeAuthor(root.author?.login, root.body),
+          threadId: thread.id, // GraphQL node ID for resolveReviewThread
+          url: root.url,
+          replies: replies.length > 0 ? replies : undefined,
+        });
+      }
+
+      return comments;
     } catch (err) {
       log.warn('Failed to get review comments', { error: String(err) });
       return [];
@@ -665,6 +720,7 @@ export class GitHubPRService implements IRemotePRService {
           isResolved: false,
           source: this._categorizeAuthor(review.user?.login, review.body),
           threadId: String(review.id),
+          url: review.html_url,
         }));
     } catch (err) {
       log.warn('Failed to get reviews', { error: String(err) });
@@ -692,6 +748,7 @@ export class GitHubPRService implements IRemotePRService {
         body: comment.body,
         isResolved: false,
         source: this._categorizeAuthor(comment.user?.login, comment.body),
+        url: comment.html_url,
       }));
     } catch (err) {
       log.warn('Failed to get issue comments', { error: String(err) });

@@ -11,6 +11,7 @@ import { EventBus } from '../eventBus';
 import { SubscribableControl } from '../subscribableControl';
 import { Topics } from '../topics';
 import { formatDurationMs, escapeHtml } from '../../templates/helpers';
+import { initReleasePanel } from '../releasePanel';
 
 const api = {
   EventBus,
@@ -18,6 +19,7 @@ const api = {
   Topics,
   formatDurationMs,
   escapeHtml,
+  initReleasePanel,
 };
 
 (globalThis as any).Orca = api;

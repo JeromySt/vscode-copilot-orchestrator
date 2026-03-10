@@ -198,16 +198,33 @@ suite('GitHubPRService', () => {
   });
 
   suite('getPRComments', () => {
-    test('aggregates inline/review/issue comments', async () => {
+    test('returns one entry per thread with replies', async () => {
       let callCount = 0;
       (mockSpawner.spawn as sinon.SinonStub).callsFake((cmd: string, args: string[]) => {
         callCount++;
         
-        // First call: review comments
+        // First call: review comments via GraphQL — thread with 2 comments
         if (callCount === 1) {
-          return makeMockProcess(JSON.stringify([
-            { id: 1, user: { login: 'alice' }, body: 'Review comment', path: 'src/file.ts', line: 42 },
-          ]), '', 0);
+          return makeMockProcess(JSON.stringify({
+            data: {
+              repository: {
+                pullRequest: {
+                  reviewThreads: {
+                    nodes: [{
+                      id: 'PRRT_abc123',
+                      isResolved: false,
+                      comments: {
+                        nodes: [
+                          { databaseId: 1, author: { login: 'alice' }, body: 'Review comment', path: 'src/file.ts', line: 42 },
+                          { databaseId: 4, author: { login: 'bob' }, body: 'I agree with Alice', path: 'src/file.ts', line: 42 },
+                        ],
+                      },
+                    }],
+                  },
+                },
+              },
+            },
+          }), '', 0);
         }
         
         // Second call: reviews
@@ -225,10 +242,61 @@ suite('GitHubPRService', () => {
 
       const comments = await service.getPRComments(42, '/repo');
 
+      // Thread with 2 comments → 1 root entry + reviews + issue = 3 entries
       assert.strictEqual(comments.length, 3);
-      assert.ok(comments.find(c => c.id === '1' && c.author === 'alice'));
-      assert.ok(comments.find(c => c.id === '2' && c.author === 'bob'));
-      assert.ok(comments.find(c => c.id === '3' && c.author === 'carol'));
+      const threadComment = comments.find(c => c.id === '1');
+      assert.ok(threadComment);
+      assert.strictEqual(threadComment!.author, 'alice');
+      assert.strictEqual(threadComment!.replies?.length, 1);
+      assert.strictEqual(threadComment!.replies![0].author, 'bob');
+      assert.strictEqual(threadComment!.replies![0].body, 'I agree with Alice');
+    });
+
+    test('returns isResolved and GraphQL threadId from review threads', async () => {
+      let callCount = 0;
+      (mockSpawner.spawn as sinon.SinonStub).callsFake(() => {
+        callCount++;
+
+        if (callCount === 1) {
+          return makeMockProcess(JSON.stringify({
+            data: {
+              repository: {
+                pullRequest: {
+                  reviewThreads: {
+                    nodes: [
+                      {
+                        id: 'PRRT_resolved',
+                        isResolved: true,
+                        comments: { nodes: [{ databaseId: 10, url: 'https://github.com/o/r/pull/42#discussion_r10', author: { login: 'alice' }, body: 'Fixed', path: 'a.ts', line: 1 }] },
+                      },
+                      {
+                        id: 'PRRT_open',
+                        isResolved: false,
+                        comments: { nodes: [{ databaseId: 20, author: { login: 'bob' }, body: 'Bug', path: 'b.ts', line: 5 }] },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          }), '', 0);
+        }
+
+        // reviews and issue comments empty
+        return makeMockProcess(JSON.stringify([]), '', 0);
+      });
+
+      const comments = await service.getPRComments(42, '/repo');
+
+      const resolved = comments.find(c => c.id === '10');
+      const open = comments.find(c => c.id === '20');
+
+      assert.strictEqual(resolved?.isResolved, true);
+      assert.strictEqual(resolved?.threadId, 'PRRT_resolved');
+      assert.strictEqual(resolved?.url, 'https://github.com/o/r/pull/42#discussion_r10');
+      assert.strictEqual(open?.isResolved, false);
+      assert.strictEqual(open?.threadId, 'PRRT_open');
+      assert.strictEqual(open?.url, undefined);
     });
 
     test('categorizes bot/copilot/codeql', async () => {
@@ -237,9 +305,25 @@ suite('GitHubPRService', () => {
         callCount++;
         
         if (callCount === 1) {
-          return makeMockProcess(JSON.stringify([
-            { id: 1, user: { login: 'github-actions[bot]' }, body: 'Bot comment', path: 'file.ts', line: 1 },
-          ]), '', 0);
+          return makeMockProcess(JSON.stringify({
+            data: {
+              repository: {
+                pullRequest: {
+                  reviewThreads: {
+                    nodes: [{
+                      id: 'PRRT_bot',
+                      isResolved: false,
+                      comments: {
+                        nodes: [
+                          { databaseId: 1, author: { login: 'github-actions[bot]' }, body: 'Bot comment', path: 'file.ts', line: 1 },
+                        ],
+                      },
+                    }],
+                  },
+                },
+              },
+            },
+          }), '', 0);
         }
         
         if (callCount === 2) {
@@ -296,13 +380,20 @@ suite('GitHubPRService', () => {
       const mockProc = makeMockProcess('{"data":{"resolveReviewThread":{"thread":{"id":"123"}}}}', '', 0);
       (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
 
-      await service.resolveThread(42, 'thread_123', '/repo');
+      await service.resolveThread(42, 'PRRT_abc123', '/repo');
 
       const spawnCall = (mockSpawner.spawn as sinon.SinonStub).getCall(0);
       assert.strictEqual(spawnCall.args[0], 'gh');
       assert.ok(spawnCall.args[1].includes('api'));
       assert.ok(spawnCall.args[1].includes('graphql'));
       assert.ok(spawnCall.args[1].some((arg: string) => arg.includes('resolveReviewThread')));
+    });
+
+    test('rejects invalid threadId to prevent injection', async () => {
+      await assert.rejects(
+        () => service.resolveThread(42, 'bad"}) { x }', '/repo'),
+        /Invalid threadId format/,
+      );
     });
   });
 });

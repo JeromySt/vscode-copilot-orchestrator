@@ -185,23 +185,33 @@ export class AdoPRService implements IRemotePRService {
         const threadId = thread.id?.toString();
         const isResolved = thread.status === 'fixed' || thread.status === 'closed';
         
-        // Each thread can have multiple comments
+        // Each thread can have multiple comments — first is root, rest are replies
         const threadComments = thread.comments || [];
-        for (const comment of threadComments) {
-          const author = comment.author?.displayName || 'Unknown';
-          const source = this._categorizeCommentSource(author, comment);
+        if (threadComments.length === 0) continue;
 
-          comments.push({
-            id: comment.id?.toString(),
-            author,
-            body: comment.content || '',
-            path: thread.threadContext?.filePath,
-            line: thread.threadContext?.rightFileStart?.line,
-            isResolved,
-            source,
-            threadId,
-          });
-        }
+        const root = threadComments[0];
+        const rootAuthor = root.author?.displayName || 'Unknown';
+        const rootSource = this._categorizeCommentSource(rootAuthor, root);
+
+        const replies = threadComments.slice(1).map((r: any) => ({
+          id: r.id?.toString(),
+          author: r.author?.displayName || 'Unknown',
+          body: r.content || '',
+          url: r._links?.self?.href,
+        }));
+
+        comments.push({
+          id: root.id?.toString(),
+          author: rootAuthor,
+          body: root.content || '',
+          path: thread.threadContext?.filePath,
+          line: thread.threadContext?.rightFileStart?.line,
+          isResolved,
+          source: rootSource,
+          threadId,
+          url: root._links?.self?.href,
+          replies: replies.length > 0 ? replies : undefined,
+        });
       }
 
       log.debug('Fetched Azure DevOps PR comments', { prNumber, count: comments.length });

@@ -217,16 +217,22 @@ suite('AdoPRService', () => {
 
       const comments = await service.getPRComments(42, '/repo');
 
-      assert.strictEqual(comments.length, 3);
+      // 2 threads → 2 entries (thread-level grouping)
+      assert.strictEqual(comments.length, 2);
       
-      const comment1 = comments.find(c => c.id === '10');
-      assert.strictEqual(comment1?.author, 'Alice');
-      assert.strictEqual(comment1?.path, 'src/file.ts');
-      assert.strictEqual(comment1?.line, 42);
-      assert.strictEqual(comment1?.isResolved, false);
+      const thread1 = comments.find(c => c.id === '10');
+      assert.strictEqual(thread1?.author, 'Alice');
+      assert.strictEqual(thread1?.path, 'src/file.ts');
+      assert.strictEqual(thread1?.line, 42);
+      assert.strictEqual(thread1?.isResolved, false);
+      // Second comment in thread 1 becomes a reply
+      assert.strictEqual(thread1?.replies?.length, 1);
+      assert.strictEqual(thread1?.replies?.[0].author, 'Bob');
+      assert.strictEqual(thread1?.replies?.[0].body, 'Fixed');
       
-      const comment3 = comments.find(c => c.id === '20');
-      assert.strictEqual(comment3?.isResolved, true);
+      const thread2 = comments.find(c => c.id === '20');
+      assert.strictEqual(thread2?.isResolved, true);
+      assert.strictEqual(thread2?.replies, undefined); // single-comment thread
     });
   });
 

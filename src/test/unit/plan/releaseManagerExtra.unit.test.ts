@@ -626,7 +626,7 @@ suite('ReleaseManager – extra coverage', () => {
       assert.ok(progress.prMonitoring);
       assert.strictEqual(progress.prMonitoring.cyclesCompleted, 1);
       assert.strictEqual(progress.prMonitoring.failingChecks, 1);
-      assert.strictEqual(progress.prMonitoring.unresolvedComments, 1);
+      assert.strictEqual(progress.prMonitoring.unresolvedThreads, 1);
       assert.strictEqual(progress.prMonitoring.unresolvedAlerts, 1);
     });
 
@@ -737,6 +737,32 @@ suite('ReleaseManager – extra coverage', () => {
       assert.ok(actions.some(a => a.description.includes('no code changes')));
     });
 
+    test('includes sessionId in fix-code actions', async () => {
+      const planRunner = createMockPlanRunner();
+      const git = createMockGitOps();
+      git.repository.hasChanges.resolves(true);
+      const copilot = createMockCopilot();
+      const manager = createManager({ planRunner, git, copilot });
+      const release = await createRelease(manager, planRunner);
+
+      const actions: any[] = [];
+      manager.on('releaseActionTaken', (_id: string, action: any) => actions.push(action));
+
+      await manager.addressFindings(release.id, [
+        { type: 'check', name: 'CI', status: 'failing' },
+      ]);
+
+      const fixActions = actions.filter(a => a.type === 'fix-code');
+      assert.ok(fixActions.length > 0, 'should have fix-code actions');
+      // All fix-code actions after the initial "Addressing" should have sessionId
+      const postStartActions = fixActions.filter(a => !a.description.includes('Addressing'));
+      for (const action of postStartActions) {
+        assert.ok(action.sessionId, `fix-code action "${action.description}" should include sessionId`);
+        assert.ok(typeof action.sessionId === 'string');
+        assert.ok(action.sessionId.startsWith('cli-'));
+      }
+    });
+
     test('commits and pushes when copilot produces changes', async () => {
       const planRunner = createMockPlanRunner();
       const git = createMockGitOps();
@@ -823,6 +849,38 @@ suite('ReleaseManager – extra coverage', () => {
       assert.ok(prService.replyToComment.calledOnce);
       assert.ok(prService.resolveThread.calledOnce);
       assert.ok(actions.some(a => a.type === 'respond-comment' && a.success === true));
+    });
+
+    test('includes commentUrl in respond-comment actions', async () => {
+      const planRunner = createMockPlanRunner();
+      const git = createMockGitOps();
+      git.repository.hasChanges.resolves(true);
+      const prFactory = createMockPRServiceFactory();
+      const copilot = createMockCopilot();
+      const manager = createManager({ planRunner, git, copilot, prFactory });
+      const release = await createRelease(manager, planRunner);
+
+      release.prNumber = 42;
+      release.isolatedRepoPath = '/repo/.orchestrator/release/release-v1';
+
+      const actions: any[] = [];
+      manager.on('releaseActionTaken', (_id: string, action: any) => actions.push(action));
+
+      await manager.addressFindings(release.id, [
+        {
+          type: 'comment',
+          body: 'Fix this',
+          author: 'reviewer',
+          id: 'c1',
+          commentId: 'comment-123',
+          path: 'src/foo.ts',
+          url: 'https://github.com/o/r/pull/42#discussion_r123',
+        },
+      ]);
+
+      const replyAction = actions.find(a => a.type === 'respond-comment');
+      assert.ok(replyAction, 'should have respond-comment action');
+      assert.strictEqual(replyAction.commentUrl, 'https://github.com/o/r/pull/42#discussion_r123');
     });
 
     test('emits findingsResolved with finding IDs', async () => {

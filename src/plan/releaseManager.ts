@@ -97,7 +97,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
             checksPass: checks.filter((c: any) => c.status === 'passing').length,
             checksFail: checks.filter((c: any) => c.status === 'failing').length,
             checksPending: checks.filter((c: any) => c.status === 'pending').length,
-            unresolvedComments: comments.filter((c: any) => !c.isResolved).length,
+            unresolvedThreads: comments.filter((c: any) => !c.isResolved).length,
             unresolvedAlerts: alerts.filter((a: any) => !a.resolved).length,
             cycleCount: (rel.monitoringStats?.cycleCount || 0) + 1,
             lastCycleAt: Date.now(),
@@ -377,14 +377,14 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       const cycles = this.prMonitor.getMonitorCycles(releaseId);
       const lastCycle = cycles[cycles.length - 1];
 
-      const unresolvedComments = lastCycle?.comments.filter((c) => !c.isResolved).length || 0;
+      const unresolvedThreads = lastCycle?.comments.filter((c) => !c.isResolved).length || 0;
       const failingChecks = lastCycle?.checks.filter((c) => c.status === 'failing').length || 0;
       const unresolvedAlerts = lastCycle?.securityAlerts.filter((a) => !a.resolved).length || 0;
 
       progress.prMonitoring = {
         cyclesCompleted: cycles.length,
         lastCycle,
-        unresolvedComments,
+        unresolvedThreads,
         failingChecks,
         unresolvedAlerts,
       };
@@ -1027,6 +1027,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         type: 'fix-code',
         description: `Copilot CLI failed: ${errMsg}`,
         success: false,
+        sessionId,
         timestamp: Date.now(),
       });
       this.emit('findingsProcessing', releaseId, findingIds, 'failed');
@@ -1043,6 +1044,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         type: 'fix-code',
         description: `Copilot CLI failed to apply fixes: ${copilotResult.error || 'unknown error'}`,
         success: false,
+        sessionId,
         timestamp: Date.now(),
       });
       this.emit('findingsProcessing', releaseId, findingIds, 'failed');
@@ -1093,6 +1095,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
           description: `Committed and pushed fixes for ${findings.length} finding(s)`,
           success: true,
           commitHash,
+          sessionId,
           timestamp: Date.now(),
         });
       } catch (err) {
@@ -1102,6 +1105,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
           type: 'fix-code',
           description: `Failed to commit/push: ${errMsg}`,
           success: false,
+          sessionId,
           timestamp: Date.now(),
         });
       }
@@ -1111,6 +1115,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
         type: 'fix-code',
         description: 'Copilot completed but produced no code changes',
         success: true,
+        sessionId,
         timestamp: Date.now(),
       });
     }
@@ -1176,6 +1181,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
               type: 'respond-comment',
               description: `Replied to ${comment.author || 'reviewer'}'s comment`,
               success: true,
+              commentUrl: comment.url,
               timestamp: Date.now(),
             });
           } catch (err) {
@@ -1188,6 +1194,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
               type: 'respond-comment',
               description: `Failed to reply to ${comment.author || 'reviewer'}'s comment`,
               success: false,
+              commentUrl: comment.url,
               timestamp: Date.now(),
             });
           }

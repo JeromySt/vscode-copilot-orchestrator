@@ -94,9 +94,13 @@ export interface PRCreateResult {
 
 /**
  * A comment or review thread item on a pull request.
+ *
+ * When returned from `getPRComments()`, each entry represents **one thread**
+ * (not an individual comment).  The root comment's data populates the top-level
+ * fields, and any follow-up replies are in `replies[]`.
  */
 export interface PRComment {
-  /** Unique comment ID */
+  /** Unique comment ID (root comment of the thread) */
   id: string;
   
   /** Author username */
@@ -119,6 +123,26 @@ export interface PRComment {
   
   /** Platform-specific thread ID for resolving/replying */
   threadId?: string;
+
+  /** URL to view this comment on the hosting platform */
+  url?: string;
+
+  /** Follow-up replies within this thread (newest last) */
+  replies?: PRCommentReply[];
+}
+
+/**
+ * A reply within a comment thread.
+ */
+export interface PRCommentReply {
+  /** Unique comment ID */
+  id: string;
+  /** Author username */
+  author: string;
+  /** Reply body text */
+  body: string;
+  /** URL to view this reply */
+  url?: string;
 }
 
 /**

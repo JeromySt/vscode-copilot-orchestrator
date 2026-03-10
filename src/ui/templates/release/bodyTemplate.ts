@@ -508,7 +508,7 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
   const stats = release.monitoringStats;
   const checksPass = stats?.checksPass ?? 0;
   const checksFail = stats?.checksFail ?? 0;
-  const unresolvedComments = stats?.unresolvedComments ?? 0;
+  const unresolvedThreads = stats?.unresolvedThreads ?? 0;
   const unresolvedAlerts = stats?.unresolvedAlerts ?? 0;
   const cycleCount = stats?.cycleCount ?? 0;
   
@@ -554,8 +554,8 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
       <div class="pr-stat-label">Checks Failing</div>
     </div>
     <div class="pr-stat-card">
-      <div class="pr-stat-value pending" id="comments-unresolved">${unresolvedComments}</div>
-      <div class="pr-stat-label">Unresolved Comments</div>
+      <div class="pr-stat-value pending" id="comments-unresolved">${unresolvedThreads}</div>
+      <div class="pr-stat-label">Unresolved Threads</div>
     </div>
     <div class="pr-stat-card">
       <div class="pr-stat-value" id="alerts-unresolved">${unresolvedAlerts}</div>

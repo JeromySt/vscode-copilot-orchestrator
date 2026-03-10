@@ -145,7 +145,7 @@ export class ReleaseManagementPanel {
               stats: {
                 checksPass: checks.filter((c: any) => c.status === 'passing').length,
                 checksFail: checks.filter((c: any) => c.status === 'failing').length,
-                unresolvedComments: comments.filter((c: any) => !c.isResolved).length,
+                unresolvedThreads: comments.filter((c: any) => !c.isResolved).length,
                 unresolvedAlerts: alerts.filter((a: any) => !a.resolved).length,
               },
             });
