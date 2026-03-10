@@ -651,7 +651,8 @@ suite('copilotCliRunner', () => {
           'job-12345678-extra'
         );
 
-        assert.ok(result.filePath.includes('orchestrator-job-job-1234.instructions.md'));
+        // New behavior: sanitize then take last 12 chars. 'job-12345678-extra' → last 12 = '345678-extra'
+        assert.ok(result.filePath.includes('orchestrator-job-345678-extra.instructions.md'));
       });
 
       test('should omit Additional Context section when no instructions', () => {

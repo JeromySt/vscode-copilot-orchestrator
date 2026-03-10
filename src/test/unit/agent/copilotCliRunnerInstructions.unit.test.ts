@@ -49,13 +49,14 @@ suite('CopilotCliRunner Instructions Tests', () => {
         'job-123-abc'
       );
 
+      // New behavior: sanitize then take last 12 chars. 'job-123-abc' has 11 chars → all kept
       assert.strictEqual(
         result.filePath,
-        path.join('/test/worktree', '.github', 'instructions', 'orchestrator-job-job-123-.instructions.md')
+        path.join('/test/worktree', '.github', 'instructions', 'orchestrator-job-job-123-abc.instructions.md')
       );
     });
 
-    test('truncates jobId to 8 characters', () => {
+    test('truncates long jobId to last 12 characters (after sanitization)', () => {
       const result = runner.writeInstructionsFile(
         '/test/worktree',
         'Test task',
@@ -64,7 +65,8 @@ suite('CopilotCliRunner Instructions Tests', () => {
         'very-long-job-id-that-should-be-truncated'
       );
 
-      assert.ok(result.filePath.includes('orchestrator-job-very-lon'));
+      // New behavior: sanitize then take last 12 chars → 'be-truncated'
+      assert.ok(result.filePath.includes('orchestrator-job-be-truncated'));
       assert.ok(!result.filePath.includes('very-long-job-id-that-should-be-truncated'));
     });
 
