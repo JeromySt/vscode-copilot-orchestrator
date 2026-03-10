@@ -53,7 +53,6 @@ import { DefaultPlanRepository } from './plan/repository/DefaultPlanRepository';
 import { DefaultFileSystem } from './core/defaultFileSystem';
 import { GitignoreDebouncer } from './core/gitignoreDebouncer';
 import { DefaultRemoteProviderDetector } from './git/remotePR/remoteProviderDetector';
-import { GitHubPRService } from './git/remotePR/githubPRService';
 import { RemotePRServiceFactory } from './git/remotePR/remotePRServiceFactory';
 import { FileSystemReleaseStore } from './plan/store/releaseStore';
 import { DefaultReleasePRMonitor } from './plan/releasePRMonitor';
