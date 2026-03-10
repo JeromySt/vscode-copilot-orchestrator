@@ -171,9 +171,18 @@ function filterPendingActions(filter: string, btn: HTMLElement | null): void {
 
 function addressSelectedWithAI(): void {
   if (pendingActions && pendingActions.selected.size > 0) {
-    pendingActions.markSelectedQueued();
-    const selectedFindings = pendingActions.findings.filter((f: any) => pendingActions!.selected.has(f.id));
-    vscode.postMessage({ type: 'addressWithAI', findings: selectedFindings });
+    // Exclude findings already being processed by a prior AI invocation
+    const newFindings = pendingActions.findings.filter((f: any) =>
+      pendingActions!.selected.has(f.id) &&
+      f.aiStatus !== 'queued' && f.aiStatus !== 'processing'
+    );
+    if (newFindings.length === 0) return;
+    // Only mark the new batch as queued
+    for (const f of newFindings) f.aiStatus = 'queued';
+    pendingActions.aiActive = true;
+    pendingActions._updateBanner();
+    pendingActions.render();
+    vscode.postMessage({ type: 'addressWithAI', findings: newFindings });
   }
 }
 

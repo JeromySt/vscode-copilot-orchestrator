@@ -93,6 +93,19 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           const checks = cycle.checks || [];
           const comments = cycle.comments || [];
           const alerts = cycle.securityAlerts || [];
+
+          // Mark previously-addressed comments as resolved.
+          // Issue comments and top-level reviews lack GitHub thread resolution,
+          // so we track which ones we've replied to and treat them as resolved.
+          const addressed = new Set(rel.addressedCommentIds || []);
+          if (addressed.size > 0) {
+            for (const c of comments) {
+              if (!c.isResolved && addressed.has(c.id)) {
+                c.isResolved = true;
+              }
+            }
+          }
+
           rel.monitoringStats = {
             checksPass: checks.filter((c: any) => c.status === 'passing').length,
             checksFail: checks.filter((c: any) => c.status === 'failing').length,
@@ -1153,10 +1166,12 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
                 cwd,
               );
             } else {
-              // For top-level reviews / issue comments, post a general PR comment instead
+              // For top-level reviews / issue comments, post a quote-reply so the
+              // response is visually associated with the original feedback.
+              const quotedBody = (comment.body || '').split('\n').map((l: string) => `> ${l}`).join('\n');
               await prService.addIssueComment(
                 release.prNumber,
-                `Re: ${(comment.author || 'reviewer')}'s feedback — ${replyText}`,
+                `${quotedBody}\n\n${replyText}`,
                 cwd,
               );
             }
@@ -1201,6 +1216,21 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
           }
         }
       }
+    }
+
+    // Track addressed comment IDs so non-threadable comments (issue comments,
+    // top-level reviews) are treated as resolved on subsequent polling cycles.
+    const addressedIds = commentFindings
+      .map((f: any) => f.commentId || f.id?.replace('comment-', ''))
+      .filter(Boolean) as string[];
+    if (addressedIds.length > 0) {
+      if (!release.addressedCommentIds) release.addressedCommentIds = [];
+      for (const id of addressedIds) {
+        if (!release.addressedCommentIds.includes(id)) {
+          release.addressedCommentIds.push(id);
+        }
+      }
+      this.store.saveRelease(release).catch(() => {});
     }
 
     // Emit resolved finding IDs so the webview can mark them resolved
