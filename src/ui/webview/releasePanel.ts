@@ -624,6 +624,9 @@ class PendingActionsControl {
   setFilter(filter: string): void { this.filter = filter; this.render(); }
 
   toggleSelect(id: string): void {
+    // Prevent deselection while AI is working on this finding
+    const finding = this.findings.find((f: any) => f.id === id);
+    if (finding && (finding.aiStatus === 'queued' || finding.aiStatus === 'processing')) return;
     if (this.selected.has(id)) this.selected.delete(id);
     else this.selected.add(id);
     this.updateToolbar();
@@ -818,8 +821,11 @@ class PendingActionsControl {
         + '</div>';
     }
 
+    const isLocked = finding.aiStatus === 'queued' || finding.aiStatus === 'processing';
+    const disabledAttr = isLocked ? ' disabled' : '';
+
     return '<div class="pending-action-item' + resolvedClass + processingClass + '" data-type="' + finding.type + '" data-id="' + finding.id + '">'
-      + '<input type="checkbox" class="pending-action-checkbox" ' + isChecked + ' />'
+      + '<input type="checkbox" class="pending-action-checkbox" ' + isChecked + disabledAttr + ' />'
       + '<div class="pending-action-body">'
       + '<div class="pending-action-meta">' + badge + metaInfo + aiStatusBadge + '</div>'
       + '<div class="pending-action-text">' + bodyText + '</div>'

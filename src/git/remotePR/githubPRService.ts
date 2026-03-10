@@ -762,11 +762,11 @@ export class GitHubPRService implements IRemotePRService {
   private _mapCheckState(state: string): 'passing' | 'failing' | 'pending' {
     const upper = state.toUpperCase();
     
-    if (upper === 'SUCCESS') {
+    if (upper === 'SUCCESS' || upper === 'SKIPPED' || upper === 'NEUTRAL') {
       return 'passing';
     }
     
-    if (upper === 'FAILURE' || upper === 'ERROR') {
+    if (upper === 'FAILURE' || upper === 'ERROR' || upper === 'TIMED_OUT' || upper === 'CANCELLED') {
       return 'failing';
     }
     

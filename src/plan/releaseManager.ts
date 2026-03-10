@@ -1010,6 +1010,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         cwd,
         task: taskDescription,
         timeout: 0,
+        jobId: sessionId,
         onOutput: (line: string) => {
           outputLines.push(line);
           this.emit('cliSessionOutput', releaseId, sessionId, line);
