@@ -27,6 +27,46 @@ suite('ReleaseEventEmitter', () => {
     emitter.removeAllListeners();
   });
 
+  suite('emitReleaseTaskStatusChanged', () => {
+    test('should emit the correct event with args', () => {
+      const spy = sinon.spy();
+      emitter.on('release:taskStatusChanged', spy);
+
+      emitter.emitReleaseTaskStatusChanged('rel-1', 'task-1', 'in-progress');
+
+      assert.strictEqual(spy.callCount, 1, 'event should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], 'rel-1');
+      assert.strictEqual(spy.firstCall.args[1], 'task-1');
+      assert.strictEqual(spy.firstCall.args[2], 'in-progress');
+    });
+  });
+
+  suite('emitReleasePlansAdded', () => {
+    test('should emit the correct event with args', () => {
+      const spy = sinon.spy();
+      emitter.on('release:plansAdded', spy);
+
+      emitter.emitReleasePlansAdded('rel-1', ['plan-a', 'plan-b']);
+
+      assert.strictEqual(spy.callCount, 1, 'event should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], 'rel-1');
+      assert.deepStrictEqual(spy.firstCall.args[1], ['plan-a', 'plan-b']);
+    });
+  });
+
+  suite('emitReleasePrAdopted', () => {
+    test('should emit the correct event with args', () => {
+      const spy = sinon.spy();
+      emitter.on('release:prAdopted', spy);
+
+      emitter.emitReleasePrAdopted('rel-1', 42);
+
+      assert.strictEqual(spy.callCount, 1, 'event should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], 'rel-1');
+      assert.strictEqual(spy.firstCall.args[1], 42);
+    });
+  });
+
   suite('emitReleaseTaskOutput', () => {
     test('should emit the correct event with args', () => {
       const spy = sinon.spy();

@@ -410,4 +410,45 @@ suite('FileSystemReleaseStore', () => {
     const store = new FileSystemReleaseStore('/repo', fs);
     await assert.rejects(() => store.saveMonitorCycles('rel-1', []), /Rename failed/);
   });
+
+  test('loadAllReleases skips dot and .git entries', async () => {
+    const fs = createMockFileSystem();
+    const release = createTestRelease();
+    fs.existsAsync.resolves(true);
+    // Include . .. .git as well as a valid entry
+    fs.readdirAsync.resolves(['.', '..', '.git', 'release-v1.0']);
+    fs.readFileAsync.resolves(JSON.stringify(release));
+    const store = new FileSystemReleaseStore('/repo', fs);
+    const releases = await store.loadAllReleases();
+    // Only the valid entry should be loaded
+    assert.strictEqual(releases.length, 1);
+    assert.strictEqual(releases[0].id, 'rel-1');
+    // readFileAsync should only be called once (for the valid entry)
+    assert.strictEqual(fs.readFileAsync.callCount, 1);
+  });
+
+  test('loadAllReleases skips entries with path traversal attempt', async () => {
+    const fs = createMockFileSystem();
+    fs.existsAsync.resolves(true);
+    // A path-traversal attempt via readdirAsync result — validatePath should block it
+    fs.readdirAsync.resolves(['../../etc']);
+    const store = new FileSystemReleaseStore('/repo', fs);
+    const releases = await store.loadAllReleases();
+    // Path traversal entry is blocked and skipped
+    assert.strictEqual(releases.length, 0);
+  });
+
+  test('loadRelease skips .git and dot entries in findReleaseDirectory', async () => {
+    const fs = createMockFileSystem();
+    const release = createTestRelease();
+    fs.existsAsync.resolves(true);
+    fs.readdirAsync.resolves(['.', '..', '.git', 'release-v1.0']);
+    fs.readFileAsync.resolves(JSON.stringify(release));
+    const store = new FileSystemReleaseStore('/repo', fs);
+    const loaded = await store.loadRelease('rel-1');
+    assert.ok(loaded);
+    assert.strictEqual(loaded!.id, 'rel-1');
+    // Only the valid entry should be read
+    assert.strictEqual(fs.readFileAsync.callCount, 1);
+  });
 });

@@ -220,7 +220,7 @@ export class CopilotCliRunner {
     allowedFolders?: string[]
   ): { filePath: string; dirPath: string } {
     const instructionsDir = path.join(cwd, '.github', 'instructions');
-    const suffix = jobId ? `-${jobId.slice(0, 8)}` : '';
+    const suffix = jobId ? `-${jobId.replace(/[^a-zA-Z0-9_-]/g, '').slice(-12)}` : '';
     const instructionsFile = path.join(instructionsDir, `orchestrator-job${suffix}.instructions.md`);
     
     // Get the worktree folder name for scoping
