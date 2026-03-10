@@ -13,6 +13,7 @@ import type { ReleaseDefinition } from '../plan/types/release';
 import type { IReleaseManager } from '../interfaces/IReleaseManager';
 import type { IPlanRunner } from '../interfaces/IPlanRunner';
 import type { IRemoteProviderDetector } from '../interfaces/IRemoteProviderDetector';
+import type { IPulseEmitter } from '../interfaces/IPulseEmitter';
 
 /**
  * Register release management commands.
@@ -29,6 +30,7 @@ export function registerReleaseCommands(
   releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager,
   planRunner?: IPlanRunner,
   providerDetector?: IRemoteProviderDetector,
+  pulse?: IPulseEmitter,
 ): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.showReleasePanel', (releaseId: string) => {
@@ -55,7 +57,7 @@ export function registerReleaseCommands(
         releaseManager,
         undefined, // options
         undefined, // dialogService
-        undefined, // pulse
+        pulse,
         getAvailablePlans,
         planRunner,
       );

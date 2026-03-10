@@ -98,11 +98,16 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           // Issue comments and top-level reviews lack GitHub thread resolution,
           // so we track which ones we've replied to and treat them as resolved.
           const addressed = new Set(rel.addressedCommentIds || []);
-          if (addressed.size > 0) {
-            for (const c of comments) {
-              if (!c.isResolved && addressed.has(c.id)) {
-                c.isResolved = true;
-              }
+          for (const c of comments) {
+            if (c.isResolved) continue;
+            // Mark if we previously addressed this comment
+            if (addressed.has(c.id)) {
+              c.isResolved = true;
+              continue;
+            }
+            // Filter out our own automated reply comments so they don't appear as new findings
+            if (typeof c.body === 'string' && c.body.includes('\u2705 Addressed in automated fix')) {
+              c.isResolved = true;
             }
           }
 

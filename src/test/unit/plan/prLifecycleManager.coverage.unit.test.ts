@@ -220,6 +220,68 @@ suite('DefaultPRLifecycleManager coverage', () => {
     });
   });
 
+  // ── listAvailablePRs error path ────────────────────────────────────────
+
+  suite('listAvailablePRs error path', () => {
+    test('re-throws error from prServiceFactory (lines 130-136)', async () => {
+      const err = new Error('service factory failure');
+      mockPRServiceFactory.getServiceForRepo.rejects(err);
+
+      await assert.rejects(
+        () => manager.listAvailablePRs({ repoPath: '/repo' }),
+        /service factory failure/,
+      );
+    });
+
+    test('re-throws error from prService.listPRs (lines 130-136)', async () => {
+      const err = new Error('list PRs API failure');
+      mockPRService.listPRs.rejects(err);
+
+      await assert.rejects(
+        () => manager.listAvailablePRs({ repoPath: '/repo' }),
+        /list PRs API failure/,
+      );
+    });
+  });
+
+  // ── startMonitoring error path ─────────────────────────────────────────
+
+  suite('startMonitoring error path', () => {
+    test('re-throws error from prMonitor.startMonitoring (lines 271-277)', async () => {
+      const adoptResult = await manager.adoptPR({ prNumber: 42, repoPath: '/repo' });
+      assert.ok(adoptResult.managedPR);
+      const prId = adoptResult.managedPR.id;
+
+      mockPRMonitor.startMonitoring.rejects(new Error('monitor start failure'));
+
+      await assert.rejects(
+        () => manager.startMonitoring(prId),
+        /monitor start failure/,
+      );
+    });
+  });
+
+  // ── stopMonitoring error path ──────────────────────────────────────────
+
+  suite('stopMonitoring error path', () => {
+    test('re-throws error from persistPR during stop (lines 307-313)', async () => {
+      const adoptResult = await manager.adoptPR({ prNumber: 42, repoPath: '/repo' });
+      assert.ok(adoptResult.managedPR);
+      const prId = adoptResult.managedPR.id;
+
+      // Put PR into monitoring status
+      await manager.startMonitoring(prId);
+
+      // Make persistPR (store.save) fail
+      mockStore.save.rejects(new Error('persist failure on stop'));
+
+      await assert.rejects(
+        () => manager.stopMonitoring(prId),
+        /persist failure on stop/,
+      );
+    });
+  });
+
   // ── demotePR happy path completeness ──────────────────────────────────
 
   suite('demotePR happy path', () => {

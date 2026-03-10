@@ -614,7 +614,11 @@ class PendingActionsControl {
     for (const f of this.findings) oldMap.set(f.id, f);
     this.findings = newFindings.map(f => {
       const old = oldMap.get(f.id);
-      if (old) f.resolved = old.resolved;
+      if (old) {
+        f.resolved = old.resolved;
+        // Preserve AI processing state across monitoring cycles
+        if (old.aiStatus) f.aiStatus = old.aiStatus;
+      }
       return f;
     });
 
