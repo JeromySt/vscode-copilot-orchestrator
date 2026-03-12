@@ -111,6 +111,46 @@ suite('PlanArchiver', () => {
       mockPlanRunner.getStatus.returns({ status: 'archived' });
       assert.strictEqual(archiver.canArchive('plan-1'), false);
     });
+
+    test('returns false for non-existent plans (getStatus returns undefined)', () => {
+      mockPlanRunner.getStatus.returns(undefined);
+      assert.strictEqual(archiver.canArchive('plan-1'), false);
+    });
+  });
+
+  suite('_markAsArchived', () => {
+    test('persists archivedAt timestamp and stateHistory entry via saveState', async () => {
+      const plan = makeMockPlan();
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      mockGit.branches.exists.resolves(false);
+
+      const result = await archiver.archive('plan-1');
+
+      assert.strictEqual(result.success, true);
+      // archivedAt must be set on the plan
+      assert.ok(typeof plan.archivedAt === 'number', 'archivedAt should be a timestamp');
+      // stateHistory should include an 'archived' entry
+      const archivedEntry = plan.stateHistory.find((e: any) => e.to === 'archived');
+      assert.ok(archivedEntry, 'stateHistory should contain archived transition');
+      assert.strictEqual(archivedEntry.reason, 'user-archived');
+      // saveState must have been called to persist
+      assert.ok(mockPlanRepo.saveState.calledOnce, 'saveState should be called once');
+      assert.ok(mockPlanRepo.saveState.calledWith(plan), 'saveState should be called with the plan');
+    });
+
+    test('initializes stateHistory when undefined before adding archived entry', async () => {
+      const plan = makeMockPlan();
+      delete plan.stateHistory; // Remove to trigger lazy-init
+      mockPlanRunner.get.returns(plan);
+      mockPlanRunner.getStatus.returns({ status: 'succeeded' });
+      mockGit.branches.exists.resolves(false);
+
+      await archiver.archive('plan-1');
+
+      assert.ok(Array.isArray(plan.stateHistory), 'stateHistory should be initialized');
+      assert.strictEqual(plan.stateHistory.length, 1);
+    });
   });
 
   suite('archive', () => {

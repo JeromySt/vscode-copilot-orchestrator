@@ -236,7 +236,12 @@ export class PlanArchiver implements IPlanArchiver {
   }
 
   canArchive(planId: string): boolean {
-    const status = this._getStatus(planId);
+    const statusInfo = this._planRunner.getStatus(planId);
+    if (!statusInfo) {
+      // Non-existent plans cannot be archived
+      return false;
+    }
+    const status = statusInfo.status;
     return status === 'succeeded' || status === 'partial' || status === 'failed' || status === 'canceled';
   }
 

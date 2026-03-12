@@ -53,15 +53,30 @@ export async function handleScaffoldReleaseTasks(args: any, ctx: PlanHandlerCont
     }
   }
 
-  // Validate that repoPath is safe: must be absolute, non-empty, no path traversal
+  // Validate that repoPath is safe: must be absolute, non-empty, and within workspace (when available)
+  if (!path.isAbsolute(repoPath)) {
+    return errorResult('Repository path must be an absolute path');
+  }
+
   const resolvedRepoPath = path.resolve(repoPath);
   if (!resolvedRepoPath || resolvedRepoPath === path.sep) {
     return errorResult('Invalid repository path');
   }
-  // Ensure the resolved path matches what was provided (guards against relative traversal)
-  if (resolvedRepoPath !== path.resolve(repoPath)) {
-    return errorResult('Path traversal detected in repoPath');
+
+  if (ctx.workspacePath) {
+    const workspaceRoot = path.resolve(ctx.workspacePath);
+    const workspaceRootWithSep = workspaceRoot.endsWith(path.sep)
+      ? workspaceRoot
+      : workspaceRoot + path.sep;
+
+    if (
+      resolvedRepoPath !== workspaceRoot &&
+      !resolvedRepoPath.startsWith(workspaceRootWithSep)
+    ) {
+      return errorResult('Repository path must be inside the workspace root');
+    }
   }
+
   // Reject dangerous path components
   const basename = path.basename(resolvedRepoPath);
   if (basename === '.git' || basename === '..' || basename === '.') {

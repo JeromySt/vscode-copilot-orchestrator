@@ -20,7 +20,7 @@ import {
   registerPlanCommands,
 } from './core/planInitialization';
 import { GlobalCapacityManager } from './core/globalCapacity';
-import { registerUtilityCommands, registerReleaseCommands, registerPRLifecycleCommands } from './commands';
+import { registerUtilityCommands, registerReleaseCommands, registerPRLifecycleCommands, registerBulkCommands } from './commands';
 import { IMcpManager } from './interfaces/IMcpManager';
 import type { IProcessMonitor } from './interfaces/IProcessMonitor';
 import { PlanRunner } from './plan';
@@ -28,7 +28,7 @@ import { Logger } from './core/logger';
 import { cleanupOrphanedWorktrees } from './core/orphanedWorktreeCleanup';
 import { BranchChangeWatcher } from './vscode/branchWatcher';
 import type { PlanInstance } from './plan/types/plan';
-import { createContainer } from './composition';
+import { createContainer, createReleaseManager, createBulkPlanActions } from './composition';
 import * as Tokens from './core/tokens';
 import type { ServiceContainer } from './core/container';
 import type { IConfigProvider } from './interfaces';
@@ -138,7 +138,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   mcpManager = await initializeMcpServer(context, planRunner, config.mcp, container);
 
   // ── Release Manager ────────────────────────────────────────────────────
-  const { createReleaseManager } = require('./composition');
   const releaseManager = createReleaseManager(container, planRunner);
 
   // ── Plans view ──────────────────────────────────────────────────────────
@@ -157,10 +156,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Bulk Action Commands ───────────────────────────────────────────────
   // Create BulkPlanActions via composition helper (keeps DI wiring in composition.ts)
-  const { createBulkPlanActions } = require('./composition');
   const bulkActions = createBulkPlanActions(container, planRunner);
   const dialogService = container.resolve<import('./interfaces').IDialogService>(Tokens.IDialogService);
-  const { registerBulkCommands } = require('./commands');
   registerBulkCommands(context, bulkActions, dialogService);
 
   // ── Branch Change Watcher ──────────────────────────────────────────────

@@ -82,13 +82,13 @@ suite('PlanArchiver coverage', () => {
   // ── _getStatus null return (line 260) ─────────────────────────────────────
 
   suite('_getStatus null/undefined statusInfo', () => {
-    test('canArchive returns true when getStatus returns undefined (treated as canceled)', () => {
+    test('canArchive returns false when getStatus returns undefined (non-existent plan)', () => {
       mockPlanRunner.getStatus.returns(undefined);
 
-      // 'canceled' is in the archivable set, so should return true
+      // Non-existent plan should NOT be archivable
       const result = archiver.canArchive('plan-x');
 
-      assert.strictEqual(result, true);
+      assert.strictEqual(result, false);
     });
 
     test('isArchived returns false when getStatus returns undefined (treated as canceled)', () => {
