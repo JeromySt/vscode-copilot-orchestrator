@@ -127,6 +127,12 @@ export interface PRComment {
   /** URL to view this comment on the hosting platform */
   url?: string;
 
+  /** GraphQL node ID for mutations (e.g., minimizeComment) — GitHub only */
+  nodeId?: string;
+
+  /** ID of the parent review that spawned this thread (links inline threads to the review summary) */
+  parentReviewId?: string;
+
   /** Follow-up replies within this thread (newest last) */
   replies?: PRCommentReply[];
 }
@@ -153,7 +159,7 @@ export interface PRCheck {
   name: string;
   
   /** Current status of the check */
-  status: 'passing' | 'failing' | 'pending';
+  status: 'passing' | 'failing' | 'pending' | 'skipped';
   
   /** URL to the check details page */
   url?: string;

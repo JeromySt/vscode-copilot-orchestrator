@@ -156,6 +156,18 @@ export interface IRemotePRService {
   resolveThread(prNumber: number, threadId: string, cwd: string): Promise<void>;
 
   /**
+   * Minimize (hide) a comment with a reason classifier.
+   *
+   * On GitHub uses the `minimizeComment` GraphQL mutation to collapse a comment.
+   * On platforms without this feature this is a no-op.
+   *
+   * @param nodeId - GraphQL node ID of the comment (from PRComment.nodeId)
+   * @param reason - Classifier: 'RESOLVED' | 'OFF_TOPIC' | 'OUTDATED' | 'ABUSE'
+   * @param cwd - Working directory of the repository
+   */
+  minimizeComment?(nodeId: string, reason: string, cwd: string): Promise<void>;
+
+  /**
    * List pull requests filtered by author or assignee.
    * 
    * Returns a summary list of PRs matching the filter criteria.

@@ -520,19 +520,22 @@ class PRMonitorControl {
     const passing = checks.filter((c: any) => c.status === 'passing');
     const failing = checks.filter((c: any) => c.status === 'failing');
     const pending = checks.filter((c: any) => c.status === 'pending');
+    const skipped = checks.filter((c: any) => c.status === 'skipped');
 
     let html = '<h4 style="margin: 16px 0 8px 0; font-size: 13px; font-weight: 600;">CI/CD Checks (' + checks.length + ')</h4>';
-    const ordered = [...failing, ...pending, ...passing];
+    const ordered = [...failing, ...pending, ...skipped, ...passing];
     html += ordered.map((check: any) => {
       const icon = check.status === 'passing' ? '\u2705' :
-                   check.status === 'failing' ? '\u274C' : '\u23F3';
+                   check.status === 'failing' ? '\u274C' :
+                   check.status === 'skipped' ? '\u23ED\uFE0F' : '\u23F3';
+      const statusLabel = check.status === 'skipped' ? 'SKIPPED' : check.status.toUpperCase();
       const urlAttr = check.url ? ' data-check-url="' + check.url.replace(/"/g, '&quot;') + '"' : '';
       const urlLink = check.url ?
         '<a class="pr-check-url" href="#"' + urlAttr + ' title="View details">\u2197</a>' : '';
       return '<div class="pr-check-item ' + check.status + '">' +
         '<span class="pr-check-icon">' + icon + '</span>' +
         '<span class="pr-check-name">' + check.name + '</span>' +
-        '<span class="pr-check-status-label">' + check.status + '</span>' +
+        '<span class="pr-check-status-label">' + statusLabel + '</span>' +
         urlLink +
         '</div>';
     }).join('');
@@ -557,12 +560,14 @@ class PendingActionsControl {
   selected: Set<string>;
   filter: string;
   aiActive: boolean;
+  _parentReviews: Map<string, any>;
 
   constructor() {
     this.findings = [];
     this.selected = new Set();
     this.filter = 'all';
     this.aiActive = false;
+    this._parentReviews = new Map();
     this.render();
   }
 
@@ -582,6 +587,27 @@ class PendingActionsControl {
       }
     }
 
+    // Build parent review lookup for group headers.
+    // Strategy: collect from resolved parent reviews in the cycle data, AND
+    // synthesize from child threads' parentReviewId (the parent review may
+    // not be in the comments list if it was filtered or has no body).
+    const parentReviews = new Map<string, any>();
+    if (cycle.comments) {
+      // First pass: capture any resolved non-inline comments as parent review info
+      for (const comment of cycle.comments) {
+        if (comment.isResolved && !comment.path) {
+          parentReviews.set(comment.id, { author: comment.author, body: comment.body, url: comment.url, source: comment.source });
+        }
+      }
+      // Second pass: for any parentReviewId not yet in the map, synthesize from the child
+      for (const comment of cycle.comments) {
+        if (comment.parentReviewId && !parentReviews.has(comment.parentReviewId)) {
+          parentReviews.set(comment.parentReviewId, { author: comment.author, body: '', url: '', source: comment.source });
+        }
+      }
+    }
+    this._parentReviews = parentReviews;
+
     if (cycle.comments) {
       for (const comment of cycle.comments) {
         if (!comment.isResolved) {
@@ -590,6 +616,8 @@ class PendingActionsControl {
             commentId: comment.id, author: comment.author, body: comment.body,
             path: comment.path, line: comment.line, source: comment.source,
             threadId: comment.threadId, url: comment.url,
+            nodeId: comment.nodeId,
+            parentReviewId: comment.parentReviewId,
             replies: comment.replies || [],
             text: comment.body, resolved: false,
           });
@@ -740,7 +768,48 @@ class PendingActionsControl {
       return;
     }
 
-    container.innerHTML = filtered.map(f => this._renderItem(f)).join('');
+    // Group comment findings under their parent review
+    const groups = new Map<string, any[]>();  // parentReviewId → findings
+    const ungrouped: any[] = [];              // findings without a parent review
+
+    for (const f of filtered) {
+      if (f.type === 'comment' && f.parentReviewId && this._parentReviews.has(f.parentReviewId)) {
+        if (!groups.has(f.parentReviewId)) groups.set(f.parentReviewId, []);
+        groups.get(f.parentReviewId)!.push(f);
+      } else {
+        ungrouped.push(f);
+      }
+    }
+
+    let html = '';
+
+    // Render grouped review sections
+    for (const [reviewId, children] of groups) {
+      const parent = this._parentReviews.get(reviewId);
+      const resolvedCount = children.filter(c => c.resolved || c.aiStatus === 'fixed').length;
+      const totalCount = children.length;
+      const allResolved = resolvedCount === totalCount;
+      const groupClass = allResolved ? ' review-group-resolved' : '';
+      const progressText = resolvedCount + '/' + totalCount + ' resolved';
+
+      html += '<div class="review-group' + groupClass + '" data-review-id="' + reviewId + '">'
+        + '<div class="review-group-header">'
+        + '<span class="review-group-icon">\uD83D\uDCDD</span>'
+        + '<span class="review-group-author">' + escapeHtml(parent?.author || 'Reviewer') + '</span>'
+        + '<span class="review-group-label">Review</span>'
+        + '<span class="review-group-progress">' + progressText + '</span>'
+        + '</div>'
+        + '<div class="review-group-body">' + escapeHtml(truncate(parent?.body || '', 150)) + '</div>'
+        + '<div class="review-group-children">'
+        + children.map(f => this._renderItem(f)).join('')
+        + '</div>'
+        + '</div>';
+    }
+
+    // Render ungrouped findings (checks, alerts, standalone comments)
+    html += ungrouped.map(f => this._renderItem(f)).join('');
+
+    container.innerHTML = html;
     this._wireEvents(container);
     this.updateToolbar();
   }
@@ -903,7 +972,8 @@ class ActionLogControl {
         const sid = (entry as HTMLElement).getAttribute('data-session-id');
         if (sid && cliConsole) {
           cliConsole.expandedSession = sid;
-          cliConsole.render();
+          cliConsole._selectTab(sid);
+          cliConsole._switchBody(sid);
           const section = document.getElementById('cli-console-section');
           if (section) { section.style.display = 'block'; section.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
         }
@@ -1009,7 +1079,7 @@ class CliConsoleControl {
   }
 
   /** Highlight the selected tab (deselect others). */
-  private _selectTab(sessionId: string): void {
+  _selectTab(sessionId: string): void {
     const header = document.getElementById('cli-console-header');
     if (!header) return;
     header.querySelectorAll('.cli-session-tab').forEach(t => {
@@ -1021,7 +1091,7 @@ class CliConsoleControl {
    * Switch the console body to show a different session.
    * Only rebuilds the body when the session actually changes.
    */
-  private _switchBody(sessionId: string): void {
+  _switchBody(sessionId: string): void {
     if (this._renderedSession === sessionId) return;
     this._renderedSession = sessionId;
     const body = document.getElementById('cli-console-body');
@@ -1188,6 +1258,22 @@ function initControls(): void {
     if (releaseData.actionLog?.length) {
       const reversedLog = releaseData.actionLog.slice().reverse();
       for (const entry of reversedLog) actionLog.addAction(entry);
+    }
+
+    // Seed CLI console from persisted sessions (newest first)
+    if (releaseData.cliSessions?.length) {
+      for (const s of releaseData.cliSessions) {
+        cliConsole.sessions.push({
+          id: s.id,
+          label: s.label,
+          lines: s.lines || [],
+          active: false,
+          success: s.success,
+          startTime: s.startTime,
+          endTime: s.endTime,
+        });
+      }
+      cliConsole.render();
     }
 
     const selectAllCb = document.getElementById('pending-select-all');

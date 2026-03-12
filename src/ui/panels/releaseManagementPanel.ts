@@ -143,7 +143,7 @@ export class ReleaseManagementPanel {
             this._panel.webview.postMessage({
               type: 'prUpdate',
               stats: {
-                checksPass: checks.filter((c: any) => c.status === 'passing').length,
+                checksPass: checks.filter((c: any) => c.status === 'passing' || c.status === 'skipped').length,
                 checksFail: checks.filter((c: any) => c.status === 'failing').length,
                 unresolvedThreads: comments.filter((c: any) => !c.isResolved).length,
                 unresolvedAlerts: alerts.filter((a: any) => !a.resolved).length,

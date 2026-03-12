@@ -240,6 +240,16 @@ export interface ReleaseDefinition {
   /** Persisted action log entries (survives webview re-renders) */
   actionLog?: Array<PRActionTaken & { timestamp?: number }>;
 
+  /** Persisted CLI console sessions (survives webview re-renders) */
+  cliSessions?: Array<{
+    id: string;
+    label: string;
+    lines: string[];
+    success: boolean;
+    startTime: number;
+    endTime: number;
+  }>;
+
   /** Comment IDs that have been addressed (issue comments and top-level reviews lack thread resolution) */
   addressedCommentIds?: string[];
 
@@ -286,7 +296,7 @@ export interface PRCheckResult {
   name: string;
 
   /** Check status */
-  status: 'passing' | 'failing' | 'pending';
+  status: 'passing' | 'failing' | 'pending' | 'skipped';
 
   /** Optional URL to check details */
   url?: string;
@@ -327,6 +337,12 @@ export interface PRCommentResult {
 
   /** URL to view this comment on the hosting platform */
   url?: string;
+
+  /** GraphQL node ID for mutations (GitHub only) */
+  nodeId?: string;
+
+  /** ID of the parent review that contains this thread */
+  parentReviewId?: string;
 
   /** Follow-up replies within this thread */
   replies?: Array<{ id: string; author: string; body: string; url?: string }>;

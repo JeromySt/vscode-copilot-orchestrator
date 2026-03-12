@@ -44,12 +44,20 @@ export function registerCopilotCliCheck(context: vscode.ExtensionContext) {
 
 /**
  * Check CLI availability at startup and offer setup if needed.
- * Runs after extension activation to provide helpful guidance.
+ * Delays the check to avoid false negatives during VS Code's busy startup window.
  */
 export async function checkCopilotCliOnStartup(): Promise<void> {
+  // Wait for VS Code to finish initializing — process spawning is slow during startup
+  await new Promise(resolve => setTimeout(resolve, 8000));
+
   const cliAvailable = isCliCachePopulated() ? isCopilotCliAvailable() : await checkCopilotCliAsync();
   
   if (!cliAvailable) {
+    // Retry once after a short delay (the first check may have timed out)
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    const retryResult = await checkCopilotCliAsync();
+    if (retryResult) return;
+
     const action = await vscode.window.showWarningMessage(
       'Copilot CLI not detected. The orchestrator requires it for agent work.',
       'Setup Now',

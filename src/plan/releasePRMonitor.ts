@@ -282,6 +282,8 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       source: c.source,
       threadId: c.threadId,
       url: c.url,
+      nodeId: c.nodeId,
+      parentReviewId: c.parentReviewId,
       replies: c.replies,
     }));
 

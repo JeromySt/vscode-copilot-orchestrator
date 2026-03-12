@@ -782,6 +782,7 @@ function prMonitorStyles(): string {
     .pr-check-item.passing { border-left-color: var(--vscode-testing-iconPassed); }
     .pr-check-item.failing { border-left-color: var(--vscode-testing-iconFailed); }
     .pr-check-item.pending { border-left-color: var(--vscode-button-background); }
+    .pr-check-item.skipped { border-left-color: var(--vscode-descriptionForeground); opacity: 0.7; }
     .pr-check-icon {
       font-size: 14px;
       min-width: 18px;
@@ -968,6 +969,57 @@ function pendingActionsStyles(): string {
       border: 1px solid var(--vscode-input-border);
       border-radius: 4px;
       background: var(--vscode-input-background);
+    }
+    .review-group {
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 6px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .review-group-resolved {
+      opacity: 0.6;
+    }
+    .review-group-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--vscode-sideBar-background);
+      border-bottom: 1px solid var(--vscode-panel-border);
+      font-size: 12px;
+    }
+    .review-group-icon {
+      font-size: 14px;
+    }
+    .review-group-author {
+      font-weight: 600;
+      color: var(--vscode-foreground);
+    }
+    .review-group-label {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+    }
+    .review-group-progress {
+      margin-left: auto;
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+    }
+    .review-group-body {
+      padding: 6px 12px;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      border-bottom: 1px solid var(--vscode-input-border);
+      line-height: 1.4;
+    }
+    .review-group-children {
+      margin-left: 20px;
+      border-left: 3px solid var(--vscode-panel-border);
+    }
+    .review-group-children .pending-action-item {
+      padding-left: 16px;
     }
     .pending-action-item {
       display: flex;

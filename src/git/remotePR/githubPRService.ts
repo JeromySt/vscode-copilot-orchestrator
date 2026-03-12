@@ -256,6 +256,22 @@ export class GitHubPRService implements IRemotePRService {
       deduplicated.set(comment.id, comment);
     }
 
+    // Mark parent review comments that have child threads.
+    // These are summary comments (e.g., "Copilot reviewed 89 files and generated 9 comments")
+    // that aren't independently actionable — the child threads are what matter.
+    const parentReviewIds = new Set<string>();
+    for (const c of reviewComments) {
+      if (c.parentReviewId) parentReviewIds.add(c.parentReviewId);
+    }
+    for (const [, c] of deduplicated) {
+      if (parentReviewIds.has(c.id) && !c.path) {
+        // This review has child threads — mark it as resolved so it doesn't
+        // appear as a standalone finding. It will be auto-hidden when all
+        // its child threads are resolved.
+        c.isResolved = true;
+      }
+    }
+
     const result = Array.from(deduplicated.values());
     log.info('PR comments retrieved', { prNumber, count: result.length });
     
@@ -373,6 +389,37 @@ export class GitHubPRService implements IRemotePRService {
 
     await this._execGh(args, cwd, env);
     log.info('Thread resolved', { prNumber, threadId });
+  }
+
+  /**
+   * Minimize (hide) a comment on GitHub with a reason classifier.
+   *
+   * Uses the `minimizeComment` GraphQL mutation. This collapses the comment
+   * on the PR page with a "This comment was hidden" message showing the reason.
+   */
+  async minimizeComment(nodeId: string, reason: string, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    // Validate nodeId format (Base64 GraphQL node IDs)
+    if (!/^[\w\-=/+]+$/.test(nodeId)) {
+      throw new Error(`Invalid nodeId format: ${nodeId}`);
+    }
+    // Validate reason is a known classifier
+    const validReasons = ['RESOLVED', 'OFF_TOPIC', 'OUTDATED', 'ABUSE'];
+    const upperReason = reason.toUpperCase();
+    if (!validReasons.includes(upperReason)) {
+      throw new Error(`Invalid minimize reason: ${reason}`);
+    }
+
+    log.info('Minimizing comment', { nodeId, reason: upperReason });
+
+    const env = this._buildEnv(provider, credentials);
+    const query = `mutation { minimizeComment(input: {subjectId: "${nodeId}", classifier: ${upperReason}}) { minimizedComment { isMinimized } } }`;
+
+    const args = ['api', 'graphql', '-f', `query=${query}`];
+    await this._execGh(args, cwd, env);
+    log.info('Comment minimized', { nodeId, reason: upperReason });
   }
 
   /**
@@ -648,6 +695,7 @@ export class GitHubPRService implements IRemotePRService {
                       body
                       path
                       line
+                      pullRequestReview { databaseId }
                     }
                   }
                 }
@@ -686,6 +734,7 @@ export class GitHubPRService implements IRemotePRService {
           source: this._categorizeAuthor(root.author?.login, root.body),
           threadId: thread.id, // GraphQL node ID for resolveReviewThread
           url: root.url,
+          parentReviewId: root.pullRequestReview?.databaseId ? String(root.pullRequestReview.databaseId) : undefined,
           replies: replies.length > 0 ? replies : undefined,
         });
       }
@@ -721,6 +770,7 @@ export class GitHubPRService implements IRemotePRService {
           source: this._categorizeAuthor(review.user?.login, review.body),
           threadId: String(review.id),
           url: review.html_url,
+          nodeId: review.node_id,
         }));
     } catch (err) {
       log.warn('Failed to get reviews', { error: String(err) });
@@ -749,6 +799,7 @@ export class GitHubPRService implements IRemotePRService {
         isResolved: false,
         source: this._categorizeAuthor(comment.user?.login, comment.body),
         url: comment.html_url,
+        nodeId: comment.node_id,
       }));
     } catch (err) {
       log.warn('Failed to get issue comments', { error: String(err) });
@@ -759,11 +810,15 @@ export class GitHubPRService implements IRemotePRService {
   /**
    * Map gh CLI check state to our normalized status.
    */
-  private _mapCheckState(state: string): 'passing' | 'failing' | 'pending' {
+  private _mapCheckState(state: string): 'passing' | 'failing' | 'pending' | 'skipped' {
     const upper = state.toUpperCase();
     
-    if (upper === 'SUCCESS' || upper === 'SKIPPED' || upper === 'NEUTRAL') {
+    if (upper === 'SUCCESS') {
       return 'passing';
+    }
+
+    if (upper === 'SKIPPED' || upper === 'NEUTRAL') {
+      return 'skipped';
     }
     
     if (upper === 'FAILURE' || upper === 'ERROR' || upper === 'TIMED_OUT' || upper === 'CANCELLED') {

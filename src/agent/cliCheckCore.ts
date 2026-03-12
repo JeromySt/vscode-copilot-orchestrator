@@ -62,9 +62,11 @@ export async function ensureCopilotCliChecked(): Promise<boolean> {
  * Updates the cache and returns the result.
  */
 export async function checkCopilotCliAsync(spawner?: IProcessSpawner): Promise<boolean> {
-  const result = await cmdOkAsync('gh copilot --help', spawner) || 
+  // Check standalone `copilot` first — this is what the CLI runner actually invokes
+  const result = await cmdOkAsync('copilot --version', spawner) ||
+                 await cmdOkAsync('copilot --help', spawner) ||
+                 await cmdOkAsync('gh copilot --help', spawner) || 
                  await hasGhCopilotAsync(spawner) || 
-                 await cmdOkAsync('copilot --help', spawner) || 
                  await cmdOkAsync('github-copilot --help', spawner) || 
                  await cmdOkAsync('github-copilot-cli --help', spawner);
   cachedCliAvailable = result;
@@ -96,11 +98,11 @@ export async function cmdOkAsync(cmd: string, spawner?: IProcessSpawner): Promis
     const proc = actualSpawner.spawn(cmd, [], { shell: true, stdio: 'ignore' });
     proc.on('close', (code: number | null) => resolve(code === 0));
     proc.on('error', () => resolve(false));
-    // Timeout after 5 seconds
+    // Timeout after 10 seconds
     setTimeout(() => {
       proc.kill();
       resolve(false);
-    }, 5000);
+    }, 15000);
   });
 }
 

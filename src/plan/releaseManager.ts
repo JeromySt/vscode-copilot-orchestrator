@@ -112,7 +112,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           }
 
           rel.monitoringStats = {
-            checksPass: checks.filter((c: any) => c.status === 'passing').length,
+            checksPass: checks.filter((c: any) => c.status === 'passing' || c.status === 'skipped').length,
             checksFail: checks.filter((c: any) => c.status === 'failing').length,
             checksPending: checks.filter((c: any) => c.status === 'pending').length,
             unresolvedThreads: comments.filter((c: any) => !c.isResolved).length,
@@ -143,6 +143,40 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         rel.actionLog.unshift(action);
         // Cap at 100 entries to avoid bloating serialization
         if (rel.actionLog.length > 100) { rel.actionLog.length = 100; }
+      }
+    });
+
+    // Persist CLI sessions so they survive webview re-renders/reopens.
+    // Buffer output lines during active sessions, then store on the release when complete.
+    const activeSessions = new Map<string, { releaseId: string; id: string; label: string; lines: string[]; startTime: number }>();
+
+    this.on('cliSessionStart', (releaseId: string, sessionId: string, label: string) => {
+      activeSessions.set(sessionId, { releaseId, id: sessionId, label, lines: [], startTime: Date.now() });
+    });
+    this.on('cliSessionOutput', (_releaseId: string, sessionId: string, line: string) => {
+      const s = activeSessions.get(sessionId);
+      if (s) s.lines.push(line);
+    });
+    this.on('cliSessionEnd', (releaseId: string, sessionId: string, success: boolean) => {
+      const s = activeSessions.get(sessionId);
+      activeSessions.delete(sessionId);
+      const rel = this.releases.get(releaseId);
+      if (rel && s) {
+        if (!rel.cliSessions) rel.cliSessions = [];
+        // Keep last 500 lines per session to avoid storage bloat
+        const maxLines = 500;
+        const trimmedLines = s.lines.length > maxLines ? s.lines.slice(-maxLines) : s.lines;
+        rel.cliSessions.unshift({
+          id: s.id,
+          label: s.label,
+          lines: trimmedLines,
+          success,
+          startTime: s.startTime,
+          endTime: Date.now(),
+        });
+        // Cap at 10 stored sessions
+        if (rel.cliSessions.length > 10) rel.cliSessions.length = 10;
+        this.store.saveRelease(rel).catch(() => {});
       }
     });
 
@@ -1198,6 +1232,21 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
               }
             }
 
+            // For non-thread comments (issue comments, top-level reviews),
+            // minimize (hide) the original comment with "Resolved" reason so
+            // it collapses on the GitHub PR page.
+            if (!comment.path && comment.nodeId && typeof prService.minimizeComment === 'function') {
+              try {
+                await prService.minimizeComment(comment.nodeId, 'RESOLVED', cwd);
+              } catch (minErr) {
+                log.warn('Failed to minimize comment (non-fatal)', {
+                  releaseId,
+                  nodeId: comment.nodeId,
+                  error: minErr instanceof Error ? minErr.message : String(minErr),
+                });
+              }
+            }
+
             this.emit('releaseActionTaken', releaseId, {
               type: 'respond-comment',
               description: `Replied to ${comment.author || 'reviewer'}'s comment`,
@@ -1238,6 +1287,49 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
       this.store.saveRelease(release).catch(() => {});
     }
 
+    // Auto-minimize parent review comments when all their child threads are resolved.
+    // The parent review (e.g., "Copilot reviewed 89 files...") is non-actionable;
+    // once all its inline thread comments are addressed, hide it with RESOLVED.
+    if (release.prNumber && release.lastCycle) {
+      let prSvc;
+      try { prSvc = await this.prServiceFactory.getServiceForRepo(cwd); } catch { /* */ }
+      if (prSvc && typeof prSvc.minimizeComment === 'function') {
+      const allComments = release.lastCycle.comments || [];
+      // Group threads by parentReviewId
+      const reviewChildThreads = new Map<string, any[]>();
+      for (const c of allComments) {
+        if (c.parentReviewId) {
+          if (!reviewChildThreads.has(c.parentReviewId)) {
+            reviewChildThreads.set(c.parentReviewId, []);
+          }
+          reviewChildThreads.get(c.parentReviewId)!.push(c);
+        }
+      }
+      // Check each parent review — if all children are now resolved, minimize the parent
+      const addressedSet = new Set(release.addressedCommentIds || []);
+      for (const [parentId, children] of reviewChildThreads) {
+        const allChildrenResolved = children.every((c: any) =>
+          c.isResolved || addressedSet.has(c.id)
+        );
+        if (!allChildrenResolved) continue;
+        // Find the parent review's nodeId
+        const parentReview = allComments.find((c: any) => c.id === parentId);
+        if (!parentReview?.nodeId) continue;
+        try {
+          await prSvc.minimizeComment(parentReview.nodeId, 'RESOLVED', cwd);
+          log.info('Auto-minimized parent review (all children resolved)', {
+            releaseId, parentReviewId: parentId,
+          });
+        } catch (err) {
+          log.warn('Failed to auto-minimize parent review (non-fatal)', {
+            releaseId, parentReviewId: parentId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      }
+    }
+
     // Emit resolved finding IDs so the webview can mark them resolved
     const resolvedIds = findings.map((f: any) => f.id);
     this.emit('findingsResolved', releaseId, resolvedIds, !!commitHash);
@@ -1265,6 +1357,9 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
   on(event: 'releaseActionTaken', handler: (releaseId: string, action: import('./types/release').PRActionTaken & { timestamp?: number }) => void): this;
   on(event: 'findingsResolved', handler: (releaseId: string, findingIds: string[], hasCommit: boolean) => void): this;
   on(event: 'findingsProcessing', handler: (releaseId: string, findingIds: string[], status: string) => void): this;
+  on(event: 'cliSessionStart', handler: (releaseId: string, sessionId: string, label: string) => void): this;
+  on(event: 'cliSessionOutput', handler: (releaseId: string, sessionId: string, line: string) => void): this;
+  on(event: 'cliSessionEnd', handler: (releaseId: string, sessionId: string, success: boolean) => void): this;
   on(event: string | symbol, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
