@@ -145,6 +145,40 @@ suite('planStatePersister', () => {
       assert.strictEqual(result.jobs[0].hasPostchecks, true); // Found on disk
     });
 
+    test('should serialize non-empty group states', async () => {
+      const mockStore: any = {
+        hasNodeSpec: sandbox.stub().resolves(false),
+      };
+
+      const plan: PlanInstance = {
+        id: 'plan-1',
+        spec: { name: 'Test', jobs: [], status: 'pending' },
+        jobs: new Map(),
+        nodeStates: new Map(),
+        producerIdToNodeId: new Map(),
+        roots: [],
+        leaves: [],
+        groups: new Map(),
+        groupStates: new Map([
+          ['group-1', { status: 'running', version: 1, runningCount: 1, succeededCount: 0, failedCount: 0, blockedCount: 0, canceledCount: 0 }],
+        ]),
+        groupPathToId: new Map(),
+        repoPath: '/repo',
+        baseBranch: 'main',
+        targetBranch: 'main',
+        worktreeRoot: '/worktrees',
+        createdAt: 123456789,
+        stateVersion: 1,
+        isPaused: false,
+      } as any;
+
+      const result = await serializePlanState(plan, mockStore);
+
+      assert.ok(result.groupStates);
+      assert.strictEqual(result.groupStates!['group-1'].status, 'running');
+      assert.strictEqual(result.groupStates!['group-1'].runningCount, 1);
+    });
+
     test('should serialize producerIdToNodeId map', async () => {
       const mockStore: any = {
         hasNodeSpec: sandbox.stub().resolves(false),

@@ -123,6 +123,80 @@ suite('PlanLifecycleManager', () => {
     assert.strictEqual(plan.nodeStates.get('node-1')!.status, 'failed');
   });
 
+  test('initialize sets isPaused=true for scaffolding plans loaded from legacy storage', async () => {
+    const plan = createTestPlan();
+    (plan.spec as any).status = 'scaffolding';
+    (state.persistence.loadAll as sinon.SinonStub).returns([plan]);
+    (state.persistence as any).disableSaves = sinon.stub();
+
+    const mockRepo = {
+      list: sinon.stub().resolves([]),
+      loadState: sinon.stub().resolves(undefined),
+      migrateLegacy: sinon.stub().resolves(),
+      saveStateSync: sinon.stub(),
+    };
+    state.planRepository = mockRepo as any;
+
+    await mgr.initialize();
+
+    assert.strictEqual(plan.isPaused, true, 'Scaffolding plan should be paused');
+  });
+
+  test('initialize loads plans from repository not already in legacy storage', async () => {
+    const repoPlan = createTestPlan('plan-repo-1');
+    (state.persistence.loadAll as sinon.SinonStub).returns([]);
+    (state.persistence as any).disableSaves = sinon.stub();
+
+    const mockRepo = {
+      list: sinon.stub().resolves([{ id: 'plan-repo-1', name: 'Repo Plan' }]),
+      loadState: sinon.stub().resolves(repoPlan),
+      migrateLegacy: sinon.stub().resolves(),
+      saveStateSync: sinon.stub(),
+    };
+    state.planRepository = mockRepo as any;
+
+    await mgr.initialize();
+
+    assert.strictEqual(state.plans.size, 1);
+    assert.strictEqual(state.plans.get('plan-repo-1'), repoPlan);
+  });
+
+  test('initialize handles repository list failure gracefully', async () => {
+    (state.persistence.loadAll as sinon.SinonStub).returns([]);
+    (state.persistence as any).disableSaves = sinon.stub();
+
+    const mockRepo = {
+      list: sinon.stub().rejects(new Error('repository unavailable')),
+      loadState: sinon.stub().resolves(undefined),
+      migrateLegacy: sinon.stub().resolves(),
+      saveStateSync: sinon.stub(),
+    };
+    state.planRepository = mockRepo as any;
+
+    await mgr.initialize();
+
+    assert.strictEqual(state.plans.size, 0);
+    assert.ok((log.warn as sinon.SinonStub).called);
+  });
+
+  test('initialize handles individual plan load failure from repository gracefully', async () => {
+    (state.persistence.loadAll as sinon.SinonStub).returns([]);
+    (state.persistence as any).disableSaves = sinon.stub();
+
+    const mockRepo = {
+      list: sinon.stub().resolves([{ id: 'bad-plan', name: 'Bad Plan' }]),
+      loadState: sinon.stub().rejects(new Error('corrupt plan data')),
+      migrateLegacy: sinon.stub().resolves(),
+      saveStateSync: sinon.stub(),
+    };
+    state.planRepository = mockRepo as any;
+
+    await mgr.initialize();
+
+    assert.strictEqual(state.plans.size, 0);
+    assert.ok((log.warn as sinon.SinonStub).called);
+  });
+
   test('shutdown persists all plans', async () => {
     const plan = createTestPlan();
     state.plans.set(plan.id, plan);

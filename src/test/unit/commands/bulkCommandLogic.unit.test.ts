@@ -144,4 +144,19 @@ suite('executeBulkCommand', () => {
     const callArgs = mockDialog.showInfo.getCall(0).args;
     assert.ok(callArgs[0].includes('2 plans succeeded'));
   });
+
+  test('shows error dialog when all actions fail', async () => {
+    mockDialog.showWarning.resolves('Delete');
+    mockBulkActions.executeBulkAction.resolves([
+      { planId: 'plan1', success: false, error: 'Failed 1' },
+      { planId: 'plan2', success: false, error: 'Failed 2' },
+    ]);
+
+    await executeBulkCommand(mockBulkActions, mockDialog, 'delete', ['plan1', 'plan2']);
+
+    assert.ok(mockBulkActions.executeBulkAction.calledOnce);
+    assert.ok(mockDialog.showError.calledOnce);
+    const callArgs = mockDialog.showError.getCall(0).args;
+    assert.ok(callArgs[0].includes('All 2'));
+  });
 });
