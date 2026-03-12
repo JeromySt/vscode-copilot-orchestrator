@@ -96,7 +96,7 @@ suite('McpHandler', () => {
 
   setup(() => {
     quiet = silenceConsole();
-    handler = new McpHandler(makeMockPlanRunner(), '/workspace', {} as any, undefined, {} as any);
+    handler = new McpHandler(makeMockPlanRunner(), '/workspace', {} as any, {} as any, undefined);
   });
 
   teardown(() => {
@@ -176,7 +176,7 @@ suite('McpHandler', () => {
       const mockRunner = makeMockPlanRunner({
         enqueue: () => mockPlan,
       });
-      const h = new McpHandler(mockRunner, '/workspace', {} as any, undefined, {} as any);
+      const h = new McpHandler(mockRunner, '/workspace', {} as any, {} as any, undefined);
 
       const res = await h.handleRequest(makeRequest('tools/call', {
         name: 'create_copilot_plan',
@@ -196,7 +196,7 @@ suite('McpHandler', () => {
 
     test('routes list_copilot_plans', async () => {
       const mockRunner = makeMockPlanRunner({ getAll: () => [] });
-      const h = new McpHandler(mockRunner, '/workspace', {} as any, undefined, {} as any);
+      const h = new McpHandler(mockRunner, '/workspace', {} as any, {} as any, undefined);
 
       const res = await h.handleRequest(makeRequest('tools/call', {
         name: 'list_copilot_plans',
@@ -223,7 +223,7 @@ suite('McpHandler', () => {
 
     test('routes cancel_copilot_plan', async () => {
       const mockRunner = makeMockPlanRunner({ cancel: () => true });
-      const h = new McpHandler(mockRunner, '/workspace', {} as any, undefined, {} as any);
+      const h = new McpHandler(mockRunner, '/workspace', {} as any, {} as any, undefined);
 
       const res = await h.handleRequest(makeRequest('tools/call', {
         name: 'cancel_copilot_plan',
@@ -236,7 +236,7 @@ suite('McpHandler', () => {
 
     test('routes delete_copilot_plan', async () => {
       const mockRunner = makeMockPlanRunner({ delete: () => true });
-      const h = new McpHandler(mockRunner, '/workspace', {} as any, undefined, {} as any);
+      const h = new McpHandler(mockRunner, '/workspace', {} as any, {} as any, undefined);
 
       const res = await h.handleRequest(makeRequest('tools/call', {
         name: 'delete_copilot_plan',
@@ -277,7 +277,7 @@ suite('McpHandler', () => {
       const mockRunner = makeMockPlanRunner({
         getAll: () => { throw new Error('boom'); },
       });
-      const h = new McpHandler(mockRunner, '/workspace', {} as any, undefined, {} as any);
+      const h = new McpHandler(mockRunner, '/workspace', {} as any, {} as any, undefined);
 
       const res = await h.handleRequest(makeRequest('tools/call', {
         name: 'list_copilot_plans',
@@ -321,7 +321,7 @@ suite('McpHandler', () => {
         } : undefined,
         getEffectiveEndedAt: () => undefined,
       });
-      const h = new McpHandler(mockRunner, '/workspace', {} as any, undefined, {} as any);
+      const h = new McpHandler(mockRunner, '/workspace', {} as any, {} as any, undefined);
 
       const res = await h.handleRequest(makeRequest('tools/call', {
         name: 'get_copilot_plan_status',
@@ -376,7 +376,7 @@ suite('McpHandler', () => {
         get: (id: string) => id === 'plan-1' ? mockPlan : undefined,
         getPlan: (id: string) => id === 'plan-1' ? mockPlan : undefined,
       });
-      const h = new McpHandler(mockRunner, '/workspace', {} as any, undefined, {} as any);
+      const h = new McpHandler(mockRunner, '/workspace', {} as any, {} as any, undefined);
 
       const res = await h.handleRequest(makeRequest('tools/call', {
         name: 'get_copilot_job',

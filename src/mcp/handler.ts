@@ -125,8 +125,8 @@ export class McpHandler implements IMcpRequestRouter {
    * @param PlanRunner      - Singleton {@link PlanRunner} that manages plan lifecycle.
    * @param workspacePath   - Absolute path to the workspace root (git repository).
    * @param git             - Git operations interface.
-   * @param configProvider  - Optional configuration provider for reading VS Code settings.
    * @param planRepository  - Plan repository for filesystem-backed storage.
+   * @param configProvider  - Optional configuration provider for reading VS Code settings.
    * @param planArchiver    - Optional plan archiver for cleaning up completed plans.
    * @param planRecovery    - Optional plan recovery service.
    * @param releaseManager     - Optional release manager for multi-plan releases.
@@ -136,16 +136,13 @@ export class McpHandler implements IMcpRequestRouter {
     PlanRunner: PlanRunner,
     workspacePath: string,
     git: import('../interfaces/IGitOperations').IGitOperations,
+    planRepository: import('../interfaces/IPlanRepository').IPlanRepository,
     configProvider?: import('../interfaces/IConfigProvider').IConfigProvider,
-    planRepository?: import('../interfaces/IPlanRepository').IPlanRepository,
     planArchiver?: import('../interfaces/IPlanArchiver').IPlanArchiver,
     planRecovery?: import('../interfaces/IPlanRecovery').IPlanRecovery,
     releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager,
     prLifecycleManager?: import('../interfaces/IPRLifecycleManager').IPRLifecycleManager,
   ) {
-    if (!planRepository) {
-      throw new Error('planRepository is required for McpHandler');
-    }
     this.context = { 
       PlanRunner, 
       workspacePath,

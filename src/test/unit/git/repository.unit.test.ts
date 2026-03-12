@@ -14,15 +14,11 @@ suite('Git Core Repository Unit Tests', () => {
   let execAsyncStub: sinon.SinonStub;
   let execAsyncOrNullStub: sinon.SinonStub;
   let execAsyncOrThrowStub: sinon.SinonStub;
-  let readFileStub: sinon.SinonStub;
-  let writeFileStub: sinon.SinonStub;
 
   setup(() => {
     execAsyncStub = sinon.stub(executor, 'execAsync');
     execAsyncOrNullStub = sinon.stub(executor, 'execAsyncOrNull');
     execAsyncOrThrowStub = sinon.stub(executor, 'execAsyncOrThrow');
-    readFileStub = sinon.stub(fs.promises, 'readFile');
-    writeFileStub = sinon.stub(fs.promises, 'writeFile');
   });
 
   teardown(() => {
@@ -579,76 +575,76 @@ suite('Git Core Repository Unit Tests', () => {
 
   suite('ensureGitignore()', () => {
     test('should create .gitignore with patterns', async () => {
-      readFileStub.rejects(new Error('ENOENT')); // File doesn't exist
-      writeFileStub.resolves();
+      const readFile = sinon.stub().rejects(new Error('ENOENT')); // File doesn't exist
+      const writeFile = sinon.stub().resolves();
 
-      await repository.ensureGitignore('/test/repo', ['.orchestrator/', '.worktrees/']);
+      await repository.ensureGitignore('/test/repo', ['.orchestrator/', '.worktrees/'], undefined, readFile, writeFile);
 
-      assert.ok(writeFileStub.calledOnce);
-      const content = writeFileStub.getCall(0).args[1] as string;
+      assert.ok(writeFile.calledOnce);
+      const content = writeFile.getCall(0).args[1] as string;
       assert.ok(content.includes('# Copilot Orchestrator'));
       assert.ok(content.includes('.orchestrator/'));
       assert.ok(content.includes('.worktrees/'));
     });
 
     test('should append to existing .gitignore', async () => {
-      readFileStub.resolves('node_modules/\n');
-      writeFileStub.resolves();
+      const readFile = sinon.stub().resolves('node_modules/\n');
+      const writeFile = sinon.stub().resolves();
 
-      await repository.ensureGitignore('/test/repo', ['.orchestrator/']);
+      await repository.ensureGitignore('/test/repo', ['.orchestrator/'], undefined, readFile, writeFile);
 
-      assert.ok(writeFileStub.calledOnce);
-      const content = writeFileStub.getCall(0).args[1] as string;
+      assert.ok(writeFile.calledOnce);
+      const content = writeFile.getCall(0).args[1] as string;
       assert.ok(content.includes('node_modules/'));
       assert.ok(content.includes('.orchestrator/'));
     });
 
     test('should not modify if patterns already exist', async () => {
-      readFileStub.resolves('node_modules/\n.orchestrator/\n.worktrees/\n');
-      writeFileStub.resolves();
+      const readFile = sinon.stub().resolves('node_modules/\n.orchestrator/\n.worktrees/\n');
+      const writeFile = sinon.stub().resolves();
 
-      await repository.ensureGitignore('/test/repo', ['.orchestrator/', '.worktrees/']);
+      await repository.ensureGitignore('/test/repo', ['.orchestrator/', '.worktrees/'], undefined, readFile, writeFile);
 
-      assert.ok(writeFileStub.notCalled);
+      assert.ok(writeFile.notCalled);
     });
 
     test('should handle patterns without leading slash', async () => {
-      readFileStub.resolves('orchestrator/\n'); // pattern without slash exists
-      writeFileStub.resolves();
+      const readFile = sinon.stub().resolves('orchestrator/\n'); // pattern without slash exists
+      const writeFile = sinon.stub().resolves();
 
-      await repository.ensureGitignore('/test/repo', ['/orchestrator/']); // pattern with slash
+      await repository.ensureGitignore('/test/repo', ['/orchestrator/'], undefined, readFile, writeFile); // pattern with slash
 
-      assert.ok(writeFileStub.notCalled); // Should detect existing pattern
+      assert.ok(writeFile.notCalled); // Should detect existing pattern
     });
 
     test('should add newline to file without trailing newline', async () => {
-      readFileStub.resolves('node_modules/'); // No trailing newline
-      writeFileStub.resolves();
+      const readFile = sinon.stub().resolves('node_modules/'); // No trailing newline
+      const writeFile = sinon.stub().resolves();
 
-      await repository.ensureGitignore('/test/repo', ['.orchestrator/']);
+      await repository.ensureGitignore('/test/repo', ['.orchestrator/'], undefined, readFile, writeFile);
 
-      const content = writeFileStub.getCall(0).args[1] as string;
+      const content = writeFile.getCall(0).args[1] as string;
       assert.ok(content.startsWith('node_modules/\n'));
     });
 
     test('should log when patterns added', async () => {
-      readFileStub.rejects(new Error('ENOENT'));
-      writeFileStub.resolves();
+      const readFile = sinon.stub().rejects(new Error('ENOENT'));
+      const writeFile = sinon.stub().resolves();
       const logMessages: string[] = [];
       const log = (msg: string) => logMessages.push(msg);
 
-      await repository.ensureGitignore('/test/repo', ['.orchestrator/'], log);
+      await repository.ensureGitignore('/test/repo', ['.orchestrator/'], log, readFile, writeFile);
 
       assert.ok(logMessages.some(m => m.includes('[git] Updated .gitignore with orchestrator directories')));
     });
 
     test('should log error on write failure', async () => {
-      readFileStub.rejects(new Error('ENOENT'));
-      writeFileStub.rejects(new Error('Permission denied'));
+      const readFile = sinon.stub().rejects(new Error('ENOENT'));
+      const writeFile = sinon.stub().rejects(new Error('Permission denied'));
       const logMessages: string[] = [];
       const log = (msg: string) => logMessages.push(msg);
 
-      await repository.ensureGitignore('/test/repo', ['.orchestrator/'], log);
+      await repository.ensureGitignore('/test/repo', ['.orchestrator/'], log, readFile, writeFile);
 
       assert.ok(logMessages.some(m => m.includes('[git] ⚠ Could not update .gitignore')));
     });

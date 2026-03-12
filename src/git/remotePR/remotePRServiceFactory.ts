@@ -12,22 +12,27 @@ import type { IRemotePRServiceFactory } from '../../interfaces/IRemotePRServiceF
 import type { IRemotePRService } from '../../interfaces/IRemotePRService';
 import type { IProcessSpawner } from '../../interfaces/IProcessSpawner';
 import type { IRemoteProviderDetector } from '../../interfaces/IRemoteProviderDetector';
-import { GitHubPRService } from './githubPRService';
-import { AdoPRService } from './adoPRService';
 import { Logger } from '../../core/logger';
 
 const log = Logger.for('git');
+
+/** Constructor signature shared by all concrete PR service implementations. */
+export type PRServiceCtor = new (
+  spawner: IProcessSpawner,
+  detector: IRemoteProviderDetector,
+) => IRemotePRService;
 
 /**
  * Factory for creating provider-specific PR service instances.
  * 
  * Detects remote provider type from repository URL and returns the correct
  * service implementation:
- * - GitHub / GitHub Enterprise → GitHubPRService
- * - Azure DevOps → AdoPRService
+ * - GitHub / GitHub Enterprise → githubPRServiceCtor
+ * - Azure DevOps → adoPRServiceCtor
  * 
  * Caches services per repository path to prevent redundant detection.
- * This is the ONLY place where concrete PR service classes are instantiated.
+ * Concrete service classes are injected at construction time to comply with
+ * the DI constraint (no `new ConcreteClass()` outside composition.ts).
  */
 export class RemotePRServiceFactory implements IRemotePRServiceFactory {
   private readonly cache = new Map<string, IRemotePRService>();
@@ -35,6 +40,8 @@ export class RemotePRServiceFactory implements IRemotePRServiceFactory {
   constructor(
     private readonly spawner: IProcessSpawner,
     private readonly detector: IRemoteProviderDetector,
+    private readonly githubPRServiceCtor: PRServiceCtor,
+    private readonly adoPRServiceCtor: PRServiceCtor,
   ) {}
 
   /**
@@ -75,7 +82,7 @@ export class RemotePRServiceFactory implements IRemotePRServiceFactory {
           repo: provider.repoName,
           hostname: provider.hostname,
         });
-        service = new GitHubPRService(this.spawner, this.detector);
+        service = new this.githubPRServiceCtor(this.spawner, this.detector);
         break;
 
       case 'azure-devops':
@@ -84,7 +91,7 @@ export class RemotePRServiceFactory implements IRemotePRServiceFactory {
           project: provider.project,
           repo: provider.repoName,
         });
-        service = new AdoPRService(this.spawner, this.detector);
+        service = new this.adoPRServiceCtor(this.spawner, this.detector);
         break;
 
       default:

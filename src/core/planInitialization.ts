@@ -284,7 +284,7 @@ export async function initializeMcpServer(
     const { PlanRecovery } = require('../plan/planRecovery');
     const planRecovery = new PlanRecovery(planRunner, repo, git, copilotRunner);
     
-    return new McpHandler(planRunner, workspacePath, git, configProvider, repo, archiver, planRecovery);
+    return new McpHandler(planRunner, workspacePath, git, repo, configProvider, archiver, planRecovery);
   });
 
   // Register PlanArchiver with PlanRunner dependency

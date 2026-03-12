@@ -156,7 +156,7 @@ suite('GitignoreDebouncer', () => {
       assert.strictEqual(resolved3, true);
     });
 
-    test('handles deferred write failure gracefully', async () => {
+    test('rejects all pending promises when deferred write fails', async () => {
       mockGit.gitignore.ensureGitignoreEntries.rejects(new Error('Write failed'));
       
       debouncer.notifyBranchChange('/repo');
@@ -164,10 +164,24 @@ suite('GitignoreDebouncer', () => {
       
       await clock.tickAsync(30000);
       
-      // Should resolve without throwing
-      await promise;
+      // Should reject with the write error
+      await assert.rejects(() => promise, /Write failed/);
       
       assert.ok(mockGit.gitignore.ensureGitignoreEntries.calledOnce);
+    });
+
+    test('rejects all pending callers when deferred write fails', async () => {
+      mockGit.gitignore.ensureGitignoreEntries.rejects(new Error('Disk full'));
+      
+      debouncer.notifyBranchChange('/repo');
+      const promise1 = debouncer.ensureEntries('/repo', ['a']);
+      const promise2 = debouncer.ensureEntries('/repo', ['b']);
+      
+      await clock.tickAsync(30000);
+      
+      // Both should reject
+      await assert.rejects(() => promise1, /Disk full/);
+      await assert.rejects(() => promise2, /Disk full/);
     });
 
     test('resets timer when new entries arrive during delay', async () => {

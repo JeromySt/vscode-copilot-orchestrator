@@ -94,14 +94,21 @@ export function isCliCachePopulated(): boolean {
 export async function cmdOkAsync(cmd: string, spawner?: IProcessSpawner): Promise<boolean> {
   return new Promise((resolve) => {
     const actualSpawner = spawner ?? getFallbackSpawner();
+    let settled = false;
+    const settle = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
     
     const proc = actualSpawner.spawn(cmd, [], { shell: true, stdio: 'ignore' });
-    proc.on('close', (code: number | null) => resolve(code === 0));
-    proc.on('error', () => resolve(false));
-    // Timeout after 10 seconds
-    setTimeout(() => {
+    proc.on('close', (code: number | null) => settle(code === 0));
+    proc.on('error', () => settle(false));
+    // Timeout after 15 seconds
+    const timer = setTimeout(() => {
       proc.kill();
-      resolve(false);
+      settle(false);
     }, 15000);
   });
 }
@@ -109,15 +116,22 @@ export async function cmdOkAsync(cmd: string, spawner?: IProcessSpawner): Promis
 async function hasGhCopilotAsync(spawner?: IProcessSpawner): Promise<boolean> {
   return new Promise((resolve) => {
     const actualSpawner = spawner ?? getFallbackSpawner();
-    
+    let settled = false;
+    const settle = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+
     const proc = actualSpawner.spawn('gh', ['extension', 'list'], { shell: true });
     let output = '';
     proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
-    proc.on('close', () => resolve(/github\/gh-copilot/i.test(output)));
-    proc.on('error', () => resolve(false));
-    setTimeout(() => {
+    proc.on('close', () => settle(/github\/gh-copilot/i.test(output)));
+    proc.on('error', () => settle(false));
+    const timer = setTimeout(() => {
       proc.kill();
-      resolve(false);
+      settle(false);
     }, 5000);
   });
 }

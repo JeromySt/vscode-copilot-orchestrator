@@ -13,6 +13,7 @@ import type { IReleaseStore } from '../../interfaces/IReleaseStore';
 import type { ReleaseDefinition, PRMonitorCycle } from '../types/release';
 import type { IFileSystem } from '../../interfaces/IFileSystem';
 import { Logger } from '../../core/logger';
+import { validatePath } from './pathValidation';
 
 const log = Logger.for('plan-persistence');
 
@@ -24,18 +25,6 @@ function sanitizeBranchName(branchName: string): string {
   return branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
 }
 
-/**
- * Validate that a path is within the allowed .orchestrator directory.
- * Guards against path traversal attacks.
- */
-function validatePath(basePath: string, targetPath: string): void {
-  const resolved = path.resolve(targetPath);
-  const baseResolved = path.resolve(basePath);
-  
-  if (!resolved.startsWith(baseResolved + path.sep)) {
-    throw new Error(`Path traversal blocked: ${targetPath}`);
-  }
-}
 
 /**
  * FileSystem-backed implementation of IReleaseStore.

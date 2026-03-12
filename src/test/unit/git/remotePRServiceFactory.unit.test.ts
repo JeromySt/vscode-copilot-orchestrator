@@ -8,6 +8,8 @@ import { suite, test, setup, teardown } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { RemotePRServiceFactory } from '../../../git/remotePR/remotePRServiceFactory';
+import { GitHubPRService } from '../../../git/remotePR/githubPRService';
+import { AdoPRService } from '../../../git/remotePR/adoPRService';
 import type { IProcessSpawner } from '../../../interfaces/IProcessSpawner';
 import type { IRemoteProviderDetector } from '../../../interfaces/IRemoteProviderDetector';
 import type { RemoteProviderInfo } from '../../../plan/types/remotePR';
@@ -54,7 +56,7 @@ suite('RemotePRServiceFactory', () => {
       acquireCredentials: sandbox.stub(),
     } as any;
     
-    factory = new RemotePRServiceFactory(mockSpawner, mockDetector);
+    factory = new RemotePRServiceFactory(mockSpawner, mockDetector, GitHubPRService, AdoPRService);
   });
 
   teardown(() => {
@@ -122,5 +124,24 @@ suite('RemotePRServiceFactory', () => {
     assert.notStrictEqual(githubService, adoService);
     assert.strictEqual(githubService.constructor.name, 'GitHubPRService');
     assert.strictEqual(adoService.constructor.name, 'AdoPRService');
+  });
+
+  test('uses injected constructors instead of hardcoded classes', async () => {
+    let githubCtorCalled = false;
+    let adoCtorCalled = false;
+    const mockGitHubInstance = { type: 'mock-github' } as any;
+    const mockAdoInstance = { type: 'mock-ado' } as any;
+    
+    const mockGithubCtor = function() { githubCtorCalled = true; return mockGitHubInstance; } as any;
+    const mockAdoCtor = function() { adoCtorCalled = true; return mockAdoInstance; } as any;
+    
+    const customFactory = new RemotePRServiceFactory(mockSpawner, mockDetector, mockGithubCtor, mockAdoCtor);
+    
+    (mockDetector.detect as sinon.SinonStub).resolves(githubProvider);
+    const service = await customFactory.getServiceForRepo('/custom/repo');
+    
+    assert.ok(githubCtorCalled);
+    assert.ok(!adoCtorCalled);
+    assert.strictEqual(service, mockGitHubInstance);
   });
 });

@@ -12,21 +12,10 @@ import * as path from 'path';
 import type { IManagedPRStore, ManagedPR } from '../../interfaces/IManagedPRStore';
 import type { IFileSystem } from '../../interfaces/IFileSystem';
 import { Logger } from '../../core/logger';
+import { validatePath } from './pathValidation';
 
 const log = Logger.for('plan-persistence');
 
-/**
- * Validate that a path is within the allowed .orchestrator directory.
- * Guards against path traversal attacks.
- */
-function validatePath(basePath: string, targetPath: string): void {
-  const resolved = path.resolve(targetPath);
-  const baseResolved = path.resolve(basePath);
-  
-  if (!resolved.startsWith(baseResolved + path.sep)) {
-    throw new Error(`Path traversal blocked: ${targetPath}`);
-  }
-}
 
 /**
  * FileSystem-backed implementation of IManagedPRStore.

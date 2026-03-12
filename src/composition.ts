@@ -54,6 +54,8 @@ import { DefaultFileSystem } from './core/defaultFileSystem';
 import { GitignoreDebouncer } from './core/gitignoreDebouncer';
 import { DefaultRemoteProviderDetector } from './git/remotePR/remoteProviderDetector';
 import { RemotePRServiceFactory } from './git/remotePR/remotePRServiceFactory';
+import { GitHubPRService } from './git/remotePR/githubPRService';
+import { AdoPRService } from './git/remotePR/adoPRService';
 import { FileSystemReleaseStore } from './plan/store/releaseStore';
 import { DefaultReleasePRMonitor } from './plan/releasePRMonitor';
 
@@ -325,7 +327,7 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     (c) => {
       const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
       const detector = c.resolve<import('./interfaces').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
-      return new RemotePRServiceFactory(spawner, detector);
+      return new RemotePRServiceFactory(spawner, detector, GitHubPRService, AdoPRService);
     },
   );
 

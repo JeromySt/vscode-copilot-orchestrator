@@ -22,7 +22,7 @@ export const BRANCH_CHANGE_DELAY_MS = 30_000;
 interface PendingRepoState {
   entries: string[];
   timer: ReturnType<typeof setTimeout> | undefined;
-  resolvers: Array<() => void>;
+  resolvers: Array<{ resolve: () => void; reject: (err: Error) => void }>;
 }
 
 /**
@@ -97,8 +97,8 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
         clearTimeout(pending.timer);
       }
 
-      return new Promise<void>((resolve) => {
-        pending!.resolvers.push(resolve);
+      return new Promise<void>((resolve, reject) => {
+        pending!.resolvers.push({ resolve, reject });
         pending!.timer = setTimeout(async () => {
           const toWrite = [...pending!.entries];
           const resolvers = [...pending!.resolvers];
@@ -110,15 +110,14 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
               count: toWrite.length,
               entries: toWrite
             });
+            for (const r of resolvers) { r.resolve(); }
           } catch (err: any) {
             log.error('Failed to write deferred gitignore entries', {
               error: err.message,
               repoPath
             });
+            for (const r of resolvers) { r.reject(err); }
           }
-
-          // Resolve all waiting callers
-          for (const r of resolvers) { r(); }
         }, remaining);
       });
     }
@@ -145,7 +144,7 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
       if (pending.timer) {
         clearTimeout(pending.timer);
       }
-      for (const r of pending.resolvers) { r(); }
+      for (const r of pending.resolvers) { r.resolve(); }
     }
     this._pendingByRepo.clear();
     this._lastBranchChangeByRepo.clear();

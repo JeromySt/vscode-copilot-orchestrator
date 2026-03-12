@@ -152,8 +152,8 @@ suite('McpHandler Routing Dispatch', () => {
       mockRunner, 
       '/workspace', 
       mockGit, 
-      undefined, 
-      mockPlanRepository
+      mockPlanRepository,
+      undefined,
     );
   });
 

@@ -1,7 +1,7 @@
 /**
  * @fileoverview Recover Plan MCP Tool Handler
  * 
- * Implements the handler for recovering canceled or archived plans.
+ * Implements the handler for recovering canceled or failed plans.
  * 
  * @module mcp/handlers/plan/recoverPlanHandler
  */
