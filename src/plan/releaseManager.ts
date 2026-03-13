@@ -84,6 +84,13 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     });
     this.events.on('release:completed', (release) => this.emit('releaseCompleted', release));
 
+    // Listen for fix plan completions to run post-fix PR actions (push, reply, resolve)
+    this.planRunner.on('planCompleted', (plan: any, status: string) => {
+      this._onFixPlanCompleted(plan, status).catch((err) => {
+        log.error('Fix plan post-completion failed', { planId: plan?.id, error: (err as Error).message });
+      });
+    });
+
     // Listen for PR monitor cycle completions and forward to release events + panel refresh
     if (typeof (this.prMonitor as any).on === 'function') {
       (this.prMonitor as any).on('cycleComplete', (releaseId: string, cycle: any) => {
@@ -1038,10 +1045,9 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
    * Address selected findings using AI-assisted fixing.
    *
    * 1. Builds a task description from the selected findings
-   * 2. Invokes Copilot CLI in the release repo to apply fixes
-   * 3. Commits and pushes changes
-   * 4. Replies to PR comments and resolves threads
-   * 5. Emits actionTaken events for each action so the UI updates live
+   * 2. Creates a plan with a single agent job to fix the findings
+   * 3. The plan runs in its own worktree via the execution engine
+   * 4. On plan completion, pushes changes and replies to PR comments
    */
   async addressFindings(releaseId: string, findings: any[]): Promise<void> {
     const release = this.releases.get(releaseId);
@@ -1059,15 +1065,6 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       types: findings.map((f: any) => f.type),
     });
 
-    // Signal addressing started
-    this.emit('releaseActionTaken', releaseId, {
-      type: 'fix-code',
-      description: `Addressing ${findings.length} finding(s) with AI...`,
-      success: true,
-      timestamp: Date.now(),
-    });
-
-    // Emit per-finding "queued" status so the UI can show progress
     const findingIds = findings.map((f: any) => f.id);
     this.emit('findingsProcessing', releaseId, findingIds, 'queued');
 
@@ -1086,9 +1083,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       taskParts.push('### CI/CD Check Failures\n');
       for (const f of checkFindings) {
         taskParts.push(`- **${f.name || 'Unknown check'}**: FAILING`);
-        if (f.url) {
-          taskParts.push(`  URL: ${f.url}`);
-        }
+        if (f.url) taskParts.push(`  URL: ${f.url}`);
       }
       taskParts.push('\nInvestigate and fix the failing checks.\n');
     }
@@ -1098,9 +1093,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       for (const f of commentFindings) {
         taskParts.push(`- **${f.author || 'Reviewer'}** (${f.source || 'review'}):`);
         taskParts.push(`  ${f.body || f.text || ''}`);
-        if (f.path) {
-          taskParts.push(`  File: ${f.path}${f.line ? `:${f.line}` : ''}`);
-        }
+        if (f.path) taskParts.push(`  File: ${f.path}${f.line ? `:${f.line}` : ''}`);
         taskParts.push('');
       }
       taskParts.push('Address all listed review feedback.\n');
@@ -1110,9 +1103,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       taskParts.push('### Security Alerts\n');
       for (const f of alertFindings) {
         taskParts.push(`- **[${(f.severity || 'medium').toUpperCase()}]** ${f.description || f.text || ''}`);
-        if (f.file) {
-          taskParts.push(`  File: ${f.file}`);
-        }
+        if (f.file) taskParts.push(`  File: ${f.file}`);
         taskParts.push('');
       }
       taskParts.push('Fix all listed security issues.\n');
@@ -1120,227 +1111,158 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     const taskDescription = taskParts.join('\n');
 
-    // ── 2. Invoke Copilot CLI ────────────────────────────────────────
-    log.info('Invoking Copilot CLI to address selected findings', {
-      releaseId,
-      cwd,
-      findingCount: findings.length,
-    });
-
-    // Mark findings as "processing"
-    this.emit('findingsProcessing', releaseId, findingIds, 'processing');
-
-    let copilotResult;
-    const outputLines: string[] = [];
-    const sessionId = 'cli-' + Date.now();
-
-    // Build a descriptive label showing what's in this batch
+    // ── 2. Build a descriptive plan name ─────────────────────────────
     const labelParts: string[] = [];
     for (const f of commentFindings) {
       if (f.path) labelParts.push(f.path.split('/').pop() || f.path);
       else if (f.author) labelParts.push(f.author);
     }
-    for (const f of checkFindings) {
-      labelParts.push(f.name || 'CI check');
-    }
-    for (const f of alertFindings) {
-      labelParts.push(f.description?.substring(0, 30) || 'alert');
-    }
-    const sessionLabel = labelParts.length <= 3
+    for (const f of checkFindings) labelParts.push(f.name || 'CI');
+    for (const f of alertFindings) labelParts.push(f.description?.substring(0, 30) || 'alert');
+    const shortLabel = labelParts.length <= 3
       ? labelParts.join(', ')
       : labelParts.slice(0, 2).join(', ') + ' +' + (labelParts.length - 2) + ' more';
+    const planName = `Fix PR #${release.prNumber || '?'}: ${shortLabel || findings.length + ' finding(s)'}`;
 
-    this.emit('cliSessionStart', releaseId, sessionId, sessionLabel || 'Fixing ' + findings.length + ' finding(s)');
-    // Send sessionId with processing status so UI can link findings to their console
-    this.emit('findingsProcessing', releaseId, findingIds, 'processing', sessionId);
-    try {
-      copilotResult = await this.copilot.run({
-        cwd,
+    // ── 3. Create a plan with a single agent job ─────────────────────
+    const plan = this.planRunner.enqueue({
+      name: planName,
+      repoPath: cwd,
+      baseBranch: release.releaseBranch,
+      targetBranch: release.releaseBranch,
+      startPaused: false,
+      jobs: [{
+        producerId: 'fix-' + Date.now(),
+        name: planName,
         task: taskDescription,
-        timeout: 0,
-        jobId: sessionId,
-        onOutput: (line: string) => {
-          outputLines.push(line);
-          this.emit('cliSessionOutput', releaseId, sessionId, line);
-        },
-      });
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      log.error('Copilot CLI invocation failed', {
-        releaseId,
-        error: errMsg,
-        lastOutput: outputLines.slice(-10).join('\n'),
-      });
-      this.emit('cliSessionEnd', releaseId, sessionId, false);
-      this.emit('releaseActionTaken', releaseId, {
-        type: 'fix-code',
-        description: `Copilot CLI failed: ${errMsg}`,
-        success: false,
-        sessionId,
-        timestamp: Date.now(),
-      });
-      this.emit('findingsProcessing', releaseId, findingIds, 'failed');
-      return;
-    }
+        work: `@agent ${taskDescription}`,
+        dependencies: [],
+        autoHeal: true,
+      }],
+    });
 
-    if (!copilotResult.success) {
-      log.warn('Copilot CLI reported failure', {
-        releaseId,
-        error: copilotResult.error,
-      });
-      this.emit('cliSessionEnd', releaseId, sessionId, false);
-      this.emit('releaseActionTaken', releaseId, {
-        type: 'fix-code',
-        description: `Copilot CLI failed to apply fixes: ${copilotResult.error || 'unknown error'}`,
-        success: false,
-        sessionId,
-        timestamp: Date.now(),
-      });
-      this.emit('findingsProcessing', releaseId, findingIds, 'failed');
-      return;
-    }
+    log.info('Fix plan created', {
+      releaseId,
+      planId: plan.id,
+      planName,
+      findingCount: findings.length,
+    });
 
-    log.info('Copilot CLI completed', { releaseId, success: true });
-    this.emit('cliSessionEnd', releaseId, sessionId, true);
+    // ── 4. Associate plan with the release ───────────────────────────
+    if (!release.fixPlanIds) release.fixPlanIds = [];
+    release.fixPlanIds.push(plan.id);
 
-    // ── 3. Commit and push ───────────────────────────────────────────
-    let hasChanges = false;
-    try {
-      hasChanges = await this.git.repository.hasChanges(cwd);
-    } catch (err) {
-      log.error('Failed to check git status', {
-        releaseId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    // Store findings metadata so post-completion can reply/resolve
+    if (!release.fixPlanFindings) release.fixPlanFindings = {};
+    release.fixPlanFindings[plan.id] = findings;
 
-    let commitHash: string | undefined;
+    this.store.saveRelease(release).catch(() => {});
 
-    if (hasChanges) {
-      try {
-        await this.git.repository.stageAll(cwd);
+    // Signal to UI
+    this.emit('releaseActionTaken', releaseId, {
+      type: 'fix-code',
+      description: `Created fix plan: ${planName}`,
+      success: true,
+      timestamp: Date.now(),
+    });
+    this.emit('findingsProcessing', releaseId, findingIds, 'processing');
+  }
 
-        const commitMessage = `Address ${findings.length} PR finding(s)
-
-Automated fixes for:
-${checkFindings.length > 0 ? `- ${checkFindings.length} failing CI check(s)\n` : ''}${commentFindings.length > 0 ? `- ${commentFindings.length} review comment(s)\n` : ''}${alertFindings.length > 0 ? `- ${alertFindings.length} security alert(s)\n` : ''}
-Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
-
-        await this.git.repository.commit(cwd, commitMessage);
-
-        const headRef = await this.git.repository.getHead(cwd);
-        commitHash = headRef || undefined;
-
-        await this.git.repository.push(cwd, { branch: release.releaseBranch });
-
-        log.info('Changes committed and pushed', {
-          releaseId,
-          commitHash,
-          branch: release.releaseBranch,
-        });
-
-        this.emit('releaseActionTaken', releaseId, {
-          type: 'fix-code',
-          description: `Committed and pushed fixes for ${findings.length} finding(s)`,
-          success: true,
-          commitHash,
-          sessionId,
-          timestamp: Date.now(),
-        });
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        log.error('Failed to commit/push changes', { releaseId, error: errMsg });
-        this.emit('releaseActionTaken', releaseId, {
-          type: 'fix-code',
-          description: `Failed to commit/push: ${errMsg}`,
-          success: false,
-          sessionId,
-          timestamp: Date.now(),
-        });
+  /**
+   * Post-completion handler for fix plans.
+   *
+   * When a fix plan succeeds: push changes to the release branch, reply to
+   * PR comments, resolve threads, and minimize parent reviews.
+   */
+  private async _onFixPlanCompleted(plan: any, status: string): Promise<void> {
+    // Find the release that owns this fix plan
+    let release: ReleaseDefinition | undefined;
+    let releaseId = '';
+    for (const [id, rel] of this.releases) {
+      if (rel.fixPlanIds?.includes(plan.id)) {
+        release = rel;
+        releaseId = id;
+        break;
       }
-    } else {
-      log.info('No changes produced by AI', { releaseId });
+    }
+    if (!release) return; // Not a fix plan — ignore
+
+    const findings = release.fixPlanFindings?.[plan.id];
+    if (!findings?.length) return;
+
+    const cwd = release.isolatedRepoPath || release.repoPath;
+
+    if (status !== 'succeeded') {
+      log.warn('Fix plan did not succeed', { releaseId, planId: plan.id, status });
+      const findingIds = findings.map((f: any) => f.id);
+      this.emit('findingsProcessing', releaseId, findingIds, 'failed');
       this.emit('releaseActionTaken', releaseId, {
         type: 'fix-code',
-        description: 'Copilot completed but produced no code changes',
-        success: true,
-        sessionId,
+        description: `Fix plan failed: ${plan.spec?.name || plan.id}`,
+        success: false,
         timestamp: Date.now(),
+      });
+      return;
+    }
+
+    log.info('Fix plan succeeded, running post-fix PR actions', {
+      releaseId, planId: plan.id,
+    });
+
+    const commentFindings = findings.filter((f: any) => f.type === 'comment');
+
+    // ── 1. Push the fix plan's changes to the release branch ─────────
+    let commitHash: string | undefined;
+    try {
+      // The plan's worktree committed changes — get the commit hash
+      const headRef = await this.git.repository.getHead(cwd);
+      commitHash = headRef || undefined;
+
+      await this.git.repository.push(cwd, { branch: release.releaseBranch });
+
+      log.info('Fix plan changes pushed', { releaseId, commitHash, branch: release.releaseBranch });
+
+      this.emit('releaseActionTaken', releaseId, {
+        type: 'fix-code',
+        description: `Pushed fixes for ${findings.length} finding(s)`,
+        success: true,
+        commitHash,
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      log.error('Failed to push fix plan changes', {
+        releaseId, error: err instanceof Error ? err.message : String(err),
       });
     }
 
-    // ── 4. Reply to PR comments and resolve threads ──────────────────
+    // ── 2. Reply to PR comments and resolve threads ──────────────────
     if (release.prNumber && commentFindings.length > 0) {
       let prService;
       try {
         prService = await this.prServiceFactory.getServiceForRepo(cwd);
-      } catch (err) {
-        log.error('Failed to get PR service for comment replies', {
-          releaseId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      } catch { /* logged below */ }
 
       if (prService) {
         for (const comment of commentFindings) {
           const commentId = comment.commentId || comment.id?.replace('comment-', '');
-          if (!commentId) {
-            continue;
-          }
+          if (!commentId) continue;
 
           try {
             const replyText = `✅ Addressed in automated fix${commitHash ? ` (${commitHash.substring(0, 7)})` : ''}`;
 
-            // Only use replyToComment for inline review comments (those with a file path).
-            // Top-level reviews and issue comments don't support in_reply_to and return 422.
             if (comment.path) {
-              await prService.replyToComment(
-                release.prNumber,
-                commentId,
-                replyText,
-                cwd,
-              );
+              await prService.replyToComment(release.prNumber, commentId, replyText, cwd);
             } else {
-              // For top-level reviews / issue comments, post a quote-reply so the
-              // response is visually associated with the original feedback.
               const quotedBody = (comment.body || '').split('\n').map((l: string) => `> ${l}`).join('\n');
-              await prService.addIssueComment(
-                release.prNumber,
-                `${quotedBody}\n\n${replyText}`,
-                cwd,
-              );
+              await prService.addIssueComment(release.prNumber, `${quotedBody}\n\n${replyText}`, cwd);
             }
 
-            // Resolve thread if we have a proper GraphQL thread ID
             if (comment.threadId) {
-              try {
-                await prService.resolveThread(
-                  release.prNumber,
-                  comment.threadId,
-                  cwd,
-                );
-              } catch (resolveErr) {
-                log.warn('Failed to resolve thread (non-fatal)', {
-                  releaseId,
-                  threadId: comment.threadId,
-                  error: resolveErr instanceof Error ? resolveErr.message : String(resolveErr),
-                });
-              }
+              try { await prService.resolveThread(release.prNumber, comment.threadId, cwd); } catch { /* non-fatal */ }
             }
 
-            // For non-thread comments (issue comments, top-level reviews),
-            // minimize (hide) the original comment with "Resolved" reason so
-            // it collapses on the GitHub PR page.
             if (!comment.path && comment.nodeId && typeof prService.minimizeComment === 'function') {
-              try {
-                await prService.minimizeComment(comment.nodeId, 'RESOLVED', cwd);
-              } catch (minErr) {
-                log.warn('Failed to minimize comment (non-fatal)', {
-                  releaseId,
-                  nodeId: comment.nodeId,
-                  error: minErr instanceof Error ? minErr.message : String(minErr),
-                });
-              }
+              try { await prService.minimizeComment(comment.nodeId, 'RESOLVED', cwd); } catch { /* non-fatal */ }
             }
 
             this.emit('releaseActionTaken', releaseId, {
@@ -1352,84 +1274,59 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
             });
           } catch (err) {
             log.error('Failed to reply to comment', {
-              releaseId,
-              commentId,
-              error: err instanceof Error ? err.message : String(err),
-            });
-            this.emit('releaseActionTaken', releaseId, {
-              type: 'respond-comment',
-              description: `Failed to reply to ${comment.author || 'reviewer'}'s comment`,
-              success: false,
-              commentUrl: comment.url,
-              timestamp: Date.now(),
+              releaseId, commentId, error: err instanceof Error ? err.message : String(err),
             });
           }
         }
       }
     }
 
-    // Track addressed comment IDs so non-threadable comments (issue comments,
-    // top-level reviews) are treated as resolved on subsequent polling cycles.
+    // ── 3. Track addressed comments ──────────────────────────────────
     const addressedIds = commentFindings
       .map((f: any) => f.commentId || f.id?.replace('comment-', ''))
       .filter(Boolean) as string[];
     if (addressedIds.length > 0) {
       if (!release.addressedCommentIds) release.addressedCommentIds = [];
       for (const id of addressedIds) {
-        if (!release.addressedCommentIds.includes(id)) {
-          release.addressedCommentIds.push(id);
-        }
+        if (!release.addressedCommentIds.includes(id)) release.addressedCommentIds.push(id);
       }
-      this.store.saveRelease(release).catch(() => {});
     }
 
-    // Auto-minimize parent review comments when all their child threads are resolved.
-    // The parent review (e.g., "Copilot reviewed 89 files...") is non-actionable;
-    // once all its inline thread comments are addressed, hide it with RESOLVED.
+    // ── 4. Auto-minimize parent reviews if all children resolved ─────
     if (release.prNumber && release.lastCycle) {
       let prSvc;
       try { prSvc = await this.prServiceFactory.getServiceForRepo(cwd); } catch { /* */ }
       if (prSvc && typeof prSvc.minimizeComment === 'function') {
-      const allComments = release.lastCycle.comments || [];
-      // Group threads by parentReviewId
-      const reviewChildThreads = new Map<string, any[]>();
-      for (const c of allComments) {
-        if (c.parentReviewId) {
-          if (!reviewChildThreads.has(c.parentReviewId)) {
-            reviewChildThreads.set(c.parentReviewId, []);
+        const allComments = release.lastCycle.comments || [];
+        const reviewChildThreads = new Map<string, any[]>();
+        for (const c of allComments) {
+          if (c.parentReviewId) {
+            if (!reviewChildThreads.has(c.parentReviewId)) reviewChildThreads.set(c.parentReviewId, []);
+            reviewChildThreads.get(c.parentReviewId)!.push(c);
           }
-          reviewChildThreads.get(c.parentReviewId)!.push(c);
         }
-      }
-      // Check each parent review — if all children are now resolved, minimize the parent
-      const addressedSet = new Set(release.addressedCommentIds || []);
-      for (const [parentId, children] of reviewChildThreads) {
-        const allChildrenResolved = children.every((c: any) =>
-          c.isResolved || addressedSet.has(c.id)
-        );
-        if (!allChildrenResolved) continue;
-        // Find the parent review's nodeId
-        const parentReview = allComments.find((c: any) => c.id === parentId);
-        if (!parentReview?.nodeId) continue;
-        try {
-          await prSvc.minimizeComment(parentReview.nodeId, 'RESOLVED', cwd);
-          log.info('Auto-minimized parent review (all children resolved)', {
-            releaseId, parentReviewId: parentId,
-          });
-        } catch (err) {
-          log.warn('Failed to auto-minimize parent review (non-fatal)', {
-            releaseId, parentReviewId: parentId,
-            error: err instanceof Error ? err.message : String(err),
-          });
+        const addressedSet = new Set(release.addressedCommentIds || []);
+        for (const [parentId, children] of reviewChildThreads) {
+          if (!children.every((c: any) => c.isResolved || addressedSet.has(c.id))) continue;
+          const parentReview = allComments.find((c: any) => c.id === parentId);
+          if (!parentReview?.nodeId) continue;
+          try {
+            await prSvc.minimizeComment(parentReview.nodeId, 'RESOLVED', cwd);
+            log.info('Auto-minimized parent review', { releaseId, parentReviewId: parentId });
+          } catch { /* non-fatal */ }
         }
-      }
       }
     }
 
-    // Emit resolved finding IDs so the webview can mark them resolved
+    // ── 5. Emit resolved and clean up ────────────────────────────────
     const resolvedIds = findings.map((f: any) => f.id);
     this.emit('findingsResolved', releaseId, resolvedIds, !!commitHash);
 
+    // Clean up findings metadata (no longer needed)
+    if (release.fixPlanFindings) {
+      delete release.fixPlanFindings[plan.id];
+    }
+    this.store.saveRelease(release).catch(() => {});
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
   }
 

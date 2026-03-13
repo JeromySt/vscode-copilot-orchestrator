@@ -268,9 +268,10 @@ suite('DefaultReleaseManager – auto-fix', () => {
     test('queues new unresolved comments when autoFixEnabled', async () => {
       const planRunner = createMockPlanRunner();
       const prMonitor = createEventEmitterPRMonitor();
-      const copilot = createMockCopilot();
       const store = createMockReleaseStore();
-      const manager = createManager({ planRunner, prMonitor, copilot, store });
+      const manager = createManager({ planRunner, prMonitor, store });
+      // Stub addressFindings to prevent async side effects in the test suite
+      sandbox.stub(manager as any, 'addressFindings').resolves();
       const release = await createRelease(manager, planRunner);
 
       manager.setAutoFix(release.id, true);
@@ -286,9 +287,8 @@ suite('DefaultReleaseManager – auto-fix', () => {
         securityAlerts: [],
       });
 
-      // findingsProcessing emitted with the new comment finding
-      // (emitted once by auto-fix handler + twice more inside addressFindings)
-      assert.ok(findingsProcessingEvents.length >= 1);
+      // findingsProcessing emitted by auto-fix handler
+      assert.strictEqual(findingsProcessingEvents.length, 1);
       const [emittedReleaseId, findingIds] = findingsProcessingEvents[0];
       assert.strictEqual(emittedReleaseId, release.id);
       assert.ok((findingIds as string[]).includes('comment-c1'));
@@ -303,6 +303,7 @@ suite('DefaultReleaseManager – auto-fix', () => {
       const prMonitor = createEventEmitterPRMonitor();
       const store = createMockReleaseStore();
       const manager = createManager({ planRunner, prMonitor, store });
+      sandbox.stub(manager as any, 'addressFindings').resolves();
       const release = await createRelease(manager, planRunner);
 
       manager.setAutoFix(release.id, true);
@@ -316,7 +317,7 @@ suite('DefaultReleaseManager – auto-fix', () => {
         securityAlerts: [],
       });
 
-      assert.ok(findingsProcessingEvents.length >= 1);
+      assert.strictEqual(findingsProcessingEvents.length, 1);
       const [, findingIds] = findingsProcessingEvents[0];
       assert.ok((findingIds as string[]).some((id: string) => id.startsWith('check-')));
     });
@@ -326,6 +327,7 @@ suite('DefaultReleaseManager – auto-fix', () => {
       const prMonitor = createEventEmitterPRMonitor();
       const store = createMockReleaseStore();
       const manager = createManager({ planRunner, prMonitor, store });
+      sandbox.stub(manager as any, 'addressFindings').resolves();
       const release = await createRelease(manager, planRunner);
 
       manager.setAutoFix(release.id, true);
@@ -339,7 +341,7 @@ suite('DefaultReleaseManager – auto-fix', () => {
         securityAlerts: [{ id: 'a1', resolved: false, severity: 'high', description: 'SQL injection', file: 'src/db.ts' }],
       });
 
-      assert.ok(findingsProcessingEvents.length >= 1);
+      assert.strictEqual(findingsProcessingEvents.length, 1);
       const [, alertFindingIds] = findingsProcessingEvents[0];
       assert.ok((alertFindingIds as string[]).includes('alert-a1'));
     });
@@ -349,6 +351,7 @@ suite('DefaultReleaseManager – auto-fix', () => {
       const prMonitor = createEventEmitterPRMonitor();
       const store = createMockReleaseStore();
       const manager = createManager({ planRunner, prMonitor, store });
+      sandbox.stub(manager as any, 'addressFindings').resolves();
       const release = await createRelease(manager, planRunner);
 
       manager.setAutoFix(release.id, true);
@@ -416,6 +419,7 @@ suite('DefaultReleaseManager – auto-fix', () => {
       const prMonitor = createEventEmitterPRMonitor();
       const store = createMockReleaseStore();
       const manager = createManager({ planRunner, prMonitor, store });
+      sandbox.stub(manager as any, 'addressFindings').resolves();
       const release = await createRelease(manager, planRunner);
 
       manager.setAutoFix(release.id, true);

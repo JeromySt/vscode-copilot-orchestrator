@@ -259,6 +259,15 @@ export interface ReleaseDefinition {
   /** Finding IDs that have already been auto-addressed (prevents re-triggering) */
   autoFixedFindingIds?: string[];
 
+  /** Plan IDs created to fix PR findings (associated with the release, contribute to it) */
+  fixPlanIds?: string[];
+
+  /**
+   * Maps fix plan IDs to the findings they address.
+   * Used for post-completion PR actions (reply, resolve, minimize).
+   */
+  fixPlanFindings?: Record<string, any[]>;
+
   /** History of state transitions */
   stateHistory: StateTransition[];
 }
