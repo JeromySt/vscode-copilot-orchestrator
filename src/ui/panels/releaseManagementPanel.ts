@@ -172,10 +172,10 @@ export class ReleaseManagementPanel {
       });
 
       // Forward finding processing status to the webview
-      (this._releaseManager as any).on('findingsProcessing', (releaseId: string, findingIds: string[], status: string) => {
+      (this._releaseManager as any).on('findingsProcessing', (releaseId: string, findingIds: string[], status: string, sessionId?: string) => {
         if (releaseId === this._releaseId && !this._disposed) {
           try {
-            this._panel.webview.postMessage({ type: 'findingsProcessing', findingIds, status });
+            this._panel.webview.postMessage({ type: 'findingsProcessing', findingIds, status, sessionId });
           } catch { /* panel disposed */ }
         }
       });

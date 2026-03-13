@@ -1133,7 +1133,26 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     let copilotResult;
     const outputLines: string[] = [];
     const sessionId = 'cli-' + Date.now();
-    this.emit('cliSessionStart', releaseId, sessionId, 'Fixing ' + findings.length + ' finding(s)');
+
+    // Build a descriptive label showing what's in this batch
+    const labelParts: string[] = [];
+    for (const f of commentFindings) {
+      if (f.path) labelParts.push(f.path.split('/').pop() || f.path);
+      else if (f.author) labelParts.push(f.author);
+    }
+    for (const f of checkFindings) {
+      labelParts.push(f.name || 'CI check');
+    }
+    for (const f of alertFindings) {
+      labelParts.push(f.description?.substring(0, 30) || 'alert');
+    }
+    const sessionLabel = labelParts.length <= 3
+      ? labelParts.join(', ')
+      : labelParts.slice(0, 2).join(', ') + ' +' + (labelParts.length - 2) + ' more';
+
+    this.emit('cliSessionStart', releaseId, sessionId, sessionLabel || 'Fixing ' + findings.length + ' finding(s)');
+    // Send sessionId with processing status so UI can link findings to their console
+    this.emit('findingsProcessing', releaseId, findingIds, 'processing', sessionId);
     try {
       copilotResult = await this.copilot.run({
         cwd,

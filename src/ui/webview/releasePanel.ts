@@ -698,10 +698,15 @@ class PendingActionsControl {
     this.render();
   }
 
-  setProcessing(findingIds: string[], status: string): void {
+  setProcessing(findingIds: string[], status: string, sessionId?: string): void {
     if (!Array.isArray(findingIds)) return;
     const idSet = new Set(findingIds);
-    for (const f of this.findings) { if (idSet.has(f.id)) f.aiStatus = status; }
+    for (const f of this.findings) {
+      if (idSet.has(f.id)) {
+        f.aiStatus = status;
+        if (sessionId) f.aiSessionId = sessionId;
+      }
+    }
     this.aiActive = (status === 'queued' || status === 'processing');
     this._updateBanner();
     this.render();
@@ -845,6 +850,21 @@ class PendingActionsControl {
         if (url) vscode.postMessage({ type: 'openExternal', url });
       });
     });
+    // Wire "View Console" links on processing findings to scroll to CLI console
+    container.querySelectorAll('.ai-session-link').forEach(el => {
+      el.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const sid = (el as HTMLElement).getAttribute('data-session-id');
+        if (sid && cliConsole) {
+          cliConsole.expandedSession = sid;
+          cliConsole._selectTab(sid);
+          cliConsole._switchBody(sid);
+          const section = document.getElementById('cli-console-section');
+          if (section) { section.style.display = 'block'; section.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        }
+      });
+    });
   }
 
   _renderItem(finding: any): string {
@@ -854,7 +874,12 @@ class PendingActionsControl {
 
     let aiStatusBadge = '';
     if (finding.aiStatus === 'queued') aiStatusBadge = '<span class="pending-action-ai-status queued">\u23F3 Queued</span>';
-    else if (finding.aiStatus === 'processing') aiStatusBadge = '<span class="pending-action-ai-status processing"><span class="ai-spinner"></span> Processing</span>';
+    else if (finding.aiStatus === 'processing') {
+      const sessionLink = finding.aiSessionId
+        ? ' <a class="ai-session-link" href="#" data-session-id="' + finding.aiSessionId + '" title="View console">View Console \u25B6</a>'
+        : '';
+      aiStatusBadge = '<span class="pending-action-ai-status processing"><span class="ai-spinner"></span> Processing' + sessionLink + '</span>';
+    }
     else if (finding.aiStatus === 'fixed') aiStatusBadge = '<span class="pending-action-ai-status fixed">\u2705 Fixed</span>';
     else if (finding.aiStatus === 'failed') aiStatusBadge = '<span class="pending-action-ai-status failed">\u274C Failed</span>';
 
@@ -1208,7 +1233,7 @@ function setupMessageListener(): void {
         if (pendingActions && message.findingIds) pendingActions.markResolved(message.findingIds);
         break;
       case 'findingsProcessing':
-        if (pendingActions && message.findingIds) pendingActions.setProcessing(message.findingIds, message.status);
+        if (pendingActions && message.findingIds) pendingActions.setProcessing(message.findingIds, message.status, message.sessionId);
         break;
       case 'monitoringStopped':
         if (prMonitor) prMonitor.onStopped();
