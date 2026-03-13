@@ -31,6 +31,8 @@ function createMockPlanRunner(overrides?: Record<string, any>): any {
     resume: sinon.stub(),
     getStateMachine: sinon.stub().returns({ computePlanStatus: () => 'succeeded' }),
     getStatus: sinon.stub().returns(undefined),
+    on: sinon.stub(),
+    off: sinon.stub(),
     ...overrides,
   };
 }

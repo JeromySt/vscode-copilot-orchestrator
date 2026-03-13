@@ -414,7 +414,7 @@ suite('createReleaseManager', () => {
     container.registerSingleton(Tokens.IRemoteProviderDetector, () => mockProviderDetector);
     container.registerSingleton(Tokens.IDialogService, () => mockDialogService);
 
-    const mockPlanRunner: any = {};
+    const mockPlanRunner: any = { on: () => {}, off: () => {} };
     const result = createReleaseManager(container, mockPlanRunner);
     assert.ok(result);
   });

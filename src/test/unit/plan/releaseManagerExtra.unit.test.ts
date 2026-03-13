@@ -23,13 +23,15 @@ function createMockPlanRunner(overrides?: Record<string, any>): any {
   return {
     get: sinon.stub().returns(undefined),
     getAll: sinon.stub().returns([]),
-    enqueue: sinon.stub(),
+    enqueue: sinon.stub().returns({ id: 'mock-plan-id', spec: { name: 'test' } }),
     cancel: sinon.stub(),
     delete: sinon.stub(),
     pause: sinon.stub(),
     resume: sinon.stub(),
     getStateMachine: sinon.stub().returns({ computePlanStatus: () => 'succeeded' }),
     getStatus: sinon.stub().returns(undefined),
+    on: sinon.stub(),
+    off: sinon.stub(),
     ...overrides,
   };
 }
@@ -715,12 +717,9 @@ suite('ReleaseManager – extra coverage', () => {
       );
     });
 
-    test('invokes copilot and emits releaseActionTaken on success with no changes', async () => {
+    test('creates a fix plan via enqueue and emits releaseActionTaken', async () => {
       const planRunner = createMockPlanRunner();
-      const git = createMockGitOps();
-      git.repository.hasChanges.resolves(false);
-      const copilot = createMockCopilot();
-      const manager = createManager({ planRunner, git, copilot });
+      const manager = createManager({ planRunner });
       const release = await createRelease(manager, planRunner);
 
       const actions: any[] = [];
@@ -730,169 +729,109 @@ suite('ReleaseManager – extra coverage', () => {
         { type: 'check', name: 'CI', status: 'failing' },
       ]);
 
-      assert.ok(copilot.run.calledOnce);
-      // Started action emitted
-      assert.ok(actions.some(a => a.description.includes('Addressing')));
-      // No changes action
-      assert.ok(actions.some(a => a.description.includes('no code changes')));
+      assert.ok(planRunner.enqueue.calledOnce, 'should call planRunner.enqueue');
+      assert.ok(actions.some(a => a.type === 'fix-code' && a.success === true));
     });
 
-    test('includes sessionId in fix-code actions', async () => {
+    test('enqueued plan includes correct baseBranch and targetBranch', async () => {
       const planRunner = createMockPlanRunner();
-      const git = createMockGitOps();
-      git.repository.hasChanges.resolves(true);
-      const copilot = createMockCopilot();
-      const manager = createManager({ planRunner, git, copilot });
+      const manager = createManager({ planRunner });
       const release = await createRelease(manager, planRunner);
-
-      const actions: any[] = [];
-      manager.on('releaseActionTaken', (_id: string, action: any) => actions.push(action));
 
       await manager.addressFindings(release.id, [
         { type: 'check', name: 'CI', status: 'failing' },
       ]);
 
-      const fixActions = actions.filter(a => a.type === 'fix-code');
-      assert.ok(fixActions.length > 0, 'should have fix-code actions');
-      // All fix-code actions after the initial "Addressing" should have sessionId
-      const postStartActions = fixActions.filter(a => !a.description.includes('Addressing'));
-      for (const action of postStartActions) {
-        assert.ok(action.sessionId, `fix-code action "${action.description}" should include sessionId`);
-        assert.ok(typeof action.sessionId === 'string');
-        assert.ok(action.sessionId.startsWith('cli-'));
-      }
+      const planSpec = planRunner.enqueue.firstCall.args[0];
+      assert.ok(planSpec.baseBranch, 'should set baseBranch');
+      assert.ok(planSpec.targetBranch, 'should set targetBranch');
+      assert.strictEqual(planSpec.baseBranch, planSpec.targetBranch);
     });
 
-    test('commits and pushes when copilot produces changes', async () => {
+    test('associates plan with release fixPlanIds and fixPlanFindings', async () => {
       const planRunner = createMockPlanRunner();
-      const git = createMockGitOps();
-      git.repository.hasChanges.resolves(true);
-      const copilot = createMockCopilot();
-      const manager = createManager({ planRunner, git, copilot });
+      const manager = createManager({ planRunner });
       const release = await createRelease(manager, planRunner);
 
-      const actions: any[] = [];
-      manager.on('releaseActionTaken', (_id: string, action: any) => actions.push(action));
+      const findings = [
+        { type: 'alert', id: 'a1', description: 'XSS', severity: 'high', file: 'src/a.ts' },
+      ];
+      await manager.addressFindings(release.id, findings);
+
+      assert.ok(Array.isArray(release.fixPlanIds), 'fixPlanIds should be an array');
+      assert.ok(release.fixPlanIds!.includes('mock-plan-id'));
+      assert.ok(release.fixPlanFindings!['mock-plan-id'], 'fixPlanFindings should have entry for plan');
+      assert.strictEqual(release.fixPlanFindings!['mock-plan-id'].length, 1);
+    });
+
+    test('emits findingsProcessing with queued and processing statuses', async () => {
+      const planRunner = createMockPlanRunner();
+      const manager = createManager({ planRunner });
+      const release = await createRelease(manager, planRunner);
+
+      const events: any[] = [];
+      manager.on('findingsProcessing', (_id: string, ids: string[], status: string) =>
+        events.push({ ids, status }),
+      );
 
       await manager.addressFindings(release.id, [
-        { type: 'alert', severity: 'high', description: 'XSS vulnerability', file: 'src/a.ts' },
+        { type: 'check', id: 'c1', name: 'CI' },
       ]);
 
-      assert.ok(git.repository.stageAll.calledOnce);
-      assert.ok(git.repository.commit.calledOnce);
-      assert.ok(git.repository.push.calledOnce);
-      assert.ok(actions.some(a => a.type === 'fix-code' && a.success === true && a.commitHash));
+      assert.ok(events.some(e => e.status === 'queued'), 'should emit queued status');
+      assert.ok(events.some(e => e.status === 'processing'), 'should emit processing status');
     });
 
-    test('emits failure action when copilot returns failure', async () => {
+    test('enqueue is not called when findings array triggers empty path', async () => {
+      // Empty findings early-return path
       const planRunner = createMockPlanRunner();
-      const copilot = createMockCopilot();
-      copilot.run.resolves({ success: false, error: 'AI timed out' });
-      const manager = createManager({ planRunner, copilot });
+      const manager = createManager({ planRunner });
       const release = await createRelease(manager, planRunner);
 
-      const actions: any[] = [];
-      manager.on('releaseActionTaken', (_id: string, action: any) => actions.push(action));
+      await manager.addressFindings(release.id, []);
 
-      await manager.addressFindings(release.id, [
-        { type: 'comment', body: 'Fix this', author: 'reviewer', id: 'c1' },
-      ]);
-
-      assert.ok(actions.some(a => a.success === false && a.description.includes('AI timed out')));
+      assert.ok(planRunner.enqueue.notCalled, 'enqueue should not be called for empty findings');
     });
 
-    test('emits failure action when copilot throws', async () => {
+    test('stores all finding types in fixPlanFindings for post-completion use', async () => {
       const planRunner = createMockPlanRunner();
-      const copilot = createMockCopilot();
-      copilot.run.rejects(new Error('copilot spawn failed'));
-      const manager = createManager({ planRunner, copilot });
+      const manager = createManager({ planRunner });
       const release = await createRelease(manager, planRunner);
 
-      const actions: any[] = [];
-      manager.on('releaseActionTaken', (_id: string, action: any) => actions.push(action));
+      const findings = [
+        { type: 'check', id: 'ck1', name: 'CI' },
+        { type: 'comment', id: 'cm1', body: 'fix this', author: 'alice' },
+        { type: 'alert', id: 'al1', description: 'XSS' },
+      ];
+      await manager.addressFindings(release.id, findings);
 
-      await manager.addressFindings(release.id, [
-        { type: 'check', name: 'CI' },
-      ]);
-
-      assert.ok(actions.some(a => a.success === false && a.description.includes('copilot spawn failed')));
+      const stored = release.fixPlanFindings!['mock-plan-id'];
+      assert.strictEqual(stored.length, 3);
+      assert.ok(stored.some((f: any) => f.id === 'ck1'));
+      assert.ok(stored.some((f: any) => f.id === 'cm1'));
+      assert.ok(stored.some((f: any) => f.id === 'al1'));
     });
 
-    test('replies to comments via prService when prNumber set', async () => {
+    test('plan name includes PR number when set', async () => {
       const planRunner = createMockPlanRunner();
-      const git = createMockGitOps();
-      git.repository.hasChanges.resolves(true);
-      const prFactory = createMockPRServiceFactory();
-      const copilot = createMockCopilot();
-      const manager = createManager({ planRunner, git, copilot, prFactory });
+      const manager = createManager({ planRunner });
       const release = await createRelease(manager, planRunner);
+      release.prNumber = 99;
 
-      release.prNumber = 42;
-      release.isolatedRepoPath = '/repo/.orchestrator/release/release-v1';
+      await manager.addressFindings(release.id, [{ type: 'check', name: 'CI' }]);
 
-      const actions: any[] = [];
-      manager.on('releaseActionTaken', (_id: string, action: any) => actions.push(action));
-
-      await manager.addressFindings(release.id, [
-        {
-          type: 'comment',
-          body: 'Fix this',
-          author: 'reviewer',
-          id: 'c1',
-          commentId: 'comment-123',
-          threadId: 'thread-abc',
-          path: 'src/foo.ts',
-        },
-      ]);
-
-      const prService = prFactory._service;
-      assert.ok(prService.replyToComment.calledOnce);
-      assert.ok(prService.resolveThread.calledOnce);
-      assert.ok(actions.some(a => a.type === 'respond-comment' && a.success === true));
+      const planSpec = planRunner.enqueue.firstCall.args[0];
+      assert.ok(planSpec.name.includes('99'), 'plan name should include PR number');
     });
 
-    test('includes commentUrl in respond-comment actions', async () => {
+    test('emits findingsProcessing with correct finding IDs', async () => {
       const planRunner = createMockPlanRunner();
-      const git = createMockGitOps();
-      git.repository.hasChanges.resolves(true);
-      const prFactory = createMockPRServiceFactory();
-      const copilot = createMockCopilot();
-      const manager = createManager({ planRunner, git, copilot, prFactory });
+      const manager = createManager({ planRunner });
       const release = await createRelease(manager, planRunner);
 
-      release.prNumber = 42;
-      release.isolatedRepoPath = '/repo/.orchestrator/release/release-v1';
-
-      const actions: any[] = [];
-      manager.on('releaseActionTaken', (_id: string, action: any) => actions.push(action));
-
-      await manager.addressFindings(release.id, [
-        {
-          type: 'comment',
-          body: 'Fix this',
-          author: 'reviewer',
-          id: 'c1',
-          commentId: 'comment-123',
-          path: 'src/foo.ts',
-          url: 'https://github.com/o/r/pull/42#discussion_r123',
-        },
-      ]);
-
-      const replyAction = actions.find(a => a.type === 'respond-comment');
-      assert.ok(replyAction, 'should have respond-comment action');
-      assert.strictEqual(replyAction.commentUrl, 'https://github.com/o/r/pull/42#discussion_r123');
-    });
-
-    test('emits findingsResolved with finding IDs', async () => {
-      const planRunner = createMockPlanRunner();
-      const git = createMockGitOps();
-      git.repository.hasChanges.resolves(false);
-      const manager = createManager({ planRunner, git });
-      const release = await createRelease(manager, planRunner);
-
-      const resolvedEvents: any[] = [];
-      manager.on('findingsResolved', (id: string, ids: string[], hasCommit: boolean) =>
-        resolvedEvents.push({ id, ids, hasCommit }),
+      const events: any[] = [];
+      manager.on('findingsProcessing', (_id: string, ids: string[], status: string) =>
+        events.push({ ids, status }),
       );
 
       await manager.addressFindings(release.id, [
@@ -900,15 +839,15 @@ suite('ReleaseManager – extra coverage', () => {
         { type: 'alert', id: 'finding-2', description: 'XSS' },
       ]);
 
-      assert.ok(resolvedEvents.length > 0);
-      assert.ok(resolvedEvents[0].ids.includes('finding-1'));
-      assert.ok(resolvedEvents[0].ids.includes('finding-2'));
+      const queuedEvent = events.find(e => e.status === 'queued');
+      assert.ok(queuedEvent, 'should have a queued event');
+      assert.ok(queuedEvent.ids.includes('finding-1'));
+      assert.ok(queuedEvent.ids.includes('finding-2'));
     });
 
     test('builds task description from mixed finding types', async () => {
       const planRunner = createMockPlanRunner();
-      const copilot = createMockCopilot();
-      const manager = createManager({ planRunner, copilot });
+      const manager = createManager({ planRunner });
       const release = await createRelease(manager, planRunner);
 
       await manager.addressFindings(release.id, [
@@ -917,41 +856,41 @@ suite('ReleaseManager – extra coverage', () => {
         { type: 'alert', severity: 'critical', description: 'SQL injection', file: 'src/db.ts' },
       ]);
 
-      const callArgs = copilot.run.firstCall.args[0];
-      const task = callArgs.task as string;
+      const planSpec = planRunner.enqueue.firstCall.args[0];
+      const task = planSpec.jobs[0].task as string;
       assert.ok(task.includes('CI/CD Check Failures'));
       assert.ok(task.includes('PR Review Comments'));
       assert.ok(task.includes('Security Alerts'));
     });
 
-    test('handles commit/push failure gracefully', async () => {
-      const planRunner = createMockPlanRunner();
-      const git = createMockGitOps();
-      git.repository.hasChanges.resolves(true);
-      git.repository.commit.rejects(new Error('commit failed'));
-      const copilot = createMockCopilot();
-      const manager = createManager({ planRunner, git, copilot });
+    test('handles enqueue failure gracefully', async () => {
+      const planRunner = createMockPlanRunner({
+        enqueue: sinon.stub().throws(new Error('queue full')),
+      });
+      const manager = createManager({ planRunner });
       const release = await createRelease(manager, planRunner);
 
-      const actions: any[] = [];
-      manager.on('releaseActionTaken', (_id: string, action: any) => actions.push(action));
-
-      await manager.addressFindings(release.id, [{ type: 'check', name: 'CI' }]);
-
-      assert.ok(actions.some(a => a.success === false && a.description.includes('commit failed')));
+      await assert.rejects(
+        () => manager.addressFindings(release.id, [{ type: 'check', name: 'CI' }]),
+        /queue full/,
+      );
     });
 
-    test('handles git hasChanges failure gracefully', async () => {
+    test('plan job has correct task and work fields', async () => {
       const planRunner = createMockPlanRunner();
-      const git = createMockGitOps();
-      git.repository.hasChanges.rejects(new Error('git status failed'));
-      const copilot = createMockCopilot();
-      const manager = createManager({ planRunner, git, copilot });
+      const manager = createManager({ planRunner });
       const release = await createRelease(manager, planRunner);
 
-      // Should not throw
-      await manager.addressFindings(release.id, [{ type: 'check', name: 'CI' }]);
-      assert.ok(copilot.run.calledOnce);
+      await manager.addressFindings(release.id, [
+        { type: 'alert', description: 'XSS vulnerability' },
+      ]);
+
+      const planSpec = planRunner.enqueue.firstCall.args[0];
+      assert.ok(planSpec.jobs.length > 0, 'should have at least one job');
+      const job = planSpec.jobs[0];
+      assert.ok(typeof job.task === 'string' && job.task.length > 0);
+      assert.ok(typeof job.work === 'string' && job.work.startsWith('@agent'));
+      assert.strictEqual(job.autoHeal, true);
     });
   });
 

@@ -23,6 +23,8 @@ function createMockPlanRunner(overrides?: Record<string, any>): any {
     pause: sinon.stub(),
     resume: sinon.stub(),
     getStateMachine: sinon.stub().returns({ computePlanStatus: () => 'succeeded' }),
+    on: sinon.stub(),
+    off: sinon.stub(),
     ...overrides,
   };
 }
