@@ -851,16 +851,28 @@ suite('ReleaseManager – extra coverage', () => {
       const release = await createRelease(manager, planRunner);
 
       await manager.addressFindings(release.id, [
-        { type: 'check', name: 'CI/CD', url: 'https://ci.example.com' },
-        { type: 'comment', body: 'Please fix', author: 'alice', path: 'src/a.ts', line: 5 },
-        { type: 'alert', severity: 'critical', description: 'SQL injection', file: 'src/db.ts' },
+        { type: 'check', id: 'ck1', name: 'CI/CD', url: 'https://ci.example.com' },
+        { type: 'comment', id: 'cm1', body: 'Please fix', author: 'alice', path: 'src/a.ts', line: 5 },
+        { type: 'alert', id: 'al1', severity: 'critical', description: 'SQL injection', file: 'src/db.ts' },
       ]);
 
       const planSpec = planRunner.enqueue.firstCall.args[0];
-      const task = planSpec.jobs[0].task as string;
-      assert.ok(task.includes('CI/CD Check Failures'));
-      assert.ok(task.includes('PR Review Comments'));
-      assert.ok(task.includes('Security Alerts'));
+      // New code creates one job per finding plus a verification job
+      assert.ok(planSpec.jobs.length >= 4, 'should have check, comment, alert, and verify jobs');
+      // Check job includes CI check details
+      const checkJob = planSpec.jobs.find((j: any) => j.task.includes('CI/CD'));
+      assert.ok(checkJob, 'should have a CI check job');
+      assert.ok(checkJob.task.includes('FAILING'));
+      // Comment job
+      const commentJob = planSpec.jobs.find((j: any) => j.task.includes('Please fix'));
+      assert.ok(commentJob, 'should have a comment job');
+      // Alert job
+      const alertJob = planSpec.jobs.find((j: any) => j.task.includes('SQL injection'));
+      assert.ok(alertJob, 'should have an alert job');
+      // Verification job
+      const verifyJob = planSpec.jobs.find((j: any) => j.name.includes('Verify'));
+      assert.ok(verifyJob, 'should have a verification job');
+      assert.strictEqual(verifyJob.autoHeal, false);
     });
 
     test('handles enqueue failure gracefully', async () => {
@@ -882,15 +894,19 @@ suite('ReleaseManager – extra coverage', () => {
       const release = await createRelease(manager, planRunner);
 
       await manager.addressFindings(release.id, [
-        { type: 'alert', description: 'XSS vulnerability' },
+        { type: 'alert', id: 'al1', description: 'XSS vulnerability' },
       ]);
 
       const planSpec = planRunner.enqueue.firstCall.args[0];
-      assert.ok(planSpec.jobs.length > 0, 'should have at least one job');
+      assert.ok(planSpec.jobs.length >= 2, 'should have fix job + verify job');
       const job = planSpec.jobs[0];
       assert.ok(typeof job.task === 'string' && job.task.length > 0);
       assert.ok(typeof job.work === 'string' && job.work.startsWith('@agent'));
       assert.strictEqual(job.autoHeal, true);
+      // Verification job should have autoHeal: false
+      const verifyJob = planSpec.jobs[planSpec.jobs.length - 1];
+      assert.strictEqual(verifyJob.autoHeal, false);
+      assert.ok(verifyJob.dependencies.length > 0, 'verify job should depend on fix jobs');
     });
   });
 
@@ -1075,6 +1091,209 @@ suite('ReleaseManager – extra coverage', () => {
       await clock.tickAsync(6000);
 
       // Now monitoring should have been started
+      assert.ok(prMonitor.startMonitoring.calledOnce);
+
+      clock.restore();
+    });
+
+    test('forwards state machine transition events to events.emitReleaseStatusChanged', async () => {
+      const store = createMockReleaseStore();
+      const savedRelease: any = {
+        id: 'rel-sm-transition',
+        name: 'SM Transition Release',
+        flowType: 'from-plans',
+        planIds: [],
+        releaseBranch: 'release/sm',
+        targetBranch: 'main',
+        repoPath: '/repo',
+        status: 'drafting',
+        source: 'from-plans',
+        stateHistory: [{ from: 'drafting', to: 'drafting', timestamp: Date.now(), reason: 'created' }],
+        createdAt: Date.now(),
+      };
+      store.loadAllReleases.resolves([savedRelease]);
+
+      const manager = new DefaultReleaseManager(
+        createMockPlanRunner(),
+        createMockGitOps(),
+        createMockCopilot(),
+        createMockIsolatedRepos(),
+        createMockPRMonitor(),
+        createMockPRServiceFactory(),
+        store,
+      );
+      await new Promise(r => setTimeout(r, 0));
+
+      const statusChangedEvents: any[] = [];
+      manager.on('releaseStatusChanged', (...args: any[]) => statusChangedEvents.push(args));
+
+      // Trigger the transition event on the state machine directly
+      const sm = (manager as any).stateMachines.get('rel-sm-transition');
+      assert.ok(sm, 'state machine should exist for loaded release');
+      sm.emit('transition', { releaseId: 'rel-sm-transition', from: 'drafting', to: 'building' });
+
+      assert.strictEqual(statusChangedEvents.length, 1);
+      assert.strictEqual(statusChangedEvents[0][0].id, 'rel-sm-transition');
+    });
+
+    test('forwards state machine completed event (succeeded) to events.emitReleaseCompleted', async () => {
+      const store = createMockReleaseStore();
+      const savedRelease: any = {
+        id: 'rel-sm-succeeded',
+        name: 'SM Succeeded Release',
+        flowType: 'from-plans',
+        planIds: [],
+        releaseBranch: 'release/sm-ok',
+        targetBranch: 'main',
+        repoPath: '/repo',
+        status: 'building',
+        source: 'from-plans',
+        stateHistory: [],
+        createdAt: Date.now(),
+      };
+      store.loadAllReleases.resolves([savedRelease]);
+
+      const manager = new DefaultReleaseManager(
+        createMockPlanRunner(),
+        createMockGitOps(),
+        createMockCopilot(),
+        createMockIsolatedRepos(),
+        createMockPRMonitor(),
+        createMockPRServiceFactory(),
+        store,
+      );
+      await new Promise(r => setTimeout(r, 0));
+
+      const completedEvents: any[] = [];
+      manager.on('releaseCompleted', (r: any) => completedEvents.push(r));
+
+      const sm = (manager as any).stateMachines.get('rel-sm-succeeded');
+      assert.ok(sm, 'state machine should exist');
+      sm.emit('completed', 'rel-sm-succeeded', 'succeeded');
+
+      assert.strictEqual(completedEvents.length, 1);
+      assert.strictEqual(completedEvents[0].id, 'rel-sm-succeeded');
+    });
+
+    test('forwards state machine completed event (failed) to events.emitReleaseFailed', async () => {
+      const store = createMockReleaseStore();
+      const savedRelease: any = {
+        id: 'rel-sm-failed',
+        name: 'SM Failed Release',
+        flowType: 'from-plans',
+        planIds: [],
+        releaseBranch: 'release/sm-fail',
+        targetBranch: 'main',
+        repoPath: '/repo',
+        status: 'building',
+        source: 'from-plans',
+        stateHistory: [],
+        createdAt: Date.now(),
+        error: 'Something went wrong',
+      };
+      store.loadAllReleases.resolves([savedRelease]);
+
+      const manager = new DefaultReleaseManager(
+        createMockPlanRunner(),
+        createMockGitOps(),
+        createMockCopilot(),
+        createMockIsolatedRepos(),
+        createMockPRMonitor(),
+        createMockPRServiceFactory(),
+        store,
+      );
+      await new Promise(r => setTimeout(r, 0));
+
+      const failedEvents: any[] = [];
+      (manager as any).events.on('release:failed', (...args: any[]) => failedEvents.push(args));
+
+      const sm = (manager as any).stateMachines.get('rel-sm-failed');
+      assert.ok(sm, 'state machine should exist');
+      sm.emit('completed', 'rel-sm-failed', 'failed');
+
+      assert.strictEqual(failedEvents.length, 1);
+      assert.strictEqual(failedEvents[0][0].id, 'rel-sm-failed');
+    });
+
+    test('forwards state machine completed event (canceled) to events.emitReleaseCanceled', async () => {
+      const store = createMockReleaseStore();
+      const savedRelease: any = {
+        id: 'rel-sm-canceled',
+        name: 'SM Canceled Release',
+        flowType: 'from-plans',
+        planIds: [],
+        releaseBranch: 'release/sm-cancel',
+        targetBranch: 'main',
+        repoPath: '/repo',
+        status: 'building',
+        source: 'from-plans',
+        stateHistory: [],
+        createdAt: Date.now(),
+      };
+      store.loadAllReleases.resolves([savedRelease]);
+
+      const manager = new DefaultReleaseManager(
+        createMockPlanRunner(),
+        createMockGitOps(),
+        createMockCopilot(),
+        createMockIsolatedRepos(),
+        createMockPRMonitor(),
+        createMockPRServiceFactory(),
+        store,
+      );
+      await new Promise(r => setTimeout(r, 0));
+
+      const canceledEvents: any[] = [];
+      (manager as any).events.on('release:canceled', (id: string) => canceledEvents.push(id));
+
+      const sm = (manager as any).stateMachines.get('rel-sm-canceled');
+      assert.ok(sm, 'state machine should exist');
+      sm.emit('completed', 'rel-sm-canceled', 'canceled');
+
+      assert.strictEqual(canceledEvents.length, 1);
+      assert.strictEqual(canceledEvents[0], 'rel-sm-canceled');
+    });
+
+    test('logs warning when monitoring restoration fails', async () => {
+      const store = createMockReleaseStore();
+      const clock = sinon.useFakeTimers();
+
+      const monitoringRelease: any = {
+        id: 'rel-mon-fail',
+        name: 'Monitoring Fail Release',
+        flowType: 'from-plans',
+        planIds: [],
+        releaseBranch: 'release/mon-fail',
+        targetBranch: 'main',
+        repoPath: '/repo',
+        status: 'monitoring',
+        prNumber: 99,
+        source: 'from-plans',
+        stateHistory: [{ from: 'pr-active', to: 'monitoring', timestamp: Date.now(), reason: 'started' }],
+        createdAt: Date.now(),
+      };
+      store.loadAllReleases.resolves([monitoringRelease]);
+
+      const prMonitor = createMockPRMonitor();
+      prMonitor.startMonitoring.rejects(new Error('Monitor service unavailable'));
+
+      const manager = new DefaultReleaseManager(
+        createMockPlanRunner(),
+        createMockGitOps(),
+        createMockCopilot(),
+        createMockIsolatedRepos(),
+        prMonitor,
+        createMockPRServiceFactory(),
+        store,
+      );
+
+      // Let the async _loadPersistedReleases settle
+      await clock.tickAsync(0);
+
+      // Advance past the 5-second delay and let the rejection be handled
+      await clock.tickAsync(6000);
+
+      // Verify that startMonitoring was called (and failed)
       assert.ok(prMonitor.startMonitoring.calledOnce);
 
       clock.restore();

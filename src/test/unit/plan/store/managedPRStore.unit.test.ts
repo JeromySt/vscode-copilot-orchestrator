@@ -55,6 +55,7 @@ suite('FileSystemManagedPRStore', () => {
       existsAsync: sandbox.stub().resolves(true),
       readdirAsync: sandbox.stub().resolves([]),
       rmAsync: sandbox.stub().resolves(),
+      realpathAsync: sandbox.stub().callsFake((p: string) => Promise.resolve(p)),
     };
 
     store = new FileSystemManagedPRStore(repoPath, mockFS);

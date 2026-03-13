@@ -35,6 +35,7 @@ function createMockFS(): any {
     unlinkAsync: sinon.stub().resolves(),
     existsSync: sinon.stub().returns(false),
     copyFileAsync: sinon.stub().resolves(),
+    realpathAsync: sinon.stub().callsFake((p: string) => Promise.resolve(p)),
   };
 }
 
