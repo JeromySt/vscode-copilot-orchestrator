@@ -244,6 +244,13 @@ export interface IReleaseManager {
    * @param findings - Array of findings to address (comments, checks, alerts)
    */
   addressFindings(releaseId: string, findings: any[]): Promise<void>;
+
+  /**
+   * Toggle auto-fix mode.
+   * When enabled, new findings from monitoring cycles are automatically sent to AI.
+   */
+  setAutoFix(releaseId: string, enabled: boolean): void;
+
   // ── Events ─────────────────────────────────────────────────────────
 
   /**

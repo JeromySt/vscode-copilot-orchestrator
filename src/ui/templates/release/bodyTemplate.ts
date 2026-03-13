@@ -536,6 +536,11 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
   <div class="monitoring-controls" style="margin-bottom: 16px;">
     ${isPRActive ? '<button onclick="startMonitoring()">Start Monitoring</button>' : ''}
     ${isMonitoring ? '<button class="secondary" style="padding:6px 14px; border:1px solid var(--vscode-input-border); background:var(--vscode-input-background); color:var(--vscode-foreground); border-radius:4px; cursor:pointer; font-size:12px; font-family:var(--vscode-font-family);" onclick="stopMonitoring()">Stop Monitoring</button>' : ''}
+    ${(isMonitoring || isPRActive) ? `
+    <label class="auto-fix-toggle" style="display:inline-flex; align-items:center; gap:6px; margin-left:12px; font-size:12px; cursor:pointer;">
+      <input type="checkbox" id="auto-fix-toggle" ${release.autoFixEnabled ? 'checked' : ''} onchange="toggleAutoFix(this.checked)" />
+      <span>🤖 Auto-fix with AI</span>
+    </label>` : ''}
     ${isMonitoring ? `
     <div class="monitor-timer-bar">
       <div class="monitor-timer-label">Next check in:</div>

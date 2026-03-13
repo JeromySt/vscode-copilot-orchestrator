@@ -161,6 +161,10 @@ function switchAccount(): void {
   vscode.postMessage({ type: 'switchAccount' });
 }
 
+function toggleAutoFix(enabled: boolean): void {
+  vscode.postMessage({ type: 'toggleAutoFix', enabled });
+}
+
 function filterPendingActions(filter: string, btn: HTMLElement | null): void {
   if (pendingActions) {
     pendingActions.setFilter(filter);
@@ -1321,6 +1325,7 @@ export function initReleasePanel(config: { releaseData: any; availablePlans: any
   g.dismissFinding = dismissFinding;
   g.openFindingFile = openFindingFile;
   g.switchAccount = switchAccount;
+  g.toggleAutoFix = toggleAutoFix;
   g.filterPendingActions = filterPendingActions;
   g.addressSelectedWithAI = addressSelectedWithAI;
   g.planSelector = undefined; // Will be set by initControls

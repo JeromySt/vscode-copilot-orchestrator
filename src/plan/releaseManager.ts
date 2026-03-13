@@ -123,6 +123,65 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           // Store the full cycle so the panel can seed Pending Actions on open
           rel.lastCycle = cycle;
           this.store.saveRelease(rel).catch(() => {});
+
+          // ── Auto-fix: if enabled, automatically address new unresolved findings ──
+          if (rel.autoFixEnabled) {
+            const autoFixedSet = new Set(rel.autoFixedFindingIds || []);
+            const newFindings: any[] = [];
+
+            for (const c of comments) {
+              if (!c.isResolved) {
+                const findingId = 'comment-' + c.id;
+                if (!autoFixedSet.has(findingId)) {
+                  newFindings.push({
+                    type: 'comment', id: findingId,
+                    commentId: c.id, author: c.author, body: c.body,
+                    path: c.path, line: c.line, source: c.source,
+                    threadId: c.threadId, url: c.url, nodeId: c.nodeId,
+                  });
+                }
+              }
+            }
+            for (const ch of checks) {
+              if (ch.status === 'failing') {
+                const findingId = 'check-' + (ch.name || '').replace(/[^a-zA-Z0-9]/g, '-');
+                if (!autoFixedSet.has(findingId)) {
+                  newFindings.push({
+                    type: 'check', id: findingId,
+                    name: ch.name, status: ch.status, url: ch.url,
+                  });
+                }
+              }
+            }
+            for (const a of alerts) {
+              if (!a.resolved) {
+                const findingId = 'alert-' + a.id;
+                if (!autoFixedSet.has(findingId)) {
+                  newFindings.push({
+                    type: 'alert', id: findingId,
+                    alertId: a.id, severity: a.severity,
+                    description: a.description, file: a.file,
+                  });
+                }
+              }
+            }
+
+            if (newFindings.length > 0) {
+              log.info('Auto-fix: addressing new findings', {
+                releaseId, count: newFindings.length,
+              });
+              if (!rel.autoFixedFindingIds) rel.autoFixedFindingIds = [];
+              for (const f of newFindings) rel.autoFixedFindingIds.push(f.id);
+              if (rel.autoFixedFindingIds.length > 500) {
+                rel.autoFixedFindingIds = rel.autoFixedFindingIds.slice(-500);
+              }
+              this.store.saveRelease(rel).catch(() => {});
+              this.emit('findingsProcessing', releaseId, newFindings.map((f: any) => f.id), 'queued');
+              this.addressFindings(releaseId, newFindings).catch((err) => {
+                log.error('Auto-fix failed', { releaseId, error: (err as Error).message });
+              });
+            }
+          }
         }
         this.events.emitReleasePrCycle(releaseId, cycle);
         this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
@@ -955,6 +1014,24 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     }
 
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  /**
+   * Toggle auto-fix mode for a release.
+   * When enabled, new findings from monitoring cycles are automatically sent to AI.
+   */
+  setAutoFix(releaseId: string, enabled: boolean): void {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+    release.autoFixEnabled = enabled;
+    if (!enabled) {
+      // Clear the auto-fixed tracking when disabling so re-enabling starts fresh
+      release.autoFixedFindingIds = [];
+    }
+    log.info('Auto-fix toggled', { releaseId, enabled });
+    this.store.saveRelease(release).catch(() => {});
   }
 
   /**

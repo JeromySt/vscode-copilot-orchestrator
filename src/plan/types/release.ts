@@ -253,6 +253,12 @@ export interface ReleaseDefinition {
   /** Comment IDs that have been addressed (issue comments and top-level reviews lack thread resolution) */
   addressedCommentIds?: string[];
 
+  /** When true, new findings from monitoring cycles are automatically sent to AI for fixing */
+  autoFixEnabled?: boolean;
+
+  /** Finding IDs that have already been auto-addressed (prevents re-triggering) */
+  autoFixedFindingIds?: string[];
+
   /** History of state transitions */
   stateHistory: StateTransition[];
 }

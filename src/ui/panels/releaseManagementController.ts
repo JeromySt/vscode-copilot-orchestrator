@@ -319,6 +319,9 @@ export class ReleaseManagementController {
         }
         break;
       }
+      case 'toggleAutoFix':
+        this._releaseManager.setAutoFix(this._releaseId, !!message.enabled);
+        break;
       case 'refresh':
         this._delegate.forceFullRefresh();
         break;
