@@ -7,7 +7,6 @@
  * @module plan/store/pathValidation
  */
 
-import * as fs from 'fs';
 import * as path from 'path';
 
 /**
@@ -42,16 +41,21 @@ export function validatePath(basePath: string, targetPath: string): void {
  *
  * @param basePath - The directory that all valid paths must reside within.
  * @param targetPath - The path to validate.
+ * @param realpathFn - Async function that resolves a path following symlinks (e.g. `IFileSystem.realpathAsync`).
  * @throws {Error} If `targetPath` escapes `basePath` (lexically or via symlinks).
  */
-export async function validatePathAsync(basePath: string, targetPath: string): Promise<void> {
+export async function validatePathAsync(
+  basePath: string,
+  targetPath: string,
+  realpathFn: (filePath: string) => Promise<string>,
+): Promise<void> {
   // Lexical check first (guards against .. traversal without I/O)
   validatePath(basePath, targetPath);
 
   // Realpath check to guard against symlink escapes
   try {
-    const baseReal = await fs.promises.realpath(basePath).catch(() => path.resolve(basePath));
-    const targetReal = await fs.promises.realpath(targetPath);
+    const baseReal = await realpathFn(basePath).catch(() => path.resolve(basePath));
+    const targetReal = await realpathFn(targetPath);
     if (!targetReal.startsWith(baseReal + path.sep)) {
       throw new Error(`Path traversal blocked (symlink): ${targetPath}`);
     }
