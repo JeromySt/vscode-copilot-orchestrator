@@ -23,6 +23,7 @@ function createMockFileSystem(): any {
     unlinkAsync: sinon.stub().resolves(),
     rmAsync: sinon.stub().resolves(),
     readdirAsync: sinon.stub().resolves([]),
+    realpathAsync: sinon.stub().callsFake((p: string) => Promise.resolve(p)),
   };
 }
 
