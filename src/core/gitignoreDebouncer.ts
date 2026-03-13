@@ -130,6 +130,7 @@ export class GitignoreDebouncer implements IGitignoreDebouncer {
         error: err.message,
         repoPath
       });
+      throw err;
     }
   }
 

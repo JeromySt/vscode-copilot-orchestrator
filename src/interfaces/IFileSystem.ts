@@ -147,4 +147,7 @@ export interface IFileSystem {
 
   /** Copy a file (async). */
   copyFileAsync(src: string, dest: string): Promise<void>;
+
+  /** Resolve the real absolute path, following symlinks (async). */
+  realpathAsync(filePath: string): Promise<string>;
 }

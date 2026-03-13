@@ -12,7 +12,7 @@ import * as path from 'path';
 import type { IManagedPRStore, ManagedPR } from '../../interfaces/IManagedPRStore';
 import type { IFileSystem } from '../../interfaces/IFileSystem';
 import { Logger } from '../../core/logger';
-import { validatePath } from './pathValidation';
+import { validatePath, validatePathAsync } from './pathValidation';
 
 const log = Logger.for('plan-persistence');
 
@@ -103,8 +103,8 @@ export class FileSystemManagedPRStore implements IManagedPRStore {
 
         const prFile = path.join(managedPRsRoot, prDir, 'managed-pr.json');
         try {
-          // Ensure the managed PR file path stays under the managed-prs root
-          validatePath(managedPRsRoot, prFile);
+          // Ensure the managed PR file path stays under the managed-prs root (with symlink check)
+          await validatePathAsync(managedPRsRoot, prFile);
 
           const content = await this.fs.readFileAsync(prFile);
           const managedPR = JSON.parse(content) as ManagedPR;

@@ -95,6 +95,7 @@ export async function cmdOkAsync(cmd: string, spawner?: IProcessSpawner): Promis
   return new Promise((resolve) => {
     const actualSpawner = spawner ?? getFallbackSpawner();
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const settle = (value: boolean) => {
       if (settled) return;
       settled = true;
@@ -106,7 +107,7 @@ export async function cmdOkAsync(cmd: string, spawner?: IProcessSpawner): Promis
     proc.on('close', (code: number | null) => settle(code === 0));
     proc.on('error', () => settle(false));
     // Timeout after 15 seconds
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       proc.kill();
       settle(false);
     }, 15000);
@@ -117,6 +118,7 @@ async function hasGhCopilotAsync(spawner?: IProcessSpawner): Promise<boolean> {
   return new Promise((resolve) => {
     const actualSpawner = spawner ?? getFallbackSpawner();
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const settle = (value: boolean) => {
       if (settled) return;
       settled = true;
@@ -129,7 +131,7 @@ async function hasGhCopilotAsync(spawner?: IProcessSpawner): Promise<boolean> {
     proc.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
     proc.on('close', () => settle(/github\/gh-copilot/i.test(output)));
     proc.on('error', () => settle(false));
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       proc.kill();
       settle(false);
     }, 5000);

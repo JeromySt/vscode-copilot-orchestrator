@@ -55,14 +55,14 @@ suite('GitignoreDebouncer', () => {
       await promise;
     });
 
-    test('handles write failure gracefully without throwing', async () => {
+    test('rejects when immediate write fails', async () => {
       // Advance time past the initial 0 timestamp to simulate no recent branch change
       await clock.tickAsync(31000);
       
       mockGit.gitignore.ensureGitignoreEntries.rejects(new Error('Write failed'));
       
-      // Should not throw
-      await debouncer.ensureEntries('/repo', ['entry1']);
+      // Should reject with the write error (consistent with deferred path behaviour)
+      await assert.rejects(() => debouncer.ensureEntries('/repo', ['entry1']), /Write failed/);
       
       assert.ok(mockGit.gitignore.ensureGitignoreEntries.calledOnce);
     });

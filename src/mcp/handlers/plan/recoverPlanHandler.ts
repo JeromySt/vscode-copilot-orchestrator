@@ -14,7 +14,7 @@ import {
 /**
  * Handle the `recover_copilot_plan` MCP tool call.
  *
- * Recovers a canceled or archived plan by:
+ * Recovers a canceled or failed plan by:
  * 1. Recreating the target branch at the base commit
  * 2. Recovering worktree states from successfully completed jobs
  * 3. Transitioning the plan to paused state

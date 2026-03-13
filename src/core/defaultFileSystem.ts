@@ -151,4 +151,8 @@ export class DefaultFileSystem implements IFileSystem {
   async copyFileAsync(src: string, dest: string): Promise<void> {
     await fs.promises.copyFile(src, dest);
   }
+
+  async realpathAsync(filePath: string): Promise<string> {
+    return fs.promises.realpath(filePath);
+  }
 }

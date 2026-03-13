@@ -13,7 +13,7 @@ import type { IReleaseStore } from '../../interfaces/IReleaseStore';
 import type { ReleaseDefinition, PRMonitorCycle } from '../types/release';
 import type { IFileSystem } from '../../interfaces/IFileSystem';
 import { Logger } from '../../core/logger';
-import { validatePath } from './pathValidation';
+import { validatePath, validatePathAsync } from './pathValidation';
 
 const log = Logger.for('plan-persistence');
 
@@ -75,9 +75,9 @@ export class FileSystemReleaseStore implements IReleaseStore {
         const branchPath = path.join(releaseRoot, branch);
         const releaseFile = path.join(branchPath, 'release.json');
         try {
-          // Ensure constructed paths remain under .orchestrator
-          validatePath(this.orchestratorPath, branchPath);
-          validatePath(this.orchestratorPath, releaseFile);
+          // Ensure constructed paths remain under .orchestrator (with symlink check)
+          await validatePathAsync(this.orchestratorPath, branchPath);
+          await validatePathAsync(this.orchestratorPath, releaseFile);
 
           const content = await this.fs.readFileAsync(releaseFile);
           const release = JSON.parse(content) as ReleaseDefinition;
@@ -157,9 +157,9 @@ export class FileSystemReleaseStore implements IReleaseStore {
         const releaseDir = path.join(releaseRoot, branch);
         const releaseFile = path.join(releaseDir, 'release.json');
         try {
-          // Ensure both paths remain under the release root
-          validatePath(releaseRoot, releaseDir);
-          validatePath(releaseRoot, releaseFile);
+          // Ensure both paths remain under the release root (with symlink check)
+          await validatePathAsync(releaseRoot, releaseDir);
+          await validatePathAsync(releaseRoot, releaseFile);
 
           const content = await this.fs.readFileAsync(releaseFile);
           const release = JSON.parse(content) as ReleaseDefinition;
