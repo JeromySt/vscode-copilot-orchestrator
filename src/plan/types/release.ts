@@ -268,6 +268,13 @@ export interface ReleaseDefinition {
    */
   fixPlanFindings?: Record<string, any[]>;
 
+  /**
+   * Maps fix plan IDs to finding→producerId job mappings.
+   * Used by the UI to link each finding to its specific node detail panel.
+   * Shape: { [planId]: { [findingId]: producerId } }
+   */
+  fixPlanJobMap?: Record<string, Record<string, string>>;
+
   /** History of state transitions */
   stateHistory: StateTransition[];
 }
@@ -414,6 +421,9 @@ export interface PRActionTaken {
 
   /** URL to the original comment on the hosting platform (for respond-comment actions) */
   commentUrl?: string;
+
+  /** Plan ID — links this action to a fix plan (for plan-based fixing) */
+  planId?: string;
 }
 
 /**

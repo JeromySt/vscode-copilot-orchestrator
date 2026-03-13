@@ -1044,10 +1044,10 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
   /**
    * Address selected findings using AI-assisted fixing.
    *
-   * 1. Builds a task description from the selected findings
-   * 2. Creates a plan with a single agent job to fix the findings
-   * 3. The plan runs in its own worktree via the execution engine
-   * 4. On plan completion, pushes changes and replies to PR comments
+   * 1. Creates one agent job per finding (parallel execution in worktrees)
+   * 2. Adds a final verification job that depends on all fix jobs
+   * 3. On plan completion, pushes changes and replies to PR comments
+   * 4. Each finding links to its specific job's node detail panel
    */
   async addressFindings(releaseId: string, findings: any[]): Promise<void> {
     const release = this.releases.get(releaseId);
@@ -1070,75 +1070,126 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     const cwd = release.isolatedRepoPath || release.repoPath;
 
-    // ── 1. Build task description from selected findings ─────────────
-    const taskParts: string[] = [
-      'You are addressing specific PR review findings. Fix ONLY the issues listed below.\n',
-    ];
+    // ── 1. Build jobs from findings ──────────────────────────────────
+    const jobs: any[] = [];
+    const findingJobMap: Record<string, string> = {}; // findingId → producerId
+    const producerIds: string[] = [];
+    const ts = Date.now();
 
-    const commentFindings = findings.filter((f: any) => f.type === 'comment');
+    // Group check findings by base name (strip matrix params like "(os, node)")
     const checkFindings = findings.filter((f: any) => f.type === 'check');
-    const alertFindings = findings.filter((f: any) => f.type === 'alert');
-
-    if (checkFindings.length > 0) {
-      taskParts.push('### CI/CD Check Failures\n');
-      for (const f of checkFindings) {
-        taskParts.push(`- **${f.name || 'Unknown check'}**: FAILING`);
-        if (f.url) taskParts.push(`  URL: ${f.url}`);
-      }
-      taskParts.push('\nInvestigate and fix the failing checks.\n');
+    const checkGroups = new Map<string, any[]>();
+    for (const f of checkFindings) {
+      // "build (ubuntu-latest, 20.x)" → "build"
+      const baseName = (f.name || 'CI check').replace(/\s*\(.*\)\s*$/, '').trim();
+      if (!checkGroups.has(baseName)) checkGroups.set(baseName, []);
+      checkGroups.get(baseName)!.push(f);
     }
 
-    if (commentFindings.length > 0) {
-      taskParts.push('### PR Review Comments to Address\n');
-      for (const f of commentFindings) {
-        taskParts.push(`- **${f.author || 'Reviewer'}** (${f.source || 'review'}):`);
-        taskParts.push(`  ${f.body || f.text || ''}`);
-        if (f.path) taskParts.push(`  File: ${f.path}${f.line ? `:${f.line}` : ''}`);
-        taskParts.push('');
-      }
-      taskParts.push('Address all listed review feedback.\n');
+    // Create one job per check group
+    for (const [baseName, checks] of checkGroups) {
+      const producerId = 'fix-check-' + baseName.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 40) + '-' + ts;
+      producerIds.push(producerId);
+      for (const f of checks) findingJobMap[f.id] = producerId;
+
+      const checkNames = checks.map((c: any) => c.name).join(', ');
+      const checkUrls = checks.filter((c: any) => c.url).map((c: any) => `  URL: ${c.url}`).join('\n');
+      const taskDesc = `Fix these failing CI/CD checks (all related to "${baseName}"):\n\n`
+        + checks.map((c: any) => `- **${c.name}**: FAILING`).join('\n') + '\n'
+        + (checkUrls ? `\n${checkUrls}\n` : '')
+        + `\nThese are likely caused by the same root issue. Investigate and fix the common cause.`;
+
+      jobs.push({
+        producerId,
+        name: `Fix CI: ${baseName}` + (checks.length > 1 ? ` (${checks.length} variants)` : ''),
+        task: taskDesc,
+        work: `@agent ${taskDesc}`,
+        dependencies: [],
+        autoHeal: true,
+      });
     }
 
-    if (alertFindings.length > 0) {
-      taskParts.push('### Security Alerts\n');
-      for (const f of alertFindings) {
-        taskParts.push(`- **[${(f.severity || 'medium').toUpperCase()}]** ${f.description || f.text || ''}`);
-        if (f.file) taskParts.push(`  File: ${f.file}`);
-        taskParts.push('');
-      }
-      taskParts.push('Fix all listed security issues.\n');
+    // One job per comment finding
+    for (const f of findings) {
+      if (f.type !== 'comment') continue;
+      let jobName: string;
+      let taskDesc: string;
+
+      const file = f.path ? f.path.split('/').pop() : '';
+      const line = f.line ? `:${f.line}` : '';
+      jobName = f.path ? `Fix: ${file}${line}` : `Fix: ${f.author || 'review'} comment`;
+      taskDesc = `Address this PR review comment:\n\n`
+        + `**${f.author || 'Reviewer'}** (${f.source || 'review'}):\n`
+        + `${f.body || f.text || ''}\n`
+        + (f.path ? `\nFile: ${f.path}${line}\n` : '')
+        + `\nFix ONLY this specific issue. Make minimal, targeted changes.`;
+
+      const producerId = 'fix-' + f.id.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 50) + '-' + ts;
+      producerIds.push(producerId);
+      findingJobMap[f.id] = producerId;
+
+      jobs.push({
+        producerId,
+        name: jobName,
+        task: taskDesc,
+        work: `@agent ${taskDesc}`,
+        dependencies: [],
+        autoHeal: true,
+      });
     }
 
-    const taskDescription = taskParts.join('\n');
+    // One job per alert finding
+    for (const f of findings) {
+      if (f.type !== 'alert') continue;
 
-    // ── 2. Build a descriptive plan name ─────────────────────────────
-    const labelParts: string[] = [];
-    for (const f of commentFindings) {
-      if (f.path) labelParts.push(f.path.split('/').pop() || f.path);
-      else if (f.author) labelParts.push(f.author);
+      const jobName = `Fix: ${(f.description || 'alert').substring(0, 40)}`;
+      const taskDesc = `Fix this security alert:\n\n`
+        + `**[${(f.severity || 'medium').toUpperCase()}]** ${f.description || ''}\n`
+        + (f.file ? `File: ${f.file}\n` : '')
+        + `\nFix the security issue.`;
+
+      const producerId = 'fix-' + f.id.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 50) + '-' + ts;
+      producerIds.push(producerId);
+      findingJobMap[f.id] = producerId;
+
+      jobs.push({
+        producerId,
+        name: jobName,
+        task: taskDesc,
+        work: `@agent ${taskDesc}`,
+        dependencies: [],
+        autoHeal: true,
+      });
     }
-    for (const f of checkFindings) labelParts.push(f.name || 'CI');
-    for (const f of alertFindings) labelParts.push(f.description?.substring(0, 30) || 'alert');
-    const shortLabel = labelParts.length <= 3
-      ? labelParts.join(', ')
-      : labelParts.slice(0, 2).join(', ') + ' +' + (labelParts.length - 2) + ' more';
-    const planName = `Fix PR #${release.prNumber || '?'}: ${shortLabel || findings.length + ' finding(s)'}`;
 
-    // ── 3. Create a plan with a single agent job ─────────────────────
+    // ── 2. Add verification job (depends on all fix jobs) ────────────
+    const allFindingsSummary = findings.map((f: any) => {
+      if (f.type === 'comment') return `- ${f.path || 'general'}: ${(f.body || '').substring(0, 80)}`;
+      if (f.type === 'check') return `- CI: ${f.name}`;
+      return `- Alert: ${(f.description || '').substring(0, 80)}`;
+    }).join('\n');
+
+    jobs.push({
+      producerId: 'verify-' + ts,
+      name: 'Verify: Review all fixes',
+      task: `Review all the fixes made by previous jobs and ensure they are correct.\n\nFindings addressed:\n${allFindingsSummary}\n\nCheck that all issues are fixed, no regressions introduced, and code style is consistent.`,
+      work: `@agent Review all fixes for correctness and completeness`,
+      dependencies: producerIds,
+      autoHeal: false,
+      expectsNoChanges: false,
+    });
+
+    // ── 3. Create the plan ───────────────────────────────────────────
+    const planName = `Fix PR #${release.prNumber || '?'}: ${findings.length} finding(s)`;
+
     const plan = this.planRunner.enqueue({
       name: planName,
       repoPath: cwd,
       baseBranch: release.releaseBranch,
       targetBranch: release.releaseBranch,
       startPaused: false,
-      jobs: [{
-        producerId: 'fix-' + Date.now(),
-        name: planName,
-        task: taskDescription,
-        work: `@agent ${taskDescription}`,
-        dependencies: [],
-        autoHeal: true,
-      }],
+      maxParallel: 4,
+      jobs,
     });
 
     log.info('Fix plan created', {
@@ -1146,23 +1197,27 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       planId: plan.id,
       planName,
       findingCount: findings.length,
+      jobCount: jobs.length,
     });
 
     // ── 4. Associate plan with the release ───────────────────────────
     if (!release.fixPlanIds) release.fixPlanIds = [];
     release.fixPlanIds.push(plan.id);
 
-    // Store findings metadata so post-completion can reply/resolve
     if (!release.fixPlanFindings) release.fixPlanFindings = {};
     release.fixPlanFindings[plan.id] = findings;
 
+    if (!release.fixPlanJobMap) release.fixPlanJobMap = {};
+    release.fixPlanJobMap[plan.id] = findingJobMap;
+
     this.store.saveRelease(release).catch(() => {});
 
-    // Signal to UI
+    // Signal to UI with plan ID so activity log can link to plan detail
     this.emit('releaseActionTaken', releaseId, {
       type: 'fix-code',
-      description: `Created fix plan: ${planName}`,
+      description: `Created fix plan: ${planName} (${jobs.length} jobs)`,
       success: true,
+      planId: plan.id,
       timestamp: Date.now(),
     });
     this.emit('findingsProcessing', releaseId, findingIds, 'processing');
