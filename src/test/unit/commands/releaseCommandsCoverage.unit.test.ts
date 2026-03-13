@@ -605,5 +605,91 @@ suite('releaseCommands coverage', () => {
       await registeredCommands.get('orchestrator.showReleasePanel')?.('rel-1');
       assert.ok(mockWindow.showErrorMessage.calledOnce);
     });
+
+    test('calls createOrShow when releaseManager is available', async () => {
+      const panelModule = require('../../../ui/panels/releaseManagementPanel');
+      const stubCreateOrShow = sandbox.stub(panelModule.ReleaseManagementPanel, 'createOrShow');
+      await registeredCommands.get('orchestrator.showReleasePanel')?.('rel-1');
+      assert.ok(stubCreateOrShow.calledOnce);
+      stubCreateOrShow.restore();
+    });
+
+    test('getAvailablePlans returns empty array when planRunner not set', async () => {
+      let capturedGetPlans: (() => unknown[]) | undefined;
+      const panelModule = require('../../../ui/panels/releaseManagementPanel');
+      const stubCreateOrShow = sandbox.stub(panelModule.ReleaseManagementPanel, 'createOrShow')
+        .callsFake((...args: unknown[]) => { capturedGetPlans = args[7] as () => unknown[]; });
+
+      registeredCommands.clear();
+      const context2 = { subscriptions: [], extensionUri: { fsPath: '/ext' } } as any;
+      const { registerReleaseCommands } = require('../../../commands/releaseCommands');
+      registerReleaseCommands(context2, () => undefined, mockReleaseManager /* no planRunner */);
+      await registeredCommands.get('orchestrator.showReleasePanel')?.('rel-1');
+      assert.ok(capturedGetPlans);
+      const plans = capturedGetPlans!();
+      assert.deepStrictEqual(plans, []);
+      stubCreateOrShow.restore();
+    });
+
+    test('getAvailablePlans maps planRunner data with succeeded/running/pending status', async () => {
+      let capturedGetPlans: (() => unknown[]) | undefined;
+      const panelModule = require('../../../ui/panels/releaseManagementPanel');
+      const stubCreateOrShow = sandbox.stub(panelModule.ReleaseManagementPanel, 'createOrShow')
+        .callsFake((...args: unknown[]) => { capturedGetPlans = args[7] as () => unknown[]; });
+
+      const succeededMap = new Map([['n1', { status: 'succeeded' }]]);
+      const runningMap = new Map([['n1', { status: 'succeeded' }], ['n2', { status: 'running' }]]);
+      const pendingMap = new Map([['n1', { status: 'pending' }]]);
+      mockPlanRunner.getAll.returns([
+        { id: 'p1', spec: { name: 'Plan A' }, nodeStates: succeededMap },
+        { id: 'p2', spec: { name: 'Plan B' }, nodeStates: runningMap },
+        { id: 'p3', spec: { name: 'Plan C' }, nodeStates: pendingMap },
+        { id: 'p4', spec: { name: '' }, nodeStates: succeededMap }, // filtered out (no name)
+        { id: 'p5', spec: { name: 'Plan E' }, nodeStates: new Map() }, // filtered out (no nodes)
+      ]);
+
+      await registeredCommands.get('orchestrator.showReleasePanel')?.('rel-1');
+      assert.ok(capturedGetPlans);
+      const plans = capturedGetPlans!() as any[];
+      assert.strictEqual(plans.length, 3);
+      assert.strictEqual(plans[0].status, 'succeeded');
+      assert.strictEqual(plans[1].status, 'running');
+      assert.strictEqual(plans[2].status, 'pending');
+      stubCreateOrShow.restore();
+    });
+  });
+
+  // ── createRelease ─────────────────────────────────────────────────────────
+
+  suite('createRelease', () => {
+    test('returns early when name input is cancelled', async () => {
+      mockWindow.showInputBox.resolves(undefined);
+      await registeredCommands.get('orchestrator.createRelease')?.();
+      assert.ok(mockWindow.showInformationMessage.notCalled);
+    });
+
+    test('returns early when releaseBranch input is cancelled', async () => {
+      mockWindow.showInputBox.onFirstCall().resolves('v1.0.0');
+      mockWindow.showInputBox.onSecondCall().resolves(undefined);
+      await registeredCommands.get('orchestrator.createRelease')?.();
+      assert.ok(mockWindow.showInformationMessage.notCalled);
+    });
+
+    test('returns early when targetBranch input is cancelled', async () => {
+      mockWindow.showInputBox.onFirstCall().resolves('v1.0.0');
+      mockWindow.showInputBox.onSecondCall().resolves('release/v1.0.0');
+      mockWindow.showInputBox.onThirdCall().resolves(undefined);
+      await registeredCommands.get('orchestrator.createRelease')?.();
+      assert.ok(mockWindow.showInformationMessage.notCalled);
+    });
+
+    test('shows not-yet-implemented message when all inputs provided', async () => {
+      mockWindow.showInputBox.onFirstCall().resolves('v1.0.0');
+      mockWindow.showInputBox.onSecondCall().resolves('release/v1.0.0');
+      mockWindow.showInputBox.onThirdCall().resolves('main');
+      await registeredCommands.get('orchestrator.createRelease')?.();
+      assert.ok(mockWindow.showInformationMessage.calledOnce);
+      assert.ok(mockWindow.showInformationMessage.firstCall.args[0].includes('v1.0.0'));
+    });
   });
 });
