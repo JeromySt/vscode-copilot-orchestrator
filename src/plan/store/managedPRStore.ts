@@ -104,7 +104,7 @@ export class FileSystemManagedPRStore implements IManagedPRStore {
         const prFile = path.join(managedPRsRoot, prDir, 'managed-pr.json');
         try {
           // Ensure the managed PR file path stays under the managed-prs root (with symlink check)
-          await validatePathAsync(managedPRsRoot, prFile);
+          await validatePathAsync(managedPRsRoot, prFile, (p) => this.fs.realpathAsync(p));
 
           const content = await this.fs.readFileAsync(prFile);
           const managedPR = JSON.parse(content) as ManagedPR;

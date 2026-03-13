@@ -75,7 +75,7 @@ suite('validatePathAsync', () => {
       await fs.promises.mkdir(child);
       const target = path.join(child, 'file.json');
       await fs.promises.writeFile(target, '{}');
-      await assert.doesNotReject(() => validatePathAsync(tempDir, target));
+      await assert.doesNotReject(() => validatePathAsync(tempDir, target, fs.promises.realpath));
     } finally {
       await teardown();
     }
@@ -85,13 +85,14 @@ suite('validatePathAsync', () => {
     const base = path.resolve('/some/base/dir');
     const target = path.join(base, 'nonexistent', 'file.json');
     // Should not throw — lexical check passes and ENOENT is silenced
-    await assert.doesNotReject(() => validatePathAsync(base, target));
+    const enoentFn = async (_p: string): Promise<string> => { const e: any = new Error('ENOENT'); e.code = 'ENOENT'; throw e; };
+    await assert.doesNotReject(() => validatePathAsync(base, target, enoentFn));
   });
 
   test('rejects lexical traversal even when path does not exist', async () => {
     const base = path.resolve('/some/base/dir');
     const outside = path.join(base, '..', 'etc', 'passwd');
-    await assert.rejects(() => validatePathAsync(base, outside), /Path traversal blocked/);
+    await assert.rejects(() => validatePathAsync(base, outside, fs.promises.realpath), /Path traversal blocked/);
   });
 
   test('detects symlink escape to outside base directory', async () => {
@@ -108,7 +109,7 @@ suite('validatePathAsync', () => {
         await fs.promises.symlink(outsideDir, symlink);
 
         // validatePathAsync should detect the symlink escape
-        await assert.rejects(() => validatePathAsync(base, symlink), /Path traversal blocked \(symlink\)/);
+        await assert.rejects(() => validatePathAsync(base, symlink, fs.promises.realpath), /Path traversal blocked \(symlink\)/);
       } finally {
         await fs.promises.rm(outsideDir, { recursive: true, force: true }).catch(() => {});
       }

@@ -76,8 +76,8 @@ export class FileSystemReleaseStore implements IReleaseStore {
         const releaseFile = path.join(branchPath, 'release.json');
         try {
           // Ensure constructed paths remain under .orchestrator (with symlink check)
-          await validatePathAsync(this.orchestratorPath, branchPath);
-          await validatePathAsync(this.orchestratorPath, releaseFile);
+          await validatePathAsync(this.orchestratorPath, branchPath, (p) => this.fs.realpathAsync(p));
+          await validatePathAsync(this.orchestratorPath, releaseFile, (p) => this.fs.realpathAsync(p));
 
           const content = await this.fs.readFileAsync(releaseFile);
           const release = JSON.parse(content) as ReleaseDefinition;
@@ -158,8 +158,8 @@ export class FileSystemReleaseStore implements IReleaseStore {
         const releaseFile = path.join(releaseDir, 'release.json');
         try {
           // Ensure both paths remain under the release root (with symlink check)
-          await validatePathAsync(releaseRoot, releaseDir);
-          await validatePathAsync(releaseRoot, releaseFile);
+          await validatePathAsync(releaseRoot, releaseDir, (p) => this.fs.realpathAsync(p));
+          await validatePathAsync(releaseRoot, releaseFile, (p) => this.fs.realpathAsync(p));
 
           const content = await this.fs.readFileAsync(releaseFile);
           const release = JSON.parse(content) as ReleaseDefinition;
