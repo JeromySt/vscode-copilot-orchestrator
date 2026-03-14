@@ -135,6 +135,21 @@ function createEventEmitterPRMonitor(): EventEmitter & {
   return ee;
 }
 
+function createEventEmitterPlanRunner(): EventEmitter & any {
+  const ee = new EventEmitter() as any;
+  ee.get = sinon.stub().returns(undefined);
+  ee.getAll = sinon.stub().returns([]);
+  ee.enqueue = sinon.stub();
+  ee.cancel = sinon.stub();
+  ee.delete = sinon.stub();
+  ee.pause = sinon.stub();
+  ee.resume = sinon.stub();
+  ee.getStateMachine = sinon.stub().returns({ computePlanStatus: () => 'succeeded' });
+  ee.getStatus = sinon.stub().returns(undefined);
+  ee.off = sinon.stub();
+  return ee;
+}
+
 function createManager(overrides?: {
   planRunner?: any;
   git?: any;
@@ -455,6 +470,174 @@ suite('DefaultReleaseManager – auto-fix', () => {
           securityAlerts: [],
         });
       });
+    });
+
+    test('marks comment as resolved when id is in addressedCommentIds', async () => {
+      const planRunner = createMockPlanRunner();
+      const prMonitor = createEventEmitterPRMonitor();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, prMonitor, store });
+      sandbox.stub(manager as any, 'addressFindings').resolves();
+      const release = await createRelease(manager, planRunner);
+
+      // Pre-seed addressed comment IDs (set by _onFixPlanCompleted after a previous fix)
+      const rel = manager.getRelease(release.id)!;
+      rel.addressedCommentIds = ['c1'];
+      manager.setAutoFix(release.id, true);
+
+      const findingsProcessingEvents: any[] = [];
+      manager.on('findingsProcessing', (...args: any[]) => findingsProcessingEvents.push(args));
+
+      prMonitor.emit('cycleComplete', release.id, {
+        comments: [{ id: 'c1', isResolved: false, body: 'fix this' }],
+        checks: [],
+        securityAlerts: [],
+      });
+
+      // Comment was previously addressed — should not trigger a new auto-fix
+      assert.strictEqual(findingsProcessingEvents.length, 0);
+    });
+
+    test('marks comment as resolved when body contains ✅ Addressed in automated fix', async () => {
+      const planRunner = createMockPlanRunner();
+      const prMonitor = createEventEmitterPRMonitor();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, prMonitor, store });
+      sandbox.stub(manager as any, 'addressFindings').resolves();
+      const release = await createRelease(manager, planRunner);
+
+      manager.setAutoFix(release.id, true);
+
+      const findingsProcessingEvents: any[] = [];
+      manager.on('findingsProcessing', (...args: any[]) => findingsProcessingEvents.push(args));
+
+      prMonitor.emit('cycleComplete', release.id, {
+        comments: [
+          {
+            id: 'c2', isResolved: false,
+            body: '> fix this\n\n\u2705 Addressed in automated fix (abc1234)',
+          },
+        ],
+        checks: [],
+        securityAlerts: [],
+      });
+
+      // Comment is our own automated reply — should not trigger a new auto-fix
+      assert.strictEqual(findingsProcessingEvents.length, 0);
+    });
+  });
+
+  // ── _onFixPlanCompleted ─────────────────────────────────────────────────
+
+  suite('_onFixPlanCompleted', () => {
+    test('calls replyToComment for inline comment with path', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const prFactory = createMockPRServiceFactory();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, prFactory, store });
+      const release = await createRelease(manager, planRunner);
+
+      release.prNumber = 42;
+      release.fixPlanIds = ['fix-plan-1'];
+      release.fixPlanFindings = {
+        'fix-plan-1': [
+          { type: 'comment', id: 'comment-c1', commentId: 'c1', author: 'reviewer', body: 'fix this', path: 'src/a.ts', line: 5 },
+        ],
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('timed out')), 2000);
+        manager.once('findingsResolved', () => { clearTimeout(t); resolve(); });
+        planRunner.emit('planCompleted', { id: 'fix-plan-1', spec: { repoPath: '/repo' } }, 'succeeded');
+      });
+
+      assert.ok(prFactory._service.replyToComment.calledOnce, 'should call replyToComment for inline comment');
+      assert.ok(prFactory._service.addIssueComment.notCalled, 'should not call addIssueComment for inline comment');
+    });
+
+    test('calls addIssueComment for top-level comment without path', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const prFactory = createMockPRServiceFactory();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, prFactory, store });
+      const release = await createRelease(manager, planRunner);
+
+      release.prNumber = 42;
+      release.fixPlanIds = ['fix-plan-1'];
+      release.fixPlanFindings = {
+        'fix-plan-1': [
+          { type: 'comment', id: 'comment-c2', commentId: 'c2', author: 'bot', body: 'review feedback' },
+        ],
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('timed out')), 2000);
+        manager.once('findingsResolved', () => { clearTimeout(t); resolve(); });
+        planRunner.emit('planCompleted', { id: 'fix-plan-1', spec: { repoPath: '/repo' } }, 'succeeded');
+      });
+
+      assert.ok(prFactory._service.addIssueComment.calledOnce, 'should call addIssueComment for top-level comment');
+      assert.ok(prFactory._service.replyToComment.notCalled, 'should not call replyToComment for top-level comment');
+    });
+
+    test('adds commentId to addressedCommentIds', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, store });
+      const release = await createRelease(manager, planRunner);
+
+      release.prNumber = 42;
+      release.fixPlanIds = ['fix-plan-1'];
+      release.fixPlanFindings = {
+        'fix-plan-1': [
+          { type: 'comment', id: 'comment-c3', commentId: 'c3', author: 'reviewer', body: 'fix it' },
+        ],
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('timed out')), 2000);
+        manager.once('findingsResolved', () => { clearTimeout(t); resolve(); });
+        planRunner.emit('planCompleted', { id: 'fix-plan-1', spec: { repoPath: '/repo' } }, 'succeeded');
+      });
+
+      const updated = manager.getRelease(release.id);
+      assert.ok(updated?.addressedCommentIds?.includes('c3'), 'should track addressed comment id');
+    });
+
+    test('emits findingsProcessing with failed status when plan did not succeed', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, store });
+      const release = await createRelease(manager, planRunner);
+
+      release.fixPlanIds = ['fix-plan-1'];
+      release.fixPlanFindings = {
+        'fix-plan-1': [
+          { type: 'comment', id: 'comment-c4', commentId: 'c4', author: 'reviewer', body: 'fix it' },
+        ],
+      };
+
+      const failedEvents: any[] = [];
+      manager.on('findingsProcessing', (...args: any[]) => failedEvents.push(args));
+      planRunner.emit('planCompleted', { id: 'fix-plan-1', spec: { repoPath: '/repo' } }, 'failed');
+
+      await new Promise(r => setTimeout(r, 20));
+
+      const failedEvent = failedEvents.find(([, , status]: any) => status === 'failed');
+      assert.ok(failedEvent, 'should emit findingsProcessing with failed status');
+    });
+
+    test('does nothing when plan is not associated with any release', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const prFactory = createMockPRServiceFactory();
+      const manager = createManager({ planRunner, prFactory });
+
+      planRunner.emit('planCompleted', { id: 'unknown-plan' }, 'succeeded');
+
+      await new Promise(r => setTimeout(r, 20));
+
+      assert.ok(prFactory._service.replyToComment.notCalled);
+      assert.ok(prFactory._service.addIssueComment.notCalled);
     });
   });
 });
