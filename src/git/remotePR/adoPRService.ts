@@ -43,7 +43,7 @@ const log = Logger.for('git');
  */
 export class AdoPRService implements IRemotePRService {
   constructor(
-    private readonly spawner: IProcessSpawner,
+    _spawner: IProcessSpawner,
     private readonly detector: IRemoteProviderDetector,
   ) {}
 
