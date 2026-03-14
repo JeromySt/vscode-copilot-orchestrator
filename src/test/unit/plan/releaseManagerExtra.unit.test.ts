@@ -597,7 +597,21 @@ suite('ReleaseManager – extra coverage', () => {
 
       const result = await manager.transitionToState(release.id, 'preparing');
       assert.strictEqual(result, true);
-      // preparationTasks may be set
+      assert.ok(release.preparationTasks && release.preparationTasks.length > 0, 'preparationTasks should be initialized');
+      assert.ok(release.prepTasks && release.prepTasks.length > 0, 'prepTasks should be initialized');
+    });
+
+    test('does not reinitialize prepTasks when already set', async () => {
+      const planRunner = createMockPlanRunner();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, store });
+      const release = await createRelease(manager, planRunner);
+      const existingTask = { id: 'custom', title: 'Custom', description: '', required: true, autoSupported: false, status: 'pending' as const };
+      release.prepTasks = [existingTask];
+
+      await manager.transitionToState(release.id, 'preparing');
+      assert.strictEqual(release.prepTasks.length, 1, 'prepTasks should not be replaced when already set');
+      assert.strictEqual(release.prepTasks[0].id, 'custom');
     });
   });
 
@@ -744,7 +758,7 @@ suite('ReleaseManager – extra coverage', () => {
 
       assert.ok(Array.isArray(release.actionLog), 'actionLog should be initialized as an array');
       assert.ok(release.actionLog!.length > 0, 'actionLog should have at least one entry');
-      assert.ok(release.actionLog![0].type === 'fix-code', 'first entry should be the fix-code action');
+      assert.strictEqual(release.actionLog![0].type, 'fix-code', 'first entry should be the fix-code action');
     });
 
     test('actionLog caps at 100 entries when more than 100 actions are taken', async () => {

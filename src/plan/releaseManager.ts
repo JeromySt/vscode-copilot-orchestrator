@@ -575,10 +575,17 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     const result = stateMachine.transition(newStatus, reason);
     if (result.success) {
-      // Initialize preparation tasks when entering the preparing state
-      if (newStatus === 'preparing' && (!release.preparationTasks || release.preparationTasks.length === 0)) {
-        const { getDefaultPrepTasks } = await import('./releasePreparation');
-        release.preparationTasks = getDefaultPrepTasks(release);
+      // Initialize tasks when entering the preparing state
+      if (newStatus === 'preparing') {
+        if (!release.preparationTasks || release.preparationTasks.length === 0) {
+          const { getDefaultPrepTasks } = await import('./releasePreparation');
+          release.preparationTasks = getDefaultPrepTasks(release);
+        }
+        if (!release.prepTasks || release.prepTasks.length === 0) {
+          const { loadReleaseTasks, getDefaultReleaseTasks } = await import('./releaseTaskLoader');
+          const loadedTasks = await loadReleaseTasks(release.repoPath);
+          release.prepTasks = loadedTasks.length > 0 ? loadedTasks : getDefaultReleaseTasks();
+        }
       }
       await this.store.saveRelease(release);
     }
@@ -1672,50 +1679,6 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       default:
         return 'Unknown';
     }
-  }
-
-  /**
-   * Transition release to preparing status and initialize preparation tasks.
-   * @private
-   */
-  private async prepareRelease(releaseId: string): Promise<void> {
-    const release = this.releases.get(releaseId);
-    if (!release) {
-      throw new Error(`Release not found: ${releaseId}`);
-    }
-
-    log.info('Preparing release', { releaseId });
-
-    // Transition to preparing status
-    const success = await this.transitionToState(releaseId, 'preparing', 'Starting preparation phase');
-    if (!success) {
-      throw new Error(`Failed to transition release ${releaseId} to preparing status`);
-    }
-
-    // Initialize preparation tasks if not already set
-    if (!release.prepTasks || release.prepTasks.length === 0) {
-      const { loadReleaseTasks, getDefaultReleaseTasks } = await import('./releaseTaskLoader');
-      const loadedTasks = await loadReleaseTasks(release.repoPath);
-      release.prepTasks = loadedTasks.length > 0 ? loadedTasks : getDefaultReleaseTasks();
-      await this.store.saveRelease(release);
-    }
-  }
-
-  /**
-   * Check if all required preparation tasks are complete.
-   * @private
-   */
-  private areRequiredTasksComplete(releaseId: string): boolean {
-    const release = this.releases.get(releaseId);
-    if (!release) {
-      return false;
-    }
-
-    const tasks = release.prepTasks || [];
-    const requiredTasks = tasks.filter(t => t.required);
-    
-    // All required tasks must be either completed or skipped (though required tasks shouldn't be skipped)
-    return requiredTasks.every(t => t.status === 'completed' || t.status === 'skipped');
   }
 
   /**
