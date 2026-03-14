@@ -733,6 +733,34 @@ suite('ReleaseManager – extra coverage', () => {
       assert.ok(actions.some(a => a.type === 'fix-code' && a.success === true));
     });
 
+    test('persists releaseActionTaken entries in release.actionLog (newest-first)', async () => {
+      const planRunner = createMockPlanRunner();
+      const manager = createManager({ planRunner });
+      const release = await createRelease(manager, planRunner);
+
+      await manager.addressFindings(release.id, [
+        { type: 'check', name: 'CI', status: 'failing' },
+      ]);
+
+      assert.ok(Array.isArray(release.actionLog), 'actionLog should be initialized as an array');
+      assert.ok(release.actionLog!.length > 0, 'actionLog should have at least one entry');
+      assert.ok(release.actionLog![0].type === 'fix-code', 'first entry should be the fix-code action');
+    });
+
+    test('actionLog caps at 100 entries when more than 100 actions are taken', async () => {
+      const planRunner = createMockPlanRunner();
+      const manager = createManager({ planRunner });
+      const release = await createRelease(manager, planRunner);
+
+      // Directly emit releaseActionTaken 105 times to exceed the 100-entry cap
+      for (let i = 0; i < 105; i++) {
+        manager.emit('releaseActionTaken', release.id, { type: 'fix-code', planId: `plan-${i}`, success: true });
+      }
+
+      assert.ok(Array.isArray(release.actionLog), 'actionLog should be an array');
+      assert.strictEqual(release.actionLog!.length, 100, 'actionLog should be capped at 100 entries');
+    });
+
     test('enqueued plan includes correct baseBranch and targetBranch', async () => {
       const planRunner = createMockPlanRunner();
       const manager = createManager({ planRunner });

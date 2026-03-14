@@ -213,10 +213,11 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
    * Runs a single monitoring cycle.
    *
    * 1. Fetches PR checks, comments, and security alerts via prService
-   * 2. If findings detected, addresses them via Copilot CLI
-   * 3. Commits and pushes fixes (resets the 40-minute timer)
-   * 4. Replies to comments and resolves threads via prService
-   * 5. Stops monitoring if 40 minutes elapsed since last push
+   * 2. Emits findings via the cycleComplete event for UI display
+   * 3. Stops monitoring only if 40 minutes have elapsed since the last push
+   *    AND there are no outstanding findings (unresolved comments, failing
+   *    checks, or unresolved alerts). When findings remain, monitoring
+   *    continues indefinitely so the user can trigger AI fixes from the UI.
    */
   private async _runCycle(state: MonitorState): Promise<void> {
     const cycleNumber = state.cycles.length + 1;
