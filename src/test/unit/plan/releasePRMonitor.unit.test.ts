@@ -208,6 +208,45 @@ suite('ReleasePRMonitor', () => {
     assert.strictEqual(isMonitoring, false);
   });
 
+  test('keeps monitoring beyond 40 minutes when findings are outstanding', async () => {
+    const mockService = createMockPRService();
+    mockService.getPRComments.resolves([
+      {
+        id: 'c1',
+        author: 'reviewer',
+        body: 'Please fix this',
+        path: 'src/file.ts',
+        line: 10,
+        isResolved: false,
+        source: 'review',
+        threadId: 't1',
+      },
+    ]);
+
+    const factory = createMockPRServiceFactory(mockService);
+
+    const monitor = new DefaultReleasePRMonitor(
+      createMockCopilot(),
+      createMockSpawner(),
+      createMockGit(),
+      factory,
+      createTimerBasedPulse(),
+    );
+
+    await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
+
+    // Advance past 40 minutes (21 cycles at 2 minutes each = 42 min)
+    for (let i = 0; i < 21; i++) {
+      await clock.tickAsync(120000);
+    }
+
+    // Should NOT stop monitoring because there are still outstanding findings
+    const isMonitoring = monitor.isMonitoring('rel-1');
+    assert.strictEqual(isMonitoring, true);
+
+    monitor.stopMonitoring('rel-1');
+  });
+
   test('emits cycleComplete event with findings (auto-fix disabled)', async () => {
     const mockService = createMockPRService();
     mockService.getPRComments.resolves([
