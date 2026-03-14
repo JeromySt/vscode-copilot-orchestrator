@@ -228,16 +228,12 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       prNumber: state.prNumber,
     });
 
-    // Check if we've exceeded the max monitoring time since last push.
-    // Only stop if there are no outstanding findings — if there are still
-    // unresolved comments/checks/alerts, keep monitoring so the user
-    // can see them and trigger AI fixes.
+    // Track elapsed time since last push. We only stop monitoring on timeout
+    // if there are no outstanding findings — if there are still unresolved
+    // comments/checks/alerts, keep monitoring so the user can see them and
+    // trigger AI fixes. The actual stop decision is made below after fetching
+    // current findings status.
     const elapsedSinceLastPush = timestamp - state.lastPushTime;
-    if (elapsedSinceLastPush > MAX_MONITORING_MS) {
-      // We'll check findings after fetching status below.
-      // For now, just log and continue — the actual stop decision
-      // happens after we know the current findings state.
-    }
 
     // Fetch current PR status via prService
     let checks: PRCheck[] = [];

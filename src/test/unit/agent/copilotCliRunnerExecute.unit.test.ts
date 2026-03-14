@@ -32,6 +32,11 @@ class TestableCliRunner extends CopilotCliRunner {
     return true;
   }
 
+  /** Skip real CLI detection — always report available to prevent test hangs. */
+  async ensureAvailable(): Promise<boolean> {
+    return true;
+  }
+
   buildCommand(_options: any): string {
     return this._testCommand || super.buildCommand(_options);
   }
@@ -181,55 +186,56 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
     });
 
     test('run executes command and captures exit code on failure', async function () {
-      this.timeout(15000);
+      this.timeout(10000);
 
-      // Use a command that will fail quickly
-      const result = await runner.run({
+      // Use TestableCliRunner (overrides ensureAvailable + buildCommand) to avoid real CLI detection
+      const testRunner = new TestableCliRunner(createLogger());
+      testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c exit 1' : 'sh -c "exit 1"');
+
+      const result = await testRunner.run({
         cwd: os.tmpdir(),
         task: 'test task',
         skipInstructionsFile: true,
-        timeout: 10000,
+        timeout: 5000,
       });
 
-      // The copilot command doesn't exist in test env, so it should fail
-      // Either spawn error or non-zero exit code
-      assert.ok(result.success === false || result.success === true,
-        'Should return a result');
+      assert.strictEqual(result.success, false, 'Should return failure for non-zero exit code');
     });
 
     test('run calls onOutput callback with output lines', async function () {
-      this.timeout(15000);
+      this.timeout(10000);
       const outputLines: string[] = [];
 
-      // Run with echo command via buildCommand override approach
-      // Since we can't easily override buildCommand, test the callback plumbing
-      await runner.run({
+      const testRunner = new TestableCliRunner(createLogger());
+      testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c echo hello_from_run' : 'echo hello_from_run');
+
+      await testRunner.run({
         cwd: os.tmpdir(),
         task: 'test',
         skipInstructionsFile: true,
-        timeout: 10000,
+        timeout: 5000,
         onOutput: (line) => outputLines.push(line),
       });
 
-      // Just verify callback was set up (output depends on whether copilot exists)
-      assert.ok(Array.isArray(outputLines));
+      assert.ok(outputLines.some(l => l.includes('hello_from_run')), 'onOutput should receive output lines');
     });
 
     test('run calls onProcess callback when process spawns', async function () {
-      this.timeout(15000);
+      this.timeout(10000);
       let processReceived = false;
 
-      await runner.run({
+      const testRunner = new TestableCliRunner(createLogger());
+      testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c echo spawned' : 'echo spawned');
+
+      await testRunner.run({
         cwd: os.tmpdir(),
         task: 'test',
         skipInstructionsFile: true,
-        timeout: 10000,
+        timeout: 5000,
         onProcess: () => { processReceived = true; },
       });
 
-      // Process callback should have been called if spawn succeeded
-      // (may not be called if spawn itself fails)
-      assert.ok(typeof processReceived === 'boolean');
+      assert.strictEqual(processReceived, true, 'onProcess callback should be called when process spawns');
     });
 
     test('run with instructions writes and cleans up instructions file', async function () {
