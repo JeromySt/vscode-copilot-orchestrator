@@ -144,4 +144,14 @@ suite('RemotePRServiceFactory', () => {
     assert.ok(!adoCtorCalled);
     assert.strictEqual(service, mockGitHubInstance);
   });
+
+  test('throws for unsupported provider type', async () => {
+    const unknownProvider = { type: 'bitbucket', remoteUrl: 'https://bitbucket.org/x/y' } as any;
+    (mockDetector.detect as sinon.SinonStub).resolves(unknownProvider);
+
+    await assert.rejects(
+      () => factory.getServiceForRepo('/unknown/repo'),
+      /Unsupported remote provider type: bitbucket/,
+    );
+  });
 });
