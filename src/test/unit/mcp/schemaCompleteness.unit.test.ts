@@ -706,6 +706,61 @@ suite('MCP Schema Completeness', () => {
     });
   });
 
+  // -----------------------------------------------------------------------
+  // archive_copilot_plan and recover_copilot_plan schema tests
+  // -----------------------------------------------------------------------
+
+  suite('archive_copilot_plan schema', () => {
+    test('accepts planId only', () => {
+      const r = validateInput('archive_copilot_plan', { planId: 'plan-123' });
+      assert.strictEqual(r.valid, true, r.error);
+    });
+
+    test('accepts planId with optional flags', () => {
+      const r = validateInput('archive_copilot_plan', {
+        planId: 'plan-123',
+        force: true,
+        deleteRemoteBranches: false,
+      });
+      assert.strictEqual(r.valid, true, r.error);
+    });
+
+    test('rejects missing planId', () => {
+      const r = validateInput('archive_copilot_plan', { force: true });
+      assert.strictEqual(r.valid, false);
+    });
+
+    test('rejects unknown properties', () => {
+      const r = validateInput('archive_copilot_plan', { planId: 'plan-123', unknown: true });
+      assert.strictEqual(r.valid, false);
+    });
+  });
+
+  suite('recover_copilot_plan schema', () => {
+    test('accepts planId only', () => {
+      const r = validateInput('recover_copilot_plan', { planId: 'plan-123' });
+      assert.strictEqual(r.valid, true, r.error);
+    });
+
+    test('accepts planId with useCopilotAgent flag', () => {
+      const r = validateInput('recover_copilot_plan', {
+        planId: 'plan-123',
+        useCopilotAgent: true,
+      });
+      assert.strictEqual(r.valid, true, r.error);
+    });
+
+    test('rejects missing planId', () => {
+      const r = validateInput('recover_copilot_plan', { useCopilotAgent: true });
+      assert.strictEqual(r.valid, false);
+    });
+
+    test('rejects unknown properties', () => {
+      const r = validateInput('recover_copilot_plan', { planId: 'plan-123', unknown: 'x' });
+      assert.strictEqual(r.valid, false);
+    });
+  });
+
   suite('validatePostchecksPresence', () => {
     test('returns warning when job has work but no postchecks', () => {
       const warnings = validatePostchecksPresence({
