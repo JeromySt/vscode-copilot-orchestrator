@@ -1,5 +1,5 @@
 /**
- * @fileoverview Unit tests for AdoPRService extensions (listPRs, getPRDetails, abandonPR, promotePR, demotePR).
+ * @fileoverview Unit tests for AdoPRService extensions (listPRs, getPRDetails, abandonPR, promotePR, demotePR, addIssueComment).
  *
  * Covers:
  * - listPRs: List PRs via ADO REST API with filters
@@ -7,6 +7,7 @@
  * - abandonPR: Close PR via ADO REST API with optional comment
  * - promotePR: Mark PR as ready via ADO REST API
  * - demotePR: Mark PR as draft via ADO REST API
+ * - addIssueComment: Post a general PR comment via ADO threads API
  * - All operations use PAT/Bearer token authentication
  */
 
@@ -627,6 +628,45 @@ suite('AdoPRService Extensions', () => {
       // Will throw when trying to construct the API URL
       await assert.rejects(
         async () => newService.listPRs('/repo')
+      );
+    });
+  });
+
+  // ── addIssueComment ────────────────────────────────────────────────────
+
+  suite('addIssueComment', () => {
+    test('should post a general comment to a PR thread', async () => {
+      mockHttpsSuccess({ id: 1, comments: [{ id: 1, content: 'Test comment' }] });
+
+      await service.addIssueComment(42, 'Test comment body', '/repo');
+
+      const requestOptions = httpsRequestStub.firstCall.args[0];
+      assert.strictEqual(requestOptions.method, 'POST');
+      assert.ok(requestOptions.path.includes('pullRequests/42/threads'));
+
+      const mockReq = httpsRequestStub.firstCall.returnValue;
+      assert.ok(mockReq.write.calledOnce);
+      const body = JSON.parse(mockReq.write.firstCall.args[0]);
+      assert.deepStrictEqual(body.comments, [{ content: 'Test comment body', commentType: 1 }]);
+      assert.strictEqual(body.status, 1);
+    });
+
+    test('should include correct repo name in URL', async () => {
+      mockHttpsSuccess({});
+
+      await service.addIssueComment(99, 'Hello world', '/repo');
+
+      const requestOptions = httpsRequestStub.firstCall.args[0];
+      assert.ok(requestOptions.path.includes('test-repo'));
+      assert.ok(requestOptions.path.includes('pullRequests/99/threads'));
+    });
+
+    test('should throw when API request fails', async () => {
+      mockHttpsError(403, 'Forbidden');
+
+      await assert.rejects(
+        async () => service.addIssueComment(42, 'Test comment', '/repo'),
+        /Failed to add general comment to ADO PR/
       );
     });
   });

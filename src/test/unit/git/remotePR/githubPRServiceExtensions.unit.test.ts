@@ -1,5 +1,5 @@
 /**
- * @fileoverview Unit tests for GitHubPRService extensions (listPRs, getPRDetails, abandonPR, promotePR, demotePR).
+ * @fileoverview Unit tests for GitHubPRService extensions (listPRs, getPRDetails, abandonPR, promotePR, demotePR, addIssueComment).
  *
  * Covers:
  * - listPRs: List PRs via gh CLI with filters, parse JSON output
@@ -7,6 +7,7 @@
  * - abandonPR: Close PR via gh CLI, optional comment
  * - promotePR: Mark draft PR ready via gh CLI
  * - demotePR: Convert PR to draft via GraphQL mutation
+ * - addIssueComment: Post a general PR issue comment via gh CLI
  * - All operations use GH_TOKEN env var authentication
  */
 
@@ -618,6 +619,43 @@ suite('GitHubPRService Extensions', () => {
 
       assert.ok(mockDetector.acquireCredentials.calledOnce);
       assert.ok(mockDetector.acquireCredentials.calledWith(mockProvider));
+    });
+  });
+
+  // ── addIssueComment ────────────────────────────────────────────────────
+
+  suite('addIssueComment', () => {
+    test('should post a general issue comment to a PR', async () => {
+      mockSpawnSuccess(JSON.stringify({ id: 123, body: 'Test comment' }));
+
+      await service.addIssueComment(42, 'Test comment body', '/repo');
+
+      const spawnArgs = mockSpawner.spawn.firstCall.args;
+      assert.strictEqual(spawnArgs[0], 'gh');
+      assert.ok(spawnArgs[1].includes('api'));
+      assert.ok(spawnArgs[1].includes('repos/test-owner/test-repo/issues/42/comments'));
+      assert.ok(spawnArgs[1].includes('-X'));
+      assert.ok(spawnArgs[1].includes('POST'));
+      assert.ok(spawnArgs[1].includes('-f'));
+      assert.ok(spawnArgs[1].some((a: string) => a === 'body=Test comment body'));
+    });
+
+    test('should include GH_TOKEN in environment', async () => {
+      mockSpawnSuccess('{}');
+
+      await service.addIssueComment(42, 'Hello', '/repo');
+
+      const spawnEnv = mockSpawner.spawn.firstCall.args[2]?.env;
+      assert.strictEqual(spawnEnv?.GH_TOKEN, 'gh_token_123');
+    });
+
+    test('should throw when gh CLI fails', async () => {
+      mockSpawnError('HTTP 403: Forbidden', 1);
+
+      await assert.rejects(
+        async () => service.addIssueComment(42, 'Test', '/repo'),
+        /HTTP 403/
+      );
     });
   });
 });
