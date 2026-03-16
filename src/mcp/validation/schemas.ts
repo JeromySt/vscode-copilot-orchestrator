@@ -868,7 +868,7 @@ export const createReleaseSchema = {
   required: ['name', 'releaseBranch'],
   anyOf: [
     { required: ['planIds'], properties: { planIds: { type: 'array', minItems: 1 } } },
-    { required: ['repoPath'] },
+    { required: ['repoPath'], properties: { repoPath: { type: 'string', minLength: 1 } } },
   ],
   additionalProperties: false
 } as const;

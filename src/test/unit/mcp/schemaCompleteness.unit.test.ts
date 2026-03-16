@@ -761,6 +761,34 @@ suite('MCP Schema Completeness', () => {
     });
   });
 
+  suite('create_copilot_release schema', () => {
+    test('accepts plan-based release input', () => {
+      const r = validateInput('create_copilot_release', {
+        name: 'Release 1',
+        releaseBranch: 'release/v1',
+        planIds: ['plan-123'],
+      });
+      assert.strictEqual(r.valid, true, r.error);
+    });
+
+    test('accepts from-branch release input', () => {
+      const r = validateInput('create_copilot_release', {
+        name: 'Release 1',
+        releaseBranch: 'release/v1',
+        repoPath: 'C:\\repo',
+      });
+      assert.strictEqual(r.valid, true, r.error);
+    });
+
+    test('rejects release input without planIds or repoPath', () => {
+      const r = validateInput('create_copilot_release', {
+        name: 'Release 1',
+        releaseBranch: 'release/v1',
+      });
+      assert.strictEqual(r.valid, false);
+    });
+  });
+
   suite('validatePostchecksPresence', () => {
     test('returns warning when job has work but no postchecks', () => {
       const warnings = validatePostchecksPresence({
