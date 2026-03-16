@@ -513,13 +513,13 @@ suite('ReleasePRMonitor – coverage', () => {
     assert.ok(actions.some((a: any) => a.type === 'respond-comment'));
   });
 
-  test('_addressFindings: handles replyToComment failure gracefully', async () => {
+  test('_addressFindings: handles addIssueComment failure gracefully for non-threadable comments', async () => {
     const copilot = createMockCopilot();
     const git = createMockGit();
     git.repository.hasChanges.resolves(false);
 
     const prService = createMockPRService();
-    prService.replyToComment.rejects(new Error('API failure'));
+    prService.addIssueComment.rejects(new Error('API failure'));
 
     const monitor = new DefaultReleasePRMonitor(
       copilot,
@@ -538,6 +538,8 @@ suite('ReleasePRMonitor – coverage', () => {
 
     const actions = await (monitor as any)._addressFindings(state, cycle);
 
+    assert.ok(prService.replyToComment.notCalled);
+    assert.ok(prService.addIssueComment.calledOnce);
     assert.ok(actions.some((a: any) => a.type === 'respond-comment' && a.success === false));
   });
 
