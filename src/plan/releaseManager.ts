@@ -1322,7 +1322,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           try {
             const replyText = `✅ Addressed in automated fix${commitHash ? ` (${commitHash.substring(0, 7)})` : ''}`;
 
-            if (comment.path) {
+            if (comment.path || comment.threadId) {
               await prService.replyToComment(release.prNumber, commentId, replyText, cwd);
             } else {
               const quotedBody = (comment.body || '').split('\n').map((l: string) => `> ${l}`).join('\n');
