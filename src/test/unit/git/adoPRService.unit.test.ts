@@ -66,24 +66,47 @@ suite('AdoPRService', () => {
   /**
    * Helper to stub an HTTPS request that returns a successful response.
    */
-  function stubHttpsRequest(statusCode: number, responseBody: string): void {
-    httpsRequestStub.callsFake((options: any, callback: any) => {
+  function stubHttpsRequest(statusCode: number, responseBody: string): any {
+    const req = (() => {
       const EventEmitter = require('events');
-      const req = new EventEmitter() as any;
-      req.write = sandbox.stub();
-      req.end = sandbox.stub().callsFake(() => {
+      const request = new EventEmitter() as any;
+      request.write = sandbox.stub();
+      request.setTimeout = sandbox.stub().returns(request);
+      request.destroy = sandbox.stub().callsFake((error?: Error) => {
+        if (error) {
+          request.emit('error', error);
+        }
+      });
+      request.end = sandbox.stub().callsFake((callback: any) => {
         const res = new EventEmitter() as any;
         res.statusCode = statusCode;
-        
+
         process.nextTick(() => {
           callback(res);
           res.emit('data', Buffer.from(responseBody));
           res.emit('end');
         });
       });
-      
+
+      return request;
+    })();
+
+    httpsRequestStub.callsFake((_options: any, callback: any) => {
+      req.end = sandbox.stub().callsFake(() => {
+        const EventEmitter = require('events');
+        const res = new EventEmitter() as any;
+        res.statusCode = statusCode;
+
+        process.nextTick(() => {
+          callback(res);
+          res.emit('data', Buffer.from(responseBody));
+          res.emit('end');
+        });
+      });
+
       return req;
     });
+    return req;
   }
 
   suite('createPR', () => {
@@ -152,6 +175,21 @@ suite('AdoPRService', () => {
       const authHeader = options.headers.Authorization;
       
       assert.strictEqual(authHeader, 'Bearer ey_bearer_token');
+    });
+
+    test('configures a timeout for Azure DevOps API requests', async () => {
+      const req = stubHttpsRequest(201, JSON.stringify({ pullRequestId: 1, url: 'http://example.com' }));
+
+      await service.createPR({
+        baseBranch: 'main',
+        headBranch: 'feature',
+        title: 'Title',
+        body: 'Body',
+        cwd: '/repo',
+      });
+
+      assert.ok(req.setTimeout.calledOnce);
+      assert.strictEqual(req.setTimeout.firstCall.args[0], 30000);
     });
   });
 
@@ -295,5 +333,35 @@ suite('AdoPRService', () => {
     // Verify token is used in auth header but would not be logged
     const options = httpsRequestStub.firstCall.args[0];
     assert.ok(options.headers.Authorization);
+  });
+
+  test('rejects when an Azure DevOps API request times out', async () => {
+    httpsRequestStub.callsFake(() => {
+      const EventEmitter = require('events');
+      const req = new EventEmitter() as any;
+      req.write = sandbox.stub();
+      req.destroy = sandbox.stub().callsFake((error?: Error) => {
+        if (error) {
+          req.emit('error', error);
+        }
+      });
+      req.setTimeout = sandbox.stub().callsFake((_timeoutMs: number, handler: () => void) => {
+        process.nextTick(() => handler());
+        return req;
+      });
+      req.end = sandbox.stub();
+      return req;
+    });
+
+    await assert.rejects(
+      service.createPR({
+        baseBranch: 'main',
+        headBranch: 'feature',
+        title: 'Title',
+        body: 'Body',
+        cwd: '/repo',
+      }),
+      /timed out/i,
+    );
   });
 });

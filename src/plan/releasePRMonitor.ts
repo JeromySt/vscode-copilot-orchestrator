@@ -74,6 +74,9 @@ interface MonitorState {
   /** Timestamp of the last push (resets the 40-minute timer) */
   lastPushTime: number;
 
+  /** Last observed HEAD ref for detecting newly pushed fixes */
+  lastObservedHeadRef: string | null;
+
   /** All monitoring cycles executed */
   cycles: PRMonitorCycle[];
 
@@ -133,6 +136,17 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
     // Resolve PR service for this repository (cached by factory)
     const prService = await this.prServiceFactory.getServiceForRepo(repoPath);
 
+    let initialHeadRef: string | null = null;
+    try {
+      initialHeadRef = await this.git.repository.getHead(repoPath);
+    } catch (err) {
+      log.warn('Failed to read initial release branch HEAD for monitoring', {
+        releaseId,
+        repoPath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     // Initialize monitoring state
     const state: MonitorState = {
       releaseId,
@@ -143,6 +157,7 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       pulseSubscription: undefined,
       tickCount: 0,
       lastPushTime: Date.now(),
+      lastObservedHeadRef: initialHeadRef,
       cycles: [],
       isActive: true,
     };
@@ -237,6 +252,24 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       cycleNumber,
       prNumber: state.prNumber,
     });
+
+    try {
+      const currentHeadRef = await this.git.repository.getHead(state.repoPath);
+      if (currentHeadRef && currentHeadRef !== state.lastObservedHeadRef) {
+        state.lastObservedHeadRef = currentHeadRef;
+        state.lastPushTime = timestamp;
+        log.info('Detected new release PR push, resetting monitoring timer', {
+          releaseId: state.releaseId,
+          headRef: currentHeadRef,
+        });
+      }
+    } catch (err) {
+      log.warn('Failed to read release branch HEAD during monitoring', {
+        releaseId: state.releaseId,
+        repoPath: state.repoPath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     // Track elapsed time since last push. We only stop monitoring on timeout
     // if there are no outstanding findings — if there are still unresolved
@@ -540,6 +573,8 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
 
         // Push to remote
         await this.git.repository.push(state.repoPath, { branch: state.releaseBranch });
+        state.lastObservedHeadRef = headRef;
+        state.lastPushTime = Date.now();
 
         log.info('Changes committed and pushed', {
           releaseId: state.releaseId,

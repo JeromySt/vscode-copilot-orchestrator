@@ -25,6 +25,7 @@ import type {
 import { Logger } from '../../core/logger';
 
 const log = Logger.for('git');
+const GH_COMMAND_TIMEOUT_MS = 60000;
 
 /**
  * Cache entry for provider info and credentials per cwd.
@@ -631,6 +632,32 @@ export class GitHubPRService implements IRemotePRService {
 
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      const timeoutHandle = setTimeout(() => {
+        log.error('gh command timed out', { args, cwd, timeoutMs: GH_COMMAND_TIMEOUT_MS });
+        if (!proc.killed && proc.exitCode === null) {
+          proc.kill();
+        }
+        finishReject(new Error(`gh command timed out after ${GH_COMMAND_TIMEOUT_MS}ms`));
+      }, GH_COMMAND_TIMEOUT_MS);
+
+      const finishResolve = (value: string): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeoutHandle);
+        resolve(value);
+      };
+
+      const finishReject = (error: Error): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeoutHandle);
+        reject(error);
+      };
 
       proc.stdout?.on('data', (data) => {
         stdout += data.toString();
@@ -642,16 +669,16 @@ export class GitHubPRService implements IRemotePRService {
 
       proc.on('close', (code) => {
         if (code === 0) {
-          resolve(stdout.trim());
+          finishResolve(stdout.trim());
         } else {
           log.error('gh command failed', { args, code, stderr });
-          reject(new Error(`gh command failed with code ${code}: ${stderr}`));
+          finishReject(new Error(`gh command failed with code ${code}: ${stderr}`));
         }
       });
 
       proc.on('error', (err) => {
         log.error('gh command error', { args, error: String(err) });
-        reject(err);
+        finishReject(err instanceof Error ? err : new Error(String(err)));
       });
     });
   }

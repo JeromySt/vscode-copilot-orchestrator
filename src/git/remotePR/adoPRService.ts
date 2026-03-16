@@ -26,6 +26,7 @@ import type {
 import { Logger } from '../../core/logger';
 
 const log = Logger.for('git');
+const API_REQUEST_TIMEOUT_MS = 30000;
 
 /**
  * Azure DevOps PR service implementation.
@@ -723,6 +724,10 @@ export class AdoPRService implements IRemotePRService {
 
       req.on('error', (error) => {
         reject(error);
+      });
+
+      req.setTimeout(API_REQUEST_TIMEOUT_MS, () => {
+        req.destroy(new Error(`Azure DevOps API request timed out after ${API_REQUEST_TIMEOUT_MS}ms`));
       });
 
       if (bodyStr) {
