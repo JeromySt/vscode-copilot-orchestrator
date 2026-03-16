@@ -33,6 +33,14 @@ const log = Logger.for('plan');
 const AUTOMATED_FIX_MARKER = '✅ Addressed in automated fix';
 const AUTOMATED_FIX_REVIEW_REPLY_PREFIX = "Re: copilot-pull-request-reviewer[bot]'s feedback";
 
+function isAutomatedFixRelayComment(comment: PRComment): boolean {
+  if (comment.source !== 'human') {
+    return false;
+  }
+
+  return /^Re:\s+[^\n]*\[bot\]'s feedback\b[\s\S]*✅ Addressed in automated fix\b/u.test(comment.body);
+}
+
 // Poll every 2 minutes (120 pulse ticks at ~1s each)
 const POLL_INTERVAL_TICKS = 120;
 
@@ -276,9 +284,7 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
         (typeof c.body === 'string'
           && c.body.startsWith('> ')
           && c.body.includes(`\n\n${AUTOMATED_FIX_MARKER}`))
-        || (typeof c.body === 'string'
-          && c.body.startsWith(AUTOMATED_FIX_REVIEW_REPLY_PREFIX)
-          && c.body.includes(AUTOMATED_FIX_MARKER))
+        || isAutomatedFixRelayComment(c)
         || c.replies?.some((reply) => (
           typeof reply.body === 'string'
           && reply.body.trimStart().startsWith(AUTOMATED_FIX_MARKER)

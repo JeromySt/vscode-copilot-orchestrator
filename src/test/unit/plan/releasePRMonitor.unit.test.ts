@@ -15,11 +15,11 @@ function silenceConsole(): { restore: () => void } {
 
 function createMockCopilot(): any {
   return {
-    run: sinon.stub().resolves({ 
-      success: true, 
-      sessionId: 'test', 
+    run: sinon.stub().resolves({
+      success: true,
+      sessionId: 'test',
       output: 'Fixed',
-      metrics: { requestCount: 1, inputTokens: 100, outputTokens: 50, costUsd: 0.01, durationMs: 1000 } 
+      metrics: { requestCount: 1, inputTokens: 100, outputTokens: 50, costUsd: 0.01, durationMs: 1000 }
     }),
     isAvailable: sinon.stub().returns(true),
   };
@@ -129,7 +129,7 @@ suite('ReleasePRMonitor', () => {
   test('runs first cycle immediately', async () => {
     const mockService = createMockPRService();
     const factory = createMockPRServiceFactory(mockService);
-    
+
     const monitor = new DefaultReleasePRMonitor(
       createMockCopilot(),
       createMockSpawner(),
@@ -151,7 +151,7 @@ suite('ReleasePRMonitor', () => {
   test('polls every 2 minutes', async () => {
     const mockService = createMockPRService();
     const factory = createMockPRServiceFactory(mockService);
-    
+
     const monitor = new DefaultReleasePRMonitor(
       createMockCopilot(),
       createMockSpawner(),
@@ -183,7 +183,7 @@ suite('ReleasePRMonitor', () => {
   test('stops after 40 minutes', async () => {
     const mockService = createMockPRService();
     const factory = createMockPRServiceFactory(mockService);
-    
+
     const monitor = new DefaultReleasePRMonitor(
       createMockCopilot(),
       createMockSpawner(),
@@ -351,7 +351,7 @@ suite('ReleasePRMonitor', () => {
   test('uses prService.getPRChecks() not gh directly', async () => {
     const mockService = createMockPRService();
     const factory = createMockPRServiceFactory(mockService);
-    
+
     const monitor = new DefaultReleasePRMonitor(
       createMockCopilot(),
       createMockSpawner(),
@@ -372,7 +372,7 @@ suite('ReleasePRMonitor', () => {
   test('uses prService.getPRComments() not gh directly', async () => {
     const mockService = createMockPRService();
     const factory = createMockPRServiceFactory(mockService);
-    
+
     const monitor = new DefaultReleasePRMonitor(
       createMockCopilot(),
       createMockSpawner(),
@@ -393,7 +393,7 @@ suite('ReleasePRMonitor', () => {
   test('uses prService.getSecurityAlerts()', async () => {
     const mockService = createMockPRService();
     const factory = createMockPRServiceFactory(mockService);
-    
+
     const monitor = new DefaultReleasePRMonitor(
       createMockCopilot(),
       createMockSpawner(),
@@ -459,7 +459,7 @@ suite('ReleasePRMonitor', () => {
     monitor.stopMonitoring('rel-1');
   });
 
-  test('treats reviewer acknowledgements of bot automated fixes as resolved', async () => {
+  test('treats human bot-feedback relay comments with automated fix text as resolved', async () => {
     const mockService = createMockPRService();
     mockService.getPRComments.resolves([
       {
@@ -487,6 +487,38 @@ suite('ReleasePRMonitor', () => {
 
     assert.strictEqual(cycleEvents.length, 1);
     assert.strictEqual(cycleEvents[0].comments[0].isResolved, true);
+
+    monitor.stopMonitoring('rel-1');
+  });
+
+  test('does not treat substantive human feedback that mentions automated fix text as resolved', async () => {
+    const mockService = createMockPRService();
+    mockService.getPRComments.resolves([
+      {
+        id: 'c1',
+        author: 'JeromySt',
+        body: 'I still see a bug here. Saying ✅ Addressed in automated fix (2d18137) is not enough.',
+        isResolved: false,
+        source: 'human',
+      },
+    ]);
+
+    const factory = createMockPRServiceFactory(mockService);
+    const monitor = new DefaultReleasePRMonitor(
+      createMockCopilot(),
+      createMockSpawner(),
+      createMockGit(),
+      factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
+    );
+
+    const cycleEvents: any[] = [];
+    monitor.on('cycleComplete', (_: string, cycle: any) => cycleEvents.push(cycle));
+
+    await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
+
+    assert.strictEqual(cycleEvents.length, 1);
+    assert.strictEqual(cycleEvents[0].comments[0].isResolved, false);
 
     monitor.stopMonitoring('rel-1');
   });
