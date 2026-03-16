@@ -51,6 +51,7 @@ function createMockPRService(): any {
     getPRComments: sinon.stub().resolves([]),
     getSecurityAlerts: sinon.stub().resolves([]),
     replyToComment: sinon.stub().resolves(),
+    addIssueComment: sinon.stub().resolves(),
     resolveThread: sinon.stub().resolves(),
     createPR: sinon.stub().resolves({ prNumber: 42, prUrl: 'https://github.com/test/repo/pull/42' }),
   };
@@ -506,7 +507,8 @@ suite('ReleasePRMonitor – coverage', () => {
 
     const actions = await (monitor as any)._addressFindings(state, cycle);
 
-    assert.ok(prService.replyToComment.calledOnce);
+    assert.ok(prService.addIssueComment.calledOnce);
+    assert.ok(prService.replyToComment.notCalled);
     assert.ok(prService.resolveThread.notCalled);
     assert.ok(actions.some((a: any) => a.type === 'respond-comment'));
   });

@@ -38,6 +38,7 @@ function createMockPRService(sandbox: sinon.SinonSandbox): any {
     getPRComments: sandbox.stub().resolves([]),
     getSecurityAlerts: sandbox.stub().resolves([]),
     replyToComment: sandbox.stub().resolves(),
+    addIssueComment: sandbox.stub().resolves(),
     resolveThread: sandbox.stub().resolves(),
     createPR: sandbox.stub().resolves({ prNumber: 42, prUrl: 'https://github.com/test/pr/42' }),
   };
@@ -398,9 +399,10 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
 
       const actions = await callAddressFindings(monitor, state, cycle);
 
-      assert.ok(prService.replyToComment.calledOnce);
-      assert.strictEqual(prService.replyToComment.firstCall.args[0], state.prNumber);
-      assert.strictEqual(prService.replyToComment.firstCall.args[1], 'c1');
+      assert.ok(prService.addIssueComment.calledOnce);
+      assert.ok(prService.replyToComment.notCalled);
+      assert.strictEqual(prService.addIssueComment.firstCall.args[0], state.prNumber);
+      assert.ok(prService.addIssueComment.firstCall.args[1].includes('> Fix this'));
 
       const respondAction = actions.find((a: any) => a.type === 'respond-comment');
       assert.ok(respondAction);
@@ -444,6 +446,26 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       await callAddressFindings(monitor, state, cycle);
 
       assert.ok(prService.resolveThread.notCalled);
+    });
+
+    test('replies to inline comments with replyToComment', async () => {
+      const copilot = createMockCopilot(sandbox);
+      const git = createMockGit(sandbox);
+      git.repository.hasChanges.resolves(false);
+      const monitor = makeMonitor(copilot, git);
+      const prService = createMockPRService(sandbox);
+      const state = makeState(prService);
+      const cycle = makeCycle({
+        comments: [
+          { id: 'c-inline', author: 'rev', body: 'Fix', path: 'src/file.ts', isResolved: false, source: 'github' },
+        ],
+      });
+
+      await callAddressFindings(monitor, state, cycle);
+
+      assert.ok(prService.replyToComment.calledOnce);
+      assert.ok(prService.addIssueComment.notCalled);
+      assert.strictEqual(prService.replyToComment.firstCall.args[1], 'c-inline');
     });
 
     test('records failed respond-comment action when replyToComment throws', async () => {
