@@ -494,7 +494,9 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       await callAddressFindings(monitor, state, cycle);
 
       assert.ok(prService.addIssueComment.calledOnce);
+      assert.ok(prService.replyToComment.notCalled);
       assert.ok(prService.minimizeComment.calledOnce);
+      assert.ok(prService.resolveThread.notCalled);
       assert.strictEqual(prService.minimizeComment.firstCall.args[0], 'node-42');
       assert.strictEqual(prService.minimizeComment.firstCall.args[1], 'RESOLVED');
       assert.strictEqual(prService.minimizeComment.firstCall.args[2], state.repoPath);
