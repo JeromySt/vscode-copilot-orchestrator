@@ -247,6 +247,60 @@ suite('ReleasePRMonitor', () => {
     monitor.stopMonitoring('rel-1');
   });
 
+  test('keeps monitoring beyond 40 minutes when failing checks are present', async () => {
+    const mockService = createMockPRService();
+    mockService.getPRChecks.resolves([
+      { name: 'CI / build', status: 'failing', url: 'https://ci.example.com/42' },
+    ]);
+
+    const factory = createMockPRServiceFactory(mockService);
+    const monitor = new DefaultReleasePRMonitor(
+      createMockCopilot(),
+      createMockSpawner(),
+      createMockGit(),
+      factory,
+      createTimerBasedPulse(),
+    );
+
+    await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
+
+    // Advance past 40 minutes (21 cycles × 2 min = 42 min)
+    for (let i = 0; i < 21; i++) {
+      await clock.tickAsync(120000);
+    }
+
+    // Should NOT stop — failing CI check keeps it alive
+    assert.strictEqual(monitor.isMonitoring('rel-1'), true);
+    monitor.stopMonitoring('rel-1');
+  });
+
+  test('keeps monitoring beyond 40 minutes when unresolved security alerts are present', async () => {
+    const mockService = createMockPRService();
+    mockService.getSecurityAlerts.resolves([
+      { id: 'alert-1', severity: 'high', description: 'SQL injection', file: 'src/db.ts', resolved: false },
+    ]);
+
+    const factory = createMockPRServiceFactory(mockService);
+    const monitor = new DefaultReleasePRMonitor(
+      createMockCopilot(),
+      createMockSpawner(),
+      createMockGit(),
+      factory,
+      createTimerBasedPulse(),
+    );
+
+    await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
+
+    // Advance past 40 minutes (21 cycles × 2 min = 42 min)
+    for (let i = 0; i < 21; i++) {
+      await clock.tickAsync(120000);
+    }
+
+    // Should NOT stop — unresolved security alert keeps it alive
+    assert.strictEqual(monitor.isMonitoring('rel-1'), true);
+    monitor.stopMonitoring('rel-1');
+  });
+
   test('emits cycleComplete event with findings (auto-fix disabled)', async () => {
     const mockService = createMockPRService();
     mockService.getPRComments.resolves([
