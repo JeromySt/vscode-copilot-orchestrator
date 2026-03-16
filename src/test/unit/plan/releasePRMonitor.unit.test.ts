@@ -459,13 +459,45 @@ suite('ReleasePRMonitor', () => {
     monitor.stopMonitoring('rel-1');
   });
 
-  test('does not treat human feedback that mentions automated fix text as resolved', async () => {
+  test('treats human bot-feedback relay comments with automated fix text as resolved', async () => {
     const mockService = createMockPRService();
     mockService.getPRComments.resolves([
       {
         id: 'c1',
         author: 'JeromySt',
         body: 'Re: copilot-pull-request-reviewer[bot]\'s feedback — ✅ Addressed in automated fix (2d18137)',
+        isResolved: false,
+        source: 'human',
+      },
+    ]);
+
+    const factory = createMockPRServiceFactory(mockService);
+    const monitor = new DefaultReleasePRMonitor(
+      createMockCopilot(),
+      createMockSpawner(),
+      createMockGit(),
+      factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
+    );
+
+    const cycleEvents: any[] = [];
+    monitor.on('cycleComplete', (_: string, cycle: any) => cycleEvents.push(cycle));
+
+    await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
+
+    assert.strictEqual(cycleEvents.length, 1);
+    assert.strictEqual(cycleEvents[0].comments[0].isResolved, true);
+
+    monitor.stopMonitoring('rel-1');
+  });
+
+  test('does not treat substantive human feedback that mentions automated fix text as resolved', async () => {
+    const mockService = createMockPRService();
+    mockService.getPRComments.resolves([
+      {
+        id: 'c1',
+        author: 'JeromySt',
+        body: 'I still see a bug here. Saying ✅ Addressed in automated fix (2d18137) is not enough.',
         isResolved: false,
         source: 'human',
       },
