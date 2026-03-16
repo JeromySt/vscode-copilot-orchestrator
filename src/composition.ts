@@ -404,14 +404,21 @@ export function createReleaseManager(
  * 
  * Call this after PlanRunner is initialized. Keeps concrete instantiation out of extension.ts.
  * 
- * @param _container - The DI container (unused, kept for API stability)
+ * @param container - The DI container used to create a scoped IBulkPlanActions binding
  * @param planRunner - The initialized PlanRunner instance
  * @returns A fully-wired IBulkPlanActions instance
  */
 export function createBulkPlanActions(
-  _container: ServiceContainer,
+  container: ServiceContainer,
   planRunner: import('./interfaces/IPlanRunner').IPlanRunner,
 ): import('./interfaces/IBulkPlanActions').IBulkPlanActions {
-  const { BulkPlanActions } = require('./plan/bulkPlanActions');
-  return new BulkPlanActions(planRunner);
+  const scoped = container.createScope();
+  scoped.register(
+    Tokens.IBulkPlanActions,
+    () => {
+      const { BulkPlanActions } = require('./plan/bulkPlanActions');
+      return new BulkPlanActions(planRunner);
+    },
+  );
+  return scoped.resolve<import('./interfaces/IBulkPlanActions').IBulkPlanActions>(Tokens.IBulkPlanActions);
 }
