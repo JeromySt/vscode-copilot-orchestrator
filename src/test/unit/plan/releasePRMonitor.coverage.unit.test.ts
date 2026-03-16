@@ -385,7 +385,7 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       assert.ok(copilot.run.calledOnce);
     });
 
-    test('replies to unresolved comments after successful copilot run (no changes)', async () => {
+    test('replies to inline comments after successful copilot run (no changes)', async () => {
       const copilot = createMockCopilot(sandbox);
       const git = createMockGit(sandbox);
       git.repository.hasChanges.resolves(false);
@@ -400,10 +400,11 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
 
       const actions = await callAddressFindings(monitor, state, cycle);
 
-      assert.ok(prService.addIssueComment.calledOnce);
-      assert.ok(prService.replyToComment.notCalled);
-      assert.strictEqual(prService.addIssueComment.firstCall.args[0], state.prNumber);
-      assert.ok(prService.addIssueComment.firstCall.args[1].includes('> Fix this'));
+      assert.ok(prService.replyToComment.calledOnce);
+      assert.ok(prService.addIssueComment.notCalled);
+      assert.strictEqual(prService.replyToComment.firstCall.args[0], state.prNumber);
+      assert.strictEqual(prService.replyToComment.firstCall.args[1], 'c1');
+      assert.ok(prService.replyToComment.firstCall.args[2].includes('✅ Addressed in automated fix'));
 
       const respondAction = actions.find((a: any) => a.type === 'respond-comment');
       assert.ok(respondAction);

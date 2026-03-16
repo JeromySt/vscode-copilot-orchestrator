@@ -272,8 +272,13 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
 
     const cycleComments: PRCommentResult[] = comments.map((c) => {
       const hasAutomatedFixReply = (
-        (typeof c.body === 'string' && c.body.includes(AUTOMATED_FIX_MARKER))
-        || c.replies?.some((reply) => typeof reply.body === 'string' && reply.body.includes(AUTOMATED_FIX_MARKER)) === true
+        (typeof c.body === 'string'
+          && c.body.startsWith('> ')
+          && c.body.includes(`\n\n${AUTOMATED_FIX_MARKER}`))
+        || c.replies?.some((reply) => (
+          typeof reply.body === 'string'
+          && reply.body.trimStart().startsWith(AUTOMATED_FIX_MARKER)
+        )) === true
       );
 
       return {

@@ -459,7 +459,7 @@ suite('ReleasePRMonitor', () => {
     monitor.stopMonitoring('rel-1');
   });
 
-  test('treats comments with automated fix marker as resolved', async () => {
+  test('does not treat human feedback that mentions automated fix text as resolved', async () => {
     const mockService = createMockPRService();
     mockService.getPRComments.resolves([
       {
@@ -468,6 +468,72 @@ suite('ReleasePRMonitor', () => {
         body: 'Re: copilot-pull-request-reviewer[bot]\'s feedback — ✅ Addressed in automated fix (2d18137)',
         isResolved: false,
         source: 'human',
+      },
+    ]);
+
+    const factory = createMockPRServiceFactory(mockService);
+    const monitor = new DefaultReleasePRMonitor(
+      createMockCopilot(),
+      createMockSpawner(),
+      createMockGit(),
+      factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
+    );
+
+    const cycleEvents: any[] = [];
+    monitor.on('cycleComplete', (_: string, cycle: any) => cycleEvents.push(cycle));
+
+    await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
+
+    assert.strictEqual(cycleEvents.length, 1);
+    assert.strictEqual(cycleEvents[0].comments[0].isResolved, false);
+
+    monitor.stopMonitoring('rel-1');
+  });
+
+  test('treats quoted automated fix comments as resolved', async () => {
+    const mockService = createMockPRService();
+    mockService.getPRComments.resolves([
+      {
+        id: 'c1',
+        author: 'copilot-pull-request-reviewer[bot]',
+        body: '> Please fix this\n\n✅ Addressed in automated fix (2d18137)',
+        isResolved: false,
+        source: 'bot',
+      },
+    ]);
+
+    const factory = createMockPRServiceFactory(mockService);
+    const monitor = new DefaultReleasePRMonitor(
+      createMockCopilot(),
+      createMockSpawner(),
+      createMockGit(),
+      factory,
+      { onPulse: () => ({ dispose: () => {} }), isRunning: false } as any,
+    );
+
+    const cycleEvents: any[] = [];
+    monitor.on('cycleComplete', (_: string, cycle: any) => cycleEvents.push(cycle));
+
+    await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
+
+    assert.strictEqual(cycleEvents.length, 1);
+    assert.strictEqual(cycleEvents[0].comments[0].isResolved, true);
+    monitor.stopMonitoring('rel-1');
+  });
+
+  test('treats thread replies with automated fix marker as resolved', async () => {
+    const mockService = createMockPRService();
+    mockService.getPRComments.resolves([
+      {
+        id: 'c1',
+        author: 'reviewer',
+        body: 'Please fix this',
+        isResolved: false,
+        source: 'human',
+        replies: [
+          { id: 'r1', author: 'copilot', body: '✅ Addressed in automated fix (2d18137)' },
+        ],
       },
     ]);
 
