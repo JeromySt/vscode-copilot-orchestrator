@@ -146,4 +146,54 @@ suite('cliCheckCore', () => {
       assert.strictEqual(result, true);
     });
   });
+
+  // =========================================================================
+  // cmdOkAsync — settle/timer correctness
+  // =========================================================================
+
+  suite('cmdOkAsync settle correctness', () => {
+    test('resolves only once when close fires after error', async () => {
+      // Process emits both 'error' and 'close' — should not double-resolve
+      spawnStub.callsFake(() => {
+        const proc: any = new (require('events').EventEmitter)();
+        proc.stdout = new (require('events').EventEmitter)();
+        proc.stderr = new (require('events').EventEmitter)();
+        proc.kill = sinon.stub();
+        setTimeout(() => {
+          proc.emit('error', new Error('not found'));
+          proc.emit('close', 1);
+        }, 5);
+        return proc;
+      });
+      // Should not hang or throw; must resolve cleanly to false
+      const result = await checkCopilotCliAsync();
+      assert.strictEqual(result, false);
+    });
+
+    test('timer is cleared when process closes before timeout', async () => {
+      const clock = sinon.useFakeTimers();
+      try {
+        spawnStub.callsFake(() => {
+          const proc: any = new (require('events').EventEmitter)();
+          proc.stdout = new (require('events').EventEmitter)();
+          proc.stderr = new (require('events').EventEmitter)();
+          proc.kill = sinon.stub();
+          // Close immediately (success) before the 15s timeout
+          setImmediate(() => proc.emit('close', 0));
+          return proc;
+        });
+
+        const promise = checkCopilotCliAsync();
+        await clock.tickAsync(100);
+        const result = await promise;
+
+        // Verify process was NOT killed by the timeout
+        assert.strictEqual(result, true);
+        assert.ok(spawnStub.returnValues.every((p: any) => !p.kill.called),
+          'kill should not have been called — timer should have been cleared on close');
+      } finally {
+        clock.restore();
+      }
+    });
+  });
 });

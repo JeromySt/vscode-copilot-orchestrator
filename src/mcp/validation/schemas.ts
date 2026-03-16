@@ -868,7 +868,7 @@ export const createReleaseSchema = {
   required: ['name', 'releaseBranch'],
   anyOf: [
     { required: ['planIds'], properties: { planIds: { type: 'array', minItems: 1 } } },
-    { required: ['repoPath'] },
+    { required: ['repoPath'], properties: { repoPath: { type: 'string', minLength: 1 } } },
   ],
   additionalProperties: false
 } as const;
@@ -1142,6 +1142,35 @@ export const removePRSchema = {
 } as const;
 
 /**
+ * Schema for archive_copilot_plan input
+ */
+export const archivePlanSchema = {
+  $id: 'archive_copilot_plan',
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    force: { type: 'boolean', description: 'Force archive even if the plan is still running' },
+    deleteRemoteBranches: { type: 'boolean', description: 'Delete remote branches associated with the plan' }
+  },
+  required: ['planId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for recover_copilot_plan input
+ */
+export const recoverPlanSchema = {
+  $id: 'recover_copilot_plan',
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    useCopilotAgent: { type: 'boolean', description: 'Use Copilot CLI agent to attempt automatic recovery' }
+  },
+  required: ['planId'],
+  additionalProperties: false
+} as const;
+
+/**
  * All schemas indexed by tool name
  */
 export const schemas: Record<string, object> = {
@@ -1166,6 +1195,10 @@ export const schemas: Record<string, object> = {
   force_fail_copilot_job: forceFailNodeSchema,
   get_copilot_job_failure_context: getNodeFailureContextSchema,
   update_copilot_plan_job: updateCopilotPlanNodeSchema,
+
+  // Plan archive and recovery tools
+  archive_copilot_plan: archivePlanSchema,
+  recover_copilot_plan: recoverPlanSchema,
 
   // Scaffolding tools
   scaffold_copilot_plan: scaffoldPlanSchema,
