@@ -112,12 +112,15 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               c.isResolved = true;
               continue;
             }
-            // Filter out our own automated reply comments so they don't appear as new findings,
-            // including replies captured within a comment thread.
+            // Filter out our own automated reply comments so they don't appear as new findings.
+            // Top-level automated replies quote the original feedback, while thread replies contain only the marker.
             const hasAutomatedFixReply = (
-              (typeof c.body === 'string' && c.body.includes('\u2705 Addressed in automated fix'))
+              (typeof c.body === 'string'
+                && c.body.startsWith('> ')
+                && c.body.includes('\n\n\u2705 Addressed in automated fix'))
               || c.replies?.some((reply: any) => (
-                typeof reply.body === 'string' && reply.body.includes('\u2705 Addressed in automated fix')
+                typeof reply.body === 'string'
+                && reply.body.trimStart().startsWith('\u2705 Addressed in automated fix')
               ))
             );
             if (hasAutomatedFixReply) {
