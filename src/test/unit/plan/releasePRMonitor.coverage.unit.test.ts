@@ -494,7 +494,9 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       await callAddressFindings(monitor, state, cycle);
 
       assert.ok(prService.addIssueComment.calledOnce);
+      assert.ok(prService.replyToComment.notCalled);
       assert.ok(prService.minimizeComment.calledOnce);
+      assert.ok(prService.resolveThread.notCalled);
       assert.strictEqual(prService.minimizeComment.firstCall.args[0], 'node-42');
       assert.strictEqual(prService.minimizeComment.firstCall.args[1], 'RESOLVED');
       assert.strictEqual(prService.minimizeComment.firstCall.args[2], state.repoPath);
@@ -524,6 +526,34 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       await callAddressFindings(monitor, state, cycle);
 
       assert.ok(prService.replyToComment.calledOnce);
+      assert.ok(prService.minimizeComment.notCalled);
+    });
+
+    test('does not minimize threaded review comments even when nodeId is available', async () => {
+      const copilot = createMockCopilot(sandbox);
+      const git = createMockGit(sandbox);
+      git.repository.hasChanges.resolves(false);
+      const monitor = makeMonitor(copilot, git);
+      const prService = createMockPRService(sandbox);
+      const state = makeState(prService);
+      const cycle = makeCycle({
+        comments: [
+          {
+            id: 'c-thread',
+            author: 'rev',
+            body: 'Fix',
+            isResolved: false,
+            source: 'github',
+            threadId: 'thread-42',
+            nodeId: 'node-thread',
+          },
+        ],
+      });
+
+      await callAddressFindings(monitor, state, cycle);
+
+      assert.ok(prService.replyToComment.calledOnce);
+      assert.ok(prService.resolveThread.calledOnce);
       assert.ok(prService.minimizeComment.notCalled);
     });
 
