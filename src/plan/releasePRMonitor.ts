@@ -551,12 +551,21 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
       try {
         const replyText = `✅ Addressed in automated fix ${commitHash ? `(${commitHash.substring(0, 7)})` : ''}`;
 
-        await state.prService.replyToComment(
-          state.prNumber,
-          comment.id,
-          replyText,
-          state.repoPath,
-        );
+        if (comment.path || comment.threadId) {
+          await state.prService.replyToComment(
+            state.prNumber,
+            comment.id,
+            replyText,
+            state.repoPath,
+          );
+        } else {
+          const quotedBody = (comment.body || '').split('\n').map((line) => `> ${line}`).join('\n');
+          await state.prService.addIssueComment(
+            state.prNumber,
+            `${quotedBody}\n\n${replyText}`,
+            state.repoPath,
+          );
+        }
 
         // Mark thread as resolved if we have a threadId
         if (comment.threadId) {
