@@ -118,6 +118,9 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               (typeof c.body === 'string'
                 && c.body.startsWith('> ')
                 && c.body.includes('\n\n\u2705 Addressed in automated fix'))
+              || (typeof c.body === 'string'
+                && c.body.startsWith("Re: copilot-pull-request-reviewer[bot]'s feedback")
+                && c.body.includes('\u2705 Addressed in automated fix'))
               || c.replies?.some((reply: any) => (
                 typeof reply.body === 'string'
                 && reply.body.trimStart().startsWith('\u2705 Addressed in automated fix')
@@ -334,7 +337,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     // Create state machine for this release
     const stateMachine = new ReleaseStateMachine(release);
-    
+
     // Forward state machine events to release events
     stateMachine.on('transition', (event) => {
       this.events.emitReleaseStatusChanged(event.releaseId, event.from, event.to);
@@ -629,15 +632,15 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     // Setup log file infrastructure
     const logDir = this.getTaskLogDirectory(release);
     await fs.mkdir(logDir, { recursive: true });
-    
+
     const logFilePath = path.join(logDir, `${taskId}.log`);
     task.logFilePath = logFilePath;
     task.startedAt = Date.now();
     task.status = 'running';
-    
+
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
-    
+
     // Emit started log line
     const startedMessage = `Task started: ${task.title}\n`;
     await fs.appendFile(logFilePath, startedMessage);
@@ -650,7 +653,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       // Execute task using Copilot CLI
       const cwd = release.isolatedRepoPath || release.repoPath;
       let taskDescription = task.description || task.title;
-      
+
       // Add structured output instructions for review tasks
       if (task.id === 'ai-review' || task.id.includes('review')) {
         taskDescription += '\n\nIMPORTANT: After completing your review, output your findings in this exact format:\n' +
@@ -659,7 +662,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           '<!-- FINDINGS_END -->\n' +
           'Output the findings as a valid JSON array between the markers. Include ALL findings you discovered.';
       }
-      
+
       if (this.copilot) {
         const result = await this.copilot.run({
           cwd,
@@ -668,7 +671,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           onOutput: async (line: string) => {
             // Collect output for finding parsing
             outputBuffer.push(line);
-            
+
             // Stream every CLI output line to log file AND event
             const logLine = `${line}\n`;
             try { await fs.appendFile(logFilePath, logLine); } catch { /* ignore write errors */ }
@@ -701,7 +704,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         this.events.emitReleaseTaskOutput(releaseId, taskId, completedMessage);
         log.info('Preparation task auto-completed (no runner)', { releaseId, taskId });
       }
-      
+
       // Parse findings from collected output (try buffer first, then log file)
       let fullOutput = outputBuffer.join('\n');
       if (!fullOutput.includes('FINDINGS_START') && logFilePath) {
@@ -743,7 +746,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     task.status = 'completed';
     task.completedAt = Date.now();
-    
+
     // Write log entry for manual completion
     if (task.logFilePath) {
       const completedMessage = `Task manually marked as completed\n`;
@@ -779,7 +782,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     task.status = 'skipped';
     task.completedAt = Date.now();
-    
+
     // Write log entry for skip
     if (task.logFilePath) {
       const skippedMessage = `Task skipped by user\n`;
@@ -844,7 +847,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     }
 
     const allFindings: import('./types/release').ReviewFinding[] = [];
-    
+
     if (release.prepTasks) {
       for (const task of release.prepTasks) {
         if (task.findings && task.findings.length > 0) {
@@ -927,7 +930,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     try {
       // For from-branch releases, always use repoPath (not isolatedRepoPath which may not exist)
       const cwd = release.repoPath;
-      
+
       // Ensure credentials are configured before creating PR
       if (this.providerDetector) {
         try {
@@ -939,9 +942,9 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           // Continue anyway - the PR service will attempt its own credential acquisition
         }
       }
-      
+
       const prService = await this.prServiceFactory.getServiceForRepo(cwd);
-      
+
       // Push the release branch to the remote before creating the PR
       log.info('Pushing release branch to remote', { releaseId, branch: release.releaseBranch, cwd });
       try {
@@ -951,7 +954,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       } catch (pushErr) {
         log.warn('git push failed, PR creation may fail', { releaseId, error: (pushErr as Error).message });
       }
-      
+
       const prResult = await prService.createPR({
         baseBranch: release.targetBranch,
         headBranch: release.releaseBranch,
@@ -1634,7 +1637,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
   /**
    * Transition release to a new status using the state machine.
-   * 
+   *
    * @param release - The release to transition
    * @param newStatus - The target status
    * @param reason - Optional reason for the transition
@@ -1722,7 +1725,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
         // Create state machine for this release
         const stateMachine = new ReleaseStateMachine(release);
-        
+
         // Forward state machine events to release events
         stateMachine.on('transition', (event) => {
           this.events.emitReleaseStatusChanged(event.releaseId, event.from, event.to);
@@ -1749,7 +1752,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           this.emit('releaseCreated', release);
         }
       }
-      
+
       // Restore monitoring for any releases in monitoring state (delay to ensure all services are ready)
       const releasesToRestore = releases.filter(r => r.status === 'monitoring' && r.prNumber);
       if (releasesToRestore.length > 0) {

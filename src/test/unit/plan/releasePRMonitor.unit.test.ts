@@ -459,7 +459,7 @@ suite('ReleasePRMonitor', () => {
     monitor.stopMonitoring('rel-1');
   });
 
-  test('does not treat human feedback that mentions automated fix text as resolved', async () => {
+  test('treats reviewer acknowledgements of bot automated fixes as resolved', async () => {
     const mockService = createMockPRService();
     mockService.getPRComments.resolves([
       {
@@ -486,7 +486,7 @@ suite('ReleasePRMonitor', () => {
     await monitor.startMonitoring('rel-1', 42, '/repo/.orchestrator/release/v1', 'release/v1');
 
     assert.strictEqual(cycleEvents.length, 1);
-    assert.strictEqual(cycleEvents[0].comments[0].isResolved, false);
+    assert.strictEqual(cycleEvents[0].comments[0].isResolved, true);
 
     monitor.stopMonitoring('rel-1');
   });

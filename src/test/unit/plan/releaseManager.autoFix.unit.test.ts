@@ -527,7 +527,7 @@ suite('DefaultReleaseManager – auto-fix', () => {
       assert.strictEqual(findingsProcessingEvents.length, 0);
     });
 
-    test('does not suppress human comment that only references automated fix text', async () => {
+    test('suppresses reviewer acknowledgements of bot automated fixes', async () => {
       const planRunner = createMockPlanRunner();
       const prMonitor = createEventEmitterPRMonitor();
       const store = createMockReleaseStore();
@@ -553,8 +553,8 @@ suite('DefaultReleaseManager – auto-fix', () => {
         securityAlerts: [],
       });
 
-      // Human-authored feedback that mentions the marker should still be treated as a new finding
-      assert.strictEqual(findingsProcessingEvents.length, 1);
+      // Reviewer acknowledgement of a bot finding already addressed should not trigger a new auto-fix
+      assert.strictEqual(findingsProcessingEvents.length, 0);
     });
 
     test('marks comment as resolved when replies contain ✅ Addressed in automated fix', async () => {
