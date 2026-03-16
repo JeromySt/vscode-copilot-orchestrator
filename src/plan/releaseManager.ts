@@ -1319,7 +1319,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           try {
             const replyText = `✅ Addressed in automated fix${commitHash ? ` (${commitHash.substring(0, 7)})` : ''}`;
 
-            if (comment.path) {
+            if (comment.path || comment.threadId) {
               await prService.replyToComment(release.prNumber, commentId, replyText, cwd);
             } else {
               const quotedBody = (comment.body || '').split('\n').map((l: string) => `> ${l}`).join('\n');
@@ -1330,7 +1330,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               try { await prService.resolveThread(release.prNumber, comment.threadId, cwd); } catch { /* non-fatal */ }
             }
 
-            if (!comment.path && comment.nodeId && typeof prService.minimizeComment === 'function') {
+            if (!comment.path && !comment.threadId && comment.nodeId && typeof prService.minimizeComment === 'function') {
               try { await prService.minimizeComment(comment.nodeId, 'RESOLVED', cwd); } catch { /* non-fatal */ }
             }
 
