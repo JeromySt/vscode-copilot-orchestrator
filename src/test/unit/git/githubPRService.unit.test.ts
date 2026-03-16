@@ -66,10 +66,19 @@ suite('GitHubPRService', () => {
     const proc = new EventEmitter() as any;
     proc.stdout = new EventEmitter();
     proc.stderr = new EventEmitter();
+    proc.exitCode = null;
+    proc.killed = false;
+    proc.kill = sandbox.stub().callsFake(() => {
+      proc.killed = true;
+      proc.exitCode = -1;
+      proc.emit('close', -1);
+      return true;
+    });
     
     setImmediate(() => {
       if (stdout) proc.stdout.emit('data', Buffer.from(stdout));
       if (stderr) proc.stderr.emit('data', Buffer.from(stderr));
+      proc.exitCode = exitCode;
       proc.emit('close', exitCode);
     });
     
@@ -297,6 +306,28 @@ suite('GitHubPRService', () => {
       assert.strictEqual(open?.isResolved, false);
       assert.strictEqual(open?.threadId, 'PRRT_open');
       assert.strictEqual(open?.url, undefined);
+    });
+
+    test('times out hung gh commands and kills the process', async () => {
+      const clock = sinon.useFakeTimers();
+      const hungProc = new EventEmitter() as any;
+      hungProc.stdout = new EventEmitter();
+      hungProc.stderr = new EventEmitter();
+      hungProc.exitCode = null;
+      hungProc.killed = false;
+      hungProc.kill = sandbox.stub().callsFake(() => {
+        hungProc.killed = true;
+        return true;
+      });
+      (mockSpawner.spawn as sinon.SinonStub).returns(hungProc);
+
+      const promise = (service as any)._execGh(['api', 'rate_limit'], '/repo', { GH_TOKEN: 'token' });
+      const rejection = assert.rejects(promise, /timed out/i);
+
+      await clock.tickAsync(60000);
+      await rejection;
+      assert.ok(hungProc.kill.calledOnce);
+      clock.restore();
     });
 
     test('categorizes bot/copilot/codeql', async () => {

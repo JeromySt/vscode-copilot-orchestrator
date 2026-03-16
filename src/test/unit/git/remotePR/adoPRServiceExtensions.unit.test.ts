@@ -87,6 +87,8 @@ suite('AdoPRService Extensions', () => {
 
     const mockReq: any = {
       on: (event: string, handler: any) => {},
+      setTimeout: sandbox.stub(),
+      destroy: sandbox.stub(),
       write: sandbox.stub(),
       end: sandbox.stub().callsFake(() => {
         // Immediately trigger response
@@ -112,6 +114,8 @@ suite('AdoPRService Extensions', () => {
 
     const mockReq: any = {
       on: (event: string, handler: any) => {},
+      setTimeout: sandbox.stub(),
+      destroy: sandbox.stub(),
       write: sandbox.stub(),
       end: sandbox.stub().callsFake(() => {
         const callback = httpsRequestStub.firstCall.args[1];
@@ -436,6 +440,8 @@ suite('AdoPRService Extensions', () => {
 
         const mockReq: any = {
           on: (event: string, handler: any) => {},
+          setTimeout: sandbox.stub(),
+          destroy: sandbox.stub(),
           write: sandbox.stub(),
           end: sandbox.stub().callsFake(() => {
             callback(mockRes);
@@ -480,6 +486,8 @@ suite('AdoPRService Extensions', () => {
 
           const mockReq: any = {
             on: (event: string, handler: any) => {},
+            setTimeout: sandbox.stub(),
+            destroy: sandbox.stub(),
             write: sandbox.stub(),
             end: sandbox.stub().callsFake(() => {
               callback(mockRes);
@@ -501,6 +509,8 @@ suite('AdoPRService Extensions', () => {
 
           const mockReq: any = {
             on: (event: string, handler: any) => {},
+            setTimeout: sandbox.stub(),
+            destroy: sandbox.stub(),
             write: sandbox.stub(),
             end: sandbox.stub().callsFake(() => {
               callback(mockRes);
