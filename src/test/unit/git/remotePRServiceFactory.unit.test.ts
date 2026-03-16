@@ -8,8 +8,6 @@ import { suite, test, setup, teardown } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { RemotePRServiceFactory } from '../../../git/remotePR/remotePRServiceFactory';
-import { GitHubPRService } from '../../../git/remotePR/githubPRService';
-import { AdoPRService } from '../../../git/remotePR/adoPRService';
 import type { IProcessSpawner } from '../../../interfaces/IProcessSpawner';
 import type { IRemoteProviderDetector } from '../../../interfaces/IRemoteProviderDetector';
 import type { RemoteProviderInfo } from '../../../plan/types/remotePR';
@@ -19,6 +17,8 @@ suite('RemotePRServiceFactory', () => {
   let mockSpawner: IProcessSpawner;
   let mockDetector: IRemoteProviderDetector;
   let factory: RemotePRServiceFactory;
+  let githubCreator: sinon.SinonStub;
+  let adoCreator: sinon.SinonStub;
 
   const githubProvider: RemoteProviderInfo = {
     type: 'github',
@@ -55,8 +55,11 @@ suite('RemotePRServiceFactory', () => {
       detect: sandbox.stub(),
       acquireCredentials: sandbox.stub(),
     } as any;
-    
-    factory = new RemotePRServiceFactory(mockSpawner, mockDetector, GitHubPRService, AdoPRService);
+
+    githubCreator = sandbox.stub().callsFake(() => ({ kind: 'github-service' } as any));
+    adoCreator = sandbox.stub().callsFake(() => ({ kind: 'ado-service' } as any));
+
+    factory = new RemotePRServiceFactory(mockSpawner, mockDetector, githubCreator, adoCreator);
   });
 
   teardown(() => {
@@ -69,7 +72,9 @@ suite('RemotePRServiceFactory', () => {
     const service = await factory.getServiceForRepo('/repo/path');
 
     assert.ok(service);
-    assert.strictEqual(service.constructor.name, 'GitHubPRService');
+    assert.strictEqual(service, githubCreator.firstCall.returnValue);
+    assert.ok(githubCreator.calledOnceWithExactly(mockSpawner, mockDetector));
+    assert.ok(adoCreator.notCalled);
   });
 
   test('returns GitHubPRService for github-enterprise', async () => {
@@ -78,7 +83,9 @@ suite('RemotePRServiceFactory', () => {
     const service = await factory.getServiceForRepo('/ghe/repo');
 
     assert.ok(service);
-    assert.strictEqual(service.constructor.name, 'GitHubPRService');
+    assert.strictEqual(service, githubCreator.firstCall.returnValue);
+    assert.ok(githubCreator.calledOnceWithExactly(mockSpawner, mockDetector));
+    assert.ok(adoCreator.notCalled);
   });
 
   test('returns AdoPRService for azure-devops', async () => {
@@ -87,7 +94,9 @@ suite('RemotePRServiceFactory', () => {
     const service = await factory.getServiceForRepo('/ado/repo');
 
     assert.ok(service);
-    assert.strictEqual(service.constructor.name, 'AdoPRService');
+    assert.strictEqual(service, adoCreator.firstCall.returnValue);
+    assert.ok(adoCreator.calledOnceWithExactly(mockSpawner, mockDetector));
+    assert.ok(githubCreator.notCalled);
   });
 
   test('caches per repoPath', async () => {
@@ -122,26 +131,37 @@ suite('RemotePRServiceFactory', () => {
     const adoService = await factory.getServiceForRepo('/ado/repo');
 
     assert.notStrictEqual(githubService, adoService);
-    assert.strictEqual(githubService.constructor.name, 'GitHubPRService');
-    assert.strictEqual(adoService.constructor.name, 'AdoPRService');
+    assert.strictEqual(githubService, githubCreator.firstCall.returnValue);
+    assert.strictEqual(adoService, adoCreator.firstCall.returnValue);
   });
 
-  test('uses injected constructors instead of hardcoded classes', async () => {
-    let githubCtorCalled = false;
-    let adoCtorCalled = false;
+  test('uses injected service creators instead of hardcoded classes', async () => {
+    let githubCreatorCalled = false;
+    let adoCreatorCalled = false;
     const mockGitHubInstance = { type: 'mock-github' } as any;
     const mockAdoInstance = { type: 'mock-ado' } as any;
-    
-    const mockGithubCtor = function() { githubCtorCalled = true; return mockGitHubInstance; } as any;
-    const mockAdoCtor = function() { adoCtorCalled = true; return mockAdoInstance; } as any;
-    
-    const customFactory = new RemotePRServiceFactory(mockSpawner, mockDetector, mockGithubCtor, mockAdoCtor);
+
+    const mockGithubCreator = (() => {
+      githubCreatorCalled = true;
+      return mockGitHubInstance;
+    }) as any;
+    const mockAdoCreator = (() => {
+      adoCreatorCalled = true;
+      return mockAdoInstance;
+    }) as any;
+
+    const customFactory = new RemotePRServiceFactory(
+      mockSpawner,
+      mockDetector,
+      mockGithubCreator,
+      mockAdoCreator,
+    );
     
     (mockDetector.detect as sinon.SinonStub).resolves(githubProvider);
     const service = await customFactory.getServiceForRepo('/custom/repo');
     
-    assert.ok(githubCtorCalled);
-    assert.ok(!adoCtorCalled);
+    assert.ok(githubCreatorCalled);
+    assert.ok(!adoCreatorCalled);
     assert.strictEqual(service, mockGitHubInstance);
   });
 

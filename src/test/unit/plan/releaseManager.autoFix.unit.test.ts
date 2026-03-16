@@ -525,6 +525,36 @@ suite('DefaultReleaseManager – auto-fix', () => {
       // Comment is our own automated reply — should not trigger a new auto-fix
       assert.strictEqual(findingsProcessingEvents.length, 0);
     });
+
+    test('marks comment as resolved when replies contain ✅ Addressed in automated fix', async () => {
+      const planRunner = createMockPlanRunner();
+      const prMonitor = createEventEmitterPRMonitor();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, prMonitor, store });
+      sandbox.stub(manager as any, 'addressFindings').resolves();
+      const release = await createRelease(manager, planRunner);
+
+      manager.setAutoFix(release.id, true);
+
+      const findingsProcessingEvents: any[] = [];
+      manager.on('findingsProcessing', (...args: any[]) => findingsProcessingEvents.push(args));
+
+      prMonitor.emit('cycleComplete', release.id, {
+        comments: [
+          {
+            id: 'c3',
+            isResolved: false,
+            body: 'fix this',
+            replies: [{ id: 'r1', author: 'bot', body: '\u2705 Addressed in automated fix (abc1234)' }],
+          },
+        ],
+        checks: [],
+        securityAlerts: [],
+      });
+
+      // Thread already contains our automated fix reply — should not trigger a new auto-fix
+      assert.strictEqual(findingsProcessingEvents.length, 0);
+    });
   });
 
   // ── _onFixPlanCompleted ─────────────────────────────────────────────────

@@ -112,8 +112,15 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               c.isResolved = true;
               continue;
             }
-            // Filter out our own automated reply comments so they don't appear as new findings
-            if (typeof c.body === 'string' && c.body.includes('\u2705 Addressed in automated fix')) {
+            // Filter out our own automated reply comments so they don't appear as new findings,
+            // including replies captured within a comment thread.
+            const hasAutomatedFixReply = (
+              (typeof c.body === 'string' && c.body.includes('\u2705 Addressed in automated fix'))
+              || c.replies?.some((reply: any) => (
+                typeof reply.body === 'string' && reply.body.includes('\u2705 Addressed in automated fix')
+              ))
+            );
+            if (hasAutomatedFixReply) {
               c.isResolved = true;
             }
           }
