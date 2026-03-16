@@ -101,6 +101,7 @@ function createMockPRServiceFactory(overrides?: any): any {
     replyToComment: sinon.stub().resolves(),
     addIssueComment: sinon.stub().resolves(),
     resolveThread: sinon.stub().resolves(),
+    minimizeComment: sinon.stub().resolves(),
     ...overrides,
   };
   return {
@@ -664,6 +665,41 @@ suite('DefaultReleaseManager – auto-fix', () => {
 
       assert.ok(prFactory._service.addIssueComment.calledOnce, 'should call addIssueComment for top-level comment');
       assert.ok(prFactory._service.replyToComment.notCalled, 'should not call replyToComment for top-level comment');
+    });
+
+    test('calls replyToComment for review thread comment without path', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const prFactory = createMockPRServiceFactory();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, prFactory, store });
+      const release = await createRelease(manager, planRunner);
+
+      release.prNumber = 42;
+      release.fixPlanIds = ['fix-plan-1'];
+      release.fixPlanFindings = {
+        'fix-plan-1': [
+          {
+            type: 'comment',
+            id: 'comment-c2-thread',
+            commentId: 'c2-thread',
+            author: 'reviewer',
+            body: 'review feedback',
+            threadId: 'thread-42',
+            nodeId: 'node-42',
+          },
+        ],
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('timed out')), 2000);
+        manager.once('findingsResolved', () => { clearTimeout(t); resolve(); });
+        planRunner.emit('planCompleted', { id: 'fix-plan-1', spec: { repoPath: '/repo' } }, 'succeeded');
+      });
+
+      assert.ok(prFactory._service.replyToComment.calledOnce, 'should call replyToComment for thread comment');
+      assert.ok(prFactory._service.addIssueComment.notCalled, 'should not call addIssueComment for thread comment');
+      assert.ok(prFactory._service.resolveThread.calledOnce, 'should resolve the review thread');
+      assert.ok(prFactory._service.minimizeComment.notCalled, 'should not minimize a threaded review comment');
     });
 
     test('adds commentId to addressedCommentIds', async () => {

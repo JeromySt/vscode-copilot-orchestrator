@@ -1333,7 +1333,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               try { await prService.resolveThread(release.prNumber, comment.threadId, cwd); } catch { /* non-fatal */ }
             }
 
-            if (!comment.path && comment.nodeId && typeof prService.minimizeComment === 'function') {
+            if (!comment.path && !comment.threadId && comment.nodeId && typeof prService.minimizeComment === 'function') {
               try { await prService.minimizeComment(comment.nodeId, 'RESOLVED', cwd); } catch { /* non-fatal */ }
             }
 
