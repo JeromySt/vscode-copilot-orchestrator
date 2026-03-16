@@ -527,6 +527,34 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       assert.ok(prService.minimizeComment.notCalled);
     });
 
+    test('does not minimize threaded review comments even when nodeId is available', async () => {
+      const copilot = createMockCopilot(sandbox);
+      const git = createMockGit(sandbox);
+      git.repository.hasChanges.resolves(false);
+      const monitor = makeMonitor(copilot, git);
+      const prService = createMockPRService(sandbox);
+      const state = makeState(prService);
+      const cycle = makeCycle({
+        comments: [
+          {
+            id: 'c-thread',
+            author: 'rev',
+            body: 'Fix',
+            isResolved: false,
+            source: 'github',
+            threadId: 'thread-42',
+            nodeId: 'node-thread',
+          },
+        ],
+      });
+
+      await callAddressFindings(monitor, state, cycle);
+
+      assert.ok(prService.replyToComment.calledOnce);
+      assert.ok(prService.resolveThread.calledOnce);
+      assert.ok(prService.minimizeComment.notCalled);
+    });
+
     test('replies to inline comments with replyToComment', async () => {
       const copilot = createMockCopilot(sandbox);
       const git = createMockGit(sandbox);
