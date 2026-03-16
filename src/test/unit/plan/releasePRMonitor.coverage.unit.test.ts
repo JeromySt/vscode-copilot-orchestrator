@@ -527,7 +527,7 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       assert.ok(prService.minimizeComment.notCalled);
     });
 
-    test('does not minimize threaded comments without a path', async () => {
+    test('does not minimize threaded comments even when nodeId is available', async () => {
       const copilot = createMockCopilot(sandbox);
       const git = createMockGit(sandbox);
       git.repository.hasChanges.resolves(false);
@@ -540,10 +540,10 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
             id: 'c-thread',
             author: 'rev',
             body: 'Fix',
-            threadId: 'thread-1',
             isResolved: false,
             source: 'github',
             nodeId: 'node-thread',
+            threadId: 'thread-42',
           },
         ],
       });
