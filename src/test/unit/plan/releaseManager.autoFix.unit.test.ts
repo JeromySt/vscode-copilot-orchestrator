@@ -101,6 +101,7 @@ function createMockPRServiceFactory(overrides?: any): any {
     replyToComment: sinon.stub().resolves(),
     addIssueComment: sinon.stub().resolves(),
     resolveThread: sinon.stub().resolves(),
+    minimizeComment: sinon.stub().resolves(),
     ...overrides,
   };
   return {
@@ -526,6 +527,36 @@ suite('DefaultReleaseManager – auto-fix', () => {
       assert.strictEqual(findingsProcessingEvents.length, 0);
     });
 
+    test('does not suppress human comment that only references automated fix text', async () => {
+      const planRunner = createMockPlanRunner();
+      const prMonitor = createEventEmitterPRMonitor();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, prMonitor, store });
+      sandbox.stub(manager as any, 'addressFindings').resolves();
+      const release = await createRelease(manager, planRunner);
+
+      manager.setAutoFix(release.id, true);
+
+      const findingsProcessingEvents: any[] = [];
+      manager.on('findingsProcessing', (...args: any[]) => findingsProcessingEvents.push(args));
+
+      prMonitor.emit('cycleComplete', release.id, {
+        comments: [
+          {
+            id: 'c-human',
+            isResolved: false,
+            author: 'JeromySt',
+            body: "Re: copilot-pull-request-reviewer[bot]'s feedback -- ✅ Addressed in automated fix (abc1234)",
+          },
+        ],
+        checks: [],
+        securityAlerts: [],
+      });
+
+      // Human-authored feedback that mentions the marker should still be treated as a new finding
+      assert.strictEqual(findingsProcessingEvents.length, 1);
+    });
+
     test('marks comment as resolved when replies contain ✅ Addressed in automated fix', async () => {
       const planRunner = createMockPlanRunner();
       const prMonitor = createEventEmitterPRMonitor();
@@ -585,6 +616,32 @@ suite('DefaultReleaseManager – auto-fix', () => {
       assert.ok(prFactory._service.addIssueComment.notCalled, 'should not call addIssueComment for inline comment');
     });
 
+    test('calls replyToComment for threaded comment without path', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const prFactory = createMockPRServiceFactory();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, prFactory, store });
+      const release = await createRelease(manager, planRunner);
+
+      release.prNumber = 42;
+      release.fixPlanIds = ['fix-plan-1'];
+      release.fixPlanFindings = {
+        'fix-plan-1': [
+          { type: 'comment', id: 'comment-c-thread', commentId: 'c-thread', author: 'reviewer', body: 'fix this thread', threadId: 'thread-1' },
+        ],
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('timed out')), 2000);
+        manager.once('findingsResolved', () => { clearTimeout(t); resolve(); });
+        planRunner.emit('planCompleted', { id: 'fix-plan-1', spec: { repoPath: '/repo' } }, 'succeeded');
+      });
+
+      assert.ok(prFactory._service.replyToComment.calledOnce, 'should call replyToComment for threaded comment');
+      assert.ok(prFactory._service.addIssueComment.notCalled, 'should not call addIssueComment for threaded comment');
+      assert.ok(prFactory._service.resolveThread.calledOnce, 'should resolve the thread when threadId is present');
+    });
+
     test('calls addIssueComment for top-level comment without path', async () => {
       const planRunner = createEventEmitterPlanRunner();
       const prFactory = createMockPRServiceFactory();
@@ -608,6 +665,41 @@ suite('DefaultReleaseManager – auto-fix', () => {
 
       assert.ok(prFactory._service.addIssueComment.calledOnce, 'should call addIssueComment for top-level comment');
       assert.ok(prFactory._service.replyToComment.notCalled, 'should not call replyToComment for top-level comment');
+    });
+
+    test('calls replyToComment for review thread comment without path', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const prFactory = createMockPRServiceFactory();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, prFactory, store });
+      const release = await createRelease(manager, planRunner);
+
+      release.prNumber = 42;
+      release.fixPlanIds = ['fix-plan-1'];
+      release.fixPlanFindings = {
+        'fix-plan-1': [
+          {
+            type: 'comment',
+            id: 'comment-c2-thread',
+            commentId: 'c2-thread',
+            author: 'reviewer',
+            body: 'review feedback',
+            threadId: 'thread-42',
+            nodeId: 'node-42',
+          },
+        ],
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('timed out')), 2000);
+        manager.once('findingsResolved', () => { clearTimeout(t); resolve(); });
+        planRunner.emit('planCompleted', { id: 'fix-plan-1', spec: { repoPath: '/repo' } }, 'succeeded');
+      });
+
+      assert.ok(prFactory._service.replyToComment.calledOnce, 'should call replyToComment for thread comment');
+      assert.ok(prFactory._service.addIssueComment.notCalled, 'should not call addIssueComment for thread comment');
+      assert.ok(prFactory._service.resolveThread.calledOnce, 'should resolve the review thread');
+      assert.ok(prFactory._service.minimizeComment.notCalled, 'should not minimize a threaded review comment');
     });
 
     test('adds commentId to addressedCommentIds', async () => {

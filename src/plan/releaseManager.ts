@@ -112,12 +112,15 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               c.isResolved = true;
               continue;
             }
-            // Filter out our own automated reply comments so they don't appear as new findings,
-            // including replies captured within a comment thread.
+            // Filter out our own automated reply comments so they don't appear as new findings.
+            // Top-level automated replies quote the original feedback, while thread replies contain only the marker.
             const hasAutomatedFixReply = (
-              (typeof c.body === 'string' && c.body.includes('\u2705 Addressed in automated fix'))
+              (typeof c.body === 'string'
+                && c.body.startsWith('> ')
+                && c.body.includes('\n\n\u2705 Addressed in automated fix'))
               || c.replies?.some((reply: any) => (
-                typeof reply.body === 'string' && reply.body.includes('\u2705 Addressed in automated fix')
+                typeof reply.body === 'string'
+                && reply.body.trimStart().startsWith('\u2705 Addressed in automated fix')
               ))
             );
             if (hasAutomatedFixReply) {
@@ -500,7 +503,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     // Add PR monitoring progress if monitoring
     if (release.status === 'monitoring' || release.status === 'addressing') {
       const cycles = this.prMonitor.getMonitorCycles(releaseId);
-      const lastCycle = cycles[cycles.length - 1];
+      const lastCycle = release.lastCycle ?? cycles[cycles.length - 1];
 
       const unresolvedThreads = lastCycle?.comments.filter((c) => !c.isResolved).length || 0;
       const failingChecks = lastCycle?.checks.filter((c) => c.status === 'failing').length || 0;
@@ -1319,7 +1322,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           try {
             const replyText = `✅ Addressed in automated fix${commitHash ? ` (${commitHash.substring(0, 7)})` : ''}`;
 
-            if (comment.path) {
+            if (comment.path || comment.threadId) {
               await prService.replyToComment(release.prNumber, commentId, replyText, cwd);
             } else {
               const quotedBody = (comment.body || '').split('\n').map((l: string) => `> ${l}`).join('\n');
@@ -1330,7 +1333,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               try { await prService.resolveThread(release.prNumber, comment.threadId, cwd); } catch { /* non-fatal */ }
             }
 
-            if (!comment.path && comment.nodeId && typeof prService.minimizeComment === 'function') {
+            if (!comment.path && !comment.threadId && comment.nodeId && typeof prService.minimizeComment === 'function') {
               try { await prService.minimizeComment(comment.nodeId, 'RESOLVED', cwd); } catch { /* non-fatal */ }
             }
 

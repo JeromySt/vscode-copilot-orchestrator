@@ -662,6 +662,36 @@ suite('ReleaseManager – extra coverage', () => {
       assert.strictEqual(progress.prMonitoring.cyclesCompleted, 0);
     });
 
+    test('prefers release.lastCycle when it has manager-filtered resolved comments', async () => {
+      const planRunner = createMockPlanRunner();
+      const prMonitor = createMockPRMonitor();
+      const rawCycle = {
+        cycleNumber: 1,
+        timestamp: Date.now(),
+        checks: [],
+        comments: [{ id: 'c1', author: 'reviewer', body: 'Please fix this', source: 'human', isResolved: false }],
+        securityAlerts: [],
+        actions: [],
+      };
+      prMonitor.getMonitorCycles.returns([rawCycle]);
+      const manager = createManager({ planRunner, prMonitor });
+      const release = await createRelease(manager, planRunner);
+
+      release.status = 'monitoring';
+      release.lastCycle = {
+        ...rawCycle,
+        comments: [{ id: 'c1', author: 'reviewer', body: 'Please fix this', source: 'human', isResolved: true }],
+      };
+
+      const progress = manager.getReleaseProgress(release.id);
+
+      assert.ok(progress);
+      assert.ok(progress.prMonitoring);
+      assert.strictEqual(progress.prMonitoring.cyclesCompleted, 1);
+      assert.strictEqual(progress.prMonitoring.unresolvedThreads, 0);
+      assert.strictEqual(progress.prMonitoring.lastCycle?.comments[0].isResolved, true);
+    });
+
     test('returns undefined for non-existent release', () => {
       const manager = createManager();
       const progress = manager.getReleaseProgress('no-such-id');

@@ -30,6 +30,7 @@ import type { IPulseEmitter, Disposable as PulseDisposable } from '../interfaces
 import { Logger } from '../core/logger';
 
 const log = Logger.for('plan');
+const AUTOMATED_FIX_MARKER = '✅ Addressed in automated fix';
 
 // Poll every 2 minutes (120 pulse ticks at ~1s each)
 const POLL_INTERVAL_TICKS = 120;
@@ -269,20 +270,32 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       url: c.url,
     }));
 
-    const cycleComments: PRCommentResult[] = comments.map((c) => ({
-      id: c.id,
-      author: c.author,
-      body: c.body,
-      path: c.path,
-      line: c.line,
-      isResolved: c.isResolved,
-      source: c.source,
-      threadId: c.threadId,
-      url: c.url,
-      nodeId: c.nodeId,
-      parentReviewId: c.parentReviewId,
-      replies: c.replies,
-    }));
+    const cycleComments: PRCommentResult[] = comments.map((c) => {
+      const hasAutomatedFixReply = (
+        (typeof c.body === 'string'
+          && c.body.startsWith('> ')
+          && c.body.includes(`\n\n${AUTOMATED_FIX_MARKER}`))
+        || c.replies?.some((reply) => (
+          typeof reply.body === 'string'
+          && reply.body.trimStart().startsWith(AUTOMATED_FIX_MARKER)
+        )) === true
+      );
+
+      return {
+        id: c.id,
+        author: c.author,
+        body: c.body,
+        path: c.path,
+        line: c.line,
+        isResolved: c.isResolved === true || hasAutomatedFixReply,
+        source: c.source,
+        threadId: c.threadId,
+        url: c.url,
+        nodeId: c.nodeId,
+        parentReviewId: c.parentReviewId,
+        replies: c.replies,
+      };
+    });
 
     const cycleAlerts: PRSecurityAlert[] = alerts.map((a) => ({
       id: a.id,
@@ -572,6 +585,14 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
           await state.prService.resolveThread(
             state.prNumber,
             comment.threadId,
+            state.repoPath,
+          );
+        }
+
+        if (!comment.path && comment.nodeId && typeof state.prService.minimizeComment === 'function') {
+          await state.prService.minimizeComment(
+            comment.nodeId,
+            'RESOLVED',
             state.repoPath,
           );
         }

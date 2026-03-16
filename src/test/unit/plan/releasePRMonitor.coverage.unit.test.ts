@@ -40,6 +40,7 @@ function createMockPRService(sandbox: sinon.SinonSandbox): any {
     replyToComment: sandbox.stub().resolves(),
     addIssueComment: sandbox.stub().resolves(),
     resolveThread: sandbox.stub().resolves(),
+    minimizeComment: sandbox.stub().resolves(),
     createPR: sandbox.stub().resolves({ prNumber: 42, prUrl: 'https://github.com/test/pr/42' }),
   };
 }
@@ -384,7 +385,7 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       assert.ok(copilot.run.calledOnce);
     });
 
-    test('replies to unresolved comments after successful copilot run (no changes)', async () => {
+    test('replies to inline comments after successful copilot run (no changes)', async () => {
       const copilot = createMockCopilot(sandbox);
       const git = createMockGit(sandbox);
       git.repository.hasChanges.resolves(false);
@@ -399,10 +400,11 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
 
       const actions = await callAddressFindings(monitor, state, cycle);
 
-      assert.ok(prService.addIssueComment.calledOnce);
-      assert.ok(prService.replyToComment.notCalled);
-      assert.strictEqual(prService.addIssueComment.firstCall.args[0], state.prNumber);
-      assert.ok(prService.addIssueComment.firstCall.args[1].includes('> Fix this'));
+      assert.ok(prService.replyToComment.calledOnce);
+      assert.ok(prService.addIssueComment.notCalled);
+      assert.strictEqual(prService.replyToComment.firstCall.args[0], state.prNumber);
+      assert.strictEqual(prService.replyToComment.firstCall.args[1], 'c1');
+      assert.ok(prService.replyToComment.firstCall.args[2].includes('✅ Addressed in automated fix'));
 
       const respondAction = actions.find((a: any) => a.type === 'respond-comment');
       assert.ok(respondAction);
@@ -474,6 +476,55 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       await callAddressFindings(monitor, state, cycle);
 
       assert.ok(prService.resolveThread.notCalled);
+    });
+
+    test('minimizes top-level review comments when nodeId is available', async () => {
+      const copilot = createMockCopilot(sandbox);
+      const git = createMockGit(sandbox);
+      git.repository.hasChanges.resolves(false);
+      const monitor = makeMonitor(copilot, git);
+      const prService = createMockPRService(sandbox);
+      const state = makeState(prService);
+      const cycle = makeCycle({
+        comments: [
+          { id: 'c-root', author: 'rev', body: 'Fix', isResolved: false, source: 'github', nodeId: 'node-42' },
+        ],
+      });
+
+      await callAddressFindings(monitor, state, cycle);
+
+      assert.ok(prService.addIssueComment.calledOnce);
+      assert.ok(prService.minimizeComment.calledOnce);
+      assert.strictEqual(prService.minimizeComment.firstCall.args[0], 'node-42');
+      assert.strictEqual(prService.minimizeComment.firstCall.args[1], 'RESOLVED');
+      assert.strictEqual(prService.minimizeComment.firstCall.args[2], state.repoPath);
+    });
+
+    test('does not minimize inline comments even when nodeId is available', async () => {
+      const copilot = createMockCopilot(sandbox);
+      const git = createMockGit(sandbox);
+      git.repository.hasChanges.resolves(false);
+      const monitor = makeMonitor(copilot, git);
+      const prService = createMockPRService(sandbox);
+      const state = makeState(prService);
+      const cycle = makeCycle({
+        comments: [
+          {
+            id: 'c-inline',
+            author: 'rev',
+            body: 'Fix',
+            path: 'src/file.ts',
+            isResolved: false,
+            source: 'github',
+            nodeId: 'node-inline',
+          },
+        ],
+      });
+
+      await callAddressFindings(monitor, state, cycle);
+
+      assert.ok(prService.replyToComment.calledOnce);
+      assert.ok(prService.minimizeComment.notCalled);
     });
 
     test('replies to inline comments with replyToComment', async () => {
