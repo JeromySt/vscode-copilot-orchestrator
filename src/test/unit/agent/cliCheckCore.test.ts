@@ -7,6 +7,7 @@ import * as sinon from 'sinon';
 import {
   isCopilotCliAvailable,
   checkCopilotCliAsync,
+  hasGhCopilotAsync,
   resetCliCache,
   isCliCachePopulated,
 } from '../../../agent/cliCheckCore';
@@ -190,6 +191,53 @@ suite('cliCheckCore', () => {
         // Verify process was NOT killed by the timeout
         assert.strictEqual(result, true);
         assert.ok(spawnStub.returnValues.every((p: any) => !p.kill.called),
+          'kill should not have been called — timer should have been cleared on close');
+      } finally {
+        clock.restore();
+      }
+    });
+  });
+
+  suite('hasGhCopilotAsync settle correctness', () => {
+    test('resolves only once when close fires after error', async () => {
+      spawnStub.callsFake(() => {
+        const proc: any = new (require('events').EventEmitter)();
+        proc.stdout = new (require('events').EventEmitter)();
+        proc.stderr = new (require('events').EventEmitter)();
+        proc.kill = sinon.stub();
+        setTimeout(() => {
+          proc.emit('error', new Error('not found'));
+          proc.emit('close', 1);
+        }, 5);
+        return proc;
+      });
+
+      const result = await hasGhCopilotAsync();
+      assert.strictEqual(result, false);
+    });
+
+    test('timer is cleared when process closes before timeout', async () => {
+      const clock = sinon.useFakeTimers();
+      try {
+        let proc: any;
+        spawnStub.callsFake(() => {
+          proc = new (require('events').EventEmitter)();
+          proc.stdout = new (require('events').EventEmitter)();
+          proc.stderr = new (require('events').EventEmitter)();
+          proc.kill = sinon.stub();
+          setImmediate(() => {
+            proc.stdout.emit('data', Buffer.from('github/gh-copilot\n'));
+            proc.emit('close', 0);
+          });
+          return proc;
+        });
+
+        const promise = hasGhCopilotAsync();
+        await clock.tickAsync(100);
+        const result = await promise;
+
+        assert.strictEqual(result, true);
+        assert.ok(!proc.kill.called,
           'kill should not have been called — timer should have been cleared on close');
       } finally {
         clock.restore();

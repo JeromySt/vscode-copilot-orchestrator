@@ -114,7 +114,7 @@ export async function cmdOkAsync(cmd: string, spawner?: IProcessSpawner): Promis
   });
 }
 
-async function hasGhCopilotAsync(spawner?: IProcessSpawner): Promise<boolean> {
+export async function hasGhCopilotAsync(spawner?: IProcessSpawner): Promise<boolean> {
   return new Promise((resolve) => {
     const actualSpawner = spawner ?? getFallbackSpawner();
     let settled = false;
