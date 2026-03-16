@@ -526,6 +526,36 @@ suite('DefaultReleaseManager – auto-fix', () => {
       assert.strictEqual(findingsProcessingEvents.length, 0);
     });
 
+    test('does not suppress human comment that only references automated fix text', async () => {
+      const planRunner = createMockPlanRunner();
+      const prMonitor = createEventEmitterPRMonitor();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, prMonitor, store });
+      sandbox.stub(manager as any, 'addressFindings').resolves();
+      const release = await createRelease(manager, planRunner);
+
+      manager.setAutoFix(release.id, true);
+
+      const findingsProcessingEvents: any[] = [];
+      manager.on('findingsProcessing', (...args: any[]) => findingsProcessingEvents.push(args));
+
+      prMonitor.emit('cycleComplete', release.id, {
+        comments: [
+          {
+            id: 'c-human',
+            isResolved: false,
+            author: 'JeromySt',
+            body: "Re: copilot-pull-request-reviewer[bot]'s feedback -- ✅ Addressed in automated fix (abc1234)",
+          },
+        ],
+        checks: [],
+        securityAlerts: [],
+      });
+
+      // Human-authored feedback that mentions the marker should still be treated as a new finding
+      assert.strictEqual(findingsProcessingEvents.length, 1);
+    });
+
     test('marks comment as resolved when replies contain ✅ Addressed in automated fix', async () => {
       const planRunner = createMockPlanRunner();
       const prMonitor = createEventEmitterPRMonitor();
