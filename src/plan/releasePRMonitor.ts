@@ -593,7 +593,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
           );
         }
 
-        if (!comment.path && comment.nodeId && typeof state.prService.minimizeComment === 'function') {
+        if (!comment.path && !comment.threadId && comment.nodeId && typeof state.prService.minimizeComment === 'function') {
           await state.prService.minimizeComment(
             comment.nodeId,
             'RESOLVED',
