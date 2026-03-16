@@ -585,6 +585,32 @@ suite('DefaultReleaseManager – auto-fix', () => {
       assert.ok(prFactory._service.addIssueComment.notCalled, 'should not call addIssueComment for inline comment');
     });
 
+    test('calls replyToComment for threaded comment without path', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const prFactory = createMockPRServiceFactory();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, prFactory, store });
+      const release = await createRelease(manager, planRunner);
+
+      release.prNumber = 42;
+      release.fixPlanIds = ['fix-plan-1'];
+      release.fixPlanFindings = {
+        'fix-plan-1': [
+          { type: 'comment', id: 'comment-c-thread', commentId: 'c-thread', author: 'reviewer', body: 'fix this thread', threadId: 'thread-1' },
+        ],
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('timed out')), 2000);
+        manager.once('findingsResolved', () => { clearTimeout(t); resolve(); });
+        planRunner.emit('planCompleted', { id: 'fix-plan-1', spec: { repoPath: '/repo' } }, 'succeeded');
+      });
+
+      assert.ok(prFactory._service.replyToComment.calledOnce, 'should call replyToComment for threaded comment');
+      assert.ok(prFactory._service.addIssueComment.notCalled, 'should not call addIssueComment for threaded comment');
+      assert.ok(prFactory._service.resolveThread.calledOnce, 'should resolve the thread when threadId is present');
+    });
+
     test('calls addIssueComment for top-level comment without path', async () => {
       const planRunner = createEventEmitterPlanRunner();
       const prFactory = createMockPRServiceFactory();
