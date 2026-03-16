@@ -327,7 +327,12 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     (c) => {
       const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
       const detector = c.resolve<import('./interfaces').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
-      return new RemotePRServiceFactory(spawner, detector, GitHubPRService, AdoPRService);
+      return new RemotePRServiceFactory(
+        spawner,
+        detector,
+        (serviceSpawner, serviceDetector) => new GitHubPRService(serviceSpawner, serviceDetector),
+        (serviceSpawner, serviceDetector) => new AdoPRService(serviceSpawner, serviceDetector),
+      );
     },
   );
 
