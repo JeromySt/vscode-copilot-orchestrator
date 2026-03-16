@@ -500,7 +500,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     // Add PR monitoring progress if monitoring
     if (release.status === 'monitoring' || release.status === 'addressing') {
       const cycles = this.prMonitor.getMonitorCycles(releaseId);
-      const lastCycle = cycles[cycles.length - 1];
+      const lastCycle = release.lastCycle ?? cycles[cycles.length - 1];
 
       const unresolvedThreads = lastCycle?.comments.filter((c) => !c.isResolved).length || 0;
       const failingChecks = lastCycle?.checks.filter((c) => c.status === 'failing').length || 0;
