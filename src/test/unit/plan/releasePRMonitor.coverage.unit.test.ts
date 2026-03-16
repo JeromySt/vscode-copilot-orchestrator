@@ -529,7 +529,7 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       assert.ok(prService.minimizeComment.notCalled);
     });
 
-    test('does not minimize threaded comments even when nodeId is available', async () => {
+    test('does not minimize threaded review comments even when nodeId is available', async () => {
       const copilot = createMockCopilot(sandbox);
       const git = createMockGit(sandbox);
       git.repository.hasChanges.resolves(false);
@@ -544,8 +544,8 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
             body: 'Fix',
             isResolved: false,
             source: 'github',
-            nodeId: 'node-thread',
             threadId: 'thread-42',
+            nodeId: 'node-thread',
           },
         ],
       });
