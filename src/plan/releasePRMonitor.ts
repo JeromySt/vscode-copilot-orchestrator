@@ -551,7 +551,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
       try {
         const replyText = `✅ Addressed in automated fix ${commitHash ? `(${commitHash.substring(0, 7)})` : ''}`;
 
-        if (comment.path) {
+        if (comment.path || comment.threadId) {
           await state.prService.replyToComment(
             state.prNumber,
             comment.id,
@@ -559,7 +559,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
             state.repoPath,
           );
         } else {
-          const quotedBody = comment.body.split('\n').map((line) => `> ${line}`).join('\n');
+          const quotedBody = (comment.body || '').split('\n').map((line) => `> ${line}`).join('\n');
           await state.prService.addIssueComment(
             state.prNumber,
             `${quotedBody}\n\n${replyText}`,

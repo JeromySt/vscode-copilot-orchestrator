@@ -393,7 +393,7 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       const state = makeState(prService);
       const cycle = makeCycle({
         comments: [
-          { id: 'c1', author: 'rev', body: 'Fix this', isResolved: false, source: 'github' },
+          { id: 'c1', author: 'rev', body: 'Fix this', path: 'src/file.ts', isResolved: false, source: 'github' },
         ],
       });
 
@@ -408,6 +408,34 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       assert.ok(respondAction);
       assert.strictEqual(respondAction.success, true);
       assert.ok(respondAction.description.includes('rev'));
+    });
+
+    test('posts a quoted issue comment for non-threadable PR feedback', async () => {
+      const copilot = createMockCopilot(sandbox);
+      const git = createMockGit(sandbox);
+      git.repository.hasChanges.resolves(false);
+      const monitor = makeMonitor(copilot, git);
+      const prService = createMockPRService(sandbox);
+      const state = makeState(prService);
+      const cycle = makeCycle({
+        comments: [
+          { id: 'c-top', author: 'rev', body: 'Please revisit this', isResolved: false, source: 'human' },
+        ],
+      });
+
+      const actions = await callAddressFindings(monitor, state, cycle);
+
+      assert.ok(prService.replyToComment.notCalled);
+      assert.ok(prService.addIssueComment.calledOnce);
+      assert.strictEqual(prService.addIssueComment.firstCall.args[0], state.prNumber);
+      assert.strictEqual(
+        prService.addIssueComment.firstCall.args[1],
+        '> Please revisit this\n\n✅ Addressed in automated fix ',
+      );
+
+      const respondAction = actions.find((a: any) => a.type === 'respond-comment');
+      assert.ok(respondAction);
+      assert.strictEqual(respondAction.success, true);
     });
 
     test('resolves thread when comment has threadId', async () => {
@@ -439,7 +467,7 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       const state = makeState(prService);
       const cycle = makeCycle({
         comments: [
-          { id: 'c1', author: 'rev', body: 'Fix', isResolved: false, source: 'github' },
+          { id: 'c1', author: 'rev', body: 'Fix', path: 'src/file.ts', isResolved: false, source: 'github' },
         ],
       });
 
@@ -478,7 +506,7 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       const state = makeState(prService);
       const cycle = makeCycle({
         comments: [
-          { id: 'c1', author: 'rev', body: 'Fix', isResolved: false, source: 'github' },
+          { id: 'c1', author: 'rev', body: 'Fix', path: 'src/file.ts', isResolved: false, source: 'github' },
         ],
       });
 
@@ -500,7 +528,7 @@ suite('ReleasePRMonitor – _addressFindings coverage', () => {
       const state = makeState(prService);
       const cycle = makeCycle({
         comments: [
-          { id: 'c1', author: 'rev', body: 'Fix this', isResolved: false, source: 'github' },
+          { id: 'c1', author: 'rev', body: 'Fix this', path: 'src/file.ts', isResolved: false, source: 'github' },
         ],
       });
 
