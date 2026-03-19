@@ -232,6 +232,31 @@ export interface PRListItem {
 }
 
 /**
+ * Options for merging a pull request.
+ */
+export interface PRMergeOptions {
+  /** Merge method to use */
+  method: 'squash' | 'merge' | 'rebase';
+
+  /** Whether to bypass branch protection rules */
+  admin?: boolean;
+
+  /** Whether to delete the source branch after merging */
+  deleteSourceBranch?: boolean;
+
+  /** Commit title for squash/merge commits */
+  title?: string;
+}
+
+/**
+ * Result of merging a pull request.
+ */
+export interface PRMergeResult {
+  /** SHA of the merge commit */
+  commitSha: string;
+}
+
+/**
  * Detailed information about a pull request.
  */
 export interface PRDetails {

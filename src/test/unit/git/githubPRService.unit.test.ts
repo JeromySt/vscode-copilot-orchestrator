@@ -380,6 +380,49 @@ suite('GitHubPRService', () => {
     });
   });
 
+  suite('mergePR', () => {
+    test('calls gh pr merge with squash method', async () => {
+      const mockProc = makeMockProcess(JSON.stringify({ mergeCommit: { oid: 'abc1234' } }), '', 0);
+      (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
+
+      const result = await service.mergePR(42, '/repo', { method: 'squash' });
+
+      assert.strictEqual(result.commitSha, 'abc1234');
+      const spawnCall = (mockSpawner.spawn as sinon.SinonStub).getCall(0);
+      assert.strictEqual(spawnCall.args[0], 'gh');
+      assert.ok(spawnCall.args[1].includes('--squash'));
+      assert.ok(!spawnCall.args[1].includes('--admin'));
+    });
+
+    test('includes --admin and --delete-branch flags when requested', async () => {
+      const mockProc = makeMockProcess(JSON.stringify({ mergeCommit: { oid: 'def5678' } }), '', 0);
+      (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
+
+      const result = await service.mergePR(42, '/repo', {
+        method: 'merge',
+        admin: true,
+        deleteSourceBranch: true,
+        title: 'My release',
+      });
+
+      assert.strictEqual(result.commitSha, 'def5678');
+      const args = (mockSpawner.spawn as sinon.SinonStub).getCall(0).args[1] as string[];
+      assert.ok(args.includes('--admin'));
+      assert.ok(args.includes('--delete-branch'));
+      assert.ok(args.includes('--subject'));
+      assert.ok(args.includes('My release'));
+    });
+
+    test('handles empty output gracefully', async () => {
+      const mockProc = makeMockProcess('', '', 0);
+      (mockSpawner.spawn as sinon.SinonStub).returns(mockProc);
+
+      const result = await service.mergePR(42, '/repo', { method: 'rebase' });
+
+      assert.strictEqual(result.commitSha, '');
+    });
+  });
+
   suite('getSecurityAlerts', () => {
     test('returns empty on 404', async () => {
       const mockProc = makeMockProcess('', 'HTTP 404: Not Found', 1);
