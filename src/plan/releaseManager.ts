@@ -101,34 +101,25 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           const comments = cycle.comments || [];
           const alerts = cycle.securityAlerts || [];
 
-          // Mark previously-addressed comments as resolved.
-          // Issue comments and top-level reviews lack GitHub thread resolution,
-          // so we track which ones we've replied to and treat them as resolved.
-          const addressed = new Set(rel.addressedCommentIds || []);
+          // Filter out our own automated reply comments so they don't appear as findings.
+          // Only hide comments that ARE our bot replies (contain the signature).
+          // Don't hide original reviewer comments even if we've previously addressed them —
+          // the fix may not have worked, so they should remain visible until
+          // the thread is resolved natively on GitHub.
+          const rawUnresolved = comments.filter((c: any) => !c.isResolved).length;
           for (const c of comments) {
             if (c.isResolved) continue;
-            // Mark if we previously addressed this comment
-            if (addressed.has(c.id)) {
-              c.isResolved = true;
-              continue;
-            }
-            // Filter out our own automated reply comments so they don't appear as new findings.
-            // Top-level automated replies quote the original feedback, while thread replies contain only the marker.
-            const hasAutomatedFixReply = (
-              (typeof c.body === 'string'
-                && c.body.startsWith('> ')
-                && c.body.includes('\n\n\u2705 Addressed in automated fix'))
-              || (typeof c.body === 'string'
-                && c.body.startsWith("Re: copilot-pull-request-reviewer[bot]'s feedback")
-                && c.body.includes('\u2705 Addressed in automated fix'))
-              || c.replies?.some((reply: any) => (
-                typeof reply.body === 'string'
-                && reply.body.trimStart().startsWith('\u2705 Addressed in automated fix')
-              ))
-            );
-            if (hasAutomatedFixReply) {
+            // Filter bot replies in all formats:
+            // Format 1: "✅ Addressed in automated fix..."  (direct reply)
+            // Format 2: "> quoted text\n\n✅ Addressed..."  (quote-reply)
+            // Format 3: "Re: reviewer's feedback — ✅ Addressed..."  (old format)
+            if (typeof c.body === 'string' && c.body.includes('\u2705 Addressed in automated fix')) {
               c.isResolved = true;
             }
+          }
+          const filteredUnresolved = comments.filter((c: any) => !c.isResolved).length;
+          if (rawUnresolved !== filteredUnresolved) {
+            log.debug('Bot reply filter', { rawUnresolved, filteredUnresolved, filtered: rawUnresolved - filteredUnresolved });
           }
 
           rel.monitoringStats = {
@@ -146,13 +137,31 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
           // ── Auto-fix: if enabled, automatically address new unresolved findings ──
           if (rel.autoFixEnabled) {
-            const autoFixedSet = new Set(rel.autoFixedFindingIds || []);
+            // Only block findings that are currently being worked on (plan still running).
+            // Completed plans (succeeded or failed) do NOT block re-fixing —
+            // if the finding reappears as unresolved, the previous fix didn't work.
+            const activelyFixedIds = new Set<string>();
+            if (rel.fixPlanIds && rel.fixPlanFindings) {
+              for (const planId of rel.fixPlanIds) {
+                const plan = this.planRunner.get(planId);
+                if (!plan) continue;
+                const allNodes = Array.from(plan.nodeStates?.values() || []);
+                const planDone = allNodes.length > 0 && allNodes.every((n: any) =>
+                  n.status === 'succeeded' || n.status === 'failed' || n.status === 'canceled');
+                if (!planDone) {
+                  // Plan still running — block these findings from re-triggering
+                  const planFindings = rel.fixPlanFindings[planId] || [];
+                  for (const f of planFindings) activelyFixedIds.add(f.id);
+                }
+              }
+            }
+
             const newFindings: any[] = [];
 
             for (const c of comments) {
               if (!c.isResolved) {
                 const findingId = 'comment-' + c.id;
-                if (!autoFixedSet.has(findingId)) {
+                if (!activelyFixedIds.has(findingId)) {
                   newFindings.push({
                     type: 'comment', id: findingId,
                     commentId: c.id, author: c.author, body: c.body,
@@ -165,7 +174,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
             for (const ch of checks) {
               if (ch.status === 'failing') {
                 const findingId = 'check-' + (ch.name || '').replace(/[^a-zA-Z0-9]/g, '-');
-                if (!autoFixedSet.has(findingId)) {
+                if (!activelyFixedIds.has(findingId)) {
                   newFindings.push({
                     type: 'check', id: findingId,
                     name: ch.name, status: ch.status, url: ch.url,
@@ -176,7 +185,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
             for (const a of alerts) {
               if (!a.resolved) {
                 const findingId = 'alert-' + a.id;
-                if (!autoFixedSet.has(findingId)) {
+                if (!activelyFixedIds.has(findingId)) {
                   newFindings.push({
                     type: 'alert', id: findingId,
                     alertId: a.id, severity: a.severity,
@@ -190,12 +199,6 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               log.info('Auto-fix: addressing new findings', {
                 releaseId, count: newFindings.length,
               });
-              if (!rel.autoFixedFindingIds) rel.autoFixedFindingIds = [];
-              for (const f of newFindings) rel.autoFixedFindingIds.push(f.id);
-              if (rel.autoFixedFindingIds.length > 500) {
-                rel.autoFixedFindingIds = rel.autoFixedFindingIds.slice(-500);
-              }
-              this.store.saveRelease(rel).catch(() => {});
               this.emit('findingsProcessing', releaseId, newFindings.map((f: any) => f.id), 'queued');
               this.addressFindings(releaseId, newFindings).catch((err) => {
                 log.error('Auto-fix failed', { releaseId, error: (err as Error).message });
@@ -222,40 +225,6 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         rel.actionLog.unshift(action);
         // Cap at 100 entries to avoid bloating serialization
         if (rel.actionLog.length > 100) { rel.actionLog.length = 100; }
-      }
-    });
-
-    // Persist CLI sessions so they survive webview re-renders/reopens.
-    // Buffer output lines during active sessions, then store on the release when complete.
-    const activeSessions = new Map<string, { releaseId: string; id: string; label: string; lines: string[]; startTime: number }>();
-
-    this.on('cliSessionStart', (releaseId: string, sessionId: string, label: string) => {
-      activeSessions.set(sessionId, { releaseId, id: sessionId, label, lines: [], startTime: Date.now() });
-    });
-    this.on('cliSessionOutput', (_releaseId: string, sessionId: string, line: string) => {
-      const s = activeSessions.get(sessionId);
-      if (s) s.lines.push(line);
-    });
-    this.on('cliSessionEnd', (releaseId: string, sessionId: string, success: boolean) => {
-      const s = activeSessions.get(sessionId);
-      activeSessions.delete(sessionId);
-      const rel = this.releases.get(releaseId);
-      if (rel && s) {
-        if (!rel.cliSessions) rel.cliSessions = [];
-        // Keep last 500 lines per session to avoid storage bloat
-        const maxLines = 500;
-        const trimmedLines = s.lines.length > maxLines ? s.lines.slice(-maxLines) : s.lines;
-        rel.cliSessions.unshift({
-          id: s.id,
-          label: s.label,
-          lines: trimmedLines,
-          success,
-          startTime: s.startTime,
-          endTime: Date.now(),
-        });
-        // Cap at 10 stored sessions
-        if (rel.cliSessions.length > 10) rel.cliSessions.length = 10;
-        this.store.saveRelease(rel).catch(() => {});
       }
     });
 
@@ -337,7 +306,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     // Create state machine for this release
     const stateMachine = new ReleaseStateMachine(release);
-
+    
     // Forward state machine events to release events
     stateMachine.on('transition', (event) => {
       this.events.emitReleaseStatusChanged(event.releaseId, event.from, event.to);
@@ -506,7 +475,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     // Add PR monitoring progress if monitoring
     if (release.status === 'monitoring' || release.status === 'addressing') {
       const cycles = this.prMonitor.getMonitorCycles(releaseId);
-      const lastCycle = release.lastCycle ?? cycles[cycles.length - 1];
+      const lastCycle = cycles[cycles.length - 1];
 
       const unresolvedThreads = lastCycle?.comments.filter((c) => !c.isResolved).length || 0;
       const failingChecks = lastCycle?.checks.filter((c) => c.status === 'failing').length || 0;
@@ -588,17 +557,10 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     const result = stateMachine.transition(newStatus, reason);
     if (result.success) {
-      // Initialize tasks when entering the preparing state
-      if (newStatus === 'preparing') {
-        if (!release.preparationTasks || release.preparationTasks.length === 0) {
-          const { getDefaultPrepTasks } = await import('./releasePreparation');
-          release.preparationTasks = getDefaultPrepTasks(release);
-        }
-        if (!release.prepTasks || release.prepTasks.length === 0) {
-          const { loadReleaseTasks, getDefaultReleaseTasks } = await import('./releaseTaskLoader');
-          const loadedTasks = await loadReleaseTasks(release.repoPath);
-          release.prepTasks = loadedTasks.length > 0 ? loadedTasks : getDefaultReleaseTasks();
-        }
+      // Initialize preparation tasks when entering the preparing state
+      if (newStatus === 'preparing' && (!release.preparationTasks || release.preparationTasks.length === 0)) {
+        const { getDefaultPrepTasks } = await import('./releasePreparation');
+        release.preparationTasks = getDefaultPrepTasks(release);
       }
       await this.store.saveRelease(release);
     }
@@ -632,15 +594,15 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     // Setup log file infrastructure
     const logDir = this.getTaskLogDirectory(release);
     await fs.mkdir(logDir, { recursive: true });
-
+    
     const logFilePath = path.join(logDir, `${taskId}.log`);
     task.logFilePath = logFilePath;
     task.startedAt = Date.now();
     task.status = 'running';
-
+    
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
-
+    
     // Emit started log line
     const startedMessage = `Task started: ${task.title}\n`;
     await fs.appendFile(logFilePath, startedMessage);
@@ -653,7 +615,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       // Execute task using Copilot CLI
       const cwd = release.isolatedRepoPath || release.repoPath;
       let taskDescription = task.description || task.title;
-
+      
       // Add structured output instructions for review tasks
       if (task.id === 'ai-review' || task.id.includes('review')) {
         taskDescription += '\n\nIMPORTANT: After completing your review, output your findings in this exact format:\n' +
@@ -662,7 +624,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           '<!-- FINDINGS_END -->\n' +
           'Output the findings as a valid JSON array between the markers. Include ALL findings you discovered.';
       }
-
+      
       if (this.copilot) {
         const result = await this.copilot.run({
           cwd,
@@ -671,7 +633,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           onOutput: async (line: string) => {
             // Collect output for finding parsing
             outputBuffer.push(line);
-
+            
             // Stream every CLI output line to log file AND event
             const logLine = `${line}\n`;
             try { await fs.appendFile(logFilePath, logLine); } catch { /* ignore write errors */ }
@@ -704,7 +666,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         this.events.emitReleaseTaskOutput(releaseId, taskId, completedMessage);
         log.info('Preparation task auto-completed (no runner)', { releaseId, taskId });
       }
-
+      
       // Parse findings from collected output (try buffer first, then log file)
       let fullOutput = outputBuffer.join('\n');
       if (!fullOutput.includes('FINDINGS_START') && logFilePath) {
@@ -746,7 +708,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     task.status = 'completed';
     task.completedAt = Date.now();
-
+    
     // Write log entry for manual completion
     if (task.logFilePath) {
       const completedMessage = `Task manually marked as completed\n`;
@@ -782,7 +744,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     task.status = 'skipped';
     task.completedAt = Date.now();
-
+    
     // Write log entry for skip
     if (task.logFilePath) {
       const skippedMessage = `Task skipped by user\n`;
@@ -847,7 +809,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     }
 
     const allFindings: import('./types/release').ReviewFinding[] = [];
-
+    
     if (release.prepTasks) {
       for (const task of release.prepTasks) {
         if (task.findings && task.findings.length > 0) {
@@ -930,7 +892,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     try {
       // For from-branch releases, always use repoPath (not isolatedRepoPath which may not exist)
       const cwd = release.repoPath;
-
+      
       // Ensure credentials are configured before creating PR
       if (this.providerDetector) {
         try {
@@ -942,9 +904,9 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           // Continue anyway - the PR service will attempt its own credential acquisition
         }
       }
-
+      
       const prService = await this.prServiceFactory.getServiceForRepo(cwd);
-
+      
       // Push the release branch to the remote before creating the PR
       log.info('Pushing release branch to remote', { releaseId, branch: release.releaseBranch, cwd });
       try {
@@ -954,7 +916,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       } catch (pushErr) {
         log.warn('git push failed, PR creation may fail', { releaseId, error: (pushErr as Error).message });
       }
-
+      
       const prResult = await prService.createPR({
         baseBranch: release.targetBranch,
         headBranch: release.releaseBranch,
@@ -1059,6 +1021,80 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     }
     log.info('Auto-fix toggled', { releaseId, enabled });
     this.store.saveRelease(release).catch(() => {});
+  }
+
+  /**
+   * Get merge readiness status for the release's PR.
+   */
+  async getMergeReadiness(releaseId: string): Promise<import('./types/remotePR').PRDetails | null> {
+    const release = this.releases.get(releaseId);
+    if (!release?.prNumber) return null;
+    const cwd = release.isolatedRepoPath || release.repoPath;
+    try {
+      const prService = await this.prServiceFactory.getServiceForRepo(cwd);
+      return await prService.getPRDetails(release.prNumber, cwd);
+    } catch (err) {
+      log.error('Failed to get merge readiness', { releaseId, error: (err as Error).message });
+      return null;
+    }
+  }
+
+  /**
+   * Merge the release PR.
+   */
+  async mergePR(releaseId: string, options?: { method?: 'squash' | 'merge' | 'rebase'; admin?: boolean }): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) throw new Error(`Release not found: ${releaseId}`);
+    if (!release.prNumber) throw new Error('Release has no PR to merge');
+
+    const cwd = release.isolatedRepoPath || release.repoPath;
+    const prService = await this.prServiceFactory.getServiceForRepo(cwd);
+
+    log.info('Merging release PR', { releaseId, prNumber: release.prNumber, method: options?.method, admin: options?.admin });
+
+    // Stop monitoring before merging
+    if (this.prMonitor.isMonitoring(releaseId)) {
+      this.prMonitor.stopMonitoring(releaseId);
+    }
+
+    const result = await prService.mergePR(release.prNumber, cwd, {
+      method: options?.method || 'squash',
+      admin: options?.admin,
+      deleteSourceBranch: true,
+      title: `${release.name} (#${release.prNumber})`,
+    });
+
+    log.info('Release PR merged', { releaseId, prNumber: release.prNumber, commitSha: result.commitSha });
+
+    release.status = 'succeeded';
+    this.store.saveRelease(release).catch(() => {});
+    this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+    this.emit('releaseStatusChanged', release);
+    this.emit('releaseCompleted', release);
+  }
+
+  /**
+   * Tag the release on the merged commit.
+   */
+  async tagRelease(releaseId: string, tagName?: string): Promise<string> {
+    const release = this.releases.get(releaseId);
+    if (!release) throw new Error(`Release not found: ${releaseId}`);
+
+    const tag = tagName || release.name;
+    const cwd = release.repoPath;
+
+    log.info('Tagging release', { releaseId, tag });
+
+    // Fetch latest main to get the merge commit
+    await this.git.repository.fetch(cwd);
+    
+    // Create annotated tag and push via git commands
+    const { execSync } = require('child_process');
+    execSync(`git tag -a "${tag}" -m "Release ${tag}"`, { cwd, stdio: 'pipe' });
+    execSync(`git push origin "${tag}"`, { cwd, stdio: 'pipe' });
+
+    log.info('Release tagged', { releaseId, tag });
+    return tag;
   }
 
   /**
@@ -1310,7 +1346,9 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       });
     }
 
-    // ── 2. Reply to PR comments and resolve threads ──────────────────
+    // ── 2. Reply to PR comments (but DON'T resolve threads yet) ────────
+    // Threads should only be resolved after the next monitoring cycle confirms
+    // the fix actually worked. Resolving prematurely hides unresolved issues.
     if (release.prNumber && commentFindings.length > 0) {
       let prService;
       try {
@@ -1323,22 +1361,17 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           if (!commentId) continue;
 
           try {
-            const replyText = `✅ Addressed in automated fix${commitHash ? ` (${commitHash.substring(0, 7)})` : ''}`;
+            const replyText = `✅ Addressed in automated fix${commitHash ? ` (${commitHash.substring(0, 7)})` : ''} — awaiting CI verification`;
 
-            if (comment.path || comment.threadId) {
+            if (comment.path) {
               await prService.replyToComment(release.prNumber, commentId, replyText, cwd);
             } else {
               const quotedBody = (comment.body || '').split('\n').map((l: string) => `> ${l}`).join('\n');
               await prService.addIssueComment(release.prNumber, `${quotedBody}\n\n${replyText}`, cwd);
             }
 
-            if (comment.threadId) {
-              try { await prService.resolveThread(release.prNumber, comment.threadId, cwd); } catch { /* non-fatal */ }
-            }
-
-            if (!comment.path && !comment.threadId && comment.nodeId && typeof prService.minimizeComment === 'function') {
-              try { await prService.minimizeComment(comment.nodeId, 'RESOLVED', cwd); } catch { /* non-fatal */ }
-            }
+            // NOTE: Intentionally NOT resolving threads or minimizing comments here.
+            // Resolution happens only after CI passes on the next monitoring cycle.
 
             this.emit('releaseActionTaken', releaseId, {
               type: 'respond-comment',
@@ -1356,44 +1389,11 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       }
     }
 
-    // ── 3. Track addressed comments ──────────────────────────────────
-    const addressedIds = commentFindings
-      .map((f: any) => f.commentId || f.id?.replace('comment-', ''))
-      .filter(Boolean) as string[];
-    if (addressedIds.length > 0) {
-      if (!release.addressedCommentIds) release.addressedCommentIds = [];
-      for (const id of addressedIds) {
-        if (!release.addressedCommentIds.includes(id)) release.addressedCommentIds.push(id);
-      }
-    }
+    // ── 3. DON'T track as addressed yet — wait for CI verification ───
+    // Threads stay unresolved on GitHub until the next clean monitoring cycle.
+    // This prevents the "fix didn't work but thread appears resolved" problem.
 
-    // ── 4. Auto-minimize parent reviews if all children resolved ─────
-    if (release.prNumber && release.lastCycle) {
-      let prSvc;
-      try { prSvc = await this.prServiceFactory.getServiceForRepo(cwd); } catch { /* */ }
-      if (prSvc && typeof prSvc.minimizeComment === 'function') {
-        const allComments = release.lastCycle.comments || [];
-        const reviewChildThreads = new Map<string, any[]>();
-        for (const c of allComments) {
-          if (c.parentReviewId) {
-            if (!reviewChildThreads.has(c.parentReviewId)) reviewChildThreads.set(c.parentReviewId, []);
-            reviewChildThreads.get(c.parentReviewId)!.push(c);
-          }
-        }
-        const addressedSet = new Set(release.addressedCommentIds || []);
-        for (const [parentId, children] of reviewChildThreads) {
-          if (!children.every((c: any) => c.isResolved || addressedSet.has(c.id))) continue;
-          const parentReview = allComments.find((c: any) => c.id === parentId);
-          if (!parentReview?.nodeId) continue;
-          try {
-            await prSvc.minimizeComment(parentReview.nodeId, 'RESOLVED', cwd);
-            log.info('Auto-minimized parent review', { releaseId, parentReviewId: parentId });
-          } catch { /* non-fatal */ }
-        }
-      }
-    }
-
-    // ── 5. Emit resolved and clean up ────────────────────────────────
+    // ── 4. Emit resolved for UI (findings panel marks them as done) ──
     const resolvedIds = findings.map((f: any) => f.id);
     this.emit('findingsResolved', releaseId, resolvedIds, !!commitHash);
 
@@ -1425,9 +1425,6 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
   on(event: 'releaseActionTaken', handler: (releaseId: string, action: import('./types/release').PRActionTaken & { timestamp?: number }) => void): this;
   on(event: 'findingsResolved', handler: (releaseId: string, findingIds: string[], hasCommit: boolean) => void): this;
   on(event: 'findingsProcessing', handler: (releaseId: string, findingIds: string[], status: string) => void): this;
-  on(event: 'cliSessionStart', handler: (releaseId: string, sessionId: string, label: string) => void): this;
-  on(event: 'cliSessionOutput', handler: (releaseId: string, sessionId: string, line: string) => void): this;
-  on(event: 'cliSessionEnd', handler: (releaseId: string, sessionId: string, success: boolean) => void): this;
   on(event: string | symbol, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
@@ -1637,7 +1634,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
   /**
    * Transition release to a new status using the state machine.
-   *
+   * 
    * @param release - The release to transition
    * @param newStatus - The target status
    * @param reason - Optional reason for the transition
@@ -1695,6 +1692,50 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
   }
 
   /**
+   * Transition release to preparing status and initialize preparation tasks.
+   * @private
+   */
+  private async prepareRelease(releaseId: string): Promise<void> {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      throw new Error(`Release not found: ${releaseId}`);
+    }
+
+    log.info('Preparing release', { releaseId });
+
+    // Transition to preparing status
+    const success = await this.transitionToState(releaseId, 'preparing', 'Starting preparation phase');
+    if (!success) {
+      throw new Error(`Failed to transition release ${releaseId} to preparing status`);
+    }
+
+    // Initialize preparation tasks if not already set
+    if (!release.prepTasks || release.prepTasks.length === 0) {
+      const { loadReleaseTasks, getDefaultReleaseTasks } = await import('./releaseTaskLoader');
+      const loadedTasks = await loadReleaseTasks(release.repoPath);
+      release.prepTasks = loadedTasks.length > 0 ? loadedTasks : getDefaultReleaseTasks();
+      await this.store.saveRelease(release);
+    }
+  }
+
+  /**
+   * Check if all required preparation tasks are complete.
+   * @private
+   */
+  private areRequiredTasksComplete(releaseId: string): boolean {
+    const release = this.releases.get(releaseId);
+    if (!release) {
+      return false;
+    }
+
+    const tasks = release.prepTasks || [];
+    const requiredTasks = tasks.filter(t => t.required);
+    
+    // All required tasks must be either completed or skipped (though required tasks shouldn't be skipped)
+    return requiredTasks.every(t => t.status === 'completed' || t.status === 'skipped');
+  }
+
+  /**
    * Generate a unique release ID.
    */
   private _generateReleaseId(): string {
@@ -1725,7 +1766,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
         // Create state machine for this release
         const stateMachine = new ReleaseStateMachine(release);
-
+        
         // Forward state machine events to release events
         stateMachine.on('transition', (event) => {
           this.events.emitReleaseStatusChanged(event.releaseId, event.from, event.to);
@@ -1752,7 +1793,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           this.emit('releaseCreated', release);
         }
       }
-
+      
       // Restore monitoring for any releases in monitoring state (delay to ensure all services are ready)
       const releasesToRestore = releases.filter(r => r.status === 'monitoring' && r.prNumber);
       if (releasesToRestore.length > 0) {

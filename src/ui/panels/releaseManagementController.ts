@@ -54,6 +54,7 @@ export class ReleaseManagementController {
     private readonly _dialogService: IDialogService,
     private readonly _delegate: ReleaseManagementDelegate,
     private readonly _releaseManager: IReleaseManager,
+    private readonly _planRunner?: { get(id: string): any },
   ) {
     // Subscribe to release state changes
     this._releaseManager.on('releaseStatusChanged', (release) => {
@@ -322,6 +323,49 @@ export class ReleaseManagementController {
       case 'toggleAutoFix':
         this._releaseManager.setAutoFix(this._releaseId, !!message.enabled);
         break;
+      case 'openPlanDetail':
+        if (message.planId) {
+          this._delegate.executeCommand('orchestrator.showPlanDetails', message.planId).catch(() => {});
+        }
+        break;
+      case 'openNodeDetail':
+        if (message.planId && message.producerId) {
+          const fixPlan = this._planRunner?.get(message.planId);
+          const nid = fixPlan?.producerIdToNodeId?.get(message.producerId);
+          if (nid) {
+            this._delegate.executeCommand('orchestrator.showNodeDetails', message.planId, nid).catch(() => {});
+          } else {
+            this._delegate.executeCommand('orchestrator.showPlanDetails', message.planId).catch(() => {});
+          }
+        }
+        break;
+      case 'checkMergeReadiness':
+        this._releaseManager.getMergeReadiness(this._releaseId).then((details) => {
+          this._delegate.postMessage({ type: 'mergeReadiness', details });
+        }).catch((error) => {
+          this._delegate.postMessage({ type: 'mergeReadiness', details: null, error: error.message });
+        });
+        break;
+      case 'mergePR': {
+        const method = message.method || 'squash';
+        const admin = !!message.admin;
+        this._releaseManager.mergePR(this._releaseId, { method, admin }).then(() => {
+          this._dialogService.showInfo('PR merged successfully!');
+          this._delegate.forceFullRefresh();
+        }).catch((error) => {
+          this._dialogService.showError(`Failed to merge PR: ${error.message}`);
+        });
+        break;
+      }
+      case 'tagRelease': {
+        const tagName = message.tagName;
+        this._releaseManager.tagRelease(this._releaseId, tagName).then((tag) => {
+          this._dialogService.showInfo(`Release tagged as ${tag}`);
+        }).catch((error) => {
+          this._dialogService.showError(`Failed to tag release: ${error.message}`);
+        });
+        break;
+      }
       case 'refresh':
         this._delegate.forceFullRefresh();
         break;

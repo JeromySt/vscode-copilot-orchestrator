@@ -106,7 +106,7 @@ export class ReleaseManagementPanel {
         return vscode.workspace.getConfiguration(`copilotOrchestrator.${section}`).get(key, defaultValue);
       },
     };
-    this._controller = new ReleaseManagementController(releaseId, dialogService, delegate, this._releaseManager);
+    this._controller = new ReleaseManagementController(releaseId, dialogService, delegate, this._releaseManager, planRunner as any);
     
     // Subscribe to plan runner events so the plan selector stays fresh
     if (planRunner) {
@@ -185,29 +185,6 @@ export class ReleaseManagementPanel {
         if (releaseId === this._releaseId && !this._disposed) {
           try {
             this._panel.webview.postMessage({ type: 'monitoringStopped', totalCycles });
-          } catch { /* panel disposed */ }
-        }
-      });
-
-      // Forward CLI session events to the webview console
-      (this._releaseManager as any).on('cliSessionStart', (releaseId: string, sessionId: string, label: string) => {
-        if (releaseId === this._releaseId && !this._disposed) {
-          try {
-            this._panel.webview.postMessage({ type: 'cliSessionStart', sessionId, label });
-          } catch { /* panel disposed */ }
-        }
-      });
-      (this._releaseManager as any).on('cliSessionOutput', (releaseId: string, sessionId: string, line: string) => {
-        if (releaseId === this._releaseId && !this._disposed) {
-          try {
-            this._panel.webview.postMessage({ type: 'cliSessionOutput', sessionId, line });
-          } catch { /* panel disposed */ }
-        }
-      });
-      (this._releaseManager as any).on('cliSessionEnd', (releaseId: string, sessionId: string, success: boolean) => {
-        if (releaseId === this._releaseId && !this._disposed) {
-          try {
-            this._panel.webview.postMessage({ type: 'cliSessionEnd', sessionId, success });
           } catch { /* panel disposed */ }
         }
       });

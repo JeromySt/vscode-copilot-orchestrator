@@ -29,7 +29,6 @@ export function renderReleaseStyles(): string {
     prMonitorStyles(),
     pendingActionsStyles(),
     actionLogStyles(),
-    cliConsoleStyles(),
     floatingButtonStyles(),
     wizardNavigationStyles(),
     buttonStyles(),
@@ -1359,6 +1358,23 @@ function actionLogStyles(): string {
     .action-comment-link:hover {
       text-decoration: underline;
     }
+    .action-plan-link, .finding-job-link {
+      font-size: 11px;
+      color: var(--vscode-textLink-foreground);
+      cursor: pointer;
+      white-space: nowrap;
+      text-decoration: none;
+      padding: 2px 8px;
+      border: 1px solid var(--vscode-textLink-foreground);
+      border-radius: 3px;
+      display: inline-block;
+      margin-left: 4px;
+    }
+    .action-plan-link:hover, .finding-job-link:hover {
+      text-decoration: none;
+      background: var(--vscode-textLink-foreground);
+      color: var(--vscode-editor-background);
+    }
     .md-link {
       color: var(--vscode-textLink-foreground);
       cursor: pointer;
@@ -1366,72 +1382,6 @@ function actionLogStyles(): string {
     }
     .md-link:hover {
       text-decoration: underline;
-    }`;
-}
-
-function cliConsoleStyles(): string {
-  return `
-    .cli-console-section h3 {
-      margin: 0 0 10px 0;
-      font-size: 14px;
-      font-weight: 600;
-    }
-    .cli-console-tabs {
-      display: flex;
-      gap: 4px;
-      overflow-x: auto;
-      padding-bottom: 6px;
-      margin-bottom: 4px;
-    }
-    .cli-session-tab {
-      padding: 4px 10px;
-      border: 1px solid var(--vscode-input-border);
-      background: var(--vscode-input-background);
-      color: var(--vscode-foreground);
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 11px;
-      font-family: var(--vscode-font-family);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      white-space: nowrap;
-      transition: all 0.15s ease;
-    }
-    .cli-session-tab.selected {
-      background: var(--vscode-list-activeSelectionBackground);
-      color: var(--vscode-list-activeSelectionForeground);
-      border-color: var(--vscode-focusBorder);
-    }
-    .cli-session-tab.active {
-      border-color: var(--vscode-button-background);
-    }
-    .cli-session-tab:hover:not(.selected) {
-      background: var(--vscode-list-hoverBackground);
-    }
-    .cli-elapsed {
-      font-size: 10px;
-      color: var(--vscode-descriptionForeground);
-    }
-    .cli-console-body {
-      border: 1px solid var(--vscode-input-border);
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    .cli-console-output {
-      margin: 0;
-      padding: 10px;
-      max-height: 350px;
-      overflow-y: auto;
-      background: var(--vscode-terminal-background, #1e1e1e);
-      color: var(--vscode-terminal-foreground, #cccccc);
-      font-family: var(--vscode-editor-font-family, 'Cascadia Code', 'Fira Code', Consolas, monospace);
-      font-size: 12px;
-      line-height: 1.5;
-    }
-    .cli-line {
-      white-space: pre-wrap;
-      word-break: break-all;
     }`;
 }
 

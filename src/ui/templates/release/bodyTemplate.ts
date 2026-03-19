@@ -618,12 +618,24 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
       </div>
     </div>
   </div>
-  
-  <div class="cli-console-section" id="cli-console-section" style="display: none; margin-top: 24px;">
-    <h3>Copilot CLI Console</h3>
-    <div class="cli-console-tabs" id="cli-console-header"></div>
-    <div class="cli-console-body" id="cli-console-body">
-      <div style="padding:12px;text-align:center;color:var(--vscode-descriptionForeground);font-size:11px;">No CLI sessions yet</div>
+
+  <div class="merge-section" id="merge-section" style="margin-top: 24px; border: 1px solid var(--vscode-panel-border); border-radius: 8px; padding: 20px;">
+    <h3 style="margin: 0 0 16px 0;">Merge & Complete</h3>
+    <div id="merge-readiness" style="margin-bottom: 16px;">
+      <div style="padding:12px;text-align:center;color:var(--vscode-descriptionForeground);font-size:12px;">
+        Click "Check Readiness" to verify merge status
+      </div>
+    </div>
+    <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+      <button onclick="checkMergeReadiness()" style="padding:6px 14px; border:1px solid var(--vscode-input-border); background:var(--vscode-input-background); color:var(--vscode-foreground); border-radius:4px; cursor:pointer; font-size:12px;">
+        🔍 Check Readiness
+      </button>
+      <button id="merge-btn" onclick="mergePR('squash', false)" style="padding:8px 20px; background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">
+        Squash and Merge
+      </button>
+      <button id="merge-admin-btn" onclick="mergePR('squash', true)" style="padding:6px 14px; border:1px solid var(--vscode-input-border); background:var(--vscode-input-background); color:var(--vscode-foreground); border-radius:4px; cursor:pointer; font-size:12px;" title="Bypass branch protection rules">
+        ⚠ Merge (bypass rules)
+      </button>
     </div>
   </div>
 </div>`;

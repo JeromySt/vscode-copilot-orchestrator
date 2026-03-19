@@ -240,16 +240,6 @@ export interface ReleaseDefinition {
   /** Persisted action log entries (survives webview re-renders) */
   actionLog?: Array<PRActionTaken & { timestamp?: number }>;
 
-  /** Persisted CLI console sessions (survives webview re-renders) */
-  cliSessions?: Array<{
-    id: string;
-    label: string;
-    lines: string[];
-    success: boolean;
-    startTime: number;
-    endTime: number;
-  }>;
-
   /** Comment IDs that have been addressed (issue comments and top-level reviews lack thread resolution) */
   addressedCommentIds?: string[];
 

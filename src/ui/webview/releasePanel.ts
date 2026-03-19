@@ -58,7 +58,6 @@ let mergeProgress: MergeProgressControl | undefined;
 let prMonitor: PRMonitorControl | undefined;
 let actionLog: ActionLogControl | undefined;
 let pendingActions: PendingActionsControl | undefined;
-let cliConsole: CliConsoleControl | undefined;
 
 /* ── Global functions (referenced by onclick attrs in HTML templates) ─ */
 
@@ -163,6 +162,67 @@ function switchAccount(): void {
 
 function toggleAutoFix(enabled: boolean): void {
   vscode.postMessage({ type: 'toggleAutoFix', enabled });
+}
+
+function checkMergeReadiness(): void {
+  const container = document.getElementById('merge-readiness');
+  if (container) {
+    container.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:12px;font-size:12px;color:var(--vscode-descriptionForeground);"><span class="ai-spinner"></span> Checking merge readiness…</div>';
+  }
+  vscode.postMessage({ type: 'checkMergeReadiness' });
+}
+
+function mergePR(method: string, admin: boolean): void {
+  if (!admin || confirm('Are you sure you want to bypass branch protection rules and merge?')) {
+    vscode.postMessage({ type: 'mergePR', method, admin });
+  }
+}
+
+function tagRelease(tagName?: string): void {
+  vscode.postMessage({ type: 'tagRelease', tagName });
+}
+
+function renderMergeReadiness(details: any, error?: string): void {
+  const container = document.getElementById('merge-readiness');
+  if (!container) return;
+  if (error) {
+    container.innerHTML = '<div style="color:var(--vscode-testing-iconFailed);font-size:13px;">❌ Failed to check readiness: ' + escapeHtml(error) + '</div>';
+    return;
+  }
+  if (!details) return;
+
+  const items: string[] = [];
+
+  // Merge state
+  const state = details.mergeStateStatus || 'UNKNOWN';
+  if (state === 'CLEAN') items.push('<div style="color:var(--vscode-testing-iconPassed);">\u2705 No merge conflicts</div>');
+  else if (state === 'DIRTY') items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C Merge conflicts detected</div>');
+  else if (state === 'BEHIND') items.push('<div style="color:var(--vscode-editorWarning-foreground);">\u26A0 Branch is behind base — needs rebase</div>');
+  else if (state === 'BLOCKED') items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C Merge blocked by branch protection</div>');
+  else if (state === 'UNSTABLE') items.push('<div style="color:var(--vscode-editorWarning-foreground);">\u26A0 Some checks are failing</div>');
+  else items.push('<div>\u2139 Merge state: ' + escapeHtml(state) + '</div>');
+
+  // Review decision
+  const review = details.reviewDecision;
+  if (review === 'APPROVED') items.push('<div style="color:var(--vscode-testing-iconPassed);">\u2705 Review approved</div>');
+  else if (review === 'CHANGES_REQUESTED') items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C Changes requested by reviewer</div>');
+  else if (review === 'REVIEW_REQUIRED') items.push('<div style="color:var(--vscode-editorWarning-foreground);">\u26A0 Approving review required</div>');
+  else items.push('<div>\u2139 No review requirement</div>');
+
+  // Mergeable
+  if (details.mergeable === true) items.push('<div style="color:var(--vscode-testing-iconPassed);">\u2705 PR is mergeable</div>');
+  else if (details.mergeable === false) items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C PR cannot be merged</div>');
+
+  // PR state
+  if (details.state === 'merged') items.push('<div style="color:var(--vscode-testing-iconPassed);">\u2705 PR already merged</div>');
+  else if (details.state === 'closed') items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C PR is closed</div>');
+
+  container.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px;font-size:13px;">' + items.join('') + '</div>';
+
+  // Enable/disable merge buttons based on readiness
+  const mergeBtn = document.getElementById('merge-btn') as HTMLButtonElement;
+  const canMerge = details.mergeable && details.state === 'open';
+  if (mergeBtn) mergeBtn.disabled = !canMerge;
 }
 
 function filterPendingActions(filter: string, btn: HTMLElement | null): void {
@@ -850,18 +910,15 @@ class PendingActionsControl {
         if (url) vscode.postMessage({ type: 'openExternal', url });
       });
     });
-    // Wire "View Console" links on processing findings to scroll to CLI console
-    container.querySelectorAll('.ai-session-link').forEach(el => {
+    // Wire "View Job" links on findings to open node detail panel
+    container.querySelectorAll('.finding-job-link').forEach(el => {
       el.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();
-        const sid = (el as HTMLElement).getAttribute('data-session-id');
-        if (sid && cliConsole) {
-          cliConsole.expandedSession = sid;
-          cliConsole._selectTab(sid);
-          cliConsole._switchBody(sid);
-          const section = document.getElementById('cli-console-section');
-          if (section) { section.style.display = 'block'; section.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        const planId = (el as HTMLElement).getAttribute('data-plan-id');
+        const producerId = (el as HTMLElement).getAttribute('data-producer-id');
+        if (planId && producerId) {
+          vscode.postMessage({ type: 'openNodeDetail', planId, producerId });
         }
       });
     });
@@ -875,10 +932,7 @@ class PendingActionsControl {
     let aiStatusBadge = '';
     if (finding.aiStatus === 'queued') aiStatusBadge = '<span class="pending-action-ai-status queued">\u23F3 Queued</span>';
     else if (finding.aiStatus === 'processing') {
-      const sessionLink = finding.aiSessionId
-        ? ' <a class="ai-session-link" href="#" data-session-id="' + finding.aiSessionId + '" title="View console">View Console \u25B6</a>'
-        : '';
-      aiStatusBadge = '<span class="pending-action-ai-status processing"><span class="ai-spinner"></span> Processing' + sessionLink + '</span>';
+      aiStatusBadge = '<span class="pending-action-ai-status processing"><span class="ai-spinner"></span> Processing</span>';
     }
     else if (finding.aiStatus === 'fixed') aiStatusBadge = '<span class="pending-action-ai-status fixed">\u2705 Fixed</span>';
     else if (finding.aiStatus === 'failed') aiStatusBadge = '<span class="pending-action-ai-status failed">\u274C Failed</span>';
@@ -935,13 +989,25 @@ class PendingActionsControl {
     const isLocked = finding.aiStatus === 'queued' || finding.aiStatus === 'processing';
     const disabledAttr = isLocked ? ' disabled' : '';
 
+    // Look up fix plan job for this finding
+    let jobLink = '';
+    if (releaseData.fixPlanJobMap && releaseData.fixPlanIds) {
+      for (const pid of releaseData.fixPlanIds) {
+        const map = releaseData.fixPlanJobMap[pid];
+        if (map && map[finding.id]) {
+          jobLink = '<a class="finding-job-link" href="#" data-plan-id="' + pid + '" data-producer-id="' + map[finding.id] + '" title="View AI fix job">View Job \u25B6</a>';
+          break;
+        }
+      }
+    }
+
     return '<div class="pending-action-item' + resolvedClass + processingClass + '" data-type="' + finding.type + '" data-id="' + finding.id + '">'
       + '<input type="checkbox" class="pending-action-checkbox" ' + isChecked + disabledAttr + ' />'
       + '<div class="pending-action-body">'
       + '<div class="pending-action-meta">' + badge + metaInfo + aiStatusBadge + '</div>'
       + '<div class="pending-action-text">' + bodyText + '</div>'
       + repliesHtml
-      + (locationHtml ? '<div>' + locationHtml + '</div>' : '')
+      + (locationHtml || jobLink ? '<div>' + locationHtml + (jobLink ? ' ' + jobLink : '') + '</div>' : '')
       + '</div></div>';
   }
 }
@@ -984,13 +1050,15 @@ class ActionLogControl {
       const consoleLink = action.sessionId ? '<span class="action-console-link">View Console \u25B6</span>' : '';
       const commentLink = action.commentUrl
         ? '<a class="action-comment-link" href="#" data-url="' + action.commentUrl + '">View Comment \u2197</a>' : '';
+      const planLink = action.planId
+        ? '<a class="action-plan-link" href="#" data-plan-id="' + action.planId + '">View Plan \u25B6</a>' : '';
 
       return '<div class="action-entry ' + action.type + ' ' + statusClass + clickableClass + '"' + sessionAttr + '>'
         + '<div class="action-icon">' + icon + '</div>'
         + '<div class="action-content">'
         + '<div class="action-type">' + action.description
         + '<span class="action-status ' + statusClass + '">' + statusText + '</span>'
-        + commitInfo + consoleLink + commentLink + '</div>'
+        + commitInfo + consoleLink + commentLink + planLink + '</div>'
         + '<div class="action-timestamp">' + timestamp + '</div>'
         + '</div></div>';
     }).join('');
@@ -999,12 +1067,9 @@ class ActionLogControl {
       entry.addEventListener('click', e => {
         if ((e.target as HTMLElement).closest('.action-comment-link')) return;
         const sid = (entry as HTMLElement).getAttribute('data-session-id');
-        if (sid && cliConsole) {
-          cliConsole.expandedSession = sid;
-          cliConsole._selectTab(sid);
-          cliConsole._switchBody(sid);
-          const section = document.getElementById('cli-console-section');
-          if (section) { section.style.display = 'block'; section.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        if (sid) {
+          const planId = (entry as HTMLElement).getAttribute('data-plan-id');
+          if (planId) vscode.postMessage({ type: 'openPlanDetail', planId });
         }
       });
     });
@@ -1015,186 +1080,13 @@ class ActionLogControl {
         if (url) vscode.postMessage({ type: 'openExternal', url });
       });
     });
-  }
-}
-
-/* ── CLI Console Control ─────────────────────────────────────────────── */
-
-class CliConsoleControl {
-  sessions: any[];
-  expandedSession: string | null;
-  private _renderedSession: string | null = null; // tracks which session body is currently in the DOM
-
-  constructor() { this.sessions = []; this.expandedSession = null; this._initContainer(); }
-
-  startSession(sessionId: string, label: string): void {
-    this.sessions.unshift({ id: sessionId, label: label || 'Copilot CLI', lines: [] as string[], active: true, startTime: Date.now() });
-    this.expandedSession = sessionId;
-    this._addTab(this.sessions[0]);
-    this._switchBody(sessionId);
-    this._showContainer();
-  }
-
-  appendLine(sessionId: string, line: string): void {
-    const session = this.sessions.find((s: any) => s.id === sessionId);
-    if (!session) return;
-    session.lines.push(line);
-    if (this._renderedSession === sessionId) this._appendToConsole(line);
-  }
-
-  endSession(sessionId: string, success: boolean): void {
-    const session = this.sessions.find((s: any) => s.id === sessionId);
-    if (session) { session.active = false; session.success = success; session.endTime = Date.now(); }
-    this._updateTabStatus(sessionId);
-  }
-
-  /** Called on each pulse event — update elapsed time labels surgically. */
-  tickElapsed(): void {
-    for (const s of this.sessions) {
-      if (!s.startTime) continue;
-      const ms = (s.endTime || Date.now()) - s.startTime;
-      const sec = Math.floor(ms / 1000);
-      const text = sec < 60 ? sec + 's' : Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
-      const el = document.querySelector(`.cli-session-tab[data-session-id="${s.id}"] .cli-elapsed`);
-      if (el) el.textContent = text;
-    }
-  }
-
-  /* ── Private: surgical DOM operations ──────────────────────────────── */
-
-  private _initContainer(): void {
-    const container = document.getElementById('cli-console-section');
-    if (container) container.style.display = 'none';
-  }
-
-  private _showContainer(): void {
-    const container = document.getElementById('cli-console-section');
-    if (container) container.style.display = 'block';
-  }
-
-  /** Add a single tab button to the header (no full rebuild). */
-  private _addTab(session: any): void {
-    const header = document.getElementById('cli-console-header');
-    if (!header) return;
-    const btn = document.createElement('button');
-    btn.className = 'cli-session-tab active selected';
-    btn.setAttribute('data-session-id', session.id);
-    btn.innerHTML = '<span class="ai-spinner"></span> ' + escapeHtml(session.label)
-      + ' <span class="cli-elapsed">0s</span>';
-    btn.addEventListener('click', () => {
-      if (this.expandedSession === session.id) return;
-      this.expandedSession = session.id;
-      this._selectTab(session.id);
-      this._switchBody(session.id);
-    });
-    // Deselect all existing tabs
-    header.querySelectorAll('.cli-session-tab').forEach(t => t.classList.remove('selected'));
-    header.prepend(btn);
-  }
-
-  /** Update status icon on a tab when session ends (no full rebuild). */
-  private _updateTabStatus(sessionId: string): void {
-    const session = this.sessions.find((s: any) => s.id === sessionId);
-    if (!session) return;
-    const tab = document.querySelector(`.cli-session-tab[data-session-id="${sessionId}"]`);
-    if (!tab) return;
-    tab.classList.remove('active');
-    // Replace spinner with final icon
-    const spinner = tab.querySelector('.ai-spinner');
-    if (spinner) {
-      const icon = document.createTextNode(session.success ? '\u2705' : '\u274C');
-      spinner.replaceWith(icon);
-    }
-  }
-
-  /** Highlight the selected tab (deselect others). */
-  _selectTab(sessionId: string): void {
-    const header = document.getElementById('cli-console-header');
-    if (!header) return;
-    header.querySelectorAll('.cli-session-tab').forEach(t => {
-      t.classList.toggle('selected', t.getAttribute('data-session-id') === sessionId);
-    });
-  }
-
-  /**
-   * Switch the console body to show a different session.
-   * Only rebuilds the body when the session actually changes.
-   */
-  _switchBody(sessionId: string): void {
-    if (this._renderedSession === sessionId) return;
-    this._renderedSession = sessionId;
-    const body = document.getElementById('cli-console-body');
-    if (!body) return;
-
-    const session = this.sessions.find((s: any) => s.id === sessionId);
-    if (!session) {
-      body.innerHTML = '<div style="padding:12px;text-align:center;color:var(--vscode-descriptionForeground);font-size:11px;">Select a session above</div>';
-      return;
-    }
-
-    body.innerHTML = '<pre class="cli-console-output" id="cli-console-output"></pre>';
-    const pre = document.getElementById('cli-console-output');
-    if (pre && session.lines.length > 0) {
-      // Batch-append lines using a document fragment (one reflow, not N)
-      const frag = document.createDocumentFragment();
-      for (const line of session.lines) {
-        const lineEl = document.createElement('div');
-        lineEl.className = 'cli-line';
-        lineEl.textContent = line;
-        frag.appendChild(lineEl);
-      }
-      pre.appendChild(frag);
-      pre.scrollTop = pre.scrollHeight;
-    }
-  }
-
-  /** Append a single line to the visible console (no rebuild). */
-  private _appendToConsole(line: string): void {
-    const pre = document.getElementById('cli-console-output');
-    if (!pre) return;
-    const lineEl = document.createElement('div');
-    lineEl.className = 'cli-line';
-    lineEl.textContent = line;
-    pre.appendChild(lineEl);
-    pre.scrollTop = pre.scrollHeight;
-  }
-
-  /** Full render — only used if we ever need to rebuild from scratch (e.g., panel restore). */
-  render(): void {
-    const container = document.getElementById('cli-console-section');
-    if (!container) return;
-    if (this.sessions.length === 0) { container.style.display = 'none'; return; }
-    container.style.display = 'block';
-
-    const header = document.getElementById('cli-console-header');
-    if (!header) return;
-    header.innerHTML = '';
-    // Rebuild tabs
-    for (const s of this.sessions) {
-      const btn = document.createElement('button');
-      const isActive = s.active;
-      const isSelected = this.expandedSession === s.id;
-      btn.className = 'cli-session-tab' + (isActive ? ' active' : '') + (isSelected ? ' selected' : '');
-      btn.setAttribute('data-session-id', s.id);
-      const statusIcon = isActive ? '<span class="ai-spinner"></span>' : (s.success ? '\u2705' : '\u274C');
-      let elapsed = '';
-      if (s.startTime) {
-        const ms = (s.endTime || Date.now()) - s.startTime;
-        const sec = Math.floor(ms / 1000);
-        elapsed = sec < 60 ? sec + 's' : Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
-      }
-      btn.innerHTML = statusIcon + ' ' + escapeHtml(s.label) + ' <span class="cli-elapsed">' + elapsed + '</span>';
-      btn.addEventListener('click', () => {
-        if (this.expandedSession === s.id) return;
-        this.expandedSession = s.id;
-        this._selectTab(s.id);
-        this._switchBody(s.id);
+    container.querySelectorAll('.action-plan-link').forEach(link => {
+      link.addEventListener('click', e => {
+        e.preventDefault(); e.stopPropagation();
+        const pid = (link as HTMLElement).getAttribute('data-plan-id');
+        if (pid) vscode.postMessage({ type: 'openPlanDetail', planId: pid });
       });
-      header.appendChild(btn);
-    }
-
-    this._renderedSession = null; // force body rebuild
-    if (this.expandedSession) this._switchBody(this.expandedSession);
+    });
   }
 }
 
@@ -1208,7 +1100,6 @@ function setupMessageListener(): void {
         updateGitAccountDisplay(message.username);
         break;
       case 'pulse':
-        if (cliConsole) cliConsole.tickElapsed();
         break;
       case 'taskUpdate':
         if (prepTasks && message.taskId) prepTasks.updateTask(message.taskId, message.status, message.error);
@@ -1238,14 +1129,8 @@ function setupMessageListener(): void {
       case 'monitoringStopped':
         if (prMonitor) prMonitor.onStopped();
         break;
-      case 'cliSessionStart':
-        if (cliConsole && message.sessionId) cliConsole.startSession(message.sessionId, message.label);
-        break;
-      case 'cliSessionOutput':
-        if (cliConsole && message.sessionId) cliConsole.appendLine(message.sessionId, message.line);
-        break;
-      case 'cliSessionEnd':
-        if (cliConsole && message.sessionId) cliConsole.endSession(message.sessionId, message.success);
+      case 'mergeReadiness':
+        renderMergeReadiness(message.details, message.error);
         break;
     }
   });
@@ -1269,7 +1154,6 @@ function initControls(): void {
     prMonitor = new PRMonitorControl();
     actionLog = new ActionLogControl();
     pendingActions = new PendingActionsControl();
-    cliConsole = new CliConsoleControl();
 
     if (releaseData.lastCycle) {
       prMonitor.addCycle(releaseData.lastCycle);
@@ -1287,22 +1171,6 @@ function initControls(): void {
     if (releaseData.actionLog?.length) {
       const reversedLog = releaseData.actionLog.slice().reverse();
       for (const entry of reversedLog) actionLog.addAction(entry);
-    }
-
-    // Seed CLI console from persisted sessions (newest first)
-    if (releaseData.cliSessions?.length) {
-      for (const s of releaseData.cliSessions) {
-        cliConsole.sessions.push({
-          id: s.id,
-          label: s.label,
-          lines: s.lines || [],
-          active: false,
-          success: s.success,
-          startTime: s.startTime,
-          endTime: s.endTime,
-        });
-      }
-      cliConsole.render();
     }
 
     const selectAllCb = document.getElementById('pending-select-all');
@@ -1351,6 +1219,9 @@ export function initReleasePanel(config: { releaseData: any; availablePlans: any
   g.openFindingFile = openFindingFile;
   g.switchAccount = switchAccount;
   g.toggleAutoFix = toggleAutoFix;
+  g.checkMergeReadiness = checkMergeReadiness;
+  g.mergePR = mergePR;
+  g.tagRelease = tagRelease;
   g.filterPendingActions = filterPendingActions;
   g.addressSelectedWithAI = addressSelectedWithAI;
   g.planSelector = undefined; // Will be set by initControls
