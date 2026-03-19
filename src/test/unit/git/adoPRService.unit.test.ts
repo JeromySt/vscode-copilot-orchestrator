@@ -304,6 +304,73 @@ suite('AdoPRService', () => {
     });
   });
 
+  suite('mergePR', () => {
+    test('patches PR with status completed and squash strategy', async () => {
+      const responseBody = JSON.stringify({
+        pullRequestId: 42,
+        status: 'completed',
+        lastMergeCommit: { commitId: 'abc1234567890' },
+      });
+      stubHttpsRequest(200, responseBody);
+
+      const result = await service.mergePR(42, '/repo', { method: 'squash' });
+
+      const options = httpsRequestStub.firstCall.args[0];
+      assert.strictEqual(options.method, 'PATCH');
+      assert.ok(options.path.includes('pullRequests/42'));
+      assert.ok(!options.path.includes('/merge'), 'URL must not have /merge suffix');
+      assert.strictEqual(result.commitSha, 'abc1234567890');
+    });
+
+    test('includes admin bypass in completionOptions', async () => {
+      stubHttpsRequest(200, JSON.stringify({
+        pullRequestId: 42,
+        lastMergeCommit: { commitId: 'def567' },
+      }));
+
+      let capturedBody: any;
+      httpsRequestStub.callsFake((_options: any, callback: any) => {
+        const EventEmitter = require('events');
+        const req = new EventEmitter() as any;
+        req.write = sandbox.stub().callsFake((data: any) => {
+          capturedBody = JSON.parse(data.toString());
+        });
+        req.setTimeout = sandbox.stub().returns(req);
+        req.destroy = sandbox.stub();
+        req.end = sandbox.stub().callsFake(() => {
+          const res = new EventEmitter() as any;
+          res.statusCode = 200;
+          process.nextTick(() => {
+            callback(res);
+            res.emit('data', Buffer.from(JSON.stringify({
+              pullRequestId: 42,
+              lastMergeCommit: { commitId: 'def567' },
+            })));
+            res.emit('end');
+          });
+        });
+        return req;
+      });
+
+      await service.mergePR(42, '/repo', { method: 'merge', admin: true, deleteSourceBranch: true, title: 'My release' });
+
+      assert.ok(capturedBody, 'Body should be captured');
+      assert.strictEqual(capturedBody.status, 'completed');
+      assert.strictEqual(capturedBody.completionOptions.bypassPolicy, true);
+      assert.strictEqual(capturedBody.completionOptions.deleteSourceBranch, true);
+      assert.strictEqual(capturedBody.completionOptions.mergeCommitMessage, 'My release');
+    });
+
+    test('throws on API error', async () => {
+      stubHttpsRequest(400, JSON.stringify({ message: 'PR is not mergeable' }));
+
+      await assert.rejects(
+        () => service.mergePR(42, '/repo', { method: 'squash' }),
+        /Failed to merge ADO PR/,
+      );
+    });
+  });
+
   suite('resolveThread', () => {
     test('patches status to fixed', async () => {
       stubHttpsRequest(200, JSON.stringify({ id: 1, status: 'fixed' }));
