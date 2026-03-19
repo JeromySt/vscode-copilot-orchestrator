@@ -251,6 +251,35 @@ export interface IReleaseManager {
    */
   setAutoFix(releaseId: string, enabled: boolean): void;
 
+  // ── Merge & Tag ────────────────────────────────────────────────────
+
+  /**
+   * Get merge readiness details for the release's PR.
+   *
+   * @param releaseId - The release ID
+   * @returns PR details if the PR exists and is accessible, or null otherwise
+   */
+  getMergeReadiness(releaseId: string): Promise<import('../plan/types/remotePR').PRDetails | null>;
+
+  /**
+   * Merge the release PR.
+   *
+   * @param releaseId - The release ID
+   * @param options - Merge options (method, admin bypass)
+   * @throws If the release is not found or has no associated PR
+   */
+  mergePR(releaseId: string, options?: { method?: 'squash' | 'merge' | 'rebase'; admin?: boolean }): Promise<void>;
+
+  /**
+   * Tag the release on the merged commit.
+   *
+   * @param releaseId - The release ID
+   * @param tagName - Optional tag name (defaults to release name)
+   * @returns The tag name that was created
+   * @throws If the release is not found or the tag cannot be pushed
+   */
+  tagRelease(releaseId: string, tagName?: string): Promise<string>;
+
   // ── Events ─────────────────────────────────────────────────────────
 
   /**

@@ -115,6 +115,18 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
             // Format 3: "Re: reviewer's feedback — ✅ Addressed..."  (old format)
             if (typeof c.body === 'string' && c.body.includes('\u2705 Addressed in automated fix')) {
               c.isResolved = true;
+              continue;
+            }
+            // Mark as resolved if the comment was previously addressed by a fix plan
+            if (rel.addressedCommentIds?.includes(c.id)) {
+              c.isResolved = true;
+              continue;
+            }
+            // Mark as resolved if any reply contains the automated fix marker
+            if (Array.isArray(c.replies) && c.replies.some((r: any) =>
+              typeof r.body === 'string' && r.body.includes('\u2705 Addressed in automated fix')
+            )) {
+              c.isResolved = true;
             }
           }
           const filteredUnresolved = comments.filter((c: any) => !c.isResolved).length;
@@ -156,12 +168,15 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               }
             }
 
+            // Also skip findings that were already processed in a previous cycle
+            const alreadyFixedIds = new Set<string>(rel.autoFixedFindingIds || []);
+
             const newFindings: any[] = [];
 
             for (const c of comments) {
               if (!c.isResolved) {
                 const findingId = 'comment-' + c.id;
-                if (!activelyFixedIds.has(findingId)) {
+                if (!activelyFixedIds.has(findingId) && !alreadyFixedIds.has(findingId)) {
                   newFindings.push({
                     type: 'comment', id: findingId,
                     commentId: c.id, author: c.author, body: c.body,
@@ -174,7 +189,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
             for (const ch of checks) {
               if (ch.status === 'failing') {
                 const findingId = 'check-' + (ch.name || '').replace(/[^a-zA-Z0-9]/g, '-');
-                if (!activelyFixedIds.has(findingId)) {
+                if (!activelyFixedIds.has(findingId) && !alreadyFixedIds.has(findingId)) {
                   newFindings.push({
                     type: 'check', id: findingId,
                     name: ch.name, status: ch.status, url: ch.url,
@@ -185,7 +200,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
             for (const a of alerts) {
               if (!a.resolved) {
                 const findingId = 'alert-' + a.id;
-                if (!activelyFixedIds.has(findingId)) {
+                if (!activelyFixedIds.has(findingId) && !alreadyFixedIds.has(findingId)) {
                   newFindings.push({
                     type: 'alert', id: findingId,
                     alertId: a.id, severity: a.severity,
@@ -199,6 +214,13 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               log.info('Auto-fix: addressing new findings', {
                 releaseId, count: newFindings.length,
               });
+              // Track processed finding IDs for deduplication across cycles
+              if (!rel.autoFixedFindingIds) rel.autoFixedFindingIds = [];
+              rel.autoFixedFindingIds.push(...newFindings.map((f: any) => f.id));
+              // Trim to last 500 to prevent unbounded growth
+              if (rel.autoFixedFindingIds.length > 500) {
+                rel.autoFixedFindingIds = rel.autoFixedFindingIds.slice(-500);
+              }
               this.emit('findingsProcessing', releaseId, newFindings.map((f: any) => f.id), 'queued');
               this.addressFindings(releaseId, newFindings).catch((err) => {
                 log.error('Auto-fix failed', { releaseId, error: (err as Error).message });
@@ -475,7 +497,9 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     // Add PR monitoring progress if monitoring
     if (release.status === 'monitoring' || release.status === 'addressing') {
       const cycles = this.prMonitor.getMonitorCycles(releaseId);
-      const lastCycle = cycles[cycles.length - 1];
+      const rawLastCycle = cycles[cycles.length - 1];
+      // Prefer release.lastCycle which may have manager-filtered resolved comments
+      const lastCycle = release.lastCycle ?? rawLastCycle;
 
       const unresolvedThreads = lastCycle?.comments.filter((c) => !c.isResolved).length || 0;
       const failingChecks = lastCycle?.checks.filter((c) => c.status === 'failing').length || 0;
@@ -561,6 +585,10 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       if (newStatus === 'preparing' && (!release.preparationTasks || release.preparationTasks.length === 0)) {
         const { getDefaultPrepTasks } = await import('./releasePreparation');
         release.preparationTasks = getDefaultPrepTasks(release);
+      }
+      if (newStatus === 'preparing' && (!release.prepTasks || release.prepTasks.length === 0)) {
+        const { getDefaultReleaseTasks } = await import('./releaseTaskLoader');
+        release.prepTasks = getDefaultReleaseTasks();
       }
       await this.store.saveRelease(release);
     }
@@ -1364,10 +1392,28 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
             const replyText = `✅ Addressed in automated fix${commitHash ? ` (${commitHash.substring(0, 7)})` : ''} — awaiting CI verification`;
 
             if (comment.path) {
+              // Inline code comment — reply directly to the comment
               await prService.replyToComment(release.prNumber, commentId, replyText, cwd);
+            } else if (comment.threadId) {
+              // Threaded review comment — reply using replyToComment and resolve the thread
+              await prService.replyToComment(release.prNumber, commentId, replyText, cwd);
+              try {
+                await prService.resolveThread(release.prNumber, comment.threadId, cwd);
+              } catch (resolveErr) {
+                log.warn('Failed to resolve thread', {
+                  releaseId, threadId: comment.threadId, error: resolveErr instanceof Error ? resolveErr.message : String(resolveErr),
+                });
+              }
             } else {
+              // Top-level issue comment — use addIssueComment with quoted body
               const quotedBody = (comment.body || '').split('\n').map((l: string) => `> ${l}`).join('\n');
               await prService.addIssueComment(release.prNumber, `${quotedBody}\n\n${replyText}`, cwd);
+            }
+
+            // Track comment as addressed so future cycles can skip it
+            if (!release.addressedCommentIds) release.addressedCommentIds = [];
+            if (!release.addressedCommentIds.includes(commentId)) {
+              release.addressedCommentIds.push(commentId);
             }
 
             // NOTE: Intentionally NOT resolving threads or minimizing comments here.

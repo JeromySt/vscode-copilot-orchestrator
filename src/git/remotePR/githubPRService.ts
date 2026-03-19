@@ -21,6 +21,8 @@ import type {
   PRListOptions,
   PRListItem,
   PRDetails,
+  PRMergeOptions,
+  PRMergeResult,
 } from '../../plan/types/remotePR';
 import { Logger } from '../../core/logger';
 
@@ -590,6 +592,43 @@ export class GitHubPRService implements IRemotePRService {
 
     await this._execGh(mutationArgs, cwd, env);
     log.info('PR demoted to draft', { prNumber });
+  }
+
+  /**
+   * Merge a pull request.
+   */
+  async mergePR(prNumber: number, cwd: string, options: PRMergeOptions): Promise<PRMergeResult> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    log.info('Merging PR', { prNumber, method: options.method, admin: options.admin });
+
+    const env = this._buildEnv(provider, credentials);
+    const args = ['pr', 'merge', String(prNumber), `--${options.method}`];
+
+    if (options.admin) {
+      args.push('--admin');
+    }
+    if (options.deleteSourceBranch) {
+      args.push('--delete-branch');
+    }
+    if (options.title) {
+      args.push('--subject', options.title);
+    }
+    args.push('--json', 'mergeCommit');
+
+    const output = await this._execGh(args, cwd, env);
+
+    let commitSha = '';
+    try {
+      const parsed = JSON.parse(output);
+      commitSha = parsed.mergeCommit?.oid ?? '';
+    } catch {
+      // Output may be empty on success for some gh versions
+    }
+
+    log.info('PR merged', { prNumber, commitSha });
+    return { commitSha };
   }
 
   /**

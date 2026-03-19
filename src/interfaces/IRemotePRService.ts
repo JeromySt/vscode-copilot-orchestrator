@@ -18,6 +18,8 @@ import type {
   PRListOptions,
   PRListItem,
   PRDetails,
+  PRMergeOptions,
+  PRMergeResult,
 } from '../plan/types/remotePR';
 
 /**
@@ -224,4 +226,15 @@ export interface IRemotePRService {
    * @throws If the PR does not exist, is already a draft, or cannot be demoted
    */
   demotePR(prNumber: number, cwd: string): Promise<void>;
+
+  /**
+   * Merge a pull request.
+   *
+   * @param prNumber - PR number to merge
+   * @param cwd - Working directory of the repository
+   * @param options - Merge options (method, admin bypass, delete branch, title)
+   * @returns Result containing the merge commit SHA
+   * @throws If the PR does not exist, is not mergeable, or the merge fails
+   */
+  mergePR(prNumber: number, cwd: string, options: PRMergeOptions): Promise<PRMergeResult>;
 }

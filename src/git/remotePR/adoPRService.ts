@@ -22,6 +22,8 @@ import type {
   PRListOptions,
   PRListItem,
   PRDetails,
+  PRMergeOptions,
+  PRMergeResult,
 } from '../../plan/types/remotePR';
 import { Logger } from '../../core/logger';
 
@@ -609,6 +611,51 @@ export class AdoPRService implements IRemotePRService {
         prNumber,
       });
       throw new Error(`Failed to demote ADO PR: ${error.message}`);
+    }
+  }
+
+  /**
+   * Merge a pull request.
+   *
+   * POST {org}/{project}/_apis/git/repositories/{repo}/pullRequests/{prId}/threads?api-version=7.0
+   * PATCH {org}/{project}/_apis/git/repositories/{repo}/pullRequests/{prId}?api-version=7.0
+   */
+  async mergePR(prNumber: number, cwd: string, options: PRMergeOptions): Promise<PRMergeResult> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    log.info('Merging Azure DevOps PR', { prNumber, method: options.method, admin: options.admin });
+
+    const mergeStrategyMap: Record<string, number> = {
+      merge: 1,
+      squash: 3,
+      rebase: 4,
+    };
+
+    const apiUrl = this._buildApiUrl(
+      provider,
+      `git/repositories/${provider.repoName}/pullRequests/${prNumber}/merge`,
+    );
+
+    const body: Record<string, unknown> = {
+      mergeStrategy: mergeStrategyMap[options.method] ?? 3,
+      deleteSourceBranch: options.deleteSourceBranch ?? false,
+      bypassPolicy: options.admin ?? false,
+      bypassReason: options.admin ? 'Admin merge' : undefined,
+    };
+
+    if (options.title) {
+      body.commitMessage = options.title;
+    }
+
+    try {
+      const result = await this._apiRequest('PATCH', apiUrl, credentials, body);
+      const commitSha: string = result?.mergeCommitId ?? '';
+      log.info('Azure DevOps PR merged', { prNumber, commitSha });
+      return { commitSha };
+    } catch (error: any) {
+      log.error('Failed to merge Azure DevOps PR', { error: error.message, prNumber });
+      throw new Error(`Failed to merge ADO PR: ${error.message}`);
     }
   }
 
