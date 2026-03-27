@@ -289,14 +289,10 @@ export class DefaultRemoteProviderDetector implements IRemoteProviderDetector {
     // Check for per-repo configured username
     const configuredUsername = repoPath ? await this.getConfiguredUsername(repoPath, hostname) : null;
 
-    // Also try the repo owner from the remote URL as a credential hint
-    const ownerUsername = configuredUsername || provider.owner || null;
-
-    if (ownerUsername) {
-      // Try git credential fill with the owner/configured username first,
-      // bypassing gh auth token which may be for a different account.
-      log.debug('Trying git credential fill with username hint', { username: ownerUsername });
-      const gitCred = await this.tryGitCredentialFill(hostname, ownerUsername);
+    if (configuredUsername) {
+      // Skip gh auth token (globally active account) and go straight to git credential fill
+      log.debug('Using configured username for GitHub', { hostname, username: configuredUsername });
+      const gitCred = await this.tryGitCredentialFill(hostname, configuredUsername);
       if (gitCred) {
         return {
           token: gitCred.token,

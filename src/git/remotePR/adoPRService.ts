@@ -516,18 +516,25 @@ export class AdoPRService implements IRemotePRService {
       `git/repositories/${provider.repoName}/pullRequests/${prNumber}`
     );
 
-    await this._apiRequest('PATCH', apiUrl, credentials, {
-      status: 'completed',
-      lastMergeSourceCommit: { commitId: '' },
-      completionOptions: {
-        deleteSourceBranch: options?.deleteSourceBranch !== false,
-        mergeStrategy: options?.method === 'rebase' ? 'rebaseMerge' : (options?.method === 'squash' ? 'squash' : 'noFastForward'),
-        bypassPolicy: options?.admin || false,
-      },
-    });
+    let response: any;
+    try {
+      response = await this._apiRequest('PATCH', apiUrl, credentials, {
+        status: 'completed',
+        lastMergeSourceCommit: { commitId: '' },
+        completionOptions: {
+          deleteSourceBranch: options?.deleteSourceBranch !== false,
+          mergeStrategy: options?.method === 'rebase' ? 'rebaseMerge' : (options?.method === 'squash' ? 'squash' : 'noFastForward'),
+          bypassPolicy: options?.admin || false,
+          ...(options?.title ? { mergeCommitMessage: options.title } : {}),
+        },
+      });
+    } catch (err: any) {
+      throw new Error(`Failed to merge ADO PR: ${err.message}`);
+    }
 
-    log.info('Azure DevOps PR merged', { prNumber });
-    return { commitSha: '' }; // ADO doesn't return merge commit SHA in the same call
+    const commitSha = response?.lastMergeCommit?.commitId || '';
+    log.info('Azure DevOps PR merged', { prNumber, commitSha });
+    return { commitSha };
   }
 
   async abandonPR(prNumber: number, cwd: string, comment?: string): Promise<void> {
