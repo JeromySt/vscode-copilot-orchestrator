@@ -21,8 +21,6 @@ import type {
   PRListOptions,
   PRListItem,
   PRDetails,
-  PRMergeOptions,
-  PRMergeResult,
 } from '../../plan/types/remotePR';
 import { Logger } from '../../core/logger';
 
@@ -224,7 +222,8 @@ export class GitHubPRService implements IRemotePRService {
         }
       }
 
-      log.info('PR checks retrieved', { prNumber, count: checks.length });
+      log.info('PR checks retrieved', { prNumber, count: checks.length, headSha });
+      if (checks.length > 0) checks[0].headSha = headSha;
       return checks;
     } catch (err) {
       log.warn('Failed to fetch PR checks, returning empty', { prNumber, error: String(err) });
@@ -494,9 +493,11 @@ export class GitHubPRService implements IRemotePRService {
     log.debug('Getting PR details', { prNumber });
 
     const env = this._buildEnv(provider, credentials);
+
+    // Use gh pr view with merge readiness fields
     const args = [
       'pr', 'view', String(prNumber),
-      '--json', 'number,title,headRefName,baseRefName,isDraft,state,author,url,body',
+      '--json', 'number,title,headRefName,baseRefName,isDraft,state,author,url,body,mergeable,reviewDecision,mergeStateStatus',
     ];
 
     const result = await this._execGh(args, cwd, env);
@@ -513,14 +514,64 @@ export class GitHubPRService implements IRemotePRService {
         author: pr.author?.login || 'unknown',
         url: pr.url,
         body: pr.body,
+        mergeable: pr.mergeable === 'MERGEABLE',
+        reviewDecision: pr.reviewDecision || undefined,
+        mergeStateStatus: pr.mergeStateStatus || undefined,
       };
       
-      log.info('PR details retrieved', { prNumber });
+      log.info('PR details retrieved', { prNumber, mergeable: details.mergeable, reviewDecision: details.reviewDecision, mergeStateStatus: details.mergeStateStatus });
       return details;
     } catch (err) {
       log.error('Failed to parse PR details response', { error: String(err), output: result });
       throw new Error(`Failed to parse gh pr view output: ${err}`);
     }
+  }
+
+  /**
+   * Merge a pull request via gh CLI.
+   */
+  async mergePR(prNumber: number, cwd: string, options?: {
+    method?: 'squash' | 'merge' | 'rebase';
+    admin?: boolean;
+    deleteSourceBranch?: boolean;
+    title?: string;
+    body?: string;
+  }): Promise<{ commitSha: string }> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.info('Merging PR', { prNumber, method: options?.method, admin: options?.admin });
+
+    const env = this._buildEnv(provider, credentials);
+    const method = options?.method || 'squash';
+    const args = ['pr', 'merge', String(prNumber), `--${method}`];
+
+    if (options?.admin) {
+      args.push('--admin');
+    }
+    if (options?.deleteSourceBranch !== false) {
+      args.push('--delete-branch');
+    }
+    if (options?.title) {
+      args.push('--subject', options.title);
+    }
+    if (options?.body) {
+      args.push('--body', options.body);
+    }
+
+    await this._execGh(args, cwd, env);
+
+    // Get the merge commit SHA
+    const ownerRepo = `${provider.owner}/${provider.repoName}`;
+    let commitSha = '';
+    try {
+      const prData = await this._execGhApi(`repos/${ownerRepo}/pulls/${prNumber}`, cwd, env);
+      const parsed = JSON.parse(prData);
+      commitSha = parsed.merge_commit_sha || '';
+    } catch { /* best effort */ }
+
+    log.info('PR merged', { prNumber, commitSha });
+    return { commitSha };
   }
 
   /**
@@ -592,43 +643,6 @@ export class GitHubPRService implements IRemotePRService {
 
     await this._execGh(mutationArgs, cwd, env);
     log.info('PR demoted to draft', { prNumber });
-  }
-
-  /**
-   * Merge a pull request.
-   */
-  async mergePR(prNumber: number, cwd: string, options: PRMergeOptions): Promise<PRMergeResult> {
-    const provider = await this.detectProvider(cwd);
-    const credentials = await this.acquireCredentials(provider);
-
-    log.info('Merging PR', { prNumber, method: options.method, admin: options.admin });
-
-    const env = this._buildEnv(provider, credentials);
-    const args = ['pr', 'merge', String(prNumber), `--${options.method}`];
-
-    if (options.admin) {
-      args.push('--admin');
-    }
-    if (options.deleteSourceBranch) {
-      args.push('--delete-branch');
-    }
-    if (options.title) {
-      args.push('--subject', options.title);
-    }
-    args.push('--json', 'mergeCommit');
-
-    const output = await this._execGh(args, cwd, env);
-
-    let commitSha = '';
-    try {
-      const parsed = JSON.parse(output);
-      commitSha = parsed.mergeCommit?.oid ?? '';
-    } catch {
-      // Output may be empty on success for some gh versions
-    }
-
-    log.info('PR merged', { prNumber, commitSha });
-    return { commitSha };
   }
 
   /**

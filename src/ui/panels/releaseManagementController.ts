@@ -161,6 +161,9 @@ export class ReleaseManagementController {
           this._dialogService.showError(`Failed to stop monitoring: ${error.message}`);
         });
         break;
+      case 'resetPolling':
+        this._releaseManager.resetPolling(this._releaseId);
+        break;
       case 'goBack':
         this._handleGoBack();
         break;

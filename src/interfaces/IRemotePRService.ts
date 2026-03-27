@@ -18,8 +18,6 @@ import type {
   PRListOptions,
   PRListItem,
   PRDetails,
-  PRMergeOptions,
-  PRMergeResult,
 } from '../plan/types/remotePR';
 
 /**
@@ -194,6 +192,22 @@ export interface IRemotePRService {
   getPRDetails(prNumber: number, cwd: string): Promise<PRDetails>;
 
   /**
+   * Merge a pull request.
+   *
+   * @param prNumber - PR number to merge
+   * @param cwd - Working directory of the repository
+   * @param options - Merge options
+   * @returns The merge commit SHA
+   */
+  mergePR(prNumber: number, cwd: string, options?: {
+    method?: 'squash' | 'merge' | 'rebase';
+    admin?: boolean;
+    deleteSourceBranch?: boolean;
+    title?: string;
+    body?: string;
+  }): Promise<{ commitSha: string }>;
+
+  /**
    * Abandon (close) a pull request without merging.
    * 
    * Closes the PR and optionally adds a closing comment.
@@ -226,15 +240,4 @@ export interface IRemotePRService {
    * @throws If the PR does not exist, is already a draft, or cannot be demoted
    */
   demotePR(prNumber: number, cwd: string): Promise<void>;
-
-  /**
-   * Merge a pull request.
-   *
-   * @param prNumber - PR number to merge
-   * @param cwd - Working directory of the repository
-   * @param options - Merge options (method, admin bypass, delete branch, title)
-   * @returns Result containing the merge commit SHA
-   * @throws If the PR does not exist, is not mergeable, or the merge fails
-   */
-  mergePR(prNumber: number, cwd: string, options: PRMergeOptions): Promise<PRMergeResult>;
 }

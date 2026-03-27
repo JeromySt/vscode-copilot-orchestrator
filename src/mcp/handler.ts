@@ -377,9 +377,21 @@ export class McpHandler implements IMcpRequestRouter {
       case 'add_copilot_plan_job':
         result = await handleAddPlanJob(args || {}, this.context);
         break;
+
+      case 'add_copilot_plan_jobs':
+        result = await (await import('./handlers/plan/addJobsHandler')).handleAddPlanJobs(args || {}, this.context);
+        break;
       
       case 'finalize_copilot_plan':
         result = await handleFinalizePlan(args || {}, this.context);
+        break;
+
+      case 'get_copilot_plan_graph':
+        result = await (await import('./handlers/plan/graphPlanHandler')).handleGetPlanGraph(args || {}, this.context);
+        break;
+
+      case 'clone_copilot_plan':
+        result = await (await import('./handlers/plan/clonePlanHandler')).handleClonePlan(args || {}, this.context);
         break;
 
       // --- Release tools ---

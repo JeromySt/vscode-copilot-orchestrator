@@ -48,6 +48,14 @@ export interface IReleasePRMonitor {
   stopMonitoring(releaseId: string): void;
 
   /**
+   * Resets the polling interval back to the base rate and triggers an immediate cycle.
+   * Used when the user wants to force a fresh check after backoff has slowed polling.
+   * 
+   * @param releaseId - The release ID
+   */
+  resetPolling(releaseId: string): void;
+
+  /**
    * Checks if a release PR is currently being monitored.
    * 
    * @param releaseId - The release ID

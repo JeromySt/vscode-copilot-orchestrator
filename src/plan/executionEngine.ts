@@ -821,6 +821,7 @@ export class JobExecutionEngine {
             // Replace the original instructions file with a heal-specific one.
             // This prevents the copilot CLI from re-reading and re-executing the
             // original task. The heal instructions point the agent at the log file.
+            const healFileName = `orchestrator-heal-${node.id.slice(0, 8)}.instructions.md`;
             try {
               const instrDir = path.join(worktreePath, '.github', 'instructions');
               
@@ -878,7 +879,7 @@ export class JobExecutionEngine {
                 `- Previous auto-heal agents may have already made partial progress — build on their work`,
               ].join('\n');
               
-              const healFile = path.join(instrDir, `orchestrator-heal-${node.id.slice(0, 8)}.instructions.md`);
+              const healFile = path.join(instrDir, healFileName);
               fs.writeFileSync(healFile, healInstructions, 'utf8');
               this.log.debug(`Wrote heal instructions to: ${healFile}`);
             } catch (e: any) {
@@ -915,7 +916,7 @@ export class JobExecutionEngine {
             }
             const healSpec: WorkSpec = {
               type: 'agent',
-              instructions: `Read the heal instructions file in .github/instructions/. The ${failedPhase} phase failed. Diagnose the root cause from the execution log, then do whatever work is needed to fix it — write code, add tests, fix configs. Re-run the failed command to verify your fix. Do NOT just diagnose; actively resolve the problem.`,
+              instructions: `Read the heal instructions file at .github/instructions/${healFileName} — it contains the failure log path, the failed command, and step-by-step fix instructions. The ${failedPhase} phase failed. Do NOT just diagnose; actively resolve the problem.`,
               allowedFolders: healAllowedFolders,
               allowedUrls: healAllowedUrls.length > 0 ? healAllowedUrls : undefined,
             };

@@ -93,7 +93,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     // Listen for PR monitor cycle completions and forward to release events + panel refresh
     if (typeof (this.prMonitor as any).on === 'function') {
-      (this.prMonitor as any).on('cycleComplete', (releaseId: string, cycle: any) => {
+      (this.prMonitor as any).on('cycleComplete', (releaseId: string, cycle: any, pollIntervalTicks?: number) => {
         // Update monitoring stats on the release for panel rendering
         const rel = this.releases.get(releaseId);
         if (rel) {
@@ -229,6 +229,10 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
           }
         }
         this.events.emitReleasePrCycle(releaseId, cycle);
+        // Forward poll interval so the UI can show backoff status
+        if (pollIntervalTicks) {
+          this.emit('pollIntervalChanged', releaseId, Math.round(pollIntervalTicks));
+        }
         this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
       });
 
@@ -1031,6 +1035,10 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     }
 
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+  }
+
+  resetPolling(releaseId: string): void {
+    this.prMonitor.resetPolling(releaseId);
   }
 
   /**

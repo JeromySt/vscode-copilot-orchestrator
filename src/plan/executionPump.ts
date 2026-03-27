@@ -293,12 +293,23 @@ export class ExecutionPump {
         });
       }
 
-      // Schedule and execute each node
-      for (const nodeId of nodesToSchedule) {
+      // Schedule and execute each node with staggering to avoid thundering-herd
+      // rate limiting on shared endpoints (models list, auth, MCP).
+      // When multiple nodes become ready simultaneously, stagger CLI spawns
+      // by a few seconds to prevent 429 collisions.
+      const STAGGER_DELAY_MS = 3000; // 3 seconds between concurrent spawns
+      for (let i = 0; i < nodesToSchedule.length; i++) {
+        const nodeId = nodesToSchedule[i];
         const node = plan.jobs.get(nodeId);
         if (!node) {continue;}
         sm.transition(nodeId, 'scheduled');
-        this.executeNode(plan, sm, node as JobNode);
+        if (i > 0 && nodesToSchedule.length > 2) {
+          // Stagger: delay subsequent nodes when batch is large enough to matter
+          const delay = Math.min(i * STAGGER_DELAY_MS, 15000); // Cap at 15s
+          setTimeout(() => this.executeNode(plan, sm, node as JobNode), delay);
+        } else {
+          this.executeNode(plan, sm, node as JobNode);
+        }
       }
 
       if (nodesToSchedule.length > 0) {

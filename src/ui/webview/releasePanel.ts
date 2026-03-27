@@ -164,6 +164,10 @@ function toggleAutoFix(enabled: boolean): void {
   vscode.postMessage({ type: 'toggleAutoFix', enabled });
 }
 
+function resetPolling(): void {
+  vscode.postMessage({ type: 'resetPolling' });
+}
+
 function checkMergeReadiness(): void {
   const container = document.getElementById('merge-readiness');
   if (container) {
@@ -470,11 +474,13 @@ class PRMonitorControl {
   cycles: any[];
   isMonitoring: boolean;
   countdownSeconds: number;
+  pollIntervalSeconds: number;
 
   constructor() {
     this.stats = { checksPass: 0, checksFail: 0, unresolvedThreads: 0, unresolvedAlerts: 0 };
     this.cycles = [];
     this.isMonitoring = releaseData.status === 'monitoring' || releaseData.status === 'addressing';
+    this.pollIntervalSeconds = 120;
     this.countdownSeconds = 120;
     this.render();
     if (this.isMonitoring) {
@@ -486,7 +492,7 @@ class PRMonitorControl {
     if (data) {
       this.stats = data;
       this.render();
-      this.countdownSeconds = 120;
+      this.countdownSeconds = this.pollIntervalSeconds;
     }
   }
 
@@ -494,7 +500,13 @@ class PRMonitorControl {
     this.cycles.push(cycle);
     this.renderCycles();
     this.renderChecks(cycle);
-    this.countdownSeconds = 120;
+    this.countdownSeconds = this.pollIntervalSeconds;
+  }
+
+  updatePollInterval(intervalSeconds: number): void {
+    this.pollIntervalSeconds = intervalSeconds;
+    this.countdownSeconds = intervalSeconds;
+    this._updatePollDisplay();
   }
 
   onStopped(): void {
@@ -519,10 +531,22 @@ class PRMonitorControl {
       const m = Math.floor(self.countdownSeconds / 60);
       const s = self.countdownSeconds % 60;
       el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
-      self.countdownSeconds = self.countdownSeconds > 0 ? self.countdownSeconds - 1 : 120;
+      self.countdownSeconds = self.countdownSeconds > 0 ? self.countdownSeconds - 1 : self.pollIntervalSeconds;
       setTimeout(tick, 1000);
     };
     tick();
+  }
+
+  private _updatePollDisplay(): void {
+    const pollInfo = document.querySelector('.monitor-poll-info');
+    if (pollInfo) {
+      const mins = Math.round(this.pollIntervalSeconds / 60);
+      const label = mins === 1 ? '1 minute' : mins + ' minutes';
+      const isBackoff = this.pollIntervalSeconds > 120;
+      pollInfo.textContent = isBackoff
+        ? 'Backed off to every ' + label + ' (all green)'
+        : 'Polling every ' + label;
+    }
   }
 
   render(): void {
@@ -586,7 +610,10 @@ class PRMonitorControl {
     const pending = checks.filter((c: any) => c.status === 'pending');
     const skipped = checks.filter((c: any) => c.status === 'skipped');
 
-    let html = '<h4 style="margin: 16px 0 8px 0; font-size: 13px; font-weight: 600;">CI/CD Checks (' + checks.length + ')</h4>';
+    const shaLabel = cycle.headSha
+      ? ' <span style="font-weight:400;font-size:11px;color:var(--vscode-descriptionForeground);" title="' + escapeHtml(cycle.headSha) + '">@ ' + escapeHtml(cycle.headSha.substring(0, 7)) + '</span>'
+      : '';
+    let html = '<h4 style="margin: 16px 0 8px 0; font-size: 13px; font-weight: 600;">CI/CD Checks (' + checks.length + ')' + shaLabel + '</h4>';
     const ordered = [...failing, ...pending, ...skipped, ...passing];
     html += ordered.map((check: any) => {
       const icon = check.status === 'passing' ? '\u2705' :
@@ -1128,6 +1155,9 @@ function setupMessageListener(): void {
         break;
       case 'monitoringStopped':
         if (prMonitor) prMonitor.onStopped();
+        break;
+      case 'pollIntervalChanged':
+        if (prMonitor && message.intervalSeconds) prMonitor.updatePollInterval(message.intervalSeconds);
         break;
       case 'mergeReadiness':
         renderMergeReadiness(message.details, message.error);

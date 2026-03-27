@@ -97,6 +97,38 @@ const fallbackEnvironment: IEnvironment = {
   cwd() { return process.cwd(); },
 };
 
+// ── Transient Failure Detection ────────────────────────────────────────
+
+/** Patterns in CLI output that indicate a transient (retryable) failure. */
+const TRANSIENT_FAILURE_PATTERNS = [
+  /failed to list models:\s*429/i,
+  /failed to list models:\s*5\d{2}/i,
+  /rate limit/i,
+  /too many requests/i,
+  /ECONNRESET/i,
+  /ETIMEDOUT/i,
+  /ECONNREFUSED/i,
+  /socket hang up/i,
+];
+
+/** Max duration in ms for a run to be considered "early exit" (eligible for transient retry). */
+const TRANSIENT_MAX_DURATION_MS = 30_000;
+
+/** Max transient retries before treating as permanent failure. */
+const MAX_TRANSIENT_RETRIES = 3;
+
+/** Base backoff delay in ms (doubles each attempt: 30s, 60s, 120s). */
+const TRANSIENT_BACKOFF_BASE_MS = 30_000;
+
+/**
+ * Check if a CLI failure looks transient based on captured output lines.
+ */
+function isTransientFailure(outputLines: string[], durationMs: number): boolean {
+  if (durationMs > TRANSIENT_MAX_DURATION_MS) return false;
+  const combined = outputLines.join('\n');
+  return TRANSIENT_FAILURE_PATTERNS.some(p => p.test(combined));
+}
+
 // ── CopilotCliRunner ───────────────────────────────────────────────────
 
 /** Unified runner for Copilot CLI operations. */
@@ -185,20 +217,53 @@ export class CopilotCliRunner {
     
     this.logger.info(`[${label}] Running: ${copilotCmd.substring(0, 100)}...`);
     
-    // Execute and return result
+    // Execute with transient failure retry
     try {
-      const result = await this.execute({
-        command: copilotCmd,
-        cwd,
-        label,
-        sessionId,
-        timeout,
-        onOutput,
-        onProcess,
-        env: options.env,
-      });
-      
-      return result;
+      let lastResult: CopilotRunResult | undefined;
+      for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+        const capturedLines: string[] = [];
+        const startTime = Date.now();
+
+        try {
+          lastResult = await this.execute({
+            command: copilotCmd,
+            cwd,
+            label: attempt > 0 ? `${label} (retry ${attempt}/${MAX_TRANSIENT_RETRIES})` : label,
+            sessionId,
+            timeout,
+            onOutput: (line: string) => {
+              capturedLines.push(line);
+              onOutput?.(line);
+            },
+            onProcess,
+            env: options.env,
+          });
+
+          if (lastResult.success) {
+            return lastResult;
+          }
+
+          // Check if this is a transient failure worth retrying
+          const durationMs = Date.now() - startTime;
+          if (attempt < MAX_TRANSIENT_RETRIES && isTransientFailure(capturedLines, durationMs)) {
+            const backoffMs = TRANSIENT_BACKOFF_BASE_MS * Math.pow(2, attempt);
+            const backoffSec = Math.round(backoffMs / 1000);
+            this.logger.warn(`[${label}] Transient CLI failure detected (attempt ${attempt + 1}/${MAX_TRANSIENT_RETRIES + 1}), retrying in ${backoffSec}s...`);
+            onOutput?.(`⚠ Transient failure detected (${lastResult.error}). Retrying in ${backoffSec}s... (attempt ${attempt + 1}/${MAX_TRANSIENT_RETRIES + 1})`);
+            await new Promise(resolve => setTimeout(resolve, backoffMs));
+            continue;
+          }
+
+          // Not transient or max retries exceeded — return failure
+          return lastResult;
+        } catch (error: any) {
+          // Execute threw unexpectedly — not retryable
+          return { success: false, error: error.message } as CopilotRunResult;
+        }
+      }
+
+      // Should not reach here, but return last result as safety net
+      return lastResult ?? { success: false, error: 'Max transient retries exceeded' };
     } finally {
       // Cleanup instructions file
       if (instructionsFile) {

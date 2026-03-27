@@ -189,6 +189,15 @@ export class ReleaseManagementPanel {
         }
       });
 
+      // Forward poll interval changes (backoff) to the webview
+      (this._releaseManager as any).on('pollIntervalChanged', (releaseId: string, intervalTicks: number) => {
+        if (releaseId === this._releaseId && !this._disposed) {
+          try {
+            this._panel.webview.postMessage({ type: 'pollIntervalChanged', intervalSeconds: intervalTicks });
+          } catch { /* panel disposed */ }
+        }
+      });
+
       // Full refresh on release progress changes — but ONLY for status transitions.
       // During monitoring, all updates are incremental (messages), not full re-renders.
       (this._releaseManager as any).on('releaseProgress', (releaseId: string) => {

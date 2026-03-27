@@ -30,21 +30,18 @@ import type { IPulseEmitter, Disposable as PulseDisposable } from '../interfaces
 import { Logger } from '../core/logger';
 
 const log = Logger.for('plan');
-const AUTOMATED_FIX_MARKER = '✅ Addressed in automated fix';
-
-function isAutomatedFixRelayComment(comment: PRComment): boolean {
-  if (comment.source !== 'human') {
-    return false;
-  }
-
-  return /^Re:\s+[^\n]*\[bot\]'s feedback\b[\s\S]*✅ Addressed in automated fix\b/u.test(comment.body);
-}
 
 // Poll every 2 minutes (120 pulse ticks at ~1s each)
 const POLL_INTERVAL_TICKS = 120;
 
+// Maximum backoff: 30 minutes (1800 ticks)
+const MAX_POLL_INTERVAL_TICKS = 1800;
+
 // Stop monitoring after 40 minutes since last push
 const MAX_MONITORING_MS = 2400000;
+
+// Maximum cycles to keep in memory (older ones are discarded)
+const MAX_CYCLES_IN_MEMORY = 100;
 
 /**
  * Internal state for a single release PR monitoring session.
@@ -71,11 +68,14 @@ interface MonitorState {
   /** Tick counter for pulse-based polling */
   tickCount: number;
 
+  /** Current poll interval in ticks (increases via exponential backoff) */
+  currentPollTicks: number;
+
+  /** Number of consecutive green (no-findings) cycles */
+  consecutiveGreenCycles: number;
+
   /** Timestamp of the last push (resets the 40-minute timer) */
   lastPushTime: number;
-
-  /** Last observed HEAD ref for detecting newly pushed fixes */
-  lastObservedHeadRef: string | null;
 
   /** All monitoring cycles executed */
   cycles: PRMonitorCycle[];
@@ -136,17 +136,6 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
     // Resolve PR service for this repository (cached by factory)
     const prService = await this.prServiceFactory.getServiceForRepo(repoPath);
 
-    let initialHeadRef: string | null = null;
-    try {
-      initialHeadRef = await this.git.repository.getHead(repoPath);
-    } catch (err) {
-      log.warn('Failed to read initial release branch HEAD for monitoring', {
-        releaseId,
-        repoPath,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
     // Initialize monitoring state
     const state: MonitorState = {
       releaseId,
@@ -156,8 +145,9 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       prService,
       pulseSubscription: undefined,
       tickCount: 0,
+      currentPollTicks: POLL_INTERVAL_TICKS,
+      consecutiveGreenCycles: 0,
       lastPushTime: Date.now(),
-      lastObservedHeadRef: initialHeadRef,
       cycles: [],
       isActive: true,
     };
@@ -172,7 +162,7 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
     state.pulseSubscription = this.pulse.onPulse(() => {
       if (!state.isActive || isRunningCycle) return;
       state.tickCount++;
-      if (state.tickCount >= POLL_INTERVAL_TICKS) {
+      if (state.tickCount >= state.currentPollTicks) {
         state.tickCount = 0;
         isRunningCycle = true;
         this._runCycle(state).catch((err) => {
@@ -186,7 +176,7 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
 
     log.info('PR monitoring scheduled via pulse', {
       releaseId,
-      pollIntervalTicks: POLL_INTERVAL_TICKS,
+      pollIntervalTicks: state.currentPollTicks,
       maxMonitoringMs: MAX_MONITORING_MS,
     });
   }
@@ -234,14 +224,41 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
   }
 
   /**
+   * Resets the polling interval back to the base rate (2 minutes).
+   * Called when the user wants to force a fresh check.
+   */
+  resetPolling(releaseId: string): void {
+    const state = this.monitors.get(releaseId);
+    if (!state) return;
+    state.consecutiveGreenCycles = 0;
+    state.currentPollTicks = POLL_INTERVAL_TICKS;
+    state.tickCount = 0;
+    log.info('Polling interval reset to base rate', { releaseId, pollIntervalTicks: POLL_INTERVAL_TICKS });
+    // Run a cycle immediately
+    this._runCycle(state).catch((err) => {
+      log.error('Immediate cycle after polling reset failed', {
+        releaseId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
+  /**
+   * Gets the current polling interval in seconds for a release.
+   */
+  getPollingIntervalSeconds(releaseId: string): number {
+    const state = this.monitors.get(releaseId);
+    return state ? Math.round(state.currentPollTicks) : POLL_INTERVAL_TICKS;
+  }
+
+  /**
    * Runs a single monitoring cycle.
    *
    * 1. Fetches PR checks, comments, and security alerts via prService
-   * 2. Emits findings via the cycleComplete event for UI display
-   * 3. Stops monitoring only if 40 minutes have elapsed since the last push
-   *    AND there are no outstanding findings (unresolved comments, failing
-   *    checks, or unresolved alerts). When findings remain, monitoring
-   *    continues indefinitely so the user can trigger AI fixes from the UI.
+   * 2. If findings detected, addresses them via Copilot CLI
+   * 3. Commits and pushes fixes (resets the 40-minute timer)
+   * 4. Replies to comments and resolves threads via prService
+   * 5. Stops monitoring if 40 minutes elapsed since last push
    */
   private async _runCycle(state: MonitorState): Promise<void> {
     const cycleNumber = state.cycles.length + 1;
@@ -253,91 +270,73 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       prNumber: state.prNumber,
     });
 
-    try {
-      const currentHeadRef = await this.git.repository.getHead(state.repoPath);
-      if (currentHeadRef && currentHeadRef !== state.lastObservedHeadRef) {
-        state.lastObservedHeadRef = currentHeadRef;
-        state.lastPushTime = timestamp;
-        log.info('Detected new release PR push, resetting monitoring timer', {
-          releaseId: state.releaseId,
-          headRef: currentHeadRef,
-        });
-      }
-    } catch (err) {
-      log.warn('Failed to read release branch HEAD during monitoring', {
-        releaseId: state.releaseId,
-        repoPath: state.repoPath,
-        error: err instanceof Error ? err.message : String(err),
-      });
+    // Check if we've exceeded the max monitoring time since last push.
+    // Only stop if there are no outstanding findings — if there are still
+    // unresolved comments/checks/alerts, keep monitoring so the user
+    // can see them and trigger AI fixes.
+    const elapsedSinceLastPush = timestamp - state.lastPushTime;
+    if (elapsedSinceLastPush > MAX_MONITORING_MS) {
+      // We'll check findings after fetching status below.
+      // For now, just log and continue — the actual stop decision
+      // happens after we know the current findings state.
     }
 
-    // Track elapsed time since last push. We only stop monitoring on timeout
-    // if there are no outstanding findings — if there are still unresolved
-    // comments/checks/alerts, keep monitoring so the user can see them and
-    // trigger AI fixes. The actual stop decision is made below after fetching
-    // current findings status.
-    const elapsedSinceLastPush = timestamp - state.lastPushTime;
-
-    // Fetch current PR status via prService
+    // Fetch current PR status via prService — each call is independent
+    // so a failure in one (e.g., 403 on security alerts) doesn't prevent
+    // processing of the others (checks and comments).
     let checks: PRCheck[] = [];
     let comments: PRComment[] = [];
     let alerts: RemotePRSecurityAlert[] = [];
 
     try {
       checks = await state.prService.getPRChecks(state.prNumber, state.repoPath);
-      comments = await state.prService.getPRComments(state.prNumber, state.repoPath);
-      alerts = await state.prService.getSecurityAlerts(state.releaseBranch, state.repoPath);
     } catch (err) {
-      log.error('Failed to fetch PR status', {
+      log.warn('Failed to fetch PR checks (continuing with empty)', {
         releaseId: state.releaseId,
         error: err instanceof Error ? err.message : String(err),
       });
-      // Record empty cycle on error
-      state.cycles.push({
-        cycleNumber,
-        timestamp,
-        checks: [],
-        comments: [],
-        securityAlerts: [],
-        actions: [],
+    }
+
+    try {
+      comments = await state.prService.getPRComments(state.prNumber, state.repoPath);
+    } catch (err) {
+      log.warn('Failed to fetch PR comments (continuing with empty)', {
+        releaseId: state.releaseId,
+        error: err instanceof Error ? err.message : String(err),
       });
-      return;
+    }
+
+    try {
+      alerts = await state.prService.getSecurityAlerts(state.releaseBranch, state.repoPath);
+    } catch (err) {
+      log.warn('Failed to fetch security alerts (continuing with empty)', {
+        releaseId: state.releaseId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     // Convert to cycle format
+    const headSha = checks.find(c => c.headSha)?.headSha;
     const cycleChecks: PRCheckResult[] = checks.map((c) => ({
       name: c.name,
       status: c.status,
       url: c.url,
     }));
 
-    const cycleComments: PRCommentResult[] = comments.map((c) => {
-      const hasAutomatedFixReply = (
-        (typeof c.body === 'string'
-          && c.body.startsWith('> ')
-          && c.body.includes(`\n\n${AUTOMATED_FIX_MARKER}`))
-        || isAutomatedFixRelayComment(c)
-        || c.replies?.some((reply) => (
-          typeof reply.body === 'string'
-          && reply.body.trimStart().startsWith(AUTOMATED_FIX_MARKER)
-        )) === true
-      );
-
-      return {
-        id: c.id,
-        author: c.author,
-        body: c.body,
-        path: c.path,
-        line: c.line,
-        isResolved: c.isResolved === true || hasAutomatedFixReply,
-        source: c.source,
-        threadId: c.threadId,
-        url: c.url,
-        nodeId: c.nodeId,
-        parentReviewId: c.parentReviewId,
-        replies: c.replies,
-      };
-    });
+    const cycleComments: PRCommentResult[] = comments.map((c) => ({
+      id: c.id,
+      author: c.author,
+      body: c.body,
+      path: c.path,
+      line: c.line,
+      isResolved: c.isResolved,
+      source: c.source,
+      threadId: c.threadId,
+      url: c.url,
+      nodeId: c.nodeId,
+      parentReviewId: c.parentReviewId,
+      replies: c.replies,
+    }));
 
     const cycleAlerts: PRSecurityAlert[] = alerts.map((a) => ({
       id: a.id,
@@ -373,8 +372,27 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       // Auto-fix is disabled. Findings are emitted via the cycleComplete event
       // so the UI can display them in the Pending Actions panel. The user
       // selects which findings to address and triggers AI fixes from there.
+
+      // Reset backoff — findings detected, poll frequently
+      state.consecutiveGreenCycles = 0;
+      state.currentPollTicks = POLL_INTERVAL_TICKS;
     } else {
       log.info('No findings detected', { releaseId: state.releaseId });
+
+      // Exponential backoff: double interval after each consecutive green cycle
+      // 2m → 4m → 8m → 16m → 30m (cap)
+      state.consecutiveGreenCycles++;
+      if (state.consecutiveGreenCycles > 1) {
+        const newTicks = Math.min(state.currentPollTicks * 2, MAX_POLL_INTERVAL_TICKS);
+        if (newTicks !== state.currentPollTicks) {
+          state.currentPollTicks = newTicks;
+          log.info('Backoff: increasing poll interval (all green)', {
+            releaseId: state.releaseId,
+            consecutiveGreen: state.consecutiveGreenCycles,
+            newIntervalSeconds: Math.round(newTicks),
+          });
+        }
+      }
 
       // Only stop on timeout when everything is green (no findings)
       if (elapsedSinceLastPush > MAX_MONITORING_MS) {
@@ -387,13 +405,14 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
         const cycle: PRMonitorCycle = {
           cycleNumber,
           timestamp,
+          headSha,
           checks: cycleChecks,
           comments: cycleComments,
           securityAlerts: cycleAlerts,
           actions,
         };
         state.cycles.push(cycle);
-        this.emit('cycleComplete', state.releaseId, cycle);
+        this.emit('cycleComplete', state.releaseId, cycle, state.currentPollTicks);
         this.stopMonitoring(state.releaseId);
         return;
       }
@@ -403,6 +422,7 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
     const cycle: PRMonitorCycle = {
       cycleNumber,
       timestamp,
+      headSha,
       checks: cycleChecks,
       comments: cycleComments,
       securityAlerts: cycleAlerts,
@@ -410,8 +430,13 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
     };
     state.cycles.push(cycle);
 
+    // Cap cycles in memory to avoid unbounded growth
+    if (state.cycles.length > MAX_CYCLES_IN_MEMORY) {
+      state.cycles = state.cycles.slice(-MAX_CYCLES_IN_MEMORY);
+    }
+
     // Emit cycle event so release manager can update the release and UI
-    this.emit('cycleComplete', state.releaseId, cycle);
+    this.emit('cycleComplete', state.releaseId, cycle, state.currentPollTicks);
 
     log.info('Monitoring cycle complete', {
       releaseId: state.releaseId,
@@ -573,8 +598,6 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
 
         // Push to remote
         await this.git.repository.push(state.repoPath, { branch: state.releaseBranch });
-        state.lastObservedHeadRef = headRef;
-        state.lastPushTime = Date.now();
 
         log.info('Changes committed and pushed', {
           releaseId: state.releaseId,
@@ -608,38 +631,18 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
       try {
         const replyText = `✅ Addressed in automated fix ${commitHash ? `(${commitHash.substring(0, 7)})` : ''}`;
 
-        if (comment.path || comment.threadId) {
-          await state.prService.replyToComment(
-            state.prNumber,
-            comment.id,
-            replyText,
-            state.repoPath,
-          );
-        } else {
-          const quotedBody = (comment.body || '').split('\n').map((line) => `> ${line}`).join('\n');
-          await state.prService.addIssueComment(
-            state.prNumber,
-            `${quotedBody}\n\n${replyText}`,
-            state.repoPath,
-          );
-        }
+        await state.prService.replyToComment(
+          state.prNumber,
+          comment.id,
+          replyText,
+          state.repoPath,
+        );
 
         // Mark thread as resolved if we have a threadId
         if (comment.threadId) {
           await state.prService.resolveThread(
             state.prNumber,
             comment.threadId,
-            state.repoPath,
-          );
-        }
-
-        if (!comment.path
-          && !comment.threadId
-          && comment.nodeId
-          && typeof state.prService.minimizeComment === 'function') {
-          await state.prService.minimizeComment(
-            comment.nodeId,
-            'RESOLVED',
             state.repoPath,
           );
         }

@@ -22,8 +22,6 @@ import type {
   PRListOptions,
   PRListItem,
   PRDetails,
-  PRMergeOptions,
-  PRMergeResult,
 } from '../../plan/types/remotePR';
 import { Logger } from '../../core/logger';
 
@@ -150,6 +148,10 @@ export class AdoPRService implements IRemotePRService {
           url: build._links?.web?.href,
         };
       });
+
+      // Attach the head SHA from the most recent build's sourceVersion
+      const latestSha = prBuilds[0]?.sourceVersion;
+      if (latestSha && checks.length > 0) checks[0].headSha = latestSha;
 
       log.debug('Fetched Azure DevOps PR checks', { prNumber, count: checks.length });
       return checks;
@@ -497,6 +499,37 @@ export class AdoPRService implements IRemotePRService {
    * 
    * PATCH {org}/{project}/_apis/git/repositories/{repo}/pullRequests/{prId}?api-version=7.0
    */
+  async mergePR(prNumber: number, cwd: string, options?: {
+    method?: 'squash' | 'merge' | 'rebase';
+    admin?: boolean;
+    deleteSourceBranch?: boolean;
+    title?: string;
+    body?: string;
+  }): Promise<{ commitSha: string }> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    log.info('Merging Azure DevOps PR', { prNumber, method: options?.method });
+
+    const apiUrl = this._buildApiUrl(
+      provider,
+      `git/repositories/${provider.repoName}/pullRequests/${prNumber}`
+    );
+
+    await this._apiRequest('PATCH', apiUrl, credentials, {
+      status: 'completed',
+      lastMergeSourceCommit: { commitId: '' },
+      completionOptions: {
+        deleteSourceBranch: options?.deleteSourceBranch !== false,
+        mergeStrategy: options?.method === 'rebase' ? 'rebaseMerge' : (options?.method === 'squash' ? 'squash' : 'noFastForward'),
+        bypassPolicy: options?.admin || false,
+      },
+    });
+
+    log.info('Azure DevOps PR merged', { prNumber });
+    return { commitSha: '' }; // ADO doesn't return merge commit SHA in the same call
+  }
+
   async abandonPR(prNumber: number, cwd: string, comment?: string): Promise<void> {
     const provider = await this.detectProvider(cwd);
     const credentials = await this.acquireCredentials(provider);
@@ -611,56 +644,6 @@ export class AdoPRService implements IRemotePRService {
         prNumber,
       });
       throw new Error(`Failed to demote ADO PR: ${error.message}`);
-    }
-  }
-
-  /**
-   * Merge a pull request.
-   *
-   * PATCH {org}/{project}/_apis/git/repositories/{repo}/pullRequests/{prId}?api-version=7.0
-   */
-  async mergePR(prNumber: number, cwd: string, options: PRMergeOptions): Promise<PRMergeResult> {
-    const provider = await this.detectProvider(cwd);
-    const credentials = await this.acquireCredentials(provider);
-
-    log.info('Merging Azure DevOps PR', { prNumber, method: options.method, admin: options.admin });
-
-    // ADO merge strategy: 1=noFastForward, 2=rebase, 3=rebaseMerge, 4=squash
-    const mergeStrategyMap: Record<string, number> = {
-      merge: 1,
-      rebase: 2,
-      squash: 4,
-    };
-
-    const apiUrl = this._buildApiUrl(
-      provider,
-      `git/repositories/${provider.repoName}/pullRequests/${prNumber}`,
-    );
-
-    const completionOptions: Record<string, unknown> = {
-      mergeStrategy: mergeStrategyMap[options.method] ?? 4,
-      deleteSourceBranch: options.deleteSourceBranch ?? false,
-      bypassPolicy: options.admin ?? false,
-      bypassReason: options.admin ? 'Admin merge' : undefined,
-    };
-
-    if (options.title) {
-      completionOptions.mergeCommitMessage = options.title;
-    }
-
-    const body: Record<string, unknown> = {
-      status: 'completed',
-      completionOptions,
-    };
-
-    try {
-      const result = await this._apiRequest('PATCH', apiUrl, credentials, body);
-      const commitSha: string = result?.lastMergeCommit?.commitId ?? result?.mergeCommitId ?? '';
-      log.info('Azure DevOps PR merged', { prNumber, commitSha });
-      return { commitSha };
-    } catch (error: any) {
-      log.error('Failed to merge Azure DevOps PR', { error: error.message, prNumber });
-      throw new Error(`Failed to merge ADO PR: ${error.message}`);
     }
   }
 

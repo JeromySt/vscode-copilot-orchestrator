@@ -429,6 +429,9 @@ export interface PRMonitorCycle {
   /** When this cycle ran */
   timestamp: number;
 
+  /** Head commit SHA the checks ran against */
+  headSha?: string;
+
   /** CI/CD check results */
   checks: PRCheckResult[];
 

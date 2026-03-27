@@ -254,6 +254,17 @@ export class DefaultJobExecutor implements JobExecutor {
       if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid, phaseTiming: context.phaseTiming };}
 
       // ---- WORK ----
+      // Capture HEAD before work starts — this becomes the commit phase's baseline.
+      // Using context.baseCommit is unreliable during auto-heal retries because
+      // a prior auto-heal attempt may have created commits, making HEAD !== baseCommit
+      // even when the current work phase produced no changes.
+      let preWorkHead = context.baseCommit;
+      if (!skip('work')) {
+        try {
+          const currentHead = await this.git.worktrees.getHeadCommit(worktreePath);
+          if (currentHead) preWorkHead = currentHead;
+        } catch { /* fall back to context.baseCommit */ }
+      }
       if (skip('work')) { this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION (SKIPPED - RESUMING) =========='); }
       else if (workSpec_) {
         context.onProgress?.('Running work'); context.onStepStatusChange?.('work', 'running');
@@ -283,7 +294,7 @@ export class DefaultJobExecutor implements JobExecutor {
       this.logEntry(executionKey, 'commit', 'info', '========== COMMIT SECTION START ==========');
       const phaseStartCommit = Date.now();
       context.phaseTiming!.push({ phase: 'commit', startedAt: phaseStartCommit });
-      const commitCtx: CommitPhaseContext = { ...makeCtx('commit'), baseCommit: context.baseCommit, getWorkSpec: () => resolveSpec('work'), getExecutionLogs: () => this.executionLogs.get(executionKey) || [], getLogFilePath: () => getLogFilePathByKey(executionKey, this.storagePath, this.logFiles) };
+      const commitCtx: CommitPhaseContext = { ...makeCtx('commit'), baseCommit: preWorkHead, getWorkSpec: () => resolveSpec('work'), getExecutionLogs: () => this.executionLogs.get(executionKey) || [], getLogFilePath: () => getLogFilePathByKey(executionKey, this.storagePath, this.logFiles) };
       const cr = await new CommitPhaseExecutor({ evidenceValidator: this.evidenceValidator, ...phaseDeps() }).execute(commitCtx);
       context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
       this.logEntry(executionKey, 'commit', 'info', '========== COMMIT SECTION END ==========');

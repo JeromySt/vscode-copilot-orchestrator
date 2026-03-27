@@ -546,6 +546,7 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
       <div class="monitor-timer-label">Next check in:</div>
       <div class="monitor-countdown" id="countdown-display">2:00</div>
       <div class="monitor-poll-info">Polling every 2 minutes</div>
+      <button onclick="resetPolling()" style="margin-left:8px;padding:2px 10px;border:1px solid var(--vscode-input-border);background:var(--vscode-input-background);color:var(--vscode-foreground);border-radius:4px;cursor:pointer;font-size:11px;" title="Reset backoff and check now">&#x21bb; Refresh Now</button>
     </div>` : ''}
   </div>
   

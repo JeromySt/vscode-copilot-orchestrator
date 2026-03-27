@@ -163,6 +163,9 @@ export interface PRCheck {
   
   /** URL to the check details page */
   url?: string;
+
+  /** Head commit SHA the checks ran against (set on the first element only) */
+  headSha?: string;
 }
 
 /**
@@ -232,31 +235,6 @@ export interface PRListItem {
 }
 
 /**
- * Options for merging a pull request.
- */
-export interface PRMergeOptions {
-  /** Merge method to use */
-  method: 'squash' | 'merge' | 'rebase';
-
-  /** Whether to bypass branch protection rules */
-  admin?: boolean;
-
-  /** Whether to delete the source branch after merging */
-  deleteSourceBranch?: boolean;
-
-  /** Commit title for squash/merge commits */
-  title?: string;
-}
-
-/**
- * Result of merging a pull request.
- */
-export interface PRMergeResult {
-  /** SHA of the merge commit */
-  commitSha: string;
-}
-
-/**
  * Detailed information about a pull request.
  */
 export interface PRDetails {
@@ -286,4 +264,18 @@ export interface PRDetails {
   
   /** PR description/body */
   body?: string;
+
+  // ── Merge readiness fields ──────────────────────────────────────────
+
+  /** Whether the PR can be merged (no conflicts, not blocked) */
+  mergeable?: boolean;
+
+  /** Review decision: APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, or undefined */
+  reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED';
+
+  /** Merge state: CLEAN, DIRTY, BLOCKED, BEHIND, UNSTABLE, HAS_HOOKS, UNKNOWN */
+  mergeStateStatus?: string;
+
+  /** Whether the current user can bypass branch protection to merge */
+  canBypassProtection?: boolean;
 }
