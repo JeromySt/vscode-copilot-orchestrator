@@ -559,15 +559,14 @@ export class GitHubPRService implements IRemotePRService {
       args.push('--body', options.body);
     }
 
-    await this._execGh(args, cwd, env);
+    args.push('--json', 'mergeCommit');
 
-    // Get the merge commit SHA
-    const ownerRepo = `${provider.owner}/${provider.repoName}`;
+    const output = await this._execGh(args, cwd, env);
+
     let commitSha = '';
     try {
-      const prData = await this._execGhApi(`repos/${ownerRepo}/pulls/${prNumber}`, cwd, env);
-      const parsed = JSON.parse(prData);
-      commitSha = parsed.merge_commit_sha || '';
+      const parsed = JSON.parse(output);
+      commitSha = parsed?.mergeCommit?.oid || '';
     } catch { /* best effort */ }
 
     log.info('PR merged', { prNumber, commitSha });

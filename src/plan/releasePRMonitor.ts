@@ -329,7 +329,7 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       body: c.body,
       path: c.path,
       line: c.line,
-      isResolved: c.isResolved,
+      isResolved: c.isResolved || this._isAlreadyAddressedByAutomatedFix(c),
       source: c.source,
       threadId: c.threadId,
       url: c.url,
@@ -372,27 +372,13 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
       // Auto-fix is disabled. Findings are emitted via the cycleComplete event
       // so the UI can display them in the Pending Actions panel. The user
       // selects which findings to address and triggers AI fixes from there.
-
-      // Reset backoff — findings detected, poll frequently
-      state.consecutiveGreenCycles = 0;
-      state.currentPollTicks = POLL_INTERVAL_TICKS;
     } else {
       log.info('No findings detected', { releaseId: state.releaseId });
 
-      // Exponential backoff: double interval after each consecutive green cycle
-      // 2m → 4m → 8m → 16m → 30m (cap)
-      state.consecutiveGreenCycles++;
-      if (state.consecutiveGreenCycles > 1) {
-        const newTicks = Math.min(state.currentPollTicks * 2, MAX_POLL_INTERVAL_TICKS);
-        if (newTicks !== state.currentPollTicks) {
-          state.currentPollTicks = newTicks;
-          log.info('Backoff: increasing poll interval (all green)', {
-            releaseId: state.releaseId,
-            consecutiveGreen: state.consecutiveGreenCycles,
-            newIntervalSeconds: Math.round(newTicks),
-          });
-        }
-      }
+      // Exponential backoff removed: keep constant 2-minute polling interval.
+      // The stop-after-40-minutes check relies on cycles running at a predictable
+      // rate; backoff caused cycles to fire too infrequently for the timeout to
+      // trigger within the monitoring window.
 
       // Only stop on timeout when everything is green (no findings)
       if (elapsedSinceLastPush > MAX_MONITORING_MS) {
@@ -631,20 +617,39 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
       try {
         const replyText = `✅ Addressed in automated fix ${commitHash ? `(${commitHash.substring(0, 7)})` : ''}`;
 
-        await state.prService.replyToComment(
-          state.prNumber,
-          comment.id,
-          replyText,
-          state.repoPath,
-        );
-
-        // Mark thread as resolved if we have a threadId
         if (comment.threadId) {
+          // Threaded review comment: reply inline and resolve the thread
+          await state.prService.replyToComment(
+            state.prNumber,
+            comment.id,
+            replyText,
+            state.repoPath,
+          );
           await state.prService.resolveThread(
             state.prNumber,
             comment.threadId,
             state.repoPath,
           );
+        } else if (comment.path) {
+          // Inline file comment without a thread: reply to the comment directly
+          await state.prService.replyToComment(
+            state.prNumber,
+            comment.id,
+            replyText,
+            state.repoPath,
+          );
+        } else {
+          // Top-level issue comment (no path, no threadId): post a quoted reply
+          const quotedReply = `> ${comment.body}\n\n${replyText}`;
+          await state.prService.addIssueComment(
+            state.prNumber,
+            quotedReply,
+            state.repoPath,
+          );
+          // Minimize the original comment if we have its GraphQL node ID
+          if (comment.nodeId && state.prService.minimizeComment) {
+            await state.prService.minimizeComment(comment.nodeId, 'RESOLVED', state.repoPath);
+          }
         }
 
         actions.push({
@@ -675,5 +680,37 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`;
     }
 
     return actions;
+  }
+
+  /**
+   * Detects whether a comment has already been addressed by an automated fix,
+   * even if the platform hasn't marked it as resolved yet.
+   *
+   * Three patterns indicate a comment is already handled:
+   * 1. A human relayed the bot's feedback with the standard fix marker
+   *    ("Re: bot's feedback — ✅ Addressed in automated fix")
+   * 2. The comment body is a quoted reply that ends with the fix marker
+   *    ("> Original text\n\n✅ Addressed in automated fix")
+   * 3. A reply in the thread already contains the fix marker
+   */
+  private _isAlreadyAddressedByAutomatedFix(comment: { body: string; replies?: Array<{ body: string }> }): boolean {
+    const MARKER = '✅ Addressed in automated fix';
+
+    // Pattern 1: human relay comment ("Re: …bot… — ✅ Addressed in automated fix …")
+    if (/^Re:.*—\s*✅ Addressed in automated fix/.test(comment.body)) {
+      return true;
+    }
+
+    // Pattern 2: quoted reply (">" prefix + marker somewhere in the body)
+    if (comment.body.startsWith('>') && comment.body.includes(MARKER)) {
+      return true;
+    }
+
+    // Pattern 3: a thread reply contains the marker
+    if (comment.replies?.some((r) => r.body.includes(MARKER))) {
+      return true;
+    }
+
+    return false;
   }
 }
