@@ -494,10 +494,10 @@ export class GitHubPRService implements IRemotePRService {
 
     const env = this._buildEnv(provider, credentials);
 
-    // Use gh pr view with merge readiness fields
+    // Use gh pr view with merge readiness fields + reviews for protection policy detail
     const args = [
       'pr', 'view', String(prNumber),
-      '--json', 'number,title,headRefName,baseRefName,isDraft,state,author,url,body,mergeable,reviewDecision,mergeStateStatus',
+      '--json', 'number,title,headRefName,baseRefName,isDraft,state,author,url,body,mergeable,reviewDecision,mergeStateStatus,statusCheckRollup,latestReviews',
     ];
 
     const result = await this._execGh(args, cwd, env);
@@ -517,6 +517,19 @@ export class GitHubPRService implements IRemotePRService {
         mergeable: pr.mergeable === 'MERGEABLE',
         reviewDecision: pr.reviewDecision || undefined,
         mergeStateStatus: pr.mergeStateStatus || undefined,
+        statusChecks: Array.isArray(pr.statusCheckRollup)
+          ? pr.statusCheckRollup.map((c: any) => ({
+              name: c.name || c.context || 'unknown',
+              status: c.conclusion?.toUpperCase() || c.state?.toUpperCase() || 'PENDING',
+              url: c.detailsUrl || c.targetUrl || undefined,
+            }))
+          : undefined,
+        reviews: Array.isArray(pr.latestReviews)
+          ? pr.latestReviews.map((r: any) => ({
+              author: r.author?.login || 'unknown',
+              state: r.state || 'PENDING',
+            }))
+          : undefined,
       };
       
       log.info('PR details retrieved', { prNumber, mergeable: details.mergeable, reviewDecision: details.reviewDecision, mergeStateStatus: details.mergeStateStatus });
@@ -559,9 +572,20 @@ export class GitHubPRService implements IRemotePRService {
       args.push('--body', options.body);
     }
 
-    args.push('--json', 'mergeCommit');
-
-    const output = await this._execGh(args, cwd, env);
+    // --json is not universally supported on gh pr merge; try with it, fall back without
+    let output: string;
+    try {
+      args.push('--json', 'mergeCommit');
+      output = await this._execGh(args, cwd, env);
+    } catch (firstErr: any) {
+      // If the error looks like --json is unsupported, retry without it
+      if (firstErr.message?.includes('json') || firstErr.message?.includes('flag')) {
+        args.splice(args.indexOf('--json'), 2);
+        output = await this._execGh(args, cwd, env);
+      } else {
+        throw firstErr;
+      }
+    }
 
     let commitSha = '';
     try {

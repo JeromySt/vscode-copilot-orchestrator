@@ -278,4 +278,17 @@ export interface PRDetails {
 
   /** Whether the current user can bypass branch protection to merge */
   canBypassProtection?: boolean;
+
+  /** Status check rollup from branch protection rules */
+  statusChecks?: Array<{
+    name: string;
+    status: 'SUCCESS' | 'FAILURE' | 'PENDING' | 'ERROR' | 'EXPECTED' | 'NEUTRAL';
+    url?: string;
+  }>;
+
+  /** Latest reviews on the PR (for showing who approved/requested changes) */
+  reviews?: Array<{
+    author: string;
+    state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING';
+  }>;
 }

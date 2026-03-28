@@ -176,9 +176,11 @@ function checkMergeReadiness(): void {
   vscode.postMessage({ type: 'checkMergeReadiness' });
 }
 
-function mergePR(method: string, admin: boolean): void {
+function mergePR(admin?: boolean): void {
+  const methodEl = document.getElementById('merge-method') as HTMLSelectElement | null;
+  const method = methodEl?.value || 'squash';
   if (!admin || confirm('Are you sure you want to bypass branch protection rules and merge?')) {
-    vscode.postMessage({ type: 'mergePR', method, admin });
+    vscode.postMessage({ type: 'mergePR', method, admin: !!admin });
   }
 }
 
@@ -196,37 +198,101 @@ function renderMergeReadiness(details: any, error?: string): void {
   if (!details) return;
 
   const items: string[] = [];
+  let allPoliciesPassing = true;
 
   // Merge state
   const state = details.mergeStateStatus || 'UNKNOWN';
   if (state === 'CLEAN') items.push('<div style="color:var(--vscode-testing-iconPassed);">\u2705 No merge conflicts</div>');
-  else if (state === 'DIRTY') items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C Merge conflicts detected</div>');
-  else if (state === 'BEHIND') items.push('<div style="color:var(--vscode-editorWarning-foreground);">\u26A0 Branch is behind base — needs rebase</div>');
-  else if (state === 'BLOCKED') items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C Merge blocked by branch protection</div>');
-  else if (state === 'UNSTABLE') items.push('<div style="color:var(--vscode-editorWarning-foreground);">\u26A0 Some checks are failing</div>');
+  else if (state === 'DIRTY') { items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C Merge conflicts detected</div>'); allPoliciesPassing = false; }
+  else if (state === 'BEHIND') items.push('<div style="color:var(--vscode-editorWarning-foreground);">\u26A0 Branch is behind base \u2014 needs rebase</div>');
+  else if (state === 'BLOCKED') { items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C Merge blocked by branch protection</div>'); allPoliciesPassing = false; }
+  else if (state === 'UNSTABLE') { items.push('<div style="color:var(--vscode-editorWarning-foreground);">\u26A0 Some checks are failing</div>'); allPoliciesPassing = false; }
   else items.push('<div>\u2139 Merge state: ' + escapeHtml(state) + '</div>');
 
-  // Review decision
+  // Review decision with reviewer details
   const review = details.reviewDecision;
+  const approvedReviews = (details.reviews || []).filter(function(r: any) { return r.state === 'APPROVED'; });
+  const hasApprovals = approvedReviews.length > 0;
+
   if (review === 'APPROVED') items.push('<div style="color:var(--vscode-testing-iconPassed);">\u2705 Review approved</div>');
-  else if (review === 'CHANGES_REQUESTED') items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C Changes requested by reviewer</div>');
-  else if (review === 'REVIEW_REQUIRED') items.push('<div style="color:var(--vscode-editorWarning-foreground);">\u26A0 Approving review required</div>');
+  else if (review === 'CHANGES_REQUESTED') { items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C Changes requested by reviewer</div>'); allPoliciesPassing = false; }
+  else if (review === 'REVIEW_REQUIRED') { items.push('<div style="color:var(--vscode-editorWarning-foreground);">\u26A0 Approving review required</div>'); allPoliciesPassing = false; }
+  else if (state === 'BLOCKED' && !hasApprovals) {
+    // reviewDecision is empty but merge is blocked — likely requires approving review
+    items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C At least 1 approving review is required to merge</div>');
+    allPoliciesPassing = false;
+  }
+  else if (!review && !hasApprovals) items.push('<div>\u2139 No review requirement</div>');
   else items.push('<div>\u2139 No review requirement</div>');
+
+  // Show individual reviewer states
+  if (details.reviews && details.reviews.length > 0) {
+    for (var ri = 0; ri < details.reviews.length; ri++) {
+      var rv = details.reviews[ri];
+      var rvIcon = rv.state === 'APPROVED' ? '\u2705' : rv.state === 'CHANGES_REQUESTED' ? '\u274C' : rv.state === 'COMMENTED' ? '\uD83D\uDCAC' : '\u23F3';
+      var rvColor = rv.state === 'APPROVED' ? 'var(--vscode-testing-iconPassed)' : rv.state === 'CHANGES_REQUESTED' ? 'var(--vscode-testing-iconFailed)' : 'var(--vscode-descriptionForeground)';
+      var countNote = rv.state === 'COMMENTED' ? ' (does not count as approval)' : '';
+      items.push('<div style="padding-left:16px;font-size:12px;color:' + rvColor + ';">' + rvIcon + ' ' + escapeHtml(rv.author) + ': ' + rv.state.toLowerCase().replace(/_/g, ' ') + countNote + '</div>');
+    }
+  }
 
   // Mergeable
   if (details.mergeable === true) items.push('<div style="color:var(--vscode-testing-iconPassed);">\u2705 PR is mergeable</div>');
-  else if (details.mergeable === false) items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C PR cannot be merged</div>');
+  else if (details.mergeable === false) { items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C PR cannot be merged</div>'); allPoliciesPassing = false; }
 
   // PR state
   if (details.state === 'merged') items.push('<div style="color:var(--vscode-testing-iconPassed);">\u2705 PR already merged</div>');
-  else if (details.state === 'closed') items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C PR is closed</div>');
+  else if (details.state === 'closed') { items.push('<div style="color:var(--vscode-testing-iconFailed);">\u274C PR is closed</div>'); allPoliciesPassing = false; }
+
+  // Status checks — show failed/pending ones from branch protection
+  if (details.statusChecks && details.statusChecks.length > 0) {
+    const failed = details.statusChecks.filter(function(c: any) { return c.status === 'FAILURE' || c.status === 'ERROR'; });
+    const pending = details.statusChecks.filter(function(c: any) { return c.status === 'PENDING' || c.status === 'EXPECTED'; });
+    const passed = details.statusChecks.filter(function(c: any) { return c.status === 'SUCCESS' || c.status === 'NEUTRAL'; });
+
+    if (failed.length > 0) {
+      allPoliciesPassing = false;
+      items.push('<div style="margin-top:8px;font-weight:600;color:var(--vscode-testing-iconFailed);">\u274C Failed checks (' + failed.length + '):</div>');
+      for (let i = 0; i < failed.length; i++) {
+        const c = failed[i];
+        const link = c.url ? ' <a href="#" class="merge-check-link" data-url="' + escapeHtml(c.url) + '" style="color:var(--vscode-textLink-foreground);font-size:11px;">\u2197 details</a>' : '';
+        items.push('<div style="padding-left:16px;font-size:12px;color:var(--vscode-testing-iconFailed);">\u2717 ' + escapeHtml(c.name) + link + '</div>');
+      }
+    }
+    if (pending.length > 0) {
+      items.push('<div style="margin-top:4px;font-weight:600;color:var(--vscode-editorWarning-foreground);">\u23F3 Pending checks (' + pending.length + '):</div>');
+      for (let j = 0; j < pending.length; j++) {
+        items.push('<div style="padding-left:16px;font-size:12px;color:var(--vscode-descriptionForeground);">\u25CB ' + escapeHtml(pending[j].name) + '</div>');
+      }
+    }
+    if (passed.length > 0) {
+      items.push('<div style="margin-top:4px;color:var(--vscode-testing-iconPassed);font-size:12px;">\u2705 ' + passed.length + ' check(s) passing</div>');
+    }
+  }
 
   container.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px;font-size:13px;">' + items.join('') + '</div>';
 
+  // Wire up check detail links
+  container.querySelectorAll('.merge-check-link').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      const url = (el as HTMLElement).getAttribute('data-url');
+      if (url) vscode.postMessage({ type: 'openExternal', url: url });
+    });
+  });
+
   // Enable/disable merge buttons based on readiness
   const mergeBtn = document.getElementById('merge-btn') as HTMLButtonElement;
-  const canMerge = details.mergeable && details.state === 'open';
-  if (mergeBtn) mergeBtn.disabled = !canMerge;
+  const adminBtn = document.getElementById('merge-admin-btn') as HTMLButtonElement;
+  const canMerge = allPoliciesPassing && details.state === 'open';
+  if (mergeBtn) {
+    mergeBtn.disabled = !canMerge;
+    mergeBtn.style.opacity = canMerge ? '1' : '0.5';
+  }
+  // Admin bypass is always enabled for open PRs
+  if (adminBtn) {
+    adminBtn.disabled = details.state !== 'open';
+  }
 }
 
 function filterPendingActions(filter: string, btn: HTMLElement | null): void {
@@ -1251,6 +1317,7 @@ export function initReleasePanel(config: { releaseData: any; availablePlans: any
   g.toggleAutoFix = toggleAutoFix;
   g.checkMergeReadiness = checkMergeReadiness;
   g.mergePR = mergePR;
+  g.resetPolling = resetPolling;
   g.tagRelease = tagRelease;
   g.filterPendingActions = filterPendingActions;
   g.addressSelectedWithAI = addressSelectedWithAI;

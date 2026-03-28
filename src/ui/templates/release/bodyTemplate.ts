@@ -631,10 +631,15 @@ function renderMonitoringStep(release: ReleaseDefinition): string {
       <button onclick="checkMergeReadiness()" style="padding:6px 14px; border:1px solid var(--vscode-input-border); background:var(--vscode-input-background); color:var(--vscode-foreground); border-radius:4px; cursor:pointer; font-size:12px;">
         🔍 Check Readiness
       </button>
-      <button id="merge-btn" onclick="mergePR('squash', false)" style="padding:8px 20px; background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">
-        Squash and Merge
+      <select id="merge-method" style="padding:6px 10px; border:1px solid var(--vscode-input-border); background:var(--vscode-input-background); color:var(--vscode-foreground); border-radius:4px; font-size:12px; cursor:pointer;">
+        <option value="squash">Squash and merge</option>
+        <option value="merge">Create a merge commit</option>
+        <option value="rebase">Rebase and merge</option>
+      </select>
+      <button id="merge-btn" onclick="mergePR()" disabled style="padding:8px 20px; background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600; opacity:0.5;">
+        Merge
       </button>
-      <button id="merge-admin-btn" onclick="mergePR('squash', true)" style="padding:6px 14px; border:1px solid var(--vscode-input-border); background:var(--vscode-input-background); color:var(--vscode-foreground); border-radius:4px; cursor:pointer; font-size:12px;" title="Bypass branch protection rules">
+      <button id="merge-admin-btn" onclick="mergePR(true)" style="padding:6px 14px; border:1px solid var(--vscode-input-border); background:var(--vscode-input-background); color:var(--vscode-foreground); border-radius:4px; cursor:pointer; font-size:12px;" title="Bypass branch protection rules">
         ⚠ Merge (bypass rules)
       </button>
     </div>
