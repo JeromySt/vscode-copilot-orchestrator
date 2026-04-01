@@ -311,9 +311,11 @@ suite('DefaultReleaseManager – auto-fix', () => {
       assert.strictEqual(emittedReleaseId, release.id);
       assert.ok((findingIds as string[]).includes('comment-c1'));
 
-      // autoFixedFindingIds updated
+      // autoFixedFindingIds is populated inside addressFindings (which is stubbed),
+      // so it should NOT be populated here in the cycleComplete handler
       const updated = manager.getRelease(release.id);
-      assert.ok(updated?.autoFixedFindingIds?.includes('comment-c1'));
+      assert.ok(!updated?.autoFixedFindingIds?.includes('comment-c1'),
+        'should not populate autoFixedFindingIds in cycleComplete handler');
     });
 
     test('queues new failing checks when autoFixEnabled', async () => {
@@ -434,25 +436,22 @@ suite('DefaultReleaseManager – auto-fix', () => {
 
     test('trims autoFixedFindingIds to last 500 when overflow', async () => {
       const planRunner = createMockPlanRunner();
+      planRunner.enqueue = sinon.stub().returns({ id: 'fix-plan-trim', spec: { name: 'trim test' } });
       const prMonitor = createEventEmitterPRMonitor();
       const store = createMockReleaseStore();
       const manager = createManager({ planRunner, prMonitor, store });
-      sandbox.stub(manager as any, 'addressFindings').resolves();
+      // Use a real addressFindings call that populates autoFixedFindingIds
       const release = await createRelease(manager, planRunner);
 
       manager.setAutoFix(release.id, true);
       const rel = manager.getRelease(release.id)!;
-      // Pre-seed with 499 IDs so adding one more pushes it to exactly 500 (no trim)
-      // then we'll add one more to push to 501 which triggers trim
+      // Pre-seed with 500 IDs so adding one more pushes to 501 which triggers trim
       rel.autoFixedFindingIds = Array.from({ length: 500 }, (_, i) => `old-${i}`);
 
-      manager.on('findingsProcessing', () => {});
-
-      prMonitor.emit('cycleComplete', release.id, {
-        comments: [{ id: 'new-c', isResolved: false, body: 'new finding' }],
-        checks: [],
-        securityAlerts: [],
-      });
+      // Call addressFindings directly (this is where autoFixedFindingIds is now populated)
+      await (manager as any).addressFindings(release.id, [
+        { type: 'comment', id: 'comment-new-c', commentId: 'new-c', body: 'new finding' },
+      ]);
 
       // After adding 'comment-new-c', length should be trimmed to 500
       const updated = manager.getRelease(release.id);
@@ -747,6 +746,108 @@ suite('DefaultReleaseManager – auto-fix', () => {
 
       const failedEvent = failedEvents.find(([, , status]: any) => status === 'failed');
       assert.ok(failedEvent, 'should emit findingsProcessing with failed status');
+    });
+
+    test('removes finding IDs from autoFixedFindingIds when plan fails so they can be retried', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, store });
+      const release = await createRelease(manager, planRunner);
+
+      release.fixPlanIds = ['fix-plan-1'];
+      release.fixPlanFindings = {
+        'fix-plan-1': [
+          { type: 'check', id: 'check-unit-tests', name: 'unit tests' },
+          { type: 'comment', id: 'comment-c5', commentId: 'c5', author: 'reviewer', body: 'fix it' },
+        ],
+      };
+      release.autoFixedFindingIds = ['check-unit-tests', 'comment-c5', 'alert-other'];
+
+      planRunner.emit('planCompleted', { id: 'fix-plan-1', spec: { repoPath: '/repo' } }, 'failed');
+
+      await new Promise(r => setTimeout(r, 20));
+
+      const updated = manager.getRelease(release.id);
+      // Failed finding IDs should be removed, unrelated ones preserved
+      assert.ok(!updated?.autoFixedFindingIds?.includes('check-unit-tests'),
+        'should remove failed check finding from autoFixedFindingIds');
+      assert.ok(!updated?.autoFixedFindingIds?.includes('comment-c5'),
+        'should remove failed comment finding from autoFixedFindingIds');
+      assert.ok(updated?.autoFixedFindingIds?.includes('alert-other'),
+        'should preserve unrelated finding IDs');
+    });
+
+    test('cleans up fixPlanFindings when plan fails', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, store });
+      const release = await createRelease(manager, planRunner);
+
+      release.fixPlanIds = ['fix-plan-1'];
+      release.fixPlanFindings = {
+        'fix-plan-1': [
+          { type: 'check', id: 'check-ci', name: 'CI' },
+        ],
+      };
+
+      planRunner.emit('planCompleted', { id: 'fix-plan-1', spec: { repoPath: '/repo' } }, 'failed');
+
+      await new Promise(r => setTimeout(r, 20));
+
+      const updated = manager.getRelease(release.id);
+      assert.strictEqual(updated?.fixPlanFindings?.['fix-plan-1'], undefined,
+        'should clean up fixPlanFindings for failed plan');
+    });
+
+    test('removes finding IDs from autoFixedFindingIds when plan succeeds', async () => {
+      const planRunner = createEventEmitterPlanRunner();
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, store });
+      const release = await createRelease(manager, planRunner);
+
+      release.prNumber = 42;
+      release.fixPlanIds = ['fix-plan-1'];
+      release.fixPlanFindings = {
+        'fix-plan-1': [
+          { type: 'check', id: 'check-unit-tests', name: 'unit tests' },
+          { type: 'comment', id: 'comment-c6', commentId: 'c6', author: 'reviewer', body: 'fix it' },
+        ],
+      };
+      release.autoFixedFindingIds = ['check-unit-tests', 'comment-c6', 'alert-other'];
+
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('timed out')), 2000);
+        manager.once('findingsResolved', () => { clearTimeout(t); resolve(); });
+        planRunner.emit('planCompleted', { id: 'fix-plan-1', spec: { repoPath: '/repo' } }, 'succeeded');
+      });
+
+      const updated = manager.getRelease(release.id);
+      // Succeeded finding IDs should be removed so next cycle can re-evaluate
+      assert.ok(!updated?.autoFixedFindingIds?.includes('check-unit-tests'),
+        'should remove succeeded check finding from autoFixedFindingIds');
+      assert.ok(!updated?.autoFixedFindingIds?.includes('comment-c6'),
+        'should remove succeeded comment finding from autoFixedFindingIds');
+      assert.ok(updated?.autoFixedFindingIds?.includes('alert-other'),
+        'should preserve unrelated finding IDs');
+    });
+
+    test('autoFixedFindingIds is populated inside addressFindings after plan creation', async () => {
+      const planRunner = createMockPlanRunner();
+      planRunner.enqueue = sinon.stub().returns({ id: 'fix-plan-populate', spec: { name: 'populate test' } });
+      const store = createMockReleaseStore();
+      const manager = createManager({ planRunner, store });
+      const release = await createRelease(manager, planRunner);
+
+      assert.ok(!release.autoFixedFindingIds?.length,
+        'should start with no autoFixedFindingIds');
+
+      await (manager as any).addressFindings(release.id, [
+        { type: 'check', id: 'check-ci', name: 'CI', status: 'failing', url: 'http://gh/ci' },
+      ]);
+
+      const updated = manager.getRelease(release.id);
+      assert.ok(updated?.autoFixedFindingIds?.includes('check-ci'),
+        'should populate autoFixedFindingIds after plan creation');
     });
 
     test('does nothing when plan is not associated with any release', async () => {

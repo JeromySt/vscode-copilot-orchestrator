@@ -301,7 +301,7 @@ export class DefaultJobExecutor implements JobExecutor {
       this.logEntry(executionKey, 'commit', 'info', '========== COMMIT SECTION END ==========');
       if (cr.reviewMetrics) { phaseMetrics['commit'] = cr.reviewMetrics; capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, cr.reviewMetrics]) : cr.reviewMetrics; }
       if (!cr.success) {
-        if (workWasSkipped) { this.logEntry(executionKey, 'commit', 'info', 'Commit found no evidence, but work was skipped (resuming). Succeeding without commit.'); stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
+        if (workWasSkipped && context.resumeFromPhase !== 'commit') { this.logEntry(executionKey, 'commit', 'info', 'Commit found no evidence, but work was skipped (resuming from later phase). Succeeding without commit.'); stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
         else if (postchecksSpec_ && !skip('postchecks')) { stepStatuses.commit = 'failed'; context.onStepStatusChange?.('commit', 'failed'); pendingCommitFailure = cr.error ?? 'unknown'; }
         else { stepStatuses.commit = 'failed'; context.onStepStatusChange?.('commit', 'failed'); return { success: false, error: `Commit failed: ${cr.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'commit', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
       } else { stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }

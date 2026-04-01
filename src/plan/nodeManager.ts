@@ -425,9 +425,13 @@ export class NodeManager {
       // Only advance resumeFromPhase if it wasn't already set to an earlier phase
       const phaseOrder = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
       const existingIdx = nodeState.resumeFromPhase ? phaseOrder.indexOf(nodeState.resumeFromPhase as any) : -1;
-      const candidateIdx = phaseOrder.indexOf(failedPhase as any);
+      // Commit failures mean work didn't produce changes — re-run from work, not commit.
+      // Skipping work and retrying commit alone would just fail again (nothing to commit)
+      // or worse, auto-succeed via the workWasSkipped bypass in the executor.
+      const effectivePhase = failedPhase === 'commit' ? 'work' : failedPhase;
+      const candidateIdx = phaseOrder.indexOf(effectivePhase as any);
       if (existingIdx < 0 || candidateIdx < existingIdx) {
-        nodeState.resumeFromPhase = failedPhase as any;
+        nodeState.resumeFromPhase = effectivePhase as any;
       }
     }
 

@@ -214,14 +214,10 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               log.info('Auto-fix: addressing new findings', {
                 releaseId, count: newFindings.length,
               });
-              // Track processed finding IDs for deduplication across cycles
-              if (!rel.autoFixedFindingIds) rel.autoFixedFindingIds = [];
-              rel.autoFixedFindingIds.push(...newFindings.map((f: any) => f.id));
-              // Trim to last 500 to prevent unbounded growth
-              if (rel.autoFixedFindingIds.length > 500) {
-                rel.autoFixedFindingIds = rel.autoFixedFindingIds.slice(-500);
-              }
               this.emit('findingsProcessing', releaseId, newFindings.map((f: any) => f.id), 'queued');
+              // Finding IDs are tracked inside addressFindings() after the plan
+              // is successfully created. This prevents permanently blocking
+              // findings when addressFindings() throws before creating a plan.
               this.addressFindings(releaseId, newFindings).catch((err) => {
                 log.error('Auto-fix failed', { releaseId, error: (err as Error).message });
               });
@@ -1302,6 +1298,16 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     if (!release.fixPlanJobMap) release.fixPlanJobMap = {};
     release.fixPlanJobMap[plan.id] = findingJobMap;
 
+    // Track finding IDs for deduplication across cycles. This is done HERE
+    // (after successful plan creation) rather than in the cycleComplete handler
+    // to prevent permanently blocking findings when addressFindings() throws.
+    if (!release.autoFixedFindingIds) release.autoFixedFindingIds = [];
+    release.autoFixedFindingIds.push(...findings.map((f: any) => f.id));
+    // Trim to last 500 to prevent unbounded growth
+    if (release.autoFixedFindingIds.length > 500) {
+      release.autoFixedFindingIds = release.autoFixedFindingIds.slice(-500);
+    }
+
     this.store.saveRelease(release).catch(() => {});
 
     // Signal to UI with plan ID so activity log can link to plan detail
@@ -1347,8 +1353,25 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         type: 'fix-code',
         description: `Fix plan failed: ${plan.spec?.name || plan.id}`,
         success: false,
+        planId: plan.id,
         timestamp: Date.now(),
       });
+
+      // Remove failed finding IDs from autoFixedFindingIds so they can be
+      // retried on the next monitoring cycle. Without this, a failed fix
+      // permanently blocks the finding from being re-addressed.
+      if (release.autoFixedFindingIds?.length) {
+        const failedSet = new Set(findingIds);
+        release.autoFixedFindingIds = release.autoFixedFindingIds.filter(
+          (id) => !failedSet.has(id),
+        );
+      }
+
+      // Clean up findings metadata for the failed plan
+      if (release.fixPlanFindings) {
+        delete release.fixPlanFindings[plan.id];
+      }
+      this.store.saveRelease(release).catch(() => {});
       return;
     }
 
@@ -1450,6 +1473,17 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     // ── 4. Emit resolved for UI (findings panel marks them as done) ──
     const resolvedIds = findings.map((f: any) => f.id);
     this.emit('findingsResolved', releaseId, resolvedIds, !!commitHash);
+
+    // Remove finding IDs from autoFixedFindingIds so the next monitoring
+    // cycle can re-evaluate them. If the fix actually worked, the check
+    // will be passing and no new finding is generated. If the fix didn't
+    // work, the finding reappears and a new fix plan is created.
+    if (release.autoFixedFindingIds?.length) {
+      const resolvedSet = new Set(resolvedIds);
+      release.autoFixedFindingIds = release.autoFixedFindingIds.filter(
+        (id) => !resolvedSet.has(id),
+      );
+    }
 
     // Clean up findings metadata (no longer needed)
     if (release.fixPlanFindings) {
@@ -1834,6 +1868,30 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
             this.events.emitReleaseCanceled(releaseId);
           }
         });
+
+        // Clear autoFixedFindingIds on reload. Plans from the previous
+        // session no longer exist in planRunner, so these IDs would
+        // permanently block findings from being re-addressed. The
+        // activelyFixedIds check handles deduplication for running plans.
+        if (release.autoFixedFindingIds?.length) {
+          log.info('Clearing stale autoFixedFindingIds on reload', {
+            releaseId: release.id,
+            count: release.autoFixedFindingIds.length,
+          });
+          release.autoFixedFindingIds = [];
+        }
+
+        // Backfill planId on legacy actionLog entries that predate the fix.
+        // Old fix-code entries were emitted without planId, so the webview
+        // "View Plan" link was missing. Assign from fixPlanIds if available.
+        if (release.actionLog?.length && release.fixPlanIds?.length) {
+          for (const entry of release.actionLog) {
+            if (entry.type === 'fix-code' && !entry.planId) {
+              // Assign the most recent fix plan ID as a best-effort fallback
+              entry.planId = release.fixPlanIds[release.fixPlanIds.length - 1];
+            }
+          }
+        }
 
         this.releases.set(release.id, release);
         this.stateMachines.set(release.id, stateMachine);

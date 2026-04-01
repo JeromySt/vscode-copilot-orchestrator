@@ -1370,6 +1370,42 @@ suite('ReleaseManager – extra coverage', () => {
 
       clock.restore();
     });
+
+    test('clears stale autoFixedFindingIds on reload', async () => {
+      const store = createMockReleaseStore();
+      const savedRelease: any = {
+        id: 'rel-stale-fix',
+        name: 'Stale Fix Release',
+        flowType: 'from-plans',
+        planIds: [],
+        releaseBranch: 'release/stale',
+        targetBranch: 'main',
+        repoPath: '/repo',
+        status: 'monitoring',
+        prNumber: 55,
+        source: 'from-plans',
+        stateHistory: [{ from: 'pr-active', to: 'monitoring', timestamp: Date.now(), reason: 'started' }],
+        createdAt: Date.now(),
+        autoFixedFindingIds: ['check-unit-tests', 'comment-c1', 'alert-a1'],
+      };
+      store.loadAllReleases.resolves([savedRelease]);
+
+      const manager = new DefaultReleaseManager(
+        createMockPlanRunner(),
+        createMockGitOps(),
+        createMockCopilot(),
+        createMockIsolatedRepos(),
+        createMockPRMonitor(),
+        createMockPRServiceFactory(),
+        store,
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const loaded = manager.getRelease('rel-stale-fix');
+      assert.deepStrictEqual(loaded?.autoFixedFindingIds, [],
+        'should clear autoFixedFindingIds on reload since plans from previous session are lost');
+    });
   });
 
   // ── createPR ─────────────────────────────────────────────────────────
