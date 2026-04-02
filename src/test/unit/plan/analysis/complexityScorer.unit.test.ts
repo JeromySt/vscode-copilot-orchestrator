@@ -135,5 +135,100 @@ suite('complexityScorer', () => {
         assert.ok(result.warningMessage.includes('cryptography') || result.warningMessage.includes('state machine') || result.warningMessage.includes('protocol'));
       }
     });
+
+    test('elevated complexity returns warning without shouldDecompose', () => {
+      // Manually construct a score between WARN_THRESHOLD and DECOMPOSE_THRESHOLD
+      const score: import('../../../../plan/analysis/complexityScorer').ComplexityScore = {
+        estimatedOutputFiles: 5,
+        estimatedTestCases: 2,
+        estimatedLOC: 0,
+        hasCryptoWork: true,
+        hasStateMachine: false,
+        hasProtocolWork: false,
+        dependencyFanIn: 1,
+        score: WARN_THRESHOLD + 10, // Above warn, below decompose
+      };
+      const result = evaluateComplexity(score, 'some instructions');
+      assert.strictEqual(result.shouldDecompose, false);
+      assert.ok(result.warningMessage.includes('ELEVATED COMPLEXITY'));
+      assert.ok(result.warningMessage.includes('cryptography'));
+    });
+
+    test('high complexity returns shouldDecompose with suggested splits', () => {
+      const score: import('../../../../plan/analysis/complexityScorer').ComplexityScore = {
+        estimatedOutputFiles: 10,
+        estimatedTestCases: 8,
+        estimatedLOC: 600,
+        hasCryptoWork: true,
+        hasStateMachine: true,
+        hasProtocolWork: false,
+        dependencyFanIn: 2,
+        score: DECOMPOSE_THRESHOLD + 20,
+      };
+      const instructions = [
+        '1. Create EncryptingStream.cs with AES encryption',
+        '2. Create StateMachine.cs with lifecycle',
+        '3. Create Tests.cs for validation',
+        '4. Create Integration.cs for wiring',
+      ].join('\n');
+      const result = evaluateComplexity(score, instructions);
+      assert.strictEqual(result.shouldDecompose, true);
+      assert.ok(result.warningMessage.includes('HIGH COMPLEXITY'));
+      assert.ok(result.suggestedSplits.length > 0);
+    });
+
+    test('suggestSplits generates generic splits for numbered steps without keywords', () => {
+      const score: import('../../../../plan/analysis/complexityScorer').ComplexityScore = {
+        estimatedOutputFiles: 4,
+        estimatedTestCases: 0,
+        estimatedLOC: 0,
+        hasCryptoWork: false,
+        hasStateMachine: false,
+        hasProtocolWork: false,
+        dependencyFanIn: 0,
+        score: DECOMPOSE_THRESHOLD + 10,
+      };
+      const instructions = [
+        '1. Create FileA.cs',
+        '2. Create FileB.cs',
+        '3. Create FileC.cs',
+        '4. Create FileD.cs',
+      ].join('\n');
+      const result = evaluateComplexity(score, instructions);
+      assert.ok(result.suggestedSplits.length >= 2, 'should suggest at least 2 splits');
+      assert.ok(result.suggestedSplits.some(s => s.includes('Steps 1')));
+    });
+
+    test('suggestSplits includes integration tests split when many test cases', () => {
+      const score: import('../../../../plan/analysis/complexityScorer').ComplexityScore = {
+        estimatedOutputFiles: 6,
+        estimatedTestCases: 10,
+        estimatedLOC: 0,
+        hasCryptoWork: true,
+        hasStateMachine: false,
+        hasProtocolWork: true,
+        dependencyFanIn: 0,
+        score: DECOMPOSE_THRESHOLD + 10,
+      };
+      const instructions = [
+        '1. Create Crypto.cs with encryption',
+        '2. Create Stream.cs with streaming',
+        '3. Create Tests.cs',
+      ].join('\n');
+      const result = evaluateComplexity(score, instructions);
+      assert.ok(result.suggestedSplits.some(s => s.includes('Integration tests')),
+        'should suggest integration tests split');
+    });
+
+    test('no warning for scores at exactly WARN_THRESHOLD', () => {
+      const score: import('../../../../plan/analysis/complexityScorer').ComplexityScore = {
+        estimatedOutputFiles: 0, estimatedTestCases: 0, estimatedLOC: 0,
+        hasCryptoWork: false, hasStateMachine: false, hasProtocolWork: false,
+        dependencyFanIn: 0, score: WARN_THRESHOLD,
+      };
+      const result = evaluateComplexity(score, '');
+      assert.strictEqual(result.shouldDecompose, false);
+      assert.strictEqual(result.warningMessage, '');
+    });
   });
 });
