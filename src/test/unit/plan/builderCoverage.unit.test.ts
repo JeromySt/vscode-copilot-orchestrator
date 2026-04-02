@@ -427,7 +427,7 @@ suite('Builder Coverage Tests', () => {
       assert.deepStrictEqual(svNode.work, agentSpec);
     });
 
-    test('verifyRiSpec is undefined when not specified', () => {
+    test('default verification spec is generated when verifyRiSpec not specified', () => {
       const plan = buildPlan({
         name: 'Test',
         baseBranch: 'main',
@@ -437,7 +437,13 @@ suite('Builder Coverage Tests', () => {
       const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
       const svNode = plan.jobs.get(svId)!;
       
-      assert.strictEqual(svNode.work, undefined);
+      // Should get the default verification agent spec
+      assert.ok(svNode.work, 'SV node should have a default verification spec');
+      const work = svNode.work as any;
+      assert.strictEqual(work.type, 'agent');
+      assert.strictEqual(work.modelTier, 'premium');
+      assert.ok(work.instructions.includes('Snapshot Verification'));
+      assert.ok(work.instructions.includes('main'), 'should reference target branch');
     });
 
     test('verifyRiSpec works with 0-job plan', () => {

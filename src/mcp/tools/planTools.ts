@@ -200,6 +200,8 @@ For process type, args is an array - no shell quoting needed.
 For shell type, shell can be: cmd, powershell, pwsh, bash, sh. Do NOT use '2>&1' in PowerShell — the orchestrator captures stderr separately.
 For agent type, model goes INSIDE the work object. Available models: ${modelEnum.join(', ')}
 Fast models (haiku/mini) for simple tasks, premium models (opus) for complex reasoning.
+IMPORTANT: For security-sensitive work (cryptography, authentication, authorization, input validation, secret handling, encryption, certificate management, or any code that handles sensitive data), ALWAYS use modelTier: 'premium' to ensure the most capable model reviews the code.
+IMPORTANT: For security-sensitive work (cryptography, authentication, authorization, input validation, secret handling, encryption, certificate management, or any code that handles sensitive data), ALWAYS use modelTier: 'premium' to ensure the most capable model reviews the code. Security bugs from weaker models are far more costly than the premium request overhead.
 
 Agent instructions MUST be in Markdown format with headers, numbered lists, bullet lists.
 

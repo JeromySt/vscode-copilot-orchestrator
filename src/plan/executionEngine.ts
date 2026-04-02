@@ -327,7 +327,18 @@ export class JobExecutionEngine {
         // Don't overwrite with current HEAD which includes prior work
         // But if baseCommit is somehow missing, fall back to timing.baseCommit
         if (!nodeState.baseCommit) {
-          nodeState.baseCommit = timing.baseCommit;
+          // For the SV node, the base commit must be the original snapshot base,
+          // NOT the current HEAD of the reused worktree. The worktree HEAD includes
+          // predecessor commits that the SV node needs to merge-RI to targetBranch.
+          // Using the worktree HEAD as baseCommit would make the commit phase think
+          // there are no new commits → completedCommit = undefined → merge-RI no-op
+          // → accumulated snapshot work never reaches the target branch.
+          if (isSvNode && plan.snapshot?.baseCommit) {
+            nodeState.baseCommit = plan.snapshot.baseCommit;
+            this.log.info(`SV node: using snapshot base commit ${plan.snapshot.baseCommit.slice(0, 8)} (not worktree HEAD ${timing.baseCommit.slice(0, 8)})`);
+          } else {
+            nodeState.baseCommit = timing.baseCommit;
+          }
         }
       } else {
         // Only set baseCommit on fresh worktree creation

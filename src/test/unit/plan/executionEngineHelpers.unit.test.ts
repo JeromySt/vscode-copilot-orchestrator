@@ -611,6 +611,90 @@ suite('JobExecutionEngine - helper methods', () => {
     });
   });
 
+  suite('SV node snapshot baseCommit', () => {
+    test('SV node uses snapshot baseCommit instead of worktree HEAD on reuse', async () => {
+      const dir = makeTmpDir();
+      const snapshotBase = 'snapshot-base-aaa111222333444555666777';
+      const worktreeHead = 'worktree-head-bbb111222333444555666';
+      const svNode = createJobNode('sv-1', ['dep-1'], [], {
+        producerId: '__snapshot-validation__',
+        name: 'Snapshot Validation',
+        assignedWorktreePath: '/tmp/snapshot-wt',
+      });
+      const depNode = createJobNode('dep-1', [], ['sv-1']);
+      const nodes = new Map<string, PlanNode>([['sv-1', svNode], ['dep-1', depNode]]);
+      const nodeStates = new Map<string, NodeExecutionState>([
+        ['sv-1', { status: 'scheduled', version: 0, attempts: 0 }],
+        ['dep-1', { status: 'succeeded', version: 0, attempts: 1, completedCommit: worktreeHead }],
+      ]);
+      const plan = createTestPlan({
+        nodes,
+        nodeStates,
+        leaves: ['sv-1'],
+        roots: ['dep-1'],
+        targetBranch: 'feature/test',
+      });
+      plan.snapshot = {
+        branch: 'orchestrator/snapshot/plan-1',
+        worktreePath: '/tmp/snapshot-wt',
+        baseCommit: snapshotBase,
+      };
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state, gitOps } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: worktreeHead,
+          stepStatuses: { 'merge-fi': 'success', commit: 'success', 'merge-ri': 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      // Worktree already exists (snapshot worktree created earlier), return HEAD = worktreeHead
+      (gitOps.worktrees.createOrReuseDetached as sinon.SinonStub).resolves({
+        reused: true, baseCommit: worktreeHead, totalMs: 0,
+      });
+
+      await engine.executeJobNode(plan, sm, svNode);
+
+      const ns = plan.nodeStates.get('sv-1')!;
+      // SV node should use the original snapshot base commit so that the commit phase
+      // can detect accumulated predecessor work (HEAD != snapshotBase)
+      assert.strictEqual(ns.baseCommit, snapshotBase,
+        'SV node baseCommit should be the original snapshot base, not worktree HEAD');
+    });
+
+    test('non-SV node with reused worktree still uses worktree HEAD as baseCommit', async () => {
+      const dir = makeTmpDir();
+      const worktreeHead = 'worktree-head-ccc111222333444555666';
+      const node = createJobNode('node-1');
+      const plan = createTestPlan();
+      const sm = new PlanStateMachine(plan);
+
+      const { engine, state, gitOps } = createEngine(dir, {
+        execute: sinon.stub().resolves({
+          success: true,
+          completedCommit: 'final-commit-111222333444555666777888',
+          stepStatuses: { work: 'success', commit: 'success' },
+        }),
+      });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+
+      (gitOps.worktrees.createOrReuseDetached as sinon.SinonStub).resolves({
+        reused: true, baseCommit: worktreeHead, totalMs: 0,
+      });
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      // Non-SV nodes should still use worktree HEAD (existing behavior)
+      assert.strictEqual(ns.baseCommit, worktreeHead,
+        'non-SV node should use worktree HEAD as baseCommit');
+    });
+  });
+
   suite('agent interrupted auto-retry', () => {
     test('agent killed externally retries same spec', async () => {
       const dir = makeTmpDir();

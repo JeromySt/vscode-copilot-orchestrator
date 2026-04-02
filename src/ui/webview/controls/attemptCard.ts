@@ -43,6 +43,23 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function truncateLogPath(filePath: string): string {
+  if (!filePath) { return ''; }
+  const separator = filePath.includes('\\') ? '\\' : '/';
+  const parts = filePath.split(separator);
+  const filename = parts[parts.length - 1];
+  const prefix = parts[0] + separator;
+
+  let truncatedFilename = filename;
+  const logMatch = filename.match(/^([a-f0-9]{8})-[a-f0-9-]+_[a-f0-9-]+-([a-f0-9]{12})_(\d+\.log)$/i);
+  if (logMatch) {
+    truncatedFilename = logMatch[1] + '....' + logMatch[2] + '_' + logMatch[3];
+  }
+
+  if (filePath.length <= 50) { return filePath; }
+  return prefix + '....' + separator + truncatedFilename;
+}
+
 function formatDuration(sec: number): string {
   if (sec < 60) return sec + 's';
   const m = Math.floor(sec / 60);
@@ -53,12 +70,17 @@ function formatDuration(sec: number): string {
 }
 
 function stepIconHtml(status?: string): string {
-  if (!status) return '<span class="step-dot step-pending" title="pending">○</span>';
-  if (status === 'success' || status === 'succeeded') return '<span class="step-dot step-success" title="success">✓</span>';
-  if (status === 'failed') return '<span class="step-dot step-failed" title="failed">✗</span>';
-  if (status === 'running') return '<span class="step-dot step-running" title="running">⟳</span>';
-  if (status === 'skipped') return '<span class="step-dot step-skipped" title="skipped">⊘</span>';
-  return '<span class="step-dot step-pending" title="' + status + '">○</span>';
+  const icon = status === 'success' || status === 'succeeded' ? '✓'
+    : status === 'failed' ? '✗'
+    : status === 'running' ? '⟳'
+    : status === 'skipped' ? '⊘'
+    : '○';
+  const cls = status === 'success' || status === 'succeeded' ? 'success'
+    : status === 'failed' ? 'failed'
+    : status === 'running' ? 'running'
+    : status === 'skipped' ? 'skipped'
+    : 'pending';
+  return '<span class="step-icon ' + cls + '">' + icon + '</span>';
 }
 
 /**
@@ -99,10 +121,8 @@ export class AttemptCard extends SubscribableControl {
         if (!card) return;
         const num = parseInt(card.getAttribute('data-attempt') || '0', 10);
         const body = card.querySelector('.attempt-body') as HTMLElement | null;
-        const chevron = header.querySelector('.chevron') as HTMLElement | null;
         const isExpanded = header.getAttribute('data-expanded') === 'true';
         if (body) body.style.display = isExpanded ? 'none' : 'block';
-        if (chevron) chevron.textContent = isExpanded ? '▶' : '▼';
         header.setAttribute('data-expanded', isExpanded ? 'false' : 'true');
         card.setAttribute('data-expanded', isExpanded ? 'false' : 'true');
         if (isExpanded) this.expandedAttempts.delete(num);
@@ -124,11 +144,11 @@ export class AttemptCard extends SubscribableControl {
         // Swap log content
         const card = btn.closest('.attempt-card');
         if (!card) return;
-        const dataEl = card.querySelector('.attempt-logs-data') as HTMLElement | null;
-        const viewer = card.querySelector('.attempt-log-viewer') as HTMLElement | null;
+        const dataEl = card.querySelector('.attempt-logs-data[data-attempt="' + attNum + '"]') as HTMLElement | null;
+        const viewer = card.querySelector('.attempt-log-viewer[data-attempt="' + attNum + '"]') as HTMLElement | null;
         if (dataEl && viewer) {
           try {
-            const allLogs = JSON.parse(dataEl.getAttribute('data-logs') || '{}');
+            const allLogs = JSON.parse(dataEl.textContent || '{}');
             viewer.textContent = allLogs[phase] || '(no logs for this phase)';
           } catch { /* ignore parse errors */ }
         }
@@ -162,77 +182,123 @@ export class AttemptCard extends SubscribableControl {
     const triggerBadge = triggerLabel ? '<span class="attempt-trigger-badge">' + triggerLabel + '</span>' : '';
 
     const ss = att.stepStatuses || {};
-    const stepIndicators = [
-      stepIconHtml(ss['merge-fi']),
-      stepIconHtml(ss['prechecks']),
-      stepIconHtml(ss['work']),
-      stepIconHtml(ss['commit']),
-      stepIconHtml(ss['postchecks']),
-      stepIconHtml(ss['merge-ri']),
-    ].join('');
+    const stepIndicators = '<span class="step-indicators">'
+      + stepIconHtml(ss['merge-fi'])
+      + stepIconHtml(ss['prechecks'])
+      + stepIconHtml(ss['work'])
+      + stepIconHtml(ss['commit'])
+      + stepIconHtml(ss['postchecks'])
+      + stepIconHtml(ss['merge-ri'])
+      + '</span>';
 
     const expanded = this.expandedAttempts.has(att.attemptNumber);
-    const chevron = expanded ? '\u25BC' : '\u25B6';
     const bodyDisplay = expanded ? 'block' : 'none';
 
-    // Error section
+    // ── Error section ──
     const errorHtml = att.error
       ? '<div class="attempt-section attempt-error-section">'
         + '<div class="attempt-section-title">\u274C Error</div>'
         + '<div class="attempt-error-body">'
         + '<div class="attempt-error-msg">' + escapeHtml(att.error) + '</div>'
-        + (att.failedPhase ? '<div class="attempt-error-detail">Failed in phase: <strong>' + att.failedPhase + '</strong></div>' : '')
+        + (att.failedPhase ? '<div class="attempt-error-detail">Failed in phase: <strong>' + escapeHtml(att.failedPhase) + '</strong></div>' : '')
         + (att.exitCode !== undefined ? '<div class="attempt-error-detail">Exit code: <strong>' + att.exitCode + '</strong></div>' : '')
         + '</div></div>'
       : '';
 
-    // Metrics section
+    // ── Metrics section ──
     const metricsHtml = att.metricsHtml
       ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDCCA AI Usage</div>' + att.metricsHtml + '</div>'
       : '';
 
-    // Context section
+    // ── Context section ──
     const ctxItems: string[] = [];
-    if (att.baseCommit) ctxItems.push('<div class="attempt-ctx-row"><span class="attempt-ctx-label">Base</span><code class="attempt-ctx-value">' + att.baseCommit.slice(0, 8) + '</code></div>');
-    if (att.worktreePath) ctxItems.push('<div class="attempt-ctx-row"><span class="attempt-ctx-label">Worktree</span><code class="attempt-ctx-value">' + escapeHtml(att.worktreePath) + '</code></div>');
-    if (att.copilotSessionId) ctxItems.push('<div class="attempt-ctx-row"><span class="attempt-ctx-label">Session</span><code class="attempt-ctx-value">' + att.copilotSessionId.slice(0, 12) + '</code></div>');
+    if (att.baseCommit) {
+      ctxItems.push('<div class="attempt-ctx-row"><span class="attempt-ctx-label">Base</span><code class="attempt-ctx-value">' + att.baseCommit.slice(0, 8) + '</code></div>');
+    }
+    if (att.worktreePath) {
+      ctxItems.push('<div class="attempt-ctx-row"><span class="attempt-ctx-label">Worktree</span><code class="attempt-ctx-value">' + escapeHtml(att.worktreePath) + '</code></div>');
+    }
+    if (att.logFilePath) {
+      ctxItems.push('<div class="attempt-ctx-row"><span class="attempt-ctx-label">Log</span><span class="log-file-path attempt-ctx-value" data-path="' + escapeHtml(att.logFilePath) + '" title="' + escapeHtml(att.logFilePath) + '">\uD83D\uDCC4 ' + escapeHtml(truncateLogPath(att.logFilePath)) + '</span></div>');
+    }
+    if (att.copilotSessionId) {
+      ctxItems.push('<div class="attempt-ctx-row"><span class="attempt-ctx-label">Session</span><span class="session-id attempt-ctx-value" data-session="' + escapeHtml(att.copilotSessionId) + '" title="Click to copy">' + escapeHtml(att.copilotSessionId.substring(0, 12)) + '\u2026 \uD83D\uDCCB</span></div>');
+    }
     const contextHtml = ctxItems.length > 0
-      ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDD27 Context</div><div class="attempt-ctx-grid">' + ctxItems.join('') + '</div></div>'
+      ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDD17 Context</div><div class="attempt-ctx-grid">' + ctxItems.join('') + '</div></div>'
       : '';
 
-    // Specs sections
-    const workHtml = att.workUsedHtml ? '<div class="attempt-section"><div class="attempt-section-title">\u2699\uFE0F Work</div>' + att.workUsedHtml + '</div>' : '';
-    const prechecksHtml = att.prechecksUsedHtml ? '<div class="attempt-section"><div class="attempt-section-title">\u2713 Prechecks</div>' + att.prechecksUsedHtml + '</div>' : '';
-    const postchecksHtml = att.postchecksUsedHtml ? '<div class="attempt-section"><div class="attempt-section-title">\u2713 Postchecks</div>' + att.postchecksUsedHtml + '</div>' : '';
+    // ── Specs sections ──
+    const prechecksHtml = att.prechecksUsedHtml
+      ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDD0D Prechecks</div>' + att.prechecksUsedHtml + '</div>'
+      : '';
+    const workHtml = att.workUsedHtml
+      ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDCDD Work Spec</div>' + att.workUsedHtml + '</div>'
+      : '';
+    const postchecksHtml = att.postchecksUsedHtml
+      ? '<div class="attempt-section"><div class="attempt-section-title">\u2705 Postchecks</div>' + att.postchecksUsedHtml + '</div>'
+      : '';
 
-    // Log section with phase tabs
+    // ── Log section with phase tabs ──
     let logSection = '';
     if (att.logs) {
-      const phases = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+      const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+      const phaseLabels: Record<string, string> = {
+        'all': '\uD83D\uDCC4 Full Log',
+        'merge-fi': '\u21D9\u21D8 Merge FI',
+        'prechecks': '\u2713 Prechecks',
+        'work': '\u2699 Work',
+        'commit': '\uD83D\uDCBE Commit',
+        'postchecks': '\u2713 Postchecks',
+        'merge-ri': '\u2197\u2199 Merge RI',
+      };
       const phaseLogs = this.extractPhaseLogs(att.logs, phases);
+      // Also include the full log
+      phaseLogs['all'] = att.logs;
+
       const tabsHtml = phases.map(p => {
-        const hasContent = !!phaseLogs[p];
-        return '<button class="attempt-phase-tab' + (p === 'work' ? ' active' : '') + (hasContent ? '' : ' empty') + '" data-phase="' + p + '" data-attempt="' + att.attemptNumber + '">' + p + '</button>';
+        const ss2 = att.stepStatuses || {};
+        const pStatus = p === 'all' ? '' : (ss2[p] || '');
+        const statusCls = pStatus === 'success' || pStatus === 'succeeded' ? ' success'
+          : pStatus === 'failed' ? ' failed'
+          : pStatus === 'skipped' ? ' skipped'
+          : '';
+        return '<button class="attempt-phase-tab' + (p === 'all' ? ' active' : '') + statusCls + '" data-phase="' + p + '" data-attempt="' + att.attemptNumber + '">'
+          + (phaseLabels[p] || p) + '</button>';
       }).join('');
-      const defaultLog = phaseLogs['work'] || att.logs.slice(0, 5000);
-      logSection = '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDCDD Logs</div>'
+
+      logSection = '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDCCB Logs</div>'
+        + '<div class="attempt-phases" data-attempt="' + att.attemptNumber + '">'
         + '<div class="attempt-phase-tabs">' + tabsHtml + '</div>'
-        + '<div class="attempt-logs-data" data-attempt="' + att.attemptNumber + '" data-logs="' + escapeHtml(JSON.stringify(phaseLogs)) + '" style="display:none;"></div>'
-        + '<pre class="attempt-log-viewer">' + escapeHtml(defaultLog) + '</pre></div>';
+        + '<pre class="attempt-log-viewer" data-attempt="' + att.attemptNumber + '">' + escapeHtml(phaseLogs['all'] || '') + '</pre>'
+        + '<script type="application/json" class="attempt-logs-data" data-attempt="' + att.attemptNumber + '">'
+        + JSON.stringify(phaseLogs)
+        + '<\/script>'
+        + '</div></div>';
     }
 
-    return '<div class="attempt-card" data-attempt="' + att.attemptNumber + '" data-expanded="' + expanded + '">'
+    // ── Running placeholder ──
+    const hasBodyContent = errorHtml || metricsHtml || ctxItems.length > 0 || prechecksHtml || workHtml || postchecksHtml || logSection;
+    const runningPlaceholder = (!hasBodyContent && isRunning)
+      ? '<div class="attempt-section"><div class="attempt-running-indicator">\u27F3 Executing\u2026 see live log viewer above for current output.</div></div>'
+      : '';
+
+    return '<div class="attempt-card" data-attempt="' + att.attemptNumber + '" data-expanded="' + expanded + '" style="border-left: 3px solid ' + statusColor + ';">'
       + '<div class="attempt-header" data-expanded="' + expanded + '">'
-      + '<span class="chevron">' + chevron + '</span>'
-      + '<span class="attempt-badge" style="background:' + statusColor + ';">' + statusIcon + ' #' + att.attemptNumber + '</span>'
+      + '<div class="attempt-header-left">'
+      + '<span class="attempt-status-icon" style="color:' + statusColor + ';">' + statusIcon + '</span>'
+      + '<span class="attempt-badge">#' + att.attemptNumber + '</span>'
       + triggerBadge
-      + '<span class="attempt-status status-' + att.status + '">' + att.status + '</span>'
-      + '<span class="attempt-steps">' + stepIndicators + '</span>'
-      + '<span class="attempt-duration">' + duration + '</span>'
+      + stepIndicators
+      + '</div>'
+      + '<div class="attempt-header-right">'
       + '<span class="attempt-time">' + timestamp + '</span>'
+      + '<span class="attempt-duration">' + duration + '</span>'
+      + '<span class="attempt-chevron">\u203A</span>'
+      + '</div>'
       + '</div>'
       + '<div class="attempt-body" style="display:' + bodyDisplay + ';">'
-      + errorHtml + metricsHtml + contextHtml + prechecksHtml + workHtml + postchecksHtml + logSection
+      + runningPlaceholder + errorHtml + metricsHtml + contextHtml + prechecksHtml + workHtml + postchecksHtml + logSection
       + '</div>'
       + '</div>';
   }

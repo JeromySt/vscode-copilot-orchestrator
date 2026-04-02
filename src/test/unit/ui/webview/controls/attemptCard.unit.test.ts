@@ -100,7 +100,7 @@ suite('AttemptCard', () => {
       ],
     });
 
-    assert.ok(container.innerHTML.includes('status-failed'));
+    assert.ok(container.innerHTML.includes('#f48771'), 'should include failed status color');
     assert.ok(container.innerHTML.includes('Something broke'));
     assert.ok(container.innerHTML.includes('work'));
     ac.dispose();
@@ -136,8 +136,8 @@ suite('AttemptCard', () => {
       }],
     });
 
-    assert.ok(container.innerHTML.includes('step-success'));
-    assert.ok(container.innerHTML.includes('step-running'));
+    assert.ok(container.innerHTML.includes('step-icon success'), 'should show success step icons');
+    assert.ok(container.innerHTML.includes('step-icon running'), 'should show running step icon');
     ac.dispose();
   });
 
