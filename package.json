@@ -386,6 +386,11 @@
           "default": false,
           "description": "[EXPERIMENTAL] Show the timeline view in plan detail panels. This feature is under active development and hidden by default. Enable to preview and provide feedback on the interactive execution timeline visualization."
         },
+        "copilotOrchestrator.experimental.enableReleaseManagement": {
+          "type": "boolean",
+          "default": false,
+          "description": "[EXPERIMENTAL] Enable release management and PR lifecycle tools. When enabled, exposes MCP tools for creating releases, managing PRs, and monitoring CI/review pipelines. This feature is under active development."
+        },
         "copilotOrchestrator.releaseManagement.pollIntervalSeconds": {
           "type": "number",
           "default": 120,

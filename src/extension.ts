@@ -137,22 +137,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── MCP Server (stdio transport via IPC) ───────────────────────────────
   mcpManager = await initializeMcpServer(context, planRunner, config.mcp, container);
 
-  // ── Release Manager ────────────────────────────────────────────────────
-  const releaseManager = createReleaseManager(container, planRunner);
+  // ── Release Manager (experimental) ──────────────────────────────────────
+  const releaseFeatureEnabled = vscode.workspace.getConfiguration('copilotOrchestrator').get<boolean>('experimental.enableReleaseManagement', false);
+  const releaseManager = releaseFeatureEnabled ? createReleaseManager(container, planRunner) : undefined;
 
   // ── Plans view ──────────────────────────────────────────────────────────
   const pulse = container.resolve<IPulseEmitter>(Tokens.IPulseEmitter);
-  const prLifecycleManager = container.resolve<import('./interfaces/IPRLifecycleManager').IPRLifecycleManager>(Tokens.IPRLifecycleManager);
+  const prLifecycleManager = releaseFeatureEnabled
+    ? container.resolve<import('./interfaces/IPRLifecycleManager').IPRLifecycleManager>(Tokens.IPRLifecycleManager)
+    : undefined;
   initializePlansView(context, planRunner, pulse, prLifecycleManager, releaseManager);
 
   // ── Commands ───────────────────────────────────────────────────────────
   registerPlanCommands(context, planRunner, pulse, container);
   registerUtilityCommands(context);
-  // Register release commands with actual releaseManager and providerDetector
-  const providerDetector = container.resolve<import('./interfaces/IRemoteProviderDetector').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
-  registerReleaseCommands(context, (id: string) => releaseManager.getRelease(id), releaseManager, planRunner, providerDetector, pulse);
-  // Register PR lifecycle commands
-  registerPRLifecycleCommands(context, (id: string) => prLifecycleManager.getManagedPR(id));
+  // Register release commands (experimental — gated)
+  if (releaseFeatureEnabled && releaseManager) {
+    const providerDetector = container.resolve<import('./interfaces/IRemoteProviderDetector').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
+    registerReleaseCommands(context, (id: string) => releaseManager.getRelease(id), releaseManager, planRunner, providerDetector, pulse);
+    if (prLifecycleManager) {
+      registerPRLifecycleCommands(context, (id: string) => prLifecycleManager.getManagedPR(id));
+    }
+  }
 
   // ── Bulk Action Commands ───────────────────────────────────────────────
   // Create BulkPlanActions via composition helper (keeps DI wiring in composition.ts)

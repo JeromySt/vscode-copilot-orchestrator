@@ -142,6 +142,7 @@ export class McpHandler implements IMcpRequestRouter {
     planRecovery?: import('../interfaces/IPlanRecovery').IPlanRecovery,
     releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager,
     prLifecycleManager?: import('../interfaces/IPRLifecycleManager').IPRLifecycleManager,
+    options?: { enableReleaseManagement?: boolean },
   ) {
     this.context = { 
       PlanRunner, 
@@ -157,8 +158,12 @@ export class McpHandler implements IMcpRequestRouter {
       runner: null as any,
       plans: null as any,
     };
-    log.info('MCP Handler initialized', { workspacePath });
+    this._enableReleaseManagement = options?.enableReleaseManagement ?? false;
+    log.info('MCP Handler initialized', { workspacePath, releaseManagement: this._enableReleaseManagement });
   }
+
+  /** Whether release/PR lifecycle tools are enabled (experimental flag). */
+  private readonly _enableReleaseManagement: boolean;
 
   /**
    * Process an incoming MCP JSON-RPC request and return a response.
@@ -241,8 +246,8 @@ export class McpHandler implements IMcpRequestRouter {
     const tools = [
       ...(await getPlanToolDefinitions()),
       ...(await getJobToolDefinitions()),
-      ...(await getReleaseToolDefinitions()),
-      ...(await getPRLifecycleToolDefinitions()),
+      ...(this._enableReleaseManagement ? await getReleaseToolDefinitions() : []),
+      ...(this._enableReleaseManagement ? await getPRLifecycleToolDefinitions() : []),
     ];
     log.info('Tools list requested', { toolCount: tools.length });
     log.debug('Tools list - tool names', { tools: tools.map(t => t.name) });

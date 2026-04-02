@@ -284,7 +284,10 @@ export async function initializeMcpServer(
     const { PlanRecovery } = require('../plan/planRecovery');
     const planRecovery = new PlanRecovery(planRunner, repo, git, copilotRunner);
     
-    return new McpHandler(planRunner, workspacePath, git, repo, configProvider, archiver, planRecovery);
+    return new McpHandler(planRunner, workspacePath, git, repo, configProvider, archiver, planRecovery,
+      undefined, undefined, // releaseManager, prLifecycleManager — injected later if experimental flag is on
+      { enableReleaseManagement: configProvider?.getConfig?.('copilotOrchestrator.experimental', 'enableReleaseManagement', false) ?? false },
+    );
   });
 
   // Register PlanArchiver with PlanRunner dependency
@@ -401,9 +404,11 @@ export function initializePlansView(
   treeViewManager.createTreeView(context);
   context.subscriptions.push(treeViewManager);
   
-  // Status bar: release rocket icon next to branch indicator
-  const { attachReleaseStatusBar } = require('../ui/statusBar');
-  attachReleaseStatusBar(context);
+  // Status bar: release rocket icon next to branch indicator (experimental — only when release management enabled)
+  if (releaseManager) {
+    const { attachReleaseStatusBar } = require('../ui/statusBar');
+    attachReleaseStatusBar(context);
+  }
   
   log.info('Plans view initialized');
 }
@@ -438,9 +443,11 @@ export function initializePlansViewWithReleaseManager(
   treeViewManager.createTreeView(context);
   context.subscriptions.push(treeViewManager);
   
-  // Status bar: release rocket icon next to branch indicator
-  const { attachReleaseStatusBar } = require('../ui/statusBar');
-  attachReleaseStatusBar(context);
+  // Status bar: release rocket icon next to branch indicator (experimental — only when release management enabled)
+  if (releaseManager) {
+    const { attachReleaseStatusBar } = require('../ui/statusBar');
+    attachReleaseStatusBar(context);
+  }
   
   log.info('Plans view initialized with release manager');
 }

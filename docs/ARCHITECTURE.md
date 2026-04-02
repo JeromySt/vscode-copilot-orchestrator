@@ -398,6 +398,12 @@ sequenceDiagram
 
 ## Sequence Diagram — Snapshot Validation & Final Merge
 
+The Snapshot Validation (SV) node is auto-injected into every plan. It depends on all user-defined leaf nodes, accumulates their work via forward integration, then validates and merges the combined result to the target branch.
+
+**Key invariant**: The SV node's `baseCommit` must be the **original snapshot base commit** (not the worktree HEAD after FI). This ensures the commit phase detects accumulated predecessor work and merge-RI has a real commit to merge.
+
+When no user-provided `verifyRiSpec` exists, the SV node uses a **default verification spec** — a premium-tier agent that cross-references all job deliverables against the actual snapshot changes.
+
 ```mermaid
 sequenceDiagram
     participant Pump as ExecutionPump
@@ -408,6 +414,7 @@ sequenceDiagram
     Note over Pump: All leaf nodes merged to snapshot branch
 
     Pump->>SV: execute (worktree = snapshot worktree)
+    Note over SV: baseCommit = snapshot.baseCommit (original plan start)
 
     Note over SV: Prechecks — target branch health
     SV->>Git: check targetBranch dirty/ahead
@@ -417,8 +424,15 @@ sequenceDiagram
         SV->>Git: rebase snapshot onto target
     end
 
-    Note over SV: Work — run verifyRiSpec
-    SV->>SV: npm run compile && npm run test:unit
+    Note over SV: Work — verifyRiSpec or default verification
+    alt User provided verifyRiSpec
+        SV->>SV: run verifyRiSpec (e.g., npm test)
+    else Default verification
+        SV->>SV: premium AI agent reviews all job deliverables
+    end
+
+    Note over SV: Commit — detect accumulated work
+    SV->>Git: HEAD != baseCommit → commit = HEAD
 
     Note over SV: Merge-RI — final merge to target
     SV->>Git: merge-tree snapshot to target
@@ -805,6 +819,9 @@ src/
 │   ├── stateMachine.ts       #   DAG state transitions & propagation
 │   ├── scheduler.ts          #   Capacity-aware node selection
 │   ├── builder.ts            #   PlanSpec → PlanInstance DAG builder
+│   ├── svNodeBuilder.ts      #   Snapshot Validation node spec builder
+│   ├── analysis/             #   Job analysis utilities
+│   │   └── complexityScorer.ts  # Complexity scoring + decomposition warnings
 │   ├── phases/               #   Individual phase implementations
 │   │   ├── mergeFiPhase.ts   #     Forward Integration merge
 │   │   ├── setupPhase.ts     #     Worktree environment prep
@@ -1403,6 +1420,23 @@ graph TB
 ```
 
 ---
+
+## Experimental Feature Flags
+
+Features under active development are gated behind `copilotOrchestrator.experimental.*` settings (default: `false`).
+
+| Setting | What it gates |
+|---------|--------------|
+| `experimental.showTimeline` | Interactive Gantt-chart timeline view in plan detail panels |
+| `experimental.enableReleaseManagement` | Release management + PR lifecycle MCP tools, commands, and UI |
+
+When a flag is off:
+- MCP tools for that feature are excluded from `tools/list` responses — agents never see them
+- VS Code commands are not registered — command palette doesn't show them
+- UI components (status bar items, panels) are not created
+- DI services for that feature are not resolved — zero runtime overhead
+
+Flags are checked once at extension activation via `vscode.workspace.getConfiguration()`.
 
 ## Related Documentation
 

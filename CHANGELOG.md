@@ -9,12 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes yet._
 
-## [0.15.0] - 2026-03-05
+## [0.15.0] - 2026-04-02
 
 ### 🚀 Major Features
 
-#### Release Preparation & Lifecycle
-- **Adaptive release wizard**: Dynamic wizard steps adapt to release flow type (from-branch vs from-plans)
+#### Snapshot Validation Improvements
+- **Default verification spec**: Plans without a user-provided `verifyRiSpec` now automatically get a premium-tier AI verification agent that reviews all accumulated plan work before merging to the target branch. The agent cross-references job specs against actual changes, checks for completeness, and validates no files were lost.
+- **SV node baseCommit fix**: Fixed critical bug where the Snapshot Validation node's merge-RI was silently skipped because `baseCommit` was incorrectly set to the worktree HEAD (predecessor's commit) instead of the original snapshot base commit. This caused accumulated plan work to never merge to the target branch.
+- **Security model tier guidance**: MCP tool descriptions now explicitly recommend `modelTier: 'premium'` for cryptography, authentication, authorization, and other security-sensitive work.
+
+#### Job Complexity Scoring
+- **Static complexity analysis**: When adding jobs via `add_copilot_plan_job`, the orchestrator analyzes work instructions for complexity signals (file count, test count, crypto/protocol/state-machine keywords, LOC targets, dependency fan-in) and returns a warning when the score exceeds thresholds.
+- **Decomposition suggestions**: High-complexity jobs (score > 120) receive specific suggestions for splitting at logical boundaries.
+- New `src/plan/analysis/complexityScorer.ts` module with configurable weights and thresholds.
+
+#### Attempt History UI Consolidation  
+- **Single renderer**: Eliminated duplicate "Attempt History" sections in the node detail panel. Previously, a stale SSR snapshot and a live CSR control rendered simultaneously. Now the CSR `AttemptCard` control is the sole renderer, receiving initial data on panel load.
+- **Polished card layout**: The CSR attempt cards now match the SSR template's styling — proper `attempt-header-left`/`attempt-header-right` layout, `border-left` status accent, `attempt-chevron` with CSS rotation, log file paths with click-to-open, session IDs with click-to-copy, phase tabs with `<script>` JSON data, and `attempt-running-indicator` for empty running attempts.
+
+#### Release Management (Experimental)
+- **Feature-flagged**: All release management and PR lifecycle features are now gated behind `copilotOrchestrator.experimental.enableReleaseManagement` (default: `false`). When disabled, release/PR MCP tools are hidden from `tools/list`, release commands are not registered, and the status bar rocket icon is not shown.
+- Release preparation & lifecycle (wizard, preparation tasks, PR monitoring)
 - **Pre-PR preparation checklist**: Guided preparation tasks before creating pull requests
   - Update changelog with release notes
   - Bump version numbers in package.json and other files
@@ -90,6 +105,17 @@ _No unreleased changes yet._
   - `abandon_pr` — Stop management and mark as abandoned
   - `remove_pr` — Completely remove from management
 - **Integration with releases**: Managed PRs can be linked to releases for unified tracking; release-generated PRs are automatically adopted for monitoring
+
+### 🐛 Bug Fixes
+
+- **SV node merge-RI skipped**: Fixed the Snapshot Validation node setting `baseCommit` to the reused worktree's HEAD instead of the original snapshot base commit, causing merge-RI to no-op and accumulated plan work to never reach the target branch
+- **Duplicate attempt history**: Fixed node detail panel rendering two separate "Attempt History" sections (one stale SSR, one live CSR) by removing the SSR injection and making the CSR control the sole renderer
+- **Auto-heal retry**: Fixed auto-fix retry, commit resume, and activity log planId issues
+- **Lint exemptions**: Added lint exemptions for new files violating DI/fs/createWebviewPanel rules
+
+### 📦 Internal
+
+- **Context Pressure Dynamic Response System**: Tracked as GitHub issue #86 for v0.16.0 — runtime detection of agent context exhaustion with automatic job splitting and continuation
 
 ## [0.14.0] - 2026-02-28
 
