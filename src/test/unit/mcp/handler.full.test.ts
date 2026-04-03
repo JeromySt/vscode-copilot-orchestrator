@@ -76,7 +76,7 @@ suite('McpHandler Full Coverage', () => {
       discoveredAt: Date.now(),
     });
     mockRunner = makeMockPlanRunner();
-    handler = new McpHandler(mockRunner, '/workspace', {} as any);
+    handler = new McpHandler(mockRunner, '/workspace', {} as any, {} as any, undefined);
   });
 
   teardown(() => {
@@ -243,11 +243,11 @@ suite('McpHandler Full Coverage', () => {
     test('should catch handler exceptions as -32603', async () => {
       // Create a handler that throws on tools/list
       const badRunner = makeMockPlanRunner();
-      const badHandler = new McpHandler(badRunner, '/workspace', {} as any);
+      const badHandler = new McpHandler(badRunner, '/workspace', {} as any, {} as any, undefined);
       
       // Stub the internal method to throw
       const origHandleRequest = badHandler.handleRequest.bind(badHandler);
-      const throwingHandler = new McpHandler(badRunner, '/workspace', {} as any);
+      const throwingHandler = new McpHandler(badRunner, '/workspace', {} as any, {} as any, undefined);
       // Force an error by making a handler throw
       sinon.stub(throwingHandler as any, 'handleToolsList').throws(new Error('Internal failure'));
       

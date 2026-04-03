@@ -127,7 +127,8 @@ const workSpecObjectSchema = {
     args: { type: 'array', items: { type: 'string' } },
     shell: { type: 'string', enum: ['cmd', 'powershell', 'pwsh', 'bash', 'sh'] },
     errorAction: { type: 'string', enum: ['Continue', 'Stop', 'SilentlyContinue'], description: 'PowerShell $ErrorActionPreference. Default: Continue. Only applies to powershell/pwsh shells.' },
-    instructions: { type: 'string' },
+    instructions: { type: 'string', maxLength: 100000, description: 'Inline agent instructions. Supports full Markdown formatting. Mutually exclusive with instructionsFile.' },
+    instructionsFile: { type: 'string', maxLength: 500, description: 'Path to .md file with agent instructions. Mutually exclusive with instructions.' },
     model: { type: 'string', maxLength: 100 },
     modelTier: { type: 'string', enum: ['fast', 'standard', 'premium'], description: 'Model tier preference. When set and model is not specified, auto-selects a model matching this tier.' },
     maxTurns: { type: 'number', minimum: 1, maximum: 100 },
@@ -844,6 +845,333 @@ export const finalizePlanSchema = {
 } as const;
 
 /**
+ * Schema for create_copilot_release input.
+ * 
+ * Supports two modes:
+ * - Plan-based: requires non-empty planIds and releaseBranch
+ * - From-branch: requires repoPath and releaseBranch; planIds may be empty/omitted
+ */
+export const createReleaseSchema = {
+  $id: 'create_copilot_release',
+  type: 'object',
+  properties: {
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    planIds: {
+      type: 'array',
+      items: { type: 'string', minLength: 1 },
+      minItems: 0
+    },
+    releaseBranch: { type: 'string', minLength: 1, maxLength: 200 },
+    targetBranch: { type: 'string', minLength: 1, maxLength: 200 },
+    repoPath: { type: 'string', minLength: 1 },
+    autoStart: { type: 'boolean' }
+  },
+  required: ['name', 'releaseBranch'],
+  anyOf: [
+    { required: ['planIds'], properties: { planIds: { type: 'array', minItems: 1 } } },
+    { required: ['repoPath'], properties: { repoPath: { type: 'string', minLength: 1 } } },
+  ],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for scaffold_release_tasks input
+ */
+export const scaffoldReleaseTasksSchema = {
+  $id: 'scaffold_release_tasks',
+  type: 'object',
+  properties: {
+    repoPath: { type: 'string', minLength: 1 }
+  },
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for start_copilot_release input
+ */
+export const startReleaseSchema = {
+  $id: 'start_copilot_release',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for get_copilot_release_status input
+ */
+export const getReleaseStatusSchema = {
+  $id: 'get_copilot_release_status',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for cancel_copilot_release input
+ */
+export const cancelReleaseSchema = {
+  $id: 'cancel_copilot_release',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for list_copilot_releases input
+ */
+export const listReleasesSchema = {
+  $id: 'list_copilot_releases',
+  type: 'object',
+  properties: {
+    status: {
+      type: 'string',
+      enum: ['drafting', 'preparing', 'ready-for-pr', 'merging', 'creating-pr', 'pr-active', 'monitoring', 'addressing', 'succeeded', 'failed', 'canceled']
+    }
+  },
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for prepare_copilot_release input
+ */
+export const prepareReleaseSchema = {
+  $id: 'prepare_copilot_release',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for execute_release_task input
+ */
+export const executeReleaseTaskSchema = {
+  $id: 'execute_release_task',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 },
+    taskId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId', 'taskId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for skip_release_task input
+ */
+export const skipReleaseTaskSchema = {
+  $id: 'skip_release_task',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 },
+    taskId: { type: 'string', minLength: 1, maxLength: 100 }
+  },
+  required: ['releaseId', 'taskId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for add_plans_to_release input
+ */
+export const addPlansToReleaseSchema = {
+  $id: 'add_plans_to_release',
+  type: 'object',
+  properties: {
+    releaseId: { type: 'string', minLength: 1, maxLength: 100 },
+    planIds: {
+      type: 'array',
+      items: { type: 'string', minLength: 1 },
+      minItems: 1
+    }
+  },
+  required: ['releaseId', 'planIds'],
+  additionalProperties: false
+} as const;
+
+// ============================================================================
+// PR LIFECYCLE SCHEMAS
+// ============================================================================
+
+/**
+ * Schema for list_available_prs input
+ */
+export const listAvailablePRsSchema = {
+  $id: 'list_available_prs',
+  type: 'object',
+  properties: {
+    repoPath: { type: 'string', minLength: 1 },
+    baseBranch: { type: 'string' },
+    state: { type: 'string', enum: ['open', 'closed', 'all'] },
+    limit: { type: 'number', minimum: 1, maximum: 100 }
+  },
+  required: ['repoPath'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for adopt_pr input
+ */
+export const adoptPRSchema = {
+  $id: 'adopt_pr',
+  type: 'object',
+  properties: {
+    prNumber: { type: 'number', minimum: 1 },
+    repoPath: { type: 'string', minLength: 1 },
+    workingDirectory: { type: 'string' },
+    releaseId: { type: 'string' },
+    priority: { type: 'number', minimum: 0 }
+  },
+  required: ['prNumber', 'repoPath'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for get_managed_pr input
+ */
+export const getManagedPRSchema = {
+  $id: 'get_managed_pr',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for list_managed_prs input
+ */
+export const listManagedPRsSchema = {
+  $id: 'list_managed_prs',
+  type: 'object',
+  properties: {
+    status: {
+      type: 'string',
+      enum: ['adopted', 'monitoring', 'addressing', 'ready', 'blocked', 'abandoned']
+    }
+  },
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for start_pr_monitoring input
+ */
+export const startPRMonitoringSchema = {
+  $id: 'start_pr_monitoring',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for stop_pr_monitoring input
+ */
+export const stopPRMonitoringSchema = {
+  $id: 'stop_pr_monitoring',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for promote_pr input
+ */
+export const promotePRSchema = {
+  $id: 'promote_pr',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for demote_pr input
+ */
+export const demotePRSchema = {
+  $id: 'demote_pr',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for abandon_pr input
+ */
+export const abandonPRSchema = {
+  $id: 'abandon_pr',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for remove_pr input
+ */
+export const removePRSchema = {
+  $id: 'remove_pr',
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 }
+  },
+  required: ['id'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for archive_copilot_plan input
+ */
+export const archivePlanSchema = {
+  $id: 'archive_copilot_plan',
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    force: { type: 'boolean', description: 'Force archive even if the plan is still running' },
+    deleteRemoteBranches: { type: 'boolean', description: 'Delete remote branches associated with the plan' }
+  },
+  required: ['planId'],
+  additionalProperties: false
+} as const;
+
+/**
+ * Schema for recover_copilot_plan input
+ */
+export const recoverPlanSchema = {
+  $id: 'recover_copilot_plan',
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    useCopilotAgent: { type: 'boolean', description: 'Use Copilot CLI agent to attempt automatic recovery' }
+  },
+  required: ['planId'],
+  additionalProperties: false
+} as const;
+
+/**
  * All schemas indexed by tool name
  */
 export const schemas: Record<string, object> = {
@@ -869,8 +1197,36 @@ export const schemas: Record<string, object> = {
   get_copilot_job_failure_context: getNodeFailureContextSchema,
   update_copilot_plan_job: updateCopilotPlanNodeSchema,
 
+  // Plan archive and recovery tools
+  archive_copilot_plan: archivePlanSchema,
+  recover_copilot_plan: recoverPlanSchema,
+
   // Scaffolding tools
   scaffold_copilot_plan: scaffoldPlanSchema,
   add_copilot_plan_job: addPlanNodeSchema,
   finalize_copilot_plan: finalizePlanSchema,
+
+  // Release tools
+  create_copilot_release: createReleaseSchema,
+  start_copilot_release: startReleaseSchema,
+  get_copilot_release_status: getReleaseStatusSchema,
+  cancel_copilot_release: cancelReleaseSchema,
+  list_copilot_releases: listReleasesSchema,
+  prepare_copilot_release: prepareReleaseSchema,
+  execute_release_task: executeReleaseTaskSchema,
+  skip_release_task: skipReleaseTaskSchema,
+  add_plans_to_release: addPlansToReleaseSchema,
+  scaffold_release_tasks: scaffoldReleaseTasksSchema,
+
+  // PR lifecycle tools
+  list_available_prs: listAvailablePRsSchema,
+  adopt_pr: adoptPRSchema,
+  get_managed_pr: getManagedPRSchema,
+  list_managed_prs: listManagedPRsSchema,
+  start_pr_monitoring: startPRMonitoringSchema,
+  stop_pr_monitoring: stopPRMonitoringSchema,
+  promote_pr: promotePRSchema,
+  demote_pr: demotePRSchema,
+  abandon_pr: abandonPRSchema,
+  remove_pr: removePRSchema,
 };

@@ -16,6 +16,8 @@ import {
   errorResult,
 } from '../utils';
 import { Logger } from '../../../core/logger';
+import { scoreComplexity, evaluateComplexity } from '../../../plan/analysis/complexityScorer';
+import { normalizeWorkSpec } from '../../../plan/types';
 
 const log = Logger.for('mcp');
 
@@ -97,10 +99,29 @@ export async function handleAddPlanJob(args: any, ctx: PlanHandlerContext): Prom
     (ctx.PlanRunner as any)._state?.events?.emitPlanUpdated?.(planId);
     log.info('Job added to scaffolding plan', { planId, producerId: producerId, task });
 
+    // Feature 1: Compute complexity score and warn if the job is too large
+    let complexityWarning: string | undefined;
+    const normalized = normalizeWorkSpec(work);
+    if (normalized?.type === 'agent') {
+      const instructions = (normalized as any).instructions || '';
+      const depCount = (dependencies || []).length;
+      const score = scoreComplexity(instructions, depCount);
+      const evaluation = evaluateComplexity(score, instructions);
+      if (evaluation.warningMessage) {
+        complexityWarning = evaluation.warningMessage;
+        log.warn('High complexity job detected', { planId, producerId, score: score.score });
+      }
+    }
+
+    const message = complexityWarning
+      ? `Job '${producerId}' added to scaffolding plan '${planId}'. Task: ${task}\n\n${complexityWarning}`
+      : `Job '${producerId}' added to scaffolding plan '${planId}'. Task: ${task}`;
+
     return {
       success: true,
       jobId: producerId,
-      message: `Job '${producerId}' added to scaffolding plan '${planId}'. Task: ${task}`
+      message,
+      ...(complexityWarning ? { complexityWarning } : {}),
     };
 
   } catch (error: any) {

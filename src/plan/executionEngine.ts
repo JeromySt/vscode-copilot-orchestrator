@@ -327,7 +327,18 @@ export class JobExecutionEngine {
         // Don't overwrite with current HEAD which includes prior work
         // But if baseCommit is somehow missing, fall back to timing.baseCommit
         if (!nodeState.baseCommit) {
-          nodeState.baseCommit = timing.baseCommit;
+          // For the SV node, the base commit must be the original snapshot base,
+          // NOT the current HEAD of the reused worktree. The worktree HEAD includes
+          // predecessor commits that the SV node needs to merge-RI to targetBranch.
+          // Using the worktree HEAD as baseCommit would make the commit phase think
+          // there are no new commits → completedCommit = undefined → merge-RI no-op
+          // → accumulated snapshot work never reaches the target branch.
+          if (isSvNode && plan.snapshot?.baseCommit) {
+            nodeState.baseCommit = plan.snapshot.baseCommit;
+            this.log.info(`SV node: using snapshot base commit ${plan.snapshot.baseCommit.slice(0, 8)} (not worktree HEAD ${timing.baseCommit.slice(0, 8)})`);
+          } else {
+            nodeState.baseCommit = timing.baseCommit;
+          }
         }
       } else {
         // Only set baseCommit on fresh worktree creation
@@ -412,6 +423,8 @@ export class JobExecutionEngine {
               const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1];
               if (last.status === 'running') {
                 last.stepStatuses = { ...nodeState.stepStatuses };
+                // Sync phaseTiming so timeline can render proportional phase widths
+                if (context.phaseTiming) { last.phaseTiming = [...context.phaseTiming]; }
               }
             }
           },
@@ -668,7 +681,10 @@ export class JobExecutionEngine {
                   (nodeState.stepStatuses as any)[phase] = status;
                   if (nodeState.attemptHistory && nodeState.attemptHistory.length > 0) {
                     const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1];
-                    if (last.status === 'running') { last.stepStatuses = { ...nodeState.stepStatuses }; }
+                    if (last.status === 'running') {
+                      last.stepStatuses = { ...nodeState.stepStatuses };
+                      if (retryContext.phaseTiming) { last.phaseTiming = [...retryContext.phaseTiming]; }
+                    }
                   }
                 },
               };
@@ -816,6 +832,7 @@ export class JobExecutionEngine {
             // Replace the original instructions file with a heal-specific one.
             // This prevents the copilot CLI from re-reading and re-executing the
             // original task. The heal instructions point the agent at the log file.
+            const healFileName = `orchestrator-heal-${node.id.slice(0, 8)}.instructions.md`;
             try {
               const instrDir = path.join(worktreePath, '.github', 'instructions');
               
@@ -873,7 +890,7 @@ export class JobExecutionEngine {
                 `- Previous auto-heal agents may have already made partial progress — build on their work`,
               ].join('\n');
               
-              const healFile = path.join(instrDir, `orchestrator-heal-${node.id.slice(0, 8)}.instructions.md`);
+              const healFile = path.join(instrDir, healFileName);
               fs.writeFileSync(healFile, healInstructions, 'utf8');
               this.log.debug(`Wrote heal instructions to: ${healFile}`);
             } catch (e: any) {
@@ -910,7 +927,7 @@ export class JobExecutionEngine {
             }
             const healSpec: WorkSpec = {
               type: 'agent',
-              instructions: `Read the heal instructions file in .github/instructions/. The ${failedPhase} phase failed. Diagnose the root cause from the execution log, then do whatever work is needed to fix it — write code, add tests, fix configs. Re-run the failed command to verify your fix. Do NOT just diagnose; actively resolve the problem.`,
+              instructions: `Read the heal instructions file at .github/instructions/${healFileName} — it contains the failure log path, the failed command, and step-by-step fix instructions. The ${failedPhase} phase failed. Do NOT just diagnose; actively resolve the problem.`,
               allowedFolders: healAllowedFolders,
               allowedUrls: healAllowedUrls.length > 0 ? healAllowedUrls : undefined,
             };
@@ -957,7 +974,10 @@ export class JobExecutionEngine {
                 (nodeState.stepStatuses as any)[phase] = status;
                 if (nodeState.attemptHistory && nodeState.attemptHistory.length > 0) {
                   const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1];
-                  if (last.status === 'running') { last.stepStatuses = { ...nodeState.stepStatuses }; }
+                  if (last.status === 'running') {
+                    last.stepStatuses = { ...nodeState.stepStatuses };
+                    if (healContext.phaseTiming) { last.phaseTiming = [...healContext.phaseTiming]; }
+                  }
                 }
               },
             };
@@ -1131,7 +1151,7 @@ export class JobExecutionEngine {
                 onStepStatusChange: (p, s) => {
                   if (!nodeState.stepStatuses) {nodeState.stepStatuses = {};}
                   (nodeState.stepStatuses as any)[p] = s;
-                  if (nodeState.attemptHistory?.length) { const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1]; if (last.status === 'running') { last.stepStatuses = { ...nodeState.stepStatuses }; } }
+                  if (nodeState.attemptHistory?.length) { const last = nodeState.attemptHistory[nodeState.attemptHistory.length - 1]; if (last.status === 'running') { last.stepStatuses = { ...nodeState.stepStatuses }; if (retryCtx.phaseTiming) { last.phaseTiming = [...retryCtx.phaseTiming]; } } }
                 },
               };
 

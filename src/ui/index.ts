@@ -7,4 +7,4 @@
 export { plansViewProvider } from './plansViewProvider';
 export { planDetailPanel } from './panels/planDetailPanel';
 export { NodeDetailPanel } from './panels/nodeDetailPanel';
-export { attachStatusBar } from './statusBar';
+export { attachStatusBar, attachReleaseStatusBar } from './statusBar';

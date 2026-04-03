@@ -25,6 +25,7 @@ import {
   GroupInstance,
   GroupExecutionState,
 } from './types';
+import { buildDefaultVerificationSpec } from './svNodeBuilder';
 
 /**
  * Validation error thrown when a {@link PlanSpec} is invalid.
@@ -482,7 +483,14 @@ export function buildPlan(
     type: 'job',
     task: `Validate snapshot and merge to '${svTargetBranch}'`,
     prechecks: svPrechecks,
-    work: spec.verifyRiSpec,
+    work: spec.verifyRiSpec || buildDefaultVerificationSpec(
+      svTargetBranch,
+      planId,
+      options.repoPath || '',
+      [...nodes.values()]
+        .filter((n): n is JobNode => n.type === 'job' && n.producerId !== '__snapshot-validation__')
+        .map(n => ({ name: n.name, task: n.task })),
+    ),
     postchecks: svPostchecks,
     group: svGroupPath,
     groupId: svGroupId,

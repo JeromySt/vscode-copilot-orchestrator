@@ -81,3 +81,18 @@ export function attachStatusBar(context: vscode.ExtensionContext, planRunner: Pl
     }
   });
 }
+
+/**
+ * Create a status bar item next to the git branch indicator for quick release creation.
+ * Shows a rocket icon that opens a quick pick with release options for the current branch.
+ */
+export function attachReleaseStatusBar(context: vscode.ExtensionContext) {
+  // Priority ~9999 to appear right next to the git branch indicator (~10000)
+  const releaseItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 9999);
+  releaseItem.text = '$(rocket)';
+  releaseItem.tooltip = 'Copilot Orchestrator: Create Release from Current Branch';
+  releaseItem.command = 'orchestrator.createReleaseFromBranch';
+  releaseItem.show();
+  
+  context.subscriptions.push(releaseItem);
+}

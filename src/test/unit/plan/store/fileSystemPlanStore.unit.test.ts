@@ -618,6 +618,43 @@ suite('FileSystemPlanStore', () => {
       assert.ok(fs.existsSync(path.join(attemptDir, 'work.json')));
     });
 
+    test('readPlanMetadata throws on non-ENOENT error', async () => {
+      const tmpDir = makeTmpDir();
+      const errorFs: any = {
+        ...defaultFs,
+        readFileAsync: async () => { throw Object.assign(new Error('Permission denied'), { code: 'EACCES' }); },
+      };
+      const store = new FileSystemPlanStore(tmpDir, tmpDir, errorFs);
+      await assert.rejects(() => store.readPlanMetadata('test-plan'), /Permission denied/);
+    });
+
+    test('readPlanMetadataSync returns parsed metadata when file exists', async () => {
+      const tmpDir = makeTmpDir();
+      const store = new FileSystemPlanStore(tmpDir, tmpDir, defaultFs);
+      const metadata = makeStoredPlan();
+      await store.writePlanMetadata(metadata);
+      const result = (store as any).readPlanMetadataSync(metadata.id);
+      assert.ok(result);
+      assert.strictEqual(result.id, metadata.id);
+    });
+
+    test('readPlanMetadataSync returns undefined when file not found', () => {
+      const tmpDir = makeTmpDir();
+      const store = new FileSystemPlanStore(tmpDir, tmpDir, defaultFs);
+      const result = (store as any).readPlanMetadataSync('nonexistent');
+      assert.strictEqual(result, undefined);
+    });
+
+    test('readNodeSpec throws on non-ENOENT error', async () => {
+      const tmpDir = makeTmpDir();
+      const errorFs: any = {
+        ...defaultFs,
+        readFileAsync: async () => { throw Object.assign(new Error('Read failed'), { code: 'EACCES' }); },
+      };
+      const store = new FileSystemPlanStore(tmpDir, tmpDir, errorFs);
+      await assert.rejects(() => store.readNodeSpec('plan-1', 'node-1', 'work'), /Read failed/);
+    });
+
     test('should copy specs from previous attempt for subsequent attempts', async () => {
       const tmpDir = makeTmpDir();
       const store = new FileSystemPlanStore(tmpDir, tmpDir, defaultFs);

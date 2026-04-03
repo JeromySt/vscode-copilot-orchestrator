@@ -4,7 +4,7 @@
 
 import * as assert from 'assert';
 import { suite, test } from 'mocha';
-import { buildSvJobSpec } from '../../../plan/svNodeBuilder';
+import { buildSvJobSpec, buildDefaultVerificationSpec } from '../../../plan/svNodeBuilder';
 
 suite('svNodeBuilder', () => {
   suite('buildSvJobSpec', () => {
@@ -198,6 +198,77 @@ suite('svNodeBuilder', () => {
       
       assert.ok(Array.isArray(result.dependencies));
       assert.strictEqual(result.dependencies.length, 0);
+    });
+
+    test('uses defaultVerifySpec when verifyRiSpec is not provided', () => {
+      const defaultSpec = buildDefaultVerificationSpec('main', 'plan-123', '/repo', [
+        { name: 'Job A', task: 'Do A' },
+      ]);
+      const result = buildSvJobSpec('main', undefined, undefined, defaultSpec);
+
+      assert.ok(result.work);
+      const work = result.work as any;
+      assert.strictEqual(work.type, 'agent');
+      assert.strictEqual(work.modelTier, 'premium');
+    });
+
+    test('verifyRiSpec takes priority over defaultVerifySpec', () => {
+      const defaultSpec = buildDefaultVerificationSpec('main', 'plan-123', '/repo', []);
+      const verifyRi = { type: 'shell' as const, command: 'npm test' };
+      const result = buildSvJobSpec('main', undefined, verifyRi, defaultSpec);
+
+      assert.deepStrictEqual(result.work, verifyRi);
+    });
+
+    test('work is undefined when neither verifyRiSpec nor defaultVerifySpec provided', () => {
+      const result = buildSvJobSpec('main');
+      assert.strictEqual(result.work, undefined);
+    });
+  });
+
+  suite('buildDefaultVerificationSpec', () => {
+    test('returns premium-tier agent spec', () => {
+      const spec = buildDefaultVerificationSpec('main', 'plan-abc', '/repo', [
+        { name: 'Job A', task: 'Do something' },
+      ]);
+
+      assert.strictEqual(spec.type, 'agent');
+      assert.strictEqual(spec.modelTier, 'premium');
+    });
+
+    test('includes target branch in instructions', () => {
+      const spec = buildDefaultVerificationSpec('feature/test', 'plan-abc', '/repo', []);
+      assert.ok(spec.instructions.includes('feature/test'));
+    });
+
+    test('includes job summaries in instructions', () => {
+      const spec = buildDefaultVerificationSpec('main', 'plan-abc', '/repo', [
+        { name: 'Setup', task: 'Create scaffold' },
+        { name: 'Implement', task: 'Write code' },
+      ]);
+
+      assert.ok(spec.instructions.includes('Setup'));
+      assert.ok(spec.instructions.includes('Create scaffold'));
+      assert.ok(spec.instructions.includes('Implement'));
+      assert.ok(spec.instructions.includes('Write code'));
+    });
+
+    test('includes plan specs directory in allowedFolders', () => {
+      const spec = buildDefaultVerificationSpec('main', 'plan-abc', '/repo', []);
+
+      assert.ok(spec.allowedFolders);
+      assert.strictEqual(spec.allowedFolders!.length, 1);
+      assert.ok(spec.allowedFolders![0].includes('plan-abc'));
+      assert.ok(spec.allowedFolders![0].includes('.orchestrator/plans'));
+    });
+
+    test('includes verification steps in instructions', () => {
+      const spec = buildDefaultVerificationSpec('main', 'plan-abc', '/repo', []);
+
+      assert.ok(spec.instructions.includes('Review the plan specs'));
+      assert.ok(spec.instructions.includes('Review the actual changes'));
+      assert.ok(spec.instructions.includes('Verify completeness'));
+      assert.ok(spec.instructions.includes('Check for obvious issues'));
     });
   });
 });

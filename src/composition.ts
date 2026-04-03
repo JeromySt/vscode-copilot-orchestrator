@@ -44,12 +44,20 @@ import { DefaultJobExecutor } from './plan/executor';
 import { DefaultEvidenceValidator } from './plan/evidenceValidator';
 import { GlobalCapacityManager } from './core/globalCapacity';
 import { PlanConfigManager } from './plan/configManager';
+import { ReleaseConfigManager } from './plan/releaseConfigManager';
 import { PlanPersistence } from './plan/persistence';
 import { StdioMcpServerManager } from './mcp/mcpServerManager';
 import { DefaultGitOperations } from './git/DefaultGitOperations';
 import { FileSystemPlanStore } from './plan/store/FileSystemPlanStore';
 import { DefaultPlanRepository } from './plan/repository/DefaultPlanRepository';
 import { DefaultFileSystem } from './core/defaultFileSystem';
+import { GitignoreDebouncer } from './core/gitignoreDebouncer';
+import { DefaultRemoteProviderDetector } from './git/remotePR/remoteProviderDetector';
+import { RemotePRServiceFactory } from './git/remotePR/remotePRServiceFactory';
+import { GitHubPRService } from './git/remotePR/githubPRService';
+import { AdoPRService } from './git/remotePR/adoPRService';
+import { FileSystemReleaseStore } from './plan/store/releaseStore';
+import { DefaultReleasePRMonitor } from './plan/releasePRMonitor';
 
 /**
  * Create and wire the production DI container.
@@ -178,6 +186,15 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     () => new DefaultFileSystem(),
   );
 
+  // ─── Gitignore Debouncer ────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IGitignoreDebouncer').IGitignoreDebouncer>(
+    Tokens.IGitignoreDebouncer,
+    (c) => {
+      const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+      return new GitignoreDebouncer(git);
+    },
+  );
+
   // ─── MCP Request Router ─────────────────────────────────────────────
   // McpHandler requires a PlanRunner and workspacePath at construction time.
   // Scoped containers override this registration with a configured instance.
@@ -207,6 +224,26 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     },
   );
 
+  // ─── Release Config Manager ─────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IReleaseConfigManager>(
+    Tokens.IReleaseConfigManager,
+    (c) => {
+      const configProvider = c.resolve<import('./interfaces').IConfigProvider>(Tokens.IConfigProvider);
+      return new ReleaseConfigManager(configProvider);
+    },
+  );
+
+  // ─── Isolated Repo Manager ──────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager>(
+    Tokens.IIsolatedRepoManager,
+    (c) => {
+      const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+      const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+      const { DefaultIsolatedRepoManager } = require('./git/isolatedRepoManager');
+      return new DefaultIsolatedRepoManager(git, fileSystem);
+    },
+  );
+
   // ─── Plan Repository Store ──────────────────────────────────────────
   container.registerSingleton<import('./interfaces/IPlanRepositoryStore').IPlanRepositoryStore>(
     Tokens.IPlanRepositoryStore,
@@ -231,5 +268,157 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     },
   );
 
+  // ─── Plan Archiver ──────────────────────────────────────────────────
+  // PlanArchiver requires a PlanRunner at construction time.
+  // Scoped containers override this registration with a configured instance.
+  container.register(
+    Tokens.IPlanArchiver,
+    () => { throw new Error('IPlanArchiver must be resolved from a scoped container with a PlanRunner'); },
+  );
+
+  // ─── Bulk Plan Actions ──────────────────────────────────────────────
+  // Note: Requires PlanRunner and IDialogService which must be resolved from a scoped container.
+  // This registration is overridden after PlanRunner is created in extension.ts.
+  container.register(
+    Tokens.IBulkPlanActions,
+    () => { throw new Error('IBulkPlanActions must be resolved from a scoped container with a PlanRunner'); },
+  );
+
+  // ─── Release Store ──────────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IReleaseStore').IReleaseStore>(
+    Tokens.IReleaseStore,
+    (c) => {
+      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspacePath) {
+        throw new Error('No workspace folder open. Release store requires an open workspace.');
+      }
+      const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+      return new FileSystemReleaseStore(workspacePath, fileSystem);
+    },
+  );
+
+  // ─── Managed PR Store ───────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces/IManagedPRStore').IManagedPRStore>(
+    Tokens.IManagedPRStore,
+    (c) => {
+      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspacePath) {
+        throw new Error('No workspace folder open. Managed PR store requires an open workspace.');
+      }
+      const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+      const { FileSystemManagedPRStore } = require('./plan/store/managedPRStore');
+      return new FileSystemManagedPRStore(workspacePath, fileSystem);
+    },
+  );
+
+  // ─── Remote Provider Detector ───────────────────────────────────
+  container.registerSingleton<import('./interfaces').IRemoteProviderDetector>(
+    Tokens.IRemoteProviderDetector,
+    (c) => {
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const env = c.resolve<import('./interfaces').IEnvironment>(Tokens.IEnvironment);
+      return new DefaultRemoteProviderDetector(spawner, env);
+    },
+  );
+
+  // ─── Remote PR Service Factory ─────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IRemotePRServiceFactory>(
+    Tokens.IRemotePRServiceFactory,
+    (c) => {
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const detector = c.resolve<import('./interfaces').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
+      return new RemotePRServiceFactory(
+        spawner,
+        detector,
+        (serviceSpawner, serviceDetector) => new GitHubPRService(serviceSpawner, serviceDetector),
+        (serviceSpawner, serviceDetector) => new AdoPRService(serviceSpawner, serviceDetector),
+      );
+    },
+  );
+
+  // ─── Release PR Monitor ────────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IReleasePRMonitor>(
+    Tokens.IReleasePRMonitor,
+    (c) => {
+      const copilotRunner = c.resolve<import('./interfaces').ICopilotRunner>(Tokens.ICopilotRunner);
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+      const prServiceFactory = c.resolve<import('./interfaces').IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
+      const pulse = c.resolve<import('./interfaces/IPulseEmitter').IPulseEmitter>(Tokens.IPulseEmitter);
+      return new DefaultReleasePRMonitor(copilotRunner, spawner, git, prServiceFactory, pulse);
+    },
+  );
+
+  // ─── PR Lifecycle Manager ───────────────────────────────────────────
+  container.registerSingleton<import('./interfaces').IPRLifecycleManager>(
+    Tokens.IPRLifecycleManager,
+    (c) => {
+      const prServiceFactory = c.resolve<import('./interfaces').IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
+      const prMonitor = c.resolve<import('./interfaces').IReleasePRMonitor>(Tokens.IReleasePRMonitor);
+      const isolatedRepos = c.resolve<import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager>(Tokens.IIsolatedRepoManager);
+      const store = c.resolve<import('./interfaces').IManagedPRStore>(Tokens.IManagedPRStore);
+      const releaseConfig = c.resolve<import('./interfaces').IReleaseConfigManager>(Tokens.IReleaseConfigManager);
+      const { DefaultPRLifecycleManager } = require('./plan/prLifecycleManager');
+      return new DefaultPRLifecycleManager(prServiceFactory, prMonitor, isolatedRepos, store, releaseConfig);
+    },
+  );
+
   return container;
+}
+
+/**
+ * Create a ReleaseManager instance with PlanRunner dependency.
+ * 
+ * Call this after PlanRunner is initialized to wire up the release management system.
+ * 
+ * @param container - The DI container
+ * @param planRunner - The initialized PlanRunner instance
+ * @returns A fully-wired ReleaseManager instance
+ * 
+ * @example
+ * ```typescript
+ * const container = createContainer(context);
+ * const planRunner = await initializePlanRunner(context, container, git);
+ * const releaseManager = createReleaseManager(container, planRunner);
+ * ```
+ */
+export function createReleaseManager(
+  container: ServiceContainer,
+  planRunner: import('./interfaces/IPlanRunner').IPlanRunner,
+): import('./interfaces/IReleaseManager').IReleaseManager {
+  const git = container.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+  const copilot = container.resolve<import('./interfaces/ICopilotRunner').ICopilotRunner>(Tokens.ICopilotRunner);
+  const isolatedRepos = container.resolve<import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager>(Tokens.IIsolatedRepoManager);
+  const prMonitor = container.resolve<import('./interfaces/IReleasePRMonitor').IReleasePRMonitor>(Tokens.IReleasePRMonitor);
+  const prServiceFactory = container.resolve<import('./interfaces/IRemotePRServiceFactory').IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
+  const store = container.resolve<import('./interfaces/IReleaseStore').IReleaseStore>(Tokens.IReleaseStore);
+  const providerDetector = container.resolve<import('./interfaces/IRemoteProviderDetector').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
+  const dialogService = container.resolve<import('./interfaces/IDialogService').IDialogService>(Tokens.IDialogService);
+  
+  const { DefaultReleaseManager } = require('./plan/releaseManager');
+  return new DefaultReleaseManager(planRunner, git, copilot, isolatedRepos, prMonitor, prServiceFactory, store, providerDetector, dialogService);
+}
+
+/**
+ * Create a BulkPlanActions instance with PlanRunner dependency.
+ * 
+ * Call this after PlanRunner is initialized. Keeps concrete instantiation out of extension.ts.
+ * 
+ * @param container - The DI container used to create a scoped IBulkPlanActions binding
+ * @param planRunner - The initialized PlanRunner instance
+ * @returns A fully-wired IBulkPlanActions instance
+ */
+export function createBulkPlanActions(
+  container: ServiceContainer,
+  planRunner: import('./interfaces/IPlanRunner').IPlanRunner,
+): import('./interfaces/IBulkPlanActions').IBulkPlanActions {
+  const scoped = container.createScope();
+  scoped.register(
+    Tokens.IBulkPlanActions,
+    () => {
+      const { BulkPlanActions } = require('./plan/bulkPlanActions');
+      return new BulkPlanActions(planRunner);
+    },
+  );
+  return scoped.resolve<import('./interfaces/IBulkPlanActions').IBulkPlanActions>(Tokens.IBulkPlanActions);
 }

@@ -146,12 +146,29 @@ function formatErrors(errors: ErrorObject[] | null | undefined, toolName: string
       case 'minItems':
         messages.push(`Array at ${path} has too few items (min ${(err.params as any).limit})`);
         break;
-      case 'oneOf':
-        messages.push(
-          `Invalid value at ${path}: must match exactly one of the allowed formats. ` +
-          `For 'work' field: use either a string command or an object with 'type' field.`
-        );
+      case 'oneOf': {
+        const fieldName = path.split('/').pop() || '';
+        const isWorkField = fieldName === 'work' || fieldName === 'prechecks' || fieldName === 'postchecks' || fieldName === 'verifyRi';
+        if (isWorkField) {
+          messages.push(
+            `Invalid value at ${path}: must match exactly one of the allowed formats.\n` +
+            `Valid formats for '${fieldName}':\n` +
+            `  1) String shorthand: "dotnet build"\n` +
+            `  2) Shell object:  {"type": "shell", "command": "dotnet build", "shell": "powershell"}\n` +
+            `  3) Agent object:  {"type": "agent", "instructions": "# Task\\nDetailed markdown..."}\n` +
+            `  4) Agent + file:  {"type": "agent", "instructionsFile": "path/to/instructions.md"}\n` +
+            `  5) Process:       {"type": "process", "executable": "node", "args": ["script.js"]}\n` +
+            `Valid object properties: type (required: agent|shell|process), command, instructions, instructionsFile, ` +
+            `model, modelTier (fast|standard|premium), maxTurns, shell (cmd|powershell|pwsh|bash|sh), ` +
+            `allowedFolders, allowedUrls, executable, args, env`
+          );
+        } else {
+          messages.push(
+            `Invalid value at ${path}: must match exactly one of the allowed formats.`
+          );
+        }
         break;
+      }
       default:
         messages.push(`${err.keyword} error at ${path}: ${err.message}`);
     }

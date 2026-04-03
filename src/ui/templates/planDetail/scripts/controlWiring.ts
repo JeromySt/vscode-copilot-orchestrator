@@ -906,6 +906,15 @@ export function renderControlWiring(data: PlanScriptsData): string {
           }
         }
         if (msg.planEndedAt) timelineData.planEndedAt = msg.planEndedAt;
+        // Clear planEndedAt if any node is still running — prevents timeline from
+        // freezing when the plan status briefly computes as failed/succeeded while
+        // concurrent nodes are still executing.
+        if (!msg.planEndedAt || msg.planStatus === 'running') {
+          var anyRunning = timelineData.nodes.some(function(n) {
+            return n.status === 'running' || n.status === 'scheduled';
+          });
+          if (anyRunning) timelineData.planEndedAt = undefined;
+        }
         if (msg.startedAt && !timelineData.planStartedAt) timelineData.planStartedAt = msg.startedAt;
         // Re-render timeline if visible
         var timelineSection = document.getElementById('timeline-section');

@@ -25,10 +25,10 @@ import {
   dependenciesSectionHtml, gitInfoSectionHtml,
   configSectionHtml,
   metricsSummaryHtml, attemptMetricsHtml as attemptMetricsTemplateHtml,
-  attemptHistoryHtml, webviewScripts,
+  webviewScripts,
   renderNodeDetailStyles,
 } from '../templates/nodeDetail';
-import type { AttemptCardData } from '../templates/nodeDetail';
+
 import { NodeDetailController, NodeDetailCommands } from './nodeDetailController';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
 import { webviewScriptTag } from '../webviewUri';
@@ -937,8 +937,9 @@ export class NodeDetailPanel {
     
     this._panel.webview.html = this._getHtml(plan, node, state, resolvedWork, resolvedPrechecks, resolvedPostchecks);
 
-    // Sync attempt count so incremental updates don't duplicate pre-rendered cards
-    this._lastAttemptCount = state.attemptHistory?.length || 0;
+    // Reset attempt count so the initial _sendAttemptUpdate fires (SSR removed)
+    this._lastAttemptCount = 0;
+    this._lastAttemptStatus = '';
     this._configSentOnce = false; // Reset — webview was rebuilt, config needs resending
     
     // After HTML rebuild, send messages with delays so the webview scripts
@@ -946,6 +947,9 @@ export class NodeDetailPanel {
     // Config update must be deferred like stateChange — it's async and the
     // webview needs its controls wired before it can process the message.
     setTimeout(() => { this._sendConfigUpdate(); }, 50);
+
+    // Send initial attempt history to the CSR AttemptCard control
+    setTimeout(() => { this._sendAttemptUpdate(state); }, 75);
 
     // After HTML rebuild, send stateChange to re-initialize DurationCounterControl
     const phaseStatus = this._getPhaseStatus(state);
@@ -1027,72 +1031,8 @@ export class NodeDetailPanel {
     // Get log file path for this node (use current attempt number)
     const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, state.attempts || 1);
 
-    // Build attempt history HTML (only if multiple attempts)
-    const attemptCards: AttemptCardData[] = [];
-    if (state.attemptHistory && state.attemptHistory.length > 0) {
-      for (const attempt of state.attemptHistory) {
-        // Resolve log file path: prefer logsRef (relative), fall back to logFilePath
-        // Convert relative refs to absolute paths via the plan storage directory
-        let resolvedLogPath = attempt.logFilePath;
-        if (attempt.logsRef && !attempt.logFilePath?.includes(':')) {
-          // logsRef is relative to .orchestrator/plans/<planId>/
-          const storagePath = this._planRunner.getStoragePath?.() || '';
-          if (storagePath) {
-            resolvedLogPath = require('path').join(storagePath, plan.id, attempt.logsRef);
-          }
-        }
-        if (resolvedLogPath && !resolvedLogPath.includes(':') && !resolvedLogPath.startsWith('/')) {
-          // Still relative — prefix with storage path
-          const storagePath = this._planRunner.getStoragePath?.() || '';
-          if (storagePath) {
-            resolvedLogPath = require('path').join(storagePath, plan.id, resolvedLogPath);
-          }
-        }
-
-        // Read logs from the attempt-specific log file (not /current/)
-        let attemptLogs = attempt.logs || '';
-        if (!attemptLogs && resolvedLogPath) {
-          try {
-            attemptLogs = require('fs').readFileSync(resolvedLogPath, 'utf-8');
-          } catch { /* file may not exist yet */ }
-        }
-
-        // Resolve work/prechecks/postchecks specs: inline or read from ref
-        const storagePath = this._planRunner.getStoragePath?.() || '';
-        let workUsedHtml: string | undefined;
-        if (attempt.workUsed) {
-          workUsedHtml = formatWorkSpecHtml(attempt.workUsed, escapeHtml);
-        } else {
-          workUsedHtml = resolveSpecFromRef(attempt.workRef, storagePath, plan.id, escapeHtml);
-        }
-        const prechecksUsedHtml = resolveSpecFromRef(attempt.prechecksRef, storagePath, plan.id, escapeHtml);
-        const postchecksUsedHtml = resolveSpecFromRef(attempt.postchecksRef, storagePath, plan.id, escapeHtml);
-
-        const card: AttemptCardData = {
-          attemptNumber: attempt.attemptNumber,
-          status: attempt.status,
-          triggerType: attempt.triggerType,
-          startedAt: attempt.startedAt,
-          endedAt: attempt.endedAt,
-          failedPhase: attempt.failedPhase,
-          error: attempt.error,
-          exitCode: attempt.exitCode,
-          copilotSessionId: attempt.copilotSessionId || (attempt.status === 'running' ? state.copilotSessionId : undefined),
-          stepStatuses: (attempt.stepStatuses || (attempt.status === 'running' ? state.stepStatuses : undefined)) as any,
-          // Running attempts may not have context yet — fall back to current nodeState
-          worktreePath: attempt.worktreePath || (attempt.status === 'running' ? state.worktreePath : undefined),
-          baseCommit: attempt.baseCommit || (attempt.status === 'running' ? state.baseCommit : undefined),
-          logFilePath: resolvedLogPath || (attempt.status === 'running' ? logFilePath : undefined),
-          workUsedHtml,
-          prechecksUsedHtml,
-          postchecksUsedHtml,
-          logs: attemptLogs,
-          metricsHtml: attempt.metrics ? attemptMetricsTemplateHtml(attempt.metrics, attempt.phaseMetrics) : '',
-        };
-        attemptCards.push(card);
-      }
-    }
-    const attemptHistorySection = attemptHistoryHtml({ attempts: attemptCards });
+    // Attempt history is rendered entirely by the CSR AttemptCard control.
+    // Initial data is pushed via _sendAttemptUpdate() after HTML rebuild.
 
     // Compute aggregated metrics across all attempts
     const nodeMetrics = getNodeMetrics(state);
@@ -1180,7 +1120,6 @@ export class NodeDetailPanel {
   
   ${dependenciesSectionHtml(dependencies)}
   
-  ${attemptHistorySection}
   <div class="attempt-history-container"></div>
   
   ${gitInfoSectionHtml({

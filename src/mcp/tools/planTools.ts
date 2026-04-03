@@ -200,6 +200,8 @@ For process type, args is an array - no shell quoting needed.
 For shell type, shell can be: cmd, powershell, pwsh, bash, sh. Do NOT use '2>&1' in PowerShell — the orchestrator captures stderr separately.
 For agent type, model goes INSIDE the work object. Available models: ${modelEnum.join(', ')}
 Fast models (haiku/mini) for simple tasks, premium models (opus) for complex reasoning.
+IMPORTANT: For security-sensitive work (cryptography, authentication, authorization, input validation, secret handling, encryption, certificate management, or any code that handles sensitive data), ALWAYS use modelTier: 'premium' to ensure the most capable model reviews the code.
+IMPORTANT: For security-sensitive work (cryptography, authentication, authorization, input validation, secret handling, encryption, certificate management, or any code that handles sensitive data), ALWAYS use modelTier: 'premium' to ensure the most capable model reviews the code. Security bugs from weaker models are far more costly than the premium request overhead.
 
 Agent instructions MUST be in Markdown format with headers, numbered lists, bullet lists.
 
@@ -391,6 +393,44 @@ Use this to analyze the history of retries and their outcomes.`,
             type: 'string', 
             description: 'Plan ID to delete' 
           }
+        },
+        required: ['planId']
+      }
+    },
+
+    {
+      name: 'archive_copilot_plan',
+      description: 'Archive a completed or canceled plan. Preserves plan state and logs while cleaning up git worktrees and target branches to reduce repository clutter. Only plans in succeeded, partial, failed, or canceled status can be archived.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: { 
+            type: 'string', 
+            description: 'The ID of the plan to archive' 
+          },
+          force: { 
+            type: 'boolean', 
+            description: 'Force-delete worktrees even with uncommitted changes', 
+            default: false 
+          },
+          deleteRemoteBranches: { 
+            type: 'boolean', 
+            description: 'Also delete remote tracking branches', 
+            default: false 
+          }
+        },
+        required: ['planId']
+      }
+    },
+    
+    {
+      name: 'recover_copilot_plan',
+      description: 'Recover a canceled or failed plan. Recreates the target branch at the base commit and recovers worktree states from the deepest successfully-completed jobs. Uses git rev-parse with DAG work result status. The plan will be placed in paused state. For canceled plans, Copilot CLI agent verifies recovered worktree integrity.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: { type: 'string', description: 'The ID of the plan to recover' },
+          useCopilotAgent: { type: 'boolean', description: 'Use Copilot CLI agent to verify recovery integrity', default: true }
         },
         required: ['planId']
       }
@@ -655,11 +695,20 @@ EXAMPLES:
 NOTE: This tool only works on plans in 'scaffolding' status (before finalize_copilot_plan).
 To add jobs to a finalized/running/paused plan, use reshape_copilot_plan with an 'add_node' operation.
 
+FIELD GUIDE:
 - name: Short display title (max 80 chars). Do NOT put instructions here.
 - task: Brief description (max 200 chars). NOT the work instructions.
-- work: The actual work specification — agent instructions, shell commands, or process specs go here.
+- work: The actual work specification — agent instructions, shell commands, or process specs.
+- instructions: Supports FULL MARKDOWN (headers, code blocks, lists, bold, links).
 
-For agent work: {"type": "agent", "model": "claude-opus-4.5", "instructions": "Detailed instructions..."}`,
+EXAMPLES:
+  Shell:  {"type": "shell", "command": "dotnet build", "shell": "powershell"}
+  Agent:  {"type": "agent", "instructions": "# Task\\nImplement the feature..."}
+  Agent file: {"type": "agent", "instructionsFile": ".github/prompts/task.md"}
+  Process: {"type": "process", "executable": "node", "args": ["build.js"]}
+
+LIMITS: name ≤80, task ≤200, instructions ≤100KB, work string ≤50KB.
+Use camelCase for properties: maxTurns, modelTier, allowedFolders, allowedUrls.`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -692,34 +741,35 @@ For agent work: {"type": "agent", "model": "claude-opus-4.5", "instructions": "D
             description: 'Optional group path for hierarchical organization'
           },
           work: {
-            description: 'Work specification - can be string, or object with type (agent/shell/process)',
+            description: `Work specification. String shorthand OR object with type field.
+Object properties: type (required: agent|shell|process), command, instructions (markdown), instructionsFile, model, modelTier (fast|standard|premium), maxTurns, shell (cmd|powershell|pwsh|bash|sh), allowedFolders, allowedUrls, executable, args, env.`,
             oneOf: [
               { type: 'string' },
               {
                 type: 'object',
                 properties: {
                   type: { type: 'string', enum: ['agent', 'shell', 'process'] },
+                  instructions: { type: 'string', description: 'Inline Markdown instructions for agent work. Supports headers, code blocks, lists, bold, links.' },
                   instructionsFile: { type: 'string', description: 'Path to .md file with instructions (agent type only, mutually exclusive with instructions)' },
-                  instructions: { type: 'string', description: 'Inline instructions (agent type only, mutually exclusive with instructionsFile)' },
                   model: { type: 'string', enum: modelEnum },
-                  modelTier: { type: 'string', enum: ['fast', 'balanced', 'premium'] },
-                  context_files: { type: 'array', items: { type: 'string' } },
-                  max_turns: { type: 'number', minimum: 1, maximum: 100 },
-                  allowed_folders: { type: 'array', items: { type: 'string' } },
-                  allowed_urls: { type: 'array', items: { type: 'string' } },
+                  modelTier: { type: 'string', enum: ['fast', 'standard', 'premium'] },
+                  maxTurns: { type: 'number', minimum: 1, maximum: 100 },
+                  allowedFolders: { type: 'array', items: { type: 'string' } },
+                  allowedUrls: { type: 'array', items: { type: 'string' } },
                   command: { type: 'string' },
                   executable: { type: 'string' },
                   args: { type: 'array', items: { type: 'string' } },
-                  shell: { type: 'string', enum: ['cmd', 'powershell', 'pwsh', 'bash', 'sh'] }
+                  shell: { type: 'string', enum: ['cmd', 'powershell', 'pwsh', 'bash', 'sh'] },
+                  env: { type: 'object', additionalProperties: { type: 'string' } }
                 }
               }
             ]
           },
           prechecks: {
-            description: 'Optional prechecks specification - runs before main work'
+            description: 'Optional prechecks specification - runs before main work. Same format as work.'
           },
           postchecks: {
-            description: 'Optional postchecks specification - runs after main work'
+            description: 'Optional postchecks specification - runs after main work. Same format as work.'
           },
           autoHeal: {
             type: 'boolean',
@@ -750,6 +800,106 @@ For agent work: {"type": "agent", "model": "claude-opus-4.5", "instructions": "D
           }
         },
         required: ['planId']
+      }
+    },
+
+    {
+      name: 'add_copilot_plan_jobs',
+      description: `Batch-add multiple jobs to a scaffolding plan in a single call. Much faster than calling add_copilot_plan_job repeatedly.
+
+Each job in the array uses the same format as add_copilot_plan_job (producerId, task, work, etc.).
+Jobs can reference each other's producerIds in their dependencies arrays.
+
+EXAMPLE:
+{
+  "planId": "abc123",
+  "jobs": [
+    {"producerId": "setup", "task": "Create project scaffold", "work": {"type": "agent", "instructions": "..."}, "dependencies": []},
+    {"producerId": "impl", "task": "Implement feature", "work": {"type": "agent", "instructions": "..."}, "dependencies": ["setup"]},
+    {"producerId": "test", "task": "Write tests", "work": {"type": "agent", "instructions": "..."}, "dependencies": ["impl"]}
+  ]
+}`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: {
+            type: 'string',
+            description: 'Plan unique identifier returned from scaffold_copilot_plan'
+          },
+          jobs: {
+            type: 'array',
+            description: 'Array of job definitions to add (max 100)',
+            items: {
+              type: 'object',
+              properties: {
+                producerId: { type: 'string', pattern: PRODUCER_ID_PATTERN.source, description: 'Unique job identifier (lowercase, hyphens, 3-64 chars)' },
+                name: { type: 'string', maxLength: 80, description: 'Short display name' },
+                task: { type: 'string', maxLength: 200, description: 'Brief task description' },
+                work: { description: 'Work specification (string or {type, ...} object)' },
+                dependencies: { type: 'array', items: { type: 'string' }, description: 'producerIds this job depends on' },
+                group: { type: 'string', description: 'Optional group path' },
+                prechecks: { description: 'Optional prechecks (same format as work)' },
+                postchecks: { description: 'Optional postchecks (same format as work)' },
+                autoHeal: { type: 'boolean' },
+                expectsNoChanges: { type: 'boolean' }
+              },
+              required: ['producerId', 'task', 'work']
+            },
+            minItems: 1,
+            maxItems: 100
+          }
+        },
+        required: ['planId', 'jobs']
+      }
+    },
+
+    {
+      name: 'get_copilot_plan_graph',
+      description: `Get the dependency graph of a plan as a Mermaid flowchart diagram and structured adjacency list.
+
+Returns:
+- mermaid: A complete Mermaid flowchart LR diagram with status icons, group subgraphs, and dependency edges
+- nodes: Per-node adjacency list showing dependsOn and dependedOnBy (using producerIds)
+
+Use this to verify the dependency graph is correct after adding jobs, or to visualize plan structure.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: {
+            type: 'string',
+            description: 'Plan unique identifier'
+          }
+        },
+        required: ['planId']
+      }
+    },
+
+    {
+      name: 'clone_copilot_plan',
+      description: `Duplicate an existing plan (any status, including canceled/failed) as a new scaffolding plan.
+
+Clones all job definitions including: producerIds, names, tasks, work specs, dependencies, groups, prechecks, postchecks, autoHeal, and expectsNoChanges.
+
+Does NOT clone: execution state, commits, worktrees, or timing. Auto-injected SV nodes are skipped (finalize will re-create them).
+
+The cloned plan starts in 'scaffolding' status. Use add_copilot_plan_job to modify, then finalize_copilot_plan to start.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          sourcePlanId: {
+            type: 'string',
+            description: 'ID of the plan to clone (can be in any status)'
+          },
+          name: {
+            type: 'string',
+            description: 'Name for the cloned plan (default: "<source name> (clone)")'
+          },
+          targetBranch: {
+            type: 'string',
+            description: 'Override target branch for the clone (default: auto-generated)'
+          }
+        },
+        required: ['sourcePlanId']
       }
     },
   ];

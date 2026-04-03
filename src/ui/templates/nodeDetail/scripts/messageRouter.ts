@@ -26,7 +26,7 @@ export function renderMessageRouter(): string {
           bus.emit(Topics.PULSE, msg);
           break;
         case 'stateChange':
-          bus.emit(Topics.NODE_STATE, msg);
+          bus.emit(Topics.NODE_STATE_CHANGE, msg);
           break;
         case 'attemptUpdate':
           bus.emit(Topics.ATTEMPT_UPDATE, msg);

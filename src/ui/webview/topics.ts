@@ -17,6 +17,8 @@ export const Topics = {
   CONFIG_UPDATE: 'node:config-update',
   LAYOUT_CHANGE: 'layout:change',
   LAYOUT_COMPLETE: 'layout:complete',
+  PLANS_SELECTION_CHANGED: 'plans:selection:changed',
+  PLANS_BULK_ACTION: 'plans:bulk:action',
   CONTROL_PREFIX: 'control:',
   controlUpdate: (id: string) => `control:${id}:updated`,
 } as const;

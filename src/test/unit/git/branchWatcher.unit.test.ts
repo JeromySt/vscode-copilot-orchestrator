@@ -2,7 +2,7 @@ import { suite, test } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import { BranchChangeWatcher } from '../../../git/branchWatcher';
+import { BranchChangeWatcher } from '../../../vscode/branchWatcher';
 
 /**
  * Comprehensive unit tests for git branchWatcher module.
@@ -14,6 +14,7 @@ import { BranchChangeWatcher } from '../../../git/branchWatcher';
 
 suite('Git BranchWatcher Unit Tests', () => {
   let mockLogger: any;
+  let mockDebouncer: any;
   let mockGitExtension: any;
   let mockGitAPI: any;
   let mockRepository: any;
@@ -27,6 +28,13 @@ suite('Git BranchWatcher Unit Tests', () => {
       debug: sinon.stub(),
       info: sinon.stub(),
       error: sinon.stub()
+    };
+
+    // Create mock debouncer
+    mockDebouncer = {
+      notifyBranchChange: sinon.stub(),
+      ensureEntries: sinon.stub().resolves(),
+      dispose: sinon.stub()
     };
 
     // Create mock repository
@@ -61,7 +69,7 @@ suite('Git BranchWatcher Unit Tests', () => {
     // Mock vscode.extensions.getExtension
     mockVscodeExtensions = sinon.stub(vscode.extensions, 'getExtension');
 
-    watcher = new BranchChangeWatcher(mockLogger);
+    watcher = new BranchChangeWatcher(mockLogger, mockDebouncer);
   });
 
   teardown(() => {
@@ -313,7 +321,7 @@ suite('Git BranchWatcher Unit Tests', () => {
       
       // Re-initialize to pick up new repo
       watcher.dispose();
-      watcher = new BranchChangeWatcher(mockLogger);
+      watcher = new BranchChangeWatcher(mockLogger, mockDebouncer);
       await watcher.initialize();
 
       // Change branch in first repo

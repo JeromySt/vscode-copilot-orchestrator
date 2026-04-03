@@ -47,7 +47,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 /**
  * Components that can have logging enabled
  */
-export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler' | 'plan' | 'plan-runner' | 'plan-state' | 'plan-persistence' | 'job-executor' | 'init' | 'global-capacity';
+export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler' | 'plan' | 'plan-runner' | 'plan-state' | 'plan-persistence' | 'plan-archiver' | 'job-executor' | 'init' | 'global-capacity' | 'gitignore-debouncer';
 
 /**
  * Configuration keys for logging settings
@@ -71,9 +71,11 @@ interface DebugConfig {
   'plan-runner': boolean;
   'plan-state': boolean;
   'plan-persistence': boolean;
+  'plan-archiver': boolean;
   'job-executor': boolean;
   init: boolean;
   'global-capacity': boolean;
+  'gitignore-debouncer': boolean;
 }
 
 /**
@@ -99,9 +101,11 @@ export class Logger {
     'plan-runner': false,
     'plan-state': false,
     'plan-persistence': false,
+    'plan-archiver': false,
     'job-executor': false,
     init: false,
-    'global-capacity': false
+    'global-capacity': false,
+    'gitignore-debouncer': false
   };
   private configListener: { dispose: () => void } | undefined;
   private configProvider?: IConfigProvider;
@@ -196,9 +200,11 @@ export class Logger {
         'plan-runner': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'plan-runner', false),
         'plan-state': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'plan-state', false),
         'plan-persistence': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'plan-persistence', false),
+        'plan-archiver': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'plan-archiver', false),
         'job-executor': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'job-executor', false),
         init: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'init', false),
         'global-capacity': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'global-capacity', false),
+        'gitignore-debouncer': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'gitignore-debouncer', false),
       };
     } else if (vscode) {
       // Use VS Code directly (backward compatibility)
@@ -218,9 +224,11 @@ export class Logger {
         'plan-runner': vscodeConfig.get('debug.plan-runner', false),
         'plan-state': vscodeConfig.get('debug.plan-state', false),
         'plan-persistence': vscodeConfig.get('debug.plan-persistence', false),
+        'plan-archiver': vscodeConfig.get('debug.plan-archiver', false),
         'job-executor': vscodeConfig.get('debug.job-executor', false),
         init: vscodeConfig.get('debug.init', false),
         'global-capacity': vscodeConfig.get('debug.global-capacity', false),
+        'gitignore-debouncer': vscodeConfig.get('debug.gitignore-debouncer', false),
       };
     } else {
       // Not in VS Code and no provider, keep default config (all false)

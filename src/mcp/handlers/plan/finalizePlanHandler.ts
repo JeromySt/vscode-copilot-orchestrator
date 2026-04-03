@@ -57,9 +57,17 @@ export async function handleFinalizePlan(args: any, ctx: PlanHandlerContext): Pr
       // Attach the lazy spec loader so the execution engine can hydrate work/prechecks/postchecks
       existingPlan.definition = finalizedPlan.definition;
       
-      // Respect startPaused — default to paused so user can review before running
-      const shouldPause = startPaused !== false; // Default true
+      // Respect startPaused — default to paused so user can review before running.
+      // IMPORTANT: If the plan has resumeAfterPlan set, it MUST start paused regardless
+      // of the startPaused flag. The plan will auto-resume when its dependency completes.
+      const hasResumeAfterPlan = !!existingPlan.resumeAfterPlan;
+      const shouldPause = hasResumeAfterPlan || startPaused !== false; // Default true; forced true if chained
       existingPlan.isPaused = shouldPause;
+      if (hasResumeAfterPlan && startPaused === false) {
+        log.info('Plan has resumeAfterPlan set — overriding startPaused=false to keep plan paused until dependency completes', {
+          planId, resumeAfterPlan: existingPlan.resumeAfterPlan,
+        });
+      }
       
       // Recreate state machine with the now-populated nodes
       const sm = (ctx.PlanRunner as any)._state?.stateMachineFactory?.(existingPlan);
@@ -69,7 +77,8 @@ export async function handleFinalizePlan(args: any, ctx: PlanHandlerContext): Pr
       }
     } else {
       // Fallback — register as new (shouldn't happen if scaffold registered it)
-      finalizedPlan.isPaused = startPaused !== false;
+      const hasResumeAfterPlan = !!finalizedPlan.resumeAfterPlan;
+      finalizedPlan.isPaused = hasResumeAfterPlan || startPaused !== false;
       ctx.PlanRunner.registerPlan(finalizedPlan);
     }
 
@@ -85,8 +94,11 @@ export async function handleFinalizePlan(args: any, ctx: PlanHandlerContext): Pr
     }
 
     const isPaused = plan.isPaused === true;
+    const chainedNote = plan.resumeAfterPlan
+      ? ` Waiting for plan '${plan.resumeAfterPlan}' to complete before auto-resuming.`
+      : '';
     const pauseNote = isPaused
-      ? ' Plan is PAUSED. Use resume_copilot_plan to start execution.'
+      ? ` Plan is PAUSED.${chainedNote || ' Use resume_copilot_plan to start execution.'}`
       : '';
 
     return {

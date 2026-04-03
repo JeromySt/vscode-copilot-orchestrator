@@ -30,53 +30,71 @@ const log = Logger.for('mcp');
 // Operation types
 // ---------------------------------------------------------------------------
 
+interface JobSpec {
+  producerId: string;
+  name?: string;
+  task: string;
+  work?: any;
+  dependencies: string[];
+  prechecks?: any;
+  postchecks?: any;
+  instructions?: string;
+  expectsNoChanges?: boolean;
+}
+
 interface AddNodeOp {
-  type: 'add_node';
-  spec: {
-    producerId: string;
-    name?: string;
-    task: string;
-    work?: any;
-    dependencies: string[];
-    prechecks?: any;
-    postchecks?: any;
-    instructions?: string;
-    expectsNoChanges?: boolean;
-  };
+  type: 'add_node' | 'add_job';  // Schema says add_job, handler historically used add_node
+  spec: JobSpec;
 }
 
 interface RemoveNodeOp {
-  type: 'remove_node';
+  type: 'remove_node' | 'remove_job';  // Schema says remove_job
   nodeId?: string;
+  jobId?: string;      // MCP schema field name
   producerId?: string;
 }
 
 interface UpdateDepsOp {
   type: 'update_deps';
-  nodeId: string;
+  nodeId?: string;      // Internal name
+  jobId?: string;       // MCP schema field name
+  producerId?: string;  // Also accepted
   dependencies: string[];
 }
 
 interface AddBeforeOp {
   type: 'add_before';
-  existingNodeId: string;
-  spec: AddNodeOp['spec'];
+  existingNodeId?: string;  // Internal name
+  existingJobId?: string;   // MCP schema field name
+  spec: JobSpec;
 }
 
 interface AddAfterOp {
   type: 'add_after';
-  existingNodeId: string;
-  spec: AddNodeOp['spec'];
+  existingNodeId?: string;  // Internal name
+  existingJobId?: string;   // MCP schema field name
+  spec: JobSpec;
 }
 
 type ReshapeOperation = AddNodeOp | RemoveNodeOp | UpdateDepsOp | AddBeforeOp | AddAfterOp;
+
+/** Normalize operation field names: MCP schema uses jobId/existingJobId, handler uses nodeId/existingNodeId */
+function normalizeOp(op: any): any {
+  // Normalize type: add_job -> add_node, remove_job -> remove_node
+  if (op.type === 'add_job') op.type = 'add_node';
+  if (op.type === 'remove_job') op.type = 'remove_node';
+  // Normalize field names: jobId -> nodeId, existingJobId -> existingNodeId
+  if (op.jobId && !op.nodeId) op.nodeId = op.jobId;
+  if (op.existingJobId && !op.existingNodeId) op.existingNodeId = op.existingJobId;
+  return op;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /** Convert a raw spec from the MCP input into a JobNodeSpec. */
-function toJobNodeSpec(raw: AddNodeOp['spec']): JobNodeSpec {
+function toJobNodeSpec(raw: JobSpec): JobNodeSpec {
   return {
     producerId: raw.producerId,
     name: raw.name,
@@ -93,13 +111,14 @@ function toJobNodeSpec(raw: AddNodeOp['spec']): JobNodeSpec {
 /** Resolve a nodeId from either nodeId or producerId on the plan. */
 function resolveNodeId(
   plan: import('../../../plan/types').PlanInstance,
-  nodeId?: string,
+  nodeIdOrJobId?: string,
   producerId?: string,
 ): string | undefined {
-  if (nodeId) {
-    if (plan.jobs.has(nodeId)) { return nodeId; }
-    // Maybe it's actually a producerId
-    return plan.producerIdToNodeId.get(nodeId);
+  if (nodeIdOrJobId) {
+    if (plan.jobs.has(nodeIdOrJobId)) { return nodeIdOrJobId; }
+    // Maybe it's a producerId
+    const fromProducer = plan.producerIdToNodeId.get(nodeIdOrJobId);
+    if (fromProducer) { return fromProducer; }
   }
   if (producerId) {
     return plan.producerIdToNodeId.get(producerId);
@@ -149,7 +168,8 @@ export async function handleReshapePlan(args: any, ctx: PlanHandlerContext): Pro
 
   const results: Array<{ operation: string; success: boolean; nodeId?: string; error?: string }> = [];
 
-  for (const op of args.operations as ReshapeOperation[]) {
+  for (const rawOp of args.operations as ReshapeOperation[]) {
+    const op = normalizeOp(rawOp);
     if (isScaffolding) {
       // Scaffolding plans: modify spec.jobs[] via repository and rebuild via buildPlan()
       try {
@@ -256,24 +276,83 @@ async function handleScaffoldingOp(
     }
 
     case 'update_deps': {
-      const producerId = (() => {
-        if (op.nodeId) {
-          const node = plan.jobs.get(op.nodeId);
-          return node?.producerId || plan.producerIdToNodeId.has(op.nodeId) ? op.nodeId : undefined;
-        }
-        return undefined;
-      })();
-      if (!producerId) { return { operation: 'update_deps', success: false, error: `Job not found: ${op.nodeId}` }; }
-      // Find the actual producerId from nodeId
-      const node = plan.jobs.get(op.nodeId!);
-      const pid = node?.producerId || producerId;
-      const rebuilt = await ctx.PlanRepository.updateNode(planId, pid, { dependencies: op.dependencies });
+      if (!op.nodeId || !Array.isArray(op.dependencies)) {
+        return { operation: 'update_deps', success: false, error: 'nodeId and dependencies array are required' };
+      }
+      // Resolve nodeId: could be a UUID (job.id) or a producerId
+      const resolvedNodeId = plan.jobs.has(op.nodeId) ? op.nodeId : plan.producerIdToNodeId.get(op.nodeId);
+      if (!resolvedNodeId) { return { operation: 'update_deps', success: false, error: `Job not found: ${op.nodeId}` }; }
+      const node = plan.jobs.get(resolvedNodeId);
+      if (!node) { return { operation: 'update_deps', success: false, error: `Job not found: ${op.nodeId}` }; }
+      if (node.producerId === SV_PRODUCER_ID) { return { operation: 'update_deps', success: false, error: 'SV job dependencies are auto-managed.' }; }
+      // Resolve dependency producerIds to ensure they exist
+      for (const dep of op.dependencies) {
+        const depResolved = plan.jobs.has(dep) || plan.producerIdToNodeId.has(dep);
+        if (!depResolved) { return { operation: 'update_deps', success: false, error: `Dependency not found: ${dep}` }; }
+      }
+      const rebuilt = await ctx.PlanRepository.updateNode(planId, node.producerId, { dependencies: op.dependencies });
       replaceInMemoryPlan(plan, rebuilt);
       return { operation: 'update_deps', success: true };
     }
 
+    case 'add_before': {
+      if (!op.existingNodeId || !op.spec) {
+        return { operation: 'add_before', success: false, error: 'existingNodeId and spec are required' };
+      }
+      // Resolve existingNodeId (UUID or producerId)
+      const existingResolved = plan.jobs.has(op.existingNodeId) ? op.existingNodeId : plan.producerIdToNodeId.get(op.existingNodeId);
+      if (!existingResolved) { return { operation: 'add_before', success: false, error: `Job not found: ${op.existingNodeId}` }; }
+      const existingNode = plan.jobs.get(existingResolved);
+      if (!existingNode) { return { operation: 'add_before', success: false, error: `Job not found: ${op.existingNodeId}` }; }
+      // For scaffolding: the new node inherits the existing node's current deps,
+      // then the existing node's dependencies are replaced with just the new node.
+      const existingDepProducerIds = existingNode.dependencies
+        .map(depId => plan.jobs.get(depId)?.producerId)
+        .filter((p): p is string => !!p);
+      const newSpec = {
+        producerId: op.spec.producerId,
+        name: op.spec.name || op.spec.task,
+        task: op.spec.task,
+        dependencies: existingDepProducerIds,
+        work: op.spec.work,
+        prechecks: op.spec.prechecks,
+        postchecks: op.spec.postchecks,
+        expectsNoChanges: op.spec.expectsNoChanges,
+      };
+      // Step 1: Add the new node (with the existing node's previous deps)
+      await ctx.PlanRepository.addNode(planId, newSpec);
+      // Step 2: Update existing node to depend only on the new node
+      const rebuilt = await ctx.PlanRepository.updateNode(planId, existingNode.producerId, { dependencies: [op.spec.producerId] });
+      replaceInMemoryPlan(plan, rebuilt);
+      return { operation: 'add_before', success: true, nodeId: op.spec.producerId };
+    }
+
+    case 'add_after': {
+      if (!op.existingNodeId || !op.spec) {
+        return { operation: 'add_after', success: false, error: 'existingNodeId and spec are required' };
+      }
+      const afterResolved = plan.jobs.has(op.existingNodeId) ? op.existingNodeId : plan.producerIdToNodeId.get(op.existingNodeId);
+      if (!afterResolved) { return { operation: 'add_after', success: false, error: `Job not found: ${op.existingNodeId}` }; }
+      const afterNode = plan.jobs.get(afterResolved);
+      if (!afterNode) { return { operation: 'add_after', success: false, error: `Job not found: ${op.existingNodeId}` }; }
+      // For scaffolding: add new node that depends on the existing node
+      const afterSpec = {
+        producerId: op.spec.producerId,
+        name: op.spec.name || op.spec.task,
+        task: op.spec.task,
+        dependencies: [...new Set([...(op.spec.dependencies || []), afterNode.producerId])],
+        work: op.spec.work,
+        prechecks: op.spec.prechecks,
+        postchecks: op.spec.postchecks,
+        expectsNoChanges: op.spec.expectsNoChanges,
+      };
+      const rebuilt = await ctx.PlanRepository.addNode(planId, afterSpec);
+      replaceInMemoryPlan(plan, rebuilt);
+      return { operation: 'add_after', success: true, nodeId: op.spec.producerId };
+    }
+
     default:
-      return { operation: (op as any).type ?? 'unknown', success: false, error: `Operation '${(op as any).type}' not supported for scaffolding plans. Use add_copilot_plan_job / remove_node / update_deps.` };
+      return { operation: (op as any).type ?? 'unknown', success: false, error: `Operation '${(op as any).type}' not supported for scaffolding plans. Supported: add_node, remove_node, update_deps, add_before, add_after.` };
   }
 }
 

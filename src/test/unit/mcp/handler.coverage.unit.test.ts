@@ -32,7 +32,7 @@ suite('McpHandler - coverage', () => {
         getCurrentBranch: sandbox.stub().resolves('main'),
       }
     };
-    handler = new McpHandler(mockPlanRunner, '/workspace', mockGit);
+    handler = new McpHandler(mockPlanRunner, '/workspace', mockGit, {} as any, undefined);
   });
 
   teardown(() => {
@@ -101,7 +101,7 @@ suite('McpHandler - coverage', () => {
   });
 
   test('handleRequest catches and returns internal errors', async () => {
-    const badHandler = new McpHandler(null as any, '/workspace', mockGit);
+    const badHandler = new McpHandler(null as any, '/workspace', mockGit, {} as any, undefined);
     const request: JsonRpcRequest = {
       jsonrpc: '2.0',
       id: 5,

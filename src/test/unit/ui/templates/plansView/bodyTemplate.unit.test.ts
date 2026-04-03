@@ -18,9 +18,9 @@ suite('plansView bodyTemplate', () => {
 
     test('includes header section', () => {
       const result = renderPlansViewBody();
-      assert.ok(result.includes('<div class="header">'), 'Should include header div');
-      assert.ok(result.includes('<h3>Plans</h3>'), 'Should include Plans heading');
-      assert.ok(result.includes('id="badge"'), 'Should include badge element');
+      assert.ok(result.includes('<div class="sidebar-tabs">'), 'Should include sidebar-tabs div');
+      assert.ok(result.includes('id="tabPlans"'), 'Should include tabPlans button');
+      assert.ok(result.includes('id="tabBadgePlans"'), 'Should include tabBadgePlans badge');
     });
 
     test('includes global capacity bar', () => {
@@ -42,7 +42,7 @@ suite('plansView bodyTemplate', () => {
     test('includes plans container with empty state', () => {
       const result = renderPlansViewBody();
       assert.ok(result.includes('id="plans"'), 'Should include plans container');
-      assert.ok(result.includes('class="empty"'), 'Should include empty state');
+      assert.ok(result.includes('class="welcome-state"'), 'Should include welcome state');
       assert.ok(result.includes('create_copilot_plan'), 'Should mention MCP tool');
     });
 

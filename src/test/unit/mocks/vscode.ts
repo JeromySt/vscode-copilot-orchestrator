@@ -133,6 +133,13 @@ export enum StatusBarAlignment {
   Right = 2,
 }
 
+export enum OverviewRulerLane {
+  Left = 1,
+  Center = 2,
+  Right = 4,
+  Full = 7,
+}
+
 export enum ViewColumn {
   Active = -1,
   Beside = -2,
@@ -232,6 +239,14 @@ export const window = {
   withProgress: async <T>(_options: unknown, task: (progress: unknown, token: unknown) => Thenable<T>): Promise<T> => {
     return task({ report: _noop }, { isCancellationRequested: false, onCancellationRequested: new EventEmitter<void>().event });
   },
+  createTextEditorDecorationType: (_options: unknown) => ({
+    key: 'mock-decoration-type',
+    dispose: () => {},
+  }),
+  visibleTextEditors: [] as unknown[],
+  onDidChangeVisibleTextEditors: new EventEmitter<unknown[]>().event,
+  onDidChangeActiveTextEditor: new EventEmitter<unknown>().event,
+  activeTextEditor: undefined as unknown,
 };
 
 // ---------------------------------------------------------------------------
@@ -351,7 +366,51 @@ export const extensions = {
   all: [] as unknown[],
 };
 
+
+export class MarkdownString {
+  value: string;
+  isTrusted?: boolean;
+  constructor(value?: string, isTrusted?: boolean) {
+    this.value = value ?? '';
+    this.isTrusted = isTrusted;
+  }
+  appendText(value: string): this { this.value += value; return this; }
+  appendMarkdown(value: string): this { this.value += value; return this; }
+}
+
 // ---------------------------------------------------------------------------
+// Position / Range
+// ---------------------------------------------------------------------------
+
+export class Position {
+  constructor(readonly line: number, readonly character: number) {}
+}
+
+export class Range {
+  readonly start: Position;
+  readonly end: Position;
+  constructor(startOrLine: Position | number, startCharOrEnd: Position | number, endLine?: number, endChar?: number) {
+    if (startOrLine instanceof Position) {
+      this.start = startOrLine;
+      this.end = startCharOrEnd as Position;
+    } else {
+      this.start = new Position(startOrLine as number, startCharOrEnd as number);
+      this.end = new Position(endLine!, endChar!);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ThemeColor
+// ---------------------------------------------------------------------------
+
+export class ThemeColor {
+  readonly id: string;
+  constructor(id: string) {
+    this.id = id;
+  }
+}
+
 // ThemeIcon
 // ---------------------------------------------------------------------------
 

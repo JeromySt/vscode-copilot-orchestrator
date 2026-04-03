@@ -203,10 +203,11 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Forward integration merge'); context.onStepStatusChange?.('merge-fi', 'running');
         this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'merge-fi', startedAt: phaseStart });
         const ctx = makeCtx('merge-fi'); 
         ctx.dependencyCommits = context.dependencyCommits;
         const r = await new MergeFiPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'merge-fi', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         if (r.metrics) { capturedMetrics = r.metrics; phaseMetrics['merge-fi'] = r.metrics; }
         this.logEntry(executionKey, 'merge-fi', 'info', '========== MERGE-FI SECTION END ==========');
         if (!r.success) { stepStatuses['merge-fi'] = 'failed'; context.onStepStatusChange?.('merge-fi', 'failed'); return { success: false, error: `Forward integration merge failed: ${r.error}`, stepStatuses, failedPhase: 'merge-fi', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
@@ -223,9 +224,10 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Running setup'); context.onStepStatusChange?.('setup', 'running');
         this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'setup', startedAt: phaseStart });
         const ctx = makeCtx('setup');
         const r = await new SetupPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'setup', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION END ==========');
         if (!r.success) { stepStatuses.setup = 'failed'; context.onStepStatusChange?.('setup', 'failed'); return { success: false, error: `Setup failed: ${r.error}`, stepStatuses, failedPhase: 'setup', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
         stepStatuses.setup = 'success'; context.onStepStatusChange?.('setup', 'success');
@@ -238,10 +240,11 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Running prechecks'); context.onStepStatusChange?.('prechecks', 'running');
         this.logEntry(executionKey, 'prechecks', 'info', '========== PRECHECKS SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'prechecks', startedAt: phaseStart });
         const precheckSpec = prechecksSpec_;
         const ctx = makeCtx('prechecks'); ctx.workSpec = precheckSpec; ctx.env = mergeEnv(precheckSpec); ctx.sessionId = capturedSessionId;
         const r = await new PrecheckPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'prechecks', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = r.metrics; phaseMetrics['prechecks'] = r.metrics; }
         this.logEntry(executionKey, 'prechecks', 'info', '========== PRECHECKS SECTION END ==========');
@@ -251,15 +254,27 @@ export class DefaultJobExecutor implements JobExecutor {
       if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid, phaseTiming: context.phaseTiming };}
 
       // ---- WORK ----
+      // Capture HEAD before work starts — this becomes the commit phase's baseline.
+      // Using context.baseCommit is unreliable during auto-heal retries because
+      // a prior auto-heal attempt may have created commits, making HEAD !== baseCommit
+      // even when the current work phase produced no changes.
+      let preWorkHead = context.baseCommit;
+      if (!skip('work')) {
+        try {
+          const currentHead = await this.git.worktrees.getHeadCommit(worktreePath);
+          if (currentHead) preWorkHead = currentHead;
+        } catch { /* fall back to context.baseCommit */ }
+      }
       if (skip('work')) { this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION (SKIPPED - RESUMING) =========='); }
       else if (workSpec_) {
         context.onProgress?.('Running work'); context.onStepStatusChange?.('work', 'running');
         this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'work', startedAt: phaseStart });
         const workSpec = workSpec_;
         const ctx = makeCtx('work'); ctx.workSpec = workSpec; ctx.env = mergeEnv(workSpec); ctx.sessionId = capturedSessionId;
         const r = await new WorkPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'work', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['work'] = r.metrics; }
         this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION END ==========');
@@ -274,17 +289,20 @@ export class DefaultJobExecutor implements JobExecutor {
       if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId, pid: execution.process?.pid, phaseTiming: context.phaseTiming };}
 
       // ---- COMMIT ----
-      const workWasSkipped = skip('work');
+      const workWasSkipped = skip('work') || stepStatuses.work === 'skipped';
+      let pendingCommitFailure: string | null = null;
       context.onProgress?.('Committing changes'); context.onStepStatusChange?.('commit', 'running');
       this.logEntry(executionKey, 'commit', 'info', '========== COMMIT SECTION START ==========');
       const phaseStartCommit = Date.now();
-      const commitCtx: CommitPhaseContext = { ...makeCtx('commit'), baseCommit: context.baseCommit, getWorkSpec: () => resolveSpec('work'), getExecutionLogs: () => this.executionLogs.get(executionKey) || [], getLogFilePath: () => getLogFilePathByKey(executionKey, this.storagePath, this.logFiles) };
+      context.phaseTiming!.push({ phase: 'commit', startedAt: phaseStartCommit });
+      const commitCtx: CommitPhaseContext = { ...makeCtx('commit'), baseCommit: preWorkHead, getWorkSpec: () => resolveSpec('work'), getExecutionLogs: () => this.executionLogs.get(executionKey) || [], getLogFilePath: () => getLogFilePathByKey(executionKey, this.storagePath, this.logFiles) };
       const cr = await new CommitPhaseExecutor({ evidenceValidator: this.evidenceValidator, ...phaseDeps() }).execute(commitCtx);
-      context.phaseTiming!.push({ phase: 'commit', startedAt: phaseStartCommit, endedAt: Date.now() });
+      context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
       this.logEntry(executionKey, 'commit', 'info', '========== COMMIT SECTION END ==========');
       if (cr.reviewMetrics) { phaseMetrics['commit'] = cr.reviewMetrics; capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, cr.reviewMetrics]) : cr.reviewMetrics; }
       if (!cr.success) {
-        if (workWasSkipped) { this.logEntry(executionKey, 'commit', 'info', 'Commit found no evidence, but work was skipped (resuming). Succeeding without commit.'); stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
+        if (workWasSkipped && context.resumeFromPhase !== 'commit') { this.logEntry(executionKey, 'commit', 'info', 'Commit found no evidence, but work was skipped (resuming from later phase). Succeeding without commit.'); stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
+        else if (postchecksSpec_ && !skip('postchecks')) { stepStatuses.commit = 'failed'; context.onStepStatusChange?.('commit', 'failed'); pendingCommitFailure = cr.error ?? 'unknown'; }
         else { stepStatuses.commit = 'failed'; context.onStepStatusChange?.('commit', 'failed'); return { success: false, error: `Commit failed: ${cr.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'commit', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
       } else { stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
 
@@ -294,16 +312,18 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Running postchecks'); context.onStepStatusChange?.('postchecks', 'running');
         this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'postchecks', startedAt: phaseStart });
         const postcheckSpec = postchecksSpec_;
         const ctx = makeCtx('postchecks'); ctx.workSpec = postcheckSpec; ctx.env = mergeEnv(postcheckSpec); ctx.sessionId = capturedSessionId;
         const r = await new PostcheckPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'postchecks', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['postchecks'] = r.metrics; }
         this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION END ==========');
         if (!r.success) { stepStatuses.postchecks = 'failed'; context.onStepStatusChange?.('postchecks', 'failed'); return this.applyFailureConfig({ success: false, error: `Postchecks failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'postchecks', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, noAutoHeal: r.noAutoHeal, failureMessage: r.failureMessage, overrideResumeFromPhase: r.overrideResumeFromPhase, phaseTiming: context.phaseTiming }, postcheckSpec); }
         stepStatuses.postchecks = 'success'; context.onStepStatusChange?.('postchecks', 'success');
       } else { stepStatuses.postchecks = 'skipped'; context.onStepStatusChange?.('postchecks', 'skipped'); }
+      if (pendingCommitFailure) { return { success: false, error: `Commit failed: ${pendingCommitFailure}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'commit', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
       if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId, phaseTiming: context.phaseTiming };}
 
       // ---- MERGE-RI ----
@@ -312,6 +332,7 @@ export class DefaultJobExecutor implements JobExecutor {
         context.onProgress?.('Reverse integration merge'); context.onStepStatusChange?.('merge-ri', 'running');
         this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION START ==========');
         const phaseStart = Date.now();
+        context.phaseTiming!.push({ phase: 'merge-ri', startedAt: phaseStart });
         const ctx = makeCtx('merge-ri'); 
         ctx.repoPath = context.repoPath;
         // If a snapshot branch exists, merge into it instead of targetBranch.
@@ -320,7 +341,7 @@ export class DefaultJobExecutor implements JobExecutor {
         ctx.completedCommit = cr.commit;
         ctx.baseCommit = context.baseCommit;
         const r = await new MergeRiPhaseExecutor(phaseDeps()).execute(ctx);
-        context.phaseTiming!.push({ phase: 'merge-ri', startedAt: phaseStart, endedAt: Date.now() });
+        context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['merge-ri'] = r.metrics; }
         this.logEntry(executionKey, 'merge-ri', 'info', '========== MERGE-RI SECTION END ==========');
         if (!r.success) { stepStatuses['merge-ri'] = 'failed'; context.onStepStatusChange?.('merge-ri', 'failed'); return { success: false, error: `Reverse integration merge failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'merge-ri', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
@@ -330,12 +351,20 @@ export class DefaultJobExecutor implements JobExecutor {
       // ---- CLEANUP/REPORT ----
       const cleanupStart = Date.now();
       stepStatuses['cleanup'] = 'running'; context.onStepStatusChange?.('cleanup', 'running');
+      context.phaseTiming!.push({ phase: 'cleanup', startedAt: cleanupStart });
       const ws = await computeWorkSummary(node, worktreePath, context.baseCommit, this.git);
-      context.phaseTiming!.push({ phase: 'cleanup', startedAt: cleanupStart, endedAt: Date.now() });
+      context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
       stepStatuses['cleanup'] = 'success'; context.onStepStatusChange?.('cleanup', 'success');
       return { success: true, completedCommit: cr.commit, workSummary: ws, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming };
     } catch (error: any) {
       log.error(`Execution error: ${node.name}`, { error: error.message });
+      // Ensure any in-flight phase timing entry has an endedAt timestamp
+      if (context.phaseTiming?.length) {
+        const last = context.phaseTiming[context.phaseTiming.length - 1];
+        if (!last.endedAt) {
+          last.endedAt = Date.now();
+        }
+      }
       return { success: false, error: error.message, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming };
     } finally {
       this.activeExecutions.delete(executionKey);

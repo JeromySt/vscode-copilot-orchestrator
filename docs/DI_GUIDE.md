@@ -4,7 +4,7 @@
 
 ## Overview
 
-Copilot Orchestrator uses a Symbol-based dependency injection container with **23 tokens** to manage service lifecycle, enable testability, and provide clean separation of concerns.
+Copilot Orchestrator uses a Symbol-based dependency injection container with **36 tokens** to manage service lifecycle, enable testability, and provide clean separation of concerns.
 
 ```mermaid
 classDiagram
@@ -401,6 +401,47 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
 }
 ```
 
+#### Real-World Example: PR Lifecycle Manager
+
+The PR lifecycle manager demonstrates complex dependency injection with multiple service dependencies:
+
+```typescript
+// src/composition.ts
+container.registerSingleton<IManagedPRStore>(
+  Tokens.IManagedPRStore,
+  (c) => {
+    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const fileSystem = c.resolve<IFileSystem>(Tokens.IFileSystem);
+    const { FileSystemManagedPRStore } = require('./plan/store/managedPRStore');
+    return new FileSystemManagedPRStore(workspacePath, fileSystem);
+  }
+);
+
+container.registerSingleton<IPRLifecycleManager>(
+  Tokens.IPRLifecycleManager,
+  (c) => {
+    const prServiceFactory = c.resolve<IRemotePRServiceFactory>(Tokens.IRemotePRServiceFactory);
+    const prMonitor = c.resolve<IReleasePRMonitor>(Tokens.IReleasePRMonitor);
+    const isolatedRepos = c.resolve<IIsolatedRepoManager>(Tokens.IIsolatedRepoManager);
+    const store = c.resolve<IManagedPRStore>(Tokens.IManagedPRStore);
+    const releaseConfig = c.resolve<IReleaseConfigManager>(Tokens.IReleaseConfigManager);
+    const { DefaultPRLifecycleManager } = require('./plan/prLifecycleManager');
+    return new DefaultPRLifecycleManager(prServiceFactory, prMonitor, isolatedRepos, store, releaseConfig);
+  }
+);
+```
+
+**Key characteristics:**
+- **Storage layer** (`IManagedPRStore`) registered first with file system dependency
+- **Manager layer** (`IPRLifecycleManager`) depends on 5 other services:
+  - `IRemotePRServiceFactory` — Provider-agnostic PR operations
+  - `IReleasePRMonitor` — Autonomous monitoring and feedback handling
+  - `IIsolatedRepoManager` — Isolated clone management for PR work
+  - `IManagedPRStore` — State persistence
+  - `IReleaseConfigManager` — Configuration access
+- **Event emitter** — Manager extends `EventEmitter` for UI synchronization
+- **Provider-agnostic** — Works with GitHub, GitHub Enterprise, and Azure DevOps via factory pattern
+
 ### Step 5: Create Mock for Testing
 
 Add mock implementation in `src/test/helpers/testAdapters.ts`:
@@ -734,6 +775,8 @@ Available DI tokens for service resolution:
 | `IPlanRepository` | `IPlanRepository` | High-level plan lifecycle management |
 | `IPlanRepositoryStore` | `IPlanRepositoryStore` | Low-level plan storage operations |
 | `IPlanDefinition` | `IPlanDefinition` | Lazy work spec access for plan nodes |
+| `IPlanArchiver` | `IPlanArchiver` | Plan archiving and cleanup |
+| `IPlanRecovery` | `IPlanRecovery` | Plan recovery from canceled/failed state |
 | `ILogger` | `ILogger` | Application logging service |
 | `IGitOperations` | `IGitOperations` | Git repository operations |
 | `IProcessMonitor` | `IProcessMonitor` | Process lifecycle monitoring |
@@ -752,6 +795,18 @@ Available DI tokens for service resolution:
 | `INodeExecutor` | `INodeExecutor` | Node phase execution |
 | `INodeStateMachine` | `INodeStateMachine` | Node state transitions |
 | `IFileSystem` | `IFileSystem` | Filesystem operations |
+| `IGitignoreDebouncer` | `IGitignoreDebouncer` | Branch-change-aware .gitignore write delay |
+| `IBulkPlanActions` | `IBulkPlanActions` | Bulk plan operations (multi-select actions) |
+| `IReleaseManager` | `IReleaseManager` | Release lifecycle orchestration |
+| `IReleasePRMonitor` | `IReleasePRMonitor` | PR monitoring and feedback addressing |
+| `IIsolatedRepoManager` | `IIsolatedRepoManager` | Isolated repository clone management |
+| `IReleaseStore` | `IReleaseStore` | Release state persistence |
+| `IRemotePRService` | `IRemotePRService` | Provider-agnostic PR operations |
+| `IRemoteProviderDetector` | `IRemoteProviderDetector` | Remote provider detection and credential acquisition |
+| `IRemotePRServiceFactory` | `IRemotePRServiceFactory` | PR service factory with auto-detection |
+| `IReleaseConfigManager` | `IReleaseConfigManager` | Release configuration management |
+| `IPRLifecycleManager` | `IPRLifecycleManager` | PR lifecycle management and autonomous monitoring |
+| `IManagedPRStore` | `IManagedPRStore` | Managed PR state persistence |
 
 ---
 

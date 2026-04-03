@@ -16,7 +16,7 @@ import * as Tokens from '../../core/tokens';
 import type { IConfigProvider, IDialogService, IClipboardService, IProcessMonitor, ILogger } from '../../interfaces';
 
 // ── Production composition (uses vscode mock) ─────────────────────────────
-import { createContainer } from '../../composition';
+import { createContainer, createBulkPlanActions, createReleaseManager } from '../../composition';
 
 // ── Test composition ──────────────────────────────────────────────────────
 import { createTestContainer } from '../helpers/compositionTest';
@@ -305,5 +305,117 @@ suite('createTestContainer', () => {
   test('empty overrides object changes nothing', () => {
     const container = createTestContainer({});
     assert.ok(container.resolve<any>(Tokens.IConfigProvider) instanceof MockConfigProvider);
+  });
+});
+
+// ============================================================================
+// createContainer — new DI tokens added in the release management feature
+// ============================================================================
+
+suite('createContainer — new release management tokens', () => {
+  let container: ServiceContainer;
+
+  setup(() => {
+    container = createContainer(makeMockContext());
+  });
+
+  test('registers IRemoteProviderDetector', () => {
+    assert.ok(container.isRegistered(Tokens.IRemoteProviderDetector));
+  });
+
+  test('registers IRemotePRServiceFactory', () => {
+    assert.ok(container.isRegistered(Tokens.IRemotePRServiceFactory));
+  });
+
+  test('registers IReleasePRMonitor', () => {
+    assert.ok(container.isRegistered(Tokens.IReleasePRMonitor));
+  });
+
+  test('registers IManagedPRStore', () => {
+    assert.ok(container.isRegistered(Tokens.IManagedPRStore));
+  });
+
+  test('resolves IRemoteProviderDetector', () => {
+    const svc = container.resolve<any>(Tokens.IRemoteProviderDetector);
+    assert.ok(svc);
+    assert.strictEqual(typeof svc.detect, 'function');
+  });
+
+  test('resolves IRemotePRServiceFactory', () => {
+    const svc = container.resolve<any>(Tokens.IRemotePRServiceFactory);
+    assert.ok(svc);
+    assert.strictEqual(typeof svc.getServiceForRepo, 'function');
+  });
+
+  test('resolves IReleasePRMonitor', () => {
+    const svc = container.resolve<any>(Tokens.IReleasePRMonitor);
+    assert.ok(svc);
+  });
+
+  test('IManagedPRStore throws without workspace folder', () => {
+    assert.throws(
+      () => container.resolve(Tokens.IManagedPRStore),
+      /No workspace folder open/,
+    );
+  });
+
+  test('IPRLifecycleManager throws without workspace folder', () => {
+    assert.throws(
+      () => container.resolve(Tokens.IPRLifecycleManager),
+      /No workspace folder open/,
+    );
+  });
+});
+
+// ============================================================================
+// createBulkPlanActions
+// ============================================================================
+
+suite('createBulkPlanActions', () => {
+  test('returns an IBulkPlanActions with executeBulkAction and getValidActions methods', () => {
+    const container = createContainer(makeMockContext());
+    const mockPlanRunner: any = {
+      getAll: () => [],
+      cancel: () => true,
+      pause: () => true,
+      resume: async () => true,
+      get: () => undefined,
+      delete: () => true,
+    };
+    const result = createBulkPlanActions(container, mockPlanRunner);
+    assert.ok(result);
+    assert.strictEqual(typeof result.executeBulkAction, 'function');
+    assert.strictEqual(typeof result.getValidActions, 'function');
+  });
+});
+
+// ============================================================================
+// createReleaseManager
+// ============================================================================
+
+suite('createReleaseManager', () => {
+  test('returns an IReleaseManager with expected methods when all tokens are registered', () => {
+    const mockGit: any = {};
+    const mockCopilot: any = {};
+    const mockIsolatedRepos: any = {};
+    const mockPRMonitor: any = {};
+    const mockPRServiceFactory: any = {};
+    const mockStore: any = {};
+    const mockProviderDetector: any = {};
+    const mockDialogService: any = { showInfo: async () => {}, showError: async () => {}, showWarning: async () => undefined, showQuickPick: async () => undefined };
+
+    const container = new ServiceContainer();
+    container.registerSingleton(Tokens.IGitOperations, () => mockGit);
+    container.registerSingleton(Tokens.ICopilotRunner, () => mockCopilot);
+    container.registerSingleton(Tokens.IIsolatedRepoManager, () => mockIsolatedRepos);
+    container.registerSingleton(Tokens.IReleasePRMonitor, () => mockPRMonitor);
+    container.registerSingleton(Tokens.IRemotePRServiceFactory, () => mockPRServiceFactory);
+    container.registerSingleton(Tokens.IReleaseStore, () => mockStore);
+    container.registerSingleton(Tokens.IRemoteProviderDetector, () => mockProviderDetector);
+    container.registerSingleton(Tokens.IDialogService, () => mockDialogService);
+
+    const mockPlanRunner: any = { on: () => {}, off: () => {} };
+    const result = createReleaseManager(container, mockPlanRunner);
+    assert.ok(result);
   });
 });

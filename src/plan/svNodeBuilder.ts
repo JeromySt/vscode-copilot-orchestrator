@@ -8,7 +8,7 @@
  * @module plan/svNodeBuilder
  */
 
-import type { AgentSpec, ProcessSpec } from './types/specs';
+import type { AgentSpec, ProcessSpec, WorkSpec } from './types/specs';
 
 /**
  * Job spec structure for SV node (minimal interface).
@@ -21,7 +21,82 @@ export interface SvJobSpec {
   prechecks?: AgentSpec;
   postchecks?: ProcessSpec;
   assignedWorktreePath?: string;
-  work?: any;
+  work?: WorkSpec;
+}
+
+/**
+ * Build a default verification agent spec for snapshot validation.
+ *
+ * When `verifyRiSpec` is not provided, this generates a premium-tier agent
+ * spec that performs a comprehensive review of the accumulated plan work:
+ * - Reads all job specs and attempt outcomes from the plan definition folder
+ * - Compares intended work against actual git changes in the snapshot
+ * - Verifies completeness: all jobs' deliverables are present and functional
+ * - Flags any obvious issues, missing files, or incomplete implementations
+ *
+ * The agent is given access to the plan's specs directory so it can review
+ * the full intent of each job and validate the implementation against it.
+ *
+ * @param targetBranch - The target branch name (for context in instructions).
+ * @param planId - The plan UUID (for constructing the plan specs path).
+ * @param repoPath - The repository root path (for `allowedFolders`).
+ * @param jobSummaries - Short descriptions of each job for the agent's context.
+ * @returns An `AgentSpec` with premium model tier and instructions.
+ */
+export function buildDefaultVerificationSpec(
+  targetBranch: string,
+  planId: string,
+  repoPath: string,
+  jobSummaries: Array<{ name: string; task: string }>,
+): AgentSpec {
+  const planSpecsDir = `${repoPath}/.orchestrator/plans/${planId}/specs`;
+  const jobList = jobSummaries.map((j, i) => `${i + 1}. **${j.name}**: ${j.task}`).join('\n');
+
+  return {
+    type: 'agent',
+    modelTier: 'premium',
+    instructions: [
+      `# Snapshot Verification — Final Review Before Merge`,
+      ``,
+      `You are reviewing the accumulated work from a Copilot Orchestrator plan before it merges to \`${targetBranch}\`.`,
+      `Your goal is to ensure all planned work is present, correct, and complete in this snapshot.`,
+      ``,
+      `## Plan Jobs`,
+      ``,
+      `The plan contained these jobs:`,
+      ``,
+      jobList,
+      ``,
+      `## Verification Steps`,
+      ``,
+      `### 1. Review the plan specs`,
+      `Read the job specification files in the plan directory to understand what each job was supposed to deliver.`,
+      `The plan specs are located at: \`${planSpecsDir}\``,
+      `Each subfolder contains the work/prechecks/postchecks specs and attempt logs for that job.`,
+      ``,
+      `### 2. Review the actual changes`,
+      `Run \`git log --oneline --all\` and \`git diff --stat HEAD~10..HEAD\` (adjust range as needed) to see what files were changed.`,
+      `Cross-reference the changes against each job's stated deliverables.`,
+      ``,
+      `### 3. Verify completeness`,
+      `For each job, confirm:`,
+      `- The files/changes described in its spec are present in the snapshot`,
+      `- No placeholder or stub implementations remain (e.g., \`// TODO\`, \`throw new NotImplementedException()\`)`,
+      `- Tests exist for new functionality (if the job spec mentioned tests)`,
+      ``,
+      `### 4. Check for obvious issues`,
+      `- Look for compilation errors: run the project's build command if one is apparent`,
+      `- Check for obvious runtime issues (null references, missing imports, broken references)`,
+      `- Verify no files were accidentally deleted or overwritten by concurrent jobs`,
+      ``,
+      `### 5. Report`,
+      `If everything looks correct, print:`,
+      `\`✅ Snapshot verification passed: all ${jobSummaries.length} job deliverables confirmed present and complete.\``,
+      ``,
+      `If issues are found, fix them if possible. If they cannot be fixed, print a clear summary of what's missing or broken.`,
+    ].join('\n'),
+    allowedFolders: [planSpecsDir],
+  };
 }
 
 /**
@@ -36,12 +111,14 @@ export interface SvJobSpec {
  * @param targetBranch - The target branch to merge to.
  * @param snapshotWorktreePath - Optional pre-assigned snapshot worktree path.
  * @param verifyRiSpec - Optional user-provided verify-ri validation spec.
+ * @param defaultVerifySpec - Optional default verification spec (used when verifyRiSpec is not provided).
  * @returns A job spec object for the snapshot-validation node.
  */
 export function buildSvJobSpec(
   targetBranch: string,
   snapshotWorktreePath?: string,
-  verifyRiSpec?: any
+  verifyRiSpec?: any,
+  defaultVerifySpec?: AgentSpec,
 ): SvJobSpec {
   // Prechecks: three-case logic for targetBranch health + snapshot rebase.
   // Runs in the snapshot worktree (HEAD = snapshot branch, shares refs with main repo).
@@ -137,13 +214,18 @@ export function buildSvJobSpec(
     },
   };
 
+  // Use user-provided verifyRiSpec, or fall back to the default verification spec.
+  // The default spec performs a premium-tier AI review of all accumulated plan work
+  // to catch completeness issues before merging to the target branch.
+  const resolvedWork = verifyRiSpec || defaultVerifySpec;
+
   return {
     producerId: '__snapshot-validation__',
     name: 'Snapshot Validation',
     task: `Validate snapshot and merge to '${targetBranch}'`,
     dependencies: [], // Will be auto-wired by rewireSvDependencies()
     prechecks: svPrechecks,
-    work: verifyRiSpec,
+    work: resolvedWork,
     postchecks: svPostchecks,
     assignedWorktreePath: snapshotWorktreePath,
   };

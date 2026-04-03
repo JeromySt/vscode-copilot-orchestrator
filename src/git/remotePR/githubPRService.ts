@@ -1,0 +1,1000 @@
+/**
+ * @fileoverview GitHub PR service implementation.
+ * 
+ * Implements IRemotePRService for GitHub and GitHub Enterprise using gh CLI.
+ * All gh CLI calls use environment variables for authentication (never CLI arguments).
+ * 
+ * @module git/remotePR/githubPRService
+ */
+
+import type { IRemotePRService } from '../../interfaces/IRemotePRService';
+import type { IProcessSpawner } from '../../interfaces/IProcessSpawner';
+import type { IRemoteProviderDetector } from '../../interfaces/IRemoteProviderDetector';
+import type {
+  RemoteProviderInfo,
+  RemoteCredentials,
+  PRCreateOptions,
+  PRCreateResult,
+  PRComment,
+  PRCheck,
+  PRSecurityAlert,
+  PRListOptions,
+  PRListItem,
+  PRDetails,
+} from '../../plan/types/remotePR';
+import { Logger } from '../../core/logger';
+
+const log = Logger.for('git');
+const GH_COMMAND_TIMEOUT_MS = 60000;
+
+/**
+ * Cache entry for provider info and credentials per cwd.
+ */
+interface CacheEntry {
+  provider: RemoteProviderInfo;
+  credentials: RemoteCredentials;
+}
+
+/**
+ * GitHub PR service implementation.
+ * 
+ * Uses gh CLI for all GitHub/GitHub Enterprise operations.
+ * Caches provider info and credentials after first detection per cwd.
+ */
+export class GitHubPRService implements IRemotePRService {
+  private readonly cache = new Map<string, CacheEntry>();
+
+  constructor(
+    private readonly spawner: IProcessSpawner,
+    private readonly detector: IRemoteProviderDetector,
+  ) {}
+
+  /**
+   * Detect the remote provider from a repository.
+   */
+  async detectProvider(repoPath: string): Promise<RemoteProviderInfo> {
+    const cached = this.cache.get(repoPath);
+    if (cached) {
+      log.debug('Using cached provider info', { repoPath });
+      return cached.provider;
+    }
+
+    log.debug('Detecting provider', { repoPath });
+    const provider = await this.detector.detect(repoPath);
+    
+    // Initialize cache entry
+    const credentials = await this.detector.acquireCredentials(provider, repoPath);
+    this.cache.set(repoPath, { provider, credentials });
+    
+    log.info('Provider detected', { 
+      type: provider.type, 
+      owner: provider.owner, 
+      repo: provider.repoName,
+      hostname: provider.hostname 
+    });
+    
+    return provider;
+  }
+
+  /**
+   * Acquire credentials for the detected provider.
+   */
+  async acquireCredentials(provider: RemoteProviderInfo, repoPath?: string): Promise<RemoteCredentials> {
+    // Check cache first by matching provider
+    for (const entry of this.cache.values()) {
+      if (entry.provider.remoteUrl === provider.remoteUrl) {
+        log.debug('Using cached credentials', { tokenSource: entry.credentials.tokenSource });
+        return entry.credentials;
+      }
+    }
+
+    log.debug('Acquiring credentials', { type: provider.type, hostname: provider.hostname });
+    const credentials = await this.detector.acquireCredentials(provider, repoPath);
+    log.info('Credentials acquired', { tokenSource: credentials.tokenSource });
+    
+    return credentials;
+  }
+
+  /**
+   * Create a new pull request.
+   */
+  async createPR(options: PRCreateOptions): Promise<PRCreateResult> {
+    const provider = await this.detectProvider(options.cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.info('Creating PR', { 
+      base: options.baseBranch, 
+      head: options.headBranch, 
+      title: options.title 
+    });
+
+    const env = this._buildEnv(provider, credentials);
+    
+    const args = [
+      'pr', 'create',
+      '--base', options.baseBranch,
+      '--head', options.headBranch,
+      '--title', options.title,
+      '--body', options.body,
+    ];
+    
+    if (options.draft) {
+      args.push('--draft');
+    }
+
+    args.push('--json', 'number,url');
+
+    const result = await this._execGh(args, options.cwd, env);
+    
+    try {
+      const parsed = JSON.parse(result.trim());
+      const prNumber = parsed.number;
+      const prUrl = parsed.url;
+      
+      if (!prNumber) {
+        throw new Error(`Could not extract PR number from output: ${result}`);
+      }
+      
+      log.info('PR created', { prNumber, prUrl });
+      return {
+        prNumber,
+        prUrl,
+      };
+    } catch (err) {
+      log.error('Failed to parse PR create response', { error: String(err), output: result });
+      throw new Error(`Failed to parse gh pr create output: ${err}`);
+    }
+  }
+
+  /**
+   * Get all CI/CD check statuses for a pull request.
+   *
+   * Uses the REST API (repos/{owner}/{repo}/commits/{ref}/check-runs) instead of
+   * `gh pr checks --json` because older gh CLI versions don't support --json on
+   * the `pr checks` subcommand.
+   */
+  async getPRChecks(prNumber: number, cwd: string): Promise<PRCheck[]> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.debug('Getting PR checks', { prNumber });
+
+    const env = this._buildEnv(provider, credentials);
+    const ownerRepo = `${provider.owner}/${provider.repoName}`;
+
+    try {
+      // First get the PR's head SHA
+      const prEndpoint = `repos/${ownerRepo}/pulls/${prNumber}`;
+      const prResult = await this._execGhApi(prEndpoint, cwd, env);
+      const prData = JSON.parse(prResult);
+      const headSha = prData?.head?.sha;
+
+      if (!headSha) {
+        log.warn('Could not determine PR head SHA', { prNumber });
+        return [];
+      }
+
+      // Fetch check runs for the head commit via REST API
+      const checksEndpoint = `repos/${ownerRepo}/commits/${headSha}/check-runs?per_page=100`;
+      const checksResult = await this._execGhApi(checksEndpoint, cwd, env);
+      const checksData = JSON.parse(checksResult);
+
+      // Also fetch commit statuses (some CI systems use the status API, not checks)
+      let statuses: Array<{ context: string; state: string; target_url: string }> = [];
+      try {
+        const statusEndpoint = `repos/${ownerRepo}/commits/${headSha}/statuses?per_page=100`;
+        const statusResult = await this._execGhApi(statusEndpoint, cwd, env);
+        statuses = JSON.parse(statusResult);
+      } catch {
+        // Status API may not be available, ignore
+      }
+
+      const checks: PRCheck[] = [];
+
+      // Map check runs
+      if (Array.isArray(checksData?.check_runs)) {
+        for (const run of checksData.check_runs) {
+          checks.push({
+            name: run.name,
+            status: this._mapCheckState(
+              run.conclusion || run.status,
+            ),
+            url: run.html_url || run.details_url || '',
+          });
+        }
+      }
+
+      // Map commit statuses (deduplicate by context, keep latest)
+      const statusByContext = new Map<string, typeof statuses[0]>();
+      for (const s of statuses) {
+        if (!statusByContext.has(s.context)) {
+          statusByContext.set(s.context, s);
+        }
+      }
+      for (const [, s] of statusByContext) {
+        // Don't duplicate if a check run already exists with the same name
+        if (!checks.some(c => c.name === s.context)) {
+          checks.push({
+            name: s.context,
+            status: this._mapCheckState(s.state),
+            url: s.target_url || '',
+          });
+        }
+      }
+
+      log.info('PR checks retrieved', { prNumber, count: checks.length, headSha });
+      if (checks.length > 0) checks[0].headSha = headSha;
+      return checks;
+    } catch (err) {
+      log.warn('Failed to fetch PR checks, returning empty', { prNumber, error: String(err) });
+      return [];
+    }
+  }
+
+  /**
+   * Get all comments for a pull request.
+   */
+  async getPRComments(prNumber: number, cwd: string): Promise<PRComment[]> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.debug('Getting PR comments', { prNumber });
+
+    const env = this._buildEnv(provider, credentials);
+    const ownerRepo = `${provider.owner}/${provider.repoName}`;
+
+    // Fetch from three sources
+    const [reviewComments, reviews, issueComments] = await Promise.all([
+      this._getReviewComments(ownerRepo, prNumber, cwd, env),
+      this._getReviews(ownerRepo, prNumber, cwd, env),
+      this._getIssueComments(ownerRepo, prNumber, cwd, env),
+    ]);
+
+    // Merge and deduplicate by id
+    const allComments = [...reviewComments, ...reviews, ...issueComments];
+    const deduplicated = new Map<string, PRComment>();
+    
+    for (const comment of allComments) {
+      deduplicated.set(comment.id, comment);
+    }
+
+    // Mark parent review comments that have child threads.
+    // These are summary comments (e.g., "Copilot reviewed 89 files and generated 9 comments")
+    // that aren't independently actionable — the child threads are what matter.
+    const parentReviewIds = new Set<string>();
+    for (const c of reviewComments) {
+      if (c.parentReviewId) parentReviewIds.add(c.parentReviewId);
+    }
+    for (const [, c] of deduplicated) {
+      if (parentReviewIds.has(c.id) && !c.path) {
+        // This review has child threads — mark it as resolved so it doesn't
+        // appear as a standalone finding. It will be auto-hidden when all
+        // its child threads are resolved.
+        c.isResolved = true;
+      }
+    }
+
+    const result = Array.from(deduplicated.values());
+    log.info('PR comments retrieved', { prNumber, count: result.length });
+    
+    return result;
+  }
+
+  /**
+   * Get security alerts for a branch.
+   */
+  async getSecurityAlerts(branchName: string, cwd: string): Promise<PRSecurityAlert[]> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.debug('Getting security alerts', { branchName });
+
+    const env = this._buildEnv(provider, credentials);
+    const ownerRepo = `${provider.owner}/${provider.repoName}`;
+    const endpoint = `repos/${ownerRepo}/code-scanning/alerts?ref=${branchName}&per_page=100`;
+
+    try {
+      const result = await this._execGhApi(endpoint, cwd, env);
+      const parsed = JSON.parse(result);
+      
+      const alerts: PRSecurityAlert[] = parsed.map((alert: any) => ({
+        id: String(alert.number),
+        severity: this._mapSeverity(alert.rule?.severity),
+        description: alert.rule?.description || alert.most_recent_instance?.message?.text || 'Unknown alert',
+        file: alert.most_recent_instance?.location?.path,
+        resolved: alert.state === 'dismissed' || alert.state === 'fixed',
+      }));
+      
+      log.info('Security alerts retrieved', { branchName, count: alerts.length });
+      return alerts;
+    } catch (err) {
+      // Graceful empty array on 404 (code scanning not enabled)
+      const errMsg = String(err);
+      if (errMsg.includes('404') || errMsg.includes('Not Found')) {
+        log.debug('Code scanning not enabled or no alerts', { branchName });
+        return [];
+      }
+      
+      log.error('Failed to get security alerts', { error: errMsg, branchName });
+      throw err;
+    }
+  }
+
+  /**
+   * Reply to a specific comment on a pull request.
+   */
+  async replyToComment(prNumber: number, commentId: string, body: string, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.info('Replying to comment', { prNumber, commentId });
+
+    const env = this._buildEnv(provider, credentials);
+    const ownerRepo = `${provider.owner}/${provider.repoName}`;
+    const endpoint = `repos/${ownerRepo}/pulls/${prNumber}/comments`;
+    
+    const args = [
+      'api', endpoint,
+      '-X', 'POST',
+      '-f', `body=${body}`,
+      '-F', `in_reply_to=${commentId}`,
+    ];
+
+    await this._execGh(args, cwd, env);
+    log.info('Reply posted', { prNumber, commentId });
+  }
+
+  /**
+   * Add a general comment to a pull request (issue comment).
+   */
+  async addIssueComment(prNumber: number, body: string, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    log.info('Adding issue comment', { prNumber });
+
+    const env = this._buildEnv(provider, credentials);
+    const ownerRepo = `${provider.owner}/${provider.repoName}`;
+    const endpoint = `repos/${ownerRepo}/issues/${prNumber}/comments`;
+
+    const args = [
+      'api', endpoint,
+      '-X', 'POST',
+      '-f', `body=${body}`,
+    ];
+
+    await this._execGh(args, cwd, env);
+    log.info('Issue comment posted', { prNumber });
+  }
+
+  /**
+   * Resolve a review thread on a pull request.
+   */
+  async resolveThread(prNumber: number, threadId: string, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.info('Resolving thread', { prNumber, threadId });
+
+    // Validate threadId is a safe GraphQL node ID (alphanumeric, _, -, =)
+    if (!/^[\w\-=]+$/.test(threadId)) {
+      throw new Error(`Invalid threadId format: ${threadId}`);
+    }
+
+    const env = this._buildEnv(provider, credentials);
+    const query = `mutation { resolveReviewThread(input: {threadId: "${threadId}"}) { thread { id } } }`;
+    
+    const args = [
+      'api', 'graphql',
+      '-f', `query=${query}`,
+    ];
+
+    await this._execGh(args, cwd, env);
+    log.info('Thread resolved', { prNumber, threadId });
+  }
+
+  /**
+   * Minimize (hide) a comment on GitHub with a reason classifier.
+   *
+   * Uses the `minimizeComment` GraphQL mutation. This collapses the comment
+   * on the PR page with a "This comment was hidden" message showing the reason.
+   */
+  async minimizeComment(nodeId: string, reason: string, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+
+    // Validate nodeId format (Base64 GraphQL node IDs)
+    if (!/^[\w\-=/+]+$/.test(nodeId)) {
+      throw new Error(`Invalid nodeId format: ${nodeId}`);
+    }
+    // Validate reason is a known classifier
+    const validReasons = ['RESOLVED', 'OFF_TOPIC', 'OUTDATED', 'ABUSE'];
+    const upperReason = reason.toUpperCase();
+    if (!validReasons.includes(upperReason)) {
+      throw new Error(`Invalid minimize reason: ${reason}`);
+    }
+
+    log.info('Minimizing comment', { nodeId, reason: upperReason });
+
+    const env = this._buildEnv(provider, credentials);
+    const query = `mutation { minimizeComment(input: {subjectId: "${nodeId}", classifier: ${upperReason}}) { minimizedComment { isMinimized } } }`;
+
+    const args = ['api', 'graphql', '-f', `query=${query}`];
+    await this._execGh(args, cwd, env);
+    log.info('Comment minimized', { nodeId, reason: upperReason });
+  }
+
+  /**
+   * List pull requests filtered by author or assignee.
+   */
+  async listPRs(cwd: string, options?: PRListOptions): Promise<PRListItem[]> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.debug('Listing PRs', options);
+
+    const env = this._buildEnv(provider, credentials);
+    
+    const args = [
+      'pr', 'list',
+      '--json', 'number,title,headRefName,baseRefName,state,isDraft,author,url',
+    ];
+
+    // Add filters
+    if (options?.author) {
+      args.push('--author', options.author);
+    } else {
+      // Default to current user
+      args.push('--author', '@me');
+    }
+
+    if (options?.assignee) {
+      args.push('--assignee', options.assignee);
+    }
+
+    if (options?.state) {
+      args.push('--state', options.state);
+    }
+
+    if (options?.limit) {
+      args.push('--limit', String(options.limit));
+    }
+
+    const result = await this._execGh(args, cwd, env);
+    
+    try {
+      const parsed = JSON.parse(result);
+      const prs: PRListItem[] = parsed.map((pr: any) => ({
+        prNumber: pr.number,
+        title: pr.title,
+        headBranch: pr.headRefName,
+        baseBranch: pr.baseRefName,
+        state: this._mapPRState(pr.state),
+        isDraft: pr.isDraft || false,
+        author: pr.author?.login || 'unknown',
+        url: pr.url,
+      }));
+      
+      log.info('PRs listed', { count: prs.length });
+      return prs;
+    } catch (err) {
+      log.error('Failed to parse PR list response', { error: String(err), output: result });
+      throw new Error(`Failed to parse gh pr list output: ${err}`);
+    }
+  }
+
+  /**
+   * Get detailed information about a specific pull request.
+   */
+  async getPRDetails(prNumber: number, cwd: string): Promise<PRDetails> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.debug('Getting PR details', { prNumber });
+
+    const env = this._buildEnv(provider, credentials);
+
+    // Use gh pr view with merge readiness fields + reviews for protection policy detail
+    const args = [
+      'pr', 'view', String(prNumber),
+      '--json', 'number,title,headRefName,baseRefName,isDraft,state,author,url,body,mergeable,reviewDecision,mergeStateStatus,statusCheckRollup,latestReviews',
+    ];
+
+    const result = await this._execGh(args, cwd, env);
+    
+    try {
+      const pr = JSON.parse(result);
+      const details: PRDetails = {
+        prNumber: pr.number,
+        title: pr.title,
+        headBranch: pr.headRefName,
+        baseBranch: pr.baseRefName,
+        isDraft: pr.isDraft || false,
+        state: this._mapPRState(pr.state),
+        author: pr.author?.login || 'unknown',
+        url: pr.url,
+        body: pr.body,
+        mergeable: pr.mergeable === 'MERGEABLE',
+        reviewDecision: pr.reviewDecision || undefined,
+        mergeStateStatus: pr.mergeStateStatus || undefined,
+        statusChecks: Array.isArray(pr.statusCheckRollup)
+          ? pr.statusCheckRollup.map((c: any) => ({
+              name: c.name || c.context || 'unknown',
+              status: c.conclusion?.toUpperCase() || c.state?.toUpperCase() || 'PENDING',
+              url: c.detailsUrl || c.targetUrl || undefined,
+            }))
+          : undefined,
+        reviews: Array.isArray(pr.latestReviews)
+          ? pr.latestReviews.map((r: any) => ({
+              author: r.author?.login || 'unknown',
+              state: r.state || 'PENDING',
+            }))
+          : undefined,
+      };
+      
+      log.info('PR details retrieved', { prNumber, mergeable: details.mergeable, reviewDecision: details.reviewDecision, mergeStateStatus: details.mergeStateStatus });
+      return details;
+    } catch (err) {
+      log.error('Failed to parse PR details response', { error: String(err), output: result });
+      throw new Error(`Failed to parse gh pr view output: ${err}`);
+    }
+  }
+
+  /**
+   * Merge a pull request via gh CLI.
+   */
+  async mergePR(prNumber: number, cwd: string, options?: {
+    method?: 'squash' | 'merge' | 'rebase';
+    admin?: boolean;
+    deleteSourceBranch?: boolean;
+    title?: string;
+    body?: string;
+  }): Promise<{ commitSha: string }> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.info('Merging PR', { prNumber, method: options?.method, admin: options?.admin });
+
+    const env = this._buildEnv(provider, credentials);
+    const method = options?.method || 'squash';
+    const args = ['pr', 'merge', String(prNumber), `--${method}`];
+
+    if (options?.admin) {
+      args.push('--admin');
+    }
+    if (options?.deleteSourceBranch !== false) {
+      args.push('--delete-branch');
+    }
+    if (options?.title) {
+      args.push('--subject', options.title);
+    }
+    if (options?.body) {
+      args.push('--body', options.body);
+    }
+
+    // --json is not universally supported on gh pr merge; try with it, fall back without
+    let output: string;
+    try {
+      args.push('--json', 'mergeCommit');
+      output = await this._execGh(args, cwd, env);
+    } catch (firstErr: any) {
+      // If the error looks like --json is unsupported, retry without it
+      if (firstErr.message?.includes('json') || firstErr.message?.includes('flag')) {
+        args.splice(args.indexOf('--json'), 2);
+        output = await this._execGh(args, cwd, env);
+      } else {
+        throw firstErr;
+      }
+    }
+
+    let commitSha = '';
+    try {
+      const parsed = JSON.parse(output);
+      commitSha = parsed?.mergeCommit?.oid || '';
+    } catch { /* best effort */ }
+
+    log.info('PR merged', { prNumber, commitSha });
+    return { commitSha };
+  }
+
+  /**
+   * Abandon (close) a pull request without merging.
+   */
+  async abandonPR(prNumber: number, cwd: string, comment?: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.info('Abandoning PR', { prNumber, hasComment: !!comment });
+
+    const env = this._buildEnv(provider, credentials);
+    const args = ['pr', 'close', String(prNumber)];
+
+    if (comment) {
+      args.push('--comment', comment);
+    }
+
+    await this._execGh(args, cwd, env);
+    log.info('PR abandoned', { prNumber });
+  }
+
+  /**
+   * Promote a draft pull request to ready-for-review.
+   */
+  async promotePR(prNumber: number, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.info('Promoting PR to ready', { prNumber });
+
+    const env = this._buildEnv(provider, credentials);
+    const args = ['pr', 'ready', String(prNumber)];
+
+    await this._execGh(args, cwd, env);
+    log.info('PR promoted to ready', { prNumber });
+  }
+
+  /**
+   * Demote an active pull request to draft.
+   */
+  async demotePR(prNumber: number, cwd: string): Promise<void> {
+    const provider = await this.detectProvider(cwd);
+    const credentials = await this.acquireCredentials(provider);
+    
+    log.info('Demoting PR to draft', { prNumber });
+
+    const env = this._buildEnv(provider, credentials);
+    
+    // Step 1: Get the node ID of the PR
+    const viewArgs = ['pr', 'view', String(prNumber), '--json', 'id'];
+    const viewResult = await this._execGh(viewArgs, cwd, env);
+    
+    let nodeId: string;
+    try {
+      const parsed = JSON.parse(viewResult);
+      nodeId = parsed.id;
+    } catch (err) {
+      log.error('Failed to get PR node ID', { error: String(err), prNumber });
+      throw new Error(`Failed to get PR node ID: ${err}`);
+    }
+
+    // Step 2: Use GraphQL mutation to convert to draft
+    const mutation = `mutation { convertPullRequestToDraft(input: {pullRequestId: "${nodeId}"}) { pullRequest { id isDraft } } }`;
+    const mutationArgs = [
+      'api', 'graphql',
+      '-f', `query=${mutation}`,
+    ];
+
+    await this._execGh(mutationArgs, cwd, env);
+    log.info('PR demoted to draft', { prNumber });
+  }
+
+  /**
+   * Build environment variables for gh CLI calls.
+   * 
+   * Security: Token is passed via GH_TOKEN env var, NEVER as CLI argument.
+   */
+  private _buildEnv(provider: RemoteProviderInfo, credentials: RemoteCredentials): Record<string, string> {
+    const env: Record<string, string> = {};
+    
+    // Copy process.env, filtering out undefined values
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) {
+        env[key] = value;
+      }
+    }
+    
+    if (credentials.token) {
+      env.GH_TOKEN = credentials.token;
+    }
+    
+    // For GitHub Enterprise, set GH_HOST
+    if (provider.type === 'github-enterprise' && provider.hostname) {
+      env.GH_HOST = provider.hostname;
+    }
+    
+    return env;
+  }
+
+  /**
+   * Execute a gh CLI command.
+   */
+  private async _execGh(args: string[], cwd: string, env: Record<string, string>): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const proc = this.spawner.spawn('gh', args, {
+        cwd,
+        env,
+        shell: false,
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+      const timeoutHandle = setTimeout(() => {
+        log.error('gh command timed out', { args, cwd, timeoutMs: GH_COMMAND_TIMEOUT_MS });
+        if (!proc.killed && proc.exitCode === null) {
+          proc.kill();
+        }
+        finishReject(new Error(`gh command timed out after ${GH_COMMAND_TIMEOUT_MS}ms`));
+      }, GH_COMMAND_TIMEOUT_MS);
+
+      const finishResolve = (value: string): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeoutHandle);
+        resolve(value);
+      };
+
+      const finishReject = (error: Error): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeoutHandle);
+        reject(error);
+      };
+
+      proc.stdout?.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      proc.stderr?.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      proc.on('close', (code) => {
+        if (code === 0) {
+          finishResolve(stdout.trim());
+        } else {
+          log.error('gh command failed', { args, code, stderr });
+          finishReject(new Error(`gh command failed with code ${code}: ${stderr}`));
+        }
+      });
+
+      proc.on('error', (err) => {
+        log.error('gh command error', { args, error: String(err) });
+        finishReject(err instanceof Error ? err : new Error(String(err)));
+      });
+    });
+  }
+
+  /**
+   * Execute a gh api command.
+   */
+  private async _execGhApi(endpoint: string, cwd: string, env: Record<string, string>): Promise<string> {
+    const args = ['api', endpoint];
+    return this._execGh(args, cwd, env);
+  }
+
+  /**
+   * Get inline review comments from the pull request using GraphQL.
+   *
+   * The REST API (`pulls/{pr}/comments`) does not expose thread resolution
+   * status or GraphQL node IDs needed for `resolveReviewThread`.  The GraphQL
+   * `reviewThreads` connection provides both, so we use it instead.
+   */
+  private async _getReviewComments(
+    ownerRepo: string,
+    prNumber: number,
+    cwd: string,
+    env: Record<string, string>,
+  ): Promise<PRComment[]> {
+    try {
+      const [owner, repo] = ownerRepo.split('/');
+      const query = `
+        query {
+          repository(owner: "${owner}", name: "${repo}") {
+            pullRequest(number: ${prNumber}) {
+              reviewThreads(first: 100) {
+                nodes {
+                  id
+                  isResolved
+                  comments(first: 10) {
+                    nodes {
+                      databaseId
+                      url
+                      author { login }
+                      body
+                      path
+                      line
+                      pullRequestReview { databaseId }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }`;
+
+      const args = ['api', 'graphql', '-f', `query=${query}`];
+      const result = await this._execGh(args, cwd, env);
+      const parsed = JSON.parse(result);
+
+      const threads = parsed?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+      const comments: PRComment[] = [];
+
+      for (const thread of threads) {
+        const threadComments = thread.comments?.nodes ?? [];
+        if (threadComments.length === 0) continue;
+
+        // First comment is the root; the rest are replies
+        const root = threadComments[0];
+        const replies = threadComments.slice(1).map((r: any) => ({
+          id: String(r.databaseId),
+          author: r.author?.login || 'unknown',
+          body: r.body || '',
+          url: r.url,
+        }));
+
+        comments.push({
+          id: String(root.databaseId),
+          author: root.author?.login || 'unknown',
+          body: root.body || '',
+          path: root.path,
+          line: root.line,
+          isResolved: thread.isResolved === true,
+          source: this._categorizeAuthor(root.author?.login, root.body),
+          threadId: thread.id, // GraphQL node ID for resolveReviewThread
+          url: root.url,
+          parentReviewId: root.pullRequestReview?.databaseId ? String(root.pullRequestReview.databaseId) : undefined,
+          replies: replies.length > 0 ? replies : undefined,
+        });
+      }
+
+      return comments;
+    } catch (err) {
+      log.warn('Failed to get review comments', { error: String(err) });
+      return [];
+    }
+  }
+
+  /**
+   * Get review submissions from the pull request.
+   */
+  private async _getReviews(
+    ownerRepo: string,
+    prNumber: number,
+    cwd: string,
+    env: Record<string, string>,
+  ): Promise<PRComment[]> {
+    try {
+      const endpoint = `repos/${ownerRepo}/pulls/${prNumber}/reviews`;
+      const result = await this._execGhApi(endpoint, cwd, env);
+      const parsed = JSON.parse(result);
+      
+      return parsed
+        .filter((review: any) => review.body && review.body.trim().length > 0)
+        .map((review: any) => ({
+          id: String(review.id),
+          author: review.user?.login || 'unknown',
+          body: review.body,
+          isResolved: false,
+          source: this._categorizeAuthor(review.user?.login, review.body),
+          threadId: String(review.id),
+          url: review.html_url,
+          nodeId: review.node_id,
+        }));
+    } catch (err) {
+      log.warn('Failed to get reviews', { error: String(err) });
+      return [];
+    }
+  }
+
+  /**
+   * Get general issue comments from the pull request.
+   */
+  private async _getIssueComments(
+    ownerRepo: string,
+    prNumber: number,
+    cwd: string,
+    env: Record<string, string>,
+  ): Promise<PRComment[]> {
+    try {
+      const endpoint = `repos/${ownerRepo}/issues/${prNumber}/comments`;
+      const result = await this._execGhApi(endpoint, cwd, env);
+      const parsed = JSON.parse(result);
+      
+      return parsed.map((comment: any) => ({
+        id: String(comment.id),
+        author: comment.user?.login || 'unknown',
+        body: comment.body,
+        isResolved: false,
+        source: this._categorizeAuthor(comment.user?.login, comment.body),
+        url: comment.html_url,
+        nodeId: comment.node_id,
+      }));
+    } catch (err) {
+      log.warn('Failed to get issue comments', { error: String(err) });
+      return [];
+    }
+  }
+
+  /**
+   * Map gh CLI check state to our normalized status.
+   */
+  private _mapCheckState(state: string): 'passing' | 'failing' | 'pending' | 'skipped' {
+    const upper = state.toUpperCase();
+    
+    if (upper === 'SUCCESS') {
+      return 'passing';
+    }
+
+    if (upper === 'SKIPPED' || upper === 'NEUTRAL') {
+      return 'skipped';
+    }
+    
+    if (upper === 'FAILURE' || upper === 'ERROR' || upper === 'TIMED_OUT' || upper === 'CANCELLED') {
+      return 'failing';
+    }
+    
+    return 'pending';
+  }
+
+  /**
+   * Map gh CLI PR state to normalized state.
+   */
+  private _mapPRState(state: string): 'open' | 'closed' | 'merged' {
+    const upper = state.toUpperCase();
+    
+    if (upper === 'MERGED') {
+      return 'merged';
+    }
+    
+    if (upper === 'CLOSED') {
+      return 'closed';
+    }
+    
+    return 'open';
+  }
+
+  /**
+   * Map alert severity to our normalized levels.
+   */
+  private _mapSeverity(severity?: string): 'critical' | 'high' | 'medium' | 'low' {
+    if (!severity) return 'low';
+    
+    const lower = severity.toLowerCase();
+    
+    if (lower === 'critical' || lower === 'error') {
+      return 'critical';
+    }
+    
+    if (lower === 'high') {
+      return 'high';
+    }
+    
+    if (lower === 'medium' || lower === 'warning') {
+      return 'medium';
+    }
+    
+    return 'low';
+  }
+
+  /**
+   * Categorize comment author as human, bot, copilot, or codeql.
+   */
+  private _categorizeAuthor(author?: string, body?: string): 'human' | 'copilot' | 'codeql' | 'bot' {
+    const authorLower = (author || '').toLowerCase();
+    const bodyLower = (body || '').toLowerCase();
+    
+    // Bot patterns
+    if (authorLower.includes('[bot]') || 
+        authorLower === 'github-actions[bot]' || 
+        authorLower === 'dependabot[bot]') {
+      return 'bot';
+    }
+    
+    // Copilot patterns
+    if (authorLower.includes('copilot')) {
+      return 'copilot';
+    }
+    
+    // CodeQL patterns
+    if (authorLower.includes('codeql') || bodyLower.includes('codeql')) {
+      return 'codeql';
+    }
+    
+    return 'human';
+  }
+}

@@ -201,6 +201,8 @@ module.exports = [
     files: [
       'src/ui/panels/planDetailPanel.ts',
       'src/ui/panels/nodeDetailPanel.ts',
+      'src/ui/panels/activePRPanel.ts',
+      'src/ui/panels/releaseManagementPanel.ts',
     ],
     rules: {
       'no-restricted-syntax': ['error',
@@ -304,6 +306,16 @@ module.exports = [
       'src/core/logger.ts',
       'src/plan/logFileHelper.ts',
       'src/agent/agentDelegator.ts',
+      // fs usage in plan engine and repository (tracked for DI migration)
+      'src/plan/runner.ts',
+      'src/plan/repository/DefaultPlanRepository.ts',
+      'src/plan/releaseManager.ts',
+      // fs usage in core utility (tracked for DI migration)
+      'src/core/buildInfo.ts',
+      // fs usage in panel for reading log/spec files (tracked for DI migration)
+      'src/ui/panels/nodeDetailPanel.ts',
+      // child_process usage in release controller (tracked for DI migration)
+      'src/ui/panels/releaseManagementController.ts',
     ],
     rules: {
       'no-restricted-syntax': ['warn',

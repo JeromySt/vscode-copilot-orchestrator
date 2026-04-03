@@ -168,6 +168,14 @@ export function renderEventHandlers(config: ScriptsConfig): string {
       selectPhase(phaseToSelect);
     }
 
+    // Auto-follow: when PhaseTabBar detects a new running phase from the backend,
+    // it emits LOG_PHASE_CHANGE. Request logs for that phase automatically.
+    bus.on(Topics.LOG_PHASE_CHANGE, function(data) {
+      if (data && data.phase) {
+        vscode.postMessage({ type: 'getLog', phase: data.phase });
+      }
+    });
+
     // Request initial process stats from extension
     if (document.getElementById('processTreeSection')) {
       vscode.postMessage({ type: 'getProcessStats' });

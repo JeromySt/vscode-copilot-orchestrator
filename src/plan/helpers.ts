@@ -106,12 +106,19 @@ export function computeProgress(
  * @param nodeStates - Iterable of every node's execution state
  * @param hasStarted - Whether the plan has been started (plan.startedAt is set)
  * @param isPaused - Whether the plan is paused by user
+ * @param isArchived - Whether the plan has been archived (plan.archivedAt is set)
  */
 export function computePlanStatus(
   nodeStates: Iterable<NodeExecutionState>,
   hasStarted: boolean,
-  isPaused: boolean = false
+  isPaused: boolean = false,
+  isArchived: boolean = false
 ): PlanStatus {
+  // Archived is a terminal override — always return 'archived' when set
+  if (isArchived) {
+    return 'archived';
+  }
+
   // Convert to array so we can iterate multiple times
   const states = Array.from(nodeStates);
   

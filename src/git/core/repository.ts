@@ -229,13 +229,19 @@ export async function getDiffStats(from: string, to: string, cwd: string): Promi
 /**
  * Ensure orchestrator directories are in .gitignore.
  */
-export async function ensureGitignore(repoPath: string, patterns: string[], log?: GitLogger): Promise<void> {
+export async function ensureGitignore(
+  repoPath: string,
+  patterns: string[],
+  log?: GitLogger,
+  _readFile: (p: string, enc: BufferEncoding) => Promise<string> = (p, enc) => fs.promises.readFile(p, enc),
+  _writeFile: (p: string, data: string, enc: BufferEncoding) => Promise<void> = (p, d, enc) => fs.promises.writeFile(p, d, enc),
+): Promise<void> {
   const gitignorePath = path.join(repoPath, '.gitignore');
   
   try {
     let content = '';
     try {
-      content = await fs.promises.readFile(gitignorePath, 'utf-8');
+      content = await _readFile(gitignorePath, 'utf-8');
     } catch {
       // File doesn't exist
     }
@@ -257,7 +263,7 @@ export async function ensureGitignore(repoPath: string, patterns: string[], log?
       content += '# Copilot Orchestrator\n';
       content += toAdd.join('\n') + '\n';
       
-      await fs.promises.writeFile(gitignorePath, content, 'utf-8');
+      await _writeFile(gitignorePath, content, 'utf-8');
       log?.(`[git] Updated .gitignore with orchestrator directories`);
     }
   } catch (e) {

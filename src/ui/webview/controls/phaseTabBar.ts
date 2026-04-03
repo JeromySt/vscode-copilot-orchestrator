@@ -51,6 +51,7 @@ export function phaseStatusIcon(status: string): string {
 export class PhaseTabBar extends SubscribableControl {
   private elementId: string;
   private activePhase = 'all';
+  private userSelectedPhase = false;
   private phases: PhaseInfo[];
 
   constructor(bus: EventBus, controlId: string, elementId: string, phases?: PhaseInfo[]) {
@@ -68,7 +69,16 @@ export class PhaseTabBar extends SubscribableControl {
     const el = this.getElement(this.elementId);
     if (!el) { return; }
 
-    if (data.activePhase) { this.activePhase = data.activePhase; }
+    // Auto-follow: if the backend reports a new active phase, switch to it
+    // and request logs. Only auto-follow if user hasn't manually selected a phase.
+    const backendPhase = data.activePhase;
+    if (backendPhase && backendPhase !== this.activePhase && !this.userSelectedPhase) {
+      this.activePhase = backendPhase;
+      // Emit phase change so eventHandlers can request the log
+      this.bus.emit(Topics.LOG_PHASE_CHANGE, { phase: backendPhase });
+    } else if (backendPhase && !this.userSelectedPhase) {
+      this.activePhase = backendPhase;
+    }
 
     let html = '';
     for (const phase of this.phases) {
@@ -81,9 +91,10 @@ export class PhaseTabBar extends SubscribableControl {
     this.publishUpdate(data);
   }
 
-  /** Set the active phase tab. */
+  /** Set the active phase tab (user-initiated). */
   setActivePhase(phaseId: string): void {
     this.activePhase = phaseId;
+    this.userSelectedPhase = true;
     const el = this.getElement(this.elementId);
     if (!el || !el.querySelectorAll) { return; }
 
