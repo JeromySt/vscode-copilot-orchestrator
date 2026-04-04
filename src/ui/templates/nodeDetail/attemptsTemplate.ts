@@ -8,6 +8,13 @@
  */
 
 import { escapeHtml, formatDuration } from '../helpers';
+import {
+  phaseTabsHtml as executionPhaseTabsHtml,
+  errorHtml as executionErrorHtml,
+  contextHtml as executionContextHtml,
+  splitAttemptLogs,
+} from './executionCardTemplate';
+import type { ExecutionCardData } from './executionCardTemplate';
 
 /**
  * Per-phase step status mapping used in attempt records.
@@ -67,132 +74,40 @@ export interface AttemptHistoryData {
 }
 
 /**
- * Truncate a log file path for display in attempt context.
- *
- * @param filePath - Full path to log file.
- * @returns Truncated display string.
- */
-function truncateLogPath(filePath: string): string {
-  if (!filePath) {return '';}
-
-  const separator = filePath.includes('\\') ? '\\' : '/';
-  const parts = filePath.split(separator);
-  const filename = parts[parts.length - 1];
-  const prefix = parts[0] + separator;
-
-  let truncatedFilename = filename;
-  const logMatch = filename.match(/^([a-f0-9]{8})-[a-f0-9-]+_[a-f0-9-]+-([a-f0-9]{12})_(\d+\.log)$/i);
-  if (logMatch) {
-    truncatedFilename = `${logMatch[1]}....${logMatch[2]}_${logMatch[3]}`;
-  }
-
-  if (filePath.length <= 50) {return filePath;}
-
-  return `${prefix}....${separator}${truncatedFilename}`;
-}
-
-/**
- * Map a step status to a Unicode icon wrapped in a span.
- *
- * @param status - The step status string.
- * @returns HTML span with icon and status CSS class.
- */
-function stepIconHtml(status?: string): string {
-  const icon = status === 'success' ? '✓'
-    : status === 'failed' ? '✗'
-    : status === 'running' ? '⟳'
-    : status === 'skipped' ? '⊘'
-    : '○';
-  return `<span class="step-icon ${status || 'pending'}">${icon}</span>`;
-}
-
-/**
  * Build phase tabs for a specific historical attempt record.
  *
+ * @deprecated Use `executionCardHtml` with pre-split `logs` instead.
  * @param attempt - The attempt data with logs.
  * @returns HTML fragment string for the phase tab UI, or empty string if no logs.
  */
 export function attemptPhaseTabsHtml(attempt: AttemptCardData): string {
   if (!attempt.logs) {return '';}
+  const phaseLogs = splitAttemptLogs(attempt.logs);
 
-  const logs = attempt.logs;
-  const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
-
+  const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
   const phaseLabels: Record<string, string> = {
-    'all': '📄 Full Log',
-    'merge-fi': '↙↘ Merge FI',
-    'prechecks': '✓ Prechecks',
-    'work': '⚙ Work',
-    'commit': '💾 Commit',
-    'postchecks': '✓ Postchecks',
-    'merge-ri': '↗↙ Merge RI',
+    'all': '\uD83D\uDCC4 Full Log',
+    'merge-fi': '\u21D9\u21D8 Merge FI',
+    'prechecks': '\u2713 Prechecks',
+    'work': '\u2699 Work',
+    'commit': '\uD83D\uDCBE Commit',
+    'postchecks': '\u2713 Postchecks',
+    'merge-ri': '\u2197\u2199 Merge RI',
   };
 
-  const getPhaseStatus = (phase: string): string => {
-    if (phase === 'all') {return '';}
-    const status = (attempt.stepStatuses as any)?.[phase];
-    if (status === 'success') {return 'success';}
-    if (status === 'failed') {return 'failed';}
-    if (status === 'skipped') {return 'skipped';}
-    return '';
-  };
-
-  const tabs = phases.map(phase => {
-    const status = getPhaseStatus(phase);
-    const statusIcon = status === 'success' ? '✓' : status === 'failed' ? '✗' : status === 'skipped' ? '⊘' : '';
-    return `<button class="attempt-phase-tab ${phase === 'all' ? 'active' : ''} ${status}" 
-                    data-phase="${phase}" data-attempt="${attempt.attemptNumber}">
-              ${statusIcon} ${phaseLabels[phase]}
-            </button>`;
+  const tabs = phases.map(p => {
+    return '<button class="attempt-phase-tab' + (p === 'all' ? ' active' : '') + '"'
+      + ' data-phase="' + p + '" data-attempt="' + attempt.attemptNumber + '">'
+      + (phaseLabels[p] || p) + '</button>';
   }).join('');
 
-  const extractPhaseLogs = (phase: string): string => {
-    if (phase === 'all') {return logs;}
-
-    const phaseMarkers: Record<string, string> = {
-      'merge-fi': 'FORWARD INTEGRATION',
-      'prechecks': 'PRECHECKS',
-      'work': 'WORK',
-      'commit': 'COMMIT',
-      'postchecks': 'POSTCHECKS',
-      'merge-ri': 'REVERSE INTEGRATION',
-    };
-
-    const marker = phaseMarkers[phase];
-    if (!marker) {return '';}
-
-    const startPattern = new RegExp(`=+ ${marker}.*START =+`, 'i');
-    const endPattern = new RegExp(`=+ ${marker}.*END =+`, 'i');
-
-    const startMatch = logs.match(startPattern);
-    const endMatch = logs.match(endPattern);
-
-    if (startMatch && endMatch) {
-      const startIdx = logs.indexOf(startMatch[0]);
-      const endIdx = logs.indexOf(endMatch[0]) + endMatch[0].length;
-      return logs.slice(startIdx, endIdx);
-    }
-
-    const lines = logs.split('\n');
-    const filtered = lines.filter(line => {
-      const upper = line.toUpperCase();
-      return upper.includes(`[${phase.toUpperCase()}]`) || upper.includes(marker);
-    });
-    return filtered.length > 0 ? filtered.join('\n') : `No logs for ${phase} phase.`;
-  };
-
-  const phaseLogsData: Record<string, string> = {};
-  phases.forEach(p => phaseLogsData[p] = extractPhaseLogs(p));
-
-  return `
-      <div class="attempt-phases" data-attempt="${attempt.attemptNumber}">
-        <div class="attempt-phase-tabs">${tabs}</div>
-        <pre class="attempt-log-viewer" data-attempt="${attempt.attemptNumber}">${escapeHtml(phaseLogsData['all'])}</pre>
-        <script type="application/json" class="attempt-logs-data" data-attempt="${attempt.attemptNumber}">
-          ${JSON.stringify(phaseLogsData)}
-        </script>
-      </div>
-    `;
+  return '<div class="attempt-phases" data-attempt="' + attempt.attemptNumber + '">'
+    + '<div class="attempt-phase-tabs">' + tabs + '</div>'
+    + '<pre class="attempt-log-viewer" data-attempt="' + attempt.attemptNumber + '">' + escapeHtml(phaseLogs['all'] || '') + '<\/pre>'
+    + '<script type="application/json" class="attempt-logs-data" data-attempt="' + attempt.attemptNumber + '">'
+    + JSON.stringify(phaseLogs)
+    + '<\/script>'
+    + '</div>';
 }
 
 /**
@@ -203,7 +118,7 @@ export function attemptPhaseTabsHtml(attempt: AttemptCardData): string {
  */
 export function attemptCardHtml(attempt: AttemptCardData): string {
   const isRunning = attempt.status === 'running';
-  const duration = isRunning 
+  const duration = isRunning
     ? formatDuration(Math.round((Date.now() - attempt.startedAt) / 1000)) + '…'
     : formatDuration(Math.round((attempt.endedAt - attempt.startedAt) / 1000));
   const timestamp = new Date(attempt.startedAt).toLocaleString();
@@ -213,117 +128,85 @@ export function attemptCardHtml(attempt: AttemptCardData): string {
     : attempt.status === 'running' ? '#3794ff'
     : '#858585';
 
-  const statusIcon = attempt.status === 'succeeded' ? '✓'
-    : attempt.status === 'failed' ? '✗'
-    : attempt.status === 'running' ? '▶'
-    : '⊘';
+  const statusIcon = attempt.status === 'succeeded' ? '\u2713'
+    : attempt.status === 'failed' ? '\u2717'
+    : attempt.status === 'running' ? '\u25B6'
+    : '\u2298';
 
-  const triggerLabel = attempt.triggerType === 'auto-heal' ? '🔧 Auto-Heal'
-    : attempt.triggerType === 'retry' ? '🔄 Retry'
-    : attempt.triggerType === 'postchecks-revalidation' ? '🔍 Re-validation'
+  const triggerLabel = attempt.triggerType === 'auto-heal' ? '\uD83D\uDD27 Auto-Heal'
+    : attempt.triggerType === 'retry' ? '\uD83D\uDD04 Retry'
+    : attempt.triggerType === 'postchecks-revalidation' ? '\uD83D\uDD0D Re-validation'
     : '';
   const triggerBadge = triggerLabel
-    ? `<span class="attempt-trigger-badge">${triggerLabel}</span>`
+    ? '<span class="attempt-trigger-badge">' + triggerLabel + '</span>'
     : '';
 
-  const stepIndicators = `
-        ${stepIconHtml(attempt.stepStatuses?.['merge-fi'])}
-        ${stepIconHtml(attempt.stepStatuses?.prechecks)}
-        ${stepIconHtml(attempt.stepStatuses?.work)}
-        ${stepIconHtml(attempt.stepStatuses?.commit)}
-        ${stepIconHtml(attempt.stepStatuses?.postchecks)}
-        ${stepIconHtml(attempt.stepStatuses?.['merge-ri'])}
-      `;
+  const stepIcons = executionPhaseTabsHtml(attempt.stepStatuses as Record<string, string> || {}, isRunning);
+  const stepIndicators = '<span class="step-indicators">' + stepIcons + '</span>';
 
-  // ── Expanded body sections ──
+  // ── Body sections using shared executionCardTemplate functions ──
 
-  const errorHtml = attempt.error
-    ? `<div class="attempt-section attempt-error-section">
-        <div class="attempt-section-title">❌ Error</div>
-        <div class="attempt-error-body">
-          <div class="attempt-error-msg">${escapeHtml(attempt.error)}</div>
-          ${attempt.failedPhase ? `<div class="attempt-error-detail">Failed in phase: <strong>${attempt.failedPhase}</strong></div>` : ''}
-          ${attempt.exitCode !== undefined ? `<div class="attempt-error-detail">Exit code: <strong>${attempt.exitCode}</strong></div>` : ''}
-        </div>
-      </div>`
+  const errSection = executionErrorHtml(attempt.error, undefined, attempt.failedPhase, attempt.exitCode);
+
+  const metricsSection = attempt.metricsHtml
+    ? '<div class="attempt-section">'
+      + '<div class="attempt-section-title">\uD83D\uDCCA AI Usage</div>'
+      + attempt.metricsHtml
+      + '</div>'
     : '';
 
-  const metricsHtml = attempt.metricsHtml
-    ? `<div class="attempt-section">
-        <div class="attempt-section-title">📊 AI Usage</div>
-        ${attempt.metricsHtml}
-      </div>`
+  const ctxSection = executionContextHtml({
+    copilotSessionId: attempt.copilotSessionId,
+    baseCommit: attempt.baseCommit,
+    worktreePath: attempt.worktreePath,
+    logFilePath: attempt.logFilePath,
+  } as Partial<ExecutionCardData>);
+
+  const phaseTabsContent = attempt.logs ? attemptPhaseTabsHtml(attempt) : '';
+  const logsSection = phaseTabsContent
+    ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDCCB Logs</div>' + phaseTabsContent + '</div>'
     : '';
 
-  const contextItems: string[] = [];
-  if (attempt.baseCommit) {
-    contextItems.push(`<div class="attempt-ctx-row"><span class="attempt-ctx-label">Base</span><code class="attempt-ctx-value">${attempt.baseCommit.slice(0, 8)}</code></div>`);
-  }
-  if (attempt.worktreePath) {
-    contextItems.push(`<div class="attempt-ctx-row"><span class="attempt-ctx-label">Worktree</span><code class="attempt-ctx-value">${escapeHtml(attempt.worktreePath)}</code></div>`);
-  }
-  if (attempt.logFilePath) {
-    contextItems.push(`<div class="attempt-ctx-row"><span class="attempt-ctx-label">Log</span><span class="log-file-path attempt-ctx-value" data-path="${escapeHtml(attempt.logFilePath)}" title="${escapeHtml(attempt.logFilePath)}">📄 ${escapeHtml(truncateLogPath(attempt.logFilePath))}</span></div>`);
-  }
-  if (attempt.copilotSessionId) {
-    contextItems.push(`<div class="attempt-ctx-row"><span class="attempt-ctx-label">Session</span><span class="session-id attempt-ctx-value" data-session="${attempt.copilotSessionId}" title="Click to copy">${attempt.copilotSessionId.substring(0, 12)}… 📋</span></div>`);
-  }
-  const contextHtml = contextItems.length > 0
-    ? `<div class="attempt-section"><div class="attempt-section-title">🔗 Context</div><div class="attempt-ctx-grid">${contextItems.join('')}</div></div>`
+  const prechecksSection = attempt.prechecksUsedHtml
+    ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDD0D Prechecks</div>' + attempt.prechecksUsedHtml + '</div>'
+    : '';
+  const workSection = attempt.workUsedHtml
+    ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDCDD Work Spec</div>' + attempt.workUsedHtml + '</div>'
+    : '';
+  const postchecksSection = attempt.postchecksUsedHtml
+    ? '<div class="attempt-section"><div class="attempt-section-title">\u2705 Postchecks</div>' + attempt.postchecksUsedHtml + '</div>'
     : '';
 
-  const prechecksHtml = attempt.prechecksUsedHtml
-    ? `<div class="attempt-section"><div class="attempt-section-title">🔍 Prechecks</div>${attempt.prechecksUsedHtml}</div>`
+  const hasBodyContent = errSection || metricsSection || ctxSection || logsSection;
+  const runningPlaceholder = !hasBodyContent && isRunning
+    ? '<div class="attempt-section"><div class="attempt-running-indicator">\u27F3 Executing\u2026 see live log viewer above for current output.</div></div>'
     : '';
 
-  const workHtml = attempt.workUsedHtml
-    ? `<div class="attempt-section"><div class="attempt-section-title">📝 Work Spec</div>${attempt.workUsedHtml}</div>`
-    : '';
-
-  const postchecksHtml = attempt.postchecksUsedHtml
-    ? `<div class="attempt-section"><div class="attempt-section-title">✅ Postchecks</div>${attempt.postchecksUsedHtml}</div>`
-    : '';
-
-  const phaseTabsHtml = attempt.logs ? attemptPhaseTabsHtml(attempt) : '';
-  const logsHtml = phaseTabsHtml
-    ? `<div class="attempt-section"><div class="attempt-section-title">📋 Logs</div>${phaseTabsHtml}</div>`
-    : '';
-
-  // For running attempts with no content sections, show a status indicator
-  // so the expanded body isn't completely empty
-  const hasBodyContent = errorHtml || metricsHtml || contextItems.length > 0 || 
-    prechecksHtml || workHtml || postchecksHtml || logsHtml;
-  const runningPlaceholder = (!hasBodyContent && isRunning)
-    ? `<div class="attempt-section"><div class="attempt-running-indicator">⟳ Executing… see live log viewer above for current output.</div></div>`
-    : '';
-
-  return `
-        <div class="attempt-card" data-attempt="${attempt.attemptNumber}" style="border-left: 3px solid ${statusColor};">
-          <div class="attempt-header" data-expanded="false">
-            <div class="attempt-header-left">
-              <span class="attempt-status-icon" style="color:${statusColor};">${statusIcon}</span>
-              <span class="attempt-badge">#${attempt.attemptNumber}</span>
-              ${triggerBadge}
-              <span class="step-indicators">${stepIndicators}</span>
-            </div>
-            <div class="attempt-header-right">
-              <span class="attempt-time">${timestamp}</span>
-              <span class="attempt-duration">${duration}</span>
-              <span class="attempt-chevron">›</span>
-            </div>
-          </div>
-          <div class="attempt-body" style="display: none;">
-            ${runningPlaceholder}
-            ${errorHtml}
-            ${metricsHtml}
-            ${contextHtml}
-            ${prechecksHtml}
-            ${workHtml}
-            ${postchecksHtml}
-            ${logsHtml}
-          </div>
-        </div>
-      `;
+  return '<div class="attempt-card" data-attempt="' + attempt.attemptNumber + '" style="border-left: 3px solid ' + statusColor + ';">'
+    + '<div class="attempt-header" data-expanded="false">'
+    + '<div class="attempt-header-left">'
+    + '<span class="attempt-status-icon" style="color:' + statusColor + ';">' + statusIcon + '</span>'
+    + '<span class="attempt-badge">#' + attempt.attemptNumber + '</span>'
+    + triggerBadge
+    + stepIndicators
+    + '</div>'
+    + '<div class="attempt-header-right">'
+    + '<span class="attempt-time">' + timestamp + '</span>'
+    + '<span class="attempt-duration">' + duration + '</span>'
+    + '<span class="attempt-chevron">\u203A</span>'
+    + '</div>'
+    + '</div>'
+    + '<div class="attempt-body" style="display: none;">'
+    + runningPlaceholder
+    + errSection
+    + metricsSection
+    + ctxSection
+    + prechecksSection
+    + workSection
+    + postchecksSection
+    + logsSection
+    + '</div>'
+    + '</div>';
 }
 
 /**

@@ -333,7 +333,11 @@ export class JobExecutionEngine {
           // Using the worktree HEAD as baseCommit would make the commit phase think
           // there are no new commits → completedCommit = undefined → merge-RI no-op
           // → accumulated snapshot work never reaches the target branch.
-          if (isSvNode && plan.snapshot?.baseCommit) {
+          if (isSvNode && plan.snapshot?.originalBaseCommit) {
+            nodeState.baseCommit = plan.snapshot.originalBaseCommit;
+            this.log.info(`SV node: using original snapshot base commit ${plan.snapshot.originalBaseCommit.slice(0, 8)} (not worktree HEAD ${timing.baseCommit.slice(0, 8)})`);
+          } else if (isSvNode && plan.snapshot?.baseCommit) {
+            // Fallback for plans created before originalBaseCommit was added
             nodeState.baseCommit = plan.snapshot.baseCommit;
             this.log.info(`SV node: using snapshot base commit ${plan.snapshot.baseCommit.slice(0, 8)} (not worktree HEAD ${timing.baseCommit.slice(0, 8)})`);
           } else {
@@ -342,7 +346,13 @@ export class JobExecutionEngine {
         }
       } else {
         // Only set baseCommit on fresh worktree creation
-        nodeState.baseCommit = timing.baseCommit;
+        // For SV node, use the original snapshot base commit (before any rebases)
+        if (isSvNode && plan.snapshot?.originalBaseCommit) {
+          nodeState.baseCommit = plan.snapshot.originalBaseCommit;
+          this.log.info(`SV node (fresh): using original snapshot base ${plan.snapshot.originalBaseCommit.slice(0, 8)} for commit phase diff (worktree base: ${timing.baseCommit.slice(0, 8)})`);
+        } else {
+          nodeState.baseCommit = timing.baseCommit;
+        }
         
         // Capture the resolved base branch SHA on the plan (once).
         // This ensures RI merge diffs are computed against the original

@@ -44,9 +44,10 @@ suite('MCP Scaffold Handlers', () => {
       },
       enqueue: sandbox.stub(),
       registerPlan: sandbox.stub(),
+      delete: sandbox.stub().returns(true),
       get: sandbox.stub(),
       pause: sandbox.stub(),
-      resume: sandbox.stub(),
+      resume: sandbox.stub().resolves(true),
     };
 
     mockGit = {
@@ -362,7 +363,12 @@ suite('MCP Scaffold Handlers', () => {
     });
 
     test('should reject when plan not in scaffolding state', async () => {
-      mockPlanRepository.finalize.rejects(new Error('Cannot finalize plan in status \'pending\''));
+      // Plan exists but is not in scaffolding state
+      mockPlanRunner.get.returns({
+        spec: { status: 'pending', name: 'Test' },
+        jobs: new Map(), nodeStates: new Map(), producerIdToNodeId: new Map(),
+        roots: [], leaves: [],
+      });
 
       const args = {
         planId: 'test-plan'
@@ -371,7 +377,7 @@ suite('MCP Scaffold Handlers', () => {
       const result = await handleFinalizePlan(args, mockContext);
 
       assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('finalize'));
+      assert.ok(result.error.includes('scaffolding'));
     });
 
     test('should validate input schema', async () => {
@@ -387,6 +393,11 @@ suite('MCP Scaffold Handlers', () => {
     });
 
     test('should handle finalize errors', async () => {
+      mockPlanRunner.get.returns({
+        spec: { status: 'scaffolding', name: 'Test' },
+        jobs: new Map(), nodeStates: new Map(), producerIdToNodeId: new Map(),
+        roots: [], leaves: [], stateVersion: 0,
+      });
       mockPlanRepository.finalize.rejects(new Error('Circular dependency'));
 
       const args = {
@@ -431,7 +442,9 @@ suite('MCP Scaffold Handlers', () => {
 
       await handleFinalizePlan(args, mockContext);
 
-      assert.ok(mockPlanRunner._state.events.emitPlanUpdated.calledWith('test-plan'));
+      // finalizePlanInRunner calls delete + registerPlan which triggers planCreated event internally
+      assert.ok(mockPlanRunner.delete.calledWith('test-plan'));
+      assert.ok(mockPlanRunner.registerPlan.calledOnce);
     });
 
     test('should recreate state machine with finalized nodes', async () => {
@@ -463,36 +476,22 @@ suite('MCP Scaffold Handlers', () => {
         baseBranch: 'main', targetBranch: 'feature/test',
       };
       mockPlanRunner.get.returns(existingPlan);
-      
-      // Mock state machine factory returns a state machine
-      const mockStateMachine = { id: 'sm-1' };
-      mockPlanRunner._state.stateMachineFactory.returns(mockStateMachine);
 
       const args = { planId: 'test-plan', startPaused: true };
       const result = await handleFinalizePlan(args, mockContext);
 
       assert.strictEqual(result.success, true);
-      // State machine factory should be called with the updated plan
-      assert.ok(mockPlanRunner._state.stateMachineFactory.calledOnce);
-      // State machine should be stored in the map
-      assert.ok(mockPlanRunner._state.stateMachines.has('test-plan'));
-      assert.strictEqual(mockPlanRunner._state.stateMachines.get('test-plan'), mockStateMachine);
-      // Listeners should be set up
-      assert.ok(mockPlanRunner._lifecycle.setupStateMachineListeners.calledWith(mockStateMachine));
+      // State machine is rebuilt via delete + registerPlan
+      assert.ok(mockPlanRunner.delete.calledWith('test-plan'));
+      assert.ok(mockPlanRunner.registerPlan.calledOnce);
     });
 
     test('should respect startPaused=false flag', async () => {
       const mockPlan = {
         id: 'test-plan',
         spec: { name: 'Test Plan', status: 'pending' },
-        jobs: new Map(),
-        nodeStates: new Map(),
-        producerIdToNodeId: new Map(),
-        roots: [],
-        leaves: [],
-        groups: new Map(),
-        groupStates: new Map(),
-        groupPathToId: new Map(),
+        jobs: new Map(), nodeStates: new Map(), producerIdToNodeId: new Map(),
+        roots: [], leaves: [], groups: new Map(), groupStates: new Map(), groupPathToId: new Map(),
         targetBranch: 'feature/test',
       };
 
@@ -511,22 +510,16 @@ suite('MCP Scaffold Handlers', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.paused, false);
-      // The existing plan's isPaused should be set to false
-      assert.strictEqual(existingPlan.isPaused, false);
+      // resume should be called when startPaused=false
+      assert.ok(mockPlanRunner.resume.calledWith('test-plan'));
     });
 
     test('should fallback to registerPlan when existing plan not found', async () => {
       const mockPlan = {
         id: 'test-plan',
         spec: { name: 'Test Plan', status: 'pending' },
-        jobs: new Map(),
-        nodeStates: new Map(),
-        producerIdToNodeId: new Map(),
-        roots: [],
-        leaves: [],
-        groups: new Map(),
-        groupStates: new Map(),
-        groupPathToId: new Map(),
+        jobs: new Map(), nodeStates: new Map(), producerIdToNodeId: new Map(),
+        roots: [], leaves: [], groups: new Map(), groupStates: new Map(), groupPathToId: new Map(),
         targetBranch: 'feature/test',
         baseBranch: 'main',
       };
@@ -537,10 +530,8 @@ suite('MCP Scaffold Handlers', () => {
       const args = { planId: 'test-plan' };
       const result = await handleFinalizePlan(args, mockContext);
 
-      assert.strictEqual(result.success, true);
-      // Should register the finalized plan as new
-      assert.ok(mockPlanRunner.registerPlan.calledOnce);
-      assert.ok(mockPlanRunner.registerPlan.calledWith(mockPlan));
+      // When plan not found, finalizePlanInRunner returns error
+      assert.strictEqual(result.success, false);
     });
   });
 

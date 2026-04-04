@@ -66,6 +66,7 @@ export function renderPlanControls(data: PlanControlsData): string {
   return `
   <div class="plan-toolbar">
     <div class="actions">
+      ${isScaffolding ? '<button id="finalizeBtn" class="action-btn primary" onclick="finalizePlan()">Finalize & Start</button>' : ''}
       ${isScaffolding ? '' : pauseBtn}
       ${isScaffolding ? '' : startBtn}
       ${isScaffolding ? '' : resumeBtn}

@@ -343,6 +343,11 @@ suite('registerPlanCommands', () => {
 
     test('creates node detail panel with both planId and nodeId', async () => {
       registerCommands();
+      const nodeMap = new Map();
+      nodeMap.set('n1', { id: 'n1', name: 'Node 1', dependencies: [], dependents: [] });
+      const nodeStates = new Map();
+      nodeStates.set('n1', { status: 'pending', version: 0, attempts: 0 });
+      mockPlanRunner.get.returns({ id: 'p1', spec: { name: 'Plan 1' }, jobs: nodeMap, nodeStates, producerIdToNodeId: new Map(), roots: ['n1'], leaves: ['n1'] });
       try {
         await executeCommand('orchestrator.showNodeDetails', 'p1', 'n1');
       } catch {
@@ -353,8 +358,10 @@ suite('registerPlanCommands', () => {
     test('creates node panel from node quickPick selection', async () => {
       registerCommands();
       const nodeMap = new Map();
-      nodeMap.set('n1', { id: 'n1', spec: { name: 'Node 1' } });
-      mockPlanRunner.get.returns({ id: 'p1', jobs: nodeMap });
+      nodeMap.set('n1', { id: 'n1', name: 'Node 1', dependencies: [], dependents: [] });
+      const nodeStates = new Map();
+      nodeStates.set('n1', { status: 'pending', version: 0, attempts: 0 });
+      mockPlanRunner.get.returns({ id: 'p1', spec: { name: 'Plan 1' }, jobs: nodeMap, nodeStates, producerIdToNodeId: new Map(), roots: ['n1'], leaves: ['n1'] });
       sandbox.stub(vscode.window, 'showQuickPick').resolves({ label: 'Node 1', nodeId: 'n1' } as any);
 
       try {
@@ -369,13 +376,15 @@ suite('registerPlanCommands', () => {
       mockPlanRunner.getAll.returns([{ id: 'p1', spec: { name: 'Plan 1' } }]);
       
       const nodeMap = new Map();
-      nodeMap.set('n1', { id: 'n1', spec: { name: 'Node 1' } });
+      nodeMap.set('n1', { id: 'n1', name: 'Node 1', dependencies: [], dependents: [] });
       
       // First quickPick returns plan, second returns node
       const qpStub = sandbox.stub(vscode.window, 'showQuickPick');
       qpStub.onFirstCall().resolves({ label: 'Plan 1', planId: 'p1' } as any);
       qpStub.onSecondCall().resolves({ label: 'Node 1', nodeId: 'n1' } as any);
-      mockPlanRunner.get.returns({ id: 'p1', jobs: nodeMap });
+      const nodeStates = new Map();
+      nodeStates.set('n1', { status: 'pending', version: 0, attempts: 0 });
+      mockPlanRunner.get.returns({ id: 'p1', spec: { name: 'Plan 1' }, jobs: nodeMap, nodeStates, producerIdToNodeId: new Map(), roots: ['n1'], leaves: ['n1'] });
 
       try {
         await executeCommand('orchestrator.showNodeDetails');

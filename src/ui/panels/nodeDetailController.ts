@@ -25,6 +25,10 @@ export interface NodeDetailCommands {
   sendLog(phase: string): void;
   /** Send process stats */
   sendProcessStats(): void;
+  /** Subscribe to log file updates for an attempt */
+  subscribeLog(attemptNumber: number, tag: string): void;
+  /** Unsubscribe from log file updates */
+  unsubscribeLog(tag: string): void;
   /** Retry a node */
   retryNode(planId: string, nodeId: string, resumeSession: boolean): Promise<void>;
   /** Force fail a node */
@@ -82,6 +86,12 @@ export class NodeDetailController {
         break;
       case 'getProcessStats':
         this._commands.sendProcessStats();
+        break;
+      case 'subscribeLog':
+        this._commands.subscribeLog(message.attemptNumber, message.tag);
+        break;
+      case 'unsubscribeLog':
+        this._commands.unsubscribeLog(message.tag);
         break;
       case 'copyToClipboard':
         if (message.text) {

@@ -33,33 +33,23 @@ export interface LogViewerData {
  * Map a phase status to a Unicode icon character.
  *
  * @param status - The phase status string.
- * @returns A single Unicode icon character.
+ * @returns A Unicode icon character.
  */
 export function getPhaseIcon(status: string): string {
   switch (status) {
-    case 'success': return '✓';
-    case 'failed': return '✗';
-    case 'running': return '⟳';
-    case 'skipped': return '⊘';
-    default: return '○';
+    case 'success': return '\u2713';  // ✓
+    case 'failed':  return '\u2717';  // ✗
+    case 'running': return '\u27F3';  // ⟳
+    case 'skipped': return '\u2298';  // ⊘
+    default:        return '\u2022';  // • (bullet — visible at all sizes unlike ○)
   }
 }
 
 /**
  * Map a merge status to a directional merge icon.
- *
- * @param status - The merge phase status string.
- * @param arrow - Direction indicator ('↓' for FI, '↑' for RI).
- * @returns A styled merge icon string.
  */
 export function getMergeIcon(status: string, arrow: string): string {
-  switch (status) {
-    case 'success': return `✓${arrow}`;
-    case 'failed': return `✗${arrow}`;
-    case 'running': return `⟳${arrow}`;
-    case 'skipped': return `○${arrow}`;
-    default: return `○${arrow}`;
-  }
+  return getPhaseIcon(status) + arrow;
 }
 
 /**

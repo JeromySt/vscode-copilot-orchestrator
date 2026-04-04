@@ -52,6 +52,39 @@ export function buildSkillContent(
     lines.push('', `**Worktree Path:** ${worktreePath}`);
   }
 
+  lines.push(
+    '',
+    '## Command Output Caching (MANDATORY)',
+    '',
+    'When running shell commands that produce output you may need to analyze:',
+    '',
+    '1. **Commands that take ≥10 seconds** MUST capture output to a temp file.',
+    '   Use `Tee-Object` (PowerShell) or `tee` (bash) to both display AND capture:',
+    '   ```powershell',
+    '   # PowerShell — captures AND shows live output',
+    '   npm run test 2>&1 | Tee-Object -FilePath "$env:TEMP\\test-output.txt"',
+    '   ```',
+    '   ```bash',
+    '   # Bash — captures AND shows live output',
+    '   npm run test 2>&1 | tee /tmp/test-output.txt',
+    '   ```',
+    '',
+    '2. **NEVER re-run a long command** just to apply a different filter.',
+    '   Search the captured file instead:',
+    '   ```powershell',
+    '   Select-String -Path "$env:TEMP\\test-output.txt" -Pattern "FAIL|error"',
+    '   ```',
+    '   ```bash',
+    '   grep -i "FAIL\\|error" /tmp/test-output.txt',
+    '   ```',
+    '',
+    '3. **Commands under 10 seconds** may use direct stdout piping without capture.',
+    '',
+    '4. **Build, test, coverage, and lint commands** ALWAYS capture — they invariably',
+    '   take >10 seconds and you will need to analyze their output.',
+    '',
+  );
+
   lines.push('');
   return lines.join('\n');
 }

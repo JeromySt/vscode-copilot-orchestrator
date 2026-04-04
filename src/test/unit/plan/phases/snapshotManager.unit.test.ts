@@ -25,7 +25,7 @@ function mockGitOperations(): IGitOperations {
       stashPop: sinon.stub().resolves(true),
     },
     worktrees: {
-      createDetachedWithTiming: sinon.stub().resolves({ durationMs: 100, baseCommit: 'abc123def456' }),
+      createDetachedWithTiming: sinon.stub().resolves({ durationMs: 100, baseCommit: 'abc123def456', originalBaseCommit: 'abc123def456' }),
       removeSafe: sinon.stub().resolves(true),
       isValid: sinon.stub().resolves(true),
       list: sinon.stub().resolves([]),
@@ -75,7 +75,7 @@ suite('SnapshotManager', () => {
     (git.repository.resolveRef as sinon.SinonStub).resolves('base123');
     const mgr = new SnapshotManager(git);
 
-    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'base123' };
+    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'base123', originalBaseCommit: 'base123' };
     const result = await mgr.rebaseOnTarget(snapshot, 'main', '/repo');
 
     assert.strictEqual(result, true);
@@ -86,7 +86,7 @@ suite('SnapshotManager', () => {
     (git.repository.resolveRef as sinon.SinonStub).resolves('newhead456');
     const mgr = new SnapshotManager(git);
 
-    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'oldbase123' };
+    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'oldbase123', originalBaseCommit: 'oldbase123' };
     // rebaseOnTarget uses execAsync internally which will fail in test env
     // but we're testing the logic flow
     const result = await mgr.rebaseOnTarget(snapshot, 'main', '/repo');
@@ -99,7 +99,7 @@ suite('SnapshotManager', () => {
     const mgr = new SnapshotManager(git);
     const logSpy = sinon.spy();
 
-    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'abc123' };
+    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'abc123', originalBaseCommit: 'abc123' };
     await mgr.cleanupSnapshot(snapshot, '/repo', logSpy);
 
     assert.ok((git.worktrees.removeSafe as sinon.SinonStub).calledOnce);
@@ -113,7 +113,7 @@ suite('SnapshotManager', () => {
     (git.branches.deleteLocal as sinon.SinonStub).rejects(new Error('delete failed'));
     const mgr = new SnapshotManager(git);
 
-    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'abc123' };
+    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'abc123', originalBaseCommit: 'abc123' };
     // Should not throw
     await mgr.cleanupSnapshot(snapshot, '/repo');
   });
@@ -123,7 +123,7 @@ suite('SnapshotManager', () => {
     (git.worktrees.isValid as sinon.SinonStub).resolves(true);
     const mgr = new SnapshotManager(git);
 
-    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'abc123' };
+    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'abc123', originalBaseCommit: 'abc123' };
     const result = await mgr.isSnapshotValid(snapshot);
     assert.strictEqual(result, true);
   });
@@ -133,7 +133,7 @@ suite('SnapshotManager', () => {
     (git.worktrees.isValid as sinon.SinonStub).rejects(new Error('invalid'));
     const mgr = new SnapshotManager(git);
 
-    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'abc123' };
+    const snapshot = { branch: 'orchestrator/snapshot/plan-123', worktreePath: '/wt', baseCommit: 'abc123', originalBaseCommit: 'abc123' };
     const result = await mgr.isSnapshotValid(snapshot);
     assert.strictEqual(result, false);
   });

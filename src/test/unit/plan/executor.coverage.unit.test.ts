@@ -162,7 +162,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -216,7 +216,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: { TEST_VAR: 'value' } } as any,
+      plan: { id: 'p1', env: { TEST_VAR: 'value' }, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -271,7 +271,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -335,7 +335,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -420,6 +420,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
           PLAN_VAR: 'plan',
           SHARED_VAR: 'from_plan',
         },
+        spec: {},
       } as any,
       node,
       baseCommit: 'abc',
@@ -489,7 +490,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -548,7 +549,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -604,7 +605,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -655,7 +656,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -695,7 +696,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -749,7 +750,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -799,7 +800,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -854,7 +855,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -891,7 +892,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,

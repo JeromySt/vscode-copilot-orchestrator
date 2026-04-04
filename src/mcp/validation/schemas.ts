@@ -259,6 +259,17 @@ export const createPlanSchema = {
       minLength: 1,
       maxLength: 100,
       description: 'Plan ID that must complete successfully before this plan auto-resumes. The plan will be created paused.'
+    },
+    worktreeInit: {
+      type: 'array',
+      items: {
+        oneOf: [
+          { type: 'string', maxLength: 50000 },
+          workSpecObjectSchema
+        ]
+      },
+      maxItems: 10,
+      description: 'Worktree initialization commands executed in the setup phase of every job, after forward-integration merge and before prechecks/work. Use for installing dependencies, restoring packages, or generating files. Supports shell, process, and agent specs. Also auto-detects .github/instructions/worktree-init.instructions.md if present.'
     }
   },
   required: ['name', 'jobs'],
@@ -772,6 +783,17 @@ export const scaffoldPlanSchema = {
       minLength: 1,
       maxLength: 100,
       description: 'Plan ID that must complete successfully before this plan auto-resumes. The plan will be created paused.'
+    },
+    worktreeInit: {
+      type: 'array',
+      items: {
+        oneOf: [
+          { type: 'string', maxLength: 50000 },
+          workSpecObjectSchema
+        ]
+      },
+      maxItems: 10,
+      description: 'Worktree initialization commands executed in the setup phase of every job. Use for installing dependencies, restoring packages, or generating files.'
     }
   },
   required: ['name'],

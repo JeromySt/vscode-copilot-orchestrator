@@ -66,6 +66,18 @@ export class CopilotStatsParser {
   private modelBreakdown?: ModelUsageBreakdown[];
   private parsingModels = false;
   private hasAnyMetric = false;
+  /** Timestamp when stats summary output started (first recognized stats line) */
+  private statsStartedAt?: number;
+
+  /**
+   * Returns the timestamp when the CLI started printing stats summary output,
+   * or undefined if stats haven't been detected yet. Use this to implement
+   * a grace timeout: if stats started but the process hasn't exited within
+   * N seconds, it's hung and should be force-killed.
+   */
+  getStatsStartedAt(): number | undefined {
+    return this.statsStartedAt;
+  }
 
   /**
    * Feed a single line of stdout to the parser.
@@ -81,6 +93,7 @@ export class CopilotStatsParser {
     if (premiumMatch) {
       this.premiumRequests = parseFloat(premiumMatch[1]);
       this.hasAnyMetric = true;
+      this.statsStartedAt = Date.now();
       this.parsingModels = false;
       return;
     }

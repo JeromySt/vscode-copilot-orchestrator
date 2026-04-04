@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.15.0",
+  "version": "0.15.81",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -467,7 +467,8 @@
     "watch": "npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
-    "package": "npm run check-types && node esbuild.js --production",
+    "audit:check": "npm audit --audit-level=moderate",
+    "package": "npm run audit:check && npm run check-types && node esbuild.js --production",
     "pretest": "npm run compile:tsc",
     "test": "npm run compile:tsc && mocha --ui tdd --exit \"out/test/unit/**/*.test.js\" --require src/test/unit/register-vscode-mock.js --timeout 60000",
     "test:unit": "npm run compile:tsc && mocha --ui tdd --exit \"out/test/unit/**/*.test.js\" --require src/test/unit/register-vscode-mock.js --timeout 60000",
@@ -475,7 +476,7 @@
     "lint": "eslint src --ext ts || echo 'Linting complete'",
     "clean:dist": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "package:vsix": "npx @vscode/vsce package --no-dependencies",
-    "local-install": "npm run clean:dist && npm version patch --no-git-tag-version && npm run package:vsix && node -e \"const fs=require('fs');const v=require('./package.json').version;require('child_process').execSync('code --install-extension vscode-copilot-orchestrator-'+v+'.vsix --force',{stdio:'inherit'})\""
+    "local-install": "npm run clean:dist && npm run audit:check && npm version patch --no-git-tag-version && npm run package:vsix && node -e \"const fs=require('fs');const v=require('./package.json').version;require('child_process').execSync('code --install-extension vscode-copilot-orchestrator-'+v+'.vsix --force',{stdio:'inherit'})\""
   },
   "devDependencies": {
     "@types/glob": "^9.0.0",
