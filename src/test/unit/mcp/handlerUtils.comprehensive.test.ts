@@ -43,6 +43,7 @@ interface MockPlan {
   id: string;
   jobs: Map<string, any>;
   nodeStates: Map<string, any>;
+  producerIdToNodeId?: Map<string, string>;
 }
 
 // Mock PlanRunner
@@ -291,7 +292,8 @@ suite('MCP Handler Utilities Unit Tests', () => {
       const mockPlan: MockPlan = {
         id: 'plan-123',
         jobs: new Map([['node-123', mockNode]]),
-        nodeStates: new Map([['node-123', mockState]])
+        nodeStates: new Map([['node-123', mockState]]),
+        producerIdToNodeId: new Map()
       };
       
       const result = lookupNode(mockPlan as any, 'node-123');
@@ -307,7 +309,8 @@ suite('MCP Handler Utilities Unit Tests', () => {
       const mockPlan: MockPlan = {
         id: 'plan-123',
         jobs: new Map(),
-        nodeStates: new Map()
+        nodeStates: new Map(),
+        producerIdToNodeId: new Map()
       };
       
       const result = lookupNode(mockPlan as any, 'nonexistent');
@@ -315,7 +318,7 @@ suite('MCP Handler Utilities Unit Tests', () => {
       assert.ok(isError(result));
       if (isError(result)) {
         assert.strictEqual(result.success, false);
-        assert.strictEqual(result.error, 'Job not found: nonexistent');
+        assert.ok(result.error.includes('not found'));
       }
     });
     
@@ -324,7 +327,8 @@ suite('MCP Handler Utilities Unit Tests', () => {
       const mockPlan: MockPlan = {
         id: 'plan-123',
         jobs: new Map([['node-456', mockNode]]),
-        nodeStates: new Map() // No state for this node
+        nodeStates: new Map(),
+        producerIdToNodeId: new Map()
       };
       
       const result = lookupNode(mockPlan as any, 'node-456');

@@ -12,6 +12,7 @@ import {
   errorResult,
 } from '../utils';
 import { Logger } from '../../../core/logger';
+import { finalizePlanInRunner } from '../../../plan/finalizePlanHelper';
 
 const log = Logger.for('mcp');
 
@@ -35,59 +36,14 @@ export async function handleFinalizePlan(args: any, ctx: PlanHandlerContext): Pr
   const { planId, startPaused } = args;
 
   try {
-    // Finalize the plan through the repository (validates DAG, resolves deps)
-    const finalizedPlan = await ctx.PlanRepository.finalize(planId);
-
-    // TODO: Replace (ctx.PlanRunner as any) access with a typed finalizeScaffoldPlan() method on IPlanRunner
-    // Update the existing in-memory plan with finalized state
-    const existingPlan = ctx.PlanRunner.get(planId);
-    if (existingPlan) {
-      // Transition from scaffolding to real plan
-      (existingPlan.spec as any).status = 'pending';
-      existingPlan.jobs = finalizedPlan.jobs;
-      existingPlan.nodeStates = finalizedPlan.nodeStates;
-      existingPlan.producerIdToNodeId = finalizedPlan.producerIdToNodeId;
-      existingPlan.roots = finalizedPlan.roots;
-      existingPlan.leaves = finalizedPlan.leaves;
-      existingPlan.groups = finalizedPlan.groups || new Map();
-      existingPlan.groupStates = finalizedPlan.groupStates || new Map();
-      existingPlan.groupPathToId = finalizedPlan.groupPathToId || new Map();
-      existingPlan.targetBranch = finalizedPlan.targetBranch;
-      existingPlan.stateVersion = (existingPlan.stateVersion || 0) + 1;
-      // Attach the lazy spec loader so the execution engine can hydrate work/prechecks/postchecks
-      existingPlan.definition = finalizedPlan.definition;
-      
-      // Respect startPaused — default to paused so user can review before running.
-      // IMPORTANT: If the plan has resumeAfterPlan set, it MUST start paused regardless
-      // of the startPaused flag. The plan will auto-resume when its dependency completes.
-      const hasResumeAfterPlan = !!existingPlan.resumeAfterPlan;
-      const shouldPause = hasResumeAfterPlan || startPaused !== false; // Default true; forced true if chained
-      existingPlan.isPaused = shouldPause;
-      if (hasResumeAfterPlan && startPaused === false) {
-        log.info('Plan has resumeAfterPlan set — overriding startPaused=false to keep plan paused until dependency completes', {
-          planId, resumeAfterPlan: existingPlan.resumeAfterPlan,
-        });
-      }
-      
-      // Recreate state machine with the now-populated nodes
-      const sm = (ctx.PlanRunner as any)._state?.stateMachineFactory?.(existingPlan);
-      if (sm) {
-        (ctx.PlanRunner as any)._lifecycle?.setupStateMachineListeners?.(sm);
-        (ctx.PlanRunner as any)._state?.stateMachines?.set(planId, sm);
-      }
-    } else {
-      // Fallback — register as new (shouldn't happen if scaffold registered it)
-      const hasResumeAfterPlan = !!finalizedPlan.resumeAfterPlan;
-      finalizedPlan.isPaused = hasResumeAfterPlan || startPaused !== false;
-      ctx.PlanRunner.registerPlan(finalizedPlan);
+    const result = await finalizePlanInRunner(planId, ctx.PlanRunner, ctx.PlanRepository, { startPaused });
+    if (!result.success) {
+      return errorResult(result.error || 'Finalize failed');
     }
 
-    // Emit planUpdated (not planCreated — the plan already exists in the sidebar)
-    (ctx.PlanRunner as any)._state?.events?.emitPlanUpdated?.(planId);
-    log.info('Plan finalized', { planId, name: finalizedPlan.spec.name });
-
+    const plan = result.plan!;
+    
     // Build job mapping for response (maps producerId → internal jobId)
-    const plan = ctx.PlanRunner.get(planId) || finalizedPlan;
     const jobMapping: Record<string, string> = {};
     for (const [producerId, nodeId] of plan.producerIdToNodeId) {
       jobMapping[producerId] = nodeId;

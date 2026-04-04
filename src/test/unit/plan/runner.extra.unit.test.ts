@@ -244,14 +244,14 @@ suite('PlanRunner - ensureBranchReady callback (snapshot creation)', () => {
     const dir = makeTmpDir();
     const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
 
-    const createSnapshotSpy = sinon.stub().resolves({ branch: 'snap', worktreePath: '/wt', baseCommit: 'abc' });
+    const createSnapshotSpy = sinon.stub().resolves({ branch: 'snap', worktreePath: '/wt', baseCommit: 'abc', originalBaseCommit: 'abc' });
     snapshotManagerMod.SnapshotManager = function() {
       return { createSnapshot: createSnapshotSpy };
     };
 
     const plan = createMockPlan('plan-snap3', {
       targetBranch: 'main',
-      snapshot: { branch: 'existing-snap', worktreePath: '/existing', baseCommit: 'def' },
+      snapshot: { branch: 'existing-snap', worktreePath: '/existing', baseCommit: 'def', originalBaseCommit: 'def' },
     });
 
     const callback = (runner as any)._pump['ensureBranchReady'];
@@ -265,7 +265,7 @@ suite('PlanRunner - ensureBranchReady callback (snapshot creation)', () => {
     const dir = makeTmpDir();
     const runner = new PlanRunner({ storagePath: path.join(dir, 'plans') }, createRunnerDeps(path.join(dir, 'plans')));
 
-    const createSnapshotSpy = sinon.stub().resolves({ branch: 'snap', worktreePath: '/wt', baseCommit: 'abc' });
+    const createSnapshotSpy = sinon.stub().resolves({ branch: 'snap', worktreePath: '/wt', baseCommit: 'abc', originalBaseCommit: 'abc' });
     snapshotManagerMod.SnapshotManager = function() {
       return { createSnapshot: createSnapshotSpy };
     };

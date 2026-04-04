@@ -78,6 +78,7 @@ export function renderPlanScripts(data: PlanScriptsData): string {
     function resumePlan() { vscode.postMessage({ type: 'resume' }); }
     function recoverPlan() { vscode.postMessage({ type: 'recover' }); }
     function deletePlan() { vscode.postMessage({ type: 'delete' }); }
+    function finalizePlan() { vscode.postMessage({ type: 'finalize' }); }
     function refresh() { vscode.postMessage({ type: 'refresh' }); }
     function showWorkSummary() { vscode.postMessage({ type: 'showWorkSummary' }); }
 

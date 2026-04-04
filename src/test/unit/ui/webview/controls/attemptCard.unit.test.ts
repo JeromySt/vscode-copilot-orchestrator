@@ -36,16 +36,29 @@ function makeContainer(): any {
   };
 }
 
+// Mock the vscode API that AttemptCard uses for subscribeLog messages
+function mockVscode(): () => void {
+  const prev = (globalThis as any).vscode;
+  (globalThis as any).vscode = { postMessage: () => {} };
+  return () => {
+    if (prev === undefined) { delete (globalThis as any).vscode; }
+    else { (globalThis as any).vscode = prev; }
+  };
+}
+
 suite('AttemptCard', () => {
   let bus: EventBus;
   let restoreDoc: (() => void) | undefined;
+  let restoreVscode: (() => void) | undefined;
 
   setup(() => {
     bus = new EventBus();
+    restoreVscode = mockVscode();
   });
 
   teardown(() => {
     if (restoreDoc) { restoreDoc(); restoreDoc = undefined; }
+    if (restoreVscode) { restoreVscode(); restoreVscode = undefined; }
   });
 
   test('subscribes to ATTEMPT_UPDATE', () => {

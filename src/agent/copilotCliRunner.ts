@@ -313,6 +313,24 @@ export class CopilotCliRunner {
 applyTo: '${applyToScope}'
 ---
 
+# CRITICAL RULES (read before doing ANYTHING)
+
+## Command Output Rule
+**NEVER use \`Select-Object -Last\`, \`Select-Object -First\`, \`| head\`, or \`| tail\` to truncate command output.**
+Instead, ALWAYS capture full output to a file, then search it:
+
+\`\`\`powershell
+# CORRECT: capture full output, then search
+npm run test 2>&1 | Tee-Object -FilePath "${tmpDir}\\test-output.txt"
+Select-String -Path "${tmpDir}\\test-output.txt" -Pattern "FAIL|error"
+
+# WRONG: truncating output loses critical information
+npm run test 2>&1 | Select-Object -Last 40
+\`\`\`
+
+This applies to ALL commands that run builds, tests, coverage, or linting.
+Short commands (<10 seconds) like \`git status\` or \`ls\` are exempt.
+
 # Current Task
 
 ${task}
@@ -402,6 +420,8 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       const statsParser = new CopilotStatsParser();
       let timeoutHandle: NodeJS.Timeout | undefined;
       let wasKilledByTimeout = false;
+      let statsHangTimer: NodeJS.Timeout | undefined;
+      let wasKilledByStatsHang = false;
       
       // timeout === 0 means no timeout (agent work can run indefinitely)
       const effectiveTimeout = timeout > 0 ? Math.min(timeout, 2147483647) : 0;
@@ -446,6 +466,26 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
             statsParser.feedLine(line.trim());
             onOutput?.(line.trim());
             if (!sawTaskComplete && line.includes('Task complete')) { sawTaskComplete = true; }
+            // Start grace timer when stats summary is detected but process hasn't exited
+            if (!statsHangTimer && statsParser.getStatsStartedAt()) {
+              this.logger.info(`[${label}] Stats summary detected — starting 30s grace timer for process exit`);
+              statsHangTimer = setTimeout(() => {
+                this.logger.warn(`[${label}] CLI process hung after stats summary (30s grace expired) — force-killing PID ${proc.pid}`);
+                wasKilledByStatsHang = true;
+                try {
+                  if (this.environment.platform === 'win32') {
+                    // Windows: SIGTERM is ignored by Node.js child processes — use taskkill
+                    this.spawner.spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t'], { shell: true });
+                  } else {
+                    proc.kill('SIGTERM');
+                    // If SIGTERM doesn't work, escalate after 5s
+                    setTimeout(() => {
+                      try { proc.kill('SIGKILL'); } catch { /* ignore */ }
+                    }, 5000);
+                  }
+                } catch { /* ignore */ }
+              }, 30_000);
+            }
           }
         });
         extractSession(text);
@@ -465,8 +505,12 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       
       proc.on('exit', (code, signal) => {
         if (timeoutHandle) { clearTimeout(timeoutHandle); }
+        if (statsHangTimer) { clearTimeout(statsHangTimer); }
         // Windows: code=null & signal=null after normal completion → treat as 0 if marker seen
-        const effectiveCode = (code === null && signal === null && sawTaskComplete) ? 0 : code;
+        const effectiveCode = (code === null && signal === null && sawTaskComplete) ? 0
+          // Stats-hang kill: the work completed, only the process hung — treat as success
+          : (wasKilledByStatsHang && statsParser.getMetrics()) ? 0
+          : code;
         const metrics = statsParser.getMetrics();
         if (metrics && !metrics.tokenUsage && metrics.modelBreakdown?.length) {
           const totals = metrics.modelBreakdown.reduce(
@@ -483,6 +527,8 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
           let reason: string;
           if (wasKilledByTimeout) {
             reason = `Copilot CLI killed by signal TIMEOUT after ${effectiveTimeout}ms (PID ${proc.pid})`;
+          } else if (wasKilledByStatsHang) {
+            reason = `Copilot CLI hung after stats summary, force-killed after 30s grace (PID ${proc.pid})`;
           } else if (signal) {
             reason = `Copilot CLI was killed by signal ${signal} (PID ${proc.pid})`;
           } else {
@@ -493,6 +539,8 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
         } else {
           if (code === null) {
             this.logger.info(`[${label}] Copilot CLI completed (exit code null coerced to 0 — task completion marker was present)`);
+          } else if (wasKilledByStatsHang) {
+            this.logger.warn(`[${label}] Copilot CLI completed (stats-hang force-kill → treated as success since work finished)`);
           } else {
             this.logger.info(`[${label}] Copilot CLI completed successfully`);
           }
@@ -502,6 +550,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       
       proc.on('error', (err) => {
         if (timeoutHandle) { clearTimeout(timeoutHandle); }
+        if (statsHangTimer) { clearTimeout(statsHangTimer); }
         this.logger.error(`[${label}] Copilot CLI error: ${err.message}`);
         resolve({ success: false, error: err.message });
       });

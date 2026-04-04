@@ -111,7 +111,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
       return { success: true, commit: 'abc123' };
     });
 
-    const mockPlan = { id: 'test-plan', nodes: [] } as any;
+    const mockPlan = { id: 'test-plan', nodes: [], spec: {} } as any;
     const mockNode: JobNode = {
       id: 'test-node',
       producerId: 'test-producer',
@@ -164,7 +164,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
       exitCode: 1
     } as JobExecutionResult);
 
-    const mockPlan = { id: 'test-plan', nodes: [] } as any;
+    const mockPlan = { id: 'test-plan', nodes: [], spec: {} } as any;
     const mockNode: JobNode = {
       id: 'test-node',
       producerId: 'test-producer',
@@ -217,7 +217,7 @@ suite('DefaultJobExecutor Coverage - Error Paths', () => {
       exitCode: 2
     } as JobExecutionResult);
 
-    const mockPlan = { id: 'test-plan', nodes: [] } as any;
+    const mockPlan = { id: 'test-plan', nodes: [], spec: {} } as any;
     const mockNode: JobNode = {
       id: 'test-node',
       producerId: 'test-producer',

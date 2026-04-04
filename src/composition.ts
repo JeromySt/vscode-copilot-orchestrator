@@ -411,13 +411,14 @@ export function createReleaseManager(
 export function createBulkPlanActions(
   container: ServiceContainer,
   planRunner: import('./interfaces/IPlanRunner').IPlanRunner,
+  planRepository?: import('./interfaces/IPlanRepository').IPlanRepository,
 ): import('./interfaces/IBulkPlanActions').IBulkPlanActions {
   const scoped = container.createScope();
   scoped.register(
     Tokens.IBulkPlanActions,
     () => {
       const { BulkPlanActions } = require('./plan/bulkPlanActions');
-      return new BulkPlanActions(planRunner);
+      return new BulkPlanActions(planRunner, planRepository);
     },
   );
   return scoped.resolve<import('./interfaces/IBulkPlanActions').IBulkPlanActions>(Tokens.IBulkPlanActions);

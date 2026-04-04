@@ -227,6 +227,48 @@ export class DefaultJobExecutor implements JobExecutor {
         context.phaseTiming!.push({ phase: 'setup', startedAt: phaseStart });
         const ctx = makeCtx('setup');
         const r = await new SetupPhaseExecutor(phaseDeps()).execute(ctx);
+        if (!r.success) { context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now(); this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION END =========='); stepStatuses.setup = 'failed'; context.onStepStatusChange?.('setup', 'failed'); return { success: false, error: `Setup failed: ${r.error}`, stepStatuses, failedPhase: 'setup', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
+
+        // ---- WORKTREE INIT ----
+        // Collect init specs: explicit plan-level + auto-detected instruction file
+        const initSpecs: WorkSpec[] = [];
+        // 1. Auto-detect .github/instructions/worktree-init.instructions.md
+        const initInstructionsPath = path.join(worktreePath, '.github', 'instructions', 'worktree-init.instructions.md');
+        if (fs.existsSync(initInstructionsPath)) {
+          try {
+            const initMd = fs.readFileSync(initInstructionsPath, 'utf-8');
+            if (initMd.trim()) {
+              this.logEntry(executionKey, 'setup', 'info', 'Auto-detected worktree-init.instructions.md');
+              initSpecs.push({ type: 'agent', instructions: initMd, modelTier: 'fast' } as any);
+            }
+          } catch { /* ignore read errors */ }
+        }
+        // 2. Explicit plan-level worktreeInit specs
+        if (plan.spec.worktreeInit && plan.spec.worktreeInit.length > 0) {
+          this.logEntry(executionKey, 'setup', 'info', `Plan defines ${plan.spec.worktreeInit.length} worktreeInit spec(s)`);
+          initSpecs.push(...plan.spec.worktreeInit);
+        }
+        // Execute init specs sequentially
+        for (let i = 0; i < initSpecs.length; i++) {
+          const initSpec = initSpecs[i];
+          const normalized = normalizeWorkSpec(initSpec);
+          const specLabel = normalized?.type || 'unknown';
+          this.logEntry(executionKey, 'setup', 'info', `Running worktreeInit [${i + 1}/${initSpecs.length}] (${specLabel})`);
+          const initCtx = makeCtx('setup');
+          initCtx.workSpec = initSpec;
+          initCtx.env = mergeEnv(initSpec);
+          const initResult = await new WorkPhaseExecutor(phaseDeps()).execute(initCtx);
+          if (!initResult.success) {
+            context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
+            this.logEntry(executionKey, 'setup', 'error', `worktreeInit [${i + 1}] failed: ${initResult.error}`);
+            this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION END ==========');
+            stepStatuses.setup = 'failed'; context.onStepStatusChange?.('setup', 'failed');
+            return { success: false, error: `Worktree init failed: ${initResult.error}`, stepStatuses, failedPhase: 'setup', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming };
+          }
+          if (initResult.copilotSessionId) { capturedSessionId = initResult.copilotSessionId; }
+        }
+        if (initSpecs.length > 0) { this.logEntry(executionKey, 'setup', 'info', `All ${initSpecs.length} worktreeInit spec(s) completed successfully`); }
+
         context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION END ==========');
         if (!r.success) { stepStatuses.setup = 'failed'; context.onStepStatusChange?.('setup', 'failed'); return { success: false, error: `Setup failed: ${r.error}`, stepStatuses, failedPhase: 'setup', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }

@@ -31,6 +31,10 @@ export interface HeaderData {
   endedAt?: number;
   /** Copilot session ID */
   copilotSessionId?: string;
+  /** Model name if explicitly set on work spec */
+  model?: string;
+  /** Model tier (fast/standard/premium) from work spec */
+  modelTier?: string;
   /** Error message if failed */
   error?: string;
   /** Reason for failure */
@@ -107,6 +111,12 @@ export function executionStateHtml(data: HeaderData): string {
       <div class="meta-item">
         <div class="meta-label">Started</div>
         <div class="meta-value">${new Date(data.startedAt).toLocaleString()}</div>
+      </div>
+      ` : ''}
+      ${data.model || data.modelTier ? `
+      <div class="meta-item">
+        <div class="meta-label">Model</div>
+        <div class="meta-value">${data.model ? data.model : `<em>${data.modelTier}</em> tier`}</div>
       </div>
       ` : ''}
       ${data.copilotSessionId ? `

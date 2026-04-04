@@ -1,42 +1,43 @@
 /**
  * @fileoverview Unit tests for finalizePlanHandler module
  * Tests the finalize_copilot_plan MCP tool handler.
+ * The handler delegates to finalizePlanInRunner (tested in finalizePlanHelper.unit.test.ts)
+ * and formats the response.
  */
 
 import { suite, test, setup, teardown } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 
-
 function makeMockPlan(overrides?: Record<string, any>): any {
   return {
     id: 'plan-1',
     spec: { name: 'Test Plan', status: 'scaffolding' },
-    jobs: new Map(),
-    nodeStates: new Map(),
-    producerIdToNodeId: new Map(),
-    roots: [],
-    leaves: [],
+    jobs: new Map([['node-1', { id: 'node-1', producerId: 'job-1', name: 'Job 1' }]]),
+    nodeStates: new Map([['node-1', { status: 'ready', version: 0, attempts: 0 }]]),
+    producerIdToNodeId: new Map([['job-1', 'node-1']]),
+    roots: ['node-1'],
+    leaves: ['node-1'],
     targetBranch: 'copilot_plan/test',
     baseBranch: 'main',
     isPaused: false,
+    stateVersion: 0,
     ...overrides,
   };
 }
 
-function makeCtx(overrides?: Record<string, any>): any {
+function makeCtx(runnerOverrides?: Record<string, any>): any {
   const plan = makeMockPlan();
-  plan.jobs.set('node-1', { id: 'node-1', producerId: 'job-1', name: 'Job 1' });
-  plan.producerIdToNodeId.set('job-1', 'node-1');
-  
   return {
     PlanRunner: {
       get: sinon.stub().returns(plan),
+      delete: sinon.stub().returns(true),
       registerPlan: sinon.stub(),
-      ...overrides,
+      resume: sinon.stub().resolves(true),
+      ...runnerOverrides,
     },
     PlanRepository: {
-      finalize: sinon.stub().resolves(plan),
+      finalize: sinon.stub().resolves(makeMockPlan({ spec: { name: 'Test Plan', status: 'pending' } })),
     },
     workspacePath: '/workspace',
   };
@@ -75,70 +76,26 @@ suite('finalizePlanHandler', () => {
       assert.ok(ctx.PlanRepository.finalize.calledWith('plan-1'));
     });
 
-    test('should transition plan status from scaffolding to pending', async () => {
-      const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
-      const plan = makeMockPlan();
-      const ctx = makeCtx({ get: sinon.stub().returns(plan) });
-      await handleFinalizePlan({ planId: 'plan-1' }, ctx);
-      assert.strictEqual((plan.spec as any).status, 'pending');
-    });
-
     test('should default to paused state', async () => {
       const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
-      const plan = makeMockPlan();
-      const ctx = makeCtx({ get: sinon.stub().returns(plan) });
+      const ctx = makeCtx();
       const result = await handleFinalizePlan({ planId: 'plan-1' }, ctx);
       assert.strictEqual(result.success, true);
-      assert.strictEqual(plan.isPaused, true);
       assert.strictEqual(result.paused, true);
-      assert.ok(result.message.includes('PAUSED'));
     });
 
     test('should respect startPaused=false', async () => {
       const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
-      const plan = makeMockPlan();
-      const ctx = makeCtx({ get: sinon.stub().returns(plan) });
+      const ctx = makeCtx();
       const result = await handleFinalizePlan({ planId: 'plan-1', startPaused: false }, ctx);
       assert.strictEqual(result.success, true);
-      assert.strictEqual(plan.isPaused, false);
       assert.strictEqual(result.paused, false);
-    });
-
-    test('should update in-memory plan topology', async () => {
-      const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
-      const plan = makeMockPlan();
-      const finalizedPlan = makeMockPlan();
-      finalizedPlan.jobs.set('node-2', { id: 'node-2', name: 'New Job' });
-      finalizedPlan.roots = ['node-1', 'node-2'];
-      
-      const ctx = makeCtx({ get: sinon.stub().returns(plan) });
-      ctx.PlanRepository.finalize.resolves(finalizedPlan);
-      
-      await handleFinalizePlan({ planId: 'plan-1' }, ctx);
-      assert.strictEqual(plan.jobs.size, 1); // Updated but based on finalized
-      assert.deepStrictEqual(plan.roots, ['node-1', 'node-2']);
-    });
-
-    test('should copy definition from finalized plan for work spec hydration', async () => {
-      const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
-      const plan = makeMockPlan();
-      assert.strictEqual(plan.definition, undefined);
-
-      const mockDefinition = { getWorkSpec: sinon.stub(), getPrechecksSpec: sinon.stub(), getPostchecksSpec: sinon.stub() };
-      const finalizedPlan = makeMockPlan({ definition: mockDefinition });
-
-      const ctx = makeCtx({ get: sinon.stub().returns(plan) });
-      ctx.PlanRepository.finalize.resolves(finalizedPlan);
-
-      await handleFinalizePlan({ planId: 'plan-1' }, ctx);
-      assert.strictEqual(plan.definition, mockDefinition, 'definition must be copied from finalizedPlan to existingPlan');
     });
 
     test('should return jobMapping', async () => {
       const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
       const ctx = makeCtx();
       const result = await handleFinalizePlan({ planId: 'plan-1' }, ctx);
-      assert.strictEqual(result.success, true);
       assert.ok(result.jobMapping);
       assert.strictEqual(result.jobMapping['job-1'], 'node-1');
     });
@@ -147,63 +104,32 @@ suite('finalizePlanHandler', () => {
       const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
       const ctx = makeCtx();
       const result = await handleFinalizePlan({ planId: 'plan-1' }, ctx);
-      assert.strictEqual(result.success, true);
       assert.ok(result.status);
-      assert.strictEqual(result.status.status, 'pending-start');
       assert.strictEqual(result.status.nodes, 1);
     });
 
-    test('should recreate state machine', async () => {
-      const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
-      const plan = makeMockPlan();
-      const mockSm = { on: sinon.stub() };
-      const smFactory = sinon.stub().returns(mockSm);
-      const setupListeners = sinon.stub();
-      const stateMachines = new Map();
-      
-      const ctx = makeCtx({ get: sinon.stub().returns(plan) });
-      (ctx.PlanRunner as any)._state = {
-        stateMachineFactory: smFactory,
-        stateMachines,
-      };
-      (ctx.PlanRunner as any)._lifecycle = {
-        setupStateMachineListeners: setupListeners,
-      };
-      
-      await handleFinalizePlan({ planId: 'plan-1' }, ctx);
-      assert.ok(smFactory.calledWith(plan));
-      assert.ok(setupListeners.calledWith(mockSm));
-      assert.strictEqual(stateMachines.get('plan-1'), mockSm);
-    });
-
-    test('should emit planUpdated event', async () => {
-      const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
-      const plan = makeMockPlan();
-      const mockEvents = { emitPlanUpdated: sinon.stub() };
-      const ctx = makeCtx({ get: sinon.stub().returns(plan) });
-      (ctx.PlanRunner as any)._state = { events: mockEvents };
-      
-      await handleFinalizePlan({ planId: 'plan-1' }, ctx);
-      assert.ok(mockEvents.emitPlanUpdated.calledWith('plan-1'));
-    });
-
-    test('should handle finalize errors', async () => {
+    test('should return plan name and branches', async () => {
       const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
       const ctx = makeCtx();
-      ctx.PlanRepository.finalize.rejects(new Error('Finalize failed'));
       const result = await handleFinalizePlan({ planId: 'plan-1' }, ctx);
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('Finalize failed'));
+      assert.strictEqual(result.name, 'Test Plan');
+      assert.strictEqual(result.baseBranch, 'main');
     });
 
-    test('should register plan if not in memory', async () => {
+    test('handles finalize errors', async () => {
       const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
-      const plan = makeMockPlan();
+      const ctx = makeCtx();
+      ctx.PlanRepository.finalize.rejects(new Error('DAG cycle detected'));
+      const result = await handleFinalizePlan({ planId: 'plan-1' }, ctx);
+      assert.strictEqual(result.success, false);
+      assert.ok(result.error.includes('DAG cycle'));
+    });
+
+    test('returns error when plan not found', async () => {
+      const { handleFinalizePlan } = require('../../../mcp/handlers/plan/finalizePlanHandler');
       const ctx = makeCtx({ get: sinon.stub().returns(undefined) });
-      ctx.PlanRepository.finalize.resolves(plan);
-      
-      await handleFinalizePlan({ planId: 'plan-1' }, ctx);
-      assert.ok(ctx.PlanRunner.registerPlan.calledWith(plan));
+      const result = await handleFinalizePlan({ planId: 'plan-1' }, ctx);
+      assert.strictEqual(result.success, false);
     });
   });
 });

@@ -33,6 +33,7 @@ function makeMockPlan(overrides?: Record<string, any>): any {
     spec: { name: 'Test Plan' },
     jobs,
     nodeStates,
+    producerIdToNodeId: new Map([['job-1', 'job-1']]),
     isPaused: false,
     definition: {},
     ...overrides,

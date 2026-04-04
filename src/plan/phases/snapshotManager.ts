@@ -43,8 +43,14 @@ export interface SnapshotInfo {
   /** Absolute path to the snapshot worktree on disk. */
   worktreePath: string;
 
-  /** Commit SHA that the snapshot was originally branched from. */
+  /** Commit SHA that the snapshot was originally branched from.
+   *  Updated by rebaseOnTarget() to reflect the current rebase base. */
   baseCommit: string;
+
+  /** The original base commit at snapshot creation time.
+   *  Never mutated — used by the SV node's commit phase to detect
+   *  accumulated changes for merge-RI to targetBranch. */
+  originalBaseCommit?: string;
 }
 
 export class SnapshotManager {
@@ -92,7 +98,7 @@ export class SnapshotManager {
 
     log?.(`Snapshot worktree ready at ${worktreePath}`);
 
-    return { branch, worktreePath, baseCommit };
+    return { branch, worktreePath, baseCommit, originalBaseCommit: baseCommit };
   }
 
   /**
@@ -120,7 +126,7 @@ export class SnapshotManager {
     log?.(`Rebasing snapshot onto ${targetBranch} (${currentTarget.slice(0, 8)})...`);
 
     const result = await this.git.command.execAsync(
-      ['rebase', '--onto', currentTarget, snapshot.baseCommit, snapshot.branch],
+      ['rebase', '--rebase-merges', '--onto', currentTarget, snapshot.baseCommit, snapshot.branch],
       { cwd: snapshot.worktreePath },
     );
 

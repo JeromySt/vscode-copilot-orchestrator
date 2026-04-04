@@ -162,7 +162,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -216,7 +216,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: { TEST_VAR: 'value' } } as any,
+      plan: { id: 'p1', env: { TEST_VAR: 'value' }, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -271,7 +271,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -335,7 +335,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -420,6 +420,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
           PLAN_VAR: 'plan',
           SHARED_VAR: 'from_plan',
         },
+        spec: {},
       } as any,
       node,
       baseCommit: 'abc',
@@ -489,7 +490,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -548,7 +549,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -604,7 +605,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -655,7 +656,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -695,7 +696,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -749,7 +750,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -799,7 +800,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -854,7 +855,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -891,7 +892,7 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     });
 
     const ctx: ExecutionContext = {
-      plan: { id: 'p1', env: {} } as any,
+      plan: { id: 'p1', env: {}, spec: {} } as any,
       node,
       baseCommit: 'abc',
       worktreePath: worktreeDir,
@@ -903,5 +904,127 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     // Verify cleanup happened (activeExecutions should be cleared)
     const isActive = executor.isActive('p1', 'n1');
     assert.strictEqual(isActive, false, 'execution should be cleaned up after error');
+  });
+
+  test('worktreeInit: auto-detects .github/instructions/worktree-init.instructions.md', async () => {
+    const dir = makeTmpDir();
+    const worktreeDir = makeTmpDir();
+    // Create the init instructions file
+    const initDir = path.join(worktreeDir, '.github', 'instructions');
+    fs.mkdirSync(initDir, { recursive: true });
+    fs.writeFileSync(path.join(initDir, 'worktree-init.instructions.md'), '# Init\nRun npm ci');
+
+    const executor = new DefaultJobExecutor(
+      new DefaultProcessSpawner(), new DefaultEvidenceValidator(),
+      new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner
+    );
+    executor.setStoragePath(dir);
+
+    let initRan = false;
+    sandbox.stub(SetupPhaseExecutor.prototype, 'execute').resolves({ success: true });
+    const workStub = sandbox.stub(WorkPhaseExecutor.prototype, 'execute').callsFake(async (ctx: PhaseContext) => {
+      if (ctx.phase === 'setup' && ctx.workSpec) { initRan = true; }
+      return { success: true };
+    });
+    sandbox.stub(CommitPhaseExecutor.prototype, 'execute').resolves({ success: true, commit: 'abc' });
+
+    const node = makeNode({ work: { type: 'shell', command: 'echo test' } });
+    const ctx: ExecutionContext = {
+      plan: { id: 'p1', env: {}, spec: {} } as any,
+      node, baseCommit: 'abc', worktreePath: worktreeDir, attemptNumber: 1,
+    };
+
+    const result = await executor.execute(ctx);
+    assert.ok(result.success, 'execution should succeed');
+    assert.ok(initRan, 'worktreeInit should have run from auto-detected file');
+  });
+
+  test('worktreeInit: executes explicit plan.spec.worktreeInit specs', async () => {
+    const dir = makeTmpDir();
+    const worktreeDir = makeTmpDir();
+    const executor = new DefaultJobExecutor(
+      new DefaultProcessSpawner(), new DefaultEvidenceValidator(),
+      new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner
+    );
+    executor.setStoragePath(dir);
+
+    const initSpecs: any[] = [];
+    sandbox.stub(SetupPhaseExecutor.prototype, 'execute').resolves({ success: true });
+    sandbox.stub(WorkPhaseExecutor.prototype, 'execute').callsFake(async (ctx: PhaseContext) => {
+      if (ctx.phase === 'setup' && ctx.workSpec) { initSpecs.push(ctx.workSpec); }
+      return { success: true };
+    });
+    sandbox.stub(CommitPhaseExecutor.prototype, 'execute').resolves({ success: true, commit: 'abc' });
+
+    const node = makeNode({ work: { type: 'shell', command: 'echo test' } });
+    const ctx: ExecutionContext = {
+      plan: { id: 'p1', env: {}, spec: { worktreeInit: [
+        { type: 'shell', command: 'npm ci' },
+        { type: 'shell', command: 'dotnet restore' },
+      ] } } as any,
+      node, baseCommit: 'abc', worktreePath: worktreeDir, attemptNumber: 1,
+    };
+
+    const result = await executor.execute(ctx);
+    assert.ok(result.success);
+    assert.strictEqual(initSpecs.length, 2, 'both init specs should execute');
+  });
+
+  test('worktreeInit: failing init spec fails setup phase', async () => {
+    const dir = makeTmpDir();
+    const worktreeDir = makeTmpDir();
+    const executor = new DefaultJobExecutor(
+      new DefaultProcessSpawner(), new DefaultEvidenceValidator(),
+      new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner
+    );
+    executor.setStoragePath(dir);
+
+    sandbox.stub(SetupPhaseExecutor.prototype, 'execute').resolves({ success: true });
+    sandbox.stub(WorkPhaseExecutor.prototype, 'execute').callsFake(async (ctx: PhaseContext) => {
+      if (ctx.phase === 'setup') { return { success: false, error: 'npm ci failed' }; }
+      return { success: true };
+    });
+    sandbox.stub(CommitPhaseExecutor.prototype, 'execute').resolves({ success: true, commit: 'abc' });
+
+    const node = makeNode({ work: { type: 'shell', command: 'echo test' } });
+    const ctx: ExecutionContext = {
+      plan: { id: 'p1', env: {}, spec: { worktreeInit: [{ type: 'shell', command: 'npm ci' }] } } as any,
+      node, baseCommit: 'abc', worktreePath: worktreeDir, attemptNumber: 1,
+    };
+
+    const result = await executor.execute(ctx);
+    assert.strictEqual(result.success, false);
+    assert.ok(result.error?.includes('init failed'));
+    assert.strictEqual(result.failedPhase, 'setup');
+  });
+
+  test('applyFailureConfig: applies onFailure settings from work spec', async () => {
+    const dir = makeTmpDir();
+    const worktreeDir = makeTmpDir();
+    const executor = new DefaultJobExecutor(
+      new DefaultProcessSpawner(), new DefaultEvidenceValidator(),
+      new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner
+    );
+    executor.setStoragePath(dir);
+
+    sandbox.stub(SetupPhaseExecutor.prototype, 'execute').resolves({ success: true });
+    sandbox.stub(WorkPhaseExecutor.prototype, 'execute').resolves({ success: false, error: 'work failed' });
+
+    const node = makeNode({
+      work: {
+        type: 'shell', command: 'echo fail',
+        onFailure: { noAutoHeal: true, message: 'Custom failure', resumeFromPhase: 'prechecks' },
+      },
+    });
+    const ctx: ExecutionContext = {
+      plan: { id: 'p1', env: {}, spec: {} } as any,
+      node, baseCommit: 'abc', worktreePath: worktreeDir, attemptNumber: 1,
+    };
+
+    const result = await executor.execute(ctx);
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.noAutoHeal, true);
+    assert.strictEqual(result.failureMessage, 'Custom failure');
+    assert.strictEqual(result.overrideResumeFromPhase, 'prechecks');
   });
 });

@@ -112,7 +112,34 @@ IMPORTANT: For agent work, specify 'model' INSIDE the work object (not at job le
 Agent instructions MUST be in Markdown format for proper rendering.
 
 SHELL OPTIONS: "cmd" | "powershell" | "pwsh" | "bash" | "sh"
-POWERSHELL NOTE: Do NOT use '2>&1' in PowerShell commands.`,
+POWERSHELL NOTE: Do NOT use '2>&1' in PowerShell commands.
+
+RETURNS:
+{
+  "success": true,
+  "planId": "uuid",                    // Use this ID for all subsequent operations
+  "name": "Plan Name",
+  "baseBranch": "main",
+  "targetBranch": "feat/my-feature",   // Auto-created if targeting default branch
+  "paused": true,                      // true if startPaused (default) or resumeAfterPlan set
+  "message": "Human-readable summary",
+  "jobMapping": {                      // Maps your producerIds to internal node UUIDs
+    "my-job": "uuid-1",
+    "__snapshot-validation__": "uuid-2" // Auto-injected SV node
+  },
+  "status": {
+    "status": "pending" | "pending-start",
+    "nodes": 3,    // Total job count including SV
+    "roots": 2,    // Jobs with no dependencies
+    "leaves": 1    // Jobs with no dependents (SV is always the sole leaf)
+  },
+  "warnings": ["..."]                  // Validation warnings (e.g., missing postchecks)
+}
+
+NEXT STEPS after creation:
+- If paused: use resume_copilot_plan to start execution
+- Monitor: use get_copilot_plan_status with the planId
+- Modify: use reshape_copilot_plan to add/remove jobs on a running/paused plan`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -143,7 +170,11 @@ POWERSHELL NOTE: Do NOT use '2>&1' in PowerShell commands.`,
           },
           startPaused: {
             type: 'boolean',
-            description: 'Create the plan in paused state for review before execution (default: true). Set to false to start immediately.'
+            description: 'Create the plan in paused state for review before execution (default: true). Set to false to start immediately. NOTE: If resumeAfterPlan is set, the plan always starts paused regardless of this flag.'
+          },
+          resumeAfterPlan: {
+            type: 'string',
+            description: 'Plan ID of another plan that must complete before this plan auto-resumes. Creates a plan-to-plan dependency chain. The plan starts paused and automatically resumes when the referenced plan succeeds. If the referenced plan is canceled or deleted, this plan is unblocked. Use for sequencing plans on the same target branch (e.g., a follow-up refactor after an initial implementation).'
           },
           env: {
             type: 'object',
@@ -169,6 +200,16 @@ POWERSHELL NOTE: Do NOT use '2>&1' in PowerShell commands.`,
                 }
               }
             ]
+          },
+          worktreeInit: {
+            type: 'array',
+            description: 'Worktree initialization commands executed in the setup phase of EVERY job, after forward-integration merge and before prechecks/work. Runs sequentially; if any fails, the job fails in setup. Use for dependency installation, package restore, code generation, or git hook setup. Supports all standard work spec types (shell, process, agent). Also auto-detects .github/instructions/worktree-init.instructions.md — if present in the repo, it is executed as an agent init step automatically (no config needed). Example: [{"type": "shell", "command": "npm ci", "shell": "bash"}, {"type": "shell", "command": "dotnet husky install"}]',
+            items: {
+              oneOf: [
+                { type: 'string' },
+                { type: 'object', properties: { type: { type: 'string', enum: ['process', 'shell', 'agent'] }, command: { type: 'string' }, executable: { type: 'string' }, args: { type: 'array', items: { type: 'string' } }, shell: { type: 'string' }, instructions: { type: 'string' } } }
+              ]
+            }
           },
           jobs: {
             type: 'array',
@@ -284,7 +325,7 @@ SKILL-AWARE INSTRUCTIONS: If the project has .github/skills/ directories, read t
           },
           jobId: { 
             type: 'string', 
-            description: 'Job ID or producerId' 
+            description: 'Job UUID, producerId, or job name. Use the UUID from the jobMapping field in the create/finalize response for best results. ProducerId and name are also accepted.' 
           },
           phase: {
             type: 'string',
@@ -320,7 +361,7 @@ Use this to analyze the history of retries and their outcomes.`,
           },
           jobId: { 
             type: 'string', 
-            description: 'Job ID or producerId' 
+            description: 'Job UUID, producerId, or job name. Use the UUID from the jobMapping field in the create/finalize response for best results. ProducerId and name are also accepted.' 
           },
           attemptNumber: { 
             type: 'number', 
@@ -473,7 +514,7 @@ Options:
           jobIds: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional: specific job IDs to retry. If omitted, retries all failed jobs.'
+            description: 'Optional: specific job UUIDs, producerIds, or names to retry. If omitted, retries all failed jobs.'
           },
           newWork: {
             description: `Optional replacement work for the retry. Can be:
@@ -604,9 +645,14 @@ NOTES:
     // =========================================================================
     {
       name: 'update_copilot_plan',
-      description: `Update plan-level settings. Use to change environment variables or concurrency limits on an existing plan.
+      description: `Update plan-level settings. Use to change environment variables, concurrency limits, or plan chaining on an existing plan.
 
 The plan can be in any state (scaffolding, paused, running). Changes take effect for the next job execution.
+
+PLAN CHAINING (resumeAfterPlan):
+- Set resumeAfterPlan to a plan ID to make this plan wait for that plan to complete
+- The plan will auto-pause and auto-resume when the dependency succeeds
+- Set to empty string or null to remove the dependency
 
 ENVIRONMENT VARIABLES:
 - Set env to apply environment variables to ALL jobs in the plan
@@ -614,8 +660,8 @@ ENVIRONMENT VARIABLES:
 - Pass {} to clear all plan-level env vars
 
 EXAMPLES:
+- Chain plans: { "planId": "<uuid>", "resumeAfterPlan": "<other-plan-id>" }
 - Set OpenSSL path: { "planId": "<uuid>", "env": { "OPENSSL_DIR": "C:\\\\vcpkg\\\\installed\\\\x64-windows" } }
-- Set multiple: { "planId": "<uuid>", "env": { "RUST_LOG": "debug", "CARGO_TARGET_DIR": "/tmp/target" } }
 - Change concurrency: { "planId": "<uuid>", "maxParallel": 4 }`,
       inputSchema: {
         type: 'object',
@@ -629,6 +675,10 @@ EXAMPLES:
           maxParallel: {
             type: 'number',
             description: 'Max concurrent jobs (0 = unlimited, defers to global capacity)'
+          },
+          resumeAfterPlan: {
+            type: 'string',
+            description: 'Plan ID of another plan that must complete before this plan auto-resumes. Set to empty string to remove the dependency.'
           }
         },
         required: ['planId']
@@ -640,7 +690,7 @@ EXAMPLES:
     // =========================================================================
     {
       name: 'scaffold_copilot_plan',
-      description: 'Create an empty plan scaffold for incremental job building. Returns a planId. The plan appears in the UI as "Scaffolding". Use add_copilot_plan_job to add jobs one at a time, then finalize_copilot_plan to start. RECOMMENDED for plans with 5+ jobs to avoid large payloads.',
+      description: 'Create an empty plan scaffold for incremental job building. Returns a planId. The plan appears in the UI as "Scaffolding". Use add_copilot_plan_job to add jobs one at a time, then finalize_copilot_plan to start. RECOMMENDED for plans with 5+ jobs to avoid large payloads.\\n\\nRETURNS:\\n{ \"success\": true, \"planId\": \"uuid\", \"specsDir\": \"/path/to/specs\", \"message\": \"...\" }\\n\\nWORKFLOW:\\n1. scaffold_copilot_plan → get planId\\n2. add_copilot_plan_job (repeat for each job) → get jobId confirmation\\n3. finalize_copilot_plan → validates DAG, injects SV node, starts execution\\n\\nThe plan is visible in the UI sidebar during scaffolding with an \"Under Construction\" badge.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -664,7 +714,11 @@ EXAMPLES:
           },
           startPaused: {
             type: 'boolean',
-            description: 'Create the plan in paused state for review before execution (default: true)'
+            description: 'Create the plan in paused state for review before execution (default: true). NOTE: If resumeAfterPlan is set, the plan always starts paused regardless of this flag.'
+          },
+          resumeAfterPlan: {
+            type: 'string',
+            description: 'Plan ID of another plan that must complete before this plan auto-resumes. Creates a plan-to-plan dependency chain. The plan starts paused and automatically resumes when the referenced plan succeeds. If the referenced plan is canceled or deleted, this plan is unblocked.'
           },
           cleanUpSuccessfulWork: { 
             type: 'boolean', 
@@ -682,6 +736,16 @@ EXAMPLES:
           },
           verifyRi: {
             description: 'Optional verification command run as the work phase of the auto-injected Snapshot Validation node. Executes after all leaf nodes complete, validating the accumulated snapshot before merging to targetBranch. Auto-healable: on failure, Copilot CLI attempts to fix the issue.'
+          },
+          worktreeInit: {
+            type: 'array',
+            description: 'Worktree initialization commands executed in the setup phase of EVERY job. Runs after FI merge, before prechecks/work. Use for npm ci, dotnet restore, husky install, etc. Also auto-detects .github/instructions/worktree-init.instructions.md if present in the repo.',
+            items: {
+              oneOf: [
+                { type: 'string' },
+                { type: 'object', properties: { type: { type: 'string', enum: ['process', 'shell', 'agent'] }, command: { type: 'string' }, shell: { type: 'string' }, instructions: { type: 'string' } } }
+              ]
+            }
           }
         },
         required: ['name']
@@ -708,7 +772,12 @@ EXAMPLES:
   Process: {"type": "process", "executable": "node", "args": ["build.js"]}
 
 LIMITS: name ≤80, task ≤200, instructions ≤100KB, work string ≤50KB.
-Use camelCase for properties: maxTurns, modelTier, allowedFolders, allowedUrls.`,
+Use camelCase for properties: maxTurns, modelTier, allowedFolders, allowedUrls.
+
+RETURNS:
+{ "success": true, "jobId": "producerId", "message": "Job 'producerId' added to plan 'planId'. Task: ..." }
+
+NEXT: Continue adding jobs, then call finalize_copilot_plan when all jobs are added.`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -786,7 +855,26 @@ Object properties: type (required: agent|shell|process), command, instructions (
 
     {
       name: 'finalize_copilot_plan',
-      description: 'Validate and start a scaffolded plan. Resolves dependencies, checks for cycles, transitions from Scaffolding to execution.',
+      description: `Validate and start a scaffolded plan. Resolves dependencies, checks for cycles, injects Snapshot Validation node, transitions from Scaffolding to execution.
+
+RETURNS:
+{
+  "success": true,
+  "planId": "uuid",
+  "name": "Plan Name",
+  "baseBranch": "main",
+  "targetBranch": "feat/my-feature",
+  "paused": false,
+  "message": "Plan finalized with N jobs.",
+  "jobMapping": { "my-job": "uuid-1", "__snapshot-validation__": "uuid-2" },
+  "status": { "status": "pending", "nodes": 3, "roots": 2, "leaves": 1 },
+  "warnings": ["..."]
+}
+
+NEXT STEPS:
+- If paused: use resume_copilot_plan to start
+- Monitor: use get_copilot_plan_status with the planId
+- The plan begins executing immediately unless startPaused is true`,
       inputSchema: {
         type: 'object',
         properties: {

@@ -69,7 +69,7 @@ function makeState(extras?: Record<string, any>) {
   return {
     plans: new Map(),
     stateMachines: new Map(),
-    persistence: { save: sinon.stub(), load: sinon.stub(), getStoragePath: sinon.stub().returns('/tmp'), delete: sinon.stub() },
+    persistence: { save: sinon.stub(), load: sinon.stub(), loadAll: sinon.stub().returns([]), getStoragePath: sinon.stub().returns('/tmp'), delete: sinon.stub(), disableSaves: sinon.stub(), enableSaves: sinon.stub() },
     events,
     configManager,
     config: { storagePath: '/tmp' },
@@ -316,8 +316,8 @@ suite('PlanLifecycleManager – extra coverage', () => {
       // Call recoverRunningNodes directly via private access
       await (lifecycle as any).recoverRunningNodes(plan);
 
-      // Node should be marked as failed
-      assert.strictEqual(nodeState.status, 'failed');
+      // Auto-retry: nodes are reset to 'ready' for re-scheduling (not marked failed)
+      assert.strictEqual(nodeState.status, 'ready');
     });
   });
 
@@ -683,6 +683,79 @@ suite('PlanLifecycleManager – extra coverage', () => {
       await lifecycle.initialize();
 
       assert.ok(legacySave.called, 'legacy persistence.save should be called as fallback');
+    });
+  });
+
+  suite('loadPlansOnStartup – resumeAfterPlan chain recovery', () => {
+    test('auto-resumes waiting plan when dependency already succeeded', async () => {
+      const state = makeState({
+        stateMachineFactory: sinon.stub().returns({ on: sinon.stub() }),
+        planRepository: { saveState: sinon.stub().resolves(), saveStateSync: sinon.stub() },
+      });
+      // Add loadAll to persistence so initialize() can run
+      state.persistence.loadAll = sinon.stub().returns([]);
+      const depPlan = createTestPlan('dep-plan');
+      depPlan.nodeStates.get('node-1')!.status = 'succeeded';
+      depPlan.startedAt = Date.now() - 10000;
+      state.plans.set('dep-plan', depPlan);
+      
+      const waitingPlan = createTestPlan('waiting-plan');
+      waitingPlan.resumeAfterPlan = 'dep-plan';
+      waitingPlan.isPaused = true;
+      state.plans.set('waiting-plan', waitingPlan);
+
+      const lifecycle = new PlanLifecycleManager(state as any, createMockLogger(), createMockGit());
+      lifecycle.setupStateMachineListeners = sinon.stub() as any;
+      
+      await lifecycle.initialize();
+      
+      assert.strictEqual(waitingPlan.isPaused, false, 'should auto-resume');
+      assert.strictEqual(waitingPlan.resumeAfterPlan, undefined, 'should clear dependency');
+    });
+
+    test('keeps waiting plan paused when dependency failed', async () => {
+      const state = makeState({
+        stateMachineFactory: sinon.stub().returns({ on: sinon.stub() }),
+        planRepository: { saveState: sinon.stub().resolves(), saveStateSync: sinon.stub() },
+      });
+      state.persistence.loadAll = sinon.stub().returns([]);
+      const depPlan = createTestPlan('dep-plan');
+      depPlan.nodeStates.get('node-1')!.status = 'failed';
+      depPlan.startedAt = Date.now() - 10000;
+      state.plans.set('dep-plan', depPlan);
+
+      const waitingPlan = createTestPlan('waiting-plan');
+      waitingPlan.resumeAfterPlan = 'dep-plan';
+      waitingPlan.isPaused = true;
+      state.plans.set('waiting-plan', waitingPlan);
+
+      const lifecycle = new PlanLifecycleManager(state as any, createMockLogger(), createMockGit());
+      lifecycle.setupStateMachineListeners = sinon.stub() as any;
+
+      await lifecycle.initialize();
+
+      assert.strictEqual(waitingPlan.isPaused, true, 'should stay paused');
+      assert.strictEqual(waitingPlan.resumeAfterPlan, undefined, 'should clear broken dependency');
+    });
+
+    test('unblocks when dependency plan is missing (deleted)', async () => {
+      const state = makeState({
+        stateMachineFactory: sinon.stub().returns({ on: sinon.stub() }),
+        planRepository: { saveState: sinon.stub().resolves(), saveStateSync: sinon.stub() },
+      });
+      state.persistence.loadAll = sinon.stub().returns([]);
+      const waitingPlan = createTestPlan('waiting-plan');
+      waitingPlan.resumeAfterPlan = 'deleted-plan';
+      waitingPlan.isPaused = true;
+      state.plans.set('waiting-plan', waitingPlan);
+
+      const lifecycle = new PlanLifecycleManager(state as any, createMockLogger(), createMockGit());
+      lifecycle.setupStateMachineListeners = sinon.stub() as any;
+
+      await lifecycle.initialize();
+
+      assert.strictEqual(waitingPlan.resumeAfterPlan, undefined, 'should clear missing dependency');
+      assert.strictEqual(waitingPlan.isPaused, true, 'should stay paused (user decides)');
     });
   });
 });

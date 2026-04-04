@@ -69,6 +69,9 @@ export interface ScaffoldOptions {
 
   /** Plan ID that must succeed before this plan auto-resumes */
   resumeAfterPlan?: string;
+
+  /** Worktree init commands executed in setup phase of every job */
+  worktreeInit?: import('../plan/types').WorkSpec[];
 }
 
 /**

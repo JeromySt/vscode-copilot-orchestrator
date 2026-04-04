@@ -144,7 +144,7 @@ suite('BulkPlanActions', () => {
       assert.strictEqual(mockPlanRunner.delete.callCount, 2);
     });
 
-    test('finalize: reports not supported in bulk', async () => {
+    test('finalize: reports PlanRepository not available when no repo provided', async () => {
       const planIds = ['plan1', 'plan2'];
       
       const results = await bulkActions.executeBulkAction('finalize', planIds);
@@ -152,7 +152,7 @@ suite('BulkPlanActions', () => {
       assert.strictEqual(results.length, 2);
       results.forEach(r => {
         assert.strictEqual(r.success, false);
-        assert.ok(r.error?.includes('Finalize not supported'));
+        assert.ok(r.error?.includes('not found') || r.error?.includes('PlanRepository'));
       });
     });
 
@@ -167,6 +167,32 @@ suite('BulkPlanActions', () => {
       assert.strictEqual(results[0].success, false);
       assert.ok(results[0].error?.includes('Storage error'));
       assert.strictEqual(results[1].success, true);
+    });
+
+    test('finalize: succeeds with planRepository and scaffolding plan', async () => {
+      const { BulkPlanActions } = require('../../../plan/bulkPlanActions');
+      const plan = {
+        id: 'plan1', spec: { status: 'scaffolding', name: 'Test' },
+        jobs: new Map(), nodeStates: new Map(), producerIdToNodeId: new Map(),
+        roots: [], leaves: [], stateVersion: 0, isPaused: true,
+      };
+      const finalized = {
+        ...plan, spec: { ...plan.spec, status: 'pending' },
+        jobs: new Map(), nodeStates: new Map(), producerIdToNodeId: new Map(),
+        roots: [], leaves: [], groups: new Map(), groupStates: new Map(), groupPathToId: new Map(),
+        targetBranch: 'main', definition: undefined,
+      };
+      const runner = {
+        get: sinon.stub().returns(plan),
+        delete: sinon.stub().returns(true),
+        registerPlan: sinon.stub(),
+        resume: sinon.stub().resolves(true),
+      };
+      const repo = { finalize: sinon.stub().resolves(finalized) };
+      const ba = new BulkPlanActions(runner, repo);
+      const results = await ba.executeBulkAction('finalize', ['plan1']);
+      assert.strictEqual(results[0].success, true);
+      assert.ok(repo.finalize.calledOnce);
     });
   });
 

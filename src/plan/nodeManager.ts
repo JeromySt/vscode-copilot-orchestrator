@@ -390,11 +390,11 @@ export class NodeManager {
     }
 
     // Reset node state for retry
-    // INVARIANT: nodeState.startedAt is set-once (first attempt start) and never cleared.
-    // Each attempt tracks its own startedAt/endedAt in AttemptRecord.
     nodeState.status = 'pending';
     nodeState.error = undefined;
     nodeState.endedAt = undefined;
+    nodeState.startedAt = undefined;
+    nodeState.scheduledAt = undefined;
 
     const hasNewWork = !!options?.newWork;
     const hasNewPrechecks = options?.newPrechecks !== undefined;

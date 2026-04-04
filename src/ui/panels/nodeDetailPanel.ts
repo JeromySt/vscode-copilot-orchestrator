@@ -24,10 +24,12 @@ import {
   processTreeSectionHtml, logViewerSectionHtml,
   dependenciesSectionHtml, gitInfoSectionHtml,
   configSectionHtml,
-  metricsSummaryHtml, attemptMetricsHtml as attemptMetricsTemplateHtml,
+  executionCardHtml,
+  attemptMetricsHtml as attemptMetricsTemplateHtml,
   webviewScripts,
   renderNodeDetailStyles,
 } from '../templates/nodeDetail';
+import { metricsSummaryHtml } from '../templates/nodeDetail/metricsTemplate';
 
 import { NodeDetailController, NodeDetailCommands } from './nodeDetailController';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
@@ -105,19 +107,34 @@ function formatEnvHtml(env: Record<string, string> | undefined, escapeHtml: (s: 
  */
 function resolveSpecFromRef(ref: string | undefined, storagePath: string, planId: string, escapeHtml: (s: string) => string): string | undefined {
   if (!ref || !storagePath) {return undefined;}
-  try {
-    const specPath = require('path').join(storagePath, planId, ref);
-    const rawSpec = require('fs').readFileSync(specPath, 'utf-8');
-    const spec = JSON.parse(rawSpec);
-    if (spec.instructionsFile) {
-      try {
-        const mdPath = require('path').join(require('path').dirname(specPath), spec.instructionsFile);
-        spec.instructions = require('fs').readFileSync(mdPath, 'utf-8');
-        delete spec.instructionsFile;
-      } catch { /* md not found */ }
-    }
-    return formatWorkSpecHtml(spec, escapeHtml);
-  } catch { return undefined; }
+  const path = require('path');
+  const fs = require('fs');
+  // Try the exact ref path first, then fall back to the "current" spec directory.
+  // Prechecks/postchecks are written at plan creation to specs/<nodeId>/current/,
+  // but attempt refs point to specs/<nodeId>/attempts/<n>/ which may not have them.
+  const specPath = path.join(storagePath, planId, ref);
+  const filename = path.basename(ref); // e.g. "prechecks.json"
+  const nodeIdMatch = ref.match(/^specs\/([^/]+)\//);
+  const currentPath = nodeIdMatch ? path.join(storagePath, planId, 'specs', nodeIdMatch[1], 'current', filename) : undefined;
+  
+  const tryPaths = [specPath];
+  if (currentPath && currentPath !== specPath) { tryPaths.push(currentPath); }
+  
+  for (const tryPath of tryPaths) {
+    try {
+      const rawSpec = fs.readFileSync(tryPath, 'utf-8');
+      const spec = JSON.parse(rawSpec);
+      if (spec.instructionsFile) {
+        try {
+          const mdPath = path.join(path.dirname(tryPath), spec.instructionsFile);
+          spec.instructions = fs.readFileSync(mdPath, 'utf-8');
+          delete spec.instructionsFile;
+        } catch { /* md not found */ }
+      }
+      return formatWorkSpecHtml(spec, escapeHtml);
+    } catch { /* file not found, try next */ }
+  }
+  return undefined;
 }
 
 function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) => string): string {
@@ -136,7 +153,7 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
     case 'process': {
       const args = spec.args?.join(' ') || '';
       const cmd = `${spec.executable} ${args}`.trim();
-      return `<div class="work-code-block">
+      return `<div class="work-code-block process-block">
         <div class="work-code-header"><span class="work-lang-badge process">Process</span></div>
         <pre class="work-code"><code>${escapeHtml(cmd)}</code></pre>
         ${envHtml}
@@ -145,7 +162,7 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
     case 'shell': {
       const { name } = getShellDisplayName(spec.shell);
       const formattedCmd = formatShellCommand(spec.command);
-      return `<div class="work-code-block">
+      return `<div class="work-code-block shell-block">
         <div class="work-code-header"><span class="work-lang-badge shell">${escapeHtml(name)}</span></div>
         <pre class="work-code"><code>${escapeHtml(formattedCmd)}</code></pre>
         ${envHtml}
@@ -155,8 +172,9 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
       const instructions = spec.instructions || '';
       const rendered = renderMarkdown(instructions, escapeHtml);
       const modelLabel = spec.model ? escapeHtml(spec.model) : 'unspecified';
+      const tierBadge = spec.modelTier ? `<span class="agent-tier tier-${spec.modelTier}">${escapeHtml(spec.modelTier)}</span>` : '';
       return `<div class="work-code-block agent-block">
-        <div class="work-code-header"><span class="work-lang-badge agent">Agent</span><span class="agent-model">${modelLabel}</span></div>
+        <div class="work-code-header"><span class="work-lang-badge agent">Agent</span><span class="agent-model">${modelLabel}</span>${tierBadge}</div>
         <div class="work-instructions">${rendered}</div>
         ${envHtml}
       </div>`;
@@ -290,6 +308,14 @@ function renderMarkdown(md: string, escapeHtml: (s: string) => string): string {
       continue;
     }
     
+    // Blockquote (>)
+    if (trimmed.startsWith('>')) {
+      closeLists();
+      const quoteContent = trimmed.replace(/^>\s?/, '');
+      html += `<blockquote class="md-blockquote">${formatInline(quoteContent, escapeHtml)}</blockquote>`;
+      continue;
+    }
+    
     // Regular paragraph
     closeLists();
     html += `<p class="md-para">${formatInline(trimmed, escapeHtml)}</p>`;
@@ -394,6 +420,7 @@ export class NodeDetailPanel {
   private _planId: string;
   private _nodeId: string;
   private _disposables: vscode.Disposable[] = [];
+  private _disposed = false;
   private _pulseSubscription?: PulseDisposable;
   private _currentPhase: string | null = null;
   private _lastStatus: string | null = null;
@@ -401,7 +428,10 @@ export class NodeDetailPanel {
   private _lastAttemptCount = 0;
   private _lastAttemptStatus = '';
   private _configSentOnce = false;
+  private _logSentOffset = 0; // byte offset for delta log streaming (legacy — being replaced by subscription manager)
+  private _lastDepsStatus = ''; // serialized dependency statuses for change detection
   private _controller: NodeDetailController;
+  private _subscriptionManager: import('../webViewSubscriptionManager').WebViewSubscriptionManager;
   
   /**
    * @param panel - The VS Code webview panel instance.
@@ -424,6 +454,12 @@ export class NodeDetailPanel {
     this._planId = planId;
     this._nodeId = nodeId;
     
+    // Initialize subscription manager with log file producer
+    const { WebViewSubscriptionManager } = require('../webViewSubscriptionManager');
+    const { LogFileProducer } = require('../producers/logFileProducer');
+    this._subscriptionManager = new WebViewSubscriptionManager();
+    this._subscriptionManager.registerProducer(new LogFileProducer());
+    
     // Create controller with VS Code service adapters
     const commands: NodeDetailCommands = {
       executeCommand: (cmd, ...args) => vscode.commands.executeCommand(cmd, ...args),
@@ -431,6 +467,8 @@ export class NodeDetailPanel {
       refresh: () => this._update(),
       sendLog: (phase) => { this._currentPhase = phase; this._sendLog(phase); },
       sendProcessStats: () => this._sendProcessStats(),
+      subscribeLog: (attemptNumber, tag) => this._subscribeLog(attemptNumber, tag),
+      unsubscribeLog: (tag) => this._unsubscribeLog(tag),
       retryNode: (pid, nid, resume) => this._retryNode(pid, nid, resume),
       forceFailNode: (pid, nid) => this._forceFailNode(pid, nid),
       openFile: (p) => {
@@ -501,6 +539,9 @@ export class NodeDetailPanel {
           endedAt: state.endedAt,
         });
 
+        // Push dependency status updates when any dependency changes
+        if (plan) { this._sendDepsUpdateIfChanged(plan, plan.jobs.get(this._nodeId)); }
+
         // Push incremental attempt history when new attempts are recorded
         // or when a running placeholder is replaced with a completed record
         if (state.attemptHistory && state.attemptHistory.length > 0) {
@@ -517,32 +558,59 @@ export class NodeDetailPanel {
       }
 
       if (state?.status === 'running' || state?.status === 'scheduled') {
-        // Status changed - do full update
+        // Status changed — send incremental update, NOT full HTML rebuild
         if (this._lastStatus !== state.status) {
           this._lastStatus = state.status;
-          this._update();
-        } else if (this._currentPhase) {
-          // Push log lines on arrival
-          this._sendLog(this._currentPhase);
+          // Send state change to webview controls (status badge, duration counter, etc.)
+          const phaseStatus = this._getPhaseStatus(state);
+          const currentPhase = getCurrentExecutionPhase(state);
+          this._panel.webview.postMessage({
+            type: 'stateChange',
+            status: state.status,
+            phaseStatus,
+            currentPhase,
+            startedAt: state.startedAt,
+            endedAt: state.endedAt,
+          });
         }
+        // Tick subscription manager — delivers log deltas to active subscriptions
+        this._subscriptionManager.tick();
         // Push process stats on each pulse while active
         this._sendProcessStats();
       } else if (this._lastStatus === 'running' || this._lastStatus === 'scheduled') {
-        // Transitioned from running to terminal - do full update
+        // Transitioned from running to terminal — send state change + attempt update
         this._lastStatus = state?.status || null;
-        this._update();
-        // Send final log update
-        if (this._currentPhase) {
-          this._sendLog(this._currentPhase);
+        const phaseStatus = this._getPhaseStatus(state!);
+        this._panel.webview.postMessage({
+          type: 'stateChange',
+          status: state?.status,
+          phaseStatus,
+          startedAt: state?.startedAt,
+          endedAt: state?.endedAt,
+        });
+        // Force-send attempt update after terminal transition with enough delay
+        // for the executor to record the completed attempt in history
+        if (state) {
+          setTimeout(() => { this._sendAttemptUpdate(state); }, 200);
         }
       } else {
-        // Terminal state - check for worktree cleanup or other state changes
+        // Terminal state — only send incremental updates for specific changes
         if (state?.worktreeCleanedUp !== this._lastWorktreeCleanedUp) {
           this._lastWorktreeCleanedUp = state?.worktreeCleanedUp;
-          this._update();
+          // No full rebuild needed — worktree cleanup just changes a label
         }
       }
     });
+    
+    // Pause/resume subscriptions when panel visibility changes
+    const panelId = `${planId}:${nodeId}`;
+    this._panel.onDidChangeViewState(e => {
+      if (e.webviewPanel.visible) {
+        this._subscriptionManager.resumePanel(panelId);
+      } else {
+        this._subscriptionManager.pausePanel(panelId);
+      }
+    }, null, this._disposables);
     
     // Handle panel disposal
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -634,8 +702,12 @@ export class NodeDetailPanel {
   
   /** Dispose the panel, clear timers, and remove it from the static panel map. */
   public dispose() {
+    this._disposed = true;
     const key = `${this._planId}:${this._nodeId}`;
     NodeDetailPanel.panels.delete(key);
+    
+    // Dispose all log subscriptions for this panel
+    this._subscriptionManager.disposePanel(key);
     
     if (this._pulseSubscription) {
       this._pulseSubscription.dispose();
@@ -646,6 +718,38 @@ export class NodeDetailPanel {
     while (this._disposables.length) {
       const d = this._disposables.pop();
       if (d) {d.dispose();}
+    }
+  }
+
+  /**
+   * Subscribe to log file updates for a specific attempt.
+   * Called when the webview expands an attempt card.
+   */
+  private _subscribeLog(attemptNumber: number, tag: string): void {
+    const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, attemptNumber);
+    if (!logFilePath) { return; }
+    const panelId = `${this._planId}:${this._nodeId}`;
+    // Avoid duplicate subscriptions
+    const existing = this._subscriptionManager.findSubscription(panelId, 'log', logFilePath);
+    if (existing) { return; }
+    this._subscriptionManager.subscribe(panelId, this._panel.webview, 'log', logFilePath, tag);
+  }
+
+  /**
+   * Unsubscribe from log file updates for a specific attempt.
+   * Called when the webview collapses an attempt card.
+   */
+  private _unsubscribeLog(tag: string): void {
+    // Find and remove the subscription by tag
+    const panelId = `${this._planId}:${this._nodeId}`;
+    // We need to iterate to find by tag — the manager tracks by ID
+    // For simplicity, use panelId + producerType to narrow down
+    // In practice there's one log sub per attempt, identified by tag
+    for (const sub of (this._subscriptionManager as any).subs?.values() || []) {
+      if (sub.panelId === panelId && sub.tag === tag) {
+        this._subscriptionManager.unsubscribe(sub.id);
+        break;
+      }
     }
   }
   
@@ -703,7 +807,9 @@ export class NodeDetailPanel {
   
   /** Query process stats for this node and send them to the webview. */
   private async _sendProcessStats() {
+    if (this._disposed) { return; }
     const stats = await this._planRunner.getProcessStats(this._planId, this._nodeId);
+    if (this._disposed) { return; }
     this._panel.webview.postMessage({
       type: 'processStats',
       ...stats
@@ -717,6 +823,7 @@ export class NodeDetailPanel {
    *   (e.g., `'work'`, `'merge-fi'`, `'postchecks'`).
    */
   private async _sendLog(phase: string) {
+    if (this._disposed) { return; }
     const plan = this._planRunner.get(this._planId);
     const node = plan?.jobs.get(this._nodeId);
     const state = plan?.nodeStates.get(this._nodeId);
@@ -745,6 +852,73 @@ export class NodeDetailPanel {
       content: logs || 'No logs available for this phase.',
       logFilePath,
     });
+  }
+
+  /**
+   * Send only new log lines since last offset (delta streaming).
+   * Avoids sending the full log on every pulse — much faster for large logs.
+   */
+  private _sendLogDelta(): void {
+    if (this._disposed) { return; }
+    const plan = this._planRunner.get(this._planId);
+    const state = plan?.nodeStates.get(this._nodeId);
+    if (!plan || !state) { return; }
+
+    const attemptNumber = state.attempts || 1;
+    const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, attemptNumber);
+    if (!logFilePath) { return; }
+
+    try {
+      const fs = require('fs');
+      // Open file first, then fstat to avoid TOCTOU race
+      const fd = fs.openSync(logFilePath, 'r');
+      try {
+        const stat = fs.fstatSync(fd);
+        if (stat.size <= this._logSentOffset) { fs.closeSync(fd); return; }
+
+        const newBytes = Buffer.alloc(stat.size - this._logSentOffset);
+        fs.readSync(fd, newBytes, 0, newBytes.length, this._logSentOffset);
+        const newContent = newBytes.toString('utf-8');
+        this._logSentOffset = stat.size;
+
+        this._panel.webview.postMessage({
+          type: 'logContent',
+          phase: 'all',
+          content: newContent,
+          append: true,
+        });
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch { /* file may not exist yet */ }
+  }
+
+  /**
+   * Send the full log file content (initial load on panel open).
+   * Sets the offset so subsequent pulses only send deltas.
+   */
+  private _sendFullLog(): void {
+    if (this._disposed) { return; }
+    const plan = this._planRunner.get(this._planId);
+    const state = plan?.nodeStates.get(this._nodeId);
+    if (!plan || !state) { return; }
+
+    const attemptNumber = state.attempts || 1;
+    const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, attemptNumber);
+    if (!logFilePath) { return; }
+
+    try {
+      const fs = require('fs');
+      const content = fs.readFileSync(logFilePath, 'utf-8');
+      this._logSentOffset = Buffer.byteLength(content, 'utf-8');
+
+      this._panel.webview.postMessage({
+        type: 'logContent',
+        phase: 'all',
+        content,
+        append: false, // full replace — initial load
+      });
+    } catch { /* file may not exist yet */ }
   }
 
   /** Send config update to webview for live config display updates. */
@@ -796,13 +970,95 @@ export class NodeDetailPanel {
    *
    * @param state - The current node execution state.
    */
-  private _sendAttemptUpdate(state: NodeExecutionState): void {
-    if (!state.attemptHistory || state.attemptHistory.length === 0) {return;}
-    
+  private async _sendAttemptUpdate(state: NodeExecutionState): Promise<void> {
     const plan = this._planRunner.get(this._planId);
     if (!plan) { return; }
+    const node = plan.jobs.get(this._nodeId);
     
-    const attempts = state.attemptHistory.map(attempt => {
+    // For jobs with no attemptHistory (pre-execution or jobs where the executor
+    // didn't record the attempt), synthesize a card from the nodeState.
+    if (!state.attemptHistory || state.attemptHistory.length === 0) {
+      // Resolve work spec — inline first, then from disk for finalized plans
+      let workSpec = node?.work;
+      if (!workSpec && plan.definition) {
+        try { workSpec = await plan.definition.getWorkSpec(this._nodeId); } catch { /* */ }
+      }
+      let workSpecHtml: string | undefined;
+      if (workSpec) {
+        workSpecHtml = formatWorkSpecHtml(workSpec, escapeHtml);
+      }
+      // Read logs from file if available
+      const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, state.attempts || 1);
+      let logs = '';
+      if (logFilePath && state.status !== 'running') {
+        try { logs = require('fs').readFileSync(logFilePath, 'utf-8'); } catch { /* */ }
+      }
+      // Resolve prechecks/postchecks specs from node definition or disk
+      const storagePath0 = this._planRunner.getStoragePath?.() || '';
+      let prechecksSpec = node?.prechecks;
+      if (!prechecksSpec || (prechecksSpec as any).instructionsRef) {
+        // Try plan.definition first (reads from disk with hydration)
+        if (plan.definition) {
+          try { prechecksSpec = await plan.definition.getPrechecksSpec(this._nodeId); } catch (e: any) { console.error('getPrechecksSpec error:', e?.message); }
+        }
+        // Fallback: try resolveSpecFromRef with current/ path
+        if (!prechecksSpec && storagePath0) {
+          const ref = `specs/${this._nodeId}/current/prechecks.json`;
+          const html = resolveSpecFromRef(ref, storagePath0, plan.id, escapeHtml);
+          if (html) { /* prechecksSpec stays undefined but we have HTML */ }
+        }
+      }
+      let prechecksHtml: string | undefined;
+      if (prechecksSpec) {
+        prechecksHtml = formatWorkSpecHtml(prechecksSpec, escapeHtml);
+      } else if (storagePath0) {
+        // Direct ref fallback
+        prechecksHtml = resolveSpecFromRef(`specs/${this._nodeId}/current/prechecks.json`, storagePath0, plan.id, escapeHtml);
+      }
+      
+      let postchecksSpec = node?.postchecks;
+      if (!postchecksSpec || (postchecksSpec as any).instructionsRef) {
+        if (plan.definition) {
+          try { postchecksSpec = await plan.definition.getPostchecksSpec(this._nodeId); } catch (e: any) { console.error('getPostchecksSpec error:', e?.message); }
+        }
+      }
+      let postchecksHtml: string | undefined;
+      if (postchecksSpec) {
+        postchecksHtml = formatWorkSpecHtml(postchecksSpec, escapeHtml);
+      } else if (storagePath0) {
+        postchecksHtml = resolveSpecFromRef(`specs/${this._nodeId}/current/postchecks.json`, storagePath0, plan.id, escapeHtml);
+      }
+      const nodeMetrics = getNodeMetrics(state);
+      const planEnvHtml = formatEnvHtml(plan.env, escapeHtml);
+      this._panel.webview.postMessage({
+        type: 'attemptUpdate',
+        planEnvHtml: planEnvHtml || undefined,
+        attempts: [{
+          attemptNumber: state.attempts || 1,
+          status: state.status || 'pending',
+          triggerType: state.attempts && state.attempts > 1 ? 'retry' : (state.status === 'pending' || state.status === 'ready' ? 'planned' : 'initial'),
+          startedAt: state.startedAt,
+          endedAt: state.endedAt,
+          error: state.error,
+          failedPhase: state.lastAttempt?.phase,
+          exitCode: state.lastAttempt?.exitCode,
+          copilotSessionId: state.copilotSessionId,
+          stepStatuses: state.stepStatuses,
+          worktreePath: state.worktreePath,
+          baseCommit: state.baseCommit,
+          logFilePath,
+          workUsedHtml: workSpecHtml,
+          prechecksUsedHtml: prechecksHtml,
+          postchecksUsedHtml: postchecksHtml,
+          logs,
+          metricsHtml: nodeMetrics ? attemptMetricsTemplateHtml(nodeMetrics, state.phaseMetrics) : '',
+        }],
+      });
+      return;
+    }
+    
+    const attempts = [];
+    for (const attempt of state.attemptHistory) {
       // Resolve log file path (same logic as full rebuild)
       let resolvedLogPath = attempt.logFilePath;
       if (attempt.logsRef && !attempt.logFilePath?.includes(':')) {
@@ -818,11 +1074,13 @@ export class NodeDetailPanel {
         }
       }
 
-      // Read logs from attempt-specific file
+      // Read logs from attempt-specific file (skip for running attempts — live streaming handles those)
       let attemptLogs = attempt.logs || '';
-      if (!attemptLogs && resolvedLogPath) {
+      const currentLogFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, attempt.attemptNumber || state.attempts || 1);
+      const effectiveLogPath = resolvedLogPath || currentLogFilePath;
+      if (!attemptLogs && effectiveLogPath && attempt.status !== 'running') {
         try {
-          attemptLogs = require('fs').readFileSync(resolvedLogPath, 'utf-8');
+          attemptLogs = require('fs').readFileSync(effectiveLogPath, 'utf-8');
         } catch { /* file may not exist yet */ }
       }
 
@@ -834,13 +1092,36 @@ export class NodeDetailPanel {
       } else {
         workUsedHtml = resolveSpecFromRef(attempt.workRef, storagePath, plan.id, escapeHtml);
       }
-      const prechecksUsedHtml = resolveSpecFromRef(attempt.prechecksRef, storagePath, plan.id, escapeHtml);
-      const postchecksUsedHtml = resolveSpecFromRef(attempt.postchecksRef, storagePath, plan.id, escapeHtml);
+      // For running attempts with no resolved work spec, fall back to node's work spec or disk
+      if (!workUsedHtml && (attempt.status === 'running' || !attempt.workUsed)) {
+        let fallbackWork = node?.work;
+        if (!fallbackWork && plan.definition) {
+          try { fallbackWork = await plan.definition.getWorkSpec(this._nodeId); } catch { /* */ }
+        }
+        if (fallbackWork) {
+          workUsedHtml = formatWorkSpecHtml(fallbackWork, escapeHtml);
+        }
+      }
+      // Resolve prechecks — try ref first, then node inline, then disk via definition
+      let prechecksUsedHtml = resolveSpecFromRef(attempt.prechecksRef, storagePath, plan.id, escapeHtml);
+      if (!prechecksUsedHtml && (attempt.status === 'running' || !attempt.prechecksRef)) {
+        let fallbackPrechecks = node?.prechecks;
+        if ((!fallbackPrechecks || (fallbackPrechecks as any).instructionsRef) && plan.definition) {
+          try { fallbackPrechecks = await plan.definition.getPrechecksSpec(this._nodeId); } catch { /* */ }
+        }
+        if (fallbackPrechecks) { prechecksUsedHtml = formatWorkSpecHtml(fallbackPrechecks, escapeHtml); }
+      }
+      // Resolve postchecks — try ref first, then node inline, then disk via definition
+      let postchecksUsedHtml = resolveSpecFromRef(attempt.postchecksRef, storagePath, plan.id, escapeHtml);
+      if (!postchecksUsedHtml && (attempt.status === 'running' || !attempt.postchecksRef)) {
+        let fallbackPostchecks = node?.postchecks;
+        if ((!fallbackPostchecks || (fallbackPostchecks as any).instructionsRef) && plan.definition) {
+          try { fallbackPostchecks = await plan.definition.getPostchecksSpec(this._nodeId); } catch { /* */ }
+        }
+        if (fallbackPostchecks) { postchecksUsedHtml = formatWorkSpecHtml(fallbackPostchecks, escapeHtml); }
+      }
 
-      // Get current log file path for running attempts
-      const currentLogFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, state.attempts || 1);
-
-      return {
+      attempts.push({
         attemptNumber: attempt.attemptNumber,
         status: attempt.status,
         triggerType: attempt.triggerType,
@@ -858,13 +1139,20 @@ export class NodeDetailPanel {
         workUsedHtml,
         prechecksUsedHtml,
         postchecksUsedHtml,
+        // Running attempts get live streaming via LOG_UPDATE, completed get static logs
         logs: attemptLogs,
-        metricsHtml: attempt.metrics ? attemptMetricsTemplateHtml(attempt.metrics, attempt.phaseMetrics) : '',
-      };
-    });
+        metricsHtml: attempt.metrics 
+          ? attemptMetricsTemplateHtml(attempt.metrics, attempt.phaseMetrics) 
+          : (attempt.status === 'running' && state.metrics 
+            ? attemptMetricsTemplateHtml(state.metrics, state.phaseMetrics) 
+            : ''),
+      });
+    }
 
+    const planEnvHtml = formatEnvHtml(plan.env, escapeHtml);
     this._panel.webview.postMessage({
       type: 'attemptUpdate',
+      planEnvHtml: planEnvHtml || undefined,
       attempts,
     });
   }
@@ -885,6 +1173,7 @@ export class NodeDetailPanel {
   }
 
   private _sendAiUsageUpdate(state: NodeExecutionState): void {
+    if (this._disposed) { return; }
     const metrics = getNodeMetrics(state);
     if (!metrics) {return;}
     this._panel.webview.postMessage({
@@ -913,6 +1202,20 @@ export class NodeDetailPanel {
       filesDeleted: ws.filesDeleted || 0,
     });
   }
+
+  /** Push dependency status updates only when something changed. */
+  private _sendDepsUpdateIfChanged(plan: PlanInstance, node: JobNode | undefined): void {
+    if (this._disposed || !node) { return; }
+    const deps = node.dependencies.map(depId => {
+      const depNode = plan.jobs.get(depId);
+      const depState = plan.nodeStates.get(depId);
+      return { name: depNode?.name || depId, status: depState?.status || 'pending' };
+    });
+    const key = deps.map(d => d.name + ':' + d.status).join(',');
+    if (key === this._lastDepsStatus) { return; }
+    this._lastDepsStatus = key;
+    this._panel.webview.postMessage({ type: 'depsUpdate', dependencies: deps });
+  }
   
   /** Re-render the panel HTML with current node state. */
   private async _update() {
@@ -937,10 +1240,19 @@ export class NodeDetailPanel {
     
     this._panel.webview.html = this._getHtml(plan, node, state, resolvedWork, resolvedPrechecks, resolvedPostchecks);
 
-    // Reset attempt count so the initial _sendAttemptUpdate fires (SSR removed)
-    this._lastAttemptCount = 0;
-    this._lastAttemptStatus = '';
+    // Set attempt tracking to match current state so the next pulse doesn't
+    // trigger an unnecessary rebuild (which would wipe the log container)
+    this._lastAttemptCount = state.attemptHistory?.length || 0;
+    this._lastAttemptStatus = state.attemptHistory?.length
+      ? state.attemptHistory[state.attemptHistory.length - 1].status
+      : '';
     this._configSentOnce = false; // Reset — webview was rebuilt, config needs resending
+    this._logSentOffset = 0; // Reset delta offset — webview has no log content yet
+
+    // Send initial full log content AFTER the attempt card has been built.
+    // _sendAttemptUpdate fires at 75ms, so we send full log at 250ms to ensure
+    // the <pre> element exists before we populate it.
+    setTimeout(() => { this._sendFullLog(); }, 250);
     
     // After HTML rebuild, send messages with delays so the webview scripts
     // have time to initialize the EventBus and subscribe controls.
@@ -949,7 +1261,7 @@ export class NodeDetailPanel {
     setTimeout(() => { this._sendConfigUpdate(); }, 50);
 
     // Send initial attempt history to the CSR AttemptCard control
-    setTimeout(() => { this._sendAttemptUpdate(state); }, 75);
+    setTimeout(() => { this._sendAttemptUpdate(state).catch(err => console.error('sendAttemptUpdate failed:', err)); }, 75);
 
     // After HTML rebuild, send stateChange to re-initialize DurationCounterControl
     const phaseStatus = this._getPhaseStatus(state);
@@ -1021,6 +1333,10 @@ export class NodeDetailPanel {
     // Determine initial phase to show
     const initialPhase = this._getInitialPhase(phaseStatus, state.status);
     
+    // Build aggregate AI usage metrics (sum of all attempts)
+    const nodeMetrics = getNodeMetrics(state);
+    const nodeMetricsHtml = nodeMetrics ? metricsSummaryHtml(nodeMetrics, state.phaseMetrics) : '';
+
     // Build work summary HTML
     // For leaf nodes, pass aggregated work summary to show total merged work
     const isLeaf = plan.leaves.includes(this._nodeId);
@@ -1033,10 +1349,6 @@ export class NodeDetailPanel {
 
     // Attempt history is rendered entirely by the CSR AttemptCard control.
     // Initial data is pushed via _sendAttemptUpdate() after HTML rebuild.
-
-    // Compute aggregated metrics across all attempts
-    const nodeMetrics = getNodeMetrics(state);
-    const nodeMetricsHtml = nodeMetrics ? metricsSummaryHtml(nodeMetrics, state.phaseMetrics) : '';
 
     // Build dependencies data
     const dependencies = node.dependencies.map(depId => {
@@ -1071,56 +1383,18 @@ export class NodeDetailPanel {
   ${forceFailButtonHtml(actionData)}
   </div>
   
-  ${executionStateHtml({
-    planId: plan.id,
-    planName: plan.spec.name,
-    nodeName: node.name,
-    nodeType: node.type,
-    status: state.status,
-    attempts: state.attempts,
-    startedAt: state.startedAt,
-    endedAt: state.endedAt,
-    copilotSessionId: state.copilotSessionId,
-    error: state.error,
-    failureReason: state.failureReason,
-    lastAttemptPhase: state.lastAttempt?.phase,
-    lastAttemptExitCode: state.lastAttempt?.exitCode,
-  })}
   ${retryButtonsHtml(actionData)}
   
-  ${nodeMetricsHtml}
-  <div id="aiUsageStatsContainer" style="display:none;"></div>
-  
-  <div id="configDisplayContainer">
-  ${configSectionHtml({
-    task: node.task || node.name,
-    work: resolvedWork || node.work,
-    prechecks: resolvedPrechecks || node.prechecks,
-    postchecks: resolvedPostchecks || node.postchecks,
-    instructions: (node as any).instructions,
-    currentPhase: getCurrentExecutionPhase(state),
-    expectsNoChanges: node.expectsNoChanges,
-    autoHeal: node.autoHeal,
-    group: (node as any).group,
-    producerId: (node as any).producerId,
-    planEnv: plan.env,
-  })}
+  <div id="aiUsageStatsContainer" style="${nodeMetricsHtml ? '' : 'display:none;'}">
+    ${nodeMetricsHtml}
   </div>
   
-  ${(state.status === 'running' || state.status === 'scheduled' || logFilePath) ? logViewerSectionHtml({
-    phaseStatus,
-    isRunning: state.status === 'running',
-    logFilePath,
-  }) : ''}
-  
-  ${processTreeSectionHtml({ status: state.status })}
+  <div class="attempt-history-container"></div>
   
   ${workSummaryHtml}
   <div id="workSummaryContainer" style="display:none;"></div>
   
   ${dependenciesSectionHtml(dependencies)}
-  
-  <div class="attempt-history-container"></div>
   
   ${gitInfoSectionHtml({
     worktreePath: state.worktreePath,
