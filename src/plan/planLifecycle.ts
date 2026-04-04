@@ -161,6 +161,40 @@ export class PlanLifecycleManager {
         this.state.persistence.save(plan);
       }
     }
+
+    // Check resumeAfterPlan chains — if the dependency plan already completed
+    // (possibly during a previous extension session), auto-resume waiting plans.
+    for (const [, waitingPlan] of this.state.plans) {
+      if (waitingPlan.resumeAfterPlan && waitingPlan.isPaused) {
+        const depPlan = this.state.plans.get(waitingPlan.resumeAfterPlan);
+        if (depPlan) {
+          const { computePlanStatus } = require('./helpers');
+          const depStatus = computePlanStatus(
+            depPlan.nodeStates.values(),
+            !!depPlan.startedAt,
+            depPlan.isPaused,
+          );
+          if (depStatus === 'succeeded' || depStatus === 'completed') {
+            this.log.info(`Auto-resuming chained plan '${waitingPlan.spec.name}' — dependency '${depPlan.spec.name}' already ${depStatus}`, {
+              waitingPlanId: waitingPlan.id,
+              depPlanId: depPlan.id,
+            });
+            waitingPlan.isPaused = false;
+            waitingPlan.resumeAfterPlan = undefined;
+          } else if (depStatus === 'failed' || depStatus === 'canceled') {
+            this.log.warn(`Chained plan '${waitingPlan.spec.name}' has dependency '${depPlan.spec.name}' in ${depStatus} state — keeping paused`, {
+              waitingPlanId: waitingPlan.id,
+              depPlanId: depPlan.id,
+            });
+            waitingPlan.resumeAfterPlan = undefined;
+          }
+        } else {
+          // Dependency plan not found (deleted?) — unblock
+          this.log.warn(`Chained plan '${waitingPlan.spec.name}' references missing plan '${waitingPlan.resumeAfterPlan}' — unblocking (keeping paused)`);
+          waitingPlan.resumeAfterPlan = undefined;
+        }
+      }
+    }
   }
 
   /** Persist all plans and dispose file watcher. */
@@ -639,14 +673,70 @@ export class PlanLifecycleManager {
       }
       this.state.events.emitNodeCompleted(plan.id, nodeId, false);
     };
+
+    const autoRetryCrashed = (nodeId: string, nodeState: any, error: string) => {
+      // Crashed nodes are transient failures (extension reload, process lost).
+      // Instead of marking failed (which blocks downstream), reset directly to
+      // ready so the pump re-schedules them automatically.
+      // We bypass the state machine here because running → ready is not a valid
+      // transition — this is crash recovery, not a normal state change.
+      this.log.info(`Auto-retrying crashed node: ${nodeId} — resetting to ready`, {
+        planId: plan.id, nodeId, error, attempts: nodeState.attempts,
+      });
+
+      // Record the crashed attempt in history before resetting state
+      if (!nodeState.attemptHistory) { nodeState.attemptHistory = []; }
+      nodeState.attemptHistory.push({
+        attemptNumber: nodeState.attempts || 1,
+        triggerType: nodeState.attempts === 1 ? 'initial' : 'retry',
+        status: 'failed',
+        startedAt: nodeState.startedAt,
+        endedAt: Date.now(),
+        error,
+        failureReason: 'crashed',
+        stepStatuses: nodeState.stepStatuses ? { ...nodeState.stepStatuses } : undefined,
+        metrics: nodeState.metrics,
+        copilotSessionId: nodeState.copilotSessionId,
+      });
+
+      nodeState.status = 'ready';
+      nodeState.error = `[auto-recovered] ${error}`;
+      nodeState.failureReason = undefined;
+      nodeState.pid = undefined;
+      nodeState.startedAt = undefined;
+      nodeState.endedAt = undefined;
+      nodeState.stepStatuses = undefined;
+      nodeState.metrics = undefined;
+      nodeState.copilotSessionId = undefined;
+      nodeState.attempts = (nodeState.attempts || 1) + 1;
+      nodeState.version++;
+    };
+
+    let recoveredAny = false;
     for (const [nodeId, nodeState] of plan.nodeStates.entries()) {
       if (nodeState.status !== 'running') {continue;}
       if (nodeState.pid && !this.state.processMonitor.isRunning(nodeState.pid)) {
-        this.log.warn(`Node ${nodeId} process (PID ${nodeState.pid}) not found - marking as crashed`);
-        markCrashed(nodeId, nodeState, `Process crashed or was terminated unexpectedly (PID: ${nodeState.pid})`);
+        this.log.warn(`Node ${nodeId} process (PID ${nodeState.pid}) not found - auto-retrying crashed node`);
+        autoRetryCrashed(nodeId, nodeState, `Process crashed or was terminated unexpectedly (PID: ${nodeState.pid})`);
+        recoveredAny = true;
       } else if (!nodeState.pid) {
-        this.log.warn(`Node ${nodeId} was running but has no PID - marking as crashed`);
-        markCrashed(nodeId, nodeState, 'Extension reloaded while node was running (no process tracking)');
+        this.log.warn(`Node ${nodeId} was running but has no PID - auto-retrying crashed node`);
+        autoRetryCrashed(nodeId, nodeState, 'Extension reloaded while node was running (no process tracking)');
+        recoveredAny = true;
+      }
+    }
+
+    // Persist recovered state so it survives subsequent reloads
+    if (recoveredAny) {
+      try {
+        if (this.state.planRepository) {
+          await this.state.planRepository.saveState(plan);
+        } else {
+          this.state.persistence.save(plan);
+        }
+        this.log.info(`Persisted crash recovery state for plan ${plan.id}`);
+      } catch (err: any) {
+        this.log.error(`Failed to persist crash recovery state: ${err.message}`);
       }
     }
   }

@@ -121,10 +121,16 @@ export function renderEventHandlers(config: ScriptsConfig): string {
     });
 
     // Attempt card toggle handler (chevron expand/collapse)
+    // NOTE: This is the fallback handler for static HTML. The AttemptCard
+    // webview control wires its own click handlers on rebuild() which call
+    // stopPropagation to prevent double-toggle. If the webview control is
+    // active, this handler won't fire.
     document.body.addEventListener('click', function(e) {
       if (!(e.target instanceof Element)) return;
       var header = e.target.closest('.attempt-header');
       if (!header) return;
+      // Skip if the AttemptCard control already handled this (it adds a marker)
+      if (header.__attemptControlled) return;
 
       var body = header.nextElementSibling;
       if (body) {

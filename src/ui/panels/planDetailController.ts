@@ -81,6 +81,11 @@ export class PlanDetailController {
       case 'delete':
         this._delegate.executeCommand('orchestrator.deletePlan', this._planId);
         break;
+      case 'finalize':
+        this._delegate.executeCommand('orchestrator.bulkFinalize', [this._planId]).then(() => {
+          setTimeout(() => this._delegate.forceFullRefresh(), 300);
+        });
+        break;
       case 'openNode': {
         const planIdForNode = message.planId || this._planId;
         this._delegate.executeCommand('orchestrator.showNodeDetails', planIdForNode, message.nodeId, message.attemptNumber);

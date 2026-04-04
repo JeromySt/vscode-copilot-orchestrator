@@ -144,7 +144,7 @@ suite('BulkPlanActions', () => {
       assert.strictEqual(mockPlanRunner.delete.callCount, 2);
     });
 
-    test('finalize: reports not supported in bulk', async () => {
+    test('finalize: reports PlanRepository not available when no repo provided', async () => {
       const planIds = ['plan1', 'plan2'];
       
       const results = await bulkActions.executeBulkAction('finalize', planIds);
@@ -152,7 +152,7 @@ suite('BulkPlanActions', () => {
       assert.strictEqual(results.length, 2);
       results.forEach(r => {
         assert.strictEqual(r.success, false);
-        assert.ok(r.error?.includes('Finalize not supported'));
+        assert.ok(r.error?.includes('not found') || r.error?.includes('PlanRepository'));
       });
     });
 

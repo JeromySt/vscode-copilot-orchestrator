@@ -162,7 +162,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Bulk Action Commands ───────────────────────────────────────────────
   // Create BulkPlanActions via composition helper (keeps DI wiring in composition.ts)
-  const bulkActions = createBulkPlanActions(container, planRunner);
+  let planRepo: import('./interfaces').IPlanRepository | undefined;
+  try { planRepo = container.resolve<import('./interfaces').IPlanRepository>(Tokens.IPlanRepository); } catch { /* not registered yet */ }
+  const bulkActions = createBulkPlanActions(container, planRunner, planRepo);
   const dialogService = container.resolve<import('./interfaces').IDialogService>(Tokens.IDialogService);
   registerBulkCommands(context, bulkActions, dialogService);
 

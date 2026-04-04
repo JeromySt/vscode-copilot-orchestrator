@@ -806,6 +806,35 @@ function dependencyStyles(): string {
 }
 
 /**
+ * Live execution card styles (main view, isLive: true).
+ */
+function executionCardStyles(): string {
+  return `
+    /* Live execution card — always expanded, no collapse header */
+    .execution-card-live {
+      padding: 10px 12px;
+    }
+    .execution-card-live .step-indicators {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .execution-card-live .step-indicators .step-icon {
+      font-size: 13px;
+    }
+    .execution-card-live #liveAiUsage .attempt-metrics-card {
+      margin: 0;
+      border: none;
+    }
+    .execution-card-live #liveAiUsage .metrics-stats-grid {
+      gap: 6px;
+    }
+  `;
+}
+
+/**
  * Attempt history card styles.
  */
 function attemptHistoryStyles(): string {
@@ -976,6 +1005,8 @@ function attemptHistoryStyles(): string {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .attempt-ctx-env { align-items: flex-start; }
+    .attempt-ctx-env .attempt-ctx-value { white-space: normal; overflow: visible; flex: 1; }
 
     /* Attempt metrics override */
     .attempt-section .attempt-metrics-card {
@@ -1353,6 +1384,7 @@ export function renderNodeDetailStyles(): string {
     processTreeStyles(),
     dependencyStyles(),
     attemptHistoryStyles(),
+    executionCardStyles(),
     aiMetricsStyles(),
     actionButtonStyles(),
     workSummaryStyles(),
@@ -1420,6 +1452,8 @@ function bridgeStyles(): string {
     /* ── Work spec code blocks ── */
     .work-code-block { border: 1px solid var(--vscode-panel-border); border-radius: 4px; overflow: hidden; margin: 4px 0; }
     .work-code-block.agent-block { border-left: 3px solid #9C27B0; }
+    .work-code-block.shell-block { border-left: 3px solid #4CAF50; }
+    .work-code-block.process-block { border-left: 3px solid #2196F3; }
     .work-code-header { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: rgba(128,128,128,0.08); border-bottom: 1px solid var(--vscode-panel-border); }
     .work-lang-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: rgba(128,128,128,0.2); color: var(--vscode-descriptionForeground); font-weight: 600; text-transform: uppercase; }
     .work-lang-badge.shell { background: rgba(76,175,80,0.2); color: #4CAF50; }
@@ -1427,13 +1461,17 @@ function bridgeStyles(): string {
     .work-lang-badge.agent { background: rgba(156,39,176,0.2); color: #CE93D8; }
     .work-code { margin: 0; padding: 8px; font-size: 11px; background: var(--vscode-editor-background); overflow-x: auto; }
     .agent-model { font-size: 10px; color: var(--vscode-descriptionForeground); }
+    .agent-tier { font-size: 9px; padding: 1px 5px; border-radius: 8px; font-weight: 600; text-transform: uppercase; }
+    .agent-tier.tier-fast { background: rgba(76,175,80,0.2); color: #4CAF50; }
+    .agent-tier.tier-standard { background: rgba(33,150,243,0.2); color: #2196F3; }
+    .agent-tier.tier-premium { background: rgba(255,152,0,0.2); color: #FFB74D; }
     .work-instructions { padding: 8px; font-size: 12px; line-height: 1.5; }
     .work-content { padding: 8px; }
-    .env-section { margin-top: 4px; font-size: 11px; }
-    .env-section summary { cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 11px; }
-    .env-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-    .env-key { font-weight: 600; padding: 2px 8px 2px 0; color: var(--vscode-foreground); font-family: var(--vscode-editor-font-family); font-size: 11px; }
-    .env-val { padding: 2px 0; color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: 11px; word-break: break-all; }
+    .env-section { margin-top: 6px; padding: 6px 10px; font-size: 11px; background: rgba(128,128,128,0.06); border-top: 1px solid var(--vscode-panel-border); }
+    .env-section summary { cursor: pointer; color: var(--vscode-foreground); font-size: 11px; font-weight: 600; }
+    .env-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .env-key { font-weight: 600; padding: 3px 12px 3px 0; color: var(--vscode-foreground); font-family: var(--vscode-editor-font-family); font-size: 11px; }
+    .env-val { padding: 3px 0; color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: 11px; word-break: break-all; }
 
     /* ── Dependencies extras ── */
     .deps-list { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1509,6 +1547,7 @@ function bridgeStyles(): string {
     .md-header { font-weight: 600; margin-top: 12px; margin-bottom: 4px; color: var(--vscode-foreground); }
     .md-list { margin: 4px 0; padding-left: 20px; }
     .md-para { margin: 4px 0; line-height: 1.5; }
+    .md-blockquote { margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--vscode-editorInfo-foreground, #3794ff); background: rgba(55,148,255,0.06); border-radius: 2px; font-size: 12px; line-height: 1.5; }
     .md-inline-code { background: rgba(128,128,128,0.15); padding: 1px 4px; border-radius: 3px; font-family: var(--vscode-editor-font-family); font-size: 0.9em; }
     .md-link { color: var(--vscode-textLink-foreground); text-decoration: none; }
     .md-link:hover { text-decoration: underline; }

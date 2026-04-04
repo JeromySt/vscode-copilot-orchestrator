@@ -40,6 +40,12 @@ export function renderMessageRouter(): string {
         case 'configUpdate':
           bus.emit(Topics.CONFIG_UPDATE, msg.data || msg);
           break;
+        case 'subscriptionData':
+          bus.emit(Topics.SUBSCRIPTION_DATA, msg);
+          break;
+        case 'subscriptionEnd':
+          bus.emit(Topics.SUBSCRIPTION_END, msg);
+          break;
         case 'focusAttempt':
           // Expand and scroll to a specific attempt card
           if (msg.attemptNumber) {
@@ -53,6 +59,18 @@ export function renderMessageRouter(): string {
               // Brief highlight effect
               card.style.outline = '2px solid var(--vscode-focusBorder)';
               setTimeout(function() { card.style.outline = ''; }, 2000);
+            }
+          }
+          break;
+        case 'depsUpdate':
+          // Update dependency badge statuses in-place
+          if (msg.dependencies) {
+            var depsList = document.querySelector('.deps-list');
+            if (depsList) {
+              depsList.innerHTML = msg.dependencies.map(function(dep) {
+                var name = dep.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                return '<span class="dep-badge ' + (dep.status || 'pending') + '">' + name + '</span>';
+              }).join('');
             }
           }
           break;

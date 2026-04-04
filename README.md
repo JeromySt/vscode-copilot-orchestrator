@@ -356,7 +356,44 @@ Set environment variables that apply to all jobs in a plan, with per-job overrid
 - **Job-level `env`**: Overrides plan-level values for that specific job
 - Use `update_copilot_plan` to modify plan-level env vars on a running/paused plan
 
-### 📝 Repository Instructions & Agent Skills
+### � Worktree Initialization Hooks
+
+Run setup commands in every worktree before any job work begins. Use for dependency installation, package restore, code generation, or git hook setup.
+
+**Two ways to configure:**
+
+**1. Automatic — `.github/instructions/worktree-init.instructions.md`** (recommended):
+
+Place a markdown instruction file in your repo. The orchestrator auto-detects it and runs it as an agent init step in every worktree — no plan configuration needed:
+
+```markdown
+<!-- .github/instructions/worktree-init.instructions.md -->
+# Worktree Initialization
+
+Run the following commands to set up this worktree:
+
+1. Install npm dependencies: `npm ci`
+2. Install git hooks: `npx husky install`
+3. Build shared packages: `npm run build:shared`
+```
+
+**2. Explicit — `worktreeInit` in plan spec:**
+
+```json
+{
+  "name": "My Plan",
+  "worktreeInit": [
+    { "type": "shell", "command": "npm ci", "shell": "bash" },
+    { "type": "shell", "command": "dotnet husky install" },
+    { "type": "process", "executable": "dotnet", "args": ["restore"] }
+  ],
+  "jobs": [...]
+}
+```
+
+**Execution order:** Auto-detected instruction file runs first, then explicit `worktreeInit` specs in array order. All init specs run during the **setup phase** of each job, after forward-integration merge and before prechecks/work. If any init spec fails, the job fails in the setup phase.
+
+### �📝 Repository Instructions & Agent Skills
 
 Copilot CLI agents launched by the orchestrator **automatically discover and use** repo-level instructions and skills — no extra configuration needed.
 

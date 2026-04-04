@@ -11,6 +11,9 @@ import { EventBus } from '../eventBus';
 import { SubscribableControl } from '../subscribableControl';
 import { Topics } from '../topics';
 
+// VS Code webview API global (injected by the webview host)
+declare const vscode: { postMessage(msg: unknown): void };
+
 /** Single attempt data from the backend. */
 export interface AttemptCardData {
   attemptNumber: number;
@@ -37,6 +40,7 @@ export interface AttemptCardData {
 /** Batch update payload from the backend. */
 interface AttemptUpdatePayload {
   attempts: AttemptCardData[];
+  planEnvHtml?: string;
 }
 
 function escapeHtml(s: string): string {
@@ -70,11 +74,11 @@ function formatDuration(sec: number): string {
 }
 
 function stepIconHtml(status?: string): string {
-  const icon = status === 'success' || status === 'succeeded' ? '✓'
-    : status === 'failed' ? '✗'
-    : status === 'running' ? '⟳'
-    : status === 'skipped' ? '⊘'
-    : '○';
+  const icon = status === 'success' || status === 'succeeded' ? '\u2713'  // ✓
+    : status === 'failed' ? '\u2717'   // ✗
+    : status === 'running' ? '\u27F3'  // ⟳
+    : status === 'skipped' ? '\u2298'  // ⊘
+    : '\u2022';                        // • (pending — matches executionCardTemplate)
   const cls = status === 'success' || status === 'succeeded' ? 'success'
     : status === 'failed' ? 'failed'
     : status === 'running' ? 'running'
@@ -89,12 +93,225 @@ function stepIconHtml(status?: string): string {
 export class AttemptCard extends SubscribableControl {
   private selector: string;
   private expandedAttempts = new Set<number>();
+  private activePhase = 'all';
+  private userSelectedPhase = false;
+  /** Per-attempt log buffers — key is the tag (e.g., 'log-attempt-3') */
+  private logBuffers = new Map<string, string>();
+  /** Track which phase the log stream is currently in (based on markers seen) */
+  private currentStreamPhase = 'unknown';
+  /** Plan-level env vars HTML (set once from first attemptUpdate). */
+  private planEnvHtml = '';
 
   constructor(bus: EventBus, controlId: string, selector: string) {
     super(bus, controlId);
     this.selector = selector;
     this.subscribe(Topics.ATTEMPT_UPDATE, (data?: AttemptUpdatePayload) => {
+      if (data?.planEnvHtml !== undefined) this.planEnvHtml = data.planEnvHtml;
       if (data?.attempts) this.rebuild(data.attempts);
+    });
+    // Tick running attempt durations every pulse (1s)
+    this.subscribe(Topics.PULSE, () => this.tickDurations());
+    // Handle subscription data (log deltas/full from extension host)
+    this.subscribe(Topics.SUBSCRIPTION_DATA, (msg?: { tag?: string; full?: boolean; content?: string }) => {
+      if (msg?.tag && msg.content !== undefined) {
+        this.handleSubscriptionData(msg.tag, msg.content, !!msg.full);
+      }
+    });
+    // Legacy: also handle LOG_UPDATE for backward compat during transition
+    this.subscribe(Topics.LOG_UPDATE, (data?: { phase?: string; content?: string; append?: boolean }) => {
+      if (data?.content) {
+        // Route to the first log buffer (latest attempt)
+        const latestTag = this.getLatestLogTag();
+        if (latestTag) {
+          this.handleSubscriptionData(latestTag, data.content, !data.append);
+        }
+      }
+    });
+    // Update phase tab styling when step statuses change
+    this.subscribe(Topics.NODE_STATE_CHANGE, (data?: { phaseStatus?: Record<string, string> }) => {
+      if (data?.phaseStatus) this.updatePhaseTabs(data.phaseStatus);
+    });
+  }
+
+  /** Get the tag for the latest (highest numbered) attempt's log buffer. */
+  private getLatestLogTag(): string | undefined {
+    let best: string | undefined;
+    let bestNum = -1;
+    for (const tag of this.logBuffers.keys()) {
+      const m = tag.match(/log-attempt-(\d+)/);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > bestNum) { bestNum = n; best = tag; }
+      }
+    }
+    return best;
+  }
+
+  /** Check if user has an active text selection inside the log viewer. */
+  private hasActiveLogSelection(): boolean {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
+    const container = document.querySelector(this.selector);
+    if (!container) return false;
+    const logEl = container.querySelector('.attempt-live-log');
+    if (!logEl) return false;
+    return logEl.contains(sel.anchorNode);
+  }
+
+  /** Handle subscription data — update per-attempt log buffer and render. */
+  private handleSubscriptionData(tag: string, content: string, full: boolean): void {
+    if (full) {
+      this.logBuffers.set(tag, content);
+      // Detect current phase from full content
+      this.currentStreamPhase = this.detectCurrentPhase(content);
+    } else {
+      const existing = this.logBuffers.get(tag) || '';
+      this.logBuffers.set(tag, existing + content);
+      // Update current phase from delta content (check for section markers)
+      this.currentStreamPhase = this.detectCurrentPhase(content) || this.currentStreamPhase;
+    }
+
+    // Find the log viewer element for this tag
+    const container = document.querySelector(this.selector) as HTMLElement | null;
+    if (!container) return;
+    const viewer = container.querySelector('[data-log-tag="' + tag + '"]') as HTMLPreElement | null;
+    if (!viewer) return;
+
+    // appendChild(textNode) preserves existing Selection ranges, so we always append.
+    // Only suppress auto-scroll when user has an active selection or has scrolled up.
+    const hasSelection = this.hasActiveLogSelection();
+    const wasAtBottom = !hasSelection && viewer.scrollTop + viewer.clientHeight >= viewer.scrollHeight - 20;
+
+    if (full) {
+      // Full load — set content (initial load or phase switch)
+      if (this.activePhase === 'all') {
+        viewer.textContent = content;
+      } else {
+        viewer.textContent = this.extractPhaseFromText(content, this.activePhase) || '(no logs for this phase yet)';
+      }
+    } else {
+      // Delta append — logs only roll forward, never replace
+      if (this.activePhase === 'all') {
+        // Show everything — just append
+        viewer.appendChild(document.createTextNode(content));
+      } else {
+        // A delta may span multiple phases. Re-extract the active phase from the full buffer
+        // rather than appending the raw delta which could contain other phases' content.
+        const fullText = this.logBuffers.get(tag) || '';
+        const filtered = this.extractPhaseFromText(fullText, this.activePhase);
+        const newText = filtered || '(no logs for this phase yet)';
+        if (viewer.textContent !== newText) {
+          viewer.textContent = newText;
+        }
+      }
+    }
+
+    if (wasAtBottom) {
+      viewer.scrollTop = viewer.scrollHeight;
+    }
+  }
+
+  /** Update phase tab CSS classes and auto-advance to running phase. */
+  private updatePhaseTabs(phaseStatus: Record<string, string>): void {
+    const container = document.querySelector(this.selector) as HTMLElement | null;
+    if (!container) return;
+    let runningPhase: string | null = null;
+    container.querySelectorAll('.attempt-phase-tab').forEach(tab => {
+      const phase = tab.getAttribute('data-phase');
+      if (!phase || phase === 'all') return;
+      const status = phaseStatus[phase] || '';
+      tab.classList.remove('success', 'failed', 'skipped', 'running');
+      if (status === 'success' || status === 'succeeded') tab.classList.add('success');
+      else if (status === 'failed') tab.classList.add('failed');
+      else if (status === 'skipped') tab.classList.add('skipped');
+      else if (status === 'running') { tab.classList.add('running'); runningPhase = phase; }
+    });
+
+    // Auto-advance to the running phase if the user hasn't manually selected a tab,
+    // doesn't have an active text selection, and isn't actively scrolling (not at bottom)
+    if (runningPhase && !this.userSelectedPhase && !this.hasActiveLogSelection() && this.activePhase !== runningPhase) {
+      const viewer = container.querySelector('.attempt-live-log') as HTMLElement | null;
+      const isAtBottom = !viewer || (viewer.scrollTop + viewer.clientHeight >= viewer.scrollHeight - 20);
+      if (!isAtBottom) return; // User scrolled up — don't disrupt them
+
+      this.activePhase = runningPhase;
+      // Update active tab styling
+      container.querySelectorAll('.attempt-phase-tab').forEach(t => t.classList.remove('active'));
+      const activeTab = container.querySelector('.attempt-phase-tab[data-phase="' + runningPhase + '"]');
+      if (activeTab) activeTab.classList.add('active');
+      // Filter log to new phase — since we're switching, we need the full filtered content
+      if (viewer) {
+        const tag = viewer.getAttribute('data-log-tag') || '';
+        const logText = this.logBuffers.get(tag) || '';
+        viewer.textContent = this.extractPhaseFromText(logText, runningPhase) || '(no logs for this phase yet)';
+      }
+    }
+  }
+
+  /** Extract log lines for a specific phase from the full log text. */
+  private extractPhaseFromText(text: string, phase: string): string {
+    const markers: Record<string, [string, string]> = {
+      'merge-fi': ['FORWARD INTEGRATION', 'FORWARD INTEGRATION'],
+      'prechecks': ['PRECHECKS SECTION START', 'PRECHECKS SECTION END'],
+      'work': ['WORK SECTION START', 'WORK SECTION END'],
+      'commit': ['COMMIT SECTION START', 'COMMIT SECTION END'],
+      'postchecks': ['POSTCHECKS SECTION START', 'POSTCHECKS SECTION END'],
+      'merge-ri': ['REVERSE INTEGRATION', 'REVERSE INTEGRATION'],
+    };
+    const m = markers[phase];
+    if (!m) return '';
+    const startIdx = text.indexOf(m[0]);
+    if (startIdx < 0) return '';
+    const afterStart = text.indexOf('\n', startIdx);
+    const endIdx = text.indexOf(m[1], afterStart > 0 ? afterStart : startIdx + m[0].length);
+    if (endIdx > afterStart) {
+      return text.substring(afterStart + 1, endIdx).trim();
+    }
+    return text.substring(afterStart > 0 ? afterStart + 1 : startIdx + m[0].length).trim();
+  }
+
+  /** Detect which phase the log content is currently in based on section markers. */
+  private detectCurrentPhase(text: string): string {
+    const phaseMarkers: Array<[string, string]> = [
+      ['merge-fi', 'FORWARD INTEGRATION'],
+      ['prechecks', 'PRECHECKS SECTION START'],
+      ['work', 'WORK SECTION START'],
+      ['commit', 'COMMIT SECTION START'],
+      ['postchecks', 'POSTCHECKS SECTION START'],
+      ['merge-ri', 'REVERSE INTEGRATION MERGE START'],
+    ];
+    const endMarkers: Array<[string, string]> = [
+      ['prechecks', 'PRECHECKS SECTION END'],
+      ['work', 'WORK SECTION END'],
+      ['commit', 'COMMIT SECTION END'],
+      ['postchecks', 'POSTCHECKS SECTION END'],
+      ['merge-ri', 'REVERSE INTEGRATION MERGE END'],
+    ];
+    let latestPhase = '';
+    let latestIdx = -1;
+    for (const [phase, marker] of phaseMarkers) {
+      const idx = text.lastIndexOf(marker);
+      if (idx > latestIdx) {
+        const endEntry = endMarkers.find(e => e[0] === phase);
+        const endIdx = endEntry ? text.lastIndexOf(endEntry[1]) : -1;
+        if (endIdx > idx) continue; // Phase ended
+        latestIdx = idx;
+        latestPhase = phase;
+      }
+    }
+    return latestPhase;
+  }
+
+  /** Update duration text for running attempts. */
+  private tickDurations(): void {
+    const container = document.querySelector(this.selector) as HTMLElement | null;
+    if (!container) return;
+    container.querySelectorAll('.attempt-duration[data-started]').forEach(el => {
+      const started = parseInt(el.getAttribute('data-started') || '0', 10);
+      if (started) {
+        const secs = Math.round((Date.now() - started) / 1000);
+        (el as HTMLElement).textContent = formatDuration(secs) + '\u2026';
+      }
     });
   }
 
@@ -111,12 +328,20 @@ export class AttemptCard extends SubscribableControl {
 
     // Build HTML — latest first
     const sorted = attempts.slice().sort((a, b) => b.attemptNumber - a.attemptNumber);
+    // Auto-expand the latest attempt if nothing else is expanded
+    if (this.expandedAttempts.size === 0 && sorted.length > 0) {
+      this.expandedAttempts.add(sorted[0].attemptNumber);
+    }
     const html = sorted.map(att => this.renderCard(att)).join('');
     container.innerHTML = '<div class="section"><h3>Attempt History (' + attempts.length + ')</h3>' + html + '</div>';
 
     // Wire up click handlers for expand/collapse
     container.querySelectorAll('.attempt-header').forEach(header => {
-      header.addEventListener('click', () => {
+      // Mark as controlled by this webview control so the delegated
+      // handler in eventHandlers.ts skips it (prevents double-toggle)
+      (header as any).__attemptControlled = true;
+      header.addEventListener('click', (e) => {
+        e.stopPropagation();  // Prevent delegated handler double-toggle
         const card = header.closest('.attempt-card') as HTMLElement | null;
         if (!card) return;
         const num = parseInt(card.getAttribute('data-attempt') || '0', 10);
@@ -125,35 +350,101 @@ export class AttemptCard extends SubscribableControl {
         if (body) body.style.display = isExpanded ? 'none' : 'block';
         header.setAttribute('data-expanded', isExpanded ? 'false' : 'true');
         card.setAttribute('data-expanded', isExpanded ? 'false' : 'true');
-        if (isExpanded) this.expandedAttempts.delete(num);
-        else this.expandedAttempts.add(num);
-      });
-    });
-
-    // Wire up attempt phase tab clicks
-    container.querySelectorAll('.attempt-phase-tab').forEach(tab => {
-      tab.addEventListener('click', (e) => {
-        const btn = e.currentTarget as HTMLElement;
-        const phase = btn.getAttribute('data-phase');
-        const attNum = btn.getAttribute('data-attempt');
-        if (!phase || !attNum) return;
-        // Update active tab
-        const tabBar = btn.closest('.attempt-phase-tabs');
-        if (tabBar) tabBar.querySelectorAll('.attempt-phase-tab').forEach(t => t.classList.remove('active'));
-        btn.classList.add('active');
-        // Swap log content
-        const card = btn.closest('.attempt-card');
-        if (!card) return;
-        const dataEl = card.querySelector('.attempt-logs-data[data-attempt="' + attNum + '"]') as HTMLElement | null;
-        const viewer = card.querySelector('.attempt-log-viewer[data-attempt="' + attNum + '"]') as HTMLElement | null;
-        if (dataEl && viewer) {
-          try {
-            const allLogs = JSON.parse(dataEl.textContent || '{}');
-            viewer.textContent = allLogs[phase] || '(no logs for this phase)';
-          } catch { /* ignore parse errors */ }
+        const tag = 'log-attempt-' + num;
+        if (isExpanded) {
+          // Collapsing — unsubscribe from log updates, free buffer
+          this.expandedAttempts.delete(num);
+          this.logBuffers.delete(tag);
+          vscode.postMessage({ type: 'unsubscribeLog', tag: tag });
+        } else {
+          // Expanding — subscribe to log updates
+          this.expandedAttempts.add(num);
+          vscode.postMessage({ type: 'subscribeLog', attemptNumber: num, tag: tag });
         }
       });
     });
+
+    // Wire up attempt phase tab clicks — purely client-side filtering, no re-render
+    container.querySelectorAll('.attempt-phase-tab').forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        e.stopPropagation(); // Prevent bubbling that could trigger other handlers
+        e.preventDefault();
+        const btn = e.currentTarget as HTMLElement;
+        const phase = btn.getAttribute('data-phase');
+        if (!phase) return;
+        // Update active tab styling
+        const tabBar = btn.closest('.attempt-phase-tabs');
+        if (tabBar) tabBar.querySelectorAll('.attempt-phase-tab').forEach(t => t.classList.remove('active'));
+        btn.classList.add('active');
+        // Track active phase for live filtering on appends
+        this.activePhase = phase;
+        this.userSelectedPhase = (phase !== 'all');
+        // Find the log viewer in this attempt card
+        const card = btn.closest('.attempt-card');
+        if (!card) return;
+        const viewer = card.querySelector('.attempt-live-log') as HTMLElement | null;
+        if (!viewer) return;
+        const tag = viewer.getAttribute('data-log-tag') || '';
+        // Use per-attempt log buffer — purely client-side, no extension host calls
+        const logText = this.logBuffers.get(tag) || viewer.textContent || '';
+        if (phase === 'all') {
+          viewer.textContent = logText;
+        } else {
+          viewer.textContent = this.extractPhaseFromText(logText, phase) || '(no logs for this phase yet)';
+        }
+      });
+    });
+
+    // Wire up Ctrl-A on log viewers to select only log content, not entire page
+    // Also wire scroll listener to resume auto-advance when user scrolls back to bottom
+    container.querySelectorAll('.attempt-live-log').forEach(logEl => {
+      logEl.setAttribute('tabindex', '0'); // Make focusable
+      logEl.addEventListener('keydown', (e: Event) => {
+        const ke = e as KeyboardEvent;
+        if ((ke.ctrlKey || ke.metaKey) && ke.key === 'a') {
+          ke.preventDefault();
+          ke.stopPropagation();
+          const range = document.createRange();
+          range.selectNodeContents(logEl);
+          const sel = window.getSelection();
+          if (sel) {
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        }
+      });
+      // When user scrolls back to bottom with no selection, resume auto-advance
+      logEl.addEventListener('scroll', () => {
+        const el = logEl as HTMLElement;
+        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+        const sel = window.getSelection();
+        const hasSelection = sel && !sel.isCollapsed && logEl.contains(sel.anchorNode);
+        if (atBottom && !hasSelection && this.userSelectedPhase) {
+          // User returned to bottom — resume auto-advance
+          this.userSelectedPhase = false;
+        }
+      });
+    });
+
+    // Re-subscribe and restore content for all expanded attempts.
+    // Always re-subscribe even if buffer exists — the DOM was just replaced,
+    // so the extension host needs to know we still want data.
+    for (const attemptNumber of this.expandedAttempts) {
+      const tag = 'log-attempt-' + attemptNumber;
+      vscode.postMessage({ type: 'subscribeLog', attemptNumber: attemptNumber, tag: tag });
+      // Restore log viewer content from buffer if we have cached data
+      const buffered = this.logBuffers.get(tag);
+      if (buffered) {
+        const viewer = container.querySelector('[data-log-tag="' + tag + '"]') as HTMLPreElement | null;
+        if (viewer) {
+          if (this.activePhase === 'all') {
+            viewer.textContent = buffered;
+          } else {
+            viewer.textContent = this.extractPhaseFromText(buffered, this.activePhase) || '(no logs for this phase yet)';
+          }
+        }
+      }
+    }
   }
 
   /** Render a single attempt card. */
@@ -224,6 +515,10 @@ export class AttemptCard extends SubscribableControl {
     if (att.copilotSessionId) {
       ctxItems.push('<div class="attempt-ctx-row"><span class="attempt-ctx-label">Session</span><span class="session-id attempt-ctx-value" data-session="' + escapeHtml(att.copilotSessionId) + '" title="Click to copy">' + escapeHtml(att.copilotSessionId.substring(0, 12)) + '\u2026 \uD83D\uDCCB</span></div>');
     }
+    // Plan-level inherited env vars
+    if (this.planEnvHtml) {
+      ctxItems.push('<div class="attempt-ctx-row attempt-ctx-env"><span class="attempt-ctx-label">Plan Env</span><div class="attempt-ctx-value">' + this.planEnvHtml + '</div></div>');
+    }
     const contextHtml = ctxItems.length > 0
       ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDD17 Context</div><div class="attempt-ctx-grid">' + ctxItems.join('') + '</div></div>'
       : '';
@@ -239,48 +534,46 @@ export class AttemptCard extends SubscribableControl {
       ? '<div class="attempt-section"><div class="attempt-section-title">\u2705 Postchecks</div>' + att.postchecksUsedHtml + '</div>'
       : '';
 
-    // ── Log section with phase tabs ──
-    let logSection = '';
+    // ── Unified log section — one container for both live streaming and static logs ──
+    const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+    const phaseLabels: Record<string, string> = {
+      'all': '\uD83D\uDCC4 Full Log',
+      'merge-fi': '\u21D9\u21D8 Merge FI',
+      'prechecks': '\u2713 Prechecks',
+      'work': '\u2699 Work',
+      'commit': '\uD83D\uDCBE Commit',
+      'postchecks': '\u2713 Postchecks',
+      'merge-ri': '\u2197\u2199 Merge RI',
+    };
+    let initialLogContent = '';
     if (att.logs) {
-      const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
-      const phaseLabels: Record<string, string> = {
-        'all': '\uD83D\uDCC4 Full Log',
-        'merge-fi': '\u21D9\u21D8 Merge FI',
-        'prechecks': '\u2713 Prechecks',
-        'work': '\u2699 Work',
-        'commit': '\uD83D\uDCBE Commit',
-        'postchecks': '\u2713 Postchecks',
-        'merge-ri': '\u2197\u2199 Merge RI',
-      };
-      const phaseLogs = this.extractPhaseLogs(att.logs, phases);
-      // Also include the full log
-      phaseLogs['all'] = att.logs;
-
-      const tabsHtml = phases.map(p => {
-        const ss2 = att.stepStatuses || {};
-        const pStatus = p === 'all' ? '' : (ss2[p] || '');
-        const statusCls = pStatus === 'success' || pStatus === 'succeeded' ? ' success'
-          : pStatus === 'failed' ? ' failed'
-          : pStatus === 'skipped' ? ' skipped'
-          : '';
-        return '<button class="attempt-phase-tab' + (p === 'all' ? ' active' : '') + statusCls + '" data-phase="' + p + '" data-attempt="' + att.attemptNumber + '">'
-          + (phaseLabels[p] || p) + '</button>';
-      }).join('');
-
-      logSection = '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDCCB Logs</div>'
-        + '<div class="attempt-phases" data-attempt="' + att.attemptNumber + '">'
-        + '<div class="attempt-phase-tabs">' + tabsHtml + '</div>'
-        + '<pre class="attempt-log-viewer" data-attempt="' + att.attemptNumber + '">' + escapeHtml(phaseLogs['all'] || '') + '</pre>'
-        + '<script type="application/json" class="attempt-logs-data" data-attempt="' + att.attemptNumber + '">'
-        + JSON.stringify(phaseLogs)
-        + '<\/script>'
-        + '</div></div>';
+      initialLogContent = escapeHtml(att.logs);
     }
+    const ss2 = att.stepStatuses || {};
+    const tabsHtml = phases.map(p => {
+      const pStatus = p === 'all' ? '' : (ss2[p] || '');
+      const statusCls = pStatus === 'success' || pStatus === 'succeeded' ? ' success'
+        : pStatus === 'failed' ? ' failed'
+        : pStatus === 'skipped' ? ' skipped'
+        : '';
+      return '<button class="attempt-phase-tab' + (p === 'all' ? ' active' : '') + statusCls + '" data-phase="' + p + '" data-attempt="' + att.attemptNumber + '">'
+        + (phaseLabels[p] || p) + '</button>';
+    }).join('');
+
+    const logSection = '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDCCB Logs</div>'
+      + '<div class="attempt-phases" data-attempt="' + att.attemptNumber + '">'
+      + '<div class="attempt-phase-tabs">' + tabsHtml + '</div>'
+      + '<pre class="attempt-live-log" data-attempt="' + att.attemptNumber + '" data-log-tag="log-attempt-' + att.attemptNumber + '" '
+      + 'style="max-height:500px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;'
+      + 'font-size:12px;line-height:1.4;background:var(--vscode-editor-background);'
+      + 'padding:8px;border-radius:4px;user-select:text;-webkit-user-select:text;">'
+      + initialLogContent + '</pre>'
+      + '</div></div>';
 
     // ── Running placeholder ──
-    const hasBodyContent = errorHtml || metricsHtml || ctxItems.length > 0 || prechecksHtml || workHtml || postchecksHtml || logSection;
+    const hasBodyContent = errorHtml || metricsHtml || ctxItems.length > 0 || prechecksHtml || workHtml || postchecksHtml;
     const runningPlaceholder = (!hasBodyContent && isRunning)
-      ? '<div class="attempt-section"><div class="attempt-running-indicator">\u27F3 Executing\u2026 see live log viewer above for current output.</div></div>'
+      ? '<div class="attempt-section"><div class="attempt-running-indicator">\u27F3 Executing\u2026</div></div>'
       : '';
 
     return '<div class="attempt-card" data-attempt="' + att.attemptNumber + '" data-expanded="' + expanded + '" style="border-left: 3px solid ' + statusColor + ';">'
@@ -293,7 +586,7 @@ export class AttemptCard extends SubscribableControl {
       + '</div>'
       + '<div class="attempt-header-right">'
       + '<span class="attempt-time">' + timestamp + '</span>'
-      + '<span class="attempt-duration">' + duration + '</span>'
+      + '<span class="attempt-duration"' + (isRunning && att.startedAt ? ' data-started="' + att.startedAt + '"' : '') + '>' + duration + '</span>'
       + '<span class="attempt-chevron">\u203A</span>'
       + '</div>'
       + '</div>'
@@ -301,33 +594,6 @@ export class AttemptCard extends SubscribableControl {
       + runningPlaceholder + errorHtml + metricsHtml + contextHtml + prechecksHtml + workHtml + postchecksHtml + logSection
       + '</div>'
       + '</div>';
-  }
-
-  /** Extract phase-specific logs from the combined log content. */
-  private extractPhaseLogs(logs: string, phases: string[]): Record<string, string> {
-    const result: Record<string, string> = {};
-    const markerMap: Record<string, [string, string]> = {
-      'merge-fi': ['FORWARD INTEGRATION', 'FORWARD INTEGRATION'],
-      'prechecks': ['PRECHECKS SECTION START', 'PRECHECKS SECTION END'],
-      'work': ['WORK SECTION START', 'WORK SECTION END'],
-      'commit': ['COMMIT SECTION START', 'COMMIT SECTION END'],
-      'postchecks': ['POSTCHECKS SECTION START', 'POSTCHECKS SECTION END'],
-      'merge-ri': ['REVERSE INTEGRATION', 'REVERSE INTEGRATION'],
-    };
-    for (const phase of phases) {
-      const markers = markerMap[phase];
-      if (!markers) continue;
-      const startIdx = logs.indexOf(markers[0]);
-      if (startIdx === -1) continue;
-      const endIdx = logs.indexOf(markers[1], startIdx + markers[0].length);
-      if (endIdx !== -1) {
-        result[phase] = logs.substring(startIdx, endIdx + markers[1].length + 20).trim();
-      } else {
-        // Running phase — take everything from start marker onwards
-        result[phase] = logs.substring(startIdx).trim();
-      }
-    }
-    return result;
   }
 
   // Legacy methods for compatibility

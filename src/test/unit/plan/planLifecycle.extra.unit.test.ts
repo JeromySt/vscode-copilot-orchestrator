@@ -316,8 +316,8 @@ suite('PlanLifecycleManager – extra coverage', () => {
       // Call recoverRunningNodes directly via private access
       await (lifecycle as any).recoverRunningNodes(plan);
 
-      // Node should be marked as failed
-      assert.strictEqual(nodeState.status, 'failed');
+      // Auto-retry: nodes are reset to 'ready' for re-scheduling (not marked failed)
+      assert.strictEqual(nodeState.status, 'ready');
     });
   });
 
