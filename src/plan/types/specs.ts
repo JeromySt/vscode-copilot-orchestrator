@@ -412,6 +412,24 @@ export function normalizeWorkSpec(spec: WorkSpec | undefined): ProcessSpec | She
     raw.errorAction = raw.error_action;
     delete raw.error_action;
   }
+
+  // Sanitize XML/tool-invocation artifacts that LLMs sometimes inject into fields.
+  if (raw.type === 'agent' && typeof raw.instructions === 'string') {
+    raw.instructions = stripXmlArtifacts(raw.instructions);
+  }
+  if (raw.type === 'shell' && typeof raw.command === 'string') {
+    raw.command = stripXmlArtifacts(raw.command);
+  }
   
   return spec;
+}
+
+/** Strip XML/tool-invocation artifacts injected by LLMs into spec fields. */
+function stripXmlArtifacts(text: string): string {
+  const xmlPattern = /<\/?(?:invoke|antml:invoke|function_call|tool_call|antml:function_calls)[^>]*>/gi;
+  const cleaned = text.replace(xmlPattern, '').trim();
+  if (cleaned !== text.trim()) {
+    try { console.warn('[normalizeWorkSpec] Stripped XML/tool-invocation artifacts from spec text'); } catch { /* */ }
+  }
+  return cleaned;
 }

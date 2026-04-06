@@ -76,9 +76,16 @@ export async function finalizePlanInRunner(
     });
   }
 
-  // 4. Delete old registration and re-register to rebuild state machine with new nodes
-  planRunner.delete(planId);
-  (planRunner as any).registerPlan(existingPlan);
+  // 4. Remove old registration (without canceling/deleting!) and re-register
+  //    to rebuild the state machine with the finalized nodes.
+  //    IMPORTANT: Do NOT call planRunner.delete() — that cancels all nodes and
+  //    writes a tombstone. Instead, remove from internal maps directly.
+  const runner = planRunner as any;
+  if (runner._state?.plans) { runner._state.plans.delete(planId); }
+  if (runner._state?.stateMachines) { runner._state.stateMachines.delete(planId); }
+  if (runner._lifecycle?.state?.plans) { runner._lifecycle.state.plans.delete(planId); }
+  if (runner._lifecycle?.state?.stateMachines) { runner._lifecycle.state.stateMachines.delete(planId); }
+  runner.registerPlan(existingPlan);
 
   // 5. If not paused, resume to kick off execution
   if (!shouldPause) {

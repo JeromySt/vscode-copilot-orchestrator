@@ -56,13 +56,18 @@ suite('finalizePlanHelper', () => {
     const getSpy = sandbox.stub();
     getSpy.onFirstCall().returns(plan);      // first call: check scaffolding
     getSpy.onSecondCall().returns(plan);      // after re-register: return updated plan
-    const planRunner = { get: getSpy, delete: deleteSpy, registerPlan: registerSpy, resume: resumeSpy } as any;
+    const planRunner = {
+      get: getSpy,
+      registerPlan: registerSpy,
+      resume: resumeSpy,
+      _state: { plans: new Map([['p1', plan]]), stateMachines: new Map() },
+      _lifecycle: { state: { plans: new Map([['p1', plan]]), stateMachines: new Map() } },
+    } as any;
     const planRepo = { finalize: sandbox.stub().resolves(finalized) } as any;
 
     const result = await finalizePlanInRunner('p1', planRunner, planRepo, { startPaused: false });
     assert.strictEqual(result.success, true);
     assert.ok(planRepo.finalize.calledOnce);
-    assert.ok(deleteSpy.calledOnce);
     assert.ok(registerSpy.calledOnce);
     assert.ok(resumeSpy.calledOnce);
     assert.strictEqual((plan.spec as any).status, 'pending');
