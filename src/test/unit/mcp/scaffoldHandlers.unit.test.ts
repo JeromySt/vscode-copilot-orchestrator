@@ -36,11 +36,13 @@ suite('MCP Scaffold Handlers', () => {
         events: {
           emitPlanUpdated: sandbox.stub(),
         },
+        plans: new Map(),
         stateMachineFactory: sandbox.stub(),
         stateMachines: new Map(),
       },
       _lifecycle: {
         setupStateMachineListeners: sandbox.stub(),
+        state: { plans: new Map(), stateMachines: new Map() },
       },
       enqueue: sandbox.stub(),
       registerPlan: sandbox.stub(),
@@ -442,8 +444,7 @@ suite('MCP Scaffold Handlers', () => {
 
       await handleFinalizePlan(args, mockContext);
 
-      // finalizePlanInRunner calls delete + registerPlan which triggers planCreated event internally
-      assert.ok(mockPlanRunner.delete.calledWith('test-plan'));
+      // finalizePlanInRunner removes from maps + registerPlan
       assert.ok(mockPlanRunner.registerPlan.calledOnce);
     });
 
@@ -481,8 +482,7 @@ suite('MCP Scaffold Handlers', () => {
       const result = await handleFinalizePlan(args, mockContext);
 
       assert.strictEqual(result.success, true);
-      // State machine is rebuilt via delete + registerPlan
-      assert.ok(mockPlanRunner.delete.calledWith('test-plan'));
+      // State machine is rebuilt via map removal + registerPlan
       assert.ok(mockPlanRunner.registerPlan.calledOnce);
     });
 
