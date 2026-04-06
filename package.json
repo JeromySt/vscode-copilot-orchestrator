@@ -484,7 +484,7 @@
     "@types/node": "^25.3.5",
     "@types/sinon": "^21.0.0",
     "@types/uuid": "^11.0.0",
-    "@types/vscode": "^1.109.0",
+    "@types/vscode": "^1.110.0",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
     "@vscode/vsce": "^3.7.1",
