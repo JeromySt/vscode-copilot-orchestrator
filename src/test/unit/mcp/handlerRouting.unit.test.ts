@@ -343,6 +343,12 @@ suite('McpHandler Routing Dispatch', () => {
     });
 
     test('handles finalize errors', async () => {
+      // Need a scaffolding plan so finalizePlanInRunner calls finalize()
+      mockRunner.get.returns({
+        spec: { status: 'scaffolding', name: 'Test' },
+        jobs: new Map(), nodeStates: new Map(), producerIdToNodeId: new Map(),
+        roots: [], leaves: [], stateVersion: 0,
+      });
       mockPlanRepository.finalize.rejects(new Error('Circular dependency'));
 
       const res = await handler.handleRequest(makeRequest('tools/call', {
@@ -361,7 +367,7 @@ suite('McpHandler Routing Dispatch', () => {
         ['build', 'node-1'],
         ['test', 'node-2'],
       ]);
-      planWithNodes.spec = { name: 'Test', status: 'pending' };
+      planWithNodes.spec = { name: 'Test', status: 'scaffolding' };
       mockPlanRepository.finalize.resolves(planWithNodes);
       mockRunner.get.returns(planWithNodes);
 

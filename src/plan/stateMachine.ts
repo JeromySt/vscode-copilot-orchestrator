@@ -129,16 +129,20 @@ export class PlanStateMachine extends EventEmitter {
       Object.assign(state, updates);
     }
     
-    // Set timestamps based on status — derived from stateHistory
+    // Set timestamps based on status (respect explicit overrides in updates)
     const now = Date.now();
-    if (newStatus === 'scheduled' && !state.scheduledAt) {
-      state.scheduledAt = now;
+    if (newStatus === 'scheduled') {
+      if (!updates?.scheduledAt) { state.scheduledAt = now; }
     }
-    if (newStatus === 'running' && !state.startedAt) {
-      state.startedAt = now;
+    if (newStatus === 'running') {
+      // Always reset startedAt on running — for retries, this gives the
+      // current attempt's start time, not the first attempt's.
+      if (!updates?.startedAt) { state.startedAt = now; }
+      // Clear endedAt from previous attempt so duration calculates correctly
+      state.endedAt = undefined;
     }
-    if (isTerminal(newStatus) && !state.endedAt) {
-      state.endedAt = now;
+    if (isTerminal(newStatus)) {
+      if (!updates?.endedAt) { state.endedAt = now; }
     }
     
     // Record transition in node's state history (canonical source of truth)

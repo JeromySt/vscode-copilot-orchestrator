@@ -22,7 +22,7 @@ export function renderControlWiring(config: ScriptsConfig): string {
     var processTree = new ProcessTree(bus, 'nd-process-tree', 'processTree', 'processTreeTitle');
     var phaseTabBar = new PhaseTabBar(bus, 'nd-phase-tabs', 'phaseTabs');
     var attemptList = new AttemptCard(bus, 'nd-attempt-list', '.attempt-history-container');
-    var aiUsageStats = new AiUsageStats(bus, 'nd-ai-usage', 'aiUsageStatsContainer');
+    var aiUsageStats = new AiUsageStats(bus, 'nd-ai-usage', 'liveAiUsage');
     var workSummaryCtrl = new WorkSummary(bus, 'nd-work-summary', 'workSummaryContainer');
     var configDisplay = new ConfigDisplay(bus, 'nd-config-display', 'configDisplayContainer');
   `;

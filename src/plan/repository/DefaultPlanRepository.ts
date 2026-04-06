@@ -110,6 +110,7 @@ export class DefaultPlanRepository implements IPlanRepository {
         cleanUpSuccessfulWork: true,
         startPaused: true,
         jobs: [svSpec as any],
+        worktreeInit: options.worktreeInit,
       },
       jobs: [],
       producerIdToNodeId: { '__snapshot-validation__': svId },

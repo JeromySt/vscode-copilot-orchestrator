@@ -111,8 +111,9 @@ suite('PlanLifecycleManager', () => {
     plan.nodeStates.get('node-1')!.pid = 9999;
     (state.persistence.loadAll as sinon.SinonStub).returns([plan]);
     await mgr.initialize();
-    assert.strictEqual(plan.nodeStates.get('node-1')!.status, 'failed');
-    assert.ok(plan.nodeStates.get('node-1')!.error?.includes('crashed'));
+    // Auto-retry: crashed nodes are reset to 'ready' for re-scheduling
+    assert.strictEqual(plan.nodeStates.get('node-1')!.status, 'ready');
+    assert.ok(plan.nodeStates.get('node-1')!.error?.includes('[auto-recovered]'));
   });
 
   test('initialize recovers running node with no PID', async () => {
@@ -120,7 +121,8 @@ suite('PlanLifecycleManager', () => {
     plan.nodeStates.get('node-1')!.status = 'running';
     (state.persistence.loadAll as sinon.SinonStub).returns([plan]);
     await mgr.initialize();
-    assert.strictEqual(plan.nodeStates.get('node-1')!.status, 'failed');
+    // Auto-retry: nodes with no PID (extension reload) are reset to 'ready'
+    assert.strictEqual(plan.nodeStates.get('node-1')!.status, 'ready');
   });
 
   test('initialize sets isPaused=true for scaffolding plans loaded from legacy storage', async () => {

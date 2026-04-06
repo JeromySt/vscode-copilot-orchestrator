@@ -10,12 +10,15 @@
 import { Logger } from '../core/logger';
 import type { IBulkPlanActions, BulkActionType, BulkActionResult } from '../interfaces/IBulkPlanActions';
 import type { IPlanRunner } from '../interfaces/IPlanRunner';
+import type { IPlanRepository } from '../interfaces/IPlanRepository';
+import { finalizePlanInRunner } from './finalizePlanHelper';
 
 const log = Logger.for('ui');
 
 export class BulkPlanActions implements IBulkPlanActions {
   constructor(
     private readonly _planRunner: IPlanRunner,
+    private readonly _planRepository?: IPlanRepository,
   ) {}
 
   async executeBulkAction(action: BulkActionType, planIds: string[]): Promise<BulkActionResult[]> {
@@ -56,7 +59,12 @@ export class BulkPlanActions implements IBulkPlanActions {
             break;
           }
           case 'finalize': {
-            results.push({ planId, success: false, error: 'Finalize not supported in bulk yet' });
+            if (!this._planRepository) {
+              results.push({ planId, success: false, error: 'PlanRepository not available' });
+              break;
+            }
+            const finalizeResult = await finalizePlanInRunner(planId, this._planRunner, this._planRepository, { startPaused: false });
+            results.push({ planId, success: finalizeResult.success, error: finalizeResult.error });
             break;
           }
         }

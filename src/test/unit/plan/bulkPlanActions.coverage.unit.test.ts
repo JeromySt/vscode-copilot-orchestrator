@@ -115,13 +115,13 @@ suite('BulkPlanActions coverage', () => {
   });
 
   suite('executeBulkAction – finalize coverage', () => {
-    test('finalize: returns not-supported error for each plan', async () => {
+    test('finalize: returns error for each plan without planRepository', async () => {
       const results = await bulkActions.executeBulkAction('finalize', ['plan-a', 'plan-b']);
 
       assert.strictEqual(results.length, 2);
       results.forEach(r => {
         assert.strictEqual(r.success, false);
-        assert.ok(r.error?.includes('Finalize not supported'));
+        assert.ok(r.error?.includes('not found') || r.error?.includes('PlanRepository'));
       });
     });
   });

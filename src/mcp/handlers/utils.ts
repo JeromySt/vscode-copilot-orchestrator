@@ -132,19 +132,68 @@ export function isError(value: any): value is ErrorResult {
 }
 
 /**
- * Look up a node within a plan by its UUID.
+ * Look up a node within a plan by UUID, producerId, or job name.
+ *
+ * Resolution order:
+ * 1. Direct UUID match in plan.jobs
+ * 2. ProducerId lookup via plan.producerIdToNodeId
+ * 3. Job name match (case-insensitive, fails if ambiguous)
  *
  * @param plan   - The plan instance to search.
- * @param nodeId - UUID of the node.
- * @returns `{ node, state }` if found, otherwise an {@link ErrorResult}.
+ * @param nodeId - UUID, producerId, or job name of the node.
+ * @returns `{ node, state, resolvedId }` if found, otherwise an {@link ErrorResult}.
  */
-export function lookupNode(plan: PlanInstance, nodeId: string): { node: any; state: any } | ErrorResult {
-  const node = plan.jobs.get(nodeId);
-  if (!node) {
-    return errorResult(`Job not found: ${nodeId}`);
+export function lookupNode(plan: PlanInstance, nodeId: string): { node: any; state: any; resolvedId?: string } | ErrorResult {
+  // 1. Direct UUID
+  let node = plan.jobs.get(nodeId);
+  if (node) {
+    return { node, state: plan.nodeStates.get(nodeId), resolvedId: nodeId };
   }
-  const state = plan.nodeStates.get(nodeId);
-  return { node, state };
+
+  // 2. ProducerId
+  const resolvedFromProducer = plan.producerIdToNodeId.get(nodeId);
+  if (resolvedFromProducer) {
+    node = plan.jobs.get(resolvedFromProducer);
+    if (node) {
+      return { node, state: plan.nodeStates.get(resolvedFromProducer), resolvedId: resolvedFromProducer };
+    }
+  }
+
+  // 3. Job name (case-insensitive) — fail if ambiguous
+  const lowerInput = nodeId.toLowerCase();
+  const nameMatches: string[] = [];
+  for (const [id, job] of plan.jobs) {
+    if ((job as any).name?.toLowerCase() === lowerInput) {
+      nameMatches.push(id);
+    }
+  }
+  if (nameMatches.length === 1) {
+    node = plan.jobs.get(nameMatches[0]);
+    if (node) {
+      return { node, state: plan.nodeStates.get(nameMatches[0]), resolvedId: nameMatches[0] };
+    }
+  }
+  if (nameMatches.length > 1) {
+    const matches = nameMatches.map(id => {
+      const j = plan.jobs.get(id);
+      return `${(j as any)?.producerId || 'unknown'} (${id.slice(0, 8)})`;
+    }).join(', ');
+    return errorResult(
+      `Ambiguous job name '${nodeId}' matches ${nameMatches.length} jobs: ${matches}. ` +
+      `Use the UUID from the plan creation response's jobMapping field, or use the unique producerId instead.`
+    );
+  }
+
+  // Build a helpful error listing available jobs
+  const available = Array.from(plan.jobs.entries())
+    .slice(0, 10)
+    .map(([id, j]) => `  ${(j as any)?.producerId || '?'} → ${id.slice(0, 8)}…`)
+    .join('\n');
+  return errorResult(
+    `Job not found: '${nodeId}'. ` +
+    `Hint: Use the UUID from the create/finalize response's jobMapping field, or the producerId. ` +
+    `Available jobs in this plan:\n${available}`
+  );
 }
 
 /**

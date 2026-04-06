@@ -77,6 +77,20 @@ export interface PlanSpec {
    * Groups provide namespace isolation for producerIds and visual hierarchy.
    */
   groups?: GroupSpec[];
+
+  /**
+   * Worktree initialization commands executed in the setup phase of every job.
+   * Runs after forward-integration merge and before prechecks/work phases.
+   * Use for installing dependencies, restoring packages, generating files, etc.
+   * 
+   * Supports all standard WorkSpec types (shell, process, agent).
+   * Also auto-detects `.github/instructions/worktree-init.instructions.md` in the
+   * repo root — if present, its content is executed as an agent init step automatically.
+   * 
+   * Init specs run sequentially in array order. If any fails, the job fails
+   * in the setup phase with auto-heal disabled (init is infrastructure, not work).
+   */
+  worktreeInit?: WorkSpec[];
 }
 
 // ============================================================================
@@ -637,8 +651,10 @@ export interface PlanInstance {
     branch: string;
     /** Absolute path to the snapshot worktree on disk */
     worktreePath: string;
-    /** Commit SHA the snapshot was originally branched from */
+    /** Commit SHA the snapshot was originally branched from (updated by rebase) */
     baseCommit: string;
+    /** Original commit SHA at snapshot creation (never mutated — used for merge-RI diff) */
+    originalBaseCommit?: string;
   };
 
   /** Aggregated work summary */

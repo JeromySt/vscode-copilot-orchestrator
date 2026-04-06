@@ -101,6 +101,7 @@ function validatePlanInput(args: any): { valid: boolean; error?: string; spec?: 
     verifyRiSpec: args.verifyRi,
     env: args.env,
     resumeAfterPlan: args.resumeAfterPlan,
+    worktreeInit: args.worktreeInit,
     jobs,
   };
   

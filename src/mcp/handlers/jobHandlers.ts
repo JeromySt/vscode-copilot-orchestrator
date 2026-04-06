@@ -28,10 +28,21 @@ function resolvePlan(args: any, ctx: PlanHandlerContext): { plan?: any; error?: 
   return { plan };
 }
 
-/** Resolve a job within a plan by jobId or producerId. */
+/** Resolve a job within a plan by jobId, producerId, or job name. */
 function resolveJob(plan: any, jobId: string): string {
   if (plan.jobs.has(jobId)) { return jobId; }
-  return plan.producerIdToNodeId.get(jobId) || '';
+  const fromProducer = plan.producerIdToNodeId.get(jobId);
+  if (fromProducer) { return fromProducer; }
+  // Try job name match (case-insensitive)
+  const lowerInput = jobId.toLowerCase();
+  const nameMatches: string[] = [];
+  for (const [id, job] of plan.jobs) {
+    if ((job as any).name?.toLowerCase() === lowerInput) {
+      nameMatches.push(id);
+    }
+  }
+  if (nameMatches.length === 1) { return nameMatches[0]; }
+  return '';
 }
 
 // ============================================================================
