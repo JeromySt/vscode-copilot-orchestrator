@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes yet._
 
+## [0.15.5] - 2026-04-06
+
+### 🚀 Major Features
+
+- **Node Detail Panel Overhaul** — Unified attempt cards as the sole view with shared `executionCardTemplate`. Colored left borders per work spec type (shell=green, process=blue, agent=purple). Model tier badges (fast/standard/premium). Markdown rendering for agent instructions with blockquote support.
+- **Log Streaming Architecture** — WebView Subscription Manager with byte-offset delta streaming. Phase tab filtering on live logs with auto-advance to running phase. Scroll and selection preservation during streaming. Eliminated pulse-driven full HTML rebuilds.
+- **Worktree Init Hooks** — `worktreeInit` field on PlanSpec for initialization commands (npm ci, dotnet restore, husky install, etc.). Auto-detects `.github/instructions/worktree-init.instructions.md`. Runs in setup phase of every job. Closes [#84](https://github.com/JeromySt/vscode-copilot-orchestrator/issues/84).
+
+### ✨ Enhancements
+
+- **Finalize & Start button** for scaffolded plans in the UI
+- **Live dependency status** — badges update as upstream jobs complete
+- **Plan-level env vars** displayed in attempt card Context section
+- **Job ID resolution layer** — MCP tools now accept UUID, producerId, or job name
+- **npm audit check** gate added to build pipeline
+- **SV prechecks** rendered as proper markdown (headers, bullets, code blocks, blockquote)
+- **MCP tool descriptions** include full return type documentation and NEXT STEPS guidance
+- **Unified finalize helper** — single code path for MCP and UI finalize (`finalizePlanHelper.ts`)
+
+### 🐛 Bug Fixes
+
+- **SV merge-RI no-op** — Added `--rebase-merges` and `originalBaseCommit` for snapshot diff. Closes [#89](https://github.com/JeromySt/vscode-copilot-orchestrator/issues/89).
+- **Hung CLI detection** — 30s grace timeout after stats summary + `taskkill /f /t` on Windows
+- **Crash auto-retry** — Extension reload recovery with state persistence
+- **Duration display** — Reset `startedAt`/`endedAt` on retry for correct duration
+- **Phase icons** — Unicode escape sequences survive esbuild bundling
+- **Disposed webview** — Guard `postMessage` calls against disposed panels
+- **Attempt card double-toggle** — Fixed delegated + direct handler conflict
+- **Chained plan auto-resume** — Plans with `resumeAfterPlan` now auto-resume on startup when dependency already completed
+- **Work spec resolution** — Fallback to `current/` directory for disk-backed specs in finalized plans
+- **CodeQL TOCTOU** — Fixed file system race conditions in log file reading (`statSync` → `openSync` + `fstatSync`)
+
 ## [0.15.0] - 2026-04-02
 
 ### 🚀 Major Features
